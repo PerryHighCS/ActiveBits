@@ -1,0 +1,17 @@
+{
+    "name": "raffletickets",
+    "version": "1.0.0",
+    "scripts": {
+        "dev": "concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\""
+    },
+    "keywords": [],
+    "author": "",
+    "license": "MIT",
+    "description": "",
+    "dependencies": {
+        "express": "^5.1.0"
+    },
+    "devDependencies": {
+        "concurrently": "^9.1.2"
+    }
+}
