@@ -78,7 +78,7 @@ app.delete("/api/raffle/:raffleId", (req, res) => {
 });
 
 // In production, serve static files from the built frontend.
-if (process.env.NODE_ENV === "production") {
+if (!process.env.NODE_ENV.startsWith("dev")) {
 
   // Serve static files from the built React app
   app.use(express.static(path.join(__dirname, "../client/dist")));
@@ -90,6 +90,8 @@ if (process.env.NODE_ENV === "production") {
 
 }
 else {
+  process.on('warning', e => console.warn(e.stack));
+
   // In development, proxy requests for static files to the Vite dev server.
   const { createProxyMiddleware } = require("http-proxy-middleware");
 
