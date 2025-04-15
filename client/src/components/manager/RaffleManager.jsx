@@ -137,7 +137,7 @@ const RaffleManager = () => {
     }
 
     return (
-        <div>
+        <div className='w-full'>
             <h2 className='text-center text-xl font-bold mb-4'>Raffle Management</h2>
 
             <div className='flex flex-col items-center justify-center w-full'>
@@ -171,6 +171,10 @@ const RaffleManager = () => {
                     <>
                     </>
                 }
+            </div>
+
+            <div className='text-center text-sm text-gray-500 mt-4 absolute bottom-0 left-0 w-full bg-white border-t border-gray-300 p-4 mx-auto'>
+                <p>Note: Raffles are for educational demonstration purposes only. Raffles are automatically deleted after 24 hours.</p>
             </div>
         </div>
     );

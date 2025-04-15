@@ -13,9 +13,10 @@ const raffles = {};
  */
 function cleanupRaffles() {
   for (let raffle in raffles) {
-    const deltaT = Date.now() - raffle.created;
+    const deltaT = Date.now() - raffles[raffle].created;
     if (deltaT > MAX_RAFFLE_TIME) {
       delete raffles[raffle];
+      console.log(`Deleted expired raffle ${raffle}`);
     }
   }
 }
@@ -28,7 +29,7 @@ app.get("/api/createRaffle", (req, res) => {
   }
 
   // Create the raffle
-  raffles[raffleNum] = {tickets: [], created: Date.now()};
+  raffles[raffleNum] = { id: raffleNum, tickets: [], created: Date.now()};
 
   res.json({ raffleId: raffleNum });
   console.log(`Created raffle ${raffleNum}`);
@@ -42,6 +43,7 @@ app.get("/api/generateTicket/:raffleId", (req, res) => {
   
   if (!raffles[raffleId]) {
     res.status(404).json({ error: "invalid raffle" });
+    console.log(`Request to generate ticket for invalid raffle ${raffleId}`);
     return;
   }
 
@@ -64,6 +66,7 @@ app.get("/api/listTickets/:raffleId", (req, res) => {
   }
   else {
     res.status(404).json({ error: 'invalid raffle' });
+    console.log(`Request to list tickets for invalid raffle ${raffleId}`);
   }
 });
 
