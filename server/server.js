@@ -15,23 +15,25 @@ function cleanupRaffles() {
   for (let raffle in raffles) {
     const deltaT = Date.now() - raffle.created;
     if (deltaT > MAX_RAFFLE_TIME) {
-      raffles.delete(raffle);
+      delete raffles[raffle];
     }
   }
 }
 
 app.get("/api/createRaffle", (req, res) => {
+  // Generate a random raffle id
   let raffleNum = null;
-
   while (!raffleNum || raffles[raffleNum]) {
-    raffleNum = (Math.floor(Math.random() * (MAX_RAFFLE))).toString(16).padStart(MAX_ID_LEN, '0')
-    ;
+    raffleNum = (Math.floor(Math.random() * (MAX_RAFFLE))).toString(16).padStart(MAX_ID_LEN, '0');
   }
 
+  // Create the raffle
   raffles[raffleNum] = {tickets: [], created: Date.now()};
 
   res.json({ raffleId: raffleNum });
+  console.log(`Created raffle ${raffleNum}`);
 
+  // Clean up any expired raffles
   cleanupRaffles();
 });
 
@@ -69,8 +71,14 @@ app.delete("/api/raffle/:raffleId", (req, res) => {
   let raffleId = req.params.raffleId;
 
   if (raffles[raffleId]) {
-    raffles.delete(raffleId);
-    res.json({ success: "Deleted " + raffleId });
+    // Delete the raffle
+    delete raffles[raffleId];
+    console.log(`Deleted raffle ${raffleId}`);
+
+    // Clean up any expired raffles
+    cleanupRaffles();
+
+    res.json({ success: "Deleted " + raffleId, deleted: raffleId });
   }
   else {
     res.status(404).json({ error: 'invalid raffle' });
@@ -94,6 +102,11 @@ else {
 
   // In development, proxy requests for static files to the Vite dev server.
   const { createProxyMiddleware } = require("http-proxy-middleware");
+  const viteProxy = createProxyMiddleware({
+    target: "http://localhost:5173",
+    changeOrigin: true,
+    logLevel: "silent" // adjust log level as desired
+  })
 
   // Set up a middleware function to route the paths
   app.use((req, res, next) => {
@@ -103,11 +116,7 @@ else {
     }
 
     // Otherwise, use the proxy to send the request to the Vite server
-    return createProxyMiddleware({
-      target: "http://localhost:5173",
-      changeOrigin: true,
-      logLevel: "silent" // adjust log level as desired
-    })(req, res, next);
+    return viteProxy(req, res, next);
   });
 }
 
