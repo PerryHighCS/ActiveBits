@@ -86,10 +86,6 @@ const TicketPage = () => {
                     <Button type="submit">Join Raffle</Button>
                 </form>
             )}
-            
-            <div className='text-center text-sm text-gray-500 mt-4 absolute bottom-0 left-0 w-full bg-white border-t border-gray-300 p-4 mx-auto'>
-                <p>Note: Raffles are for educational demonstration purposes only. Raffles are automatically deleted after 24 hours.</p>
-            </div>
         </>
     );
 };

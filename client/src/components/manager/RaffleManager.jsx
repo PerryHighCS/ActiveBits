@@ -137,46 +137,39 @@ const RaffleManager = () => {
     }
 
     return (
-        <div className='w-full'>
-            <h2 className='text-center text-xl font-bold mb-4'>Raffle Management</h2>
-
-            <div className='flex flex-col items-center justify-center w-full'>
-                {raffleId &&
-                    <div className='flex flex-col items-center w-full border border-gray-300 p-4 rounded-lg shadow-md'>
-                        <div className='flex flex-row items-center justify-between w-full'>
-                            <h3 className='text-lg font-semibold block'>Raffle ID: {raffleId}</h3>
-                            <Button variant='text' className='block' onClick={() => { deleteRaffle(raffleId) }}>❌</Button>
-                        </div>
-                        {(winners.length === 0) ? (
-                            <RaffleLink raffleId={raffleId}></RaffleLink>
-                        ) : (
-                            <WinnerMessage winners={winners} raffleType={raffleType}></WinnerMessage>
-                        )}
-
-                        <div className='border-t border-b border-gray-300 w-full mt-4'>
-                            <TicketsList raffleId={raffleId} tickets={tickets} onError={handleError}></TicketsList>
-                        </div>
-                        <div className='flex flex-row items-center justify-between w-full p-4'>
-                            { (tickets.length > 1) && <Button onClick={()=>raffle(1)}>Standard Raffle</Button> }
-                            { (tickets.length > 2) && <Button onClick={()=>raffle(2)}>Pair Raffle</Button> }
-                            { (tickets.length > 3) && <Button onClick={()=>raffle(-1)}>Group Raffle</Button> }
-                        </div>
+        <div className='flex flex-col items-center justify-center w-full'>
+            {raffleId &&
+                <div className='flex flex-col items-center w-full border border-gray-300 p-4 rounded-lg shadow-md'>
+                    <div className='flex flex-row items-center justify-between w-full'>
+                        <h3 className='text-lg font-semibold block'>Raffle ID: {raffleId}</h3>
+                        <Button variant='text' className='block' onClick={() => { deleteRaffle(raffleId) }}>❌</Button>
                     </div>
-                }
-                {!(raffleId) &&
-                    <Button onClick={() => createRaffle()}>Create a new raffle</Button>
-                }
+                    {(winners.length === 0) ? (
+                        <RaffleLink raffleId={raffleId}></RaffleLink>
+                    ) : (
+                        <WinnerMessage winners={winners} raffleType={raffleType}></WinnerMessage>
+                    )}
 
-                {!(loading) &&
-                    <>
-                    </>
-                }
-            </div>
+                    <div className='border-t border-b border-gray-300 w-full mt-4'>
+                        <TicketsList raffleId={raffleId} tickets={tickets} onError={handleError}></TicketsList>
+                    </div>
+                    <div className='flex flex-row items-center justify-between w-full p-4'>
+                        { (tickets.length > 1) && <Button onClick={()=>raffle(1)}>Standard Raffle</Button> }
+                        { (tickets.length > 2) && <Button onClick={()=>raffle(2)}>Pair Raffle</Button> }
+                        { (tickets.length > 3) && <Button onClick={()=>raffle(-1)}>Group Raffle</Button> }
+                    </div>
+                </div>
+            }
+            {!(raffleId) &&
+                <Button onClick={() => createRaffle()}>Create a new raffle</Button>
+            }
 
-            <div className='text-center text-sm text-gray-500 mt-4 absolute bottom-0 left-0 w-full bg-white border-t border-gray-300 p-4 mx-auto'>
-                <p>Note: Raffles are for educational demonstration purposes only. Raffles are automatically deleted after 24 hours.</p>
-            </div>
+            {!(loading) &&
+                <>
+                </>
+            }
         </div>
+
     );
 }
 
