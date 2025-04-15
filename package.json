@@ -1,7 +1,15 @@
 {
     "name": "raffletickets",
+    "private": true,
     "version": "1.0.0",
+    "workspaces": [
+        "client",
+        "server"
+    ],
     "scripts": {
+        "install-all": "npm install --prefix client && npm install --prefix server",
+        "build": "npm run build --workspace client",
+        "start": "npm start --prefix server",
         "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\""
     },
     "keywords": [],
