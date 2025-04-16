@@ -128,7 +128,7 @@ app.delete("/api/raffle/:raffleId", (req, res) => {
  * @returns {object} - A JSON response indicating the server status.
  */
 app.get("/health-check", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", memory: process.memoryUsage() });
 });
 
 // In production, serve static files from the built frontend.
