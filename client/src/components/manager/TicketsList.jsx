@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { twMerge } from 'tailwind-merge';
 
+/**
+ * Display a list of all tickets created for a raffle, sorted in ascending order.
+ * Allows the user to select multiple tickets and displays the total of the selected tickets.
+ * @param {Object} props - The component props.
+ * @param {Number[]} props.tickets - Array of ticket numbers. 
+ * @returns {React.Component} - A component that displays the list of tickets and allows selection.
+ */
 const TicketsList = ({ tickets }) => {
     const [selected, setSelected] = useState([]);
 

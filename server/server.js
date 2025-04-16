@@ -3,13 +3,15 @@ const path = require("path");
 const app = express();
 
 const MAX_ID_LEN = 5;
-const MAX_RAFFLE = Math.pow(16, MAX_ID_LEN); // Use ids in base 16
+const MAX_RAFFLE = Math.pow(16, MAX_ID_LEN);  // ids are base 16
 const MAX_RAFFLE_TIME = 24 * 60 * 60 * 1000;  // 24 hours
 
-const raffles = {};
+const raffles = {}; // Store raffles in memory
 
 /**
  * Remove any raffles lasting longer than MAX_RAFFLE_TIME
+ * This function iterates through the raffles object and deletes any raffle that has exceeded the maximum allowed time.
+ * @returns {void}
  */
 function cleanupRaffles() {
   for (let raffle in raffles) {
@@ -21,6 +23,13 @@ function cleanupRaffles() {
   }
 }
 
+/**
+ * Raffle creation endpoint
+ * This endpoint creates a new raffle with a unique ID.
+ * It generates a random raffle ID and stores it in the raffles object.
+ * It also cleans up any expired raffles after creating a new one.
+ * @returns {object} - A JSON response containing the raffle ID.
+ */
 app.get("/api/createRaffle", (req, res) => {
   // Generate a random raffle id
   let raffleNum = null;
@@ -38,6 +47,14 @@ app.get("/api/createRaffle", (req, res) => {
   cleanupRaffles();
 });
 
+/**
+ * Generate a ticket endpoint
+ * This endpoint generates a random ticket number for a specific raffle.
+ * It checks if the raffle exists and if the ticket number is unique.
+ * If the raffle does not exist, it returns a 404 error with an appropriate message.
+ * @param {string} raffleId - The ID of the raffle for which to generate a ticket.
+ * @returns {object} - A JSON response containing the generated ticket number or an error message.
+ */
 app.get("/api/generateTicket/:raffleId", (req, res) => {
   let raffleId = req.params.raffleId;
   
@@ -57,6 +74,14 @@ app.get("/api/generateTicket/:raffleId", (req, res) => {
   res.json({ ticket: ticketNum });
 });
 
+/**
+ * List tickets endpoint
+ * This endpoint retrieves the list of tickets for a specific raffle.
+ * It checks if the raffle exists, and if it does, it returns the list of tickets.
+ * If the raffle does not exist, it returns a 404 error with an appropriate message.
+ * @param {string} raffleId - The ID of the raffle for which to list tickets.
+ * @returns {object} - A JSON response containing the list of tickets or an error message.
+ */
 app.get("/api/listTickets/:raffleId", (req, res) => {
   let raffleId = req.params.raffleId;
 
@@ -70,6 +95,15 @@ app.get("/api/listTickets/:raffleId", (req, res) => {
   }
 });
 
+/**
+ * Raffle deletion endpoint
+ * This endpoint allows the deletion of a specific raffle by its ID.
+ * It checks if the raffle exists, deletes it if it does, and returns a success message.
+ * If the raffle does not exist, it returns a 404 error with an appropriate message.
+ * The endpoint also cleans up any expired raffles after the deletion.
+ * @param {string} raffleId - The ID of the raffle to be deleted.
+ * @returns {object} - A JSON response indicating the success of the deletion or an error message.
+ */
 app.delete("/api/raffle/:raffleId", (req, res) => {
   let raffleId = req.params.raffleId;
 
@@ -123,6 +157,16 @@ else {
   });
 }
 
+/**
+ * Health check endpoint
+ * This is used to check if the server is running; it returns a simple JSON response with a status message.
+ * @returns {object} - A JSON response indicating the server status.
+ */
+app.get("/health-check", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// Start the server on the port specified by the PORT environment variable if set, otherwise default to 3000
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Raffle server is running on port ${PORT}`);
