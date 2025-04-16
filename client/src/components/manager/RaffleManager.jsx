@@ -12,6 +12,7 @@ const RaffleManager = () => {
     const [tickets, setTickets] = useState([]);
     const [winners, setWinners] = useState([]);
     const [raffleType, setRaffleType] = useState('standard');
+    const [message, setMessage] = useState('');
 
     // Extract the raffleId query parameter.
     let raffleId = searchParams.get('raffleId');
@@ -30,6 +31,7 @@ const RaffleManager = () => {
                 const newRaffleId = data.raffleId;
                 // Update the query parameters to include the new raffle id.
                 setSearchParams({ raffleId: newRaffleId });
+                setMessage('');
             } catch (error) {
                 alert('Failed to generate raffle id:' + error);
             } finally {
@@ -58,7 +60,7 @@ const RaffleManager = () => {
                     }
                 );
                 if (!response.ok) {
-                    throw new Error(`${response.statusText}`);
+                    throw new Error(`${response.statusText}`, { cause: response, status: response.status });
                 }
                 const data = await response.json();
                 // The API returns { raffleId: "some-id" }
@@ -70,8 +72,14 @@ const RaffleManager = () => {
                     clearSearchParam('raffleId');
                 }
             } catch (error) {
-                alert('Failed to delete raffle id:' + error);
-                clearSearchParam('raffleId');
+                if (error.status !== 404) {
+                    setMessage('Failed to delete raffle id:' + error);
+                    clearSearchParam('raffleId');
+                }
+                else {
+                    // If the raffleId is not found, we can just clear it from the URL.
+                    clearSearchParam('raffleId');
+                }
             } finally {
                 setLoading(false);
             }
@@ -87,8 +95,9 @@ const RaffleManager = () => {
                 .then((response) => {
                     if (!response.ok) {
                         // Handle errors here if necessary
-                        throw new Error('Failed to fetch tickets');
+                        throw new Error('Failed to fetch tickets', { cause: response, status: response.status });
                     }
+                    setMessage('');
                     return response.json();
                 })
                 .then((data) => {
@@ -132,12 +141,18 @@ const RaffleManager = () => {
     }
 
     const handleError = (error) => {
-        // console.error('Error:', error);
-        // clearSearchParam('raffleId');
+        if (error.cause && error.cause.status === 404) {
+            setMessage('Raffle not found. Please create a new raffle.');
+            clearSearchParam('raffleId');          
+        }
+        else {
+            setMessage ('An error occurred while fetching tickets: ' + error);
+        }
     }
 
     return (
         <div className='flex flex-col items-center justify-center w-full'>
+            {message && <div className='border rounded border-red-500 p-4 mb-4'>{message}</div>}
             {raffleId &&
                 <div className='flex flex-col items-center w-full border border-gray-300 p-4 rounded-lg shadow-md'>
                     <div className='flex flex-row items-center justify-between w-full'>
