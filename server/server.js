@@ -122,19 +122,29 @@ app.delete("/api/raffle/:raffleId", (req, res) => {
   }
 });
 
+/**
+ * Health check endpoint
+ * This is used to check if the server is running; it returns a simple JSON response with a status message.
+ * @returns {object} - A JSON response indicating the server status.
+ */
+app.get("/health-check", (req, res) => {
+  res.json({ status: "ok" });
+});
+
 // In production, serve static files from the built frontend.
 if (!process.env.NODE_ENV.startsWith("dev")) {
 
-  // Serve static files from the built React app
+  // Serve static files for the built React app
   app.use(express.static(path.join(__dirname, "../client/dist")));
 
-  // Fallback route for client-side routing (use "/*" instead of "*")
+  // Fallback route for client-side routing
   app.get('/*fallback', (req, res) => {
     res.sendFile(path.join(__dirname, "../client/dist/index.html"));
   });
 
 }
 else {
+  // Show trace warnings in development
   process.on('warning', e => console.warn(e.stack));
 
   // In development, proxy requests for static files to the Vite dev server.
@@ -156,15 +166,6 @@ else {
     return viteProxy(req, res, next);
   });
 }
-
-/**
- * Health check endpoint
- * This is used to check if the server is running; it returns a simple JSON response with a status message.
- * @returns {object} - A JSON response indicating the server status.
- */
-app.get("/health-check", (req, res) => {
-  res.json({ status: "ok" });
-});
 
 // Start the server on the port specified by the PORT environment variable if set, otherwise default to 3000
 const PORT = process.env.PORT || 3000;
