@@ -13,7 +13,7 @@ import {QRCodeSVG} from 'qrcode.react';
  */
 const RaffleLink = ({ raffleId }) => {
     // Generate the URL for the raffle using the server's url and the raffleId.
-    const url = window.location.protocol + '//' + window.location.host + '/?raffleId=' + raffleId;
+    const url = window.location.protocol + '//' + window.location.host + '/' + raffleId;
    
     return (
         <div className='flex flex-col items-center'>

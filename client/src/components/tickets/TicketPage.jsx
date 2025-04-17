@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 
 /**
@@ -12,12 +12,12 @@ import Button from '@src/components/ui/Button';
  * @returns {React.Component} The TicketPage component.
  */
 const TicketPage = () => {
-    const [searchParams, setSearchParams] = useSearchParams(); // the URL search parameters
-    const raffleId = searchParams.get('raffleId'); // the raffle ID from the URL
-
     const [raffleIdInput, setRaffleIdInput] = useState(''); // the input field for the raffle ID
     const [ticket, setTicket] = useState(null); // the ticket number fetched from the server
     const [loading, setLoading] = useState(false); // loading state for the ticket generation
+
+    const { raffleId } = useParams(); // the raffle ID from the URL
+    const navigate = useNavigate();
 
     /**
      * Handle input change from the raffle ID input field.
@@ -34,9 +34,9 @@ const TicketPage = () => {
      */
     const handleSubmit = (e) => {
         e.preventDefault();
-        if (raffleIdInput.trim()) {
+        if (parseInt(raffleIdInput.trim(), 16)) {
             // Update the URL with the entered raffleId.
-            setSearchParams({ raffleId: raffleIdInput.trim() });
+            navigate('/' + raffleIdInput.trim() );
         }
     };
 
