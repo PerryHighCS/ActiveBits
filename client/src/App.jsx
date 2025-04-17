@@ -18,8 +18,9 @@ export default function App() {
       <div className='w-full flex-grow'>
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<TicketPage />} />
             <Route path="/manage" element={<RaffleManager />} />
+            <Route path="/:raffleId" element={<TicketPage />} />
+            <Route path="/" element={<TicketPage />} />
           </Routes>
         </BrowserRouter>
       </div>
