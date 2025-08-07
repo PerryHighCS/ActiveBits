@@ -169,6 +169,6 @@ else {
 
 // Start the server on the port specified by the PORT environment variable if set, otherwise default to 3000
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Raffle server is running on port ${PORT}`);
+app.listen(PORT, () => {  
+  console.log(`ActiveBits server is running on port [1m[32mhttp://localhost:${PORT}[0m`);
 });

@@ -4,42 +4,48 @@
 It currently supports:
 
 - 🎟️ **Raffle Tickets** – Students scan a QR code to receive a unique ticket.
-  * Search algorithms can be introduced by hosting a 'raffle', having the class get tickets,
-    choosing a winner, then searching for that winner in the list of tickets.
-  * Reasonable vs Unreasonable time algorithms can be explored with the pair and group
-    raffles, with students trying to find the tickets that add up to the winning total.
+  * Use raffles to explore search algorithms: run a raffle, assign tickets, choose a winner, and search for that ticket.
+  * Use pair and group raffles to highlight the difference between reasonable and unreasonable algorithms (e.g., finding sets that sum to a target).
 
 - 🌐 **Network Scavenger Hunts** – Simulate IP-based discovery and HTTP interactions.
 
 Future modules will include additional hands-on learning tools for computer science and engineering classrooms.
 
-## Access
+## 🌐 Access
 
-Student access: [`https://bits.mycode.run`](https://bits.mycode.run)
-Instructor dashboard: [`https://bits.mycode.run/manage`](https://bits.mycode.run/manage)
+- **Student site:** [`https://bits.mycode.run`](https://bits.mycode.run)  
+- **Instructor dashboard:** [`https://bits.mycode.run/manage`](https://bits.mycode.run/manage)
 
-## For dev
-In the main project folder, install dependencies with
-```
+---
+
+## 🛠️ Development
+
+From the project root:
+
+Install dependencies:
+```bash
 npm run install-all
 ```
 
-In the main project folder, start the project with
-```
+Start the dev server:
+```bash
 npm run dev
 ```
 
-## For production
-This project can be deployed and hosted by [Render](https://render.com) directly from 
-a clone of this repo with the following settings:
+> ⚠️ **Important:** Connect to the **Express server on port 3000**, _not_ the Vite port (5173). Codespaces may automatically open the wrong one.
 
-Install dependencies and build with
-```
+---
+
+## 🚀 Production (via Render)
+
+This project can be deployed directly on [Render](https://render.com).
+
+Build and install dependencies:
+```bash
 npm run deploy
 ```
 
-Start the server with
-```
+Start the server:
+```bash
 npm run start
 ```
-
