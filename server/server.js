@@ -30,7 +30,7 @@ function cleanupSessions() {
  * It also cleans up any expired raffles after creating a new one.
  * @returns {object} - A JSON response containing the raffle ID.
  */
-app.get("/api/createRaffle", (req, res) => {
+app.get("/api/raffle/createRaffle", (req, res) => {
   // Generate a random raffle id
   let raffleNum = null;
   while (!raffleNum || sessions[raffleNum]) {
@@ -55,7 +55,7 @@ app.get("/api/createRaffle", (req, res) => {
  * @param {string} raffleId - The ID of the raffle for which to generate a ticket.
  * @returns {object} - A JSON response containing the generated ticket number or an error message.
  */
-app.get("/api/generateTicket/:raffleId", (req, res) => {
+app.get("/api/raffle/generateTicket/:raffleId", (req, res) => {
   let raffleId = req.params.raffleId;
   
   if (!sessions[raffleId] || sessions[raffleId].type !== 'raffle') {
@@ -82,7 +82,7 @@ app.get("/api/generateTicket/:raffleId", (req, res) => {
  * @param {string} raffleId - The ID of the raffle for which to list tickets.
  * @returns {object} - A JSON response containing the list of tickets or an error message.
  */
-app.get("/api/listTickets/:raffleId", (req, res) => {
+app.get("/api/raffle/listTickets/:raffleId", (req, res) => {
   let raffleId = req.params.raffleId;
 
   if (sessions[raffleId] && sessions[raffleId].type === 'raffle') {

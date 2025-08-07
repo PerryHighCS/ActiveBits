@@ -3,40 +3,40 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 
 /**
- * TicketPage component allows users to enter a raffle ID and fetch their
+ * TicketPage component allows users to enter a session ID and fetch their
  * ticket number. It uses the URL search parameter will be used for the 
- * raffleId if present, or an input field if not. The ticket number is fetched
+ * sessionId if present, or an input field if not. The ticket number is fetched
  * from the server and stored in local storage to help limit the numbers
  * being generated.
  * 
  * @returns {React.Component} The TicketPage component.
  */
 const TicketPage = () => {
-    const [raffleIdInput, setRaffleIdInput] = useState(''); // the input field for the raffle ID
+    const [sessionIdInput, setSessionIdInput] = useState(''); // the input field for the session ID
     const [ticket, setTicket] = useState(null); // the ticket number fetched from the server
     const [loading, setLoading] = useState(false); // loading state for the ticket generation
 
-    const { raffleId } = useParams(); // the raffle ID from the URL
+    const { sessionId: sessionId } = useParams(); // the session ID from the URL
     const navigate = useNavigate();
 
     /**
-     * Handle input change from the raffle ID input field.
+     * Handle input change from the session ID input field.
      * @param {Event} e - The event object from the input change.
      */
     const handleInputChange = (e) => {
-        setRaffleIdInput(e.target.value);
+        setSessionIdInput(e.target.value);
     };
 
     /**
-     * Handle form submission to set the raffleId used to fetch the ticket 
+     * Handle form submission to set the sessionId used to fetch the ticket 
      * number.
      * @param {Event} e - The event object from the form submission.
      */
     const handleSubmit = (e) => {
         e.preventDefault();
-        if (parseInt(raffleIdInput.trim(), 16)) {
-            // Update the URL with the entered raffleId.
-            navigate('/' + raffleIdInput.trim() );
+        if (parseInt(sessionIdInput.trim(), 16)) {
+            // Update the URL with the entered sessionId.
+            navigate('/' + sessionIdInput.trim() );
         }
     };
 
@@ -49,10 +49,10 @@ const TicketPage = () => {
      * @returns {Function} Cleanup function to clear the timeout.
      */
     useEffect(() => {
-        if (!raffleId) return;
+        if (!sessionId) return;
 
-        // Use a key unique to the raffle
-        const storageKey = `ticket-${raffleId}`;
+        // Use a key unique to the session
+        const storageKey = `session-${sessionId}`;
         const storedTicket = localStorage.getItem(storageKey);
 
         if (storedTicket) {
@@ -69,7 +69,7 @@ const TicketPage = () => {
         const timerId = setTimeout(() => {
             setLoading(true);
             // No stored ticket; request one from the API.
-            fetch(`/api/generateTicket/${raffleId}`)
+            fetch(`/api/raffle/generateTicket/${sessionId}`)
                 .then((response) => {
                     if (!response.ok) {
                         throw new Error('Failed to generate ticket');
@@ -91,14 +91,14 @@ const TicketPage = () => {
 
         // Cleanup cancels the fetch timeout if the component unmounts (as in StrictMode)
         return () => clearTimeout(timerId);
-    }, [raffleId]);
+    }, [sessionId]);
 
     return (
         <>
-            {/* Display the ticket number if the raffleId has been set, or an input field if not */}
-            {raffleId ? (
+            {/* Display the ticket number if the sessionId has been set, or an input field if not */}
+            {sessionId ? (
                 <div className='flex flex-col items-center w-full text-center md:w-max mx-auto border border-gray-300 p-5 rounded-lg shadow-md'>
-                    <h2 className='text-lg font-semibold mb-4'>Raffle ID: {raffleId}</h2>
+                    <h2 className='text-lg font-semibold mb-4'>Session ID: {sessionId}</h2>
                     {ticket ? (
                         <div className='text-3xl font-bold text-center'>
                             Your Ticket Number: {loading ? <>Loading...</> : <span className='text-blue-500 font-extrabold text-6xl'>{ticket}</span>}
@@ -112,10 +112,10 @@ const TicketPage = () => {
             ) : (
                 <form onSubmit={handleSubmit} className='flex flex-col items-center w-max mx-auto'>
                     <label className='block mb-4'>
-                        Raffle ID:
-                        <input className='border border-grey-700 rounded mx-2 p-2' size='5' type="text" id='raffleId' value={raffleIdInput} onChange={handleInputChange} />
+                        Join Session ID:
+                        <input className='border border-grey-700 rounded mx-2 p-2' size='5' type="text" id='sessionId' value={sessionIdInput} onChange={handleInputChange} />
                     </label>
-                    <Button type="submit">Join Raffle</Button>
+                    <Button type="submit">Join Session</Button>
                 </form>
             )}
         </>

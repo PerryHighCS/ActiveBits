@@ -19,7 +19,7 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/manage" element={<RaffleManager />} />
-            <Route path="/:raffleId" element={<TicketPage />} />
+            <Route path="/:sessionId" element={<TicketPage />} />
             <Route path="/" element={<TicketPage />} />
           </Routes>
         </BrowserRouter>

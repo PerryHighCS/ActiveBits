@@ -34,7 +34,7 @@ const RaffleManager = () => {
             setLoading(true);
 
             try {
-                const response = await fetch('/api/createRaffle');
+                const response = await fetch('/api/raffle/createRaffle');
                 if (!response.ok) {
                     throw new Error(`Error: ${response.statusText}`);
                 }
@@ -113,7 +113,7 @@ const RaffleManager = () => {
 
         // Function to fetch tickets
         const fetchTickets = () => {
-            fetch(`/api/listTickets/${raffleId}`)
+            fetch(`/api/raffle/listTickets/${raffleId}`)
                 .then((response) => {
                     if (!response.ok) {
                         // Handle errors here if necessary
