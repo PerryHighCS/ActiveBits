@@ -75,7 +75,7 @@ const RaffleManager = () => {
     let deleteRaffle = async () => {
         if (raffleId) {
             try {
-                const response = await fetch('/api/raffle/' + raffleId,
+                const response = await fetch('/api/session/' + raffleId,
                     {
                         method: 'DELETE',
                     }

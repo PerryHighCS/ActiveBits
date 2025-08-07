@@ -6,19 +6,19 @@ const MAX_ID_LEN = 5;
 const MAX_RAFFLE = Math.pow(16, MAX_ID_LEN);  // ids are base 16
 const MAX_RAFFLE_TIME = 24 * 60 * 60 * 1000;  // 24 hours
 
-const raffles = {}; // Store raffles in memory
+const sessions = {}; // Store sessions in memory
 
 /**
  * Remove any raffles lasting longer than MAX_RAFFLE_TIME
  * This function iterates through the raffles object and deletes any raffle that has exceeded the maximum allowed time.
  * @returns {void}
  */
-function cleanupRaffles() {
-  for (let raffle in raffles) {
-    const deltaT = Date.now() - raffles[raffle].created;
+function cleanupSessions() {
+  for (let session in sessions) {
+    const deltaT = Date.now() - sessions[session].created;
     if (deltaT > MAX_RAFFLE_TIME) {
-      delete raffles[raffle];
-      console.log(`Deleted expired raffle ${raffle}`);
+      delete sessions[session];
+      console.log(`Deleted expired session ${session}`);
     }
   }
 }
@@ -33,18 +33,18 @@ function cleanupRaffles() {
 app.get("/api/createRaffle", (req, res) => {
   // Generate a random raffle id
   let raffleNum = null;
-  while (!raffleNum || raffles[raffleNum]) {
+  while (!raffleNum || sessions[raffleNum]) {
     raffleNum = (Math.floor(Math.random() * (MAX_RAFFLE))).toString(16).padStart(MAX_ID_LEN, '0');
   }
 
   // Create the raffle
-  raffles[raffleNum] = { id: raffleNum, tickets: [], created: Date.now()};
+  sessions[raffleNum] = { type: 'raffle', id: raffleNum, tickets: [], created: Date.now()};
 
   res.json({ raffleId: raffleNum });
-  console.log(`Created raffle ${raffleNum}`);
+  console.log(`Created raffle session ${raffleNum}`);
 
   // Clean up any expired raffles
-  cleanupRaffles();
+  cleanupSessions();
 });
 
 /**
@@ -58,7 +58,7 @@ app.get("/api/createRaffle", (req, res) => {
 app.get("/api/generateTicket/:raffleId", (req, res) => {
   let raffleId = req.params.raffleId;
   
-  if (!raffles[raffleId]) {
+  if (!sessions[raffleId] || sessions[raffleId].type !== 'raffle') {
     res.status(404).json({ error: "invalid raffle" });
     console.log(`Request to generate ticket for invalid raffle ${raffleId}`);
     return;
@@ -66,10 +66,10 @@ app.get("/api/generateTicket/:raffleId", (req, res) => {
 
   let ticketNum = null;
 
-  while (!ticketNum || raffles[raffleId].tickets.includes(ticketNum)) {
+  while (!ticketNum || sessions[raffleId].tickets.includes(ticketNum)) {
     ticketNum = 100 + Math.floor(Math.random() * 900);
   }
-  raffles[raffleId].tickets.push(ticketNum);
+  sessions[raffleId].tickets.push(ticketNum);
 
   res.json({ ticket: ticketNum });
 });
@@ -85,9 +85,8 @@ app.get("/api/generateTicket/:raffleId", (req, res) => {
 app.get("/api/listTickets/:raffleId", (req, res) => {
   let raffleId = req.params.raffleId;
 
-
-  if (raffles[raffleId]) {
-    res.json({ tickets: raffles[raffleId].tickets });
+  if (sessions[raffleId] && sessions[raffleId].type === 'raffle') {
+    res.json({ tickets: sessions[raffleId].tickets });
   }
   else {
     res.status(404).json({ error: 'invalid raffle' });
@@ -96,29 +95,29 @@ app.get("/api/listTickets/:raffleId", (req, res) => {
 });
 
 /**
- * Raffle deletion endpoint
- * This endpoint allows the deletion of a specific raffle by its ID.
- * It checks if the raffle exists, deletes it if it does, and returns a success message.
- * If the raffle does not exist, it returns a 404 error with an appropriate message.
- * The endpoint also cleans up any expired raffles after the deletion.
- * @param {string} raffleId - The ID of the raffle to be deleted.
+ * Session deletion endpoint
+ * This endpoint allows the deletion of a specific session by its ID.
+ * It checks if the session exists, deletes it if it does, and returns a success message.
+ * If the session does not exist, it returns a 404 error with an appropriate message.
+ * The endpoint also cleans up any expired sessions after the deletion.
+ * @param {string} sessionId - The ID of the session to be deleted.
  * @returns {object} - A JSON response indicating the success of the deletion or an error message.
  */
-app.delete("/api/raffle/:raffleId", (req, res) => {
-  let raffleId = req.params.raffleId;
+app.delete("/api/session/:sessionId", (req, res) => {
+  let sessionId = req.params.sessionId;
 
-  if (raffles[raffleId]) {
+  if (sessions[sessionId]) {
     // Delete the raffle
-    delete raffles[raffleId];
-    console.log(`Deleted raffle ${raffleId}`);
+    delete sessions[sessionId];
+    console.log(`Deleted session ${sessionId}`);
 
     // Clean up any expired raffles
-    cleanupRaffles();
+    cleanupSessions();
 
-    res.json({ success: "Deleted " + raffleId, deleted: raffleId });
+    res.json({ success: "Deleted " + sessionId, deleted: sessionId });
   }
   else {
-    res.status(404).json({ error: 'invalid raffle' });
+    res.status(404).json({ error: 'invalid session' });
   }
 });
 
