@@ -38,14 +38,14 @@ npm run dev
 
 ## 🚀 Production (via Render)
 
-This project can be deployed directly on [Render](https://render.com).
+This project can be deployed directly on [Render](https://render.com) as a Web Service with the following settings:
 
-Build and install dependencies:
+Build Command _(to install dependencies and build before each deployment)_:
 ```bash
 npm run deploy
 ```
 
-Start the server:
+Start Command _(to start the server itself)_:
 ```bash
 npm run start
 ```
