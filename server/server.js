@@ -24,23 +24,31 @@ function cleanupSessions() {
 }
 
 /**
+ * Generate a random Session ID that is unique and not already in use.
+ * @returns {string} - The generated session ID.
+ */
+function newSessionId() {
+  let sessionId = null;
+  while (!sessionId || sessions[sessionId]) {
+    sessionId = (Math.floor(Math.random() * (MAX_RAFFLE))).toString(16).padStart(MAX_ID_LEN, '0');
+  }
+  return sessionId;
+}
+
+/**
  * Raffle creation endpoint
  * This endpoint creates a new raffle with a unique ID.
  * It generates a random raffle ID and stores it in the raffles object.
  * It also cleans up any expired raffles after creating a new one.
  * @returns {object} - A JSON response containing the raffle ID.
  */
-app.get("/api/raffle/createRaffle", (req, res) => {
-  // Generate a random raffle id
-  let raffleNum = null;
-  while (!raffleNum || sessions[raffleNum]) {
-    raffleNum = (Math.floor(Math.random() * (MAX_RAFFLE))).toString(16).padStart(MAX_ID_LEN, '0');
-  }
-
+app.get("/api/raffle/create", (req, res) => {
+  
   // Create the raffle
+  raffleNum = newSessionId();
   sessions[raffleNum] = { type: 'raffle', id: raffleNum, tickets: [], created: Date.now()};
 
-  res.json({ raffleId: raffleNum });
+  res.json({ sessionId: raffleNum });
   console.log(`Created raffle session ${raffleNum}`);
 
   // Clean up any expired raffles

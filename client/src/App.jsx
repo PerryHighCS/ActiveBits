@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BrowserRouter, Routes, Route } from "react-router";
 import TicketPage from "./components/tickets/TicketPage";
 import RaffleManager from "./components/manager/RaffleManager";
+import ManageDashboard from './components/manager/ManageDashboard';
 
 /**
  * The main App component that sets up the routing for the application, using React Router
@@ -18,7 +19,9 @@ export default function App() {
       <div className='w-full flex-grow'>
         <BrowserRouter>
           <Routes>
-            <Route path="/manage" element={<RaffleManager />} />
+            <Route path="/manage" element={<ManageDashboard />} />
+            <Route path="/manage/raffle" element={<RaffleManager />} />
+            <Route path="/manage/raffle/:sessionId" element={<RaffleManager />} />
             <Route path="/:sessionId" element={<TicketPage />} />
             <Route path="/" element={<TicketPage />} />
           </Routes>
