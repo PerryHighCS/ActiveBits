@@ -7,7 +7,7 @@ export default function ManageDashboard() {
   const createSession = async (type) => {
     try {
       const res = await fetch(`/api/${type}/create`, {
-        method: 'GET',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
 
@@ -31,7 +31,7 @@ export default function ManageDashboard() {
         >
           Create Raffle
         </button>
-        
+
         <button
           className="bg-green-600 text-white px-4 py-2 rounded"
           onClick={() => createSession('www-sim')}

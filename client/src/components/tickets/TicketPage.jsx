@@ -11,34 +11,14 @@ import Button from '@src/components/ui/Button';
  * 
  * @returns {React.Component} The TicketPage component.
  */
-const TicketPage = () => {
-    const [sessionIdInput, setSessionIdInput] = useState(''); // the input field for the session ID
-    const [ticket, setTicket] = useState(null); // the ticket number fetched from the server
+const TicketPage = ({ sessionData }) => {
+    const sessionId = sessionData.sessionId;
+    const storageKey = `session-${sessionId}`;
+    
+    const [ticket, setTicket] = useState(() => sessionData.ticketNumber || null);
+
     const [loading, setLoading] = useState(false); // loading state for the ticket generation
 
-    const { sessionId: sessionId } = useParams(); // the session ID from the URL
-    const navigate = useNavigate();
-
-    /**
-     * Handle input change from the session ID input field.
-     * @param {Event} e - The event object from the input change.
-     */
-    const handleInputChange = (e) => {
-        setSessionIdInput(e.target.value);
-    };
-
-    /**
-     * Handle form submission to set the sessionId used to fetch the ticket 
-     * number.
-     * @param {Event} e - The event object from the form submission.
-     */
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        if (parseInt(sessionIdInput.trim(), 16)) {
-            // Update the URL with the entered sessionId.
-            navigate('/' + sessionIdInput.trim() );
-        }
-    };
 
     /**
      * Effect to fetch the ticket number from the server or local storage.
@@ -50,16 +30,7 @@ const TicketPage = () => {
      */
     useEffect(() => {
         if (!sessionId) return;
-
-        // Use a key unique to the session
-        const storageKey = `session-${sessionId}`;
-        const storedTicket = localStorage.getItem(storageKey);
-
-        if (storedTicket) {
-            // Ticket is already stored in local storage; set state from stored value.
-            setTicket(JSON.parse(storedTicket));
-            return;
-        }
+        if (ticket) return; // Ticket already fetched
 
         /**
          * Set a timeout to delay the ticket generation request.
@@ -77,8 +48,11 @@ const TicketPage = () => {
                     return response.json();
                 })
                 .then((data) => {
+                    const updated = { ...sessionData, ticketNumber: data.ticket };
+                    localStorage.setItem(storageKey, JSON.stringify(updated));
                     setTicket(data.ticket);
-                    localStorage.setItem(storageKey, JSON.stringify(data.ticket));
+
+                    console.log('sessionData:', sessionData);
                 })
                 .catch((error) => {
                     console.error('Error fetching ticket:', error);
@@ -95,29 +69,18 @@ const TicketPage = () => {
 
     return (
         <>
-            {/* Display the ticket number if the sessionId has been set, or an input field if not */}
-            {sessionId ? (
-                <div className='flex flex-col items-center w-full text-center md:w-max mx-auto border border-gray-300 p-5 rounded-lg shadow-md'>
-                    <h2 className='text-lg font-semibold mb-4'>Session ID: {sessionId}</h2>
-                    {ticket ? (
-                        <div className='text-3xl font-bold text-center'>
-                            Your Ticket Number: {loading ? <>Loading...</> : <span className='text-blue-500 font-extrabold text-6xl'>{ticket}</span>}
+            <div className='flex flex-col items-center w-full text-center md:w-max mx-auto border border-gray-300 p-5 rounded-lg shadow-md'>
+                <h2 className='text-lg font-semibold mb-4'>Session ID: {sessionId}</h2>
+                {ticket ? (
+                    <div className='text-3xl font-bold text-center'>
+                        Your Ticket Number: {loading ? <>Loading...</> : <span className='text-blue-500 font-extrabold text-6xl'>{ticket}</span>}
                         </div>
                     ) : (
                         <div className='text-lg font-semibold'>
                             Getting your ticket...
                         </div>
                     )}
-                </div>
-            ) : (
-                <form onSubmit={handleSubmit} className='flex flex-col items-center w-max mx-auto'>
-                    <label className='block mb-4'>
-                        Join Session ID:
-                        <input className='border border-grey-700 rounded mx-2 p-2' size='5' type="text" id='sessionId' value={sessionIdInput} onChange={handleInputChange} />
-                    </label>
-                    <Button type="submit">Join Session</Button>
-                </form>
-            )}
+            </div>
         </>
     );
 };

@@ -35,6 +35,12 @@ function newSessionId() {
   return sessionId;
 }
 
+function sanitize(session) {
+  if (session.type === 'raffle') {
+    return {id: session.id, type: session.type, created: session.created};
+  }
+}
+
 /**
  * Raffle creation endpoint
  * This endpoint creates a new raffle with a unique ID.
@@ -42,7 +48,7 @@ function newSessionId() {
  * It also cleans up any expired raffles after creating a new one.
  * @returns {object} - A JSON response containing the raffle ID.
  */
-app.get("/api/raffle/create", (req, res) => {
+app.post("/api/raffle/create", (req, res) => {
   
   // Create the raffle
   raffleNum = newSessionId();
@@ -123,6 +129,20 @@ app.delete("/api/session/:sessionId", (req, res) => {
     cleanupSessions();
 
     res.json({ success: "Deleted " + sessionId, deleted: sessionId });
+  }
+  else {
+    res.status(404).json({ error: 'invalid session' });
+  }
+});
+
+
+app.get("/api/session/:sessionId", (req, res) => {
+  let sessionId = req.params.sessionId;
+
+  if (sessions[sessionId]) {
+    const sessionData = sanitize(sessions[sessionId]);
+    console.log(`sending session ${sessionId} data`, sessionData)
+    res.json({ session: sessionData });
   }
   else {
     res.status(404).json({ error: 'invalid session' });
