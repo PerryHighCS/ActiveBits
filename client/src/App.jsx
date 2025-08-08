@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router";
-import SessionRouter from "./components/tickets/SessionRouter";
+import SessionRouter from "./components/user/SessionRouter";
 import RaffleManager from "./components/manager/raffle/RaffleManager";
 import ManageDashboard from './components/manager/ManageDashboard';
 
