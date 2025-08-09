@@ -30,7 +30,7 @@ app.get("/health-check", (req, res) => {
 // Static files / Vite proxy
 const env = process.env.NODE_ENV || "development";
 if (!env.startsWith("dev")) {
-    // Serve static files from the React build directory
+    // In production mode, serve static files from the React build directory
     app.use(express.static(path.join(__dirname, "../client/dist")));
 
     // All other requests should simply serve the React app
