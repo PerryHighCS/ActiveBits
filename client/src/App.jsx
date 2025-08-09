@@ -22,8 +22,8 @@ export default function App() {
             <Route path="/manage" element={<ManageDashboard />} />
             <Route path="/manage/raffle" element={<RaffleManager />} />
             <Route path="/manage/raffle/:sessionId" element={<RaffleManager />} />
-            <Route path="/manage/wwwsim" element={<WwwSimManager />} />
-            <Route path="/manage/wwwsim/:sessionId" element={<WwwSimManager />} />
+            <Route path="/manage/www-sim" element={<WwwSimManager />} />
+            <Route path="/manage/www-sim/:sessionId" element={<WwwSimManager />} />
             <Route path="/:sessionId" element={<SessionRouter />} />
             <Route path="/" element={<SessionRouter />} />
           </Routes>

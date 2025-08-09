@@ -49,7 +49,7 @@ export function generateHexId(store, length = 5) {
  * @param {Object} [options.data={}] - Initial data for the session.
  */
 export function createSession(store, { data = {} } = {}) {
-    const id = generateHexId(store, 6); // keep at 6 hex chars
+    const id = generateHexId(store); 
     const session = { id, created: Date.now(), data };
     store[id] = session;
     return session;
