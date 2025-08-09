@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router";
 import SessionRouter from "./components/user/SessionRouter";
 import RaffleManager from "./components/manager/raffle/RaffleManager";
+import WwwSimManager from "./components/manager/wwwsim/WwwSimManager";
 import ManageDashboard from './components/manager/ManageDashboard';
 
 /**
@@ -21,6 +22,8 @@ export default function App() {
             <Route path="/manage" element={<ManageDashboard />} />
             <Route path="/manage/raffle" element={<RaffleManager />} />
             <Route path="/manage/raffle/:sessionId" element={<RaffleManager />} />
+            <Route path="/manage/wwwsim" element={<WwwSimManager />} />
+            <Route path="/manage/wwwsim/:sessionId" element={<WwwSimManager />} />
             <Route path="/:sessionId" element={<SessionRouter />} />
             <Route path="/" element={<SessionRouter />} />
           </Routes>

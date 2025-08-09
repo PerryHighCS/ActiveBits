@@ -14,7 +14,7 @@ export default function ManageDashboard() {
       if (!res.ok) throw new Error('Failed to create session');
 
       const data = await res.json();
-      navigate(`/manage/${type}/${data.sessionId}`);
+      navigate(`/manage/${type}/${data.id}`);
     } catch (err) {
       console.error(err);
       alert('Could not create session.');
