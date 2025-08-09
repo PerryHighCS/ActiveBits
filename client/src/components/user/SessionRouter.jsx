@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 import TicketPage from './TicketPage';
+import WwwSim from './WwwSim';
 
 const CACHE_TTL = 1000 * 60 * 60 * 12; // 12 hours in milliseconds
 
@@ -116,7 +117,7 @@ const SessionRouter = () => {
     console.log('session data', sessionData);
 
     if (sessionData.type === 'raffle') return <TicketPage sessionData={sessionData} />;
-    if (sessionData.type === 'www-sim') return <SimPage sessionData={sessionData} />;
+    if (sessionData.type === 'www-sim') return <WwwSim sessionData={sessionData} />;
 
     return <div className="text-center">Unknown session type: {sessionData.type}</div>;
 };

@@ -44,7 +44,7 @@ export default function WwwSimManager() {
                     if (!cancelled) setDisplayCode(sessionId);
                 } else {
                     // create new session
-                    const created = await api(`/api/sessions`, {
+                    const created = await api(`/api/www-sim/create`, {
                         method: "POST",
                         body: JSON.stringify({ type: "www-sim" }),
                     });
