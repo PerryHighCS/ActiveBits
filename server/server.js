@@ -1,9 +1,11 @@
+import http from "http";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createSessionStore, setupSessionRoutes } from "./sessions.js"; // ↔ _sessions.js below
-import { setupRaffleRoutes } from "./raffleRoutes.js";
-import { setupWwwSimRoutes } from "./wwwSimRoutes.js";
+import { createSessionStore, setupSessionRoutes } from "./sessions.js";
+import { createWsRouter } from "./wsRouter.js";
+import setupRaffleRoutes from "./raffleRoutes.js";
+import setupWwwSimRoutes from "./wwwSimRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,16 +13,17 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json()); // Parse JSON request bodies
 
+const server = http.createServer(app);
+const ws = createWsRouter(server);
+
 // In-memory store shared by all session types
 const sessions = createSessionStore();
 app.locals.sessions = sessions;
-
-// Attach generic session routes first
 setupSessionRoutes(app, sessions);
 
 // Attach feature-specific route handlers
-setupRaffleRoutes(app, sessions);
-setupWwwSimRoutes(app, sessions);
+setupRaffleRoutes(app, sessions, ws);
+setupWwwSimRoutes(app, sessions, ws);
 
 // Health check
 app.get("/health-check", (req, res) => {
@@ -48,11 +51,12 @@ if (!env.startsWith("dev")) {
     });
     app.use((req, res, next) => {
         if (req.path.startsWith("/api")) return next();
+        if (req.path.startsWith("/ws")) return next();
         return viteProxy(req, res, next);
     });
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`ActiveBits server running on \x1b[1m\x1b[32mhttp://localhost:${PORT}\x1b[0m`);
 });

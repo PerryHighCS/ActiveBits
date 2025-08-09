@@ -17,7 +17,8 @@
     "license": "MIT",
     "description": "",
     "dependencies": {
-        "express": "^5.1.0"
+        "express": "^5.1.0",
+        "ws": "^8.18.3"
     },
     "devDependencies": {
         "concurrently": "^9.1.2"

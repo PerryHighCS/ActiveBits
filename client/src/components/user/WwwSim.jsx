@@ -1,17 +1,58 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import Button from "@src/components/ui/Button";
 
 export default function WwwSim({ sessionData }) {
+    const sessionId = sessionData?.id;
     const [hostname, setHostname] = useState("");
     const [connecting, setConnecting] = useState(false);
-    const [joined, setJoined] = useState(false);
+    const [joined, setJoined] = useState(() => !!hostname);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
 
-    async function handleConnect() {
-        if (!sessionData?.id || !hostname || connecting) return;
+    useEffect(() => {
+        if (!joined || !sessionId) return;
 
-        // Verify student hostname
+        let protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        let host = window.location.host;
+        const socket = new WebSocket(`${protocol}//${host}/ws/www-sim?sessionId=${sessionId}`);
+
+        socket.addEventListener("message", (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                switch (data.type) {
+                    case "student-updated": {
+                        const { oldHostname, newHostname } = data.payload;
+                        if (oldHostname === hostname) {
+                            setHostname(newHostname);
+                            setMessage(`Hostname updated to "${newHostname}"`);
+                        }
+                        break;
+                    }
+                    case "student-removed": {
+                        const { hostname: removed } = data.payload;
+                        if (removed === hostname) {
+                            setMessage("You have been removed by the instructor.");
+                            setJoined(false);
+                            setHostname("");
+                        }
+                        break;
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to parse WS message", err);
+            }
+        });
+
+        socket.addEventListener("error", (err) => {
+            console.error("WebSocket error (student)", err);
+        });
+
+        return () => socket.close();
+    }, [joined, sessionId, hostname]);
+
+
+    async function handleConnect() {
+        if (!sessionId || !hostname || connecting) return;
         const ok = window.confirm(`Join as "${hostname}"?`);
         if (!ok) return;
 
@@ -79,6 +120,9 @@ export default function WwwSim({ sessionData }) {
                     </Button>
                 </div>
             )}
+
+            {message && <div className="text-sm text-gray-700" role="status">{message}</div>}
+            {error && <div className="text-sm text-red-600" role="alert">{error}</div>}
         </div>
     );
 }
