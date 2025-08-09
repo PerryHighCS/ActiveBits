@@ -27,7 +27,6 @@ export function createSessionStore(ttlMs = 60 * 60 * 1000) {
  * @param {Object} store - The session store to check for existing IDs.
  * @param {number} [length=5] - The minimum length of the ID.
  */
-
 export function generateHexId(store, length = 5) {
     let attempts = 0;
     let len = length;
@@ -56,6 +55,11 @@ export function createSession(store, { data = {} } = {}) {
     return session;
 }
 
+/**
+ * Setup routes for managing sessions.
+ * @param {Object} app - The Express application.
+ * @param {Object} sessions - The session store.
+ */
 export function setupSessionRoutes(app, sessions) {
     // GET /api/session/:sessionId -> fetch any session (any type)
     app.get("/api/session/:sessionId", (req, res) => {

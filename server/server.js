@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(express.json());
+app.use(express.json()); // Parse JSON request bodies
 
 // In-memory store shared by all session types
 const sessions = createSessionStore();
@@ -30,11 +30,15 @@ app.get("/health-check", (req, res) => {
 // Static files / Vite proxy
 const env = process.env.NODE_ENV || "development";
 if (!env.startsWith("dev")) {
+    // Serve static files from the React build directory
     app.use(express.static(path.join(__dirname, "../client/dist")));
+
+    // All other requests should simply serve the React app
     app.get("/*", (req, res) => {
         res.sendFile(path.join(__dirname, "../client/dist/index.html"));
     });
 } else {
+    // Development mode: proxy requests to Vite
     process.on("warning", e => console.warn(e.stack));
     const { createProxyMiddleware } = await import("http-proxy-middleware");
     const viteProxy = createProxyMiddleware({
