@@ -162,18 +162,18 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         const s = sessions[req.params.id];
         if (!s || s.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
-        const { assignments } = req.body || {};
+        const { hostingMap } = req.body || {};
 
-        if (!assignments || typeof assignments !== "object") {
+        if (!hostingMap || typeof hostingMap !== "object") {
             return res.status(400).json({ error: "invalid or missing assignments" });
         }
 
         // Save to session
-        s.data.fragments = assignments;
+        s.data.fragments = hostingMap;
 
         // Send assigned fragments to relevant students
-        for (const fragment in assignments) {
-            for (const { hostname } of assignments[fragment].assignedTo || []) {
+        for (const fragment in hostingMap) {
+            for (const { hostname } of hostingMap[fragment].assignedTo || []) {
                 sendFragmentAssignments(hostname, s);
             }
         }

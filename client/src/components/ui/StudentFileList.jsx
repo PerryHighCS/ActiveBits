@@ -45,13 +45,13 @@ function FileElement({ filename, contentElement, responseHeader }) {
     );
 }
 
-function HostedFile({ filename, content = "", responseHeader = okHeader}) {
+function HostedFile({ filename, hostname, content = "", responseHeader = okHeader}) {
     const preview = content.length > 200 ? content.slice(0, 200) + "..." : content;
 
     return (
         <FileElement 
             key={filename} 
-            filename={(filename.startsWith('/')) ? filename : `/${filename}`} 
+            filename={`${hostname}/${filename}`} 
             contentElement={<pre>{preview}</pre>} 
             responseHeader={responseHeader} 
         />
@@ -83,7 +83,7 @@ export default function StudentFileDisplay({ fragments, hostname }) {
             <div className="mt-4">
                 <h2 className="text-lg font-semibold mb-2">Your Hosted Files</h2>
                 {fragments.map(({fileName, fragment}) => (
-                    <HostedFile key={fileName} filename={fileName} content={fragment} />
+                    <HostedFile key={fileName} hostname={hostname} filename={fileName} content={fragment} />
                 ))}
             </div>
             <div className="mt-4">

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import Button from "@src/components/ui/Button";
 import StudentFragmentList from "@src/components/ui/StudentFileList";
 
@@ -171,7 +171,11 @@ export default function WwwSim({ sessionData }) {
                     <div className="mt-4">
                         {selectedTab === "server" && (
                             <div className="text-sm text-gray-800">
-                                <StudentFragmentList fragments={assignments} hostname={hostname} />
+                                { assignments && assignments.length > 0 ? (
+                                    <StudentFragmentList fragments={assignments} hostname={hostname} />
+                                ) : (
+                                    <p className="text-gray-500">You are not hosting any files</p>
+                                )}
                             </div>
                         )}
                         {selectedTab === "browser" && (
