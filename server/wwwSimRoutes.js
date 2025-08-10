@@ -4,6 +4,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     // WS namespace
     ws.register("/ws/www-sim", (socket, qp) => {
         socket.sessionId = qp.get("sessionId") || null;
+        socket.hostname = qp.get("hostname")?.trim().toLowerCase() || null;
     });
 
     // Broadcast helper
@@ -19,6 +20,39 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     function verifyHostname(hostname) {
         const hostnameRegex = /^(?=.{1,63}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
         return hostnameRegex.test(hostname.trim().toLowerCase());
+    }
+
+    // Send fragments assigned to a specific hostname
+    function sendFragmentAssignments(hostname, session) {
+        const assignments = [];
+
+        for (const { fragment, assignedTo } of session.data.fragments || []) {
+            for (const {hostname: h, fileName} of assignedTo || []) {
+                if (h === hostname) {
+                    assignments.push({ fragment, fileName });
+                }
+            }
+        }
+        
+        console.log("!!!", assignments);
+
+        if (assignments.length > 0) {
+            const msg = JSON.stringify({
+                type: "assigned-fragments",
+                payload: { assignments }
+            });
+
+            for (const sock of ws.wss.clients) {
+                if (
+                    sock.readyState === 1 &&
+                    sock.sessionId === session.id &&
+                    sock.hostname === hostname
+                ) {
+                    console.log("Sending ", assignments.length, " fragment assignments to", sock.hostname);
+                    try { sock.send(msg); } catch {}
+                }
+            }
+        }
     }
 
     /////////////////
@@ -69,6 +103,9 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         console.log("Student joined session", s.id, "as", hostname);
         broadcast("student-joined", { hostname, joined: now }, s.id);
         res.json({ message: `Joined session as ${hostname}` });
+
+        // If fragments exist for this student, send them
+        sendFragmentAssignments(hostname, s);
     });
 
     // Edit hostname
@@ -88,10 +125,19 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         if (newHostname === current) return res.status(200).json({ message: "no change", students: s.data.students });
         if (s.data.students.some(stu => stu.hostname === newHostname)) return res.status(409).json({ error: "hostname already in use" });
 
+        // Update student's hostname
         student.hostname = newHostname;
-        broadcast("student-updated", { oldHostname: current, newHostname }, s.id);
-        console.log("Renamed student ", current, " to ", newHostname);
 
+        // Update hostname on any connected WebSocket
+        for (const sock of ws.wss.clients) {
+            if (sock.readyState === 1 && sock.sessionId === s.id && sock.hostname === current) {
+                sock.hostname = newHostname;
+            }
+        }
+
+        broadcast("student-updated", { oldHostname: current, newHostname }, s.id);
+
+        console.log("Renamed student ", current, " to ", newHostname);
         res.json({ message: `Updated hostname to ${newHostname}`, students: s.data.students });
     });
 
@@ -107,4 +153,48 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         broadcast("student-removed", { hostname: removed.hostname }, s.id);
         res.json({ message: `Removed student ${removed.hostname}`, students: s.data.students });
     });
+
+    // Assign fragments to students
+    app.post("/api/www-sim/:id/assign", (req, res) => {
+        const s = sessions[req.params.id];
+        if (!s || s.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
+
+        const { assignments } = req.body || {};
+        
+        if (!assignments || typeof assignments !== "object") {
+            return res.status(400).json({ error: "invalid or missing assignments" });
+        }
+
+        // Save to session
+        s.data.fragments = assignments;
+
+        // Send assigned fragments to relevant students
+        for (const fragment in assignments) {
+            for (const { hostname } of assignments[fragment].assignedTo || []) {
+                sendFragmentAssignments(hostname, s);
+            }
+        }
+
+        console.log("Assigned fragments for session", s.id);
+        res.json({ message: "Fragments assigned" });
+    });
+
+    app.get("/api/www-sim/:id/fragments/:hostname", (req, res) => {
+        const s = sessions[req.params.id];
+        if (!s || s.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
+
+        const { hostname } = req.params;
+        const assignments = [];
+
+        for (const fragment in s.data.fragments || {}) {
+            for (const { hostname: h, fileName } of s.data.fragments[fragment]) {
+                if (h === hostname) {
+                    assignments.push({ fragment, fileName });
+                }
+            }
+        }
+
+        res.json({ assignments });
+    });
+
 }

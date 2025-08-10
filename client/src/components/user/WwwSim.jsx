@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import Button from "@src/components/ui/Button";
+import StudentFragmentList from "@src/components/ui/StudentFileList";
 
 export default function WwwSim({ sessionData }) {
     const sessionId = sessionData?.id;
@@ -16,15 +17,18 @@ export default function WwwSim({ sessionData }) {
     const [joined, setJoined] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
+    const [selectedTab, setSelectedTab] = useState("server");
+
+    const [assignments, setAssignments] = useState([]);
 
     useEffect(() => {
         if (!joined || !sessionId) return;
 
         let protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         let host = window.location.host;
-        const socket = new WebSocket(`${protocol}//${host}/ws/www-sim?sessionId=${sessionId}`);
+        const ws = new WebSocket(`${protocol}//${host}/ws/www-sim?sessionId=${sessionId}&hostname=${hostname}`);
 
-        socket.addEventListener("message", (event) => {
+        ws.addEventListener("message", (event) => {
             try {
                 const data = JSON.parse(event.data);
                 switch (data.type) {
@@ -32,7 +36,7 @@ export default function WwwSim({ sessionData }) {
                         const { oldHostname, newHostname } = data.payload;
                         if (oldHostname === hostname) {
                             setHostname(newHostname);
-                            localStorage.setItem(storageKey, newHostname);                        
+                            localStorage.setItem(storageKey, newHostname);
                             setMessage(`Hostname updated to "${newHostname}"`);
                         }
                         break;
@@ -47,17 +51,24 @@ export default function WwwSim({ sessionData }) {
                         }
                         break;
                     }
+                    case "assigned-fragments": {
+                        const fragments = data.payload?.assignments || [];
+                                                
+                        console.log("fragments", fragments);
+                        setAssignments(fragments);
+                        break;
+                    }
                 }
             } catch (err) {
                 console.error("Failed to parse WS message", err);
             }
         });
 
-        socket.addEventListener("error", (err) => {
+        ws.addEventListener("error", (err) => {
             console.error("WebSocket error (student)", err);
         });
 
-        return () => socket.close();
+        return () => ws.close();
     }, [joined, sessionId, hostname]);
 
 
@@ -134,6 +145,39 @@ export default function WwwSim({ sessionData }) {
 
             {message && <div className="text-sm text-gray-700" role="status">{message}</div>}
             {error && <div className="text-sm text-red-600" role="alert">{error}</div>}
+
+            {joined && (
+                <>
+                    <div className="flex gap-2 mt-4 border-b border-gray-300">
+                        <button
+                            className={`px-3 py-1 text-sm font-medium ${selectedTab === "server" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
+                            onClick={() => setSelectedTab("server")}
+                        >
+                            Server
+                        </button>
+                        <button
+                            className={`px-3 py-1 text-sm font-medium ${selectedTab === "browser" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
+                            onClick={() => setSelectedTab("browser")}
+                        >
+                            Browser
+                        </button>
+                    </div>
+
+                    <div className="mt-4">
+                        {selectedTab === "server" && (
+                            <div className="text-sm text-gray-800">
+                                <StudentFragmentList fragments={assignments} hostname={hostname} />
+                            </div>
+                        )}
+                        {selectedTab === "browser" && (
+                            <div className="text-sm text-gray-800">
+                                {/* Placeholder for browser-side request content */}
+                                <p>To request a file, enter a URL above.</p>
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     );
 }
