@@ -167,7 +167,6 @@ export default function WwwSimManager() {
         ws.onmessage = (evt) => {
             try {
                 const msg = JSON.parse(evt.data);
-                console.log("Wsock", msg);
                 if (msg.type === "student-joined") {
                     console.log("Student joined: ", msg);
                     setStudents(prev => {
@@ -234,7 +233,6 @@ export default function WwwSimManager() {
     }
 
     function getRandomUnusedName(usedNames = []) {
-        console.log("used names", usedNames);
         let newName;
         do {
             newName = getRandomName(passage);
@@ -282,7 +280,6 @@ export default function WwwSimManager() {
 
     const assignFragments = async () => {
         const assignments = generateAssignments(students);
-        console.log("assignments", assignments);
 
         try {
             await fetch(`/api/www-sim/${sessionId}/assign`, {

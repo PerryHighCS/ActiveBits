@@ -40,8 +40,6 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
                 payload: { assignments }
             });
 
-            console.log("Sending assignments to", hostname, ":", assignments);
-
             for (const sock of ws.wss.clients) {
                 if (
                     sock.readyState === 1 &&
@@ -189,7 +187,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         if (!s || s.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
         const { hostname } = req.params;
-        console.log("Fetchingasdf fragments for", hostname, s.id);
+        console.log("Fetching fragments for", hostname, s.id);
 
         // Find all fragment assignments for this hostname
         const assignments = [];

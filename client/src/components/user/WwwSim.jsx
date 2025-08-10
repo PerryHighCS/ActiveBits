@@ -52,9 +52,7 @@ export default function WwwSim({ sessionData }) {
                         break;
                     }
                     case "assigned-fragments": {
-                        const fragments = data.payload?.assignments || [];
-                                                
-                        console.log("fragments", fragments);
+                        const fragments = data.payload?.assignments || [];                                                
                         setAssignments(fragments);
                         break;
                     }
@@ -100,7 +98,6 @@ export default function WwwSim({ sessionData }) {
             const frags = await fetch(`/api/www-sim/${sessionData.id}/fragments/${hostname}`);
             if (frags.ok) {
                 const fragData = await frags.json();
-                console.log("Received fragments:", fragData);
                 setAssignments(fragData.payload?.assignments || []);
             }
         } catch (e) {
