@@ -3,9 +3,17 @@ import Button from "@src/components/ui/Button";
 
 export default function WwwSim({ sessionData }) {
     const sessionId = sessionData?.id;
-    const [hostname, setHostname] = useState("");
+    const storageKey = `${sessionId}-wwwsim`;
+
+    const [hostname, setHostname] = useState(() => {
+        try {
+            return localStorage.getItem(storageKey) || "";
+        } catch {
+            return "";
+        }
+    });
     const [connecting, setConnecting] = useState(false);
-    const [joined, setJoined] = useState(() => !!hostname);
+    const [joined, setJoined] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
 
@@ -24,6 +32,7 @@ export default function WwwSim({ sessionData }) {
                         const { oldHostname, newHostname } = data.payload;
                         if (oldHostname === hostname) {
                             setHostname(newHostname);
+                            localStorage.setItem(storageKey, newHostname);                        
                             setMessage(`Hostname updated to "${newHostname}"`);
                         }
                         break;
@@ -34,6 +43,7 @@ export default function WwwSim({ sessionData }) {
                             setMessage("You have been removed by the instructor.");
                             setJoined(false);
                             setHostname("");
+                            localStorage.removeItem(storageKey);
                         }
                         break;
                     }
@@ -72,6 +82,7 @@ export default function WwwSim({ sessionData }) {
             }
             const data = await res.json();
             setJoined(true);
+            localStorage.setItem(storageKey, hostname);
             setMessage(data.message || "Joined! Waiting for instructor to start…");
         } catch (e) {
             setError(e.message || String(e));

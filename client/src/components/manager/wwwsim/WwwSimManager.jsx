@@ -190,7 +190,7 @@ export default function WwwSimManager() {
             {busy && <p>Loading session…</p>}
             {error && <p className="text-red-600">Error: {error}</p>}
 
-            <h2 className="text-md font-bold">{students.length} student{students.length > 1 ? "s" : ""} connected</h2>
+            <h2 className="text-md font-bold">{students.length} student{students.length != 1 ? "s" : ""} connected</h2>
             {/* Roster pills */}
             {students.length > 0 && (
                 <div className="flex flex-wrap gap-2">
