@@ -77,7 +77,7 @@ function ErrorMessage() {
     );
 }
 
-export default function StudentFileDisplay({ fragments, hostname }) {
+export default function StudentHostDisplay({ fragments, hostname }) {
     return (
         <>
             <div className="mt-4">

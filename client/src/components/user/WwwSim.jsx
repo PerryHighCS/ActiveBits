@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import Button from "@src/components/ui/Button";
-import StudentFragmentList from "@src/components/ui/StudentFileList";
+import StudentHostDisplay from "@src/components/ui/StudentHostDisplay";
+import StudentBrowserView from "@src/components/ui/StudentBrowserView";
 
 export default function WwwSim({ sessionData }) {
     const sessionId = sessionData?.id;
@@ -19,7 +20,8 @@ export default function WwwSim({ sessionData }) {
     const [error, setError] = useState("");
     const [selectedTab, setSelectedTab] = useState("server");
 
-    const [assignments, setAssignments] = useState([]);
+    const [hostAssignments, setHostAssignments] = useState([]);
+    const [templateRequests, setTemplateRequests] = useState([]);
 
     useEffect(() => {
         if (!joined || !sessionId) return;
@@ -52,8 +54,9 @@ export default function WwwSim({ sessionData }) {
                         break;
                     }
                     case "assigned-fragments": {
-                        const fragments = data.payload?.assignments || [];                                                
-                        setAssignments(fragments);
+                        const { host, requests } = data.payload || {};
+                        setHostAssignments(host || []);
+                        setTemplateRequests(requests || []);
                         break;
                     }
                 }
@@ -98,7 +101,8 @@ export default function WwwSim({ sessionData }) {
             const frags = await fetch(`/api/www-sim/${sessionData.id}/fragments/${hostname}`);
             if (frags.ok) {
                 const fragData = await frags.json();
-                setAssignments(fragData.payload?.assignments || []);
+                setHostAssignments(fragData.payload?.host || []);
+                setTemplateRequests(fragData.payload?.requests || []);
             }
         } catch (e) {
             setError(e.message || String(e));
@@ -171,8 +175,8 @@ export default function WwwSim({ sessionData }) {
                     <div className="mt-4">
                         {selectedTab === "server" && (
                             <div className="text-sm text-gray-800">
-                                { assignments && assignments.length > 0 ? (
-                                    <StudentFragmentList fragments={assignments} hostname={hostname} />
+                                { hostAssignments && hostAssignments.length > 0 ? (
+                                    <StudentHostDisplay fragments={hostAssignments} hostname={hostname} />
                                 ) : (
                                     <p className="text-gray-500">You are not hosting any files</p>
                                 )}
@@ -180,8 +184,7 @@ export default function WwwSim({ sessionData }) {
                         )}
                         {selectedTab === "browser" && (
                             <div className="text-sm text-gray-800">
-                                {/* Placeholder for browser-side request content */}
-                                <p>To request a file, enter a URL above.</p>
+                                <StudentBrowserView title={templateRequests.title} fragments={templateRequests.fragments} />
                             </div>
                         )}
                     </div>

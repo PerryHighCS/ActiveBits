@@ -96,6 +96,7 @@ export default function WwwSimManager() {
     const [passageEdit, setCustomVisible] = useState(false);
 
     const [assignmentLocked, setAssignmentLocked] = useState(false);
+    const [fragments, setFragments] = useState([]);
 
 
     useEffect(() => {
@@ -247,10 +248,18 @@ export default function WwwSimManager() {
         return newName;
     }
 
-    function createHostingMap(students) {
+    async function createHash(fragment) {
+        const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fragment));
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    async function createHostingMap(students) {
         const fragments = dividePassage(passage.value);
         const studentHostingMap = {};
         const fragmentHostingMap = [];
+
+        setFragments(fragments); // Store fragments for later use
 
         for (const s of students) {
             studentHostingMap[s.hostname] = [];
@@ -259,7 +268,7 @@ export default function WwwSimManager() {
         // Assign each fragment to one random student
         for (const index in fragments) {
             const fragment = fragments[index];
-            const fragmentRecord = { fragment, index, assignedTo: [] };
+            const fragmentRecord = { fragment, index, assignedTo: [], hash: await createHash(fragment) };
 
             const student = students[Math.floor(Math.random() * students.length)];
             const fileName = getRandomUnusedName(studentHostingMap[student.hostname]);
@@ -286,14 +295,47 @@ export default function WwwSimManager() {
         return fragmentHostingMap;
     }
 
+    const generateHtmlTemplate = (hostname, fragmentRecords, title) => {
+        const fragmentUrls = [];
+
+        for (const record of fragmentRecords) {
+            // Choose a source for the fragment, preferring other sources than this hostname
+            let source = record.assignedTo[0];
+            if (record.assignedTo.length > 1) {
+                // Filter out the version hosted by this student
+                const otherSources = record.assignedTo.filter(
+                    hostInfo => hostInfo.hostname !== hostname
+                );
+
+                // Pick one of the alternate sources at random
+                source = otherSources[Math.floor(Math.random() * otherSources.length)];
+            }
+            fragmentUrls.push({
+                hash: record.hash,
+                url: `http://${source.hostname}/${source.fileName}`
+            });
+        }
+
+        return {
+            title,
+            fragments: fragmentUrls
+        };
+    };
+
+
     const assignFragments = async () => {
-        const hostingMap = createHostingMap(students);
+        const hostingMap = await createHostingMap(students);
+
+        const studentTemplates = {};
+        for (const { hostname } of students) {
+            studentTemplates[hostname] = generateHtmlTemplate(hostname, hostingMap, passage.title);
+        }
 
         try {
             await fetch(`/api/www-sim/${sessionId}/assign`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ hostingMap: hostingMap })
+                body: JSON.stringify({ hostingMap, studentTemplates })
             });
 
             setAssignmentLocked(true);
@@ -306,6 +348,8 @@ export default function WwwSimManager() {
         }
     };
 
+
+    console.log('fragments', fragments);
 
     return (
         <div className="p-6 space-y-4">
@@ -354,7 +398,7 @@ export default function WwwSimManager() {
                 </div>
             )}
 
-            {!assignmentLocked && (
+            {!assignmentLocked ? (
                 <div className="space-y-2 flex flex-col">
                     <div>
                         <label htmlFor="preset" className="font-semibold">Choose a preset passage:</label>
@@ -391,6 +435,15 @@ export default function WwwSimManager() {
                         </Button>
                     </div>
                 </div>
+            ) : (
+                <>
+                    <h2 className="font-bold">Fragments</h2>
+                    <ul className="list-disc">
+                        {fragments.map((fragment, index) => (
+                            <li key={index} className="">{fragment}</li>
+                        ))}
+                    </ul>
+                </>
             )}
         </div>
     );

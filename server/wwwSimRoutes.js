@@ -24,20 +24,22 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
 
     // Send fragments assigned to a specific hostname
     function sendFragmentAssignments(hostname, session) {
-        const assignments = [];
+        const hostFragments = [];
 
         for (const { fragment, assignedTo } of session.data.fragments || []) {
             for (const { hostname: h, fileName } of assignedTo || []) {
                 if (h === hostname) {
-                    assignments.push({ fragment, fileName });
+                    hostFragments.push({ fragment, fileName });
                 }
             }
         }
 
-        if (assignments.length > 0) {
+        const requests = session.data.studentTemplates[hostname] || {};
+
+        if (hostFragments.length > 0) {
             const msg = JSON.stringify({
                 type: "assigned-fragments",
-                payload: { assignments }
+                payload: { host: hostFragments, requests }
             });
 
             for (const sock of ws.wss.clients) {
@@ -46,12 +48,12 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
                     sock.sessionId === session.id &&
                     sock.hostname === hostname
                 ) {
-                    console.log("Sending ", assignments.length, " fragment assignments to", sock.hostname);
+                    console.log("Sending ", hostFragments.length, " fragment assignments to", sock.hostname);
                     try { sock.send(msg); } catch { }
                 }
             }
 
-            return assignments;
+            return hostFragments;
         }
         else {
             console.log("No assignments for ", hostname);
@@ -63,7 +65,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
 
     // Create a new WWW simulation session
     app.post("/api/www-sim/create", (req, res) => {
-        const s = createSession(sessions, { data: { students: [] } });
+        const s = createSession(sessions, { data: { students: [], studentTemplates: {} } });
         s.type = "www-sim"; // Set the session type
         res.json({ id: s.id }); // Respond with the new session ID
     });
@@ -162,14 +164,23 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         const s = sessions[req.params.id];
         if (!s || s.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
-        const { hostingMap } = req.body || {};
+        const { hostingMap, studentTemplates } = req.body || {};
 
         if (!hostingMap || typeof hostingMap !== "object") {
-            return res.status(400).json({ error: "invalid or missing assignments" });
+            return res.status(400).json({ error: "invalid or missing hosting map" });
+        }
+        if (!studentTemplates || typeof studentTemplates !== "object") {
+            return res.status(400).json({ error: "invalid or missing student templates" });
         }
 
         // Save to session
         s.data.fragments = hostingMap;
+
+        // for (const [hostname, template] of Object.entries(studentTemplates)) {
+        //     console.log("Setting template for", hostname, template);
+        // }
+
+        s.data.studentTemplates = studentTemplates;
 
         // Send assigned fragments to relevant students
         for (const fragment in hostingMap) {
@@ -190,11 +201,11 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         console.log("Fetching fragments for", hostname, s.id);
 
         // Find all fragment assignments for this hostname
-        const assignments = [];
+        const host = [];
         for (const frag of s.data.fragments || []) {
             for (const assn of frag.assignedTo || []) {
                 if (assn.hostname === hostname) {
-                    assignments.push({
+                    host.push({
                         fileName: assn.fileName,
                         fragment: frag.fragment
                     });
@@ -202,7 +213,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
             }
         }
 
-        return res.json({ payload: { assignments } });
+        return res.json({ payload: { host, requests: s.data.studentTemplates[hostname] } });
     });
 
 }
