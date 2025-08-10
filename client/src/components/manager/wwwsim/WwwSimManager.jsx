@@ -97,7 +97,8 @@ export default function WwwSimManager() {
 
     const [assignmentLocked, setAssignmentLocked] = useState(false);
     const [fragments, setFragments] = useState([]);
-
+    const [hostingMap, setHostingMap] = useState([]);
+    const [studentTemplates, setStudentTemplates] = useState([]);
 
     useEffect(() => {
         let cancelled = false;
@@ -118,7 +119,19 @@ export default function WwwSimManager() {
             try {
                 if (sessionId) {
                     // validate/load existing session
-                    await api(`/api/www-sim/${sessionId}`);
+                    const session = await api(`/api/www-sim/${sessionId}`);
+                    console.log("Loaded session", session);
+                    
+                    setStudents(session.students || []);
+                    
+                    if (session.hostingMap && session.hostingMap.length > 0 &&
+                        session.studentTemplates && Object.keys(session.studentTemplates).length > 0) {
+                        setHostingMap(session.hostingMap || []);
+                        setStudentTemplates(session.studentTemplates || []);
+                        setFragments(session.hostingMap.map(f => f.fragment));
+                        setAssignmentLocked(true);
+                    }
+
                     if (!cancelled) setDisplayCode(sessionId);
                 } else {
                     // create new session
@@ -141,6 +154,14 @@ export default function WwwSimManager() {
         run();
         return () => { cancelled = true; };
     }, [sessionId, navigate]);
+
+    useEffect(() => {
+        if (studentTemplates.length > 0 && !passage) {
+            const example = studentTemplates[0];
+            const matched = presetPassages.find(p => p.title === example.title);
+            if (matched) setPassage(matched.value);
+        }
+    }, [studentTemplates, passage]);
 
     const studentJoinUrl = displayCode ? `${window.location.origin}/${displayCode}` : "";
 
@@ -194,6 +215,17 @@ export default function WwwSimManager() {
 
                     const { oldHostname, newHostname } = msg.payload;
                     setStudents(prev => prev.map(s => s.hostname === oldHostname ? { ...s, hostname: newHostname } : s));
+                } else if (msg.type === "fragments-assigned") {
+                    console.log("Fragments assigned: ", msg.payload);
+
+                    const { studentTemplates: st, hostingMap:hm } = msg.payload;
+                    setStudentTemplates(st || []);
+                    setHostingMap(hm || []);
+                    setFragments(hm.map(f => f.fragment));
+                    
+                    const lock = (st && hm);
+                    setAssignmentLocked(lock);
+                    console.log("locking", lock);
                 }
             } catch { /* ignore parse errors */ }
         };
@@ -325,11 +357,13 @@ export default function WwwSimManager() {
 
     const assignFragments = async () => {
         const hostingMap = await createHostingMap(students);
+        setHostingMap(hostingMap);
 
         const studentTemplates = {};
         for (const { hostname } of students) {
             studentTemplates[hostname] = generateHtmlTemplate(hostname, hostingMap, passage.title);
         }
+        setStudentTemplates(studentTemplates);
 
         try {
             await fetch(`/api/www-sim/${sessionId}/assign`, {
@@ -347,9 +381,6 @@ export default function WwwSimManager() {
             return {};
         }
     };
-
-
-    console.log('fragments', fragments);
 
     return (
         <div className="p-6 space-y-4">
