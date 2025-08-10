@@ -1,10 +1,18 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
-function FragmentTag({ src, hash, onSubmit }) {
+function FragmentTag({ src, hash, onSubmit, initialContent }) {
     const [isOpen, setIsOpen] = useState(false);
     const [inputValue, setInputValue] = useState("");
     const [isValid, setIsValid] = useState(null);
     const [wasSubmitted, setWasSubmitted] = useState(false);
+
+    useEffect(() => {
+        if (initialContent && !wasSubmitted) {
+            setInputValue(initialContent);
+            setIsValid(true);
+            setWasSubmitted(true);
+        }
+    }, [initialContent, wasSubmitted]);
 
     async function createHash(fragment) {
         const buffer = new TextEncoder().encode(fragment);
@@ -76,11 +84,25 @@ function FragmentTag({ src, hash, onSubmit }) {
     );
 }
 
-export default function StudentBrowserView({ title, fragments }) {
+export default function StudentBrowserView({ title, fragments, sessionId }) {
     const [renderedFragments, setRenderedFragments] = useState({});
 
+    useEffect(() => {
+        const stored = localStorage.getItem(`${sessionId}-fragments`);
+        if (stored) {
+            try {
+                const parsed = JSON.parse(stored);
+                setRenderedFragments(parsed);
+            } catch { }
+        }
+    }, []);
+
     const handleFragmentSubmit = (src, content) => {
-        setRenderedFragments(prev => ({ ...prev, [src]: content }));
+        setRenderedFragments(prev => {
+            const updated = { ...prev, [src]: content };
+            localStorage.setItem(`${sessionId}-fragments`, JSON.stringify(updated));
+            return updated;
+        });
     };
 
     if (!fragments || fragments.length === 0) {
@@ -106,7 +128,12 @@ export default function StudentBrowserView({ title, fragments }) {
                         {fragments.map((f, i) => (
                             <React.Fragment key={i}>
                                 {"    "}
-                                <FragmentTag src={f.url} hash={f.hash} onSubmit={handleFragmentSubmit} />
+                                <FragmentTag
+                                    src={f.url}
+                                    hash={f.hash}
+                                    onSubmit={handleFragmentSubmit}
+                                    initialContent={renderedFragments[f.url]}
+                                />
                                 {"\n"}
                             </React.Fragment>
                         ))}

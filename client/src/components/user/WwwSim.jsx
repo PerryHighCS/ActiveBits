@@ -176,7 +176,7 @@ export default function WwwSim({ sessionData }) {
                         {selectedTab === "server" && (
                             <div className="text-sm text-gray-800">
                                 { hostAssignments && hostAssignments.length > 0 ? (
-                                    <StudentHostDisplay fragments={hostAssignments} hostname={hostname} />
+                                    <StudentHostDisplay fragments={hostAssignments} hostname={hostname} sessionId={sessionId} />
                                 ) : (
                                     <p className="text-gray-500">You are not hosting any files</p>
                                 )}
