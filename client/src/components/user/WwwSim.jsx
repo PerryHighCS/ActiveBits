@@ -94,7 +94,15 @@ export default function WwwSim({ sessionData }) {
             const data = await res.json();
             setJoined(true);
             localStorage.setItem(storageKey, hostname);
+
             setMessage(data.message || "Joined! Waiting for instructor to start…");
+
+            const frags = await fetch(`/api/www-sim/${sessionData.id}/fragments/${hostname}`);
+            if (frags.ok) {
+                const fragData = await frags.json();
+                console.log("Received fragments:", fragData);
+                setAssignments(fragData.payload?.assignments || []);
+            }
         } catch (e) {
             setError(e.message || String(e));
             setMessage("");

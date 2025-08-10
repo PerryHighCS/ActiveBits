@@ -27,20 +27,20 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         const assignments = [];
 
         for (const { fragment, assignedTo } of session.data.fragments || []) {
-            for (const {hostname: h, fileName} of assignedTo || []) {
+            for (const { hostname: h, fileName } of assignedTo || []) {
                 if (h === hostname) {
                     assignments.push({ fragment, fileName });
                 }
             }
         }
-        
-        console.log("!!!", assignments);
 
         if (assignments.length > 0) {
             const msg = JSON.stringify({
                 type: "assigned-fragments",
                 payload: { assignments }
             });
+
+            console.log("Sending assignments to", hostname, ":", assignments);
 
             for (const sock of ws.wss.clients) {
                 if (
@@ -49,9 +49,14 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
                     sock.hostname === hostname
                 ) {
                     console.log("Sending ", assignments.length, " fragment assignments to", sock.hostname);
-                    try { sock.send(msg); } catch {}
+                    try { sock.send(msg); } catch { }
                 }
             }
+
+            return assignments;
+        }
+        else {
+            console.log("No assignments for ", hostname);
         }
     }
 
@@ -160,7 +165,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         if (!s || s.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
         const { assignments } = req.body || {};
-        
+
         if (!assignments || typeof assignments !== "object") {
             return res.status(400).json({ error: "invalid or missing assignments" });
         }
@@ -184,17 +189,22 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         if (!s || s.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
         const { hostname } = req.params;
-        const assignments = [];
+        console.log("Fetchingasdf fragments for", hostname, s.id);
 
-        for (const fragment in s.data.fragments || {}) {
-            for (const { hostname: h, fileName } of s.data.fragments[fragment]) {
-                if (h === hostname) {
-                    assignments.push({ fragment, fileName });
+        // Find all fragment assignments for this hostname
+        const assignments = [];
+        for (const frag of s.data.fragments || []) {
+            for (const assn of frag.assignedTo || []) {
+                if (assn.hostname === hostname) {
+                    assignments.push({
+                        fileName: assn.fileName,
+                        fragment: frag.fragment
+                    });
                 }
             }
         }
 
-        res.json({ assignments });
+        return res.json({ payload: { assignments } });
     });
 
 }
