@@ -3,6 +3,7 @@ import Button from "@src/components/ui/Button";
 import StudentHostDisplay from "@src/components/ui/StudentHostDisplay";
 import StudentBrowserView from "@src/components/ui/StudentBrowserView";
 import DNSLookupTable from "@src/components/ui/DNSLookupTable";
+import InstructionsTab from "@src/components/ui/WwwSimInstructionsTab";
 
 export default function WwwSim({ sessionData }) {
     const sessionId = sessionData?.id;
@@ -19,7 +20,7 @@ export default function WwwSim({ sessionData }) {
     const [joined, setJoined] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
-    const [selectedTab, setSelectedTab] = useState("server");
+    const [selectedTab, setSelectedTab] = useState("instructions");
 
     const [hostAssignments, setHostAssignments] = useState([]);
     const [templateRequests, setTemplateRequests] = useState([]);
@@ -196,6 +197,12 @@ export default function WwwSim({ sessionData }) {
                 <>
                     <div className="flex gap-2 mt-4 border-b border-gray-300">
                         <button
+                            className={`px-3 py-1 text-sm font-medium ${selectedTab === "instructions" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
+                            onClick={() => setSelectedTab("instructions")}
+                        >
+                            Instructions
+                        </button>
+                        <button
                             className={`px-3 py-1 text-sm font-medium ${selectedTab === "server" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
                             onClick={() => setSelectedTab("server")}
                         >
@@ -210,6 +217,11 @@ export default function WwwSim({ sessionData }) {
                     </div>
 
                     <div className="mt-4">
+                        {selectedTab === "instructions" && (
+                            <div className="text-sm text-gray-800">
+                                <InstructionsTab />
+                            </div>
+                        )}
                         {selectedTab === "server" && (
                             <div className="text-sm text-gray-800">
                                 { hostAssignments && hostAssignments.length > 0 ? (
