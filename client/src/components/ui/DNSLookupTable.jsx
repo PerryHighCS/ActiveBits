@@ -59,7 +59,7 @@ export default function DNSLookupTable({ template, initialDns = {}, onChange }) 
                 <td className="px-3 py-2 text-center">
                   <input
                     type="text"
-                    className="text-center border border-gray-300 rounded px-2 py-1 text-sm w-50"
+                    className="text-center border border-gray-300 rounded px-2 py-1 text-sm w-max-50"
                     value={dnsMap[host] || ""}
                     onChange={e =>
                       setDnsMap(prev => ({ ...prev, [host]: e.target.value }))

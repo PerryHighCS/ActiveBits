@@ -553,7 +553,7 @@ export default function WwwSimManager() {
                 ) : (
                     <div className="space-y-2 flex flex-col">
                         <div>
-                            <label htmlFor="preset" className="font-semibold">Choose a preset passage:</label>
+                            <label htmlFor="preset" className="font-semibold">Choose a passage:</label>
                             <select
                                 id="preset"
                                 className="border border-gray-300 rounded px-2 py-2 w-full max-w-md ml-2"
