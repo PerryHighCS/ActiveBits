@@ -37,10 +37,10 @@ export default function WwwSim({ sessionData }) {
 
         ws.addEventListener("message", (event) => {
             try {
-                const data = JSON.parse(event.data);
-                switch (data.type) {
+                const msg = JSON.parse(event.data);
+                switch (msg.type) {
                     case "student-updated": {
-                        const { oldHostname, newHostname } = data.payload;
+                        const { oldHostname, newHostname } = msg.payload;
                         if (oldHostname === hostname) {
                             setHostname(newHostname);
                             localStorage.setItem(storageKey, newHostname);
@@ -70,7 +70,7 @@ export default function WwwSim({ sessionData }) {
                     }
                    
                     case "student-removed": {
-                        const { hostname: removed } = data.payload;
+                        const { hostname: removed } = msg.payload;
                         if (removed === hostname) {
                             setMessage("You have been removed by the instructor.");
                             setJoined(false);
@@ -80,13 +80,16 @@ export default function WwwSim({ sessionData }) {
                         break;
                     }
                     case "assigned-fragments": {
-                        const { host, requests } = data.payload || {};
+                        console.log("Fragments assigned", msg.payload);
+                        const { host, requests } = msg.payload || {};
                         setHostAssignments(host || []);
                         setTemplateRequests(requests || []);
                         break;
                     }
+
                     case "template-assigned": {
-                        const {hostname: hn, template} = data.payload || {};
+                        console.log("template assigned", msg.payload);
+                        const {hostname: hn, template} = msg.payload || {};
                         console.log("Got template", template);
                         if (hostname === hn) {
                             setTemplateRequests(template);
