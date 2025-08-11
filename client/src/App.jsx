@@ -30,20 +30,24 @@ function attribution() {
     )
 }
 
+const footerClass = "text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto";
+
 function Footer() {
     const location = useLocation();
-    if (location.pathname.startsWith("/manage/raffle") || location.pathname === "/") {
+
+    // Raffles get special footer content
+    if (location.pathname.startsWith("/manage/raffle")) {
         return (
-            <div className="text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto">
-                {attribution()}
+            <div className={footerClass}>                
                 <p>Note: Raffles are for educational demonstration purposes only. Raffles are automatically deleted after 24 hours.</p>
+                {attribution()}
             </div>
         );
     }
 
     // Default footer
     return (
-        <div className="text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto">
+        <div className={footerClass}>
             {attribution()}
         </div>
     );
