@@ -145,6 +145,10 @@ export default function WwwSimManager() {
                         setAssignmentLocked(true);
                     }
 
+                    hostingMapRef.current = session.hostingMap || {};
+                    studentTemplatesRef.current = session.studentTemplates || {};
+                    studentsRef.current = session.students || [];
+
                     if (!cancelled) setDisplayCode(sessionId);
                 } else {
                     // create new session
