@@ -103,6 +103,16 @@ export default function WwwSimManager() {
     const [hostingMap, setHostingMap] = useState([]);
     const [studentTemplates, setStudentTemplates] = useState({});
 
+    const hostingMapRef = useRef(hostingMap);
+    const studentTemplatesRef = useRef(studentTemplates);
+    const studentsRef = useRef(students);
+    const selectedStudentRef = useRef(selectedStudent);
+
+    useEffect(() => { hostingMapRef.current = hostingMap; }, [hostingMap]);
+    useEffect(() => { studentTemplatesRef.current = studentTemplates; }, [studentTemplates]);
+    useEffect(() => { studentsRef.current = students; }, [students]);
+    useEffect(() => { selectedStudentRef.current = selectedStudent; }, [selectedStudent]);
+
     useEffect(() => {
         let cancelled = false;
 
@@ -184,7 +194,6 @@ export default function WwwSimManager() {
         return () => { cancelled = true; };
     }, [displayCode]);
 
-
     // WebSocket hookup (connect when displayCode exists)
     useEffect(() => {
         if (!displayCode) return;
@@ -197,75 +206,113 @@ export default function WwwSimManager() {
         wsRef.current = ws;
 
         ws.onmessage = async (evt) => {
-            try {
-                const msg = JSON.parse(evt.data);
+            let msg;
+            try { msg = JSON.parse(evt.data); } catch { return; }
 
-                if (msg.type === "student-joined") {
-                    // If a student has joined
-                    console.log("Student joined: ", msg);
+            if (msg.type === "student-joined") {
+                // If a student has joined
+                console.log("Student joined: ", msg);
 
-                    // Update student list
-                    setStudents(prev => {
-                        const { hostname, joined } = msg.payload;
-                        const i = prev.findIndex(s => s.hostname === hostname);
-                        if (i === -1) return [...prev, { hostname, joined }];
+                // Update student list
+                setStudents(prev => {
+                    const { hostname, joined } = msg.payload;
+                    const i = prev.findIndex(s => s.hostname === hostname);
+                    if (i === -1) return [...prev, { hostname, joined }];
 
-                        const next = prev.slice();
-                        next[i] = { ...next[i], joined };
-                        return next;
-                    });
+                    const next = prev.slice();
+                    next[i] = { ...next[i], joined };
+                    return next;
+                });
 
-                    // If fragments have been locked, assign a read-only template to this student if necessary
-                    if (hostingMap.length > 0 && studentTemplates) {
-                        const hostname = msg.payload.hostname;
-                        if (!(studentTemplates[hostname])) { // the student hasn't been assigned a template
-                            const template = generateHtmlTemplate(hostname, hostingMap, passage.title);
+                // If fragments have been locked, assign a read-only template to this student if necessary
+                if (hostingMap.length > 0 && studentTemplates) {
+                    const hostname = msg.payload.hostname;
+                    if (!(studentTemplates[hostname])) { // the student hasn't been assigned a template
+                        const template = generateHtmlTemplate(hostname, hostingMap, passage.title);
 
-                            console.log("PATCHING ", hostname, template);
+                        console.log("Assigning template to ", hostname, template);
 
-                            fetch(`/api/www-sim/${sessionId}/assign`, {
-                                method: "PATCH",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ hostname: hostname, template: template })
-                            }).catch(e => console.warn("Failed to push template", e));
-                        }
+                        fetch(`/api/www-sim/${sessionId}/assign`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ hostname: hostname, template: template })
+                        }).catch(e => console.warn("Failed to push template", e));
                     }
-                } else if (msg.type === "student-removed") {
-                    // If a student has been removed, update the student list
-                    console.log("Student removed: ", msg.payload);
-                    setStudents(prev => prev.filter(s => s.hostname !== msg.payload.hostname));
-
-                } else if (msg.type === "student-updated") {
-                    // If a student has been updated, update the student list
-                    console.log("Student updated: ", msg.payload);
-                    const { oldHostname, newHostname } = msg.payload;
-                    setStudents(prev => prev.map(s => s.hostname === oldHostname ? { ...s, hostname: newHostname } : s));
-
-                } else if (msg.type === "fragments-assigned") {
-                    // If fragments have been assigned
-                    console.log("Fragments assigned: ", msg.payload);
-
-                    // Update hosting map, student templates, and the list of fragments
-                    const { studentTemplates: st, hostingMap: hm } = msg.payload;
-                    setStudentTemplates(st || []);
-                    setHostingMap(hm || []);
-                    setFragments(hm.map(f => f.fragment));
-
-                    // Lock the assignment feature
-                    const lock = !(!st || !hm);
-                    setAssignmentLocked(lock);
-
-                } else if (msg.type === "template-assigned") {
-                    // If a template has been assigned to a student
-                    console.log("Template assigned to: ", msg.payload?.hostname);
-
-                    const { hostname, template } = msg.payload;
-                    setStudentTemplates(prev => ({
-                        ...prev,
-                        [hostname]: template
-                    }));
                 }
-            } catch { /* ignore parse errors */ }
+            } else if (msg.type === "student-removed") {
+                // If a student has been removed, update the student list
+                console.log("Student removed: ", msg.payload);
+                setStudents(prev => prev.filter(s => s.hostname !== msg.payload.hostname));
+
+                if (msg.payload.hostname === selectedStudent?.hostname) {
+                    setSelectedStudent(null);
+                }
+
+            } else if (msg.type === "student-updated") {
+                // If a student has been updated, update the student list
+                console.log("Student updated: ", msg.payload);
+
+                const { oldHostname: oldName, newHostname: newName } = msg.payload;
+                const nextHostingMap = hostingMapRef.current.map((fragment) => ({
+                    ...fragment,
+                    assignedTo: fragment.assignedTo.map(assn => ({
+                        ...assn,
+                        hostname: assn.hostname === oldName ? newName : assn.hostname
+                    }))
+                })
+                );
+
+                const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`//${escaped}/`, "g");
+
+                const nextTemplates = Object.fromEntries(Object.entries(studentTemplatesRef.current).map(([hostname, template]) =>
+                    [hostname === oldName ? newName : hostname, {
+                        ...template,
+                        fragments: template.fragments.map((fragment) => ({
+                            ...fragment,
+                            url: fragment.url.replace(regex, `//${newName}/`)
+                        }))
+                    }]
+                ));
+
+                const nextRoster = studentsRef.current.map((s) => (s.hostname === oldName ? { ...s, hostname: newName } : s));
+
+                // Commit updates using functional setters, then sync refs
+                setHostingMap(() => nextHostingMap);
+                setStudentTemplates(() => nextTemplates);
+                setStudents(() => nextRoster);
+                hostingMapRef.current = nextHostingMap;
+                studentTemplatesRef.current = nextTemplates;
+                studentsRef.current = nextRoster;
+
+                if (selectedStudentRef.current?.hostname === oldName) {
+                    setSelectedStudent({ ...selectedStudentRef.current, hostname: newName });
+                }
+
+            } else if (msg.type === "fragments-assigned") {
+                // If fragments have been assigned
+                console.log("Fragments assigned: ", msg.payload);
+
+                // Update hosting map, student templates, and the list of fragments
+                const { studentTemplates: st, hostingMap: hm } = msg.payload;
+                setStudentTemplates(st || []);
+                setHostingMap(hm || []);
+                setFragments(hm.map(f => f.fragment));
+
+                // Lock the assignment feature
+                const lock = !(!st || !hm);
+                setAssignmentLocked(lock);
+
+            } else if (msg.type === "template-assigned") {
+                // If a template has been assigned to a student
+                console.log("Template assigned to: ", msg.payload?.hostname);
+
+                const { hostname, template } = msg.payload;
+                setStudentTemplates(prev => ({
+                    ...prev,
+                    [hostname]: template
+                }));
+            }
         };
 
         ws.onerror = (e) => console.warn("WS error", e);
@@ -296,7 +343,7 @@ export default function WwwSimManager() {
                 body: JSON.stringify({ newHostname: newHn })
             });
             // Optimistic; WS will also update
-            setStudents(prev => prev.map(s => (s.hostname === oldHn ? { ...s, hostname: newHn } : s)));
+            //setStudents(prev => prev.map(s => (s.hostname === oldHn ? { ...s, hostname: newHn } : s)));
         } catch (e) {
             console.error(e);
         }
@@ -461,7 +508,7 @@ export default function WwwSimManager() {
 
             {busy && <p>Loading session…</p>}
             {error && <p className="text-red-600">Error: {error}</p>}
-            
+
             {assignmentLocked && (
                 <>
                     <h2 className="font-bold" onClick={() => setShowFragments(prev => !prev)}>{showFragments ? "❌" : "🔽"} Fragments</h2>
@@ -472,11 +519,11 @@ export default function WwwSimManager() {
                             ))}
                     </ul>
                 </>
-            )} 
+            )}
 
             <h2 className="text-md font-bold">{students.length} student{students.length != 1 ? "s" : ""} connected</h2>
 
-            
+
             {/* Roster pills */}
             {students.length > 0 && (
                 <div className="flex flex-wrap gap-2">
@@ -496,47 +543,47 @@ export default function WwwSimManager() {
                 </div>
             )}
 
-            { assignmentLocked ? 
+            {assignmentLocked ?
                 selectedStudent && (
                     <StudentInfoPanel hostname={selectedStudent.hostname} template={studentTemplates[selectedStudent.hostname]} hostingMap={hostingMap} />
-            ) : (
-                <div className="space-y-2 flex flex-col">
-                    <div>
-                        <label htmlFor="preset" className="font-semibold">Choose a preset passage:</label>
-                        <select
-                            id="preset"
-                            className="border border-gray-300 rounded px-2 py-2 w-full max-w-md ml-2"
-                            onChange={(e) => setPassage(e.target.value)}
-                            value={passage}
-                        >
-                            {presetPassages.map(p => (
-                                <option key={p.label} value={p}>{p.label + " - " + p.title}</option>
-                            ))}
-                        </select>
-                        <Button className="ml-2" onClick={() => setCustomVisible(v => !v)}>
-                            {passageEdit ? "Hide" : "View/Edit"}
-                        </Button>
-                    </div>
-
-                    {passageEdit && (
-                        <div className="transition-all duration-200 ease-in-out">
-                            <textarea
-                                className="w-full h-32 border border-gray-300 rounded px-2 py-1 text-sm font-mono"
-                                placeholder="Enter your own passage here..."
-                                value={passage}
+                ) : (
+                    <div className="space-y-2 flex flex-col">
+                        <div>
+                            <label htmlFor="preset" className="font-semibold">Choose a preset passage:</label>
+                            <select
+                                id="preset"
+                                className="border border-gray-300 rounded px-2 py-2 w-full max-w-md ml-2"
                                 onChange={(e) => setPassage(e.target.value)}
-                            />
+                                value={passage}
+                            >
+                                {presetPassages.map(p => (
+                                    <option key={p.label} value={p}>{p.label + " - " + p.title}</option>
+                                ))}
+                            </select>
+                            <Button className="ml-2" onClick={() => setCustomVisible(v => !v)}>
+                                {passageEdit ? "Hide" : "View/Edit"}
+                            </Button>
                         </div>
-                    )}
+
+                        {passageEdit && (
+                            <div className="transition-all duration-200 ease-in-out">
+                                <textarea
+                                    className="w-full h-32 border border-gray-300 rounded px-2 py-1 text-sm font-mono"
+                                    placeholder="Enter your own passage here..."
+                                    value={passage}
+                                    onChange={(e) => setPassage(e.target.value)}
+                                />
+                            </div>
+                        )}
 
 
-                    <div className="pt-4">
-                        <Button onClick={assignFragments} disabled={students.length === 0}>
-                            Assign Fragments
-                        </Button>
+                        <div className="pt-4">
+                            <Button onClick={assignFragments} disabled={students.length === 0}>
+                                Assign Fragments
+                            </Button>
+                        </div>
                     </div>
-                </div>
-            )}
+                )}
         </div>
     );
 }

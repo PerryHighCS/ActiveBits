@@ -140,6 +140,40 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
             }
         }
 
+        // Update all templates with embedded references to old hostname
+        const templates = session.data.studentTemplates || {};
+        const updatedTemplates = {};
+
+        const escaped = current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`//${escaped}/`, "g");
+
+        for (const [host, template] of Object.entries(templates)) {
+            const rewritten = {
+                ...template,
+                fragments: (template.fragments || []).map(frag => ({
+                    ...frag,
+                    url: frag.url?.replace(regex, `//${newHostname}/`)
+                }))
+            };
+            // Also rename the key if this was the student's own template
+            const key = (host === current) ? newHostname : host;
+            updatedTemplates[key] = rewritten;
+        }
+
+        session.data.studentTemplates = updatedTemplates;
+
+        // Update fragment assignments
+        for (const frag of session.data.fragments || []) {
+            if (Array.isArray(frag.assignedTo)) {
+                for (const assn of frag.assignedTo) {
+                    if (assn.hostname === current) {
+                        assn.hostname = newHostname;
+                        console.log("Updated fragment assignment for", current, "->", assn.hostname, assn);
+                    }
+                }
+            }
+        }
+
         broadcast("student-updated", { oldHostname: current, newHostname }, session.id);
 
         console.log("Renamed student ", current, " to ", newHostname);
@@ -172,7 +206,8 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         if (!studentTemplates || typeof studentTemplates !== "object") {
             return res.status(400).json({ error: "invalid or missing student templates" });
         }
-        if (session.data.fragments && session.data.studentTemplates) {
+        if (session.data.fragments && session.data.length > 0 &&
+            session.data.studentTemplates && Object.keys(session.data.studentTemplates).length > 0) {
             return res.status(409).json({ error: "hosting map and templates already assigned" });
         }
 
@@ -181,12 +216,12 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         session.data.studentTemplates = studentTemplates;
 
         broadcast("fragments-assigned", {
-                studentTemplates: session.data.studentTemplates,
-                hostingMap: session.data.fragments
-            },
+            studentTemplates: session.data.studentTemplates,
+            hostingMap: session.data.fragments
+        },
             session.id
         );
-        
+
         // Send assigned fragments to relevant students
         for (const fragment in hostingMap) {
             for (const { hostname } of hostingMap[fragment].assignedTo || []) {
@@ -198,7 +233,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         res.json({ message: "Fragments assigned" });
     });
 
-    app.patch("/api/www-sim/:id/assign", (req, res) => {
+    app.put("/api/www-sim/:id/assign", (req, res) => {
 
         const session = sessions[req.params.id];
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });

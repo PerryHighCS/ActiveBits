@@ -1,5 +1,3 @@
-import React, { useState } from "react";
-
 export default function StudentInfoPanel({ hostname, template, hostingMap }) {
     const hostedFiles = Object.values(hostingMap)
         .filter(frag => frag.assignedTo?.some(entry => entry.hostname === hostname))

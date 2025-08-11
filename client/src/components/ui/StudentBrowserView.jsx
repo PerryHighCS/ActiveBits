@@ -26,7 +26,7 @@ function FragmentTag({ src, hash, onSubmit, initialContent }) {
         const valid = computedHash === hash;
         setIsValid(valid);
         if (valid && onSubmit) {
-            onSubmit(src, inputValue.trim());
+            onSubmit(hash, inputValue.trim());
             setWasSubmitted(true);
             setIsOpen(false);
         }
@@ -84,8 +84,10 @@ function FragmentTag({ src, hash, onSubmit, initialContent }) {
     );
 }
 
-export default function StudentBrowserView({ title, fragments, sessionId }) {
+export default function StudentBrowserView({ template, sessionId }) {
     const [renderedFragments, setRenderedFragments] = useState({});
+    const title = template.title;
+    const fragments = template.fragments;
 
     useEffect(() => {
         const stored = localStorage.getItem(`${sessionId}-fragments`);
@@ -97,9 +99,9 @@ export default function StudentBrowserView({ title, fragments, sessionId }) {
         }
     }, []);
 
-    const handleFragmentSubmit = (src, content) => {
+    const handleFragmentSubmit = (hash, content) => {
         setRenderedFragments(prev => {
-            const updated = { ...prev, [src]: content };
+            const updated = { ...prev, [hash]: content };
             localStorage.setItem(`${sessionId}-fragments`, JSON.stringify(updated));
             return updated;
         });
@@ -132,7 +134,7 @@ export default function StudentBrowserView({ title, fragments, sessionId }) {
                                     src={f.url}
                                     hash={f.hash}
                                     onSubmit={handleFragmentSubmit}
-                                    initialContent={renderedFragments[f.url]}
+                                    initialContent={renderedFragments[f.hash]}
                                 />
                                 {"\n"}
                             </React.Fragment>
@@ -148,9 +150,9 @@ export default function StudentBrowserView({ title, fragments, sessionId }) {
                         <h3 className="text-lg font-bold mb-2">{title}</h3>
                         {fragments.map((f, i) => (
                             <React.Fragment key={i}>
-                                {renderedFragments[f.url] ? (
+                                {renderedFragments[f.hash] ? (
                                     <span className="text-sm text-gray-800 whitespace-pre-wrap">
-                                        {renderedFragments[f.url]}{' '}
+                                        {renderedFragments[f.hash]}{' '}
                                     </span>
                                 ) : (
                                     <div className="italic text-gray-400">Waiting for content from {f.url}</div>

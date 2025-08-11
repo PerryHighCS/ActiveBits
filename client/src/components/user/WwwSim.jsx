@@ -23,6 +23,11 @@ export default function WwwSim({ sessionData }) {
     const [hostAssignments, setHostAssignments] = useState([]);
     const [templateRequests, setTemplateRequests] = useState([]);
 
+    const templateRequestsRef = useRef();
+    useEffect(() => {
+        templateRequestsRef.current = templateRequests;
+    }, [templateRequests]);
+
     useEffect(() => {
         if (!joined || !sessionId) return;
 
@@ -41,8 +46,29 @@ export default function WwwSim({ sessionData }) {
                             localStorage.setItem(storageKey, newHostname);
                             setMessage(`Hostname updated to "${newHostname}"`);
                         }
+
+                        // Update templateRequests fragment URLs
+                        if (templateRequestsRef.current?.fragments) {
+                            const escaped = oldHostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            const regex = new RegExp(`//${escaped}/`, "g");
+
+                            const next = templateRequestsRef.current.fragments.map(frag => ({
+                                ...frag,
+                                url: frag.url.replace(regex, `//${newHostname}/`)
+                            }));
+
+                            console.log("Updated templateRequests fragments:", next);
+                            setTemplateRequests((prev) => ({
+                                title: prev.title,
+                                ...prev,
+                                fragments: next
+                            }));
+                        }
+
+
                         break;
                     }
+                   
                     case "student-removed": {
                         const { hostname: removed } = data.payload;
                         if (removed === hostname) {
@@ -191,7 +217,7 @@ export default function WwwSim({ sessionData }) {
                         )}
                         {selectedTab === "browser" && (
                             <div className="text-sm text-gray-800">
-                                <StudentBrowserView title={templateRequests.title} fragments={templateRequests.fragments} />
+                                <StudentBrowserView template={templateRequests} sessionId={sessionId} />
                             </div>
                         )}
                     </div>
