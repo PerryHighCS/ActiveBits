@@ -1,14 +1,13 @@
 import React, { useState } from "react";
 
-export function RosterPill({ hostname, onRemove, onRename }) {
+export function RosterPill({ hostname, onRemove, onRename, onClick }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(hostname);
 
   return (
-    <div className="flex items-center gap-1 border rounded-full px-2 py-1 bg-white shadow-sm">
+    <div onClick={onClick} className="flex items-center gap-1 border rounded-full px-2 py-1 bg-white shadow-sm">
       {!editing ? (
         <>
-          <span className="font-mono text-sm">{hostname}</span>
           <button
             className="text-xs  hover:opacity-100"
             onClick={() => { setValue(hostname); setEditing(true); }}
@@ -16,6 +15,7 @@ export function RosterPill({ hostname, onRemove, onRename }) {
           >
             ✏️
           </button>
+          <span className="font-mono text-sm">{hostname}</span>
           <button
             className="text-xs rounded-full hover:bg-red-50 text-red-600"
             onClick={() => {

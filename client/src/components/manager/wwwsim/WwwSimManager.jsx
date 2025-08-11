@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate, data } from "react-router-dom";
 import Button from "@src/components/ui/Button";
 import RosterPill from "@src/components/ui/RosterPill";
+import StudentInfoPanel from "../../ui/StudentInfoPanel";
 
 const presetPassages = [
     {
@@ -95,6 +96,7 @@ export default function WwwSimManager() {
     const [passage, setPassage] = useState(presetPassages[0]);
     const [passageEdit, setCustomVisible] = useState(false);
     const [showFragments, setShowFragments] = useState(false);
+    const [selectedStudent, setSelectedStudent] = useState(null);
 
     const [assignmentLocked, setAssignmentLocked] = useState(false);
     const [fragments, setFragments] = useState([]);
@@ -459,8 +461,22 @@ export default function WwwSimManager() {
 
             {busy && <p>Loading session…</p>}
             {error && <p className="text-red-600">Error: {error}</p>}
+            
+            {assignmentLocked && (
+                <>
+                    <h2 className="font-bold" onClick={() => setShowFragments(prev => !prev)}>{showFragments ? "❌" : "🔽"} Fragments</h2>
+                    <ul className="list-disc">
+                        {showFragments &&
+                            fragments.map((fragment, index) => (
+                                <li key={index} className="">{fragment}</li>
+                            ))}
+                    </ul>
+                </>
+            )} 
 
             <h2 className="text-md font-bold">{students.length} student{students.length != 1 ? "s" : ""} connected</h2>
+
+            
             {/* Roster pills */}
             {students.length > 0 && (
                 <div className="flex flex-wrap gap-2">
@@ -473,22 +489,16 @@ export default function WwwSimManager() {
                                 hostname={s.hostname}
                                 onRemove={() => removeStudent(s.hostname)}
                                 onRename={(newHn) => renameStudent(s.hostname, newHn)}
+                                onClick={() => setSelectedStudent(s)}
                             />
                         ))
                     }
                 </div>
             )}
 
-            {assignmentLocked ? (
-                <>
-                    <h2 className="font-bold" onClick={() => setShowFragments(prev => !prev)}>{showFragments ? "❌" : "🔽"} Fragments</h2>
-                    <ul className="list-disc">
-                        {showFragments &&
-                            fragments.map((fragment, index) => (
-                                <li key={index} className="">{fragment}</li>
-                            ))}
-                    </ul>
-                </>
+            { assignmentLocked ? 
+                selectedStudent && (
+                    <StudentInfoPanel hostname={selectedStudent.hostname} template={studentTemplates[selectedStudent.hostname]} hostingMap={hostingMap} />
             ) : (
                 <div className="space-y-2 flex flex-col">
                     <div>
