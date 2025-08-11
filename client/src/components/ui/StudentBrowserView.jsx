@@ -115,7 +115,6 @@ export default function StudentBrowserView({ template, sessionId }) {
 
     return (
         <div className="p-4">
-            <h2 className="text-xl font-bold mb-4">{title}</h2>
             <div className="flex flex-col lg:flex-row gap-4">
                 {/* Source View */}
                 <div className="w-full lg:w-1/2 border border-gray-300 rounded">

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import Button from "@src/components/ui/Button";
 import StudentHostDisplay from "@src/components/ui/StudentHostDisplay";
 import StudentBrowserView from "@src/components/ui/StudentBrowserView";
+import DNSLookupTable from "@src/components/ui/DNSLookupTable";
 
 export default function WwwSim({ sessionData }) {
     const sessionId = sessionData?.id;
@@ -220,6 +221,12 @@ export default function WwwSim({ sessionData }) {
                         )}
                         {selectedTab === "browser" && (
                             <div className="text-sm text-gray-800">
+                                <DNSLookupTable
+                                    template={templateRequests}
+                                    initialDns={{}}
+                                    onChange={(map) => console.log("DNS mapping:", map)}
+                                />
+
                                 <StudentBrowserView template={templateRequests} sessionId={sessionId} />
                             </div>
                         )}
