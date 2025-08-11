@@ -525,7 +525,7 @@ export default function WwwSimManager() {
                 </>
             )}
 
-            <h2 className="text-md font-bold">{students.length} student{students.length !== 1 ? "s" : ""} connected</h2>
+            <h2 className="text-md font-bold">{students.length} student{students.length != 1 ? "s" : ""} connected</h2>
 
 
             {/* Roster pills */}
