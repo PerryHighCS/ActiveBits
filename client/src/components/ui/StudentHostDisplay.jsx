@@ -28,7 +28,7 @@ function FileElement({ filename, contentElement, responseHeader }) {
     return (
         <div className={`border border-gray-300 rounded mb-4 overflow-hidden ${copied ? "ring-2 ring-green-400" : ""}`}>
             <div className="bg-gray-100 px-2 py-1 flex justify-between items-center">
-                <span className="font-mono text-sm">{filename}</span>
+                <span className="font-mono text-md font-bold">{filename}</span>
                 <button
                     onClick={handleCopy}
                     className={`text-xs text-blue-600 hover:underline transition duration-150 ${

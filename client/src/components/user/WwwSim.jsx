@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from "react";
 import Button from "@src/components/ui/Button";
 import StudentHostDisplay from "@src/components/ui/StudentHostDisplay";
 import StudentBrowserView from "@src/components/ui/StudentBrowserView";
+import DNSLookupTable from "@src/components/ui/DNSLookupTable";
+import InstructionsTab from "@src/components/ui/WwwSimInstructionsTab";
 
 export default function WwwSim({ sessionData }) {
     const sessionId = sessionData?.id;
@@ -18,7 +20,7 @@ export default function WwwSim({ sessionData }) {
     const [joined, setJoined] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
-    const [selectedTab, setSelectedTab] = useState("server");
+    const [selectedTab, setSelectedTab] = useState("instructions");
 
     const [hostAssignments, setHostAssignments] = useState([]);
     const [templateRequests, setTemplateRequests] = useState([]);
@@ -37,10 +39,10 @@ export default function WwwSim({ sessionData }) {
 
         ws.addEventListener("message", (event) => {
             try {
-                const data = JSON.parse(event.data);
-                switch (data.type) {
+                const msg = JSON.parse(event.data);
+                switch (msg.type) {
                     case "student-updated": {
-                        const { oldHostname, newHostname } = data.payload;
+                        const { oldHostname, newHostname } = msg.payload;
                         if (oldHostname === hostname) {
                             setHostname(newHostname);
                             localStorage.setItem(storageKey, newHostname);
@@ -70,7 +72,7 @@ export default function WwwSim({ sessionData }) {
                     }
                    
                     case "student-removed": {
-                        const { hostname: removed } = data.payload;
+                        const { hostname: removed } = msg.payload;
                         if (removed === hostname) {
                             setMessage("You have been removed by the instructor.");
                             setJoined(false);
@@ -80,13 +82,16 @@ export default function WwwSim({ sessionData }) {
                         break;
                     }
                     case "assigned-fragments": {
-                        const { host, requests } = data.payload || {};
+                        console.log("Fragments assigned", msg.payload);
+                        const { host, requests } = msg.payload || {};
                         setHostAssignments(host || []);
                         setTemplateRequests(requests || []);
                         break;
                     }
+
                     case "template-assigned": {
-                        const {hostname: hn, template} = data.payload || {};
+                        console.log("template assigned", msg.payload);
+                        const {hostname: hn, template} = msg.payload || {};
                         console.log("Got template", template);
                         if (hostname === hn) {
                             setTemplateRequests(template);
@@ -192,6 +197,12 @@ export default function WwwSim({ sessionData }) {
                 <>
                     <div className="flex gap-2 mt-4 border-b border-gray-300">
                         <button
+                            className={`px-3 py-1 text-sm font-medium ${selectedTab === "instructions" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
+                            onClick={() => setSelectedTab("instructions")}
+                        >
+                            Instructions
+                        </button>
+                        <button
                             className={`px-3 py-1 text-sm font-medium ${selectedTab === "server" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
                             onClick={() => setSelectedTab("server")}
                         >
@@ -206,6 +217,11 @@ export default function WwwSim({ sessionData }) {
                     </div>
 
                     <div className="mt-4">
+                        {selectedTab === "instructions" && (
+                            <div className="text-sm text-gray-800">
+                                <InstructionsTab />
+                            </div>
+                        )}
                         {selectedTab === "server" && (
                             <div className="text-sm text-gray-800">
                                 { hostAssignments && hostAssignments.length > 0 ? (
@@ -217,6 +233,12 @@ export default function WwwSim({ sessionData }) {
                         )}
                         {selectedTab === "browser" && (
                             <div className="text-sm text-gray-800">
+                                <DNSLookupTable
+                                    template={templateRequests}
+                                    initialDns={{}}
+                                    onChange={(map) => console.log("DNS mapping:", map)}
+                                />
+
                                 <StudentBrowserView template={templateRequests} sessionId={sessionId} />
                             </div>
                         )}
