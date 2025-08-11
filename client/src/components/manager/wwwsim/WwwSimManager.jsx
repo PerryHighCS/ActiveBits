@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useParams, useNavigate, data } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import Button from "@src/components/ui/Button";
 import RosterPill from "@src/components/ui/RosterPill";
 import StudentInfoPanel from "../../ui/StudentInfoPanel";
@@ -525,7 +525,7 @@ export default function WwwSimManager() {
                 </>
             )}
 
-            <h2 className="text-md font-bold">{students.length} student{students.length != 1 ? "s" : ""} connected</h2>
+            <h2 className="text-md font-bold">{students.length} student{students.length !== 1 ? "s" : ""} connected</h2>
 
 
             {/* Roster pills */}
@@ -557,11 +557,14 @@ export default function WwwSimManager() {
                             <select
                                 id="preset"
                                 className="border border-gray-300 rounded px-2 py-2 w-full max-w-md ml-2"
-                                onChange={(e) => setPassage(e.target.value)}
-                                value={passage}
+                                onChange={(e) => {
+                                    const selected = presetPassages.find(p => p.label === e.target.value);
+                                    if (selected) setPassage(selected);
+                                }}
+                                value={passage.label}
                             >
                                 {presetPassages.map(p => (
-                                    <option key={p.label} value={p}>{p.label + " - " + p.title}</option>
+                                    <option key={p.label} value={p.label}>{p.label + " - " + p.title}</option>
                                 ))}
                             </select>
                             <Button className="ml-2" onClick={() => setCustomVisible(v => !v)}>
@@ -574,8 +577,8 @@ export default function WwwSimManager() {
                                 <textarea
                                     className="w-full h-32 border border-gray-300 rounded px-2 py-1 text-sm font-mono"
                                     placeholder="Enter your own passage here..."
-                                    value={passage}
-                                    onChange={(e) => setPassage(e.target.value)}
+                                    value={passage.value}
+                                    onChange={(e) => setPassage({ ...passage, value: e.target.value })}
                                 />
                             </div>
                         )}
