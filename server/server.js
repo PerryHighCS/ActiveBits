@@ -37,7 +37,7 @@ if (!env.startsWith("dev")) {
     app.use(express.static(path.join(__dirname, "../client/dist")));
 
     // All other requests should simply serve the React app
-    app.get("/*", (req, res) => {
+    app.get("/*fallback", (req, res) => {
         res.sendFile(path.join(__dirname, "../client/dist/index.html"));
     });
 } else {
