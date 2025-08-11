@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, data } from "react-router-dom";
 import Button from "@src/components/ui/Button";
 import RosterPill from "@src/components/ui/RosterPill";
 
@@ -98,7 +98,7 @@ export default function WwwSimManager() {
     const [assignmentLocked, setAssignmentLocked] = useState(false);
     const [fragments, setFragments] = useState([]);
     const [hostingMap, setHostingMap] = useState([]);
-    const [studentTemplates, setStudentTemplates] = useState([]);
+    const [studentTemplates, setStudentTemplates] = useState({});
 
     useEffect(() => {
         let cancelled = false;
@@ -121,9 +121,9 @@ export default function WwwSimManager() {
                     // validate/load existing session
                     const session = await api(`/api/www-sim/${sessionId}`);
                     console.log("Loaded session", session);
-                    
+
                     setStudents(session.students || []);
-                    
+
                     if (session.hostingMap && session.hostingMap.length > 0 &&
                         session.studentTemplates && Object.keys(session.studentTemplates).length > 0) {
                         setHostingMap(session.hostingMap || []);
@@ -193,7 +193,7 @@ export default function WwwSimManager() {
         wsRef.current?.close();            // close any previous connection
         wsRef.current = ws;
 
-        ws.onmessage = (evt) => {
+        ws.onmessage = async (evt) => {
             try {
                 const msg = JSON.parse(evt.data);
                 if (msg.type === "student-joined") {
@@ -207,6 +207,26 @@ export default function WwwSimManager() {
                         next[i] = { ...next[i], joined };
                         return next;
                     });
+
+                    console.log("joined", studentTemplates);
+
+
+                    // If fragments have been locked, assign a read-only template to this student if necessary
+                    if (hostingMap.length > 0 && studentTemplates) {
+                        console.log("assigning", msg.payload)
+                        const hostname = msg.payload.hostname;
+                        if (!(studentTemplates[hostname])) { // the student hasn't been assigned a template
+                            const template = generateHtmlTemplate(hostname, hostingMap, passage.title);
+
+                            console.log("PATCHING ", hostname, template);
+
+                            fetch(`/api/www-sim/${sessionId}/assign`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ hostname: hostname, template: template })
+                            }).catch(e => console.warn("Failed to push template", e));
+                        }
+                    }
                 } else if (msg.type === "student-removed") {
                     console.log("Student removed: ", msg.payload);
                     setStudents(prev => prev.filter(s => s.hostname !== msg.payload.hostname));
@@ -218,14 +238,22 @@ export default function WwwSimManager() {
                 } else if (msg.type === "fragments-assigned") {
                     console.log("Fragments assigned: ", msg.payload);
 
-                    const { studentTemplates: st, hostingMap:hm } = msg.payload;
+                    const { studentTemplates: st, hostingMap: hm } = msg.payload;
                     setStudentTemplates(st || []);
                     setHostingMap(hm || []);
                     setFragments(hm.map(f => f.fragment));
-                    
-                    const lock = (st && hm);
+
+                    const lock = !(!st || !hm);
                     setAssignmentLocked(lock);
                     console.log("locking", lock);
+
+                } else if (msg.type === "template-assigned") {
+                    console.log("Template assigned: ", msg.payload);
+                    const { hostname, template } = msg.payload;
+                    setStudentTemplates(prev => ({
+                        ...prev,
+                        [hostname]: template
+                    }));
                 }
             } catch { /* ignore parse errors */ }
         };
@@ -233,7 +261,7 @@ export default function WwwSimManager() {
         ws.onerror = (e) => console.warn("WS error", e);
         ws.onclose = () => { /* optional: retry/backoff */ };
         return () => { try { ws.close(); } catch { } };
-    }, [displayCode]);
+    }, [displayCode, studentTemplates, hostingMap]);
 
     // Handlers for edit/remove
     async function removeStudent(hn) {

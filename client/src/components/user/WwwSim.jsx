@@ -59,6 +59,13 @@ export default function WwwSim({ sessionData }) {
                         setTemplateRequests(requests || []);
                         break;
                     }
+                    case "template-assigned": {
+                        const {hostname: hn, template} = data.payload || {};
+                        console.log("Got template", template);
+                        if (hostname === hn) {
+                            setTemplateRequests(template);
+                        }
+                    }
                 }
             } catch (err) {
                 console.error("Failed to parse WS message", err);

@@ -172,6 +172,9 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         if (!studentTemplates || typeof studentTemplates !== "object") {
             return res.status(400).json({ error: "invalid or missing student templates" });
         }
+        if (session.data.fragments && session.data.studentTemplates) {
+            return res.status(409).json({ error: "hosting map and templates already assigned" });
+        }
 
         // Save to session
         session.data.fragments = hostingMap;
@@ -194,6 +197,26 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         console.log("Assigned fragments for session", session.id);
         res.json({ message: "Fragments assigned" });
     });
+
+    app.patch("/api/www-sim/:id/assign", (req, res) => {
+
+        const session = sessions[req.params.id];
+        if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
+
+        const { hostname, template } = req.body || {};
+        if (!hostname || !template) return res.status(400).json({ error: "hostname and template required" });
+
+        if (session.data.studentTemplates[hostname]) return res.status(409).json({ error: "template already assigned to this hostname" });
+
+        session.data.studentTemplates ??= {};
+        session.data.studentTemplates[hostname] = template;
+
+        broadcast("template-assigned", { hostname, template }, session.id);
+
+        console.log("Template only assigned to", hostname);
+        res.json({ message: "Template assigned" });
+    });
+
 
     // Get fragments for a specific student
     app.get("/api/www-sim/:id/fragments/:hostname", (req, res) => {
