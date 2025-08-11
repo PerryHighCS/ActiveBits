@@ -1,7 +1,7 @@
-import { useState } from 'react'
 import { BrowserRouter, Routes, Route } from "react-router";
-import TicketPage from "./components/tickets/TicketPage";
-import RaffleManager from "./components/manager/RaffleManager";
+import SessionRouter from "./components/user/SessionRouter";
+import RaffleManager from "./components/manager/raffle/RaffleManager";
+import WwwSimManager from "./components/manager/wwwsim/WwwSimManager";
 import ManageDashboard from './components/manager/ManageDashboard';
 
 /**
@@ -22,8 +22,10 @@ export default function App() {
             <Route path="/manage" element={<ManageDashboard />} />
             <Route path="/manage/raffle" element={<RaffleManager />} />
             <Route path="/manage/raffle/:sessionId" element={<RaffleManager />} />
-            <Route path="/:sessionId" element={<TicketPage />} />
-            <Route path="/" element={<TicketPage />} />
+            <Route path="/manage/www-sim" element={<WwwSimManager />} />
+            <Route path="/manage/www-sim/:sessionId" element={<WwwSimManager />} />
+            <Route path="/:sessionId" element={<SessionRouter />} />
+            <Route path="/" element={<SessionRouter />} />
           </Routes>
         </BrowserRouter>
       </div>

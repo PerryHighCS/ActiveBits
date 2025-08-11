@@ -1,7 +1,8 @@
 {
-  "name": "raffle-server",
+  "name": "activebits-server",
   "version": "1.0.0",
   "main": "server.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js --trace-warnings"
