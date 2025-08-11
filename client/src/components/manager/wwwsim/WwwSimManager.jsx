@@ -94,6 +94,7 @@ export default function WwwSimManager() {
     const [students, setStudents] = useState([]); // [{ hostname, joined }]
     const [passage, setPassage] = useState(presetPassages[0]);
     const [passageEdit, setCustomVisible] = useState(false);
+    const [showFragments, setShowFragments] = useState(false);
 
     const [assignmentLocked, setAssignmentLocked] = useState(false);
     const [fragments, setFragments] = useState([]);
@@ -196,8 +197,12 @@ export default function WwwSimManager() {
         ws.onmessage = async (evt) => {
             try {
                 const msg = JSON.parse(evt.data);
+
                 if (msg.type === "student-joined") {
+                    // If a student has joined
                     console.log("Student joined: ", msg);
+
+                    // Update student list
                     setStudents(prev => {
                         const { hostname, joined } = msg.payload;
                         const i = prev.findIndex(s => s.hostname === hostname);
@@ -208,12 +213,8 @@ export default function WwwSimManager() {
                         return next;
                     });
 
-                    console.log("joined", studentTemplates);
-
-
                     // If fragments have been locked, assign a read-only template to this student if necessary
                     if (hostingMap.length > 0 && studentTemplates) {
-                        console.log("assigning", msg.payload)
                         const hostname = msg.payload.hostname;
                         if (!(studentTemplates[hostname])) { // the student hasn't been assigned a template
                             const template = generateHtmlTemplate(hostname, hostingMap, passage.title);
@@ -228,27 +229,34 @@ export default function WwwSimManager() {
                         }
                     }
                 } else if (msg.type === "student-removed") {
+                    // If a student has been removed, update the student list
                     console.log("Student removed: ", msg.payload);
                     setStudents(prev => prev.filter(s => s.hostname !== msg.payload.hostname));
-                } else if (msg.type === "student-updated") {
-                    console.log("Student updated: ", msg.payload);
 
+                } else if (msg.type === "student-updated") {
+                    // If a student has been updated, update the student list
+                    console.log("Student updated: ", msg.payload);
                     const { oldHostname, newHostname } = msg.payload;
                     setStudents(prev => prev.map(s => s.hostname === oldHostname ? { ...s, hostname: newHostname } : s));
+
                 } else if (msg.type === "fragments-assigned") {
+                    // If fragments have been assigned
                     console.log("Fragments assigned: ", msg.payload);
 
+                    // Update hosting map, student templates, and the list of fragments
                     const { studentTemplates: st, hostingMap: hm } = msg.payload;
                     setStudentTemplates(st || []);
                     setHostingMap(hm || []);
                     setFragments(hm.map(f => f.fragment));
 
+                    // Lock the assignment feature
                     const lock = !(!st || !hm);
                     setAssignmentLocked(lock);
-                    console.log("locking", lock);
 
                 } else if (msg.type === "template-assigned") {
-                    console.log("Template assigned: ", msg.payload);
+                    // If a template has been assigned to a student
+                    console.log("Template assigned to: ", msg.payload?.hostname);
+
                     const { hostname, template } = msg.payload;
                     setStudentTemplates(prev => ({
                         ...prev,
@@ -263,7 +271,7 @@ export default function WwwSimManager() {
         return () => { try { ws.close(); } catch { } };
     }, [displayCode, studentTemplates, hostingMap]);
 
-    // Handlers for edit/remove
+    // Handler for removing student pill
     async function removeStudent(hn) {
         try {
             await fetch(`/api/www-sim/${displayCode}/students/${encodeURIComponent(hn)}`, { method: "DELETE", credentials: "include" });
@@ -274,6 +282,7 @@ export default function WwwSimManager() {
         }
     }
 
+    // Handler for renaming a student
     async function renameStudent(oldHn, newHn) {
         newHn = (newHn || "").trim().toLowerCase();
         if (!newHn || newHn === oldHn) return;
@@ -291,6 +300,7 @@ export default function WwwSimManager() {
         }
     }
 
+    // Handler for copying student join link
     async function copyLink() {
         if (!studentJoinUrl) return;
         try {
@@ -300,6 +310,7 @@ export default function WwwSimManager() {
         } catch { }
     }
 
+    // Generate a random, unused name
     function getRandomUnusedName(usedNames = []) {
         let newName;
         do {
@@ -308,12 +319,14 @@ export default function WwwSimManager() {
         return newName;
     }
 
+    // Create a SHA-256 hash of a fragment
     async function createHash(fragment) {
         const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fragment));
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
     }
 
+    // Create a hosting map for the students to host fragments with random filenames
     async function createHostingMap(students) {
         const fragments = dividePassage(passage.value);
         const studentHostingMap = {};
@@ -321,6 +334,7 @@ export default function WwwSimManager() {
 
         setFragments(fragments); // Store fragments for later use
 
+        // Initialize student hosting map with all students hosting no files
         for (const s of students) {
             studentHostingMap[s.hostname] = [];
         }
@@ -355,9 +369,11 @@ export default function WwwSimManager() {
         return fragmentHostingMap;
     }
 
+    // Generate the HTML template for a student to include all fragments from random servers
     const generateHtmlTemplate = (hostname, fragmentRecords, title) => {
         const fragmentUrls = [];
 
+        // Loop through all of the fragments to build up the template in fragment order
         for (const record of fragmentRecords) {
             // Choose a source for the fragment, preferring other sources than this hostname
             let source = record.assignedTo[0];
@@ -370,6 +386,8 @@ export default function WwwSimManager() {
                 // Pick one of the alternate sources at random
                 source = otherSources[Math.floor(Math.random() * otherSources.length)];
             }
+
+            // Add the source and hash for checking that a fragment is correct
             fragmentUrls.push({
                 hash: record.hash,
                 url: `http://${source.hostname}/${source.fileName}`
@@ -383,16 +401,20 @@ export default function WwwSimManager() {
     };
 
 
+    // Assign fragments to students for both hosting and browsing
     const assignFragments = async () => {
+        // Create a hosting map for the fragments to the students hosting them with random filenames
         const hostingMap = await createHostingMap(students);
         setHostingMap(hostingMap);
 
+        // Generate HTML templates for all students and set them in state
         const studentTemplates = {};
         for (const { hostname } of students) {
             studentTemplates[hostname] = generateHtmlTemplate(hostname, hostingMap, passage.title);
         }
         setStudentTemplates(studentTemplates);
 
+        // Notify the server of the new assignments
         try {
             await fetch(`/api/www-sim/${sessionId}/assign`, {
                 method: "POST",
@@ -457,7 +479,17 @@ export default function WwwSimManager() {
                 </div>
             )}
 
-            {!assignmentLocked ? (
+            {assignmentLocked ? (
+                <>
+                    <h2 className="font-bold" onClick={() => setShowFragments(prev => !prev)}>{showFragments ? "❌" : "🔽"} Fragments</h2>
+                    <ul className="list-disc">
+                        {showFragments &&
+                            fragments.map((fragment, index) => (
+                                <li key={index} className="">{fragment}</li>
+                            ))}
+                    </ul>
+                </>
+            ) : (
                 <div className="space-y-2 flex flex-col">
                     <div>
                         <label htmlFor="preset" className="font-semibold">Choose a preset passage:</label>
@@ -494,15 +526,6 @@ export default function WwwSimManager() {
                         </Button>
                     </div>
                 </div>
-            ) : (
-                <>
-                    <h2 className="font-bold">Fragments</h2>
-                    <ul className="list-disc">
-                        {fragments.map((fragment, index) => (
-                            <li key={index} className="">{fragment}</li>
-                        ))}
-                    </ul>
-                </>
             )}
         </div>
     );
