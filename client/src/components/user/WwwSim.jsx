@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
 import Button from "@src/components/ui/Button";
-import StudentHostDisplay from "@src/components/ui/StudentHostDisplay";
+import StudentHostPalette from "@src/components/ui/StudentHostPalette";
 import StudentBrowserView from "@src/components/ui/StudentBrowserView";
 import DNSLookupTable from "@src/components/ui/DNSLookupTable";
-import InstructionsTab from "@src/components/ui/WwwSimInstructionsTab";
+import Modal from "@src/components/ui/Modal";
+import Instructions from "@src/components/ui/WwwSimInstructions";
 
 export default function WwwSim({ sessionData }) {
     const sessionId = sessionData?.id;
@@ -20,7 +21,7 @@ export default function WwwSim({ sessionData }) {
     const [joined, setJoined] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
-    const [selectedTab, setSelectedTab] = useState("instructions");
+    const [showInstructions, setShowInstructions] = useState(false);
 
     const [hostAssignments, setHostAssignments] = useState([]);
     const [templateRequests, setTemplateRequests] = useState([]);
@@ -132,6 +133,7 @@ export default function WwwSim({ sessionData }) {
             }
             const data = await res.json();
             setJoined(true);
+            setShowInstructions(true);
             localStorage.setItem(storageKey, hostname);
 
             setMessage(data.message || "Joined! Waiting for instructor to start…");
@@ -163,6 +165,9 @@ export default function WwwSim({ sessionData }) {
 
     return (
         <div className="p-6 space-y-4">
+            <Modal open={showInstructions} onClose={() => setShowInstructions(false)} title="Instructions">
+                <Instructions />
+            </Modal>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <h1 className="text-2xl font-bold">
                     Web Simulation: HTTP & DNS Protocols
@@ -170,7 +175,14 @@ export default function WwwSim({ sessionData }) {
                 {joined && (
                     <p className="text-green-600 font-mono text-lg">{hostname}</p>
                 )}
-                <p className="text-gray-600">Join Code: <span className="font-mono">{sessionData.id}</span></p>
+                <div className="flex items-center gap-2">
+                    <p className="text-gray-600">Join Code: <span className="font-mono">{sessionData.id}</span></p>
+                    {joined && (
+                        <Button variant="outline" onClick={() => setShowInstructions(true)}>
+                            Instructions
+                        </Button>
+                    )}
+                </div>
 
             </div>
             {!joined && (
@@ -195,54 +207,18 @@ export default function WwwSim({ sessionData }) {
 
             {joined && (
                 <>
-                    <div className="flex gap-2 mt-4 border-b border-gray-300">
-                        <button
-                            className={`px-3 py-1 text-sm font-medium ${selectedTab === "instructions" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
-                            onClick={() => setSelectedTab("instructions")}
-                        >
-                            Instructions
-                        </button>
-                        <button
-                            className={`px-3 py-1 text-sm font-medium ${selectedTab === "server" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
-                            onClick={() => setSelectedTab("server")}
-                        >
-                            Server
-                        </button>
-                        <button
-                            className={`px-3 py-1 text-sm font-medium ${selectedTab === "browser" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
-                            onClick={() => setSelectedTab("browser")}
-                        >
-                            Browser
-                        </button>
-                    </div>
+                    <div className="flex mt-4 gap-4">
+                        <StudentHostPalette fragments={hostAssignments} hostname={hostname} />
+                        <div className="flex-1 text-sm text-gray-800 space-y-4">
+                            <DNSLookupTable
+                                template={templateRequests}
+                                initialDns={{}}
+                                onChange={(map) => console.log("DNS mapping:", map)}
+                                sessionId={sessionId}
+                            />
 
-                    <div className="mt-4">
-                        {selectedTab === "instructions" && (
-                            <div className="text-sm text-gray-800">
-                                <InstructionsTab />
-                            </div>
-                        )}
-                        {selectedTab === "server" && (
-                            <div className="text-sm text-gray-800">
-                                { hostAssignments && hostAssignments.length > 0 ? (
-                                    <StudentHostDisplay fragments={hostAssignments} hostname={hostname} sessionId={sessionId} />
-                                ) : (
-                                    <p className="text-gray-500">You are not hosting any files</p>
-                                )}
-                            </div>
-                        )}
-                        {selectedTab === "browser" && (
-                            <div className="text-sm text-gray-800">
-                                <DNSLookupTable
-                                    template={templateRequests}
-                                    initialDns={{}}
-                                    onChange={(map) => console.log("DNS mapping:", map)}
-                                    sessionId={sessionId}
-                                />
-
-                                <StudentBrowserView template={templateRequests} sessionId={sessionId} />
-                            </div>
-                        )}
+                            <StudentBrowserView template={templateRequests} sessionId={sessionId} />
+                        </div>
                     </div>
                 </>
             )}
