@@ -84,4 +84,3 @@ const TicketPage = ({ sessionData }) => {
     );
 };
 
-export default TicketPage;

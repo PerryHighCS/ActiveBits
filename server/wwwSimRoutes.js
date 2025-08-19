@@ -63,8 +63,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
             studentHostingMap[s.hostname] = [];
         }
 
-        for (const index in fragments) {
-            const fragment = fragments[index];
+        fragments.forEach((fragment, index) => {
             const fragmentRecord = { fragment, index: Number(index), assignedTo: [], hash: createHash(fragment) };
 
             const student = students[Math.floor(Math.random() * students.length)];
@@ -73,7 +72,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
             studentHostingMap[student.hostname].push(fileName);
             fragmentRecord.assignedTo.push({ hostname: student.hostname, fileName });
             fragmentHostingMap.push(fragmentRecord);
-        }
+        });
 
         for (const student of students) {
             const { hostname } = student;

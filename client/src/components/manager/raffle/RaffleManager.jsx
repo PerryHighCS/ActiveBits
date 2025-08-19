@@ -13,7 +13,6 @@ import WinnerMessage from './WinnerMessage';
  * @returns {React.Component} The RaffleManager component.
  */
 const RaffleManager = () => {
-    // const [loading, setLoading] = useState(false);
     const [tickets, setTickets] = useState([]);
     const [winners, setWinners] = useState([]);
     const [raffleType, setRaffleType] = useState('standard');
@@ -78,12 +77,10 @@ const RaffleManager = () => {
                     // If the raffleId is not found, we can just clear it from the URL.
                     exitRaffle();
                 }
-            } /* finally {
-                setLoading(false);
-            } */
+            } 
         }
     }
-
+    
     /**
      * Handle errors when fetching tickets. If the raffle is not found, clear the raffleId from the URL.
      * @param {Error} error - The error object.
@@ -91,9 +88,8 @@ const RaffleManager = () => {
     const handleTicketError = useCallback((error) => {
         if (error.cause && error.cause.status === 404) {
             setMessage('Raffle not found. Please create a new raffle.', '/manage');
-        }
-        else {
-            setMessage ('An error occurred while fetching tickets: ' + error);
+        } else {
+            setMessage('An error occurred while fetching tickets: ' + error, '');
             setTicketPoll(false);
         }
     }, []);
