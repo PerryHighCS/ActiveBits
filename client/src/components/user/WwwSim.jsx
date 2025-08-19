@@ -30,6 +30,8 @@ export default function WwwSim({ sessionData }) {
         templateRequestsRef.current = templateRequests;
     }, [templateRequests]);
 
+
+
     useEffect(() => {
         if (!joined || !sessionId) return;
 
@@ -235,8 +237,7 @@ export default function WwwSim({ sessionData }) {
                             <div className="text-sm text-gray-800">
                                 <DNSLookupTable
                                     template={templateRequests}
-                                    initialDns={{}}
-                                    onChange={(map) => console.log("DNS mapping:", map)}
+                                    sessionId={sessionId}
                                 />
 
                                 <StudentBrowserView template={templateRequests} sessionId={sessionId} />
