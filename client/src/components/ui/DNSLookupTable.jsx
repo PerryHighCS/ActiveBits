@@ -68,7 +68,7 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
   }, [dnsMap, onChange, storageKey, loaded]);
 
   return (
-    <div className="w-full lg:w-1/3 border border-gray-300 rounded mx-auto">
+    <div className="border border-gray-300 rounded mx-auto">
       <div className="bg-gray-200 px-3 py-1 text-xs font-semibold text-gray-700 border-b border-gray-300 rounded-t">
         DNS Lookup Table
       </div>

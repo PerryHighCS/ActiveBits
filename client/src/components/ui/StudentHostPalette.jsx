@@ -53,8 +53,8 @@ export default function StudentHostPalette({ fragments = [], hostname }) {
 
     return (
         <aside className="w-64 p-2 border-r border-gray-300 bg-gray-50">
-            <h2 className="font-semibold mb-2 truncate">{hostname}</h2>
-            <h3 className="text-xs font-semibold text-gray-500 mb-2">HTTP Server</h3>
+            <h2 className="font-semibold mb-2 truncate">HTTP Server</h2>
+            <h3 className="text-xs font-semibold text-gray-500 mb-2">{hostname}/</h3>
             {fragments.length > 0 ? (
                 <ul className="space-y-2">
                     {fragments.map(({ fileName, fragment, header }) => (
