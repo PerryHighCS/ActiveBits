@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 
-export default function DNSLookupTable({ template, initialDns = {}, onChange }) {
+export default function DNSLookupTable({ template, initialDns = {}, onChange, sessionId }) {
   // Extract unique hostnames from template.fragments
   const hostnames = useMemo(() => {
     if (!template || !Array.isArray(template.fragments)) return [];
@@ -20,17 +20,29 @@ export default function DNSLookupTable({ template, initialDns = {}, onChange }) 
 
   // DNS mapping state
   const [dnsMap, setDnsMap] = useState({});
+  const storageKey = sessionId ? `${sessionId}-dnsLookupTable` : "dnsLookupTable";
 
   // Initialize/refresh dnsMap when hostnames change
   useEffect(() => {
     setDnsMap(prev => {
+      let saved = {};
+      try {
+        saved = JSON.parse(localStorage.getItem(storageKey)) || {};
+      } catch {
+        saved = {};
+      }
       const next = {};
       hostnames.forEach(h => {
-        next[h] = prev[h] ?? initialDns[h] ?? "";
+        next[h] = prev[h] ?? saved[h] ?? initialDns[h] ?? "";
       });
       return next;
     });
-  }, [hostnames, initialDns]);
+  }, [hostnames, initialDns, storageKey]);
+
+  // Persist dnsMap to localStorage
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify(dnsMap));
+  }, [dnsMap, storageKey]);
 
   // Notify parent on change
   useEffect(() => {
