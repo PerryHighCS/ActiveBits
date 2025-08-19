@@ -1,14 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import Button from '@src/components/ui/Button';
+import React, { useState, useEffect } from 'react';
 
 /**
- * TicketPage component allows users to enter a session ID and fetch their
- * ticket number. It uses the URL search parameter will be used for the 
- * sessionId if present, or an input field if not. The ticket number is fetched
- * from the server and stored in local storage to help limit the numbers
- * being generated.
- * 
+ * Displays the user's ticket for a raffle session.
+ *
+ * The `sessionId` is provided by the `sessionData` prop and is used to fetch a
+ * ticket from the server when one is not already stored. Fetched tickets are
+ * saved in `localStorage` to prevent generating multiple tickets for the same
+ * session.
+ *
  * @returns {React.Component} The TicketPage component.
  */
 const TicketPage = ({ sessionData }) => {
