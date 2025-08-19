@@ -166,7 +166,7 @@ export default function WwwSim({ sessionData }) {
 
     return (
         <div className="p-6 space-y-4">
-            <Modal open={showInstructions} onClose={() => setShowInstructions(false)}>
+            <Modal open={showInstructions} onClose={() => setShowInstructions(false)} title="Instructions">
                 <Instructions />
             </Modal>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
