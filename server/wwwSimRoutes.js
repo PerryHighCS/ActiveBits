@@ -1,4 +1,6 @@
+import crypto from "crypto";
 import { createSession } from "./sessions.js";
+import presetPassages from "./presetPassages.js";
 
 export default function setupWwwSimRoutes(app, sessions, ws) {
     // WS namespace
@@ -22,6 +24,84 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         return hostnameRegex.test(hostname.trim().toLowerCase());
     }
 
+    function dividePassage(passage, parts = 5) {
+        const words = passage.split(/\s+/);
+        const size = Math.ceil(words.length / parts);
+        const fragments = [];
+        for (let i = 0; i < parts; i++) {
+            fragments.push(words.slice(i * size, (i + 1) * size).join(" "));
+        }
+        return fragments;
+    }
+
+    function getRandomName(passage) {
+        const adjectives = passage?.adjectives || ["strange", "bright", "quick"];
+        const nouns = passage?.nouns || ["thing", "signal", "object"];
+        const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+        const noun = nouns[Math.floor(Math.random() * nouns.length)];
+        return `${adj}-${noun}`;
+    }
+
+    function getRandomUnusedName(used, passage) {
+        let n;
+        do {
+            n = getRandomName(passage);
+        } while (used.includes(n));
+        return n;
+    }
+
+    function createHash(fragment) {
+        return crypto.createHash("sha256").update(fragment).digest("hex");
+    }
+
+    function createHostingMap(students, passage) {
+        const fragments = dividePassage(passage.value);
+        const studentHostingMap = {};
+        const fragmentHostingMap = [];
+
+        for (const s of students) {
+            studentHostingMap[s.hostname] = [];
+        }
+
+        for (const index in fragments) {
+            const fragment = fragments[index];
+            const fragmentRecord = { fragment, index: Number(index), assignedTo: [], hash: createHash(fragment) };
+
+            const student = students[Math.floor(Math.random() * students.length)];
+            const fileName = getRandomUnusedName(studentHostingMap[student.hostname], passage);
+
+            studentHostingMap[student.hostname].push(fileName);
+            fragmentRecord.assignedTo.push({ hostname: student.hostname, fileName });
+            fragmentHostingMap.push(fragmentRecord);
+        }
+
+        for (const student of students) {
+            const { hostname } = student;
+            while (studentHostingMap[hostname].length < 3) {
+                const randomFragmentIndex = Math.floor(Math.random() * fragments.length);
+                if (fragmentHostingMap[randomFragmentIndex].assignedTo.some(a => a.hostname === hostname)) continue;
+                const fileName = getRandomUnusedName(studentHostingMap[hostname], passage);
+                studentHostingMap[hostname].push(fileName);
+                fragmentHostingMap[randomFragmentIndex].assignedTo.push({ hostname, fileName });
+            }
+        }
+
+        return fragmentHostingMap;
+    }
+
+    function generateHtmlTemplate(hostname, fragmentRecords, title) {
+        const fragmentUrls = [];
+        for (const record of fragmentRecords) {
+            let source = record.assignedTo[0];
+            if (record.assignedTo.length > 1) {
+                const other = record.assignedTo.filter(h => h.hostname !== hostname);
+                source = other[Math.floor(Math.random() * other.length)] || source;
+            }
+            fragmentUrls.push({ hash: record.hash, url: `http://${source.hostname}/${source.fileName}` });
+        }
+        return { title, fragments: fragmentUrls };
+    }
+
     // Send fragments assigned to a specific hostname
     function sendFragmentAssignments(hostname, session) {
         const hostFragments = [];
@@ -34,9 +114,14 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
             }
         }
 
-        const requests = session.data.studentTemplates[hostname] || {};
+        let requests = session.data.studentTemplates[hostname];
+        if (!requests && session.data.fragments && session.data.fragments.length > 0) {
+            requests = generateHtmlTemplate(hostname, session.data.fragments, session.data.passage?.title);
+            session.data.studentTemplates[hostname] = requests;
+            broadcast("template-assigned", { hostname, template: requests }, session.id);
+        }
 
-        if (hostFragments.length > 0) {
+        if (hostFragments.length > 0 || requests) {
             const msg = JSON.stringify({
                 type: "assigned-fragments",
                 payload: { host: hostFragments, requests }
@@ -63,6 +148,11 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     /////////////////
     // REST endpoints
 
+    // Get preset passages
+    app.get("/api/www-sim/passages", (req, res) => {
+        res.json(presetPassages);
+    });
+
     // Create a new WWW simulation session
     app.post("/api/www-sim/create", (req, res) => {
         const session = createSession(sessions, { data: { students: [], studentTemplates: {} } });
@@ -77,7 +167,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         // Check if the session exists and is of type 'www-sim'
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
-        res.json({ id: session.id, students: session.data.students, studentTemplates: session.data.studentTemplates || [], hostingMap: session.data.fragments || [] });
+        res.json({ id: session.id, students: session.data.students, studentTemplates: session.data.studentTemplates || [], hostingMap: session.data.fragments || [], passage: session.data.passage });
     });
 
     // Join a WWW simulation session
@@ -198,37 +288,31 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         const session = sessions[req.params.id];
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
-        const { hostingMap, studentTemplates } = req.body || {};
-
-        if (!hostingMap || typeof hostingMap !== "object") {
-            return res.status(400).json({ error: "invalid or missing hosting map" });
-        }
-        if (!studentTemplates || typeof studentTemplates !== "object") {
-            return res.status(400).json({ error: "invalid or missing student templates" });
+        const { passage } = req.body || {};
+        if (!passage || typeof passage !== "object" || typeof passage.value !== "string") {
+            return res.status(400).json({ error: "invalid or missing passage" });
         }
         if (
-            Array.isArray(session.data.fragments) &&
-            session.data.fragments.length > 0 &&
-            session.data.studentTemplates &&
-            Object.keys(session.data.studentTemplates).length > 0
+            Array.isArray(session.data.fragments) && session.data.fragments.length > 0 &&
+            session.data.studentTemplates && Object.keys(session.data.studentTemplates).length > 0
         ) {
             return res.status(409).json({ error: "hosting map and templates already assigned" });
         }
 
-        // Save to session
+        const hostingMap = createHostingMap(session.data.students, passage);
+        const studentTemplates = {};
+        for (const { hostname } of session.data.students) {
+            studentTemplates[hostname] = generateHtmlTemplate(hostname, hostingMap, passage.title);
+        }
+
         session.data.fragments = hostingMap;
         session.data.studentTemplates = studentTemplates;
+        session.data.passage = passage;
 
-        broadcast("fragments-assigned", {
-            studentTemplates: session.data.studentTemplates,
-            hostingMap: session.data.fragments
-        },
-            session.id
-        );
+        broadcast("fragments-assigned", { studentTemplates, hostingMap }, session.id);
 
-        // Send assigned fragments to relevant students
-        for (const fragment in hostingMap) {
-            for (const { hostname } of hostingMap[fragment].assignedTo || []) {
+        for (const frag of hostingMap) {
+            for (const { hostname } of frag.assignedTo || []) {
                 sendFragmentAssignments(hostname, session);
             }
         }
