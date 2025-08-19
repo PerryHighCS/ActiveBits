@@ -22,11 +22,15 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
 
   // DNS mapping state
   const [dnsMap, setDnsMap] = useState({});
+  // Track whether we've loaded any existing data so that we don't
+  // immediately overwrite it in localStorage with an empty object
+  const [loaded, setLoaded] = useState(false);
 
   // Load from localStorage when hostnames or session changes
   useEffect(() => {
     if (!storageKey) {
       setDnsMap({});
+      setLoaded(true);
       return;
     }
     try {
@@ -41,18 +45,22 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
       const next = {};
       hostnames.forEach(h => { next[h] = ""; });
       setDnsMap(next);
+    } finally {
+      setLoaded(true);
     }
   }, [storageKey, hostnames]);
 
   // Persist to localStorage and notify parent
   useEffect(() => {
-    if (storageKey) {
+    if (storageKey && loaded) {
       try {
         localStorage.setItem(storageKey, JSON.stringify(dnsMap));
-      } catch {}
+      } catch {
+        // ignore write errors, e.g. storage quota exceeded
+      }
     }
     if (onChange) onChange(dnsMap);
-  }, [dnsMap, onChange, storageKey]);
+  }, [dnsMap, onChange, storageKey, loaded]);
 
   return (
     <div className="w-full lg:w-1/3 border border-gray-300 rounded mx-auto">
