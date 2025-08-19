@@ -77,6 +77,7 @@ GET fragmentName
           <p><span className="font-semibold">Timeouts?</span> Re-lookup the IP and resend the request.</p>
         </div>
       </details>
+
     </div>
   );
 }
