@@ -1,9 +1,9 @@
 import React from "react";
 
 /**
- * InstructionsTab (post-join)
+ * Instructions content shown in a modal after joining.
  */
-export default function WwwSimInstructionsTab() {
+export default function WwwSimInstructions() {
   return (
     <div className="w-full lg:w-1/2 border border-gray-300 rounded mx-auto">
       <div className="bg-gray-200 px-3 py-1 text-xs font-semibold text-gray-700 border-b border-gray-300 rounded-t">
