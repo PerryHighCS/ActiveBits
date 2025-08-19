@@ -237,6 +237,7 @@ export default function WwwSim({ sessionData }) {
                                     template={templateRequests}
                                     initialDns={{}}
                                     onChange={(map) => console.log("DNS mapping:", map)}
+                                    sessionId={sessionId}
                                 />
 
                                 <StudentBrowserView template={templateRequests} sessionId={sessionId} />
