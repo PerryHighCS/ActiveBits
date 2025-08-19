@@ -15,7 +15,7 @@ const presetPassages = [
     {
         label: "Fantasy",
         title: "The Spellbook of Cybershire",
-        value: "In the kingdom of Cybershire, the scroll of TCP/IP weaves together a spellbook of messages. A humble peasant (your browser) casts a spell (an HTTP request), and through layers of arcane incantation, the message reaches the distant Oracle (a web server), who responds with enchanted glyphs (HTML). The villagers need not understand the spirits of Ethernet or the wind-routed DNS familiars—they simply trust the ancient runes of abstraction to carry the magic safely home.",
+        value: "In the kingdom of Cybershire, the scroll of TCP/IP weaves together a spellbook of messages. A humble peasant (your browser) casts a spell (an HTTP request), and through layers of arcane incantation, the message reaches the distant Oracle (a web server), who responds with enchanted glyphs (HTML). The villagers need not understand the spirits of Ethernet or the wind-routed DNS familiars-they simply trust the ancient runes of abstraction to carry the magic safely home.",
         adjectives: ["arcane", "enchanted", "ancient", "mystic", "magical", "woven", "layered", "hidden", "otherworldly"],
         nouns: ["scroll", "glyph", "rune", "familiar", "tome", "spellbook", "incantation", "oracle"]
     },
@@ -36,7 +36,7 @@ const presetPassages = [
     {
         label: "Science Fiction",
         title: "Encrypted Ambassadors of the Stars",
-        value: "In the neon-lit datascapes of the future, abstraction is the secret language of interstellar communication. Starships don't beam raw binary at each other, they encapsulate intent in protocols, much like ambassadors speaking through encrypted translators. At every layer, from quantum pulse to hyperpacket, abstraction lets one ship's operating system speak with another's, without either crew knowing—or caring—about the other's wiring. Just as warp drives mask the terror of relativistic math, networking abstractions conceal complexity behind elegant layers.",
+        value: "In the neon-lit datascapes of the future, abstraction is the secret language of interstellar communication. Starships don't beam raw binary at each other, they encapsulate intent in protocols, much like ambassadors speaking through encrypted translators. At every layer, from quantum pulse to hyperpacket, abstraction lets one ship's operating system speak with another's, without either crew knowing-or caring-about the other's wiring. Just as warp drives mask the terror of relativistic math, networking abstractions conceal complexity behind elegant layers.",
         adjectives: ["neon", "quantum", "synthetic", "stellar", "encrypted", "hyper", "interstellar", "elegant"],
         nouns: ["datascape", "protocol", "starship", "layer", "pulse", "core", "drone", "datastream", "signal"]
     },
@@ -50,7 +50,7 @@ const presetPassages = [
     {
         label: "Western",
         title: "Messages on the Wire",
-        value: "Out on the dusty range, messages didn't ride on horses no more—they rode the wires. And just like a rider swaps horses at every station, data passes through layers, each one takin' care of its own stretch. The rancher don't ask how the telegram gets from Tombstone to Tumbleweed, he just tips his hat when it arrives. That's abstraction for you: trust the trail, not the tack.",
+        value: "Out on the dusty range, messages didn't ride on horses no more-they rode the wires. And just like a rider swaps horses at every station, data passes through layers, each one takin' care of its own stretch. The rancher don't ask how the telegram gets from Tombstone to Tumbleweed, he just tips his hat when it arrives. That's abstraction for you: trust the trail, not the tack.",
         adjectives: ["dusty", "worn", "gritty", "lonesome", "rusty", "open", "vast"],
         nouns: ["telegram", "rider", "range", "wires", "station", "horse", "cattle", "dust", "trail", "saddle"]
     }
@@ -321,8 +321,8 @@ export default function WwwSimManager() {
 
         ws.onerror = (e) => console.warn("WS error", e);
         ws.onclose = () => { /* optional: retry/backoff */ };
-        return () => { try { ws.close(); } catch { } };
-    }, [displayCode, studentTemplates, hostingMap]);
+        return () => { try { ws.close(); } catch { console.error("Error closing WebSocket"); } };
+    }, [displayCode, studentTemplates, hostingMap, passage, sessionId, selectedStudent?.hostname]);
 
     // Handler for removing student pill
     async function removeStudent(hn) {
@@ -360,7 +360,9 @@ export default function WwwSimManager() {
             await navigator.clipboard.writeText(studentJoinUrl);
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
-        } catch { }
+        } catch { 
+            console.error("Failed to copy link");
+        }
     }
 
     // Generate a random, unused name

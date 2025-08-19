@@ -82,7 +82,7 @@ const SessionRouter = () => {
             setSessionData(fullData);
         })
         .catch(() => setError('Invalid or missing session'));
-    }, [sessionId, sessionData]);
+    }, [sessionId, sessionData, storageKey]);
 
     /**
      * Handle input change from the session ID input field.

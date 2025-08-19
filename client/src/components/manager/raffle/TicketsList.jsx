@@ -26,7 +26,7 @@ const TicketsList = ({ tickets }) => {
         if (sel.length !== selected.length) {
             setSelected(sel);
         }
-    }, [tickets]);
+    }, [tickets, selected]);
 
     const title = () => {
         let text;

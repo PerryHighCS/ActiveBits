@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 import RaffleLink from './RaffleLink';
@@ -13,7 +13,7 @@ import WinnerMessage from './WinnerMessage';
  * @returns {React.Component} The RaffleManager component.
  */
 const RaffleManager = () => {
-    const [loading, setLoading] = useState(false);
+    // const [loading, setLoading] = useState(false);
     const [tickets, setTickets] = useState([]);
     const [winners, setWinners] = useState([]);
     const [raffleType, setRaffleType] = useState('standard');
@@ -78,9 +78,9 @@ const RaffleManager = () => {
                     // If the raffleId is not found, we can just clear it from the URL.
                     exitRaffle();
                 }
-            } finally {
+            } /* finally {
                 setLoading(false);
-            }
+            } */
         }
     }
 
@@ -88,7 +88,7 @@ const RaffleManager = () => {
      * Handle errors when fetching tickets. If the raffle is not found, clear the raffleId from the URL.
      * @param {Error} error - The error object.
      */
-    const handleTicketError = (error) => {
+    const handleTicketError = useCallback((error) => {
         if (error.cause && error.cause.status === 404) {
             setMessage('Raffle not found. Please create a new raffle.', '/manage');
         }
@@ -96,7 +96,7 @@ const RaffleManager = () => {
             setMessage ('An error occurred while fetching tickets: ' + error);
             setTicketPoll(false);
         }
-    }
+    }, []);
 
     // Fetch tickets for the current raffleId every 3 seconds by polling the server to keep the ticket list updated.
     useEffect(() => {
@@ -131,7 +131,7 @@ const RaffleManager = () => {
         // And poll every 3 seconds (adjust as needed)
         const intervalId = setInterval(fetchTickets, 3000);
         return () => clearInterval(intervalId);
-    }, [raffleId]);
+    }, [raffleId, handleTicketError]);
 
     /**
      *  Perform the raffle by randomly selecting a given number of tickets from the list of tickets.

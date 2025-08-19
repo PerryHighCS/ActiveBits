@@ -1,6 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import Button from '@src/components/ui/Button';
+import React, { useState, useEffect } from 'react';
 
 /**
  * TicketPage component allows users to enter a session ID and fetch their
@@ -65,7 +63,7 @@ const TicketPage = ({ sessionData }) => {
 
         // Cleanup cancels the fetch timeout if the component unmounts (as in StrictMode)
         return () => clearTimeout(timerId);
-    }, [sessionId]);
+    }, [sessionId, sessionData, storageKey, ticket]);
 
     return (
         <>

@@ -95,9 +95,11 @@ export default function StudentBrowserView({ template, sessionId }) {
             try {
                 const parsed = JSON.parse(stored);
                 setRenderedFragments(parsed);
-            } catch { }
+            } catch { 
+                localStorage.removeItem(`${sessionId}-fragments`);
+            }
         }
-    }, []);
+    }, [sessionId]);
 
     const handleFragmentSubmit = (hash, content) => {
         setRenderedFragments(prev => {

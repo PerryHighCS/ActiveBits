@@ -108,7 +108,7 @@ export default function WwwSim({ sessionData }) {
         });
 
         return () => ws.close();
-    }, [joined, sessionId, hostname]);
+    }, [joined, sessionId, hostname, storageKey]);
 
 
     async function handleConnect() {
