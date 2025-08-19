@@ -249,7 +249,7 @@ export default function WwwSimManager() {
         ws.onerror = (e) => console.warn("WS error", e);
         ws.onclose = () => { /* optional: retry/backoff */ };
         return () => { try { ws.close(); } catch { console.error("Error closing WebSocket"); } };
-    }, [displayCode]);
+    }, [displayCode, selectedStudent?.hostname]);
 
     // Handler for removing student pill
     async function removeStudent(hn) {
