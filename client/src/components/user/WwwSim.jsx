@@ -31,6 +31,8 @@ export default function WwwSim({ sessionData }) {
         templateRequestsRef.current = templateRequests;
     }, [templateRequests]);
 
+
+
     useEffect(() => {
         if (!joined || !sessionId) return;
 
