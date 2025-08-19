@@ -28,11 +28,14 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
 
   // Load from localStorage when hostnames or session changes
   useEffect(() => {
-    if (!storageKey) {
+    setLoaded(false);
+
+    if (!storageKey || hostnames.length === 0) {
       setDnsMap({});
       setLoaded(true);
       return;
     }
+
     try {
       const stored = localStorage.getItem(storageKey);
       const parsed = stored ? JSON.parse(stored) : {};
@@ -43,7 +46,9 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
       setDnsMap(next);
     } catch {
       const next = {};
-      hostnames.forEach(h => { next[h] = ""; });
+      hostnames.forEach(h => {
+        next[h] = "";
+      });
       setDnsMap(next);
     } finally {
       setLoaded(true);
