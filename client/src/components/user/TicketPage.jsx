@@ -64,7 +64,7 @@ const TicketPage = ({ sessionData }) => {
 
         // Cleanup cancels the fetch timeout if the component unmounts (as in StrictMode)
         return () => clearTimeout(timerId);
-    }, [sessionId]);
+    }, [sessionId, sessionData, storageKey, ticket]);
 
     return (
         <>

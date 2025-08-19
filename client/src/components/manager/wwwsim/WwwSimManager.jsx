@@ -4,76 +4,6 @@ import Button from "@src/components/ui/Button";
 import RosterPill from "@src/components/ui/RosterPill";
 import StudentInfoPanel from "../../ui/StudentInfoPanel";
 
-const presetPassages = [
-    {
-        label: "Abstraction Explanation",
-        title: "Understanding Abstraction in Networking",
-        value: "In computer networking, abstraction means hiding complicated details so that we can focus on the big picture. When you open a website, you don't have to think about how your message is broken into packets, routed across the country, and reassembled. It just works. Each layer of the network handles its own job, like putting an envelope in a mailbox or translating a sentence into another language. This makes it easier to build reliable systems, because everyone can work on their own layer without needing to understand the whole thing.",
-        adjectives: ["clear", "simple", "reliable", "layered", "modular", "transparent", "efficient"],
-        nouns: ["signal", "note", "path", "bridge", "bit", "message", "route", "node", "layer", "packet", "stack", "system", "frame"]
-    },
-    {
-        label: "Fantasy",
-        title: "The Spellbook of Cybershire",
-        value: "In the kingdom of Cybershire, the scroll of TCP/IP weaves together a spellbook of messages. A humble peasant (your browser) casts a spell (an HTTP request), and through layers of arcane incantation, the message reaches the distant Oracle (a web server), who responds with enchanted glyphs (HTML). The villagers need not understand the spirits of Ethernet or the wind-routed DNS familiars—they simply trust the ancient runes of abstraction to carry the magic safely home.",
-        adjectives: ["arcane", "enchanted", "ancient", "mystic", "magical", "woven", "layered", "hidden", "otherworldly"],
-        nouns: ["scroll", "glyph", "rune", "familiar", "tome", "spellbook", "incantation", "oracle"]
-    },
-    {
-        label: "Historical Fiction",
-        title: "Signals Across the Alps",
-        value: "In the days of semaphore towers and coded letters, abstraction was a matter of survival. A general didn't care how the message crossed the Alps, only that the signal reached the front lines intact. Today's networks follow the same creed: layer upon layer, each doing its job, concealing the complexity below, ensuring the command rides safely on.",
-        adjectives: ["aged", "weathered", "sealed", "coded", "tactical", "encrypted", "layered", "hidden"],
-        nouns: ["dispatch", "missive", "cipher", "courier", "banner", "signal", "command"]
-    },
-    {
-        label: "Psychological Drama",
-        title: "The Fragmented Mind",
-        value: "He didn't need to understand the protocols. Not really. It was enough to know that somewhere, deep beneath the blinking interface, his message was fragmented, encoded, routed, and reassembled. Abstraction was comfort. It was distance. It was the lie he needed to believe: that the machine just worked.",
-        adjectives: ["fragmented", "internal", "shadowed", "distanced", "echoing", "hidden"],
-        nouns: ["mirror", "fragment", "echo", "mask", "shadow", "message"]
-    },
-    {
-        label: "Science Fiction",
-        title: "Encrypted Ambassadors of the Stars",
-        value: "In the neon-lit datascapes of the future, abstraction is the secret language of interstellar communication. Starships don't beam raw binary at each other, they encapsulate intent in protocols, much like ambassadors speaking through encrypted translators. At every layer, from quantum pulse to hyperpacket, abstraction lets one ship's operating system speak with another's, without either crew knowing—or caring—about the other's wiring. Just as warp drives mask the terror of relativistic math, networking abstractions conceal complexity behind elegant layers.",
-        adjectives: ["neon", "quantum", "synthetic", "stellar", "encrypted", "hyper", "interstellar", "elegant"],
-        nouns: ["datascape", "protocol", "starship", "layer", "pulse", "core", "drone", "datastream", "signal"]
-    },
-    {
-        label: "Spy Thriller",
-        title: "The Abstraction Shield and the Hidden Path",
-        value: "The agent inserts a flash drive into the terminal. Routine, efficient, untraceable. But beneath the calm surface of her data exfiltration lies a shadow war of abstractions. Her message, encoded in HTTP requests and DNS lookups, rides hidden on well-traveled paths, each layer shielding the next. She doesn't need to know how the bits traverse routers or which MAC address her packet wore, only that the abstraction held, and her secret made it to HQ.",
-        adjectives: ["covert", "oblique", "stealthy", "encoded", "anonymous", "hidden"],
-        nouns: ["file", "drop", "deadzone", "alias", "package", "message", "mark", "target"]
-    },
-    {
-        label: "Western",
-        title: "Messages on the Wire",
-        value: "Out on the dusty range, messages didn't ride on horses no more—they rode the wires. And just like a rider swaps horses at every station, data passes through layers, each one takin' care of its own stretch. The rancher don't ask how the telegram gets from Tombstone to Tumbleweed, he just tips his hat when it arrives. That's abstraction for you: trust the trail, not the tack.",
-        adjectives: ["dusty", "worn", "gritty", "lonesome", "rusty", "open", "vast"],
-        nouns: ["telegram", "rider", "range", "wires", "station", "horse", "cattle", "dust", "trail", "saddle"]
-    }
-];
-
-function getRandomName(passage) {
-    const adjectives = passage?.adjectives || ["strange", "bright", "quick"];
-    const nouns = passage?.nouns || ["thing", "signal", "object"];
-    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-    const noun = nouns[Math.floor(Math.random() * nouns.length)];
-    return `${adj}-${noun}`;
-}
-
-function dividePassage(passage, parts = 5) {
-    const words = passage.split(/\s+/);
-    const size = Math.ceil(words.length / parts);
-    const fragments = [];
-    for (let i = 0; i < parts; i++) {
-        fragments.push(words.slice(i * size, (i + 1) * size).join(" "));
-    }
-    return fragments;
-}
-
 /**
  * WwwSimManager
  *
@@ -93,7 +23,8 @@ export default function WwwSimManager() {
     const [copied, setCopied] = useState(false);
 
     const [students, setStudents] = useState([]); // [{ hostname, joined }]
-    const [passage, setPassage] = useState(presetPassages[0]);
+    const [presetPassages, setPresetPassages] = useState([]);
+    const [passage, setPassage] = useState(null);
     const [passageEdit, setPassageEdit] = useState(false);
     const [showFragments, setShowFragments] = useState(false);
     const [selectedStudent, setSelectedStudent] = useState(null);
@@ -107,6 +38,24 @@ export default function WwwSimManager() {
     const studentTemplatesRef = useRef(studentTemplates);
     const studentsRef = useRef(students);
     const selectedStudentRef = useRef(selectedStudent);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch("/api/www-sim/passages", { credentials: "include" });
+                if (!res.ok) throw new Error("failed to load passages");
+                const data = await res.json();
+                if (!cancelled) {
+                    setPresetPassages(data);
+                    setPassage(p => p || data[0]);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     useEffect(() => { hostingMapRef.current = hostingMap; }, [hostingMap]);
     useEffect(() => { studentTemplatesRef.current = studentTemplates; }, [studentTemplates]);
@@ -136,6 +85,7 @@ export default function WwwSimManager() {
                     console.log("Loaded session", session);
 
                     setStudents(session.students || []);
+                    if (session.passage) setPassage(session.passage);
 
                     if (session.hostingMap && session.hostingMap.length > 0 &&
                         session.studentTemplates && Object.keys(session.studentTemplates).length > 0) {
@@ -171,14 +121,6 @@ export default function WwwSimManager() {
         run();
         return () => { cancelled = true; };
     }, [sessionId, navigate]);
-
-    useEffect(() => {
-        if (studentTemplates.length > 0 && !passage) {
-            const example = studentTemplates[0];
-            const matched = presetPassages.find(p => p.title === example.title);
-            if (matched) setPassage(matched.value);
-        }
-    }, [studentTemplates, passage]);
 
     const studentJoinUrl = displayCode ? `${window.location.origin}/${displayCode}` : "";
 
@@ -228,21 +170,6 @@ export default function WwwSimManager() {
                     return next;
                 });
 
-                // If fragments have been locked, assign a read-only template to this student if necessary
-                if (hostingMap.length > 0 && studentTemplates) {
-                    const hostname = msg.payload.hostname;
-                    if (!(studentTemplates[hostname])) { // the student hasn't been assigned a template
-                        const template = generateHtmlTemplate(hostname, hostingMap, passage.title);
-
-                        console.log("Assigning template to ", hostname, template);
-
-                        fetch(`/api/www-sim/${sessionId}/assign`, {
-                            method: "PUT",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ hostname: hostname, template: template })
-                        }).catch(e => console.warn("Failed to push template", e));
-                    }
-                }
             } else if (msg.type === "student-removed") {
                 // If a student has been removed, update the student list
                 console.log("Student removed: ", msg.payload);
@@ -321,8 +248,8 @@ export default function WwwSimManager() {
 
         ws.onerror = (e) => console.warn("WS error", e);
         ws.onclose = () => { /* optional: retry/backoff */ };
-        return () => { try { ws.close(); } catch { } };
-    }, [displayCode, studentTemplates, hostingMap]);
+        return () => { try { ws.close(); } catch { console.error("Error closing WebSocket"); } };
+    }, [displayCode, selectedStudent?.hostname]);
 
     // Handler for removing student pill
     async function removeStudent(hn) {
@@ -360,128 +287,23 @@ export default function WwwSimManager() {
             await navigator.clipboard.writeText(studentJoinUrl);
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
-        } catch { }
+        } catch { 
+            console.error("Failed to copy link");
+        }
     }
 
-    // Generate a random, unused name
-    function getRandomUnusedName(usedNames = []) {
-        let newName;
-        do {
-            newName = getRandomName(passage);
-        } while (usedNames.includes(newName));
-        return newName;
-    }
-
-    // Create a SHA-256 hash of a fragment
-    async function createHash(fragment) {
-        const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fragment));
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
-    }
-
-    // Create a hosting map for the students to host fragments with random filenames
-    async function createHostingMap(students) {
-        const fragments = dividePassage(passage.value);
-        const studentHostingMap = {};
-        const fragmentHostingMap = [];
-
-        setFragments(fragments); // Store fragments for later use
-
-        // Initialize student hosting map with all students hosting no files
-        for (const s of students) {
-            studentHostingMap[s.hostname] = [];
-        }
-
-        // Assign each fragment to one random student
-        for (const index in fragments) {
-            const fragment = fragments[index];
-            const fragmentRecord = { fragment, index, assignedTo: [], hash: await createHash(fragment) };
-
-            const student = students[Math.floor(Math.random() * students.length)];
-            const fileName = getRandomUnusedName(studentHostingMap[student.hostname]);
-
-            studentHostingMap[student.hostname].push(fileName);
-            fragmentRecord.assignedTo.push({ hostname: student.hostname, fileName });
-            fragmentHostingMap.push(fragmentRecord);
-        }
-
-        // Ensure each student has at least 3 fragments
-        for (const student of students) {
-            const hostname = student.hostname;
-
-            while (studentHostingMap[hostname].length < 3) {
-                const randomFragmentIndex = Math.floor(Math.random() * fragments.length);
-                if (fragmentHostingMap[randomFragmentIndex].assignedTo.some(a => a.hostname === hostname)) continue; // already assigned to this student
-
-                const fileName = getRandomUnusedName(studentHostingMap[hostname]);
-                studentHostingMap[student.hostname].push(fileName);
-                fragmentHostingMap[randomFragmentIndex].assignedTo.push({ hostname: student.hostname, fileName });
-            }
-        }
-
-        return fragmentHostingMap;
-    }
-
-    // Generate the HTML template for a student to include all fragments from random servers
-    const generateHtmlTemplate = (hostname, fragmentRecords, title) => {
-        const fragmentUrls = [];
-
-        // Loop through all of the fragments to build up the template in fragment order
-        for (const record of fragmentRecords) {
-            // Choose a source for the fragment, preferring other sources than this hostname
-            let source = record.assignedTo[0];
-            if (record.assignedTo.length > 1) {
-                // Filter out the version hosted by this student
-                const otherSources = record.assignedTo.filter(
-                    hostInfo => hostInfo.hostname !== hostname
-                );
-
-                // Pick one of the alternate sources at random
-                source = otherSources[Math.floor(Math.random() * otherSources.length)];
-            }
-
-            // Add the source and hash for checking that a fragment is correct
-            fragmentUrls.push({
-                hash: record.hash,
-                url: `http://${source.hostname}/${source.fileName}`
-            });
-        }
-
-        return {
-            title,
-            fragments: fragmentUrls
-        };
-    };
-
-
-    // Assign fragments to students for both hosting and browsing
+    // Assign fragments to students by requesting server to generate hosting map and templates
     const assignFragments = async () => {
-        // Create a hosting map for the fragments to the students hosting them with random filenames
-        const hostingMap = await createHostingMap(students);
-        setHostingMap(hostingMap);
-
-        // Generate HTML templates for all students and set them in state
-        const studentTemplates = {};
-        for (const { hostname } of students) {
-            studentTemplates[hostname] = generateHtmlTemplate(hostname, hostingMap, passage.title);
-        }
-        setStudentTemplates(studentTemplates);
-
-        // Notify the server of the new assignments
         try {
             await fetch(`/api/www-sim/${sessionId}/assign`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ hostingMap, studentTemplates })
+                body: JSON.stringify({ passage })
             });
 
             setAssignmentLocked(true);
-
-            return hostingMap;
         } catch (e) {
             console.error("Failed to assign fragments", e);
-
-            return {};
         }
     };
 
@@ -561,7 +383,7 @@ export default function WwwSimManager() {
                                     const selected = presetPassages.find(p => p.label === e.target.value);
                                     if (selected) setPassage(selected);
                                 }}
-                                value={passage.label}
+                                value={passage?.label || ""}
                             >
                                 {presetPassages.map(p => (
                                     <option key={p.label} value={p.label}>{p.label + " - " + p.title}</option>
@@ -577,15 +399,15 @@ export default function WwwSimManager() {
                                 <textarea
                                     className="w-full h-32 border border-gray-300 rounded px-2 py-1 text-sm font-mono"
                                     placeholder="Enter your own passage here..."
-                                    value={passage.value}
-                                    onChange={(e) => setPassage({ ...passage, value: e.target.value })}
+                                    value={passage?.value || ""}
+                                    onChange={(e) => setPassage(prev => ({ ...prev, value: e.target.value }))}
                                 />
                             </div>
                         )}
 
 
                         <div className="pt-4">
-                            <Button onClick={assignFragments} disabled={students.length === 0}>
+                            <Button onClick={assignFragments} disabled={students.length === 0 || !passage}>
                                 Assign Fragments
                             </Button>
                         </div>

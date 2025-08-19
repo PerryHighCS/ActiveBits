@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 
 export default function DNSLookupTable({ template, sessionId, onChange }) {
   // Extract unique hostnames from template.fragments
@@ -22,13 +22,19 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
 
   // DNS mapping state
   const [dnsMap, setDnsMap] = useState({});
+  // Track whether we've loaded any existing data so that we don't
+  // immediately overwrite it in localStorage with an empty object
+  const loaded = useRef(false);
 
   // Load from localStorage when hostnames or session changes
   useEffect(() => {
-    if (!storageKey) {
+    loaded.current = false;
+
+    if (!storageKey || hostnames.length === 0) {
       setDnsMap({});
       return;
     }
+
     try {
       const stored = localStorage.getItem(storageKey);
       const parsed = stored ? JSON.parse(stored) : {};
@@ -39,23 +45,32 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
       setDnsMap(next);
     } catch {
       const next = {};
-      hostnames.forEach(h => { next[h] = ""; });
+      hostnames.forEach(h => {
+        next[h] = "";
+      });
       setDnsMap(next);
+    } finally {
+      loaded.current = true;
     }
   }, [storageKey, hostnames]);
 
   // Persist to localStorage and notify parent
   useEffect(() => {
+    if (!loaded.current) return;
+
     if (storageKey) {
       try {
         localStorage.setItem(storageKey, JSON.stringify(dnsMap));
-      } catch {}
+      } catch {
+        // ignore write errors, e.g. storage quota exceeded
+      }
     }
+
     if (onChange) onChange(dnsMap);
-  }, [dnsMap, onChange, storageKey]);
+  }, [dnsMap, onChange, storageKey, loaded]);
 
   return (
-    <div className="w-full lg:w-1/3 border border-gray-300 rounded mx-auto">
+    <div className="border border-gray-300 rounded mx-auto">
       <div className="bg-gray-200 px-3 py-1 text-xs font-semibold text-gray-700 border-b border-gray-300 rounded-t">
         DNS Lookup Table
       </div>
