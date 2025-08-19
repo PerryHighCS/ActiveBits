@@ -206,8 +206,12 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         if (!studentTemplates || typeof studentTemplates !== "object") {
             return res.status(400).json({ error: "invalid or missing student templates" });
         }
-        if (session.data.fragments && session.data.length > 0 &&
-            session.data.studentTemplates && Object.keys(session.data.studentTemplates).length > 0) {
+        if (
+            Array.isArray(session.data.fragments) &&
+            session.data.fragments.length > 0 &&
+            session.data.studentTemplates &&
+            Object.keys(session.data.studentTemplates).length > 0
+        ) {
             return res.status(409).json({ error: "hosting map and templates already assigned" });
         }
 
