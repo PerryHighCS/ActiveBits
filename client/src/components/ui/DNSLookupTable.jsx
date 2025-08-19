@@ -57,13 +57,16 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
 
   // Persist to localStorage and notify parent
   useEffect(() => {
-    if (storageKey && loaded) {
+    if (!loaded) return;
+
+    if (storageKey) {
       try {
         localStorage.setItem(storageKey, JSON.stringify(dnsMap));
       } catch {
         // ignore write errors, e.g. storage quota exceeded
       }
     }
+
     if (onChange) onChange(dnsMap);
   }, [dnsMap, onChange, storageKey, loaded]);
 
