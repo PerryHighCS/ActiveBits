@@ -292,8 +292,10 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
             return res.status(400).json({ error: "invalid or missing passage" });
         }
         if (
-            Array.isArray(session.data.fragments) && session.data.fragments.length > 0 &&
-            session.data.studentTemplates && Object.keys(session.data.studentTemplates).length > 0
+            Array.isArray(session.data.fragments) &&
+            session.data.fragments.length > 0 &&
+            session.data.studentTemplates &&
+            Object.keys(session.data.studentTemplates).length > 0
         ) {
             return res.status(409).json({ error: "hosting map and templates already assigned" });
         }
