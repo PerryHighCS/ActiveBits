@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import Button from "@src/components/ui/Button";
-import StudentHostDisplay from "@src/components/ui/StudentHostDisplay";
+import StudentHostPalette from "@src/components/ui/StudentHostPalette";
 import StudentBrowserView from "@src/components/ui/StudentBrowserView";
 import DNSLookupTable from "@src/components/ui/DNSLookupTable";
 import Modal from "@src/components/ui/Modal";
@@ -21,7 +21,6 @@ export default function WwwSim({ sessionData }) {
     const [joined, setJoined] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
-    const [selectedTab, setSelectedTab] = useState("server");
     const [showInstructions, setShowInstructions] = useState(false);
 
     const [hostAssignments, setHostAssignments] = useState([]);
@@ -208,43 +207,18 @@ export default function WwwSim({ sessionData }) {
 
             {joined && (
                 <>
-                    <div className="flex gap-2 mt-4 border-b border-gray-300">
-                        <button
-                            className={`px-3 py-1 text-sm font-medium ${selectedTab === "server" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
-                            onClick={() => setSelectedTab("server")}
-                        >
-                            Server
-                        </button>
-                        <button
-                            className={`px-3 py-1 text-sm font-medium ${selectedTab === "browser" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500"}`}
-                            onClick={() => setSelectedTab("browser")}
-                        >
-                            Browser
-                        </button>
-                    </div>
+                    <div className="flex mt-4 gap-4">
+                        <StudentHostPalette fragments={hostAssignments} hostname={hostname} />
+                        <div className="flex-1 text-sm text-gray-800 space-y-4">
+                            <DNSLookupTable
+                                template={templateRequests}
+                                initialDns={{}}
+                                onChange={(map) => console.log("DNS mapping:", map)}
+                                sessionId={sessionId}
+                            />
 
-                    <div className="mt-4">
-                        {selectedTab === "server" && (
-                            <div className="text-sm text-gray-800">
-                                { hostAssignments && hostAssignments.length > 0 ? (
-                                    <StudentHostDisplay fragments={hostAssignments} hostname={hostname} sessionId={sessionId} />
-                                ) : (
-                                    <p className="text-gray-500">You are not hosting any files</p>
-                                )}
-                            </div>
-                        )}
-                        {selectedTab === "browser" && (
-                            <div className="text-sm text-gray-800">
-                                <DNSLookupTable
-                                    template={templateRequests}
-                                    initialDns={{}}
-                                    onChange={(map) => console.log("DNS mapping:", map)}
-                                    sessionId={sessionId}
-                                />
-
-                                <StudentBrowserView template={templateRequests} sessionId={sessionId} />
-                            </div>
-                        )}
+                            <StudentBrowserView template={templateRequests} sessionId={sessionId} />
+                        </div>
                     </div>
                 </>
             )}
