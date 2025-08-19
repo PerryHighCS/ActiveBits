@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 
 export default function DNSLookupTable({ template, sessionId, onChange }) {
   // Extract unique hostnames from template.fragments
@@ -24,15 +24,14 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
   const [dnsMap, setDnsMap] = useState({});
   // Track whether we've loaded any existing data so that we don't
   // immediately overwrite it in localStorage with an empty object
-  const [loaded, setLoaded] = useState(false);
+  const loaded = useRef(false);
 
   // Load from localStorage when hostnames or session changes
   useEffect(() => {
-    setLoaded(false);
+    loaded.current = false;
 
     if (!storageKey || hostnames.length === 0) {
       setDnsMap({});
-      setLoaded(true);
       return;
     }
 
@@ -51,13 +50,13 @@ export default function DNSLookupTable({ template, sessionId, onChange }) {
       });
       setDnsMap(next);
     } finally {
-      setLoaded(true);
+      loaded.current = true;
     }
   }, [storageKey, hostnames]);
 
   // Persist to localStorage and notify parent
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded.current) return;
 
     if (storageKey) {
       try {
