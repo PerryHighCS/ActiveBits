@@ -94,7 +94,7 @@ export default function WwwSimManager() {
 
     const [students, setStudents] = useState([]); // [{ hostname, joined }]
     const [passage, setPassage] = useState(presetPassages[0]);
-    const [passageEdit, setCustomVisible] = useState(false);
+    const [passageEdit, setPassageEdit] = useState(false);
     const [showFragments, setShowFragments] = useState(false);
     const [selectedStudent, setSelectedStudent] = useState(null);
 
@@ -567,7 +567,7 @@ export default function WwwSimManager() {
                                     <option key={p.label} value={p.label}>{p.label + " - " + p.title}</option>
                                 ))}
                             </select>
-                            <Button className="ml-2" onClick={() => setCustomVisible(v => !v)}>
+                            <Button className="ml-2" onClick={() => setPassageEdit(v => !v)}>
                                 {passageEdit ? "Hide" : "View/Edit"}
                             </Button>
                         </div>
