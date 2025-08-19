@@ -58,6 +58,7 @@ export default function StudentHostPalette({ fragments = [], hostname }) {
                 <ul className="space-y-2">
                     {fragments.map(({ fileName, fragment, header }) => (
                         <HostedFileChip key={fileName} fileName={fileName} fragment={fragment} header={header} />
+
                     ))}
                 </ul>
             ) : (
