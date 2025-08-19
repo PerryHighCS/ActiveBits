@@ -40,12 +40,12 @@ function HostedFileChip({ fileName, fragment, header = okHeader }) {
 export default function StudentHostPalette({ fragments = [], hostname }) {
     const errorFiles = [
         {
-            fileName: "404-file-not-found.txt",
+            fileName: "404-File-Not-Found",
             fragment: "Error 404: File not found. Double-check the file name and try again.",
             header: `HTTP/1.1 404 Not Found\nContent-Type: text/plain`,
         },
         {
-            fileName: "400-bad-request.txt",
+            fileName: "400-Bad-Request",
             fragment: "Error 400: Bad request. Requests must be in the format 'GET filename'.",
             header: `HTTP/1.1 400 Bad Request\nContent-Type: text/plain`,
         },
