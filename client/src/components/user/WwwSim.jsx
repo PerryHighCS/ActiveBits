@@ -29,6 +29,8 @@ export default function WwwSim({ sessionData }) {
     const templateRequestsRef = useRef();
     const wsRef = useRef(null);
     const heartbeatRef = useRef(null);
+    const httpKeepAliveRef = useRef(null);
+
     const reconnectTimeoutRef = useRef(null);
     const reconnectAttemptsRef = useRef(0);
     useEffect(() => {
@@ -58,6 +60,11 @@ export default function WwwSim({ sessionData }) {
                 heartbeatRef.current = setInterval(() => {
                     try { ws.send('ping'); } catch { /* ignore */ }
                 }, 30000);
+                if (httpKeepAliveRef.current) clearInterval(httpKeepAliveRef.current);
+                const keepAlive = () => fetch('/', { method: 'HEAD' }).catch(() => {});
+                keepAlive();
+                httpKeepAliveRef.current = setInterval(keepAlive, 300000);
+
             };
 
             ws.addEventListener("message", (event) => {
@@ -134,6 +141,8 @@ export default function WwwSim({ sessionData }) {
 
             ws.onclose = () => {
                 if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+                if (httpKeepAliveRef.current) clearInterval(httpKeepAliveRef.current);
+
                 if (cancelled) return;
                 const delay = Math.min(30000, 1000 * 2 ** reconnectAttemptsRef.current++);
                 reconnectTimeoutRef.current = setTimeout(connect, delay);
@@ -144,6 +153,7 @@ export default function WwwSim({ sessionData }) {
         return () => {
             cancelled = true;
             clearInterval(heartbeatRef.current);
+            clearInterval(httpKeepAliveRef.current);
             clearTimeout(reconnectTimeoutRef.current);
             wsRef.current?.close();
         };

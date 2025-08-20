@@ -16,6 +16,7 @@ export default function WwwSimManager() {
     const navigate = useNavigate();
     const wsRef = useRef(null);
     const heartbeatRef = useRef(null);
+    const httpKeepAliveRef = useRef(null);
     const reconnectTimeoutRef = useRef(null);
     const reconnectAttemptsRef = useRef(0);
 
@@ -165,8 +166,12 @@ export default function WwwSimManager() {
                 heartbeatRef.current = setInterval(() => {
                     try { ws.send('ping'); } catch { /* ignore */ }
                 }, 30000);
+                if (httpKeepAliveRef.current) clearInterval(httpKeepAliveRef.current);
+                const keepAlive = () => fetch('/', { method: 'HEAD' }).catch(() => {});
+                keepAlive();
+                httpKeepAliveRef.current = setInterval(keepAlive, 300000);
             };
-
+          
             ws.onmessage = async (evt) => {
                 if (evt.data === 'pong' || evt.data === 'ping') return;
                 let msg;
@@ -267,6 +272,8 @@ export default function WwwSimManager() {
         ws.onerror = (e) => console.warn("WS error", e);
         ws.onclose = () => {
             if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+            if (httpKeepAliveRef.current) clearInterval(httpKeepAliveRef.current);
+
             if (cancelled) return;
             const delay = Math.min(30000, 1000 * 2 ** reconnectAttemptsRef.current++);
             reconnectTimeoutRef.current = setTimeout(connect, delay);
@@ -277,6 +284,8 @@ export default function WwwSimManager() {
         return () => {
             cancelled = true;
             clearInterval(heartbeatRef.current);
+            clearInterval(httpKeepAliveRef.current);
+
             clearTimeout(reconnectTimeoutRef.current);
             try { wsRef.current?.close(); } catch { console.error("Error closing WebSocket"); }
         };
