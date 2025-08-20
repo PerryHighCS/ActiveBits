@@ -15,6 +15,9 @@ export default function WwwSimManager() {
     const { sessionId } = useParams();
     const navigate = useNavigate();
     const wsRef = useRef(null);
+    const heartbeatRef = useRef(null);
+    const reconnectTimeoutRef = useRef(null);
+    const reconnectAttemptsRef = useRef(0);
 
     const [error, setError] = useState(null);
 
@@ -144,16 +147,31 @@ export default function WwwSimManager() {
     useEffect(() => {
         if (!displayCode) return;
 
-        const proto = window.location.protocol === "https:" ? "wss" : "ws";
-        const url = `${proto}://${window.location.host}/ws/www-sim?sessionId=${encodeURIComponent(displayCode)}`;
-        const ws = new WebSocket(url);
+        let cancelled = false;
 
-        wsRef.current?.close();            // close any previous connection
-        wsRef.current = ws;
+        function connect() {
+            if (cancelled) return;
 
-        ws.onmessage = async (evt) => {
-            let msg;
-            try { msg = JSON.parse(evt.data); } catch { return; }
+            const proto = window.location.protocol === "https:" ? "wss" : "ws";
+            const url = `${proto}://${window.location.host}/ws/www-sim?sessionId=${encodeURIComponent(displayCode)}`;
+            const ws = new WebSocket(url);
+
+            wsRef.current?.close();            // close any previous connection
+            wsRef.current = ws;
+
+            ws.onopen = () => {
+                reconnectAttemptsRef.current = 0;
+                if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+                heartbeatRef.current = setInterval(() => {
+                    try { ws.send('ping'); } catch { /* ignore */ }
+                }, 30000);
+            };
+
+            ws.onmessage = async (evt) => {
+                if (evt.data === 'pong' || evt.data === 'ping') return;
+                let msg;
+                try { msg = JSON.parse(evt.data); } catch { return; }
+                if (msg.type === 'ping' || msg.type === 'pong') return;
 
             if (msg.type === "student-joined") {
                 // If a student has joined
@@ -247,8 +265,21 @@ export default function WwwSimManager() {
         };
 
         ws.onerror = (e) => console.warn("WS error", e);
-        ws.onclose = () => { /* optional: retry/backoff */ };
-        return () => { try { ws.close(); } catch { console.error("Error closing WebSocket"); } };
+        ws.onclose = () => {
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+            if (cancelled) return;
+            const delay = Math.min(30000, 1000 * 2 ** reconnectAttemptsRef.current++);
+            reconnectTimeoutRef.current = setTimeout(connect, delay);
+        };
+    }
+
+        connect();
+        return () => {
+            cancelled = true;
+            clearInterval(heartbeatRef.current);
+            clearTimeout(reconnectTimeoutRef.current);
+            try { wsRef.current?.close(); } catch { console.error("Error closing WebSocket"); }
+        };
     }, [displayCode, selectedStudent?.hostname]);
 
     // Handler for removing student pill
