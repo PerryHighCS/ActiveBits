@@ -8,17 +8,29 @@ import { randomBytes } from "crypto";
 export function createSessionStore(ttlMs = 60 * 60 * 1000) {
     const store = Object.create(null);
 
-    // simple janitor, uses sessions' created timestamp
-    const t = setInterval(() => {
+    function cleanup() {
         const now = Date.now();
         for (const id in store) {
-            if (now - (store[id]?.created ?? 0) > ttlMs) delete store[id];
+            if (now - (store[id]?.lastActivity ?? 0) > ttlMs) delete store[id];
         }
-    }, 60_000);
+    }
+
+    // simple janitor, uses sessions' last activity timestamp
+    const t = setInterval(cleanup, 60_000);
     // don't keep the event loop alive just for cleanup in dev
     t.unref?.();
 
-    return store;
+    Object.defineProperty(store, "cleanup", { value: cleanup });
+
+    return new Proxy(store, {
+        get(target, prop, receiver) {
+            const value = Reflect.get(target, prop, receiver);
+            if (value && typeof value === "object" && "id" in value) {
+                value.lastActivity = Date.now();
+            }
+            return value;
+        },
+    });
 }
 
 /**
@@ -49,8 +61,9 @@ export function generateHexId(store, length = 5) {
  * @param {Object} [options.data={}] - Initial data for the session.
  */
 export function createSession(store, { data = {} } = {}) {
-    const id = generateHexId(store); 
-    const session = { id, created: Date.now(), data };
+    const id = generateHexId(store);
+    const now = Date.now();
+    const session = { id, created: now, lastActivity: now, data };
     store[id] = session;
     return session;
 }

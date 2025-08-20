@@ -14,12 +14,14 @@ const app = express();
 app.use(express.json()); // Parse JSON request bodies
 
 const server = http.createServer(app);
-const ws = createWsRouter(server);
 
 // In-memory store shared by all session types
-const sessions = createSessionStore();
+const sessionTtl = Number(process.env.SESSION_TTL_MS) || 60 * 60 * 1000;
+const sessions = createSessionStore(sessionTtl);
 app.locals.sessions = sessions;
 setupSessionRoutes(app, sessions);
+
+const ws = createWsRouter(server, sessions);
 
 // Attach feature-specific route handlers
 setupRaffleRoutes(app, sessions, ws);
