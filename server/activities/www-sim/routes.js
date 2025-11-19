@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { createSession } from "./sessions.js";
+import { createSession } from "../../core/sessions.js";
 import presetPassages from "./presetPassages.js";
 
 export default function setupWwwSimRoutes(app, sessions, ws) {

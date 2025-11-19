@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Button from "@src/components/ui/Button";
 import RosterPill from "@src/components/ui/RosterPill";
-import StudentInfoPanel from "../../ui/StudentInfoPanel";
+import StudentInfoPanel from "../components/StudentInfoPanel";
 
 /**
  * WwwSimManager

@@ -1,12 +1,13 @@
 // ManageDashboard.jsx
 import { useNavigate } from 'react-router-dom';
+import { activities } from '../../activities';
 
 export default function ManageDashboard() {
   const navigate = useNavigate();
 
-  const createSession = async (type) => {
+  const createSession = async (activityId) => {
     try {
-      const res = await fetch(`/api/${type}/create`, {
+      const res = await fetch(`/api/${activityId}/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -14,7 +15,7 @@ export default function ManageDashboard() {
       if (!res.ok) throw new Error('Failed to create session');
 
       const data = await res.json();
-      navigate(`/manage/${type}/${data.id}`);
+      navigate(`/manage/${activityId}/${data.id}`);
     } catch (err) {
       console.error(err);
       alert('Could not create session.');
@@ -25,19 +26,16 @@ export default function ManageDashboard() {
     <div className="p-6">
       <h1 className="text-xl font-bold mb-4">Activity Dashboard</h1>
       <div className="space-x-4">
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded"
-          onClick={() => createSession('raffle')}
-        >
-          Create Raffle
-        </button>
-
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded"
-          onClick={() => createSession('www-sim')}
-        >
-          Create WWW Simulation
-        </button>
+        {activities.map((activity) => (
+          <button
+            key={activity.id}
+            className={`bg-${activity.buttonColor}-600 text-white px-4 py-2 rounded`}
+            onClick={() => createSession(activity.id)}
+            title={activity.description}
+          >
+            Create {activity.name}
+          </button>
+        ))}
       </div>
     </div>
   );

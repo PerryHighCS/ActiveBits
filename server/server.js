@@ -2,10 +2,10 @@ import http from "http";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createSessionStore, setupSessionRoutes } from "./sessions.js";
-import { createWsRouter } from "./wsRouter.js";
-import setupRaffleRoutes from "./raffleRoutes.js";
-import setupWwwSimRoutes from "./wwwSimRoutes.js";
+import { createSessionStore, setupSessionRoutes } from "./core/sessions.js";
+import { createWsRouter } from "./core/wsRouter.js";
+import setupRaffleRoutes from "./activities/raffle/routes.js";
+import setupWwwSimRoutes from "./activities/www-sim/routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

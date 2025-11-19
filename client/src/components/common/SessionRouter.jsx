@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
-import TicketPage from './TicketPage';
-import WwwSim from './WwwSim';
+import { getActivity } from '../../activities';
 
 const CACHE_TTL = 1000 * 60 * 60 * 12; // 12 hours in milliseconds
 
@@ -116,10 +115,16 @@ const SessionRouter = () => {
     if (!sessionData) return <div className="text-center">Loading session...</div>;
     console.log('session data', sessionData);
 
-    if (sessionData.type === 'raffle') return <TicketPage sessionData={sessionData} />;
-    if (sessionData.type === 'www-sim') return <WwwSim sessionData={sessionData} />;
+    // Get the activity configuration for this session type
+    const activity = getActivity(sessionData.type);
+    
+    if (!activity) {
+        return <div className="text-center">Unknown session type: {sessionData.type}</div>;
+    }
 
-    return <div className="text-center">Unknown session type: {sessionData.type}</div>;
+    // Render the appropriate student component for this activity
+    const StudentComponent = activity.StudentComponent;
+    return <StudentComponent sessionData={sessionData} />;
 };
 
 export default SessionRouter;
