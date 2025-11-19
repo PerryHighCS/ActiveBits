@@ -234,21 +234,6 @@ export default function JavaStringPracticeManager() {
     document.body.removeChild(link);
   };
 
-  const deleteSession = async () => {
-    if (!confirm('Are you sure you want to delete this session?')) return;
-    
-    try {
-      const res = await fetch(`/api/session/${sessionId}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) throw new Error('Failed to delete session');
-      navigate('/manage');
-    } catch (err) {
-      console.error(err);
-      alert('Failed to delete session');
-    }
-  };
-
   if (!sessionId) {
     return (
       <div className="p-6 text-center">
