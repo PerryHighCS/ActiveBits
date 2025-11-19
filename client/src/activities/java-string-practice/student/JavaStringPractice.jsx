@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Button from '@src/components/ui/Button';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
@@ -6,23 +6,38 @@ import StringDisplay from '../components/StringDisplay';
 import AnswerSection from '../components/AnswerSection';
 import FeedbackDisplay from '../components/FeedbackDisplay';
 import StatsPanel from '../components/StatsPanel';
+import ChallengeQuestion from '../components/ChallengeQuestion';
 import { generateChallenge, validateAnswer, getExplanation } from '../components/challengeLogic';
 
 /**
  * JavaStringPractice - Student view for practicing Java String methods
  * Interactive challenges for substring(), indexOf(), equals(), length(), and compareTo()
+ * 
+ * Hint System:
+ * - Text Hint (💡): Shows a code explanation of the method
+ * - Visual Hint (🎯): Highlights the answer in the string display
+ * - Using ANY hint will prevent the answer from counting toward stats/streaks
+ * - This encourages students to try without help first, but allows learning when stuck
+ * 
+ * Stats Tracking:
+ * - Total: All attempts (with or without hints)
+ * - Correct: Only correct answers WITHOUT any hints
+ * - Streak: Consecutive correct answers WITHOUT any hints
+ * - Longest Streak: Best streak achieved during the session
  */
 export default function JavaStringPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
+  const initializedRef = useRef(false);
   
   const [studentName, setStudentName] = useState('');
+  const [studentId, setStudentId] = useState(null); // Unique student ID
   const [nameSubmitted, setNameSubmitted] = useState(false);
   const [currentChallenge, setCurrentChallenge] = useState(null);
   const [selectedTypes, setSelectedTypes] = useState(new Set(['all']));
-  const [allowedMethods, setAllowedMethods] = useState(new Set(['all'])); // Methods allowed by teacher
   const [userAnswer, setUserAnswer] = useState('');
   const [selectedIndices, setSelectedIndices] = useState([]);
   const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionType, setSelectionType] = useState(null); // 'letter' or 'index'
   const [feedback, setFeedback] = useState(null);
   const [hintShown, setHintShown] = useState(false);
   const [visualHintShown, setVisualHintShown] = useState(false);
@@ -34,7 +49,19 @@ export default function JavaStringPractice({ sessionData }) {
     longestStreak: 0,
   });
 
-  // Check for saved student name
+  // Helper function to reset all challenge-related state
+  // Extracted to avoid duplication across multiple handlers
+  const resetChallengeState = useCallback(() => {
+    setUserAnswer('');
+    setSelectedIndices([]);
+    setIsSelecting(false);
+    setSelectionType(null);
+    setFeedback(null);
+    setHintShown(false);
+    setVisualHintShown(false);
+  }, []);
+
+  // Check for saved student name and ID
   useEffect(() => {
     if (sessionId.startsWith('solo-')) {
       setStudentName('Solo Student');
@@ -43,8 +70,10 @@ export default function JavaStringPractice({ sessionData }) {
     }
 
     const savedName = localStorage.getItem(`student-name-${sessionId}`);
+    const savedId = localStorage.getItem(`student-id-${sessionId}`);
     if (savedName) {
       setStudentName(savedName);
+      setStudentId(savedId);
       setNameSubmitted(true);
     }
   }, [sessionId]);
@@ -55,7 +84,6 @@ export default function JavaStringPractice({ sessionData }) {
     
     if (sessionId.startsWith('solo-')) {
       // Solo mode - allow all methods
-      setAllowedMethods(new Set(['all']));
       return;
     }
 
@@ -66,7 +94,6 @@ export default function JavaStringPractice({ sessionData }) {
         if (!res.ok) throw new Error('Failed to fetch session');
         const data = await res.json();
         const methods = data.selectedMethods || ['all'];
-        setAllowedMethods(new Set(methods));
         setSelectedTypes(new Set(methods));
       } catch (err) {
         console.error('Failed to fetch allowed methods:', err);
@@ -78,7 +105,8 @@ export default function JavaStringPractice({ sessionData }) {
     // Set up WebSocket for real-time updates
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}`;
+    const studentIdParam = studentId ? `&studentId=${encodeURIComponent(studentId)}` : '';
+    const wsUrl = `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}${studentIdParam}`;
     console.log('Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
 
@@ -91,20 +119,20 @@ export default function JavaStringPractice({ sessionData }) {
       try {
         const message = JSON.parse(event.data);
         console.log('Parsed message:', message);
-        if (message.type === 'methodsUpdate') {
+        if (message.type === 'studentId') {
+          // Store the unique student ID
+          const newStudentId = message.payload.studentId;
+          setStudentId(newStudentId);
+          localStorage.setItem(`student-id-${sessionId}`, newStudentId);
+          console.log('Received student ID:', newStudentId);
+        } else if (message.type === 'methodsUpdate') {
           const methods = message.payload.selectedMethods || ['all'];
           console.log('Updating methods to:', methods);
-          setAllowedMethods(new Set(methods));
           setSelectedTypes(new Set(methods));
           // Generate new challenge with updated methods
           const challenge = generateChallenge(new Set(methods));
           setCurrentChallenge(challenge);
-          setUserAnswer('');
-          setSelectedIndices([]);
-          setIsSelecting(false);
-          setFeedback(null);
-          setHintShown(false);
-          setVisualHintShown(false);
+          resetChallengeState();
         }
       } catch (err) {
         console.error('Failed to parse WebSocket message:', err);
@@ -120,9 +148,11 @@ export default function JavaStringPractice({ sessionData }) {
     };
 
     return () => {
-      ws.close();
+      if (ws) {
+        ws.close();
+      }
     };
-  }, [sessionId, nameSubmitted, studentName]);
+  }, [sessionId, nameSubmitted, studentName, studentId, resetChallengeState]);
 
   // Load saved stats from localStorage
   useEffect(() => {
@@ -146,31 +176,22 @@ export default function JavaStringPractice({ sessionData }) {
         fetch(`/api/java-string-practice/${sessionId}/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ studentName, stats }),
+          body: JSON.stringify({ studentName, studentId, stats }),
         }).catch(err => console.error('Failed to send progress:', err));
       }
     }
-  }, [stats, sessionId, studentName, nameSubmitted]);
+  }, [stats, sessionId, studentName, studentId, nameSubmitted]);
 
-  // Generate initial challenge
-  useEffect(() => {
-    if (!currentChallenge) {
-      handleNewChallenge();
-    }
-  }, [currentChallenge]);
-
-  const handleNewChallenge = () => {
+  // Generate a new challenge with the current selected types
+  // Wrapped in useCallback for stable reference in dependency arrays
+  const handleNewChallenge = useCallback(() => {
     const challenge = generateChallenge(selectedTypes);
     setCurrentChallenge(challenge);
-    setUserAnswer('');
-    setSelectedIndices([]);
-    setIsSelecting(false);
-    setFeedback(null);
-    setHintShown(false);
-    setVisualHintShown(false);
-  };
+    resetChallengeState();
+  }, [selectedTypes, resetChallengeState]);
 
-  const handleTypeSelection = (type) => {
+  // Handle method type selection (solo mode only)
+  const handleTypeSelection = useCallback((type) => {
     const newTypes = new Set(selectedTypes);
     
     if (type === 'all') {
@@ -194,26 +215,32 @@ export default function JavaStringPractice({ sessionData }) {
     
     setSelectedTypes(newTypes);
     // Generate new challenge with new types
+    // setTimeout ensures state updates are batched
     setTimeout(() => {
       const challenge = generateChallenge(newTypes);
       setCurrentChallenge(challenge);
-      setUserAnswer('');
-      setSelectedIndices([]);
-      setIsSelecting(false);
-      setFeedback(null);
-      setHintShown(false);
-      setVisualHintShown(false);
+      resetChallengeState();
     }, 0);
-  };
+  }, [selectedTypes, resetChallengeState]);
+
+  // Generate initial challenge once on mount
+  useEffect(() => {
+    if (!initializedRef.current && !currentChallenge) {
+      initializedRef.current = true;
+      handleNewChallenge();
+    }
+  }, [handleNewChallenge, currentChallenge]);
 
   const handleSubmit = (answer) => {
     const isCorrect = validateAnswer(currentChallenge, answer);
     
     // Update stats
-    const newStreak = isCorrect && !visualHintShown ? stats.streak + 1 : 0;
+    // Only count as correct and contribute to streak if no hints were used
+    const noHintsUsed = !hintShown && !visualHintShown;
+    const newStreak = isCorrect && noHintsUsed ? stats.streak + 1 : 0;
     const newStats = {
       total: stats.total + 1,
-      correct: stats.correct + (isCorrect && !visualHintShown ? 1 : 0),
+      correct: stats.correct + (isCorrect && noHintsUsed ? 1 : 0),
       streak: newStreak,
       longestStreak: Math.max(stats.longestStreak, newStreak),
     };
@@ -288,31 +315,58 @@ export default function JavaStringPractice({ sessionData }) {
                 challenge={currentChallenge}
                 selectedIndices={selectedIndices}
                 visualHintShown={visualHintShown}
+                selectionType={selectionType}
                 onLetterClick={(index) => {
-                  if (currentChallenge.type === 'substring') {
-                    if (!isSelecting) {
-                      setSelectedIndices([index]);
-                      setIsSelecting(true);
-                    } else {
-                      const start = Math.min(selectedIndices[0], index);
-                      const end = Math.max(selectedIndices[0], index) + 1;
-                      setSelectedIndices([start, end]);
-                      setIsSelecting(false);
-                      const selected = currentChallenge.text.substring(start, end);
-                      setUserAnswer(selected);
-                    }
-                  } else if (currentChallenge.type === 'indexOf') {
+                  // Clicking letters always selects characters
+                  // If switching from index to letter selection, reset
+                  if (isSelecting && selectionType === 'index') {
                     setSelectedIndices([index]);
+                    setSelectionType('letter');
+                    const singleLetter = currentChallenge.text.charAt(index);
+                    setUserAnswer(singleLetter);
+                  } else if (!isSelecting) {
+                    // First click - select single letter
+                    setSelectedIndices([index]);
+                    setIsSelecting(true);
+                    setSelectionType('letter');
+                    const singleLetter = currentChallenge.text.charAt(index);
+                    setUserAnswer(singleLetter);
+                  } else {
+                    // Second click - select range
+                    const start = Math.min(selectedIndices[0], index);
+                    const end = Math.max(selectedIndices[0], index) + 1;
+                    setSelectedIndices([start, end]);
+                    setIsSelecting(false);
+                    setSelectionType(null);
+                    const selected = currentChallenge.text.substring(start, end);
+                    setUserAnswer(selected);
+                  }
+                }}
+                onIndexClick={(index) => {
+                  // Clicking indices always submits index numbers
+                  // If switching from letter to index selection, reset
+                  if (isSelecting && selectionType === 'letter') {
+                    setSelectedIndices([index]);
+                    setSelectionType('index');
                     setUserAnswer(index.toString());
+                  } else if (!isSelecting) {
+                    setSelectedIndices([index]);
+                    setIsSelecting(true);
+                    setSelectionType('index');
+                    setUserAnswer(index.toString());
+                  } else {
+                    const start = Math.min(selectedIndices[0], index);
+                    const end = Math.max(selectedIndices[0], index);
+                    setSelectedIndices([start, end]);
+                    setIsSelecting(false);
+                    setSelectionType(null);
+                    setUserAnswer(`${start}, ${end}`);
                   }
                 }}
               />
 
               <div className="question-hint-row">
-                <div
-                  className="question"
-                  dangerouslySetInnerHTML={{ __html: currentChallenge.question }}
-                />
+                <ChallengeQuestion question={currentChallenge.question} />
                 {!feedback && (
                   <div className="hint-controls">
                     {!hintShown && (

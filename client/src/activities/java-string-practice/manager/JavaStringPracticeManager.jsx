@@ -129,7 +129,9 @@ export default function JavaStringPracticeManager() {
     };
 
     return () => {
-      ws.close();
+      if (ws) {
+        ws.close();
+      }
     };
   }, [sessionId]);
 
@@ -190,12 +192,22 @@ export default function JavaStringPracticeManager() {
   const downloadCSV = () => {
     const sorted = getSortedStudents();
     
+    // Helper function to escape CSV fields
+    const escapeCSV = (field) => {
+      const str = String(field);
+      // If field contains comma, quote, or newline, wrap in quotes and escape internal quotes
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+    
     // CSV headers
     const headers = ['Student Name', 'Total Attempts', 'Correct', 'Accuracy %', 'Longest Streak'];
     
     // CSV rows
     const rows = sorted.map(student => [
-      student.name,
+      escapeCSV(student.name),
       student.stats?.total || 0,
       student.stats?.correct || 0,
       (student.stats?.total || 0) > 0
@@ -220,21 +232,6 @@ export default function JavaStringPracticeManager() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const deleteSession = async () => {
-    if (!confirm('Are you sure you want to delete this session?')) return;
-    
-    try {
-      const res = await fetch(`/api/session/${sessionId}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) throw new Error('Failed to delete session');
-      navigate('/manage');
-    } catch (err) {
-      console.error(err);
-      alert('Failed to delete session');
-    }
   };
 
   if (!sessionId) {

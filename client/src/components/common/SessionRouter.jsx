@@ -105,7 +105,7 @@ const SessionRouter = () => {
     // Solo mode - practice without a session
     if (soloActivity) {
         const StudentComponent = soloActivity.StudentComponent;
-        return <StudentComponent sessionData={{ sessionId: `solo-${soloActivity.id}`, studentName: 'Solo Player' }} />;
+        return <StudentComponent sessionData={{ sessionId: `solo-${soloActivity.id}`, studentName: 'Solo Student' }} />;
     }
     
     if (!sessionId) {

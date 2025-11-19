@@ -185,6 +185,7 @@
   flex-direction: column;
   align-items: center;
   min-width: min-content;
+  padding-top: 5px;
 }
 
 .index-row {
@@ -205,6 +206,18 @@
   font-weight: 600;
   border-radius: 10px;
   font-family: 'Monaco', 'Consolas', monospace;
+}
+
+.clickable-index {
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.clickable-index:hover {
+  background: #2d4a73;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .letters-row {

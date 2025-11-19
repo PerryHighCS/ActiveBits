@@ -6,45 +6,157 @@ import { createSession } from '../../core/sessions.js';
  * This activity uses client-side localStorage for student progress.
  * Teacher selections for methods are broadcast to students via WebSockets.
  */
+
+/**
+ * Validate and sanitize student name
+ * @param {string} name - The student name to validate
+ * @returns {string|null} - Sanitized name or null if invalid
+ */
+function validateStudentName(name) {
+  if (!name || typeof name !== 'string') {
+    return null;
+  }
+  
+  // Trim whitespace and limit length
+  const sanitized = name.trim().slice(0, 50);
+  
+  // Check if empty after trimming
+  if (sanitized.length === 0) {
+    return null;
+  }
+  
+  // Only allow alphanumeric, spaces, hyphens, apostrophes, and periods
+  const validPattern = /^[a-zA-Z0-9\s\-'.]+$/;
+  if (!validPattern.test(sanitized)) {
+    return null;
+  }
+  
+  return sanitized;
+}
+
+/**
+ * Validate and sanitize stats object
+ * @param {object} stats - The stats object to validate
+ * @returns {object|null} - Sanitized stats or null if invalid
+ */
+function validateStats(stats) {
+  if (!stats || typeof stats !== 'object') {
+    return null;
+  }
+  
+  // Helper to validate a non-negative integer within reasonable bounds
+  const validateInt = (value, max = 100000) => {
+    const num = parseInt(value, 10);
+    if (isNaN(num) || num < 0 || num > max) {
+      return 0;
+    }
+    return num;
+  };
+  
+  // Validate and sanitize each field
+  const sanitized = {
+    total: validateInt(stats.total),
+    correct: validateInt(stats.correct),
+    streak: validateInt(stats.streak, 10000),
+    longestStreak: validateInt(stats.longestStreak, 10000),
+  };
+  
+  // Ensure correct doesn't exceed total
+  if (sanitized.correct > sanitized.total) {
+    sanitized.correct = sanitized.total;
+  }
+  
+  // Ensure longestStreak is at least as large as current streak
+  if (sanitized.longestStreak < sanitized.streak) {
+    sanitized.longestStreak = sanitized.streak;
+  }
+  
+  return sanitized;
+}
+
+/**
+ * Validate methods array
+ * @param {array} methods - The methods array to validate
+ * @returns {array|null} - Sanitized methods array or null if invalid
+ */
+function validateMethods(methods) {
+  if (!methods || !Array.isArray(methods)) {
+    return null;
+  }
+  
+  const validMethods = new Set(['all', 'substring', 'indexOf', 'equals', 'length', 'compareTo']);
+  
+  // Filter to only valid method strings
+  const sanitized = methods
+    .filter(method => typeof method === 'string' && validMethods.has(method))
+    .slice(0, 10); // Limit array size to prevent abuse
+  
+  // If no valid methods, default to 'all'
+  if (sanitized.length === 0) {
+    return ['all'];
+  }
+  
+  return sanitized;
+}
+
 export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
+  // Helper to generate unique student ID
+  const generateStudentId = (name, sessionId) => {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 6);
+    return `${name}-${timestamp}-${random}`;
+  };
+
   // Register WebSocket namespace
   ws.register("/ws/java-string-practice", (socket, qp) => {
     socket.sessionId = qp.get("sessionId") || null;
-    socket.studentName = qp.get("studentName") || null;
+    const rawStudentName = qp.get("studentName") || null;
+    socket.studentName = validateStudentName(rawStudentName);
+    const studentId = qp.get("studentId") || null; // Check for existing ID
     
-    console.log(`WebSocket connection: sessionId=${socket.sessionId}, studentName=${socket.studentName}`);
+    console.log(`WebSocket connection: sessionId=${socket.sessionId}, studentName=${socket.studentName}, studentId=${studentId}`);
     
-    // If student name is provided, add/update student in session
+    // If student name is provided and valid, add/update student in session
     if (socket.sessionId && socket.studentName) {
       const session = sessions[socket.sessionId];
       console.log(`Found session:`, session ? 'yes' : 'no');
       if (session && session.type === 'java-string-practice') {
-        const existing = session.data.students.find(s => s.name === socket.studentName);
+        // Try to find by ID first, then by name for backwards compatibility
+        let existing = studentId 
+          ? session.data.students.find(s => s.id === studentId)
+          : session.data.students.find(s => s.name === socket.studentName && !s.id);
+        
         if (existing) {
-          console.log(`Reconnecting student: ${socket.studentName}`);
+          console.log(`Reconnecting student: ${socket.studentName} (${existing.id})`);
           existing.connected = true;
           existing.lastSeen = Date.now();
+          socket.studentId = existing.id;
         } else {
           console.log(`New student joining: ${socket.studentName}`);
+          const newId = generateStudentId(socket.studentName, socket.sessionId);
+          socket.studentId = newId;
           session.data.students.push({
+            id: newId,
             name: socket.studentName,
             connected: true,
             joined: Date.now(),
             lastSeen: Date.now(),
-            stats: { total: 0, correct: 0, streak: 0 }
+            stats: { total: 0, correct: 0, streak: 0, longestStreak: 0 }
           });
         }
         console.log(`Total students in session:`, session.data.students.length);
         // Broadcast updated student list to manager
         broadcast('studentsUpdate', { students: session.data.students }, session.id);
+        // Send the student ID back to the client
+        socket.send(JSON.stringify({ type: 'studentId', payload: { studentId: socket.studentId } }));
       }
     }
 
     socket.on('close', () => {
-      if (socket.sessionId && socket.studentName) {
+      if (socket.sessionId && socket.studentId) {
         const session = sessions[socket.sessionId];
         if (session && session.type === 'java-string-practice') {
-          const student = session.data.students.find(s => s.name === socket.studentName);
+          const student = session.data.students.find(s => s.id === socket.studentId);
           if (student) {
             student.connected = false;
             broadcast('studentsUpdate', { students: session.data.students }, session.id);
@@ -100,9 +212,11 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
       return res.status(404).json({ error: 'invalid session' });
     }
     
-    const { methods } = req.body;
-    if (!methods || !Array.isArray(methods)) {
-      return res.status(400).json({ error: 'methods array required' });
+    const { methods: rawMethods } = req.body;
+    const methods = validateMethods(rawMethods);
+    
+    if (!methods) {
+      return res.status(400).json({ error: 'valid methods array required' });
     }
     
     console.log(`Updating methods for session ${session.id}:`, methods);
@@ -121,12 +235,25 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
       return res.status(404).json({ error: 'invalid session' });
     }
     
-    const { studentName, stats } = req.body;
-    if (!studentName || !stats) {
-      return res.status(400).json({ error: 'studentName and stats required' });
+    const { studentId, studentName: rawStudentName, stats: rawStats } = req.body;
+    
+    const stats = validateStats(rawStats);
+    if (!stats) {
+      return res.status(400).json({ error: 'valid stats object required' });
     }
     
-    const student = session.data.students.find(s => s.name === studentName);
+    // Try to find student by ID first (new approach), then by name (backwards compatibility)
+    let student;
+    if (studentId) {
+      student = session.data.students.find(s => s.id === studentId);
+    } else {
+      // Fallback to name-based lookup for backwards compatibility
+      const studentName = validateStudentName(rawStudentName);
+      if (studentName) {
+        student = session.data.students.find(s => s.name === studentName && !s.id);
+      }
+    }
+    
     if (student) {
       student.stats = stats;
       student.lastSeen = Date.now();
