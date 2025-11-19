@@ -402,15 +402,20 @@ function generateCompareToChallenge() {
   const callingText = firstVarCallsMethod ? text1 : text2;
   const parameterText = firstVarCallsMethod ? text2 : text1;
   
-  const actualResult = callingText.localeCompare(parameterText);
+  // Use lexicographic comparison to match Java's compareTo() behavior
+  // Java uses Unicode values, not locale-aware comparison like localeCompare()
   let expectedAnswer;
-  if (actualResult === 0) {
+  if (callingText === parameterText) {
     expectedAnswer = 0;
-  } else if (actualResult < 0) {
+  } else if (callingText < parameterText) {
+    // JavaScript's < operator compares strings lexicographically (same as Java)
     expectedAnswer = "negative";
   } else {
     expectedAnswer = "positive";
   }
+  
+  // Store the actual comparison result for reference (not used in validation)
+  const actualResult = callingText < parameterText ? -1 : callingText > parameterText ? 1 : 0;
   
   return {
     text1,
