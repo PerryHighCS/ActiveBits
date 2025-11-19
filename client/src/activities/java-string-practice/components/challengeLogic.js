@@ -146,6 +146,66 @@ function generateIndexOfChallenge() {
                 "input", "content", "value", "line", "phrase", "title"];
   const varName = varNames[Math.floor(Math.random() * varNames.length)];
   
+  // Realistic not-found search terms
+  const notFoundTerms = [
+    'z', 'q', 'x', 'Z', 'Q', 'X',
+    'the', 'and', 'for', 'with', 'code', 'test',
+    '123', '!', '@', '#', '?', '.',
+    'ing', 'tion', 'ment', 'ness',
+  ];
+  
+  // Helper function to generate a not-found term
+  const generateNotFoundTerm = () => {
+    let searchTerm;
+    let attempts = 0;
+    
+    // 50% chance to use capitalization change from text, 50% use random term
+    if (Math.random() < 0.5 && text.length > 3) {
+      // Extract a substring and change its capitalization
+      const words = text.split(' ').filter(w => w.length > 0);
+      const chars = text.split('').filter(c => c !== ' ' && c.length > 0);
+      
+      if (words.length > 0 && Math.random() < 0.7) {
+        // Use a word with changed capitalization
+        const word = words[Math.floor(Math.random() * words.length)];
+        const changeType = Math.random();
+        if (changeType < 0.33) {
+          searchTerm = word.toUpperCase();
+        } else if (changeType < 0.66) {
+          searchTerm = word.toLowerCase();
+        } else {
+          // Toggle first letter case
+          searchTerm = word.charAt(0) === word.charAt(0).toUpperCase() 
+            ? word.charAt(0).toLowerCase() + word.slice(1)
+            : word.charAt(0).toUpperCase() + word.slice(1);
+        }
+      } else if (chars.length > 0) {
+        // Use a character with changed case
+        const char = chars[Math.floor(Math.random() * chars.length)];
+        searchTerm = char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase();
+      } else {
+        searchTerm = notFoundTerms[Math.floor(Math.random() * notFoundTerms.length)];
+      }
+      
+      // Verify it's actually not found
+      if (text.indexOf(searchTerm) !== -1) {
+        searchTerm = notFoundTerms[Math.floor(Math.random() * notFoundTerms.length)];
+      }
+    } else {
+      // Use a random not-found term
+      searchTerm = notFoundTerms[Math.floor(Math.random() * notFoundTerms.length)];
+    }
+    
+    // Final safety check
+    do {
+      if (text.indexOf(searchTerm) === -1) break;
+      searchTerm = notFoundTerms[Math.floor(Math.random() * notFoundTerms.length)];
+      attempts++;
+    } while (attempts < 20);
+    
+    return searchTerm;
+  };
+  
   if (Math.random() < 0.6) {
     // 1-parameter version
     let searchTerm, expectedAnswer;
@@ -159,7 +219,7 @@ function generateIndexOfChallenge() {
       expectedAnswer = text.indexOf(searchTerm);
     } else {
       // Non-existing
-      searchTerm = 'xyz';
+      searchTerm = generateNotFoundTerm();
       expectedAnswer = -1;
     }
     
@@ -173,10 +233,42 @@ function generateIndexOfChallenge() {
     };
   } else {
     // 2-parameter version
-    const chars = [...new Set(text.split(''))].filter(c => c !== ' ');
-    const searchTerm = chars[Math.floor(Math.random() * chars.length)] || 'a';
-    const startIndex = Math.floor(Math.random() * (text.length - 1));
-    const expectedAnswer = text.indexOf(searchTerm, startIndex);
+    let searchTerm, startIndex, expectedAnswer;
+    
+    if (Math.random() < 0.7) {
+      // Choose an existing character/substring and ensure it can be found
+      const chars = [...new Set(text.split(''))].filter(c => c !== ' ');
+      searchTerm = chars[Math.floor(Math.random() * chars.length)] || 'a';
+      
+      // Find all occurrences of the search term
+      const occurrences = [];
+      for (let i = 0; i < text.length; i++) {
+        if (text.indexOf(searchTerm, i) === i) {
+          occurrences.push(i);
+        }
+      }
+      
+      if (occurrences.length > 0 && Math.random() < 0.6) {
+        // Pick a start index that will find the character (before or at an occurrence)
+        const targetOccurrence = occurrences[Math.floor(Math.random() * occurrences.length)];
+        startIndex = Math.floor(Math.random() * (targetOccurrence + 1));
+        expectedAnswer = text.indexOf(searchTerm, startIndex);
+      } else {
+        // Pick a start index that might not find it (after all occurrences)
+        if (occurrences.length > 0) {
+          const lastOccurrence = occurrences[occurrences.length - 1];
+          startIndex = lastOccurrence + 1;
+        } else {
+          startIndex = 0;
+        }
+        expectedAnswer = text.indexOf(searchTerm, startIndex);
+      }
+    } else {
+      // Search for something that doesn't exist
+      searchTerm = generateNotFoundTerm();
+      startIndex = Math.floor(Math.random() * Math.max(1, text.length - 1));
+      expectedAnswer = -1;
+    }
     
     return {
       text,

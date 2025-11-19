@@ -23,6 +23,7 @@ export default function JavaStringPractice({ sessionData }) {
   const [userAnswer, setUserAnswer] = useState('');
   const [selectedIndices, setSelectedIndices] = useState([]);
   const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionType, setSelectionType] = useState(null); // 'letter' or 'index'
   const [feedback, setFeedback] = useState(null);
   const [hintShown, setHintShown] = useState(false);
   const [visualHintShown, setVisualHintShown] = useState(false);
@@ -102,6 +103,7 @@ export default function JavaStringPractice({ sessionData }) {
           setUserAnswer('');
           setSelectedIndices([]);
           setIsSelecting(false);
+          setSelectionType(null);
           setFeedback(null);
           setHintShown(false);
           setVisualHintShown(false);
@@ -165,6 +167,7 @@ export default function JavaStringPractice({ sessionData }) {
     setUserAnswer('');
     setSelectedIndices([]);
     setIsSelecting(false);
+    setSelectionType(null);
     setFeedback(null);
     setHintShown(false);
     setVisualHintShown(false);
@@ -200,6 +203,7 @@ export default function JavaStringPractice({ sessionData }) {
       setUserAnswer('');
       setSelectedIndices([]);
       setIsSelecting(false);
+      setSelectionType(null);
       setFeedback(null);
       setHintShown(false);
       setVisualHintShown(false);
@@ -288,22 +292,52 @@ export default function JavaStringPractice({ sessionData }) {
                 challenge={currentChallenge}
                 selectedIndices={selectedIndices}
                 visualHintShown={visualHintShown}
+                selectionType={selectionType}
                 onLetterClick={(index) => {
-                  if (currentChallenge.type === 'substring') {
-                    if (!isSelecting) {
-                      setSelectedIndices([index]);
-                      setIsSelecting(true);
-                    } else {
-                      const start = Math.min(selectedIndices[0], index);
-                      const end = Math.max(selectedIndices[0], index) + 1;
-                      setSelectedIndices([start, end]);
-                      setIsSelecting(false);
-                      const selected = currentChallenge.text.substring(start, end);
-                      setUserAnswer(selected);
-                    }
-                  } else if (currentChallenge.type === 'indexOf') {
+                  // Clicking letters always selects characters
+                  // If switching from index to letter selection, reset
+                  if (isSelecting && selectionType === 'index') {
                     setSelectedIndices([index]);
+                    setSelectionType('letter');
+                    const singleLetter = currentChallenge.text.charAt(index);
+                    setUserAnswer(singleLetter);
+                  } else if (!isSelecting) {
+                    // First click - select single letter
+                    setSelectedIndices([index]);
+                    setIsSelecting(true);
+                    setSelectionType('letter');
+                    const singleLetter = currentChallenge.text.charAt(index);
+                    setUserAnswer(singleLetter);
+                  } else {
+                    // Second click - select range
+                    const start = Math.min(selectedIndices[0], index);
+                    const end = Math.max(selectedIndices[0], index) + 1;
+                    setSelectedIndices([start, end]);
+                    setIsSelecting(false);
+                    setSelectionType(null);
+                    const selected = currentChallenge.text.substring(start, end);
+                    setUserAnswer(selected);
+                  }
+                }}
+                onIndexClick={(index) => {
+                  // Clicking indices always submits index numbers
+                  // If switching from letter to index selection, reset
+                  if (isSelecting && selectionType === 'letter') {
+                    setSelectedIndices([index]);
+                    setSelectionType('index');
                     setUserAnswer(index.toString());
+                  } else if (!isSelecting) {
+                    setSelectedIndices([index]);
+                    setIsSelecting(true);
+                    setSelectionType('index');
+                    setUserAnswer(index.toString());
+                  } else {
+                    const start = Math.min(selectedIndices[0], index);
+                    const end = Math.max(selectedIndices[0], index);
+                    setSelectedIndices([start, end]);
+                    setIsSelecting(false);
+                    setSelectionType(null);
+                    setUserAnswer(`${start}, ${end}`);
                   }
                 }}
               />

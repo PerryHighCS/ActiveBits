@@ -8,7 +8,9 @@ export default function StringDisplay({
   challenge, 
   selectedIndices, 
   visualHintShown, 
-  onLetterClick 
+  selectionType,
+  onLetterClick,
+  onIndexClick 
 }) {
   const { text, type } = challenge;
   
@@ -38,8 +40,8 @@ export default function StringDisplay({
         }
       }
     } else {
-      // Show user's current selection
-      if (type === 'substring') {
+      // Show user's current selection - only if selection type is 'letter'
+      if (type === 'substring' && selectionType === 'letter') {
         if (selectedIndices.length === 2) {
           const [start, end] = selectedIndices;
           if (index >= start && index < end) {
@@ -51,11 +53,18 @@ export default function StringDisplay({
             classes.push('selected');
           }
         }
-      } else if (type === 'indexOf' && selectedIndices.length === 1) {
-        const [selectedIndex] = selectedIndices;
-        const searchLen = challenge.searchTerm?.length || 1;
-        if (index >= selectedIndex && index < selectedIndex + searchLen) {
-          classes.push('selected');
+      } else if (type === 'indexOf' && selectionType === 'letter') {
+        // For indexOf with letter selection, just highlight the clicked letters
+        if (selectedIndices.length === 2) {
+          const [start, end] = selectedIndices;
+          if (index >= start && index < end) {
+            classes.push('selected');
+          }
+        } else if (selectedIndices.length === 1) {
+          // Highlight only the single clicked letter
+          if (index === selectedIndices[0]) {
+            classes.push('selected');
+          }
         }
       }
     }
@@ -103,7 +112,14 @@ export default function StringDisplay({
           <div className="string-container">
             <div className="index-row">
               {text.split('').map((_, i) => (
-                <div key={i} className="index-label">{i}</div>
+                <div 
+                  key={i} 
+                  className="index-label clickable-index"
+                  onClick={() => onIndexClick(i)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {i}
+                </div>
               ))}
             </div>
             <div className="letters-row">

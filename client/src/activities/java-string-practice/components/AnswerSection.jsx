@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import Button from '@src/components/ui/Button';
 
 /**
@@ -13,6 +13,14 @@ export default function AnswerSection({
   onSubmit 
 }) {
   const { type } = challenge;
+  const inputRef = useRef(null);
+
+  // Auto-focus input field when challenge changes (for text input types)
+  useEffect(() => {
+    if (inputRef.current && (type === 'substring' || type === 'indexOf' || type === 'length')) {
+      inputRef.current.focus();
+    }
+  }, [challenge, type]);
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -99,13 +107,14 @@ export default function AnswerSection({
     <div className="answer-section">
       <div className="answer-input-row">
         <input
+          ref={inputRef}
           type="text"
           className="answer-input"
           value={displayValue}
           onChange={(e) => onAnswerChange(e.target.value)}
           placeholder={
-            type === 'substring' ? 'Type your answer or click letters above' :
-            type === 'indexOf' ? 'Click a letter above or type the index' :
+            type === 'substring' ? 'Click letters for text or indices for numbers' :
+            type === 'indexOf' ? 'Click indices for numbers or letters for text' :
             'Type your answer'
           }
           disabled={type === 'substring' && selectedIndices.length === 2}
