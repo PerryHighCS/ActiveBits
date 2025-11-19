@@ -134,7 +134,8 @@ function generateSubstringChallenge() {
     // Strategy: Pick a start position, then pick an end position after it
     // Ensure at least 1 character in the result for meaningful practice
     const maxStart = text.length - 2; // Leave room for at least 1 character
-    const start = Math.floor(Math.random() * Math.max(1, maxStart));
+    // Random start from 0 to maxStart (inclusive)
+    const start = Math.floor(Math.random() * (maxStart + 1));
     
     // End must be > start and <= text.length
     // Ensure at least 1 character by starting from start + 1
