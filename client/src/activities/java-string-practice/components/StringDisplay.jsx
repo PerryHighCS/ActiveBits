@@ -32,6 +32,11 @@ export default function StringDisplay({
         }
       } else if (type === 'indexOf') {
         const answerIndex = challenge.expectedAnswer;
+        // Visual hint for indexOf challenges:
+        // - If expectedAnswer is -1: search term not found, nothing to highlight
+        // - If expectedAnswer is 0 or positive: highlight the found substring
+        // - For indexOf with startIndex, if term not found from that position,
+        //   expectedAnswer will be -1 and nothing is highlighted (correct behavior)
         if (answerIndex !== -1) {
           const searchLen = challenge.searchTerm.length;
           if (index >= answerIndex && index < answerIndex + searchLen) {
