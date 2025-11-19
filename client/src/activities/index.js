@@ -14,11 +14,13 @@
 
 import raffleActivity from './raffle';
 import wwwSimActivity from './www-sim';
+import javaStringPracticeActivity from './java-string-practice';
 
 // Array of all registered activities
 export const activities = [
   raffleActivity,
   wwwSimActivity,
+  javaStringPracticeActivity,
 ];
 
 // Create a map for quick lookup by activity ID

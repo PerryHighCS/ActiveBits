@@ -1,0 +1,135 @@
+/* Java String Practice Activity Styles */
+
+.java-string-container {
+  max-width: 900px;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.java-string-header {
+  background: linear-gradient(135deg, #dc143c 0%, #1a365d 100%);
+  color: white;
+  padding: 30px;
+  text-align: center;
+}
+
+.game-title {
+  font-size: 32px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.welcome-message {
+  font-size: 18px;
+  opacity: 0.9;
+}
+
+.java-string-content {
+  padding: 30px;
+}
+
+.challenge-card {
+  background: #f7fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 25px;
+  margin-bottom: 25px;
+}
+
+.challenge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.score-display {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1a365d;
+}
+
+.question-hint-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin: 20px 0;
+}
+
+.question {
+  font-size: 18px;
+  color: #2d3748;
+  line-height: 1.6;
+  flex: 1;
+  min-width: 250px;
+}
+
+.hint-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.hint-btn {
+  background: #1a365d !important;
+  color: white !important;
+}
+
+.visual-hint-btn {
+  background: #8b1538 !important;
+  color: white !important;
+}
+
+.code-hint {
+  background: #edf2f7;
+  padding: 15px;
+  border-radius: 8px;
+  font-family: 'Monaco', 'Consolas', monospace;
+  font-size: 14px;
+  color: #1a365d;
+  margin: 15px 0;
+  border-left: 3px solid #1a365d;
+}
+
+.game-instructions {
+  background: #e6fffa;
+  border: 2px solid #81e6d9;
+  border-radius: 8px;
+  padding: 10px 15px;
+  margin: 10px 0;
+  color: #234e52;
+  font-size: 14px;
+}
+
+.game-instructions.indexOf-mode {
+  background: #fef5e7;
+  border-color: #f6ad55;
+  color: #744210;
+}
+
+@media (max-width: 768px) {
+  .java-string-container {
+    margin: 10px;
+    border-radius: 12px;
+  }
+
+  .java-string-content {
+    padding: 20px;
+  }
+
+  .challenge-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .question-hint-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
