@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Button from '@src/components/ui/Button';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
@@ -14,8 +14,10 @@ import { generateChallenge, validateAnswer, getExplanation } from '../components
  */
 export default function JavaStringPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
+  const initializedRef = useRef(false);
   
   const [studentName, setStudentName] = useState('');
+  const [studentId, setStudentId] = useState(null); // Unique student ID
   const [nameSubmitted, setNameSubmitted] = useState(false);
   const [currentChallenge, setCurrentChallenge] = useState(null);
   const [selectedTypes, setSelectedTypes] = useState(new Set(['all']));
@@ -35,7 +37,7 @@ export default function JavaStringPractice({ sessionData }) {
     longestStreak: 0,
   });
 
-  // Check for saved student name
+  // Check for saved student name and ID
   useEffect(() => {
     if (sessionId.startsWith('solo-')) {
       setStudentName('Solo Student');
@@ -44,8 +46,10 @@ export default function JavaStringPractice({ sessionData }) {
     }
 
     const savedName = localStorage.getItem(`student-name-${sessionId}`);
+    const savedId = localStorage.getItem(`student-id-${sessionId}`);
     if (savedName) {
       setStudentName(savedName);
+      setStudentId(savedId);
       setNameSubmitted(true);
     }
   }, [sessionId]);
@@ -79,7 +83,8 @@ export default function JavaStringPractice({ sessionData }) {
     // Set up WebSocket for real-time updates
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}`;
+    const studentIdParam = studentId ? `&studentId=${encodeURIComponent(studentId)}` : '';
+    const wsUrl = `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}${studentIdParam}`;
     console.log('Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
 
@@ -92,7 +97,13 @@ export default function JavaStringPractice({ sessionData }) {
       try {
         const message = JSON.parse(event.data);
         console.log('Parsed message:', message);
-        if (message.type === 'methodsUpdate') {
+        if (message.type === 'studentId') {
+          // Store the unique student ID
+          const newStudentId = message.payload.studentId;
+          setStudentId(newStudentId);
+          localStorage.setItem(`student-id-${sessionId}`, newStudentId);
+          console.log('Received student ID:', newStudentId);
+        } else if (message.type === 'methodsUpdate') {
           const methods = message.payload.selectedMethods || ['all'];
           console.log('Updating methods to:', methods);
           setAllowedMethods(new Set(methods));
@@ -122,7 +133,9 @@ export default function JavaStringPractice({ sessionData }) {
     };
 
     return () => {
-      ws.close();
+      if (ws) {
+        ws.close();
+      }
     };
   }, [sessionId, nameSubmitted, studentName]);
 
@@ -148,18 +161,20 @@ export default function JavaStringPractice({ sessionData }) {
         fetch(`/api/java-string-practice/${sessionId}/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ studentName, stats }),
+          body: JSON.stringify({ studentName, studentId, stats }),
         }).catch(err => console.error('Failed to send progress:', err));
       }
     }
-  }, [stats, sessionId, studentName, nameSubmitted]);
+  }, [stats, sessionId, studentName, studentId, nameSubmitted]);
 
-  // Generate initial challenge
+  // Generate initial challenge once on mount
   useEffect(() => {
-    if (!currentChallenge) {
+    if (!initializedRef.current && !currentChallenge) {
+      initializedRef.current = true;
       handleNewChallenge();
     }
-  }, [currentChallenge]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount
 
   const handleNewChallenge = () => {
     const challenge = generateChallenge(selectedTypes);
