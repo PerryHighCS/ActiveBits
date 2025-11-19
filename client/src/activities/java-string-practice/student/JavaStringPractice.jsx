@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Button from '@src/components/ui/Button';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
@@ -37,6 +37,18 @@ export default function JavaStringPractice({ sessionData }) {
     streak: 0,
     longestStreak: 0,
   });
+
+  // Helper function to reset all challenge-related state
+  // Extracted to avoid duplication across multiple handlers
+  const resetChallengeState = useCallback(() => {
+    setUserAnswer('');
+    setSelectedIndices([]);
+    setIsSelecting(false);
+    setSelectionType(null);
+    setFeedback(null);
+    setHintShown(false);
+    setVisualHintShown(false);
+  }, []);
 
   // Check for saved student name and ID
   useEffect(() => {
@@ -112,13 +124,7 @@ export default function JavaStringPractice({ sessionData }) {
           // Generate new challenge with updated methods
           const challenge = generateChallenge(new Set(methods));
           setCurrentChallenge(challenge);
-          setUserAnswer('');
-          setSelectedIndices([]);
-          setIsSelecting(false);
-          setSelectionType(null);
-          setFeedback(null);
-          setHintShown(false);
-          setVisualHintShown(false);
+          resetChallengeState();
         }
       } catch (err) {
         console.error('Failed to parse WebSocket message:', err);
@@ -138,7 +144,7 @@ export default function JavaStringPractice({ sessionData }) {
         ws.close();
       }
     };
-  }, [sessionId, nameSubmitted, studentName]);
+  }, [sessionId, nameSubmitted, studentName, studentId, resetChallengeState]);
 
   // Load saved stats from localStorage
   useEffect(() => {
@@ -168,28 +174,16 @@ export default function JavaStringPractice({ sessionData }) {
     }
   }, [stats, sessionId, studentName, studentId, nameSubmitted]);
 
-  // Generate initial challenge once on mount
-  useEffect(() => {
-    if (!initializedRef.current && !currentChallenge) {
-      initializedRef.current = true;
-      handleNewChallenge();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run on mount
-
-  const handleNewChallenge = () => {
+  // Generate a new challenge with the current selected types
+  // Wrapped in useCallback for stable reference in dependency arrays
+  const handleNewChallenge = useCallback(() => {
     const challenge = generateChallenge(selectedTypes);
     setCurrentChallenge(challenge);
-    setUserAnswer('');
-    setSelectedIndices([]);
-    setIsSelecting(false);
-    setSelectionType(null);
-    setFeedback(null);
-    setHintShown(false);
-    setVisualHintShown(false);
-  };
+    resetChallengeState();
+  }, [selectedTypes, resetChallengeState]);
 
-  const handleTypeSelection = (type) => {
+  // Handle method type selection (solo mode only)
+  const handleTypeSelection = useCallback((type) => {
     const newTypes = new Set(selectedTypes);
     
     if (type === 'all') {
@@ -213,18 +207,21 @@ export default function JavaStringPractice({ sessionData }) {
     
     setSelectedTypes(newTypes);
     // Generate new challenge with new types
+    // setTimeout ensures state updates are batched
     setTimeout(() => {
       const challenge = generateChallenge(newTypes);
       setCurrentChallenge(challenge);
-      setUserAnswer('');
-      setSelectedIndices([]);
-      setIsSelecting(false);
-      setSelectionType(null);
-      setFeedback(null);
-      setHintShown(false);
-      setVisualHintShown(false);
+      resetChallengeState();
     }, 0);
-  };
+  }, [selectedTypes, resetChallengeState]);
+
+  // Generate initial challenge once on mount
+  useEffect(() => {
+    if (!initializedRef.current && !currentChallenge) {
+      initializedRef.current = true;
+      handleNewChallenge();
+    }
+  }, [handleNewChallenge, currentChallenge]);
 
   const handleSubmit = (answer) => {
     const isCorrect = validateAnswer(currentChallenge, answer);
