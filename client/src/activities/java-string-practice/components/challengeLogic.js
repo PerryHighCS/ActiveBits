@@ -108,9 +108,17 @@ function generateSubstringChallenge() {
                 "input", "content", "value", "line", "phrase", "title"];
   const varName = varNames[Math.floor(Math.random() * varNames.length)];
   
+  // Ensure we have a minimum string length for meaningful challenges
+  if (text.length < 3) {
+    // Fallback to a longer string if somehow a very short string is selected
+    return generateSubstringChallenge();
+  }
+  
   if (Math.random() < 0.5) {
-    // 1-parameter version
-    const start = Math.floor(Math.random() * (text.length - 1));
+    // 1-parameter version: substring(start)
+    // Ensure we don't start at the very end (leave at least 1 character)
+    const maxStart = text.length - 1;
+    const start = Math.floor(Math.random() * maxStart);
     const expectedAnswer = text.substring(start);
     
     return {
@@ -122,10 +130,18 @@ function generateSubstringChallenge() {
       methodType: "1-parameter"
     };
   } else {
-    // 2-parameter version
-    const maxStart = Math.max(0, text.length - 3);
-    const start = Math.floor(Math.random() * maxStart);
-    const end = start + Math.floor(Math.random() * (text.length - start)) + 1;
+    // 2-parameter version: substring(start, end)
+    // Strategy: Pick a start position, then pick an end position after it
+    // Ensure at least 1 character in the result for meaningful practice
+    const maxStart = text.length - 2; // Leave room for at least 1 character
+    const start = Math.floor(Math.random() * Math.max(1, maxStart));
+    
+    // End must be > start and <= text.length
+    // Ensure at least 1 character by starting from start + 1
+    const minEnd = start + 1;
+    const maxEnd = text.length;
+    const end = minEnd + Math.floor(Math.random() * (maxEnd - minEnd + 1));
+    
     const expectedAnswer = text.substring(start, end);
     
     return {
