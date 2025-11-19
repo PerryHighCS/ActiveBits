@@ -34,7 +34,6 @@ export default function JavaStringPractice({ sessionData }) {
   const [nameSubmitted, setNameSubmitted] = useState(false);
   const [currentChallenge, setCurrentChallenge] = useState(null);
   const [selectedTypes, setSelectedTypes] = useState(new Set(['all']));
-  const [allowedMethods, setAllowedMethods] = useState(new Set(['all'])); // Methods allowed by teacher
   const [userAnswer, setUserAnswer] = useState('');
   const [selectedIndices, setSelectedIndices] = useState([]);
   const [isSelecting, setIsSelecting] = useState(false);
@@ -85,7 +84,6 @@ export default function JavaStringPractice({ sessionData }) {
     
     if (sessionId.startsWith('solo-')) {
       // Solo mode - allow all methods
-      setAllowedMethods(new Set(['all']));
       return;
     }
 
@@ -96,7 +94,6 @@ export default function JavaStringPractice({ sessionData }) {
         if (!res.ok) throw new Error('Failed to fetch session');
         const data = await res.json();
         const methods = data.selectedMethods || ['all'];
-        setAllowedMethods(new Set(methods));
         setSelectedTypes(new Set(methods));
       } catch (err) {
         console.error('Failed to fetch allowed methods:', err);
@@ -131,7 +128,6 @@ export default function JavaStringPractice({ sessionData }) {
         } else if (message.type === 'methodsUpdate') {
           const methods = message.payload.selectedMethods || ['all'];
           console.log('Updating methods to:', methods);
-          setAllowedMethods(new Set(methods));
           setSelectedTypes(new Set(methods));
           // Generate new challenge with updated methods
           const challenge = generateChallenge(new Set(methods));
