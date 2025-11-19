@@ -84,8 +84,9 @@ export const activityName = {
   description: 'Brief description', // Shown in dashboard
   ManagerComponent: ManagerComp,  // Teacher view component
   StudentComponent: StudentComp,  // Student view component
-  footerContent: 'Optional text', // Custom footer (optional)
+  footerContent: null,            // JSX element or null (use .jsx if JSX)
   buttonColor: 'blue',           // Dashboard button color
+  soloMode: false,               // Allow solo practice without teacher
 };
 ```
 

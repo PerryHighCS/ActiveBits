@@ -12,8 +12,8 @@
  * 3. Import and add it to the activities array below
  */
 
-import raffleActivity from './raffle';
-import wwwSimActivity from './www-sim';
+import raffleActivity from './raffle/index.jsx';
+import wwwSimActivity from './www-sim/index.jsx';
 import javaStringPracticeActivity from './java-string-practice';
 
 // Array of all registered activities

@@ -124,7 +124,7 @@ export default function QuizManager() {
 
 ### Step 4: Create the Activity Configuration
 
-**File: `client/src/activities/quiz/index.js`**
+**File: `client/src/activities/quiz/index.js`** (or `index.jsx` if using JSX in footerContent)
 
 ```javascript
 import QuizManager from './manager/QuizManager';
@@ -136,12 +136,15 @@ export const quizActivity = {
   description: 'Ask students questions and collect responses',
   ManagerComponent: QuizManager,
   StudentComponent: QuizPage,
-  footerContent: null,
+  footerContent: null, // Set to JSX element for custom footer, or null for no footer
   buttonColor: 'purple',
+  soloMode: false, // Set to true if activity supports solo practice without teacher
 };
 
 export default quizActivity;
 ```
+
+> 💡 **Note:** If your `footerContent` contains JSX (e.g., links with `<a>` tags), the file must have a `.jsx` extension and import React.
 
 ### Step 5: Register the Activity
 
@@ -241,7 +244,7 @@ Your new activity is now fully integrated:
 When adding a new activity, create these files:
 
 **Client:**
-- [ ] `client/src/activities/{name}/index.js` - Activity config
+- [ ] `client/src/activities/{name}/index.js` (or `.jsx`) - Activity config
 - [ ] `client/src/activities/{name}/manager/Manager.jsx` - Teacher view
 - [ ] `client/src/activities/{name}/student/Student.jsx` - Student view
 - [ ] Update `client/src/activities/index.js` - Register activity
