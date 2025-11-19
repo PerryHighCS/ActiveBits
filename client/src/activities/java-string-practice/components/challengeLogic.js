@@ -141,6 +141,9 @@ function generateSubstringChallenge() {
     // Ensure at least 1 character by starting from start + 1
     const minEnd = start + 1;
     const maxEnd = text.length;
+    // Generate end from minEnd to maxEnd (inclusive)
+    // Math.random() returns [0, 1), so Math.random() * n returns [0, n)
+    // Math.floor of that gives [0, n-1], so we need (maxEnd - minEnd + 1) to get full range
     const end = minEnd + Math.floor(Math.random() * (maxEnd - minEnd + 1));
     
     const expectedAnswer = text.substring(start, end);
@@ -415,9 +418,6 @@ function generateCompareToChallenge() {
     expectedAnswer = "positive";
   }
   
-  // Store the actual comparison result for reference (not used in validation)
-  const actualResult = callingText < parameterText ? -1 : callingText > parameterText ? 1 : 0;
-  
   return {
     text1,
     text2,
@@ -428,7 +428,6 @@ function generateCompareToChallenge() {
     callingText,
     parameterText,
     expectedAnswer,
-    actualResult,
     question: `What will <code>${callingVar}.compareTo(${parameterVar})</code> return?`
   };
 }
