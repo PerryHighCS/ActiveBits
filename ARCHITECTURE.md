@@ -21,32 +21,32 @@ ActiveBits/
 │       │   │   │   └── WinnerMessage.jsx
 │       │   │   └── student/         # Student views
 │       │   │       └── TicketPage.jsx
-│       │   └── www-sim/             # WWW Simulation activity
-│       │       ├── index.js         # Activity configuration
-│       │       ├── manager/         # Teacher/manager views
-│       │       │   └── WwwSimManager.jsx
-│       │       ├── student/         # Student views
-│       │       │   └── WwwSim.jsx
-│       │       └── components/      # Activity-specific components
-│       │           ├── DNSLookupTable.jsx
-│       │           ├── StudentBrowserView.jsx
-│       │           ├── StudentHostPalette.jsx
-│       │           ├── StudentInfoPanel.jsx
-│       │           └── WwwSimInstructions.jsx
-│       └── java-string-practice/    # Java String methods activity
-│           ├── index.js             # Activity configuration
-│           ├── manager/             # Teacher/manager views
-│           │   └── JavaStringPracticeManager.jsx
-│           ├── student/             # Student views
-│           │   └── JavaStringPractice.jsx
-│           └── components/          # Activity-specific components
-│               ├── challengeLogic.js
-│               ├── ChallengeSelector.jsx
-│               ├── StringDisplay.jsx
-│               ├── AnswerSection.jsx
-│               ├── FeedbackDisplay.jsx
-│               ├── StatsPanel.jsx
-│               └── styles.css
+│       │   ├── www-sim/             # WWW Simulation activity
+│       │   │   ├── index.js         # Activity configuration
+│       │   │   ├── manager/         # Teacher/manager views
+│       │   │   │   └── WwwSimManager.jsx
+│       │   │   ├── student/         # Student views
+│       │   │   │   └── WwwSim.jsx
+│       │   │   └── components/      # Activity-specific components
+│       │   │       ├── DNSLookupTable.jsx
+│       │   │       ├── StudentBrowserView.jsx
+│       │   │       ├── StudentHostPalette.jsx
+│       │   │       ├── StudentInfoPanel.jsx
+│       │   │       └── WwwSimInstructions.jsx
+│       │   └── java-string-practice/    # Java String methods activity
+│       │       ├── index.js             # Activity configuration
+│       │       ├── manager/             # Teacher/manager views
+│       │       │   └── JavaStringPracticeManager.jsx
+│       │       ├── student/             # Student views
+│       │       │   └── JavaStringPractice.jsx
+│       │       └── components/          # Activity-specific components
+│       │           ├── challengeLogic.js
+│       │           ├── ChallengeSelector.jsx
+│       │           ├── StringDisplay.jsx
+│       │           ├── AnswerSection.jsx
+│       │           ├── FeedbackDisplay.jsx
+│       │           ├── StatsPanel.jsx
+│       │           └── styles.css
 │       ├── components/
 │       │   ├── ui/                  # Shared UI components
 │       │   │   ├── Button.jsx
