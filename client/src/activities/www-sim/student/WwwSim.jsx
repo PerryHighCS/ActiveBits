@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
 import Button from "@src/components/ui/Button";
-import StudentHostPalette from "@src/components/ui/StudentHostPalette";
-import StudentBrowserView from "@src/components/ui/StudentBrowserView";
-import DNSLookupTable from "@src/components/ui/DNSLookupTable";
+import StudentHostPalette from "../components/StudentHostPalette";
+import StudentBrowserView from "../components/StudentBrowserView";
+import DNSLookupTable from "../components/DNSLookupTable";
 import Modal from "@src/components/ui/Modal";
-import Instructions from "@src/components/ui/WwwSimInstructions";
+import Instructions from "../components/WwwSimInstructions";
 
 export default function WwwSim({ sessionData }) {
     const sessionId = sessionData?.id;

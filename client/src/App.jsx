@@ -1,8 +1,8 @@
+import React from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
-import SessionRouter from "./components/user/SessionRouter";
-import RaffleManager from "./components/manager/raffle/RaffleManager";
-import WwwSimManager from "./components/manager/wwwsim/WwwSimManager";
-import ManageDashboard from './components/manager/ManageDashboard';
+import SessionRouter from "./components/common/SessionRouter";
+import ManageDashboard from './components/common/ManageDashboard';
+import { activities } from './activities';
 
 function attribution() {
     return (
@@ -35,14 +35,16 @@ const footerClass = "text-center text-sm text-gray-500 mt-4 w-full bg-white bord
 function Footer() {
     const location = useLocation();
 
-    // Raffles get special footer content
-    if (location.pathname.startsWith("/manage/raffle")) {
-        return (
-            <div className={footerClass}>                
-                <p>Note: Raffles are for educational demonstration purposes only. Raffles are automatically deleted after 24 hours.</p>
-                {attribution()}
-            </div>
-        );
+    // Check if we're on an activity manage page and get custom footer content
+    for (const activity of activities) {
+        if (location.pathname.startsWith(`/manage/${activity.id}`) && activity.footerContent) {
+            return (
+                <div className={footerClass}>
+                    <p>{activity.footerContent}</p>
+                    {attribution()}
+                </div>
+            );
+        }
     }
 
     // Default footer
@@ -70,10 +72,18 @@ export default function App() {
                 <div className='w-full flex-grow'>
                     <Routes>
                         <Route path="/manage" element={<ManageDashboard />} />
-                        <Route path="/manage/raffle" element={<RaffleManager />} />
-                        <Route path="/manage/raffle/:sessionId" element={<RaffleManager />} />
-                        <Route path="/manage/www-sim" element={<WwwSimManager />} />
-                        <Route path="/manage/www-sim/:sessionId" element={<WwwSimManager />} />
+                        
+                        {/* Generate routes for all registered activities */}
+                        {activities.map((activity) => {
+                            const ManagerComponent = activity.ManagerComponent;
+                            return (
+                                <React.Fragment key={activity.id}>
+                                    <Route path={`/manage/${activity.id}`} element={<ManagerComponent />} />
+                                    <Route path={`/manage/${activity.id}/:sessionId`} element={<ManagerComponent />} />
+                                </React.Fragment>
+                            );
+                        })}
+                        
                         <Route path="/:sessionId" element={<SessionRouter />} />
                         <Route path="/" element={<SessionRouter />} />
                     </Routes>

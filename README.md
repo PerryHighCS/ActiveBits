@@ -11,6 +11,13 @@ It currently supports:
 
 Future modules will include additional hands-on learning tools for computer science and engineering classrooms.
 
+## 📚 Documentation
+
+- **[Adding Activities](ADDING_ACTIVITIES.md)** - Start here! Complete tutorial with working code examples
+- **[Architecture Guide](ARCHITECTURE.md)** - Deep dive into codebase structure, patterns, and design decisions
+
+---
+
 ## 🌐 Access
 
 - **Student site:** [`https://bits.mycode.run`](https://bits.mycode.run)  
