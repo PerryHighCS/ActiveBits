@@ -15,7 +15,6 @@ Future modules will include additional hands-on learning tools for computer scie
 
 - **[Adding Activities](ADDING_ACTIVITIES.md)** - Start here! Complete tutorial with working code examples
 - **[Architecture Guide](ARCHITECTURE.md)** - Deep dive into codebase structure, patterns, and design decisions
-- **[Refactoring Summary](REFACTORING_SUMMARY.md)** - Overview of recent architecture improvements
 
 ---
 
