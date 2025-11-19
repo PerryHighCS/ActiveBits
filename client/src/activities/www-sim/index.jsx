@@ -49,8 +49,8 @@ export const wwwSimActivity = {
     </>
   ),
   
-  // Button styling for the dashboard
-  buttonColor: 'green',
+  // Accent color for the activity card
+  color: 'green',
   
   // Whether this activity can be used in solo mode (without a teacher session)
   soloMode: false,

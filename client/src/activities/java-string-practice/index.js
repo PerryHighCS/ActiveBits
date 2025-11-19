@@ -8,7 +8,7 @@ export const javaStringPracticeActivity = {
   ManagerComponent: JavaStringPracticeManager,
   StudentComponent: JavaStringPractice,
   footerContent: null,
-  buttonColor: 'indigo',
+  color: 'indigo',
   
   // Whether this activity can be used in solo mode (without a teacher session)
   soloMode: true,

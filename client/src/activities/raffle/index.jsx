@@ -51,8 +51,8 @@ export const raffleActivity = {
     </>
   ),
   
-  // Button styling for the dashboard
-  buttonColor: 'blue',
+  // Accent color for the activity card
+  color: 'blue',
   
   // Whether this activity can be used in solo mode (without a teacher session)
   soloMode: false,

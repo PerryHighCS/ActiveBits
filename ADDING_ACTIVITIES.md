@@ -137,7 +137,7 @@ export const quizActivity = {
   ManagerComponent: QuizManager,
   StudentComponent: QuizPage,
   footerContent: null, // Set to JSX element for custom footer, or null for no footer
-  buttonColor: 'purple',
+  color: 'purple',
   soloMode: false, // Set to true if activity supports solo practice without teacher
 };
 
@@ -287,7 +287,7 @@ export const practiceActivity = {
   ManagerComponent: () => <div>This activity is solo-only</div>,
   StudentComponent: PracticeComponent,
   soloMode: true,  // Shows in Solo Bits
-  buttonColor: 'green',
+  color: 'green',
   footerContent: null,
 };
 ```

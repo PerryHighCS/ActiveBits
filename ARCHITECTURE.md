@@ -85,7 +85,7 @@ export const activityName = {
   ManagerComponent: ManagerComp,  // Teacher view component
   StudentComponent: StudentComp,  // Student view component
   footerContent: null,            // JSX element or null (use .jsx if JSX)
-  buttonColor: 'blue',           // Dashboard button color
+  color: 'blue',                 // Accent color for activity card
   soloMode: false,               // Allow solo practice without teacher
 };
 ```

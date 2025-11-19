@@ -24,27 +24,32 @@ export default function ManageDashboard() {
 
   // Map color names to Tailwind classes (Tailwind requires static class names)
   const colorClasses = {
-    blue: 'bg-blue-600 hover:bg-blue-700',
-    green: 'bg-green-600 hover:bg-green-700',
-    purple: 'bg-purple-600 hover:bg-purple-700',
-    red: 'bg-red-600 hover:bg-red-700',
-    yellow: 'bg-yellow-600 hover:bg-yellow-700',
-    indigo: 'bg-indigo-600 hover:bg-indigo-700',
+    blue: 'bg-blue-600',
+    green: 'bg-green-600',
+    purple: 'bg-purple-600',
+    red: 'bg-red-600',
+    yellow: 'bg-yellow-600',
+    indigo: 'bg-indigo-600',
   };
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold mb-4">Activity Dashboard</h1>
-      <div className="space-x-4">
+    <div className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">Activity Dashboard</h1>
+      <p className="text-center text-gray-600 mb-8">Choose an activity to start a new session</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {activities.map((activity) => (
-          <button
+          <div
             key={activity.id}
-            className={`${colorClasses[activity.buttonColor] || 'bg-gray-600 hover:bg-gray-700'} text-white px-4 py-2 rounded transition-colors`}
             onClick={() => createSession(activity.id)}
-            title={activity.description}
+            className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
           >
-            Create {activity.name}
-          </button>
+            <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-4`}>
+              <h3 className="text-xl font-semibold">{activity.name}</h3>
+            </div>
+            <div className="bg-white px-6 py-4">
+              <p className="text-gray-600">{activity.description}</p>
+            </div>
+          </div>
         ))}
       </div>
     </div>
