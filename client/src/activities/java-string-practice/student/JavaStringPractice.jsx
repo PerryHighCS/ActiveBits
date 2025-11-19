@@ -12,6 +12,18 @@ import { generateChallenge, validateAnswer, getExplanation } from '../components
 /**
  * JavaStringPractice - Student view for practicing Java String methods
  * Interactive challenges for substring(), indexOf(), equals(), length(), and compareTo()
+ * 
+ * Hint System:
+ * - Text Hint (💡): Shows a code explanation of the method
+ * - Visual Hint (🎯): Highlights the answer in the string display
+ * - Using ANY hint will prevent the answer from counting toward stats/streaks
+ * - This encourages students to try without help first, but allows learning when stuck
+ * 
+ * Stats Tracking:
+ * - Total: All attempts (with or without hints)
+ * - Correct: Only correct answers WITHOUT any hints
+ * - Streak: Consecutive correct answers WITHOUT any hints
+ * - Longest Streak: Best streak achieved during the session
  */
 export default function JavaStringPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
@@ -227,10 +239,12 @@ export default function JavaStringPractice({ sessionData }) {
     const isCorrect = validateAnswer(currentChallenge, answer);
     
     // Update stats
-    const newStreak = isCorrect && !visualHintShown ? stats.streak + 1 : 0;
+    // Only count as correct and contribute to streak if no hints were used
+    const noHintsUsed = !hintShown && !visualHintShown;
+    const newStreak = isCorrect && noHintsUsed ? stats.streak + 1 : 0;
     const newStats = {
       total: stats.total + 1,
-      correct: stats.correct + (isCorrect && !visualHintShown ? 1 : 0),
+      correct: stats.correct + (isCorrect && noHintsUsed ? 1 : 0),
       streak: newStreak,
       longestStreak: Math.max(stats.longestStreak, newStreak),
     };
