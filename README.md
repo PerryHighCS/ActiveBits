@@ -13,7 +13,9 @@ Future modules will include additional hands-on learning tools for computer scie
 
 ## 📚 Documentation
 
-- **[Architecture Guide](ARCHITECTURE.md)** - Detailed documentation on the codebase structure and how to add new activities
+- **[Architecture Guide](ARCHITECTURE.md)** - Comprehensive documentation on the codebase structure and patterns
+- **[Adding Activities](ADDING_ACTIVITIES.md)** - Step-by-step guide with examples for adding new activities
+- **[Refactoring Summary](REFACTORING_SUMMARY.md)** - Overview of the recent architecture improvements
 
 ---
 
