@@ -99,23 +99,25 @@ export default function StringDisplay({
 
       {/* Interactive string display (for substring and indexOf) */}
       {isInteractive && (
-        <div className="string-container">
-          <div className="index-row">
-            {text.split('').map((_, i) => (
-              <div key={i} className="index-label">{i}</div>
-            ))}
-          </div>
-          <div className="letters-row">
-            {text.split('').map((char, i) => (
-              <div
-                key={i}
-                className={getLetterClassName(i)}
-                onClick={() => onLetterClick(i)}
-                style={{ cursor: isInteractive ? 'pointer' : 'default' }}
-              >
-                {char === ' ' ? '\u00A0' : char}
-              </div>
-            ))}
+        <div className="string-container-wrapper">
+          <div className="string-container">
+            <div className="index-row">
+              {text.split('').map((_, i) => (
+                <div key={i} className="index-label">{i}</div>
+              ))}
+            </div>
+            <div className="letters-row">
+              {text.split('').map((char, i) => (
+                <div
+                  key={i}
+                  className={getLetterClassName(i)}
+                  onClick={() => onLetterClick(i)}
+                  style={{ cursor: isInteractive ? 'pointer' : 'default' }}
+                >
+                  {char === ' ' ? '\u00A0' : char}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

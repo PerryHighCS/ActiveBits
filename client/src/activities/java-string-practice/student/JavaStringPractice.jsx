@@ -14,10 +14,12 @@ import { generateChallenge, validateAnswer, getExplanation } from '../components
  */
 export default function JavaStringPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
-  const studentName = sessionData?.studentName || 'Student';
-
+  
+  const [studentName, setStudentName] = useState('');
+  const [nameSubmitted, setNameSubmitted] = useState(false);
   const [currentChallenge, setCurrentChallenge] = useState(null);
   const [selectedTypes, setSelectedTypes] = useState(new Set(['all']));
+  const [allowedMethods, setAllowedMethods] = useState(new Set(['all'])); // Methods allowed by teacher
   const [userAnswer, setUserAnswer] = useState('');
   const [selectedIndices, setSelectedIndices] = useState([]);
   const [isSelecting, setIsSelecting] = useState(false);
@@ -29,7 +31,98 @@ export default function JavaStringPractice({ sessionData }) {
     total: 0,
     correct: 0,
     streak: 0,
+    longestStreak: 0,
   });
+
+  // Check for saved student name
+  useEffect(() => {
+    if (sessionId.startsWith('solo-')) {
+      setStudentName('Solo Student');
+      setNameSubmitted(true);
+      return;
+    }
+
+    const savedName = localStorage.getItem(`student-name-${sessionId}`);
+    if (savedName) {
+      setStudentName(savedName);
+      setNameSubmitted(true);
+    }
+  }, [sessionId]);
+
+  // Fetch allowed methods from server (teacher's selection)
+  useEffect(() => {
+    if (!nameSubmitted) return; // Wait for name to be submitted
+    
+    if (sessionId.startsWith('solo-')) {
+      // Solo mode - allow all methods
+      setAllowedMethods(new Set(['all']));
+      return;
+    }
+
+    // Fetch initial methods
+    const fetchAllowedMethods = async () => {
+      try {
+        const res = await fetch(`/api/java-string-practice/${sessionId}`);
+        if (!res.ok) throw new Error('Failed to fetch session');
+        const data = await res.json();
+        const methods = data.selectedMethods || ['all'];
+        setAllowedMethods(new Set(methods));
+        setSelectedTypes(new Set(methods));
+      } catch (err) {
+        console.error('Failed to fetch allowed methods:', err);
+      }
+    };
+
+    fetchAllowedMethods();
+
+    // Set up WebSocket for real-time updates
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}`;
+    console.log('Connecting to WebSocket:', wsUrl);
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected for session:', sessionId);
+    };
+
+    ws.onmessage = (event) => {
+      console.log('WebSocket message received:', event.data);
+      try {
+        const message = JSON.parse(event.data);
+        console.log('Parsed message:', message);
+        if (message.type === 'methodsUpdate') {
+          const methods = message.payload.selectedMethods || ['all'];
+          console.log('Updating methods to:', methods);
+          setAllowedMethods(new Set(methods));
+          setSelectedTypes(new Set(methods));
+          // Generate new challenge with updated methods
+          const challenge = generateChallenge(new Set(methods));
+          setCurrentChallenge(challenge);
+          setUserAnswer('');
+          setSelectedIndices([]);
+          setIsSelecting(false);
+          setFeedback(null);
+          setHintShown(false);
+          setVisualHintShown(false);
+        }
+      } catch (err) {
+        console.error('Failed to parse WebSocket message:', err);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected for session:', sessionId);
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [sessionId, nameSubmitted, studentName]);
 
   // Load saved stats from localStorage
   useEffect(() => {
@@ -47,8 +140,17 @@ export default function JavaStringPractice({ sessionData }) {
   useEffect(() => {
     if (stats.total > 0) {
       localStorage.setItem(`java-string-stats-${sessionId}`, JSON.stringify(stats));
+      
+      // Send progress to server for teacher-managed sessions
+      if (!sessionId.startsWith('solo-') && nameSubmitted) {
+        fetch(`/api/java-string-practice/${sessionId}/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentName, stats }),
+        }).catch(err => console.error('Failed to send progress:', err));
+      }
     }
-  }, [stats, sessionId]);
+  }, [stats, sessionId, studentName, nameSubmitted]);
 
   // Generate initial challenge
   useEffect(() => {
@@ -108,10 +210,12 @@ export default function JavaStringPractice({ sessionData }) {
     const isCorrect = validateAnswer(currentChallenge, answer);
     
     // Update stats
+    const newStreak = isCorrect && !visualHintShown ? stats.streak + 1 : 0;
     const newStats = {
       total: stats.total + 1,
       correct: stats.correct + (isCorrect && !visualHintShown ? 1 : 0),
-      streak: isCorrect && !visualHintShown ? stats.streak + 1 : 0,
+      streak: newStreak,
+      longestStreak: Math.max(stats.longestStreak, newStreak),
     };
     setStats(newStats);
 
@@ -127,10 +231,46 @@ export default function JavaStringPractice({ sessionData }) {
     });
   };
 
+  // Show name prompt for teacher-managed sessions
+  if (!sessionId.startsWith('solo-') && !nameSubmitted) {
+    return (
+      <div className="java-string-container">
+        <div className="java-string-header">
+          <div className="game-title">Java String Methods Practice</div>
+        </div>
+        <div className="java-string-content">
+          <div className="challenge-card" style={{ textAlign: 'center', padding: '40px' }}>
+            <h3 className="text-xl font-semibold mb-4">Enter Your Name</h3>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (studentName.trim()) {
+                localStorage.setItem(`student-name-${sessionId}`, studentName.trim());
+                setNameSubmitted(true);
+              }
+            }}>
+              <input
+                type="text"
+                value={studentName}
+                onChange={(e) => setStudentName(e.target.value)}
+                placeholder="Your name"
+                className="border border-gray-300 rounded px-4 py-2 text-lg mb-4 w-64"
+                autoFocus
+                required
+              />
+              <br />
+              <Button type="submit">Start Practicing</Button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="java-string-container">
       <div className="java-string-header">
         <div className="game-title">Java String Methods Practice</div>
+        <StatsPanel stats={stats} />
       </div>
 
       <div className="java-string-content">
@@ -138,7 +278,7 @@ export default function JavaStringPractice({ sessionData }) {
           <div className="challenge-header">
             <ChallengeSelector
               selectedTypes={selectedTypes}
-              onTypeSelect={handleTypeSelection}
+              onTypeSelect={sessionId.startsWith('solo-') ? handleTypeSelection : undefined}
             />
           </div>
 
@@ -214,8 +354,6 @@ export default function JavaStringPractice({ sessionData }) {
             </>
           )}
         </div>
-
-        <StatsPanel stats={stats} />
       </div>
     </div>
   );

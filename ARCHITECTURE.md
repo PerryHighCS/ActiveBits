@@ -33,6 +33,20 @@ ActiveBits/
 │       │           ├── StudentHostPalette.jsx
 │       │           ├── StudentInfoPanel.jsx
 │       │           └── WwwSimInstructions.jsx
+│       └── java-string-practice/    # Java String methods activity
+│           ├── index.js             # Activity configuration
+│           ├── manager/             # Teacher/manager views
+│           │   └── JavaStringPracticeManager.jsx
+│           ├── student/             # Student views
+│           │   └── JavaStringPractice.jsx
+│           └── components/          # Activity-specific components
+│               ├── challengeLogic.js
+│               ├── ChallengeSelector.jsx
+│               ├── StringDisplay.jsx
+│               ├── AnswerSection.jsx
+│               ├── FeedbackDisplay.jsx
+│               ├── StatsPanel.jsx
+│               └── styles.css
 │       ├── components/
 │       │   ├── ui/                  # Shared UI components
 │       │   │   ├── Button.jsx
@@ -46,9 +60,11 @@ ActiveBits/
     ├── activities/                   # Activity server modules
     │   ├── raffle/
     │   │   └── routes.js            # Raffle API routes
-    │   └── www-sim/
-    │       ├── routes.js            # WWW Sim API routes
-    │       └── presetPassages.js    # Activity-specific data
+    │   ├── www-sim/
+    │   │   ├── routes.js            # WWW Sim API routes
+    │   │   └── presetPassages.js    # Activity-specific data
+    │   └── java-string-practice/
+    │       └── routes.js            # Java String Practice API routes
     ├── core/                         # Core server modules
     │   ├── sessions.js              # Session management
     │   └── wsRouter.js              # WebSocket router

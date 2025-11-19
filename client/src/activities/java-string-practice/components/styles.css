@@ -140,6 +140,20 @@
   border-color: #1a365d !important;
 }
 
+.type-btn.read-only {
+  cursor: default !important;
+  opacity: 0.8;
+}
+
+.type-btn.read-only:hover {
+  background: #e2e8f0 !important;
+}
+
+.type-btn.read-only.selected {
+  background: #1a365d !important;
+  opacity: 0.9;
+}
+
 .type-emoji {
   margin-right: 6px;
 }
@@ -160,11 +174,17 @@
   border-left: 3px solid #1a365d;
 }
 
+.string-container-wrapper {
+  overflow-x: auto;
+  padding-bottom: 10px;
+  margin: 25px 0;
+}
+
 .string-container {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin: 25px 0;
+  min-width: min-content;
 }
 
 .index-row {

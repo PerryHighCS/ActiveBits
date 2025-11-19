@@ -28,6 +28,10 @@ export default function StatsPanel({ stats }) {
           <div className="stat-value">{stats.streak}</div>
           <div className="stat-label">Current Streak</div>
         </div>
+        <div className="stat-item">
+          <div className="stat-value">{stats.longestStreak}</div>
+          <div className="stat-label">Longest Streak</div>
+        </div>
       </div>
     </div>
   );
