@@ -6,12 +6,12 @@ import Button from '@src/components/ui/Button';
  */
 export default function ChallengeSelector({ selectedTypes, onTypeSelect }) {
   const types = [
-    { id: 'all', label: 'All Methods', emoji: '🎯' },
-    { id: 'substring', label: 'substring()', emoji: '✂️' },
-    { id: 'indexOf', label: 'indexOf()', emoji: '🔍' },
-    { id: 'equals', label: 'equals()', emoji: '⚖️' },
-    { id: 'length', label: 'length()', emoji: '📏' },
-    { id: 'compareTo', label: 'compareTo()', emoji: '🔀' },
+    { id: 'all', label: 'All Methods' },
+    { id: 'substring', label: 'substring()' },
+    { id: 'indexOf', label: 'indexOf()' },
+    { id: 'equals', label: 'equals()' },
+    { id: 'length', label: 'length()' },
+    { id: 'compareTo', label: 'compareTo()' },
   ];
 
   return (
@@ -23,8 +23,7 @@ export default function ChallengeSelector({ selectedTypes, onTypeSelect }) {
           className={`type-btn ${selectedTypes.has(type.id) ? 'selected' : ''}`}
           aria-pressed={selectedTypes.has(type.id)}
         >
-          <span className="type-emoji">{type.emoji}</span>
-          <span className="type-label">{type.label}</span>
+          {type.label}
         </Button>
       ))}
     </div>

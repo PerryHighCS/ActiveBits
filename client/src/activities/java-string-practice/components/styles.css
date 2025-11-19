@@ -169,40 +169,40 @@
 
 .index-row {
   display: flex;
-  gap: 4px;
-  margin-bottom: 8px;
+  gap: 3px;
+  margin-bottom: 6px;
 }
 
 .index-label {
-  width: 40px;
-  height: 24px;
+  width: 28px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #1a365d;
   color: white;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  border-radius: 12px;
+  border-radius: 10px;
   font-family: 'Monaco', 'Consolas', monospace;
 }
 
 .letters-row {
   display: flex;
-  gap: 4px;
+  gap: 3px;
 }
 
 .letter-box {
-  width: 40px;
-  height: 50px;
+  width: 28px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #f7fafc;
   border: 2px solid #cbd5e0;
-  border-radius: 8px;
+  border-radius: 6px;
   font-family: 'Monaco', 'Consolas', monospace;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: #2d3748;
   cursor: pointer;
@@ -437,15 +437,15 @@
 
 /* Stats Panel Styles */
 .stats-panel {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #dc143c 0%, #1a365d 100%);
   border-radius: 12px;
-  padding: 25px;
+  padding: 20px;
   color: white;
 }
 
 .stats-panel h3 {
-  margin: 0 0 20px 0;
-  font-size: 22px;
+  margin: 0 0 15px 0;
+  font-size: 18px;
   text-align: center;
   font-weight: 700;
 }
@@ -453,25 +453,25 @@
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 15px;
+  gap: 12px;
 }
 
 .stat-item {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 8px;
-  padding: 15px;
+  padding: 12px;
   text-align: center;
   backdrop-filter: blur(10px);
 }
 
 .stat-value {
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
 }
 
 .stat-label {
-  font-size: 14px;
+  font-size: 13px;
   opacity: 0.9;
 }
 

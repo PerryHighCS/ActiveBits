@@ -131,7 +131,6 @@ export default function JavaStringPractice({ sessionData }) {
     <div className="java-string-container">
       <div className="java-string-header">
         <div className="game-title">Java String Methods Practice</div>
-        <div className="welcome-message">Master Java String methods with interactive challenges!</div>
       </div>
 
       <div className="java-string-content">
@@ -141,9 +140,6 @@ export default function JavaStringPractice({ sessionData }) {
               selectedTypes={selectedTypes}
               onTypeSelect={handleTypeSelection}
             />
-            <div className="score-display">
-              Score: <span>{stats.correct}</span>
-            </div>
           </div>
 
           {currentChallenge && (

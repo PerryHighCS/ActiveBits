@@ -39,10 +39,17 @@ export default function StringDisplay({
       }
     } else {
       // Show user's current selection
-      if (type === 'substring' && selectedIndices.length === 2) {
-        const [start, end] = selectedIndices;
-        if (index >= start && index < end) {
-          classes.push('selected');
+      if (type === 'substring') {
+        if (selectedIndices.length === 2) {
+          const [start, end] = selectedIndices;
+          if (index >= start && index < end) {
+            classes.push('selected');
+          }
+        } else if (selectedIndices.length === 1) {
+          // Highlight the first clicked position
+          if (index === selectedIndices[0]) {
+            classes.push('selected');
+          }
         }
       } else if (type === 'indexOf' && selectedIndices.length === 1) {
         const [selectedIndex] = selectedIndices;
@@ -63,11 +70,29 @@ export default function StringDisplay({
       {/* Variable declaration */}
       <div className="variable-declaration">
         {type === 'substring' || type === 'indexOf' || type === 'length' ? (
-          <>String {challenge.varName} = "{text}";</>
+          <>
+            String {challenge.varName} = "{text}";
+            {visualHintShown && type === 'length' && (
+              <span style={{ color: '#38a169', fontWeight: 'bold' }}>
+                {' '}// length is {challenge.expectedAnswer}
+              </span>
+            )}
+          </>
         ) : type === 'equals' || type === 'compareTo' ? (
           <>
             String {challenge.var1} = "{challenge.text1}";<br />
             String {challenge.var2} = "{challenge.text2}";
+            {visualHintShown && (
+              <span style={{ color: '#38a169', fontWeight: 'bold' }}>
+                {' '}// {type === 'equals' 
+                  ? `equals() returns ${challenge.expectedAnswer}` 
+                  : challenge.expectedAnswer === 0
+                    ? `compareTo() returns 0 (strings are equal)`
+                    : challenge.expectedAnswer === 'negative'
+                      ? `compareTo() returns negative ("${challenge.callingText}" < "${challenge.parameterText}")`
+                      : `compareTo() returns positive ("${challenge.callingText}" > "${challenge.parameterText}")`}
+              </span>
+            )}
           </>
         ) : null}
       </div>
@@ -91,24 +116,6 @@ export default function StringDisplay({
                 {char === ' ' ? '\u00A0' : char}
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* Static string display (for equals, length, compareTo) */}
-      {!isInteractive && type === 'length' && (
-        <div className="static-string-display">
-          <div className="string-value">"{text}"</div>
-        </div>
-      )}
-
-      {!isInteractive && (type === 'equals' || type === 'compareTo') && (
-        <div className="comparison-display">
-          <div className="comparison-string">
-            <span className="var-name">{challenge.var1}:</span> "{challenge.text1}"
-          </div>
-          <div className="comparison-string">
-            <span className="var-name">{challenge.var2}:</span> "{challenge.text2}"
           </div>
         </div>
       )}

@@ -5,16 +5,36 @@
 
 // Sample strings for challenges
 const sampleStrings = [
-  "Hello World",
-  "Java Programming",
-  "String Methods",
-  "Computer Science",
-  "Learning Code",
-  "Practice Makes Perfect",
-  "Object Oriented",
-  "Data Structures",
-  "Algorithm Design",
-  "Software Development",
+            "Hello World",
+            "Java Programming",
+            "String Methods",
+            "Computer Science",
+            "Learning Code",
+            "Practice Makes Perfect",
+            "Object Oriented",
+            "Data Structures",
+            "Algorithm Design",
+            "Software Development",
+            "Programming Language",
+            "Code Challenge",
+            "Method Overloading",
+            "Class Inheritance",
+            "Variable Declaration",
+            "Loop Iteration",
+            "Array Processing",
+            "Exception Handling",
+            "Memory Management",
+            "Database Connection",
+            "User Interface",
+            "System Architecture",
+            "Network Protocol",
+            "File Operations",
+            "String Manipulation",
+            "Boolean Logic",
+            "Integer Values",
+            "Character Arrays",
+            "Method Parameters",
+            "Return Statement"
 ];
 
 // Challenge type configurations
@@ -84,7 +104,8 @@ export function generateChallenge(selectedTypes) {
 
 function generateSubstringChallenge() {
   const text = sampleStrings[Math.floor(Math.random() * sampleStrings.length)];
-  const varNames = ["text", "str", "message", "word", "sentence"];
+  const varNames = ["text", "str", "message", "word", "sentence", "data", 
+                "input", "content", "value", "line", "phrase", "title"];
   const varName = varNames[Math.floor(Math.random() * varNames.length)];
   
   if (Math.random() < 0.5) {
@@ -121,7 +142,8 @@ function generateSubstringChallenge() {
 
 function generateIndexOfChallenge() {
   const text = sampleStrings[Math.floor(Math.random() * sampleStrings.length)];
-  const varNames = ["text", "str", "message", "word"];
+  const varNames = ["text", "str", "message", "word", "sentence", "data", 
+                "input", "content", "value", "line", "phrase", "title"];
   const varName = varNames[Math.floor(Math.random() * varNames.length)];
   
   if (Math.random() < 0.6) {
@@ -169,8 +191,17 @@ function generateIndexOfChallenge() {
 }
 
 function generateEqualsChallenge() {
-  const strings = ["Hello", "hello", "HELLO", "Java", "java", "Code", "code"];
-  const varNames = [["str1", "str2"], ["name1", "name2"], ["word1", "word2"]];
+  const strings = ["Hello", "hello", "HELLO", "Hello World", "hello world", 
+                "Java", "java", "JAVA", "Programming", "programming",
+                "Code", "code", "String", "string", "Method", "method",
+                "Class", "class", "Object", "object", "Array", "array"];
+  const varNames = [
+                ["str1", "str2"], ["name1", "name2"], ["word1", "word2"], 
+                ["text", "other"], ["first", "second"], ["left", "right"],
+                ["original", "copy"], ["input", "target"], ["source", "dest"],
+                ["userInput", "expected"], ["message1", "message2"], ["title", "header"],
+                ["itemA", "itemB"], ["valueX", "valueY"], ["dataOne", "dataTwo"]
+            ];
   const [var1, var2] = varNames[Math.floor(Math.random() * varNames.length)];
   
   const text1 = strings[Math.floor(Math.random() * strings.length)];
@@ -201,8 +232,13 @@ function generateEqualsChallenge() {
 }
 
 function generateLengthChallenge() {
-  const strings = ["", "a", "Hi", "Java", "Hello", "Programming", "Hello World"];
-  const varNames = ["text", "str", "message", "word"];
+  const strings = ["", "a", "Hi", "Java", "Hello", "Programming", "Hello World",
+                "String Methods", "Computer Science", 
+                "a b c", "123", "Hello123", "Special!@#", "Multi Word String"];
+  const varNames = [
+                "text", "str", "message", "word", "sentence", "data", 
+                "input", "content", "value", "line", "phrase", "title"
+            ];
   const varName = varNames[Math.floor(Math.random() * varNames.length)];
   
   const text = strings[Math.floor(Math.random() * strings.length)];
@@ -218,13 +254,37 @@ function generateLengthChallenge() {
 
 function generateCompareToChallenge() {
   const stringPairs = [
-    ["apple", "apple"],
-    ["apple", "banana"],
-    ["banana", "apple"],
-    ["Java", "java"],
+                ["apple", "apple"],
+                ["Java", "Java"],
+                ["hello", "hello"],
+                
+                // First comes before second alphabetically (negative result)
+                ["apple", "banana"],
+                ["cat", "dog"],
+                ["hello", "world"],
+                ["Java", "Python"],
+                ["abc", "def"],
+                
+                // First comes after second alphabetically (positive result)
+                ["banana", "apple"],
+                ["dog", "cat"],
+                ["world", "hello"],
+                ["Python", "Java"],
+                ["def", "abc"],
+                
+                // Case sensitivity examples
+                ["Apple", "apple"], // Capital A comes before lowercase a
+                ["java", "Java"],   // Lowercase j comes after capital J
+                ["Hello", "hello"]
   ];
   
-  const varNames = [["str1", "str2"], ["word1", "word2"]];
+  const varNames = [
+                ["str1", "str2"], ["name1", "name2"], ["word1", "word2"], 
+                ["text", "other"], ["first", "second"], ["left", "right"],
+                ["original", "copy"], ["input", "target"], ["source", "dest"],
+                ["userInput", "expected"], ["message1", "message2"], ["title", "header"],
+                ["itemA", "itemB"], ["valueX", "valueY"], ["dataOne", "dataTwo"]
+            ];
   const [var1, var2] = varNames[Math.floor(Math.random() * varNames.length)];
   const [text1, text2] = stringPairs[Math.floor(Math.random() * stringPairs.length)];
   
@@ -264,13 +324,15 @@ function generateCompareToChallenge() {
  */
 export function validateAnswer(challenge, userAnswer) {
   if (challenge.type === 'equals') {
-    return userAnswer.toLowerCase() === String(challenge.expectedAnswer).toLowerCase();
+    const answer = String(userAnswer).toLowerCase();
+    const expected = String(challenge.expectedAnswer).toLowerCase();
+    return answer === expected;
   } else if (challenge.type === 'compareTo') {
-    const normalized = userAnswer.toLowerCase().trim();
+    const normalized = String(userAnswer).toLowerCase().trim();
     const expected = String(challenge.expectedAnswer).toLowerCase();
     return normalized === expected;
   } else {
-    return userAnswer === String(challenge.expectedAnswer);
+    return String(userAnswer) === String(challenge.expectedAnswer);
   }
 }
 
