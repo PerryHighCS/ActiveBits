@@ -9,6 +9,9 @@ export const javaStringPracticeActivity = {
   StudentComponent: JavaStringPractice,
   footerContent: null,
   buttonColor: 'indigo',
+  
+  // Whether this activity can be used in solo mode (without a teacher session)
+  soloMode: true,
 };
 
 export default javaStringPracticeActivity;

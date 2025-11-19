@@ -29,6 +29,9 @@ export const wwwSimActivity = {
   
   // Button styling for the dashboard
   buttonColor: 'green',
+  
+  // Whether this activity can be used in solo mode (without a teacher session)
+  soloMode: false,
 };
 
 export default wwwSimActivity;
