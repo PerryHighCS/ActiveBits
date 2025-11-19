@@ -124,7 +124,7 @@ export default function QuizManager() {
 
 ### Step 4: Create the Activity Configuration
 
-**File: `client/src/activities/quiz/index.js`**
+**File: `client/src/activities/quiz/index.js`** (or `index.jsx` if using JSX in footerContent)
 
 ```javascript
 import QuizManager from './manager/QuizManager';
@@ -136,12 +136,15 @@ export const quizActivity = {
   description: 'Ask students questions and collect responses',
   ManagerComponent: QuizManager,
   StudentComponent: QuizPage,
-  footerContent: null,
-  buttonColor: 'purple',
+  footerContent: null, // Set to JSX element for custom footer, or null for no footer
+  color: 'purple',
+  soloMode: false, // Set to true if activity supports solo practice without teacher
 };
 
 export default quizActivity;
 ```
+
+> 💡 **Note:** If your `footerContent` contains JSX (e.g., links with `<a>` tags), the file must have a `.jsx` extension and import React.
 
 ### Step 5: Register the Activity
 
@@ -241,7 +244,7 @@ Your new activity is now fully integrated:
 When adding a new activity, create these files:
 
 **Client:**
-- [ ] `client/src/activities/{name}/index.js` - Activity config
+- [ ] `client/src/activities/{name}/index.js` (or `.jsx`) - Activity config
 - [ ] `client/src/activities/{name}/manager/Manager.jsx` - Teacher view
 - [ ] `client/src/activities/{name}/student/Student.jsx` - Student view
 - [ ] Update `client/src/activities/index.js` - Register activity
@@ -261,6 +264,52 @@ When adding a new activity, create these files:
 3. **Follow naming conventions** - Use kebab-case for folder names, PascalCase for components
 4. **Keep activities self-contained** - All activity code should live in its folder
 5. **Reuse shared UI** - Import from `@src/components/ui/` when possible
+
+## Solo Mode Activities
+
+Solo mode allows students to practice activities independently without a teacher managing a session. Activities with `soloMode: true` appear in the "Solo Bits" section on the join page.
+
+### When to Use Solo Mode
+
+Enable solo mode (`soloMode: true`) for activities that:
+- Focus on individual practice and skill building
+- Don't require teacher orchestration or real-time management
+- Can function entirely client-side or with minimal server interaction
+- Track progress locally (e.g., using localStorage)
+
+### Example: Solo-Only Activity
+
+```javascript
+export const practiceActivity = {
+  id: 'practice',
+  name: 'Practice Mode',
+  description: 'Individual skill practice',
+  ManagerComponent: () => <div>This activity is solo-only</div>,
+  StudentComponent: PracticeComponent,
+  soloMode: true,  // Shows in Solo Bits
+  color: 'green',
+  footerContent: null,
+};
+```
+
+**Key Points:**
+- Solo sessions use sessionId format: `solo-{activityId}` (e.g., `solo-java-string-practice`)
+- No teacher dashboard needed - ManagerComponent can be a stub
+- Store state in localStorage if persistence is needed
+- Server routes are optional for fully client-side activities
+
+### Solo Mode Best Practices
+
+1. **Use localStorage for progress tracking**:
+```javascript
+const sessionId = 'solo-my-activity';
+const stats = JSON.parse(localStorage.getItem(`my-activity-stats-${sessionId}`));
+localStorage.setItem(`my-activity-stats-${sessionId}`, JSON.stringify(newStats));
+```
+
+2. **Make the student experience self-contained** - no external state needed
+3. **Provide clear instructions** - no teacher to guide students
+4. **Consider adding a "reset progress" option** for solo activities
 
 ## Common Patterns
 

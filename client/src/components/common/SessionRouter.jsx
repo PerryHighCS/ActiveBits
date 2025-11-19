@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
-import { getActivity } from '../../activities';
+import { getActivity, activities } from '../../activities';
 
 const CACHE_TTL = 1000 * 60 * 60 * 12; // 12 hours in milliseconds
 
@@ -33,6 +33,7 @@ function cleanExpiredSessions() {
  */
 const SessionRouter = () => {
     const [sessionIdInput, setSessionIdInput] = useState('');
+    const [soloActivity, setSoloActivity] = useState(null);
 
     const { sessionId } = useParams(); // the session ID from the URL
 
@@ -100,15 +101,48 @@ const SessionRouter = () => {
     };
 
     if (error) return <div className="text-red-500 text-center">{error}</div>;
+    
+    // Solo mode - practice without a session
+    if (soloActivity) {
+        const StudentComponent = soloActivity.StudentComponent;
+        return <StudentComponent sessionData={{ sessionId: `solo-${soloActivity.id}`, studentName: 'Solo Player' }} />;
+    }
+    
     if (!sessionId) {
+        // Get all activities that support solo mode
+        const soloActivities = activities.filter(activity => activity.soloMode);
+        
         return (
-            <form onSubmit={handleSubmit} className='flex flex-col items-center w-max mx-auto'>
-                <label className='block mb-4'>
-                    Join Session ID:
-                    <input className='border border-grey-700 rounded mx-2 p-2' size='5' type="text" id='sessionId' value={sessionIdInput} onChange={handleInputChange} />
-                </label>
-                <Button type="submit">Join Session</Button>
-            </form>
+            <div className="flex flex-col items-center gap-8 max-w-2xl mx-auto p-6">
+                {/* Join Session Section */}
+                <form onSubmit={handleSubmit} className='flex flex-col items-center w-max mx-auto'>
+                    <label className='block mb-4'>
+                        Join Session ID:
+                        <input className='border border-grey-700 rounded mx-2 p-2' size='5' type="text" id='sessionId' value={sessionIdInput} onChange={handleInputChange} />
+                    </label>
+                    <Button type="submit">Join Session</Button>
+                </form>
+
+                {/* Solo Bits Section */}
+                {soloActivities.length > 0 && (
+                    <div className="w-full border-t-2 border-gray-300 pt-8">
+                        <h2 className="text-2xl font-bold text-center mb-4 text-gray-800">Solo Bits</h2>
+                        <p className="text-center text-gray-600 mb-6">Practice on your own</p>
+                        <div className="flex flex-col items-center gap-4">
+                            {soloActivities.map(activity => (
+                                <div 
+                                    key={activity.id} 
+                                    onClick={() => setSoloActivity(activity)}
+                                    className="bg-white rounded-lg shadow-md p-6 w-full max-w-md border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                                >
+                                    <h3 className="text-xl font-semibold mb-2 text-gray-800">{activity.name}</h3>
+                                    <p className="text-gray-600">{activity.description}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
         )
     }
 

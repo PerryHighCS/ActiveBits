@@ -4,32 +4,6 @@ import SessionRouter from "./components/common/SessionRouter";
 import ManageDashboard from './components/common/ManageDashboard';
 import { activities } from './activities';
 
-function attribution() {
-    return (
-        <p>
-            Portions of this activity are adapted from{" "}
-            <a
-                href="https://code.org"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-gray-700"
-            >
-                Code.org
-            </a>{" "}
-            Computer Science Principles curriculum. Used under{" "}
-            <a
-                href="https://code.org/en-US/terms-of-service"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-gray-700"
-            >
-                CC BY-NC-SA 4.0
-            </a>
-            .
-        </p>
-    )
-}
-
 const footerClass = "text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto";
 
 function Footer() {
@@ -37,22 +11,22 @@ function Footer() {
 
     // Check if we're on an activity manage page and get custom footer content
     for (const activity of activities) {
-        if (location.pathname.startsWith(`/manage/${activity.id}`) && activity.footerContent) {
-            return (
-                <div className={footerClass}>
-                    <p>{activity.footerContent}</p>
-                    {attribution()}
-                </div>
-            );
+        if (location.pathname.startsWith(`/manage/${activity.id}`)) {
+            // Only show footer if there's actual content
+            if (activity.footerContent) {
+                return (
+                    <div className={footerClass}>
+                        {activity.footerContent}
+                    </div>
+                );
+            }
+            // Activity has no footer content, show nothing
+            return null;
         }
     }
 
-    // Default footer
-    return (
-        <div className={footerClass}>
-            {attribution()}
-        </div>
-    );
+    // Default footer for non-activity pages - no footer on home
+    return null;
 }
 
 /**

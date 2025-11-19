@@ -21,18 +21,32 @@ ActiveBits/
 │       │   │   │   └── WinnerMessage.jsx
 │       │   │   └── student/         # Student views
 │       │   │       └── TicketPage.jsx
-│       │   └── www-sim/             # WWW Simulation activity
-│       │       ├── index.js         # Activity configuration
-│       │       ├── manager/         # Teacher/manager views
-│       │       │   └── WwwSimManager.jsx
-│       │       ├── student/         # Student views
-│       │       │   └── WwwSim.jsx
-│       │       └── components/      # Activity-specific components
-│       │           ├── DNSLookupTable.jsx
-│       │           ├── StudentBrowserView.jsx
-│       │           ├── StudentHostPalette.jsx
-│       │           ├── StudentInfoPanel.jsx
-│       │           └── WwwSimInstructions.jsx
+│       │   ├── www-sim/             # WWW Simulation activity
+│       │   │   ├── index.js         # Activity configuration
+│       │   │   ├── manager/         # Teacher/manager views
+│       │   │   │   └── WwwSimManager.jsx
+│       │   │   ├── student/         # Student views
+│       │   │   │   └── WwwSim.jsx
+│       │   │   └── components/      # Activity-specific components
+│       │   │       ├── DNSLookupTable.jsx
+│       │   │       ├── StudentBrowserView.jsx
+│       │   │       ├── StudentHostPalette.jsx
+│       │   │       ├── StudentInfoPanel.jsx
+│       │   │       └── WwwSimInstructions.jsx
+│       │   └── java-string-practice/    # Java String methods activity
+│       │       ├── index.js             # Activity configuration
+│       │       ├── manager/             # Teacher/manager views
+│       │       │   └── JavaStringPracticeManager.jsx
+│       │       ├── student/             # Student views
+│       │       │   └── JavaStringPractice.jsx
+│       │       └── components/          # Activity-specific components
+│       │           ├── challengeLogic.js
+│       │           ├── ChallengeSelector.jsx
+│       │           ├── StringDisplay.jsx
+│       │           ├── AnswerSection.jsx
+│       │           ├── FeedbackDisplay.jsx
+│       │           ├── StatsPanel.jsx
+│       │           └── styles.css
 │       ├── components/
 │       │   ├── ui/                  # Shared UI components
 │       │   │   ├── Button.jsx
@@ -46,9 +60,11 @@ ActiveBits/
     ├── activities/                   # Activity server modules
     │   ├── raffle/
     │   │   └── routes.js            # Raffle API routes
-    │   └── www-sim/
-    │       ├── routes.js            # WWW Sim API routes
-    │       └── presetPassages.js    # Activity-specific data
+    │   ├── www-sim/
+    │   │   ├── routes.js            # WWW Sim API routes
+    │   │   └── presetPassages.js    # Activity-specific data
+    │   └── java-string-practice/
+    │       └── routes.js            # Java String Practice API routes
     ├── core/                         # Core server modules
     │   ├── sessions.js              # Session management
     │   └── wsRouter.js              # WebSocket router
@@ -84,8 +100,9 @@ export const activityName = {
   description: 'Brief description', // Shown in dashboard
   ManagerComponent: ManagerComp,  // Teacher view component
   StudentComponent: StudentComp,  // Student view component
-  footerContent: 'Optional text', // Custom footer (optional)
-  buttonColor: 'blue',           // Dashboard button color
+  footerContent: null,            // JSX element or null (use .jsx if JSX)
+  color: 'blue',                 // Accent color for activity card
+  soloMode: false,               // Allow solo practice without teacher
 };
 ```
 
@@ -98,6 +115,46 @@ Routes are automatically generated in `App.jsx` based on registered activities:
 ### Adding a New Activity
 
 See **[ADDING_ACTIVITIES.md](ADDING_ACTIVITIES.md)** for a complete step-by-step tutorial with working code examples.
+
+## Solo Mode
+
+Solo mode enables students to practice activities independently without requiring a teacher to manage a session. This feature provides self-paced learning opportunities directly from the join page.
+
+### Configuration
+
+Enable solo mode by setting `soloMode: true` in the activity configuration:
+
+```javascript
+export const myActivity = {
+  id: 'my-activity',
+  name: 'My Activity',
+  soloMode: true,  // Appears in "Solo Bits" section
+  // ... other config
+};
+```
+
+### How It Works
+
+1. **Display**: Activities with `soloMode: true` appear as clickable cards in the "Solo Bits" section on the join page (`/`)
+2. **Session ID Format**: Solo sessions use the format `solo-{activity-id}` (e.g., `solo-java-string-practice`)
+3. **No Teacher Required**: Students can start practicing immediately without a teacher-managed session
+4. **Client-Side State**: Solo activities typically use `localStorage` for progress persistence
+
+### Solo Mode vs. Teacher Mode
+
+| Aspect | Solo Mode | Teacher Mode |
+|--------|-----------|--------------|
+| **Session Creation** | Automatic (`solo-{id}`) | Teacher creates via dashboard |
+| **State Management** | localStorage (client) | Server-side sessions |
+| **Teacher Dashboard** | Not used | Active management |
+| **Use Case** | Self-paced practice | Classroom activities |
+
+### Implementation Tips
+
+- **Manager Component**: Can be a simple stub for solo-only activities
+- **Persistence**: Use localStorage with session-specific keys
+- **Instructions**: Provide clear, self-explanatory UI since no teacher is present
+- **Server Routes**: Optional if activity is fully client-side
 
 ## Session Management
 

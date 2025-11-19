@@ -9,6 +9,12 @@ It currently supports:
 
 - 🌐 **Network Scavenger Hunts** – Simulate IP-based discovery and HTTP interactions.
 
+- ☕ **Java String Practice** – Interactive practice for Java String methods including `substring()`, `indexOf()`, `equals()`, `length()`, and `compareTo()`.
+  * Real-time teacher control of which methods students practice
+  * Live student progress tracking with sortable statistics
+  * Solo mode for self-paced learning
+  * Downloadable CSV reports for classroom assessment
+
 Future modules will include additional hands-on learning tools for computer science and engineering classrooms.
 
 ## 📚 Documentation
