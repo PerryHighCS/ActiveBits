@@ -97,73 +97,7 @@ Routes are automatically generated in `App.jsx` based on registered activities:
 
 ### Adding a New Activity
 
-1. **Create the activity directory structure:**
-   ```bash
-   mkdir -p client/src/activities/my-activity/{manager,student,components}
-   mkdir -p server/activities/my-activity
-   ```
-
-2. **Create the client-side components:**
-   - `manager/MyActivityManager.jsx` - Teacher view
-   - `student/MyActivity.jsx` - Student view
-   - `components/` - Activity-specific UI components (if needed)
-
-3. **Create the activity configuration:**
-   ```javascript
-   // client/src/activities/my-activity/index.js
-   import MyActivityManager from './manager/MyActivityManager';
-   import MyActivity from './student/MyActivity';
-
-   export const myActivity = {
-     id: 'my-activity',
-     name: 'My Activity',
-     description: 'Description of my activity',
-     ManagerComponent: MyActivityManager,
-     StudentComponent: MyActivity,
-     footerContent: null,
-     buttonColor: 'purple',
-   };
-
-   export default myActivity;
-   ```
-
-4. **Register the activity:**
-   ```javascript
-   // client/src/activities/index.js
-   import myActivity from './my-activity';
-   
-   export const activities = [
-     raffleActivity,
-     wwwSimActivity,
-     myActivity,  // Add your activity here
-   ];
-   ```
-
-5. **Create server routes:**
-   ```javascript
-   // server/activities/my-activity/routes.js
-   import { createSession } from '../../core/sessions.js';
-
-   export default function setupMyActivityRoutes(app, sessions, ws) {
-     app.post('/api/my-activity/create', (req, res) => {
-       const session = createSession(sessions, { data: {} });
-       session.type = 'my-activity';
-       // Initialize activity-specific data
-       res.json({ id: session.id });
-     });
-     
-     // Add more routes as needed
-   }
-   ```
-
-6. **Register server routes:**
-   ```javascript
-   // server/server.js
-   import setupMyActivityRoutes from './activities/my-activity/routes.js';
-   
-   // In the server setup:
-   setupMyActivityRoutes(app, sessions, ws);
-   ```
+See **[ADDING_ACTIVITIES.md](ADDING_ACTIVITIES.md)** for a complete step-by-step tutorial with working code examples.
 
 ## Session Management
 
@@ -198,15 +132,16 @@ Located in `components/ui/` and imported with `@src/components/ui/ComponentName`
 ### Activity-Specific Components
 Located within each activity's `components/` folder and imported with relative paths.
 
-## Benefits of This Architecture
+## Key Principles
 
 1. **Modularity** - Each activity is self-contained
 2. **Scalability** - Easy to add new activities without modifying core code
 3. **Maintainability** - Related code is grouped together
 4. **Discoverability** - Clear structure makes it easy to find code
 5. **Consistency** - Standardized patterns across all activities
-6. **Type Safety** - Activity registry provides centralized configuration
-7. **DRY Principle** - Routes and UI are generated from configuration
+6. **DRY Principle** - Routes and UI are generated from configuration
+
+For a detailed comparison of the old vs. new architecture, see [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md).
 
 ## Future Improvements
 

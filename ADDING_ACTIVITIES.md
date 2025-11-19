@@ -1,6 +1,8 @@
 # Quick Start: Adding a New Activity
 
-This guide walks you through adding a new activity to ActiveBits.
+This guide walks you through adding a new activity to ActiveBits with a complete working example.
+
+> 💡 **Tip:** For architectural details and patterns, see [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Example: Adding a "Quiz" Activity
 
@@ -261,6 +263,8 @@ When adding a new activity, create these files:
 5. **Reuse shared UI** - Import from `@src/components/ui/` when possible
 
 ## Common Patterns
+
+For detailed information on component patterns, session management, and API design, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Polling for Updates (Manager Side)
 ```javascript
