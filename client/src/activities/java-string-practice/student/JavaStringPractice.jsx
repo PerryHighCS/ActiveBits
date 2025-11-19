@@ -6,6 +6,7 @@ import StringDisplay from '../components/StringDisplay';
 import AnswerSection from '../components/AnswerSection';
 import FeedbackDisplay from '../components/FeedbackDisplay';
 import StatsPanel from '../components/StatsPanel';
+import ChallengeQuestion from '../components/ChallengeQuestion';
 import { generateChallenge, validateAnswer, getExplanation } from '../components/challengeLogic';
 
 /**
@@ -358,10 +359,7 @@ export default function JavaStringPractice({ sessionData }) {
               />
 
               <div className="question-hint-row">
-                <div
-                  className="question"
-                  dangerouslySetInnerHTML={{ __html: currentChallenge.question }}
-                />
+                <ChallengeQuestion question={currentChallenge.question} />
                 {!feedback && (
                   <div className="hint-controls">
                     {!hintShown && (
