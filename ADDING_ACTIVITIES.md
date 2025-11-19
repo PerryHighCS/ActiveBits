@@ -265,6 +265,52 @@ When adding a new activity, create these files:
 4. **Keep activities self-contained** - All activity code should live in its folder
 5. **Reuse shared UI** - Import from `@src/components/ui/` when possible
 
+## Solo Mode Activities
+
+Solo mode allows students to practice activities independently without a teacher managing a session. Activities with `soloMode: true` appear in the "Solo Bits" section on the join page.
+
+### When to Use Solo Mode
+
+Enable solo mode (`soloMode: true`) for activities that:
+- Focus on individual practice and skill building
+- Don't require teacher orchestration or real-time management
+- Can function entirely client-side or with minimal server interaction
+- Track progress locally (e.g., using localStorage)
+
+### Example: Solo-Only Activity
+
+```javascript
+export const practiceActivity = {
+  id: 'practice',
+  name: 'Practice Mode',
+  description: 'Individual skill practice',
+  ManagerComponent: () => <div>This activity is solo-only</div>,
+  StudentComponent: PracticeComponent,
+  soloMode: true,  // Shows in Solo Bits
+  buttonColor: 'green',
+  footerContent: null,
+};
+```
+
+**Key Points:**
+- Solo sessions use sessionId format: `solo-{activityId}` (e.g., `solo-java-string-practice`)
+- No teacher dashboard needed - ManagerComponent can be a stub
+- Store state in localStorage if persistence is needed
+- Server routes are optional for fully client-side activities
+
+### Solo Mode Best Practices
+
+1. **Use localStorage for progress tracking**:
+```javascript
+const sessionId = 'solo-my-activity';
+const stats = JSON.parse(localStorage.getItem(`my-activity-stats-${sessionId}`));
+localStorage.setItem(`my-activity-stats-${sessionId}`, JSON.stringify(newStats));
+```
+
+2. **Make the student experience self-contained** - no external state needed
+3. **Provide clear instructions** - no teacher to guide students
+4. **Consider adding a "reset progress" option** for solo activities
+
 ## Common Patterns
 
 For detailed information on component patterns, session management, and API design, see [ARCHITECTURE.md](ARCHITECTURE.md).
