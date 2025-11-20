@@ -58,6 +58,9 @@ export default function App() {
                             );
                         })}
                         
+                        {/* Persistent session route */}
+                        <Route path="/activity/:activityName/:hash" element={<SessionRouter />} />
+                        
                         <Route path="/:sessionId" element={<SessionRouter />} />
                         <Route path="/" element={<SessionRouter />} />
                     </Routes>
