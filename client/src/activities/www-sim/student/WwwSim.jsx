@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { useSessionEndedHandler } from "@src/hooks/useSessionEndedHandler";
 import Button from "@src/components/ui/Button";
 import StudentHostPalette from "../components/StudentHostPalette";

@@ -38,5 +38,5 @@ export function useSessionEndedHandler(wsRef) {
     return () => {
       ws.removeEventListener('message', handleMessage);
     };
-  }, [wsRef.current, navigate]);
+  }, [wsRef, navigate]);
 }

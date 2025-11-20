@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
 import SessionHeader from '@src/components/common/SessionHeader';
 
@@ -177,22 +178,12 @@ export default function JavaStringPracticeManager() {
   const downloadCSV = () => {
     const sorted = getSortedStudents();
     
-    // Helper function to escape CSV fields
-    const escapeCSV = (field) => {
-      const str = String(field);
-      // If field contains comma, quote, or newline, wrap in quotes and escape internal quotes
-      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return '"' + str.replace(/"/g, '""') + '"';
-      }
-      return str;
-    };
-    
     // CSV headers
     const headers = ['Student Name', 'Total Attempts', 'Correct', 'Accuracy %', 'Longest Streak'];
     
     // CSV rows
     const rows = sorted.map(student => [
-      escapeCSV(student.name),
+      student.name,
       student.stats?.total || 0,
       student.stats?.correct || 0,
       (student.stats?.total || 0) > 0
@@ -201,22 +192,9 @@ export default function JavaStringPracticeManager() {
       student.stats?.longestStreak || 0,
     ]);
     
-    // Combine headers and rows
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-    
-    // Create blob and download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `java-string-practice-${sessionId}-${new Date().toISOString().slice(0, 10)}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const csvContent = arrayToCsv([headers, ...rows]);
+    const filename = `java-string-practice-${sessionId}-${new Date().toISOString().slice(0, 10)}`;
+    downloadCsv(csvContent, filename);
   };
 
   if (!sessionId) {

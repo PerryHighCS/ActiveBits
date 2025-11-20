@@ -19,11 +19,17 @@ mkdir -p server/activities/quiz
 
 ```jsx
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import useSessionEndedHandler from '@src/hooks/useSessionEndedHandler';
 import Button from '@src/components/ui/Button';
 
-export default function QuizPage({ sessionData }) {
+export default function QuizPage({ sessionData, wsRef }) {
+  const navigate = useNavigate();
   const [answer, setAnswer] = useState('');
   const [submitted, setSubmitted] = useState(false);
+
+  // Handle session termination
+  useSessionEndedHandler(wsRef, navigate);
 
   const handleSubmit = async () => {
     await fetch(`/api/quiz/${sessionData.sessionId}/submit`, {
@@ -64,11 +70,13 @@ export default function QuizPage({ sessionData }) {
 
 ```jsx
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 
 export default function QuizManager() {
   const { sessionId } = useParams();
+  const navigate = useNavigate();
   const [question, setQuestion] = useState('');
   const [responses, setResponses] = useState([]);
 
@@ -93,10 +101,18 @@ export default function QuizManager() {
     });
   };
 
+  const handleEndSession = async () => {
+    await fetch(`/api/session/${sessionId}`, { method: 'DELETE' });
+    navigate('/manage');
+  };
+
   return (
     <div className="p-6">
-      <h2 className="text-xl font-bold mb-4">Quiz Manager</h2>
-      <p className="mb-2">Session ID: <strong>{sessionId}</strong></p>
+      <SessionHeader 
+        activityName="Quiz"
+        sessionId={sessionId}
+        onEndSession={handleEndSession}
+      />
       
       <div className="mb-4">
         <label className="block mb-2">Question:</label>
@@ -219,7 +235,24 @@ export default function setupQuizRoutes(app, sessions, ws) {
 }
 ```
 
-### Step 7: Register Server Routes
+### Step 7: Register Activity in Server Registry
+
+**File: `server/activities/activityRegistry.js`**
+
+```javascript
+export const ALLOWED_ACTIVITIES = [
+  'raffle',
+  'www-sim', 
+  'java-string-practice',
+  'quiz',  // Add your activity here
+];
+
+export function isValidActivity(activityType) {
+  return ALLOWED_ACTIVITIES.includes(activityType);
+}
+```
+
+### Step 8: Register Server Routes
 
 **File: `server/server.js`**
 
@@ -245,12 +278,13 @@ When adding a new activity, create these files:
 
 **Client:**
 - [ ] `client/src/activities/{name}/index.js` (or `.jsx`) - Activity config
-- [ ] `client/src/activities/{name}/manager/Manager.jsx` - Teacher view
-- [ ] `client/src/activities/{name}/student/Student.jsx` - Student view
+- [ ] `client/src/activities/{name}/manager/Manager.jsx` - Teacher view (use SessionHeader)
+- [ ] `client/src/activities/{name}/student/Student.jsx` - Student view (use useSessionEndedHandler)
 - [ ] Update `client/src/activities/index.js` - Register activity
 
 **Server:**
 - [ ] `server/activities/{name}/routes.js` - API endpoints
+- [ ] Update `server/activities/activityRegistry.js` - Add to ALLOWED_ACTIVITIES array
 - [ ] Update `server/server.js` - Import and setup routes
 
 **Optional:**
@@ -264,6 +298,9 @@ When adding a new activity, create these files:
 3. **Follow naming conventions** - Use kebab-case for folder names, PascalCase for components
 4. **Keep activities self-contained** - All activity code should live in its folder
 5. **Reuse shared UI** - Import from `@src/components/ui/` when possible
+6. **Use SessionHeader** - All manager components should use the unified SessionHeader
+7. **Handle session termination** - Student components should use useSessionEndedHandler hook
+8. **Update activity registry** - Don't forget to add your activity to `activityRegistry.js`
 
 ## Solo Mode Activities
 

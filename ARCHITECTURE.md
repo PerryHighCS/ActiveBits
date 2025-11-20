@@ -73,19 +73,35 @@ ActiveBits/
 
 ## User Flow
 
-### Teacher Flow
+### Teacher Flow - Temporary Sessions
 1. Navigate to `/manage`
 2. Click a button to create a new activity session
 3. System creates session and redirects to `/manage/{activity-id}/{session-id}`
 4. Teacher shares the session ID with students
 5. Teacher manages the activity from the manager view
 
+### Teacher Flow - Persistent Sessions
+1. Navigate to `/manage`
+2. Click "Make Permanent Link" for any activity
+3. System creates a persistent session with HMAC-authenticated hash
+4. Teacher receives unique teacher code stored in httpOnly cookie
+5. Permanent link is saved to teacher's session list
+6. Teacher can access the session at any time via `/p/{hash}`
+7. Auto-authentication using teacher code cookie
+8. Download CSV backup of all permanent links
+
 ### Student Flow
-1. Receive session ID from teacher
-2. Navigate to `/{session-id}` or enter ID at `/`
+1. Receive session ID or permanent link from teacher
+2. Navigate to `/{session-id}` or `/p/{hash}` or enter ID at `/`
 3. System fetches session data and determines activity type
 4. Student is shown the appropriate activity component
 5. Student interacts with the activity
+
+### Session Lifecycle
+- **Temporary sessions**: Created on-demand, expire after inactivity
+- **Persistent sessions**: Permanent URLs that reset on each visit
+- **Session termination**: Teacher can end any session, broadcasting to all connected students
+- **WebSocket notifications**: Students automatically redirected when session ends
 
 ## Activity Registration System
 
@@ -158,6 +174,7 @@ export const myActivity = {
 
 ## Session Management
 
+### Temporary Sessions
 Sessions are stored in-memory with a TTL (time-to-live). Each session has:
 - `id` - Unique session identifier
 - `type` - Activity type (e.g., 'raffle', 'www-sim')
@@ -165,26 +182,116 @@ Sessions are stored in-memory with a TTL (time-to-live). Each session has:
 - `lastActivity` - Timestamp of last access
 - `data` - Activity-specific data
 
+### Persistent Sessions
+Permanent sessions use HMAC-SHA256 authentication:
+- **Hash Format**: `{hash}-{salt}` where hash = HMAC(activityType + salt)
+- **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
+- **URL Format**: `/p/{hash}` for permanent activity access
+- **Auto-reset**: Session data resets each time teacher visits
+- **Security**: 
+  - httpOnly cookies prevent XSS attacks
+  - Secure flag enabled in production (HTTPS only)
+  - HMAC prevents URL tampering
+  - Cookie size limit (20 sessions max with FIFO eviction)
+  - Production warnings for default HMAC secret
+
+### Session Termination
+When a teacher ends a session:
+1. DELETE request to `/api/session/:sessionId`
+2. Server broadcasts `session-ended` via WebSocket to all connected clients
+3. Students receive message and redirect to `/session-ended` page
+4. Persistent sessions reset (teacher code remains valid)
+5. Teacher navigates to activity selection page
+
 ## API Patterns
 
 ### Common Endpoints
 - `POST /api/{activity-id}/create` - Create new session
 - `GET /api/session/{session-id}` - Get session data (any type)
-- `DELETE /api/session/{session-id}` - Delete session (any type)
+- `DELETE /api/session/{session-id}` - Delete session and broadcast to clients
+- `POST /api/persistent-session/create` - Create permanent session link
+- `GET /api/persistent-session/list` - Get all permanent sessions (requires teacher codes in cookies)
+- `POST /api/persistent-session/authenticate` - Verify teacher code for persistent session
 
 ### Activity-Specific Endpoints
 Each activity defines its own endpoints under `/api/{activity-id}/...`
 
+### Persistent Session Flow
+1. Teacher clicks "Make Permanent Link" → POST `/api/persistent-session/create`
+2. Server generates HMAC hash and teacher code
+3. Teacher code stored in httpOnly cookie, hash returned to client
+4. Teacher accesses `/p/{hash}` → checks cookie → POST `/api/persistent-session/authenticate`
+5. Server validates HMAC and teacher code, creates/resets session
+6. Teacher auto-authenticated and redirected to manager view
+
 ## Component Patterns
 
 ### Manager Component
-Receives `sessionId` from URL params via `useParams()`.
+Receives `sessionId` from URL params via `useParams()`. Should use `SessionHeader` component for consistent UI:
+
+```jsx
+import SessionHeader from '@src/components/common/SessionHeader';
+
+export default function MyActivityManager() {
+  const { sessionId } = useParams();
+  const navigate = useNavigate();
+  
+  const handleEndSession = async () => {
+    // Optional: cleanup before ending
+    await fetch(`/api/session/${sessionId}`, { method: 'DELETE' });
+    navigate('/manage');
+  };
+  
+  return (
+    <div>
+      <SessionHeader 
+        activityName="My Activity"
+        sessionId={sessionId}
+        onEndSession={handleEndSession}
+      />
+      {/* Activity content */}
+    </div>
+  );
+}
+```
 
 ### Student Component
-Receives `sessionData` prop from `SessionRouter`.
+Receives `sessionData` prop from `SessionRouter`. Should handle session termination:
+
+```jsx
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import useSessionEndedHandler from '@src/hooks/useSessionEndedHandler';
+
+export default function MyActivityStudent({ sessionData, wsRef }) {
+  const navigate = useNavigate();
+  
+  // Automatically handles session-ended messages
+  useSessionEndedHandler(wsRef, navigate);
+  
+  // Activity logic...
+}
+```
 
 ### Shared UI Components
 Located in `components/ui/` and imported with `@src/components/ui/ComponentName`.
+
+- **Button** - Consistent button styling with variants
+- **Modal** - Confirmation dialogs and overlays
+- **RosterPill** - Student count display
+
+### Common Session Components
+Located in `components/common/`:
+
+- **SessionHeader** - Unified header with join code, copy URL, end session button
+- **SessionEnded** - Page shown when teacher ends session
+- **WaitingRoom** - Lobby for persistent sessions before teacher arrives
+- **ManageDashboard** - Main teacher dashboard with persistent session list
+
+### Custom Hooks
+Located in `hooks/`:
+
+- **useSessionEndedHandler** - Centralized WebSocket listener for session termination
 
 ### Activity-Specific Components
 Located within each activity's `components/` folder and imported with relative paths.
@@ -200,6 +307,25 @@ Located within each activity's `components/` folder and imported with relative p
 
 For a detailed comparison of the old vs. new architecture, see [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md).
 
+## Security Considerations
+
+### Authentication
+- **Teacher Codes**: 16-character random strings stored in httpOnly cookies
+- **HMAC Hashing**: SHA-256 with 8-character salt prevents URL tampering
+- **Cookie Security**: httpOnly flag prevents XSS, secure flag for HTTPS in production
+- **Secret Management**: Production deployments must set `PERSISTENT_SESSION_SECRET` environment variable
+
+### Input Validation
+- Activity names validated against centralized registry (`activityRegistry.js`)
+- Session IDs sanitized before database/session lookups
+- Cookie size limits prevent abuse (max 20 sessions per browser)
+- Rate limiting on session creation endpoints (future improvement)
+
+### Data Privacy
+- Teacher codes never exposed in URLs or client-side JavaScript
+- Session data cleared when teacher ends session
+- Persistent sessions reset on each visit (no data persistence between uses)
+
 ## Future Improvements
 
 - TypeScript for better type safety
@@ -207,3 +333,6 @@ For a detailed comparison of the old vs. new architecture, see [REFACTORING_SUMM
 - Activity hot-reloading in development
 - Activity marketplace/plugins
 - Per-activity settings and preferences
+- Database backend for true persistent storage
+- Rate limiting on all API endpoints
+- Activity-level permission system

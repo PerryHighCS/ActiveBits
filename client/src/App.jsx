@@ -60,9 +60,6 @@ export default function App() {
                             );
                         })}
                         
-                        {/* Session ended page */}
-                        <Route path="/session-ended" element={<SessionEnded />} />
-                        
                         {/* Persistent session route */}
                         <Route path="/activity/:activityName/:hash" element={<SessionRouter />} />
                         

@@ -1,7 +1,7 @@
-// ManageDashboard.jsx
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { activities } from '../../activities';
+import { arrayToCsv, downloadCsv } from '../../utils/csvUtils';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 
@@ -16,32 +16,33 @@ export default function ManageDashboard() {
   const [persistentSessions, setPersistentSessions] = useState([]);
   const [savedSessions, setSavedSessions] = useState({});
   const [copiedUrl, setCopiedUrl] = useState(null);
+  const [copiedModalUrl, setCopiedModalUrl] = useState(false);
+  const [sessionError, setSessionError] = useState(null);
 
   // Fetch teacher's persistent sessions on mount
   useEffect(() => {
     fetch('/api/persistent-session/list')
       .then(res => res.json())
-      .then(data => setPersistentSessions(data.sessions || []))
-      .catch(err => console.error('Failed to fetch persistent sessions:', err));
-    
-    // Parse the cookie to get teacher codes
-    const cookieValue = document.cookie
-      .split('; ')
-      .find(row => row.startsWith('persistent_sessions='))
-      ?.split('=')[1];
-    
-    if (cookieValue) {
-      try {
-        const decoded = decodeURIComponent(cookieValue);
-        const sessions = JSON.parse(decoded);
-        setSavedSessions(sessions);
-      } catch (err) {
-        console.error('Failed to parse sessions cookie:', err);
-      }
-    }
+      .then(data => {
+        const sessions = data.sessions || [];
+        setPersistentSessions(sessions);
+        
+        // Build savedSessions map from API response (includes teacher codes)
+        const sessionsMap = {};
+        sessions.forEach(session => {
+          const key = `${session.activityName}:${session.hash}`;
+          sessionsMap[key] = session.teacherCode;
+        });
+        setSavedSessions(sessionsMap);
+      })
+      .catch(err => {
+        console.error('Failed to fetch persistent sessions:', err);
+        setSavedSessions({});
+      });
   }, []);
 
   const createSession = async (activityId) => {
+    setSessionError(null);
     try {
       const res = await fetch(`/api/${activityId}/create`, {
         method: 'POST',
@@ -54,7 +55,8 @@ export default function ManageDashboard() {
       navigate(`/manage/${activityId}/${data.id}`);
     } catch (err) {
       console.error(err);
-      alert('Could not create session.');
+      setSessionError('Could not create session. Please try again.');
+      setTimeout(() => setSessionError(null), 5000);
     }
   };
 
@@ -119,7 +121,8 @@ export default function ManageDashboard() {
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(persistentUrl);
-    alert('URL copied to clipboard!');
+    setCopiedModalUrl(true);
+    setTimeout(() => setCopiedModalUrl(false), 2000);
   };
 
   const copyPersistentUrl = (url) => {
@@ -128,7 +131,7 @@ export default function ManageDashboard() {
     setTimeout(() => setCopiedUrl(null), 2000);
   };
 
-  const downloadCSV = () => {
+  const downloadPersistentLinksCSV = () => {
     const headers = ['Activity', 'Teacher Code', 'URL'];
     const rows = persistentSessions.map(session => [
       getActivityName(session.activityName),
@@ -136,20 +139,8 @@ export default function ManageDashboard() {
       session.fullUrl
     ]);
     
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'permanent-links.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const csvContent = arrayToCsv([headers, ...rows]);
+    downloadCsv(csvContent, 'permanent-links');
   };
 
   // Get activity name from activity ID
@@ -194,6 +185,12 @@ export default function ManageDashboard() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
+      {sessionError && (
+        <div className="mb-4 bg-red-50 border-2 border-red-200 rounded p-3">
+          <p className="text-red-700 font-semibold">{sessionError}</p>
+        </div>
+      )}
+      
       <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">Activity Dashboard</h1>
       <p className="text-center text-gray-600 mb-8">Choose an activity to start a new session</p>
       
@@ -232,7 +229,7 @@ export default function ManageDashboard() {
         <div className="mt-8 bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-xl font-semibold text-gray-800">Your Permanent Links</h2>
-            <Button onClick={downloadCSV} variant="outline" className="text-sm">
+            <Button onClick={downloadPersistentLinksCSV} variant="outline" className="text-sm">
               Download CSV
             </Button>
           </div>
@@ -283,6 +280,12 @@ export default function ManageDashboard() {
               When anyone visits this URL, they'll wait until you start the session with your teacher code.
             </p>
             
+            <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-2">
+              <p className="text-sm text-yellow-800">
+                <strong>⚠️ Security Note:</strong> This is for convenience, not security. The teacher code is stored in your browser cookies and is not encrypted. Do not use sensitive passwords.
+              </p>
+            </div>
+            
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Teacher Code (min. 6 characters)
@@ -327,7 +330,7 @@ export default function ManageDashboard() {
 
             <div className="flex gap-2">
               <Button onClick={copyToClipboard}>
-                Copy to Clipboard
+                {copiedModalUrl ? '✓ Copied!' : 'Copy to Clipboard'}
               </Button>
               <button
                 onClick={() => window.open(persistentUrl, '_blank')}

@@ -10,7 +10,9 @@ import Modal from '../ui/Modal';
  * @param {object} props
  * @param {string} props.activityName - Display name of the activity
  * @param {string} props.sessionId - The session ID
- * @param {function} props.onEndSession - Optional callback when session ends
+ * @param {function} [props.onEndSession] - Optional callback invoked after the session is successfully ended. 
+ *                                          Called after the DELETE request completes but before navigation to /manage.
+ *                                          Use this for activity-specific cleanup (e.g., closing WebSocket connections).
  */
 export default function SessionHeader({ activityName, sessionId, onEndSession }) {
   const [copied, setCopied] = useState(false);
@@ -105,7 +107,9 @@ export default function SessionHeader({ activityName, sessionId, onEndSession })
             </Button>
           </div>
         </div>
-      </div>      {/* End Session Confirmation Modal */}
+      </div>
+      
+      {/* End Session Confirmation Modal */}
       <Modal
         open={showEndModal}
         onClose={() => !isEnding && setShowEndModal(false)}

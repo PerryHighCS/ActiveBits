@@ -99,7 +99,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
         ws.close();
       }
     };
-  }, [activityName, hash, navigate]);
+  }, [activityName, hash, navigate, hasTeacherCookie, autoAuthAttempted]);
 
   const handleTeacherCodeSubmit = (e) => {
     e.preventDefault();

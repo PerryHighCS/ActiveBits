@@ -18,8 +18,19 @@ const RATE_LIMIT_WINDOW = 60000; // 1 minute
 const WAITER_TIMEOUT = 600000; // 10 minutes
 const CLEANUP_INTERVAL = 60000; // 1 minute
 
-// Secret for HMAC (in production, use environment variable)
+// Secret for HMAC (MUST be set in production via environment variable)
 const HMAC_SECRET = process.env.PERSISTENT_SESSION_SECRET || 'default-secret-change-in-production';
+
+// Security check: warn if using default secret in production
+if (!process.env.PERSISTENT_SESSION_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('⚠️  SECURITY WARNING: PERSISTENT_SESSION_SECRET is not set in production!');
+    console.error('⚠️  Using default HMAC secret is a security risk.');
+    console.error('⚠️  Set PERSISTENT_SESSION_SECRET environment variable immediately.');
+  } else {
+    console.warn('⚠️  Development mode: Using default HMAC secret. Set PERSISTENT_SESSION_SECRET for production.');
+  }
+}
 
 /**
  * Hash a teacher code using SHA-256
@@ -59,12 +70,13 @@ export function generatePersistentHash(activityName, teacherCode) {
  * @param {string} activityName - The activity name
  * @param {string} hash - The persistent hash (salt+hmac)
  * @param {string} teacherCode - The teacher code to verify
- * @returns {boolean} - True if valid
+ * @returns {object} - { valid: boolean, error?: string }
  */
 export function verifyTeacherCodeWithHash(activityName, hash, teacherCode) {
   if (hash.length !== 20) {
-    console.log(`Hash validation failed: length=${hash.length}, expected=20`);
-    return false;
+    const error = `Invalid link format (corrupted URL). Expected 20 characters, got ${hash.length}.`;
+    console.log(`Hash validation failed: ${error}`);
+    return { valid: false, error };
   }
   
   const salt = hash.substring(0, 8);
@@ -74,7 +86,11 @@ export function verifyTeacherCodeWithHash(activityName, hash, teacherCode) {
   const payload = `${activityName}|${hashedTeacherCode}|${salt}`;
   const computedHmac = createHmac('sha256', HMAC_SECRET).update(payload).digest('hex').substring(0, 12);
   
-  return computedHmac === expectedHmac;
+  if (computedHmac !== expectedHmac) {
+    return { valid: false, error: 'Invalid teacher code' };
+  }
+  
+  return { valid: true };
 }
 
 /**
@@ -96,6 +112,9 @@ export function getOrCreateActivePersistentSession(activityName, hash, hashedTea
       teacherSocketId: null,
     };
     activePersistentSessions.set(hash, session);
+    
+    // Start cleanup timer if this is the first session
+    ensureCleanupTimer();
   }
   
   // Update hashed teacher code if provided
@@ -156,16 +175,17 @@ export function getWaiterCount(hash) {
 
 /**
  * Check if a socket can attempt to enter a teacher code
- * @param {string} socketId - The socket identifier
+ * Uses IP+hash combination to prevent shared IP false positives
+ * @param {string} rateLimitKey - The rate limit key (e.g., "IP:hash")
  * @returns {boolean} - True if allowed, false if rate limited
  */
-export function canAttemptTeacherCode(socketId) {
-  const record = teacherCodeAttempts.get(socketId);
+export function canAttemptTeacherCode(rateLimitKey) {
+  const record = teacherCodeAttempts.get(rateLimitKey);
   if (!record) return true;
 
   const now = Date.now();
   if (now - record.lastAttempt > RATE_LIMIT_WINDOW) {
-    teacherCodeAttempts.delete(socketId);
+    teacherCodeAttempts.delete(rateLimitKey);
     return true;
   }
 
@@ -174,14 +194,15 @@ export function canAttemptTeacherCode(socketId) {
 
 /**
  * Record a teacher code attempt
- * @param {string} socketId - The socket identifier
+ * Uses IP+hash combination to prevent shared IP false positives
+ * @param {string} rateLimitKey - The rate limit key (e.g., "IP:hash")
  */
-export function recordTeacherCodeAttempt(socketId) {
-  const record = teacherCodeAttempts.get(socketId);
+export function recordTeacherCodeAttempt(rateLimitKey) {
+  const record = teacherCodeAttempts.get(rateLimitKey);
   const now = Date.now();
 
   if (!record || now - record.lastAttempt > RATE_LIMIT_WINDOW) {
-    teacherCodeAttempts.set(socketId, { attempts: 1, lastAttempt: now });
+    teacherCodeAttempts.set(rateLimitKey, { attempts: 1, lastAttempt: now });
   } else {
     record.attempts++;
     record.lastAttempt = now;
@@ -259,19 +280,40 @@ export function findHashBySessionId(sessionId) {
  */
 export function cleanupPersistentSession(hash) {
   activePersistentSessions.delete(hash);
+  
+  // Stop cleanup timer if no active sessions
+  if (activePersistentSessions.size === 0 && cleanupTimer) {
+    clearInterval(cleanupTimer);
+    cleanupTimer = null;
+  }
 }
 
-// Cleanup interval: remove stale waiters and expired sessions
-const cleanupTimer = setInterval(() => {
-  const now = Date.now();
-  
-  for (const [hash, session] of activePersistentSessions.entries()) {
-    // For sessions that haven't started, check if they're old and empty
-    if (!session.sessionId && session.waiters.length === 0 && now - session.createdAt > WAITER_TIMEOUT) {
-      activePersistentSessions.delete(hash);
-    }
-  }
-}, CLEANUP_INTERVAL);
+// Cleanup timer reference (started on-demand)
+let cleanupTimer = null;
 
-// Don't keep the event loop alive just for cleanup
-cleanupTimer.unref?.();
+/**
+ * Ensure cleanup timer is running
+ */
+function ensureCleanupTimer() {
+  if (!cleanupTimer) {
+    cleanupTimer = setInterval(() => {
+      const now = Date.now();
+      
+      for (const [hash, session] of activePersistentSessions.entries()) {
+        // For sessions that haven't started, check if they're old and empty
+        if (!session.sessionId && session.waiters.length === 0 && now - session.createdAt > WAITER_TIMEOUT) {
+          activePersistentSessions.delete(hash);
+        }
+      }
+      
+      // Stop timer if no sessions remain
+      if (activePersistentSessions.size === 0) {
+        clearInterval(cleanupTimer);
+        cleanupTimer = null;
+      }
+    }, CLEANUP_INTERVAL);
+    
+    // Don't keep the event loop alive just for cleanup
+    cleanupTimer.unref?.();
+  }
+}

@@ -10,7 +10,6 @@ import {
   startPersistentSession,
   isSessionStarted,
   getSessionId,
-  hashTeacherCode,
 } from './persistentSessions.js';
 import { createSession } from './sessions.js';
 
@@ -82,10 +81,13 @@ export function setupPersistentSessionWs(ws, sessions) {
  * @param {object} wss - The WebSocket server
  */
 function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss) {
-  const socketId = socket._socket?.remoteAddress + ':' + socket._socket?.remotePort || 'unknown';
+  // Use IP + hash combination for rate limiting to avoid false positives
+  // in proxy/NAT environments where multiple users share the same IP
+  const clientIp = socket._socket?.remoteAddress || 'unknown';
+  const rateLimitKey = `${clientIp}:${hash}`;
   
   // Rate limiting check
-  if (!canAttemptTeacherCode(socketId)) {
+  if (!canAttemptTeacherCode(rateLimitKey)) {
     socket.send(JSON.stringify({
       type: 'teacher-code-error',
       error: 'Too many attempts. Please wait a minute.',
@@ -93,7 +95,7 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
     return;
   }
 
-  recordTeacherCodeAttempt(socketId);
+  recordTeacherCodeAttempt(rateLimitKey);
 
   // Get the session and verify teacher code
   const persistentSession = getPersistentSession(hash);
@@ -106,13 +108,13 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
   }
 
   // Verify the teacher code against the hash
-  const isValid = verifyTeacherCodeWithHash(persistentSession.activityName, hash, teacherCode);
+  const validation = verifyTeacherCodeWithHash(persistentSession.activityName, hash, teacherCode);
   
-  if (!isValid) {
-    console.log(`Invalid teacher code attempt for hash ${hash}, activity ${persistentSession.activityName}`);
+  if (!validation.valid) {
+    console.log(`Teacher code validation failed for hash ${hash}, activity ${persistentSession.activityName}: ${validation.error}`);
     socket.send(JSON.stringify({
       type: 'teacher-code-error',
-      error: 'Invalid teacher code',
+      error: validation.error,
     }));
     return;
   }
@@ -145,25 +147,26 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
   // Mark persistent session as started
   const waiters = startPersistentSession(hash, newSession.id, socket);
 
-  // Notify the teacher FIRST (before any other messages)
+  // Notify the teacher FIRST
+  // Use a separate message type to ensure different handling on client
   socket.send(JSON.stringify({
     type: 'teacher-authenticated',
     sessionId: newSession.id,
   }));
 
-  // Small delay to ensure teacher message is processed first
-  setTimeout(() => {
-    // Notify all OTHER waiters that the session has started
-    for (const waiter of waiters) {
-      if (waiter !== socket && waiter.readyState === 1) { // 1 = OPEN
-        waiter.send(JSON.stringify({
-          type: 'session-started',
-          sessionId: newSession.id,
-        }));
-      }
+  // Immediately notify all OTHER waiters that the session has started
+  // Since these are separate WebSocket connections, message ordering is guaranteed
+  // within each connection (teacher gets 'teacher-authenticated', students get 'session-started')
+  for (const waiter of waiters) {
+    if (waiter !== socket && waiter.readyState === 1) { // 1 = OPEN
+      waiter.send(JSON.stringify({
+        type: 'session-started',
+        sessionId: newSession.id,
+      }));
     }
-    console.log(`Started persistent session ${hash} -> ${newSession.id}, notified ${waiters.length} waiters`);
-  }, 10);
+  }
+  
+  console.log(`Started persistent session ${hash} -> ${newSession.id}, notified ${waiters.length} waiters`);
 }
 
 /**
@@ -172,7 +175,7 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
  * @param {object} session - The persistent session data
  */
 function broadcastWaiterCount(hash, session) {
-  if (!session) return;
+  if (!session || !session.waiters) return;
   
   const count = getWaiterCount(hash);
   const message = JSON.stringify({
