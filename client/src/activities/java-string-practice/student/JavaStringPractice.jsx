@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
@@ -28,6 +29,8 @@ import { generateChallenge, validateAnswer, getExplanation } from '../components
 export default function JavaStringPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
   const initializedRef = useRef(false);
+  const wsRef = useRef(null);
+  const navigate = useNavigate();
   
   const [studentName, setStudentName] = useState('');
   const [studentId, setStudentId] = useState(null); // Unique student ID
@@ -109,6 +112,7 @@ export default function JavaStringPractice({ sessionData }) {
     const wsUrl = `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}${studentIdParam}`;
     console.log('Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
 
     ws.onopen = () => {
       console.log('WebSocket connected for session:', sessionId);
@@ -133,6 +137,9 @@ export default function JavaStringPractice({ sessionData }) {
           const challenge = generateChallenge(new Set(methods));
           setCurrentChallenge(challenge);
           resetChallengeState();
+        } else if (message.type === 'session-ended') {
+          // Session was ended by teacher, redirect to session-ended page
+          navigate('/session-ended');
         }
       } catch (err) {
         console.error('Failed to parse WebSocket message:', err);

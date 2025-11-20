@@ -1,5 +1,5 @@
 // ManageDashboard.jsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { activities } from '../../activities';
 import Modal from '../ui/Modal';
@@ -13,6 +13,33 @@ export default function ManageDashboard() {
   const [persistentUrl, setPersistentUrl] = useState(null);
   const [error, setError] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [persistentSessions, setPersistentSessions] = useState([]);
+  const [savedSessions, setSavedSessions] = useState({});
+  const [copiedUrl, setCopiedUrl] = useState(null);
+
+  // Fetch teacher's persistent sessions on mount
+  useEffect(() => {
+    fetch('/api/persistent-session/list')
+      .then(res => res.json())
+      .then(data => setPersistentSessions(data.sessions || []))
+      .catch(err => console.error('Failed to fetch persistent sessions:', err));
+    
+    // Parse the cookie to get teacher codes
+    const cookieValue = document.cookie
+      .split('; ')
+      .find(row => row.startsWith('persistent_sessions='))
+      ?.split('=')[1];
+    
+    if (cookieValue) {
+      try {
+        const decoded = decodeURIComponent(cookieValue);
+        const sessions = JSON.parse(decoded);
+        setSavedSessions(sessions);
+      } catch (err) {
+        console.error('Failed to parse sessions cookie:', err);
+      }
+    }
+  }, []);
 
   const createSession = async (activityId) => {
     try {
@@ -71,6 +98,18 @@ export default function ManageDashboard() {
       const data = await res.json();
       const fullUrl = `${window.location.origin}${data.url}`;
       setPersistentUrl(fullUrl);
+      
+      // Update savedSessions with the new teacher code
+      setSavedSessions(prev => ({
+        ...prev,
+        [`${selectedActivity.id}:${data.hash}`]: teacherCode.trim()
+      }));
+      
+      // Refresh the list of persistent sessions
+      fetch('/api/persistent-session/list')
+        .then(res => res.json())
+        .then(data => setPersistentSessions(data.sessions || []))
+        .catch(err => console.error('Failed to refresh persistent sessions:', err));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -83,6 +122,48 @@ export default function ManageDashboard() {
     alert('URL copied to clipboard!');
   };
 
+  const copyPersistentUrl = (url) => {
+    navigator.clipboard.writeText(url);
+    setCopiedUrl(url);
+    setTimeout(() => setCopiedUrl(null), 2000);
+  };
+
+  const downloadCSV = () => {
+    const headers = ['Activity', 'Teacher Code', 'URL'];
+    const rows = persistentSessions.map(session => [
+      getActivityName(session.activityName),
+      savedSessions[`${session.activityName}:${session.hash}`] || '',
+      session.fullUrl
+    ]);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'permanent-links.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Get activity name from activity ID
+  const getActivityName = (activityId) => {
+    const activity = activities.find(a => a.id === activityId);
+    return activity ? activity.name : activityId;
+  };
+
+  // Get activity color from activity ID
+  const getActivityColor = (activityId) => {
+    const activity = activities.find(a => a.id === activityId);
+    return activity ? activity.color : 'blue';
+  };
+
   // Map color names to Tailwind classes (Tailwind requires static class names)
   const colorClasses = {
     blue: 'bg-blue-600',
@@ -93,10 +174,29 @@ export default function ManageDashboard() {
     indigo: 'bg-indigo-600',
   };
 
+  const borderColorClasses = {
+    blue: 'border-blue-200',
+    green: 'border-green-200',
+    purple: 'border-purple-200',
+    red: 'border-red-200',
+    yellow: 'border-yellow-200',
+    indigo: 'border-indigo-200',
+  };
+
+  const bgColorClasses = {
+    blue: 'bg-blue-50',
+    green: 'bg-green-50',
+    purple: 'bg-purple-50',
+    red: 'bg-red-50',
+    yellow: 'bg-yellow-50',
+    indigo: 'bg-indigo-50',
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">Activity Dashboard</h1>
       <p className="text-center text-gray-600 mb-8">Choose an activity to start a new session</p>
+      
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {activities.map((activity) => (
           <div
@@ -127,6 +227,50 @@ export default function ManageDashboard() {
         ))}
       </div>
 
+      {/* Persistent Sessions Section */}
+      {persistentSessions.length > 0 && (
+        <div className="mt-8 bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-xl font-semibold text-gray-800">Your Permanent Links</h2>
+            <Button onClick={downloadCSV} variant="outline" className="text-sm">
+              Download CSV
+            </Button>
+          </div>
+          <p className="text-sm text-gray-600 mb-3">
+            These links are stored in your browser cookies. If you clear cookies or use a different browser, you'll need to save these URLs elsewhere.
+          </p>
+          <div className="space-y-2">
+            {persistentSessions.map((session, idx) => {
+              const color = getActivityColor(session.activityName);
+              const bgClass = bgColorClasses[color] || 'bg-blue-50';
+              const borderClass = borderColorClasses[color] || 'border-blue-200';
+              
+              return (
+                <div key={idx} className={`flex items-center gap-2 ${bgClass} p-3 rounded border-2 ${borderClass}`}>
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-700">{getActivityName(session.activityName)}</p>
+                    <p className="text-sm text-gray-600">Teacher Code: <code className="bg-white px-2 py-1 rounded">{savedSessions[`${session.activityName}:${session.hash}`] || '•••••'}</code></p>
+                  </div>
+                  <Button 
+                    onClick={() => copyPersistentUrl(session.fullUrl)}
+                    variant="outline"
+                    className="whitespace-nowrap"
+                  >
+                    {copiedUrl === session.fullUrl ? '✓ Copied URL' : 'Copy URL'}
+                  </Button>
+                  <Button 
+                    onClick={() => window.open(session.fullUrl, '_blank')}
+                    variant="outline"
+                  >
+                    Open
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <Modal 
         open={showPersistentModal} 
         onClose={closePersistentModal}
@@ -144,14 +288,14 @@ export default function ManageDashboard() {
                 Teacher Code (min. 6 characters)
               </label>
               <input
-                type="password"
+                type="text"
                 value={teacherCode}
                 onChange={(e) => setTeacherCode(e.target.value)}
                 className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
-                placeholder="Enter a secure code"
+                placeholder="Create a Teacher Code for this link"
                 minLength={6}
                 required
-                autoComplete="new-password"
+                autoComplete="off"
               />
               <p className="text-xs text-gray-500 mt-1">
                 Remember this code! You'll need it to start sessions from this link.

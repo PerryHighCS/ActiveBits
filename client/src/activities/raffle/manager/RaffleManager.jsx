@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
+import SessionHeader from '@src/components/common/SessionHeader';
 import RaffleLink from './RaffleLink';
 import TicketsList from './TicketsList';
 import WinnerMessage from './WinnerMessage';
@@ -169,9 +170,15 @@ const RaffleManager = () => {
     }
 
     return (
-        <div className='flex flex-col items-center justify-center w-full'>
+        <div className='flex flex-col w-full'>
+            <SessionHeader 
+                activityName="Raffle"
+                sessionId={raffleId}
+            />
+            
+            <div className='flex flex-col items-center justify-center w-full p-6 space-y-4'>
             {/* Display a message if there is one */}
-            {message && <div className='border rounded border-red-500 p-4 mb-4'>
+            {message && <div className='border rounded border-red-500 p-4 mb-4 w-full max-w-4xl'>
                 <div className='text-center mb-2'>{message}</div>
                 {buttonUrl && (
                     <div className='flex justify-center'>
@@ -182,12 +189,7 @@ const RaffleManager = () => {
             }
             {/* Display the raffle ID and ticket list if a raffle ID is present */}
             {raffleId &&
-                <div className='flex flex-col items-center w-full border border-gray-300 p-4 rounded-lg shadow-md'>
-                    <div className='flex flex-row items-center justify-between w-full'>
-                        <h3 className='text-lg font-semibold block'>Raffle ID: {raffleId}</h3>
-                        <Button variant='text' className='block' onClick={deleteRaffle}>❌</Button>
-                    </div>
-
+                <div className='flex flex-col items-center w-full max-w-4xl border border-gray-300 p-4 rounded-lg shadow-md'>
                     {/* Display the raffle link or the winning raffle total */}
                     {(winners.length === 0) ? (
                         <RaffleLink raffleId={raffleId}></RaffleLink>
@@ -208,7 +210,7 @@ const RaffleManager = () => {
                     </div>
                 </div>
             }
-
+            </div>
         </div>
 
     );

@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useSessionEndedHandler } from "@src/hooks/useSessionEndedHandler";
 import Button from "@src/components/ui/Button";
 import StudentHostPalette from "../components/StudentHostPalette";
 import StudentBrowserView from "../components/StudentBrowserView";
@@ -30,6 +32,9 @@ export default function WwwSim({ sessionData }) {
     const wsRef = useRef(null);
     const heartbeatRef = useRef(null);
     const httpKeepAliveRef = useRef(null);
+    
+    // Handle session-ended messages
+    useSessionEndedHandler(wsRef);
 
     const reconnectTimeoutRef = useRef(null);
     const reconnectAttemptsRef = useRef(0);

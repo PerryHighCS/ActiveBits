@@ -106,7 +106,10 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
   }
 
   // Verify the teacher code against the hash
-  if (!verifyTeacherCodeWithHash(persistentSession.activityName, hash, teacherCode)) {
+  const isValid = verifyTeacherCodeWithHash(persistentSession.activityName, hash, teacherCode);
+  
+  if (!isValid) {
+    console.log(`Invalid teacher code attempt for hash ${hash}, activity ${persistentSession.activityName}`);
     socket.send(JSON.stringify({
       type: 'teacher-code-error',
       error: 'Invalid teacher code',
@@ -126,8 +129,8 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
       newSession.data.tickets = [];
       break;
     case 'www-sim':
-      newSession.data.hosts = [];
-      newSession.data.dnsTable = {};
+      newSession.data.students = [];
+      newSession.data.studentTemplates = {};
       break;
     case 'java-string-practice':
       newSession.data.students = [];

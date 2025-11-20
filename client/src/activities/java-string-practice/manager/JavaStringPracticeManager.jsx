@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
+import SessionHeader from '@src/components/common/SessionHeader';
 
 /**
  * JavaStringPracticeManager - Teacher view for managing the Java String Practice activity
@@ -11,13 +12,9 @@ export default function JavaStringPracticeManager() {
   const navigate = useNavigate();
   
   const [students, setStudents] = useState([]);
-  const [copied, setCopied] = useState(false);
   const [selectedMethods, setSelectedMethods] = useState(new Set(['all']));
   const [sortBy, setSortBy] = useState('name'); // 'name', 'total', 'correct', 'accuracy', 'streak'
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
-
-  // Generate student join URL
-  const studentJoinUrl = sessionId ? `${window.location.origin}/${sessionId}` : '';
 
   // Available method types
   const methodTypes = [
@@ -28,18 +25,6 @@ export default function JavaStringPracticeManager() {
     { id: 'length', label: 'length()' },
     { id: 'compareTo', label: 'compareTo()' },
   ];
-
-  // Handler for copying student join link
-  async function copyLink() {
-    if (!studentJoinUrl) return;
-    try {
-      await navigator.clipboard.writeText(studentJoinUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      console.error('Failed to copy link');
-    }
-  }
 
   const handleMethodToggle = (methodId) => {
     const newMethods = new Set(selectedMethods);
@@ -244,48 +229,33 @@ export default function JavaStringPracticeManager() {
   }
 
   return (
-    <div className="p-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <h2 className="text-2xl font-bold">Java String Practice Session</h2>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <input
-                value={studentJoinUrl}
-                readOnly
-                onFocus={(e) => e.target.select()}
-                className="w-64 border border-gray-300 rounded px-2 py-1 text-sm font-mono bg-gray-50"
-              />
-              <Button onClick={copyLink} variant="outline">
-                {copied ? 'Copied!' : 'Copy'}
-              </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm">Join Code:</span>
-              <code className="px-2 py-1 rounded bg-gray-100 font-mono text-lg">{sessionId}</code>
+    <div>
+      <SessionHeader 
+        activityName="Java String Practice Session"
+        sessionId={sessionId}
+      />
+      
+      <div className="p-6">
+        <div className="max-w-4xl mx-auto">
+          {/* Method Selection */}
+          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h3 className="text-xl font-semibold mb-4">Select Methods to Practice</h3>
+            <div className="flex flex-wrap gap-2">
+              {methodTypes.map(method => (
+                <button
+                  key={method.id}
+                  onClick={() => handleMethodToggle(method.id)}
+                  className={`px-4 py-2 rounded transition-colors ${
+                    selectedMethods.has(method.id)
+                      ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                      : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                  }`}
+                >
+                  {method.label}
+                </button>
+              ))}
             </div>
           </div>
-        </div>
-
-        {/* Method Selection */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h3 className="text-xl font-semibold mb-4">Select Methods to Practice</h3>
-          <div className="flex flex-wrap gap-2">
-            {methodTypes.map(method => (
-              <button
-                key={method.id}
-                onClick={() => handleMethodToggle(method.id)}
-                className={`px-4 py-2 rounded transition-colors ${
-                  selectedMethods.has(method.id)
-                    ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                }`}
-              >
-                {method.label}
-              </button>
-            ))}
-          </div>
-        </div>
 
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="flex items-center justify-between mb-4">
@@ -364,6 +334,7 @@ export default function JavaStringPracticeManager() {
               </table>
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>

@@ -24,9 +24,10 @@ const server = http.createServer(app);
 const sessionTtl = Number(process.env.SESSION_TTL_MS) || 60 * 60 * 1000;
 const sessions = createSessionStore(sessionTtl);
 app.locals.sessions = sessions;
-setupSessionRoutes(app, sessions);
 
 const ws = createWsRouter(server, sessions);
+
+setupSessionRoutes(app, sessions, ws.wss);
 
 // Setup persistent session WebSocket handling
 setupPersistentSessionWs(ws, sessions);
@@ -37,6 +38,44 @@ setupWwwSimRoutes(app, sessions, ws);
 setupJavaStringPracticeRoutes(app, sessions, ws);
 
 // Persistent session routes
+// Get list of teacher's persistent sessions from cookies (must be before :hash routes)
+app.get("/api/persistent-session/list", (req, res) => {
+    try {
+        const cookieValue = req.cookies?.['persistent_sessions'];
+        
+        if (!cookieValue) {
+            return res.json({ sessions: [] });
+        }
+
+        let savedSessions = {};
+        try {
+            savedSessions = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
+        } catch (e) {
+            console.error('Failed to parse persistent-sessions cookie:', e);
+            return res.json({ sessions: [] });
+        }
+
+        // Convert cookie entries to session list with URLs
+        const sessions = Object.keys(savedSessions).map(key => {
+            const [activityName, hash] = key.split(':');
+            // Use X-Forwarded-Host and X-Forwarded-Proto if available (for proxied environments)
+            const host = req.get('x-forwarded-host') || req.get('host');
+            const protocol = req.get('x-forwarded-proto') || req.protocol;
+            return {
+                activityName,
+                hash,
+                url: `/activity/${activityName}/${hash}`,
+                fullUrl: `${protocol}://${host}/activity/${activityName}/${hash}`
+            };
+        });
+
+        res.json({ sessions });
+    } catch (err) {
+        console.error('Error in /api/persistent-session/list:', err);
+        res.status(500).json({ error: 'Internal server error', sessions: [] });
+    }
+});
+
 app.post("/api/persistent-session/create", (req, res) => {
     const { activityName, teacherCode } = req.body;
 
@@ -93,18 +132,14 @@ app.get("/api/persistent-session/:hash", (req, res) => {
     
     try {
         const cookieValue = req.cookies[cookieName];
-        console.log('Cookie value:', cookieValue, 'Type:', typeof cookieValue);
         if (cookieValue) {
-            // Cookie-parser automatically decodes, but if it's a string, parse it
             savedSessions = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
-            console.log('Parsed sessions:', savedSessions);
         }
     } catch (err) {
         console.error('Error parsing persistent_sessions cookie:', err);
     }
     
     const cookieKey = `${activityName}:${hash}`;
-    console.log('Looking for key:', cookieKey, 'Found:', !!savedSessions[cookieKey]);
     const hasTeacherCookie = !!savedSessions[cookieKey];
 
     res.json({

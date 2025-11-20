@@ -62,7 +62,10 @@ export function generatePersistentHash(activityName, teacherCode) {
  * @returns {boolean} - True if valid
  */
 export function verifyTeacherCodeWithHash(activityName, hash, teacherCode) {
-  if (hash.length !== 20) return false; // Must be 8 (salt) + 12 (hmac)
+  if (hash.length !== 20) {
+    console.log(`Hash validation failed: length=${hash.length}, expected=20`);
+    return false;
+  }
   
   const salt = hash.substring(0, 8);
   const expectedHmac = hash.substring(8);
@@ -220,6 +223,34 @@ export function isSessionStarted(hash) {
  */
 export function getSessionId(hash) {
   return activePersistentSessions.get(hash)?.sessionId ?? null;
+}
+
+/**
+ * Reset a persistent session (clear sessionId but keep the session for reuse)
+ * This allows the persistent link to be reused after ending a session
+ * @param {string} hash - The persistent hash
+ */
+export function resetPersistentSession(hash) {
+  const session = activePersistentSessions.get(hash);
+  if (session) {
+    session.sessionId = null;
+    session.teacherSocketId = null;
+    // Keep waiters array and other data for reuse
+  }
+}
+
+/**
+ * Find hash by sessionId (for cleanup when session ends)
+ * @param {string} sessionId - The session ID
+ * @returns {string|null} - The hash or null
+ */
+export function findHashBySessionId(sessionId) {
+  for (const [hash, session] of activePersistentSessions.entries()) {
+    if (session.sessionId === sessionId) {
+      return hash;
+    }
+  }
+  return null;
 }
 
 /**

@@ -32,11 +32,34 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
 
     ws.onopen = () => {
       console.log('Connected to waiting room');
+      
+      // If teacher has cookie, immediately try to auto-authenticate
+      if (hasTeacherCookie && !autoAuthAttempted) {
+        setAutoAuthAttempted(true);
+        console.log('Attempting auto-authentication as teacher');
+        
+        fetch(`/api/persistent-session/${hash}/teacher-code?activityName=${activityName}`, { credentials: 'include' })
+          .then(res => res.json())
+          .then(data => {
+            if (data.teacherCode) {
+              console.log('Got teacher code from cookie, authenticating');
+              ws.send(JSON.stringify({
+                type: 'verify-teacher-code',
+                teacherCode: data.teacherCode,
+              }));
+            } else {
+              console.log('No teacher code found in cookie response:', data);
+            }
+          })
+          .catch(err => {
+            console.error('Failed to fetch teacher code:', err);
+          });
+      }
     };
 
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data);
-      console.log('Received WebSocket message:', message);
+      console.log('Received WebSocket message:', message.type, message);
       
       // If already navigated, ignore all messages
       if (hasNavigatedRef.current) {
@@ -46,27 +69,6 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
       
       if (message.type === 'waiter-count') {
         setWaiterCount(message.count);
-        
-        // If teacher has cookie and hasn't tried auto-auth yet, try to get the code and auto-authenticate
-        if (hasTeacherCookie && !autoAuthAttempted && message.count >= 1) {
-          setAutoAuthAttempted(true);
-          // Try to get the teacher code from cookie and auto-authenticate
-          fetch(`/api/persistent-session/${hash}/teacher-code?activityName=${activityName}`, { credentials: 'include' })
-            .then(res => res.json())
-            .then(data => {
-              if (data.teacherCode) {
-                console.log('Auto-authenticating as teacher');
-                // Auto-submit with the teacher code
-                ws.send(JSON.stringify({
-                  type: 'verify-teacher-code',
-                  teacherCode: data.teacherCode,
-                }));
-              }
-            })
-            .catch(err => {
-              console.error('Failed to auto-authenticate:', err);
-            });
-        }
       } else if (message.type === 'session-started') {
         // Session was started by teacher, redirect to session
         console.log('Redirecting to student session:', message.sessionId);
