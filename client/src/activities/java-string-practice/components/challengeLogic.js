@@ -73,6 +73,11 @@ export function generateChallenge(selectedTypes) {
     availableTypes = Array.from(selectedTypes);
   }
   
+  // Fallback to all types if no valid types are selected
+  if (availableTypes.length === 0) {
+    availableTypes = Object.keys(challengeTypes);
+  }
+  
   const randomType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
   
   let challenge;

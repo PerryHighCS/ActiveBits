@@ -16,6 +16,10 @@ export default defineConfig({
     },
   },
   server: {
+    hmr: {
+      // Disable HMR WebSocket in Codespaces to prevent connection errors
+      clientPort: process.env.CODESPACES ? 443 : undefined,
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
