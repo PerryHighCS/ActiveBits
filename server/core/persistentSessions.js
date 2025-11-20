@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 
 /**
  * Persistent Session Management
@@ -86,7 +86,17 @@ export function verifyTeacherCodeWithHash(activityName, hash, teacherCode) {
   const payload = `${activityName}|${hashedTeacherCode}|${salt}`;
   const computedHmac = createHmac('sha256', HMAC_SECRET).update(payload).digest('hex').substring(0, 12);
   
-  if (computedHmac !== expectedHmac) {
+  // Use constant-time comparison to prevent timing-based side-channel attacks
+  // Convert hex strings to buffers for timingSafeEqual
+  const expectedBuffer = Buffer.from(expectedHmac, 'hex');
+  const computedBuffer = Buffer.from(computedHmac, 'hex');
+  
+  try {
+    if (!timingSafeEqual(expectedBuffer, computedBuffer)) {
+      return { valid: false, error: 'Invalid teacher code' };
+    }
+  } catch (err) {
+    // timingSafeEqual throws if buffers have different lengths
     return { valid: false, error: 'Invalid teacher code' };
   }
   

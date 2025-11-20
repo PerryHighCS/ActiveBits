@@ -81,6 +81,26 @@ export function setupPersistentSessionWs(ws, sessions) {
  * @param {object} wss - The WebSocket server
  */
 function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss) {
+  // Validate teacherCode input
+  if (!teacherCode || typeof teacherCode !== 'string') {
+    socket.send(JSON.stringify({
+      type: 'teacher-code-error',
+      error: 'Invalid teacher code format',
+    }));
+    return;
+  }
+
+  // Prevent DoS attacks through extremely long strings
+  // Reasonable limit: 100 characters (typical codes are much shorter)
+  const MAX_TEACHER_CODE_LENGTH = 100;
+  if (teacherCode.length > MAX_TEACHER_CODE_LENGTH) {
+    socket.send(JSON.stringify({
+      type: 'teacher-code-error',
+      error: 'Teacher code too long',
+    }));
+    return;
+  }
+
   // Use IP + hash combination for rate limiting to avoid false positives
   // in proxy/NAT environments where multiple users share the same IP
   const clientIp = socket._socket?.remoteAddress || 'unknown';

@@ -35,7 +35,6 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
       
       // If teacher has cookie, immediately try to auto-authenticate
       if (hasTeacherCookie && !autoAuthAttempted) {
-        setAutoAuthAttempted(true);
         console.log('Attempting auto-authentication as teacher');
         
         fetch(`/api/persistent-session/${hash}/teacher-code?activityName=${activityName}`, { credentials: 'include' })
@@ -53,12 +52,24 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
           })
           .catch(err => {
             console.error('Failed to fetch teacher code:', err);
+          })
+          .finally(() => {
+            // Mark as attempted after fetch completes (success or failure)
+            // This prevents duplicate attempts on reconnection
+            setAutoAuthAttempted(true);
           });
       }
     };
 
     ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch (err) {
+        console.error('Failed to parse WebSocket message:', err, event.data);
+        return; // Ignore malformed messages
+      }
+      
       console.log('Received WebSocket message:', message.type, message);
       
       // If already navigated, ignore all messages

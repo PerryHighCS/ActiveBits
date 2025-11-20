@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
@@ -9,6 +8,7 @@ import FeedbackDisplay from '../components/FeedbackDisplay';
 import StatsPanel from '../components/StatsPanel';
 import ChallengeQuestion from '../components/ChallengeQuestion';
 import { generateChallenge, validateAnswer, getExplanation } from '../components/challengeLogic';
+import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 
 /**
  * JavaStringPractice - Student view for practicing Java String methods
@@ -30,7 +30,9 @@ export default function JavaStringPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
   const initializedRef = useRef(false);
   const wsRef = useRef(null);
-  const navigate = useNavigate();
+  
+  // Handle session termination
+  useSessionEndedHandler(wsRef);
   
   const [studentName, setStudentName] = useState('');
   const [studentId, setStudentId] = useState(null); // Unique student ID
@@ -137,9 +139,6 @@ export default function JavaStringPractice({ sessionData }) {
           const challenge = generateChallenge(new Set(methods));
           setCurrentChallenge(challenge);
           resetChallengeState();
-        } else if (message.type === 'session-ended') {
-          // Session was ended by teacher, redirect to session-ended page
-          navigate('/session-ended');
         }
       } catch (err) {
         console.error('Failed to parse WebSocket message:', err);

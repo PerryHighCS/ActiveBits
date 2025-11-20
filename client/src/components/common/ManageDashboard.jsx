@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { activities } from '../../activities';
 import { arrayToCsv, downloadCsv } from '../../utils/csvUtils';
+import { useClipboard } from '../../hooks/useClipboard';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 
@@ -15,8 +16,7 @@ export default function ManageDashboard() {
   const [isCreating, setIsCreating] = useState(false);
   const [persistentSessions, setPersistentSessions] = useState([]);
   const [savedSessions, setSavedSessions] = useState({});
-  const [copiedUrl, setCopiedUrl] = useState(null);
-  const [copiedModalUrl, setCopiedModalUrl] = useState(false);
+  const { copyToClipboard, isCopied } = useClipboard();
   const [sessionError, setSessionError] = useState(null);
 
   // Fetch teacher's persistent sessions on mount
@@ -117,18 +117,6 @@ export default function ManageDashboard() {
     } finally {
       setIsCreating(false);
     }
-  };
-
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(persistentUrl);
-    setCopiedModalUrl(true);
-    setTimeout(() => setCopiedModalUrl(false), 2000);
-  };
-
-  const copyPersistentUrl = (url) => {
-    navigator.clipboard.writeText(url);
-    setCopiedUrl(url);
-    setTimeout(() => setCopiedUrl(null), 2000);
   };
 
   const downloadPersistentLinksCSV = () => {
@@ -249,11 +237,11 @@ export default function ManageDashboard() {
                     <p className="text-sm text-gray-600">Teacher Code: <code className="bg-white px-2 py-1 rounded">{savedSessions[`${session.activityName}:${session.hash}`] || '•••••'}</code></p>
                   </div>
                   <Button 
-                    onClick={() => copyPersistentUrl(session.fullUrl)}
+                    onClick={() => copyToClipboard(session.fullUrl)}
                     variant="outline"
                     className="whitespace-nowrap"
                   >
-                    {copiedUrl === session.fullUrl ? '✓ Copied URL' : 'Copy URL'}
+                    {isCopied(session.fullUrl) ? '✓ Copied URL' : 'Copy URL'}
                   </Button>
                   <Button 
                     onClick={() => window.open(session.fullUrl, '_blank')}
@@ -329,8 +317,8 @@ export default function ManageDashboard() {
             </div>
 
             <div className="flex gap-2">
-              <Button onClick={copyToClipboard}>
-                {copiedModalUrl ? '✓ Copied!' : 'Copy to Clipboard'}
+              <Button onClick={() => copyToClipboard(persistentUrl)}>
+                {isCopied(persistentUrl) ? '✓ Copied!' : 'Copy to Clipboard'}
               </Button>
               <button
                 onClick={() => window.open(persistentUrl, '_blank')}

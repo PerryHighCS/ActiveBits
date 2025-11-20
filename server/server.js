@@ -51,28 +51,50 @@ app.get("/api/persistent-session/list", (req, res) => {
             return res.json({ sessions: [] });
         }
 
-        let savedSessions = {};
+        let parsedCookie;
         try {
-            savedSessions = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
+            parsedCookie = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
         } catch (e) {
             console.error('Failed to parse persistent-sessions cookie:', e);
             return res.json({ sessions: [] });
         }
 
+        // Support both array format (new) and object format (legacy)
+        let sessionEntries = [];
+        if (Array.isArray(parsedCookie)) {
+            // New format: array of {key, teacherCode} objects with explicit insertion order
+            sessionEntries = parsedCookie;
+        } else if (typeof parsedCookie === 'object') {
+            // Legacy format: plain object (migration path)
+            sessionEntries = Object.keys(parsedCookie).map(key => ({
+                key,
+                teacherCode: parsedCookie[key]
+            }));
+        }
+
         // Convert cookie entries to session list with URLs and teacher codes
-        const sessions = Object.keys(savedSessions).map(key => {
-            const [activityName, hash] = key.split(':');
-            // Use X-Forwarded-Host and X-Forwarded-Proto if available (for proxied environments)
-            const host = req.get('x-forwarded-host') || req.get('host');
-            const protocol = req.get('x-forwarded-proto') || req.protocol;
-            return {
-                activityName,
-                hash,
-                teacherCode: savedSessions[key], // Include teacher code from cookie
-                url: `/activity/${activityName}/${hash}`,
-                fullUrl: `${protocol}://${host}/activity/${activityName}/${hash}`
-            };
-        });
+        const sessions = sessionEntries
+            .map(entry => {
+                const parts = entry.key.split(':');
+                // Validate key format (should be "activityName:hash")
+                if (parts.length !== 2 || !parts[0] || !parts[1]) {
+                    console.warn(`Invalid session key format: "${entry.key}"`);
+                    return null; // Skip invalid entries
+                }
+                
+                const [activityName, hash] = parts;
+                // Use X-Forwarded-Host and X-Forwarded-Proto if available (for proxied environments)
+                const host = req.get('x-forwarded-host') || req.get('host');
+                const protocol = req.get('x-forwarded-proto') || req.protocol;
+                return {
+                    activityName,
+                    hash,
+                    teacherCode: entry.teacherCode, // Include teacher code from cookie
+                    url: `/activity/${activityName}/${hash}`,
+                    fullUrl: `${protocol}://${host}/activity/${activityName}/${hash}`
+                };
+            })
+            .filter(session => session !== null); // Remove invalid entries
 
         res.json({ sessions });
     } catch (err) {
@@ -88,6 +110,11 @@ app.post("/api/persistent-session/create", (req, res) => {
         return res.status(400).json({ error: 'Missing activityName or teacherCode' });
     }
 
+    // Validate teacherCode type
+    if (typeof teacherCode !== 'string') {
+        return res.status(400).json({ error: 'Teacher code must be a string' });
+    }
+
     // Validate activityName is allowed
     if (!isValidActivity(activityName)) {
         return res.status(400).json({ 
@@ -96,8 +123,13 @@ app.post("/api/persistent-session/create", (req, res) => {
         });
     }
 
+    // Validate teacherCode length (prevent DoS through extremely long strings)
+    const MAX_TEACHER_CODE_LENGTH = 100;
     if (teacherCode.length < 6) {
         return res.status(400).json({ error: 'Teacher code must be at least 6 characters' });
+    }
+    if (teacherCode.length > MAX_TEACHER_CODE_LENGTH) {
+        return res.status(400).json({ error: `Teacher code must be at most ${MAX_TEACHER_CODE_LENGTH} characters` });
     }
 
     const { hash } = generatePersistentHash(activityName, teacherCode);
@@ -113,36 +145,51 @@ app.post("/api/persistent-session/create", (req, res) => {
     // SIZE NOTE: Cookies have a size limit (~4KB). We limit to 20 sessions to stay well under this limit.
     // Each entry is roughly ~100 bytes (activityName:hash + teacherCode), so 20 sessions ≈ 2KB.
     // Alternative approaches for more sessions: localStorage (client-side), or database (server-side).
+    //
+    // FORMAT NOTE: We use an array format [{key, teacherCode}, ...] to maintain explicit insertion order
+    // for FIFO eviction. This is more reliable than depending on object key insertion order.
     const cookieName = 'persistent_sessions';
     const MAX_SESSIONS_PER_COOKIE = 20;
-    let existingSessions = {};
+    let existingSessions = [];
     
     try {
         const cookieValue = req.cookies[cookieName];
         if (cookieValue) {
-            existingSessions = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
-            // Validate it's an object
-            if (typeof existingSessions !== 'object' || Array.isArray(existingSessions)) {
-                console.error('Invalid cookie format during creation: expected object, got', typeof existingSessions);
-                existingSessions = {}; // Reset to empty if corrupted
+            const parsedCookie = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
+            
+            // Support both array format (new) and object format (legacy migration)
+            if (Array.isArray(parsedCookie)) {
+                existingSessions = parsedCookie;
+            } else if (typeof parsedCookie === 'object') {
+                // Migrate from old object format to new array format
+                existingSessions = Object.keys(parsedCookie).map(key => ({
+                    key,
+                    teacherCode: parsedCookie[key]
+                }));
+            } else {
+                console.error('Invalid cookie format during creation: expected array or object, got', typeof parsedCookie);
+                existingSessions = []; // Reset to empty if corrupted
             }
         }
     } catch (err) {
         console.error('Error parsing existing cookie:', err);
-        existingSessions = {}; // Reset to empty if corrupted
+        existingSessions = []; // Reset to empty if corrupted
     }
     
-    // Add new session
-    existingSessions[`${activityName}:${hash}`] = teacherCode;
+    const newKey = `${activityName}:${hash}`;
     
-    // Enforce limit: if over limit, remove oldest entries (simple FIFO approach)
-    const sessionKeys = Object.keys(existingSessions);
-    if (sessionKeys.length > MAX_SESSIONS_PER_COOKIE) {
-        // Remove the first (oldest) entries until we're at the limit
-        const toRemove = sessionKeys.length - MAX_SESSIONS_PER_COOKIE;
-        for (let i = 0; i < toRemove; i++) {
-            delete existingSessions[sessionKeys[i]];
-        }
+    // Check if this session already exists and update it (move to end)
+    const existingIndex = existingSessions.findIndex(s => s.key === newKey);
+    if (existingIndex !== -1) {
+        existingSessions.splice(existingIndex, 1);
+    }
+    
+    // Add new session at the end (most recent)
+    existingSessions.push({ key: newKey, teacherCode });
+    
+    // Enforce limit: if over limit, remove oldest entries (FIFO - remove from start of array)
+    if (existingSessions.length > MAX_SESSIONS_PER_COOKIE) {
+        existingSessions = existingSessions.slice(-MAX_SESSIONS_PER_COOKIE);
     }
     
     // SECURITY: httpOnly protects against XSS attacks by preventing client-side JavaScript access.
@@ -172,17 +219,22 @@ app.get("/api/persistent-session/:hash", (req, res) => {
 
     // Check if user has the teacher code in their cookies
     const cookieName = 'persistent_sessions';
-    let savedSessions = {};
+    let hasTeacherCookie = false;
     let cookieCorrupted = false;
     
     try {
         const cookieValue = req.cookies[cookieName];
         if (cookieValue) {
-            savedSessions = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
-            // Validate it's an object
-            if (typeof savedSessions !== 'object' || Array.isArray(savedSessions)) {
-                console.error('Invalid cookie format: expected object, got', typeof savedSessions);
-                savedSessions = {};
+            const parsedCookie = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
+            const cookieKey = `${activityName}:${hash}`;
+            
+            // Support both array format (new) and object format (legacy)
+            if (Array.isArray(parsedCookie)) {
+                hasTeacherCookie = parsedCookie.some(s => s.key === cookieKey);
+            } else if (typeof parsedCookie === 'object') {
+                hasTeacherCookie = !!parsedCookie[cookieKey];
+            } else {
+                console.error('Invalid cookie format: expected array or object, got', typeof parsedCookie);
                 cookieCorrupted = true;
             }
         }
@@ -190,9 +242,6 @@ app.get("/api/persistent-session/:hash", (req, res) => {
         console.error('Error parsing persistent_sessions cookie:', err);
         cookieCorrupted = true;
     }
-    
-    const cookieKey = `${activityName}:${hash}`;
-    const hasTeacherCookie = !!savedSessions[cookieKey];
 
     res.json({
         activityName: session.activityName,
@@ -213,15 +262,22 @@ app.get("/api/persistent-session/:hash/teacher-code", (req, res) => {
     }
 
     const cookieName = 'persistent_sessions';
-    let savedSessions = {};
+    let teacherCode = null;
     
     try {
         const cookieValue = req.cookies[cookieName];
         if (cookieValue) {
-            savedSessions = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
-            // Validate it's an object
-            if (typeof savedSessions !== 'object' || Array.isArray(savedSessions)) {
-                console.error('Invalid cookie format: expected object, got', typeof savedSessions);
+            const parsedCookie = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
+            const cookieKey = `${activityName}:${hash}`;
+            
+            // Support both array format (new) and object format (legacy)
+            if (Array.isArray(parsedCookie)) {
+                const entry = parsedCookie.find(s => s.key === cookieKey);
+                teacherCode = entry?.teacherCode || null;
+            } else if (typeof parsedCookie === 'object') {
+                teacherCode = parsedCookie[cookieKey] || null;
+            } else {
+                console.error('Invalid cookie format: expected array or object, got', typeof parsedCookie);
                 return res.status(400).json({ 
                     error: 'Cookie corrupted',
                     message: 'Your saved sessions cookie is corrupted. Please clear your cookies and create a new permanent link.'
@@ -235,9 +291,6 @@ app.get("/api/persistent-session/:hash/teacher-code", (req, res) => {
             message: 'Your saved sessions cookie is corrupted. Please clear your cookies and create a new permanent link.'
         });
     }
-    
-    const cookieKey = `${activityName}:${hash}`;
-    const teacherCode = savedSessions[cookieKey];
 
     if (teacherCode) {
         res.json({ teacherCode });

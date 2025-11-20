@@ -260,14 +260,11 @@ Receives `sessionData` prop from `SessionRouter`. Should handle session terminat
 
 ```jsx
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import useSessionEndedHandler from '@src/hooks/useSessionEndedHandler';
+import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 
 export default function MyActivityStudent({ sessionData, wsRef }) {
-  const navigate = useNavigate();
-  
-  // Automatically handles session-ended messages
-  useSessionEndedHandler(wsRef, navigate);
+  // Automatically handles session-ended messages and redirects to /session-ended
+  useSessionEndedHandler(wsRef);
   
   // Activity logic...
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useClipboard } from '@src/hooks/useClipboard';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 
@@ -15,38 +16,20 @@ import Modal from '../ui/Modal';
  *                                          Use this for activity-specific cleanup (e.g., closing WebSocket connections).
  */
 export default function SessionHeader({ activityName, sessionId, onEndSession }) {
-  const [copied, setCopied] = useState(false);
-  const [codeCopied, setCodeCopied] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const { copyToClipboard, isCopied } = useClipboard(1500);
   const navigate = useNavigate();
 
   const studentJoinUrl = sessionId ? `${window.location.origin}/${sessionId}` : '';
 
-  const copyLink = async () => {
-    if (!studentJoinUrl) return;
-    try {
-      await navigator.clipboard.writeText(studentJoinUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      console.error('Failed to copy link');
-    }
-  };
-
-  const copyCode = async () => {
-    if (!sessionId) return;
-    try {
-      await navigator.clipboard.writeText(sessionId);
-      setCodeCopied(true);
-      setTimeout(() => setCodeCopied(false), 1500);
-    } catch {
-      console.error('Failed to copy code');
-    }
-  };
+  const copyLink = () => copyToClipboard(studentJoinUrl);
+  const copyCode = () => copyToClipboard(sessionId);
 
   const handleEndSession = async () => {
     setIsEnding(true);
+    setErrorMessage('');
     try {
       const res = await fetch(`/api/session/${sessionId}`, {
         method: 'DELETE',
@@ -63,9 +46,8 @@ export default function SessionHeader({ activityName, sessionId, onEndSession })
       navigate('/manage');
     } catch (err) {
       console.error('Error ending session:', err);
-      alert('Failed to end session. Please try again.');
+      setErrorMessage('Failed to end session. Please try again.');
       setIsEnding(false);
-      setShowEndModal(false);
     }
   };
 
@@ -87,13 +69,13 @@ export default function SessionHeader({ activityName, sessionId, onEndSession })
                     className="px-3 py-1.5 rounded bg-gray-100 font-mono text-lg font-semibold text-gray-800 cursor-pointer hover:bg-gray-200 transition-colors"
                     title="Click to copy"
                   >
-                    {codeCopied ? '✓ Copied!' : sessionId}
+                    {isCopied(sessionId) ? '✓ Copied!' : sessionId}
                   </code>
                 </div>
 
                 {/* Copy URL Button */}
                 <Button onClick={copyLink} variant="outline">
-                  {copied ? '✓ Copied!' : 'Copy Join URL'}
+                  {isCopied(studentJoinUrl) ? '✓ Copied!' : 'Copy Join URL'}
                 </Button>
               </div>
 
@@ -103,8 +85,8 @@ export default function SessionHeader({ activityName, sessionId, onEndSession })
                 variant="outline"
                 className="!border-red-600 !text-red-600 hover:!bg-red-50 hover:!text-red-700"
               >
-              End Session
-            </Button>
+                End Session
+              </Button>
           </div>
         </div>
       </div>
@@ -116,6 +98,11 @@ export default function SessionHeader({ activityName, sessionId, onEndSession })
         title="End Session"
       >
         <div className="space-y-4">
+          {errorMessage && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-800">{errorMessage}</p>
+            </div>
+          )}
           <p className="text-gray-700">
             Are you sure you want to end this session? All students will be disconnected and progress data will be cleared.
           </p>
