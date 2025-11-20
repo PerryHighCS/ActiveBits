@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -8,18 +8,29 @@ import { useNavigate } from 'react-router-dom';
  * Usage in student components:
  * ```
  * const wsRef = useRef(null);
- * useSessionEndedHandler(wsRef);
+ * const attachSessionEndedHandler = useSessionEndedHandler();
+ * 
+ * useEffect(() => {
+ *   const ws = new WebSocket(url);
+ *   wsRef.current = ws;
+ *   attachSessionEndedHandler(ws); // Attach handler after creating WebSocket
+ *   // ... rest of setup
+ * }, []);
  * ```
  * 
- * @param {React.RefObject} wsRef - Reference to the WebSocket connection
+ * @returns {function} - Function to attach handler to a WebSocket
  */
-export function useSessionEndedHandler(wsRef) {
+export function useSessionEndedHandler() {
   const navigate = useNavigate();
+  const cleanupRef = useRef(null);
 
-  useEffect(() => {
-    if (!wsRef?.current) return;
-
-    const ws = wsRef.current;
+  return useCallback((ws) => {
+    if (!ws) return;
+    
+    // Clean up previous listener if any
+    if (cleanupRef.current) {
+      cleanupRef.current();
+    }
     
     const handleMessage = (event) => {
       try {
@@ -32,11 +43,12 @@ export function useSessionEndedHandler(wsRef) {
       }
     };
 
-    // Add our listener (won't interfere with other message handlers)
+    // Add listener
     ws.addEventListener('message', handleMessage);
-
-    return () => {
+    
+    // Store cleanup function
+    cleanupRef.current = () => {
       ws.removeEventListener('message', handleMessage);
     };
-  }, [wsRef, navigate]);
+  }, [navigate]);
 }

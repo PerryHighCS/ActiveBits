@@ -31,8 +31,8 @@ export default function JavaStringPractice({ sessionData }) {
   const initializedRef = useRef(false);
   const wsRef = useRef(null);
   
-  // Handle session termination
-  useSessionEndedHandler(wsRef);
+  // Get session-ended handler
+  const attachSessionEndedHandler = useSessionEndedHandler();
   
   const [studentName, setStudentName] = useState('');
   const [studentId, setStudentId] = useState(null); // Unique student ID
@@ -115,6 +115,9 @@ export default function JavaStringPractice({ sessionData }) {
     console.log('Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    
+    // Attach session-ended handler
+    attachSessionEndedHandler(ws);
 
     ws.onopen = () => {
       console.log('WebSocket connected for session:', sessionId);
@@ -158,7 +161,7 @@ export default function JavaStringPractice({ sessionData }) {
         ws.close();
       }
     };
-  }, [sessionId, nameSubmitted, studentName, studentId, resetChallengeState]);
+  }, [sessionId, nameSubmitted, studentName, studentId, resetChallengeState, attachSessionEndedHandler]);
 
   // Load saved stats from localStorage
   useEffect(() => {

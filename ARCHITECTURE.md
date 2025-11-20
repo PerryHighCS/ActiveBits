@@ -259,14 +259,21 @@ export default function MyActivityManager() {
 Receives `sessionData` prop from `SessionRouter`. Should handle session termination:
 
 ```jsx
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 
 export default function MyActivityStudent({ sessionData, wsRef }) {
-  // Automatically handles session-ended messages and redirects to /session-ended
-  useSessionEndedHandler(wsRef);
+  const attachSessionEndedHandler = useSessionEndedHandler();
   
-  // Activity logic...
+  useEffect(() => {
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    
+    // Attach handler after creating WebSocket
+    attachSessionEndedHandler(ws);
+    
+    // Activity WebSocket setup...
+  }, [attachSessionEndedHandler]);
 }
 ```
 

@@ -32,8 +32,8 @@ export default function WwwSim({ sessionData }) {
     const heartbeatRef = useRef(null);
     const httpKeepAliveRef = useRef(null);
     
-    // Handle session-ended messages
-    useSessionEndedHandler(wsRef);
+    // Get session-ended handler
+    const attachSessionEndedHandler = useSessionEndedHandler();
 
     const reconnectTimeoutRef = useRef(null);
     const reconnectAttemptsRef = useRef(0);
@@ -57,6 +57,9 @@ export default function WwwSim({ sessionData }) {
 
             wsRef.current?.close();
             wsRef.current = ws;
+            
+            // Attach session-ended handler
+            attachSessionEndedHandler(ws);
 
             ws.onopen = () => {
                 reconnectAttemptsRef.current = 0;
