@@ -21,14 +21,26 @@ const CLEANUP_INTERVAL = 60000; // 1 minute
 // Secret for HMAC (MUST be set in production via environment variable)
 const HMAC_SECRET = process.env.PERSISTENT_SESSION_SECRET || 'default-secret-change-in-production';
 
-// Security check: warn if using default secret in production
-if (!process.env.PERSISTENT_SESSION_SECRET) {
+// Security check: warn if using default secret in production or if secret is weak
+const weakSecrets = [
+  'secret', 'password', '12345', 'changeme', 'default', 'admin', 'letmein', 'qwerty',
+  'default-secret-change-in-production'
+];
+const envSecret = process.env.PERSISTENT_SESSION_SECRET;
+if (!envSecret) {
   if (process.env.NODE_ENV === 'production') {
     console.error('⚠️  SECURITY WARNING: PERSISTENT_SESSION_SECRET is not set in production!');
     console.error('⚠️  Using default HMAC secret is a security risk.');
     console.error('⚠️  Set PERSISTENT_SESSION_SECRET environment variable immediately.');
   } else {
     console.warn('⚠️  Development mode: Using default HMAC secret. Set PERSISTENT_SESSION_SECRET for production.');
+  }
+} else {
+  if (envSecret.length < 32) {
+    console.warn('⚠️  SECURITY WARNING: PERSISTENT_SESSION_SECRET is less than 32 characters. Use a longer, randomly generated secret for production.');
+  }
+  if (weakSecrets.includes(envSecret.toLowerCase())) {
+    console.warn('⚠️  SECURITY WARNING: PERSISTENT_SESSION_SECRET appears to be a weak or default value. Choose a strong, unique secret.');
   }
 }
 
