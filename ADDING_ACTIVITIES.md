@@ -19,17 +19,11 @@ mkdir -p server/activities/quiz
 
 ```jsx
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import useSessionEndedHandler from '@src/hooks/useSessionEndedHandler';
 import Button from '@src/components/ui/Button';
 
-export default function QuizPage({ sessionData, wsRef }) {
-  const navigate = useNavigate();
+export default function QuizPage({ sessionData }) {
   const [answer, setAnswer] = useState('');
   const [submitted, setSubmitted] = useState(false);
-
-  // Handle session termination
-  useSessionEndedHandler(wsRef, navigate);
 
   const handleSubmit = async () => {
     await fetch(`/api/quiz/${sessionData.sessionId}/submit`, {
@@ -380,4 +374,61 @@ app.post('/api/my-activity/:sessionId/action', (req, res) => {
 ```
 
 ### WebSocket Support (Advanced)
-See `www-sim` activity for examples of real-time WebSocket communication.
+
+For activities that need real-time bidirectional communication, use WebSocket. See `www-sim` and `java-string-practice` for complete examples.
+
+**Example WebSocket setup with session-ended handling:**
+
+```jsx
+import React, { useState, useEffect, useRef } from 'react';
+import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
+
+export default function RealtimeActivity({ sessionData }) {
+  const { sessionId } = sessionData;
+  const wsRef = useRef(null);
+  const attachSessionEndedHandler = useSessionEndedHandler();
+  const [messages, setMessages] = useState([]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    // Create WebSocket connection
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host;
+    const ws = new WebSocket(`${protocol}//${host}/ws/my-activity?sessionId=${sessionId}`);
+    
+    wsRef.current = ws;
+    
+    // Attach session-ended handler (redirects to /session-ended when teacher ends session)
+    attachSessionEndedHandler(ws);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'update') {
+        setMessages(prev => [...prev, msg.payload]);
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [sessionId, attachSessionEndedHandler]);
+
+  return (
+    <div>
+      {messages.map((msg, i) => <div key={i}>{msg}</div>)}
+    </div>
+  );
+}
+```
+
+**Key points:**
+- Call `useSessionEndedHandler()` to get the `attachSessionEndedHandler` function
+- Create your WebSocket in `useEffect`
+- Call `attachSessionEndedHandler(ws)` immediately after creating the WebSocket
+- Include `attachSessionEndedHandler` in the dependency array
+- The handler automatically redirects students to `/session-ended` when the teacher ends the session
