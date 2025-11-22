@@ -92,7 +92,9 @@ export function setupSessionRoutes(app, sessions, wss = null) {
         // Broadcast session-ended message to all connected clients
         if (wss) {
             for (const client of wss.clients) {
-                if (client.sessionId === sessionId && client.readyState === 1) {
+                // All WebSocket clients must set client.sessionId during initialization.
+                // If not set, this client will not receive session-ended broadcasts.
+                if (typeof client.sessionId !== 'undefined' && client.sessionId === sessionId && client.readyState === 1) {
                     client.send(JSON.stringify({ type: 'session-ended' }));
                 }
             }
