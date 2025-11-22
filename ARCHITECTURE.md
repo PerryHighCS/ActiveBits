@@ -217,10 +217,10 @@ When a teacher ends a session:
 Each activity defines its own endpoints under `/api/{activity-id}/...`
 
 ### Persistent Session Flow
-1. Teacher clicks "Make Permanent Link" → POST `/api/persistent-session/create`
-2. Server generates HMAC hash and teacher code
+1. Teacher clicks "Make Permanent Link" → enters custom teacher code → POST `/api/persistent-session/create`
+2. Server generates HMAC hash from activity name + teacher code + salt
 3. Teacher code stored in httpOnly cookie, hash returned to client
-4. Teacher accesses `/p/{hash}` → checks cookie → POST `/api/persistent-session/authenticate`
+4. Teacher accesses `/p/{hash}` → checks cookie → authenticates via WebSocket
 5. Server validates HMAC and teacher code, creates/resets session
 6. Teacher auto-authenticated and redirected to manager view
 
@@ -314,16 +314,18 @@ For a detailed comparison of the old vs. new architecture, see [REFACTORING_SUMM
 ## Security Considerations
 
 ### Authentication
-- **Teacher Codes**: 16-character random strings stored in httpOnly cookies
+- **Teacher Codes**: User-created codes (minimum 6 characters) stored in httpOnly cookies for convenience
 - **HMAC Hashing**: SHA-256 with 8-character salt prevents URL tampering
 - **Cookie Security**: httpOnly flag prevents XSS, secure flag for HTTPS in production
 - **Secret Management**: Production deployments must set `PERSISTENT_SESSION_SECRET` environment variable
+- **Security Note**: Teacher codes are NOT meant for cryptographic security - they're simple barriers for educational use
 
 ### Input Validation
 - Activity names validated against centralized registry (`activityRegistry.js`)
+- Teacher code length validated (6-100 characters) to prevent DoS attacks
 - Session IDs sanitized before database/session lookups
 - Cookie size limits prevent abuse (max 20 sessions per browser)
-- Rate limiting on session creation endpoints (future improvement)
+- Rate limiting on teacher code attempts (5 attempts per minute per IP+hash)
 
 ### Data Privacy
 - Teacher codes never exposed in URLs or client-side JavaScript
