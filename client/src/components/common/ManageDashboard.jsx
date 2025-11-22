@@ -16,6 +16,7 @@ export default function ManageDashboard() {
   const [isCreating, setIsCreating] = useState(false);
   const [persistentSessions, setPersistentSessions] = useState([]);
   const [savedSessions, setSavedSessions] = useState({});
+  const [visibleCodes, setVisibleCodes] = useState({}); // Track which codes are visible
   const { copyToClipboard, isCopied } = useClipboard();
   const [sessionError, setSessionError] = useState(null);
 
@@ -131,6 +132,13 @@ export default function ManageDashboard() {
     downloadCsv(csvContent, 'permanent-links');
   };
 
+  const toggleCodeVisibility = (sessionKey) => {
+    setVisibleCodes(prev => ({
+      ...prev,
+      [sessionKey]: !prev[sessionKey]
+    }));
+  };
+
   // Get activity name from activity ID
   const getActivityName = (activityId) => {
     const activity = activities.find(a => a.id === activityId);
@@ -229,12 +237,29 @@ export default function ManageDashboard() {
               const color = getActivityColor(session.activityName);
               const bgClass = bgColorClasses[color] || 'bg-blue-50';
               const borderClass = borderColorClasses[color] || 'border-blue-200';
+              const sessionKey = `${session.activityName}:${session.hash}`;
+              const teacherCode = savedSessions[sessionKey];
+              const isVisible = visibleCodes[sessionKey];
               
               return (
                 <div key={idx} className={`flex items-center gap-2 ${bgClass} p-3 rounded border-2 ${borderClass}`}>
                   <div className="flex-1">
                     <p className="font-semibold text-gray-700">{getActivityName(session.activityName)}</p>
-                    <p className="text-sm text-gray-600">Teacher Code: <code className="bg-white px-2 py-1 rounded">{savedSessions[`${session.activityName}:${session.hash}`] || '•••••'}</code></p>
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <span>Teacher Code:</span>
+                      <code className="bg-white px-2 py-1 rounded">
+                        {teacherCode ? (isVisible ? teacherCode : '•••••••') : '•••••'}
+                      </code>
+                      {teacherCode && (
+                        <button
+                          onClick={() => toggleCodeVisibility(sessionKey)}
+                          className="text-blue-600 hover:text-blue-800 underline text-xs"
+                          title={isVisible ? 'Hide code' : 'Show code'}
+                        >
+                          {isVisible ? 'hide' : 'show'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <Button 
                     onClick={() => copyToClipboard(session.fullUrl)}
