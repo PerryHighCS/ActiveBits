@@ -38,8 +38,13 @@ export function useSessionEndedHandler() {
         if (message.type === 'session-ended') {
           navigate('/session-ended');
         }
-      } catch {
-        // Ignore parse errors or non-JSON messages
+      } catch (err) {
+        // Silently ignore non-JSON messages (e.g., 'ping', 'pong') and JSON parse errors
+        // This is expected behavior as WebSockets may receive various message formats
+        // Log errors in development for debugging
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('[useSessionEndedHandler] Ignored non-JSON message:', event.data, err);
+        }
       }
     };
 
