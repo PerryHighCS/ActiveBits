@@ -42,11 +42,11 @@ setupJavaStringPracticeRoutes(app, sessions, ws);
  * Parse persistent sessions cookie and normalize to array format
  * Supports both new array format [{key, teacherCode}] and legacy object format
  * @param {string|object} cookieValue - The cookie value from req.cookies
- * @returns {Array} - Array of {key, teacherCode} objects, or empty array on error
+ * @returns {object} - { sessions: Array, corrupted: boolean, error: string|null }
  */
 function parsePersistentSessionsCookie(cookieValue) {
     if (!cookieValue) {
-        return [];
+        return { sessions: [], corrupted: false, error: null };
     }
 
     let parsedCookie;
@@ -54,22 +54,24 @@ function parsePersistentSessionsCookie(cookieValue) {
         parsedCookie = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue;
     } catch (e) {
         console.error('Failed to parse persistent-sessions cookie:', e);
-        return [];
+        return { sessions: [], corrupted: true, error: 'Invalid JSON format' };
     }
 
     // Support both array format (new) and object format (legacy)
     if (Array.isArray(parsedCookie)) {
         // New format: array of {key, teacherCode} objects with explicit insertion order
-        return parsedCookie;
+        return { sessions: parsedCookie, corrupted: false, error: null };
     } else if (typeof parsedCookie === 'object' && parsedCookie !== null) {
         // Legacy format: plain object (migration path)
-        return Object.keys(parsedCookie).map(key => ({
+        const sessions = Object.keys(parsedCookie).map(key => ({
             key,
             teacherCode: parsedCookie[key]
         }));
+        return { sessions, corrupted: false, error: null };
     }
 
-    return [];
+    console.error('Invalid cookie format: expected array or object, got', typeof parsedCookie);
+    return { sessions: [], corrupted: true, error: 'Invalid cookie format: expected array or object' };
 }
 
 // Persistent session routes
@@ -79,7 +81,7 @@ function parsePersistentSessionsCookie(cookieValue) {
 // An attacker could enumerate hashes, but they wouldn't have the teacher codes to start sessions.
 app.get("/api/persistent-session/list", (req, res) => {
     try {
-        const sessionEntries = parsePersistentSessionsCookie(req.cookies?.['persistent_sessions']);
+        const { sessions: sessionEntries } = parsePersistentSessionsCookie(req.cookies?.['persistent_sessions']);
 
         // Convert cookie entries to session list with URLs and teacher codes
         const sessions = sessionEntries
@@ -159,7 +161,7 @@ app.post("/api/persistent-session/create", (req, res) => {
     // for FIFO eviction. This is more reliable than depending on object key insertion order.
     const cookieName = 'persistent_sessions';
     const MAX_SESSIONS_PER_COOKIE = 20;
-    let existingSessions = parsePersistentSessionsCookie(req.cookies[cookieName]);
+    let { sessions: existingSessions } = parsePersistentSessionsCookie(req.cookies[cookieName]);
     
     const newKey = `${activityName}:${hash}`;
     
@@ -203,10 +205,9 @@ app.get("/api/persistent-session/:hash", (req, res) => {
     const session = getOrCreateActivePersistentSession(activityName, hash);
 
     // Check if user has the teacher code in their cookies
-    const sessionEntries = parsePersistentSessionsCookie(req.cookies?.['persistent_sessions']);
+    const { sessions: sessionEntries, corrupted: cookieCorrupted } = parsePersistentSessionsCookie(req.cookies?.['persistent_sessions']);
     const cookieKey = `${activityName}:${hash}`;
     const hasTeacherCookie = sessionEntries.some(s => s.key === cookieKey);
-    const cookieCorrupted = false; // parsePersistentSessionsCookie handles errors gracefully
 
     res.json({
         activityName: session.activityName,
@@ -226,7 +227,7 @@ app.get("/api/persistent-session/:hash/teacher-code", (req, res) => {
         return res.status(400).json({ error: 'Missing activityName parameter' });
     }
 
-    const sessionEntries = parsePersistentSessionsCookie(req.cookies?.['persistent_sessions']);
+    const { sessions: sessionEntries } = parsePersistentSessionsCookie(req.cookies?.['persistent_sessions']);
     const cookieKey = `${activityName}:${hash}`;
     const entry = sessionEntries.find(s => s.key === cookieKey);
     const teacherCode = entry?.teacherCode || null;
