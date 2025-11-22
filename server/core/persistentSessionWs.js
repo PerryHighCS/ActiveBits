@@ -131,7 +131,13 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
   const validation = verifyTeacherCodeWithHash(persistentSession.activityName, hash, teacherCode);
   
   if (!validation.valid) {
-    console.log(`Teacher code validation failed for hash ${hash}, activity ${persistentSession.activityName}: ${validation.error}`);
+    // Log validation failures (only show error details in development)
+    const logMessage = `Teacher code validation failed for hash ${hash}, activity ${persistentSession.activityName}`;
+    if (process.env.NODE_ENV?.startsWith('dev')) {
+      console.log(`${logMessage}: ${validation.error}`);
+    } else {
+      console.log(logMessage);
+    }
     socket.send(JSON.stringify({
       type: 'teacher-code-error',
       error: validation.error,
