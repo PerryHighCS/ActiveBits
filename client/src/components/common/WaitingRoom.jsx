@@ -17,7 +17,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
   const [teacherCode, setTeacherCode] = useState('');
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [autoAuthAttempted, setAutoAuthAttempted] = useState(false);
+  const autoAuthAttemptedRef = useRef(false); // Use ref to avoid re-triggering effect
   const hasNavigatedRef = useRef(false); // Use ref to persist across re-renders
   const wsRef = useRef(null);
   const navigate = useNavigate();
@@ -34,7 +34,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
       console.log('Connected to waiting room');
       
       // If teacher has cookie, immediately try to auto-authenticate
-      if (hasTeacherCookie && !autoAuthAttempted) {
+      if (hasTeacherCookie && !autoAuthAttemptedRef.current) {
         console.log('Attempting auto-authentication as teacher');
         
         fetch(`/api/persistent-session/${hash}/teacher-code?activityName=${activityName}`, { credentials: 'include' })
@@ -56,7 +56,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
           .finally(() => {
             // Mark as attempted after fetch completes (success or failure)
             // This prevents duplicate attempts on reconnection
-            setAutoAuthAttempted(true);
+            autoAuthAttemptedRef.current = true;
           });
       }
     };
@@ -110,7 +110,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
         ws.close();
       }
     };
-  }, [activityName, hash, navigate, hasTeacherCookie, autoAuthAttempted]);
+  }, [activityName, hash, navigate, hasTeacherCookie]);
 
   const handleTeacherCodeSubmit = (e) => {
     e.preventDefault();
