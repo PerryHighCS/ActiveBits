@@ -336,6 +336,6 @@ function ensureCleanupTimer() {
     }, CLEANUP_INTERVAL);
     
     // Don't keep the event loop alive just for cleanup
-    cleanupTimer.unref?.();
+    cleanupTimer.unref();
   }
 }

@@ -86,13 +86,13 @@ ActiveBits/
 3. System creates a persistent session with HMAC-authenticated hash
 4. Teacher receives unique teacher code stored in httpOnly cookie
 5. Permanent link is saved to teacher's session list
-6. Teacher can access the session at any time via `/p/{hash}`
+6. Teacher can access the session at any time via `/activity/{activityName}/{hash}`
 7. Auto-authentication using teacher code cookie
 8. Download CSV backup of all permanent links
 
 ### Student Flow
 1. Receive session ID or permanent link from teacher
-2. Navigate to `/{session-id}` or `/p/{hash}` or enter ID at `/`
+2. Navigate to `/{session-id}` or `/activity/{activityName}/{hash}` or enter ID at `/`
 3. System fetches session data and determines activity type
 4. Student is shown the appropriate activity component
 5. Student interacts with the activity
@@ -186,7 +186,7 @@ Sessions are stored in-memory with a TTL (time-to-live). Each session has:
 Permanent sessions use HMAC-SHA256 authentication:
 - **Hash Format**: `{hash}-{salt}` where hash = HMAC(activityType + salt)
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
-- **URL Format**: `/p/{hash}` for permanent activity access
+- **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
 - **Auto-reset**: Session data resets each time teacher visits
 - **Security**: 
   - httpOnly cookies prevent XSS attacks
@@ -220,7 +220,7 @@ Each activity defines its own endpoints under `/api/{activity-id}/...`
 1. Teacher clicks "Make Permanent Link" → enters custom teacher code → POST `/api/persistent-session/create`
 2. Server generates HMAC hash from activity name + teacher code + salt
 3. Teacher code stored in httpOnly cookie, hash returned to client
-4. Teacher accesses `/p/{hash}` → checks cookie → authenticates via WebSocket
+4. Teacher accesses `/activity/{activityName}/{hash}` → checks cookie → authenticates via WebSocket
 5. Server validates HMAC and teacher code, creates/resets session
 6. Teacher auto-authenticated and redirected to manager view
 

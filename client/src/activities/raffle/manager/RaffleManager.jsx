@@ -30,10 +30,6 @@ const RaffleManager = () => {
         setButtonUrl(url);
     }
 
-    let exitRaffle = () => {
-        navigate('/manage');
-    }
-
     // Keep track of the latest ticketPoll value
     useEffect(() => {
         ticketPollRef.current = ticketPoll;
@@ -46,42 +42,6 @@ const RaffleManager = () => {
         setTicketPoll(true);
     }, [raffleId]);
 
-    /**
-     * Delete the raffle by making a request to the server to delete the raffle
-     * and clear the raffleId from the URL.
-     */
-    let deleteRaffle = async () => {
-        if (raffleId) {
-            try {
-                const response = await fetch('/api/session/' + raffleId,
-                    {
-                        method: 'DELETE',
-                    }
-                );
-                if (!response.ok) {
-                    throw new Error(`${response.statusText}`, { cause: response, status: response.status });
-                }
-                const data = await response.json();
-                // The API returns { raffleId: "some-id" }
-                const successful = data.deleted == raffleId;
-                console.log('Deleted raffle:', successful, data);
-
-                if (successful) {
-                    // Update the query parameters to remove the raffle id.
-                    exitRaffle();
-                }
-            } catch (error) {
-                if (error.status !== 404) {
-                    setMessage('Failed to delete raffle id:' + error, '/manage');
-                }
-                else {
-                    // If the raffleId is not found, we can just clear it from the URL.
-                    exitRaffle();
-                }
-            } 
-        }
-    }
-    
     /**
      * Handle errors when fetching tickets. If the raffle is not found, clear the raffleId from the URL.
      * @param {Error} error - The error object.
@@ -174,6 +134,7 @@ const RaffleManager = () => {
             <SessionHeader 
                 activityName="Raffle"
                 sessionId={raffleId}
+                // SessionHeader handles session termination/end-session controls
             />
             
             <div className='flex flex-col items-center justify-center w-full p-6 space-y-4'>

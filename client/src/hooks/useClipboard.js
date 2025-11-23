@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 /**
  * Custom hook for copying text to clipboard with state management
@@ -7,6 +7,7 @@ import { useState, useCallback } from 'react';
  */
 export function useClipboard(resetDelay = 2000) {
   const [copiedText, setCopiedText] = useState(null);
+  const timeoutRef = useRef(null);
 
   const copyToClipboard = useCallback(async (text) => {
     if (!text) return false;
@@ -14,13 +15,26 @@ export function useClipboard(resetDelay = 2000) {
     try {
       await navigator.clipboard.writeText(text);
       setCopiedText(text);
-      setTimeout(() => setCopiedText(null), resetDelay);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => {
+        setCopiedText(null);
+        timeoutRef.current = null;
+      }, resetDelay);
       return true;
     } catch (err) {
       console.error('Failed to copy to clipboard:', err);
       return false;
     }
   }, [resetDelay]);
+
+  useEffect(() => () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
 
   return {
     copyToClipboard,

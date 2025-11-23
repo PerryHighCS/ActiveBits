@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
  * Usage in student components:
  * ```
  * const wsRef = useRef(null);
- * const attachSessionEndedHandler = useSessionEndedHandler();
+ * const attachSessionEndedHandler = useSessionEndedHandler(wsRef);
  * 
  * useEffect(() => {
  *   const ws = new WebSocket(url);
@@ -20,11 +20,13 @@ import { useNavigate } from 'react-router-dom';
  * 
  * @returns {function} - Function to attach handler to a WebSocket
  */
-export function useSessionEndedHandler() {
+export function useSessionEndedHandler(wsRef = null) {
   const navigate = useNavigate();
   const cleanupRef = useRef(null);
+  // Track last WebSocket to avoid adding multiple listeners to the same instance
+  const lastWsRef = useRef(null);
 
-  return useCallback((ws) => {
+  const attachHandler = useCallback((ws) => {
     if (!ws) return;
     
     // Clean up previous listener if any
@@ -50,10 +52,29 @@ export function useSessionEndedHandler() {
 
     // Add listener
     ws.addEventListener('message', handleMessage);
+    lastWsRef.current = ws;
     
     // Store cleanup function
     cleanupRef.current = () => {
       ws.removeEventListener('message', handleMessage);
+      if (lastWsRef.current === ws) {
+        lastWsRef.current = null;
+      }
     };
   }, [navigate]);
+
+  // Optional auto-attach when a wsRef is provided and the underlying socket changes.
+  // Using wsRef.current (not the ref object) keeps the dependency aligned with the actual socket instance.
+  useEffect(() => {
+    if (!wsRef || !wsRef.current) return undefined;
+    if (wsRef.current === lastWsRef.current) return undefined;
+
+    attachHandler(wsRef.current);
+    return () => cleanupRef.current?.();
+  }, [attachHandler, wsRef?.current]);
+
+  // Ensure cleanup on unmount
+  useEffect(() => () => cleanupRef.current?.(), []);
+
+  return attachHandler;
 }

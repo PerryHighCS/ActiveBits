@@ -103,7 +103,7 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
 
   // Use IP + hash combination for rate limiting to avoid false positives
   // in proxy/NAT environments where multiple users share the same IP
-  const clientIp = socket._socket?.remoteAddress || 'unknown';
+  const clientIp = socket.clientIp || 'unknown';
   const rateLimitKey = `${clientIp}:${hash}`;
   
   // Rate limiting check

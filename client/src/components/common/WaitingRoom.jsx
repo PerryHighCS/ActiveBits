@@ -29,6 +29,15 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
     
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    const navigateOnce = (path) => {
+      if (hasNavigatedRef.current) return;
+      hasNavigatedRef.current = true;
+      // Close immediately to avoid handling additional messages mid-navigation
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+      navigate(path);
+    };
 
     ws.onopen = () => {
       console.log('Connected to waiting room');
@@ -83,13 +92,11 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
       } else if (message.type === 'session-started') {
         // Session was started by teacher, redirect to session
         console.log('Redirecting to student session:', message.sessionId);
-        hasNavigatedRef.current = true;
-        navigate(`/${message.sessionId}`);
+        navigateOnce(`/${message.sessionId}`);
       } else if (message.type === 'teacher-authenticated') {
         // This client is the teacher, redirect to manage page
         console.log('Redirecting to teacher manage page:', message.sessionId);
-        hasNavigatedRef.current = true;
-        navigate(`/manage/${activityName}/${message.sessionId}`);
+        navigateOnce(`/manage/${activityName}/${message.sessionId}`);
       } else if (message.type === 'teacher-code-error') {
         setError(message.error);
         setIsSubmitting(false);
