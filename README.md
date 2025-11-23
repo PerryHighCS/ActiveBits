@@ -70,3 +70,11 @@ Start Command _(to start the server itself)_:
 ```bash
 npm run start
 ```
+
+### Pre-deploy check (local)
+
+Run the same steps Render uses to catch missing dependencies (e.g., activity packages) before pushing:
+```bash
+npm test
+```
+This installs all workspaces (including `activities/`), performs a production Vite build of the client, starts the server on a test port, and hits `/health-check` to confirm it boots.
