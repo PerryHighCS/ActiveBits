@@ -8,67 +8,28 @@ ActiveBits is a modular, activity-based learning platform designed for classroom
 
 ```
 ActiveBits/
+├── activities/                      # Co-located activities (auto-discovered)
+│   ├── raffle/
+│   │   ├── activity.config.js       # Metadata + client/server entry pointers
+│   │   ├── client/                  # Manager/Student components and assets
+│   │   └── server/                  # API/WebSocket routes and data
+│   ├── www-sim/
+│   │   ├── activity.config.js
+│   │   ├── client/
+│   │   └── server/
+│   └── java-string-practice/
+│       ├── activity.config.js
+│       ├── client/
+│       └── server/
 ├── client/
 │   └── src/
-│       ├── activities/               # Activity modules
-│       │   ├── index.js             # Activity registry
-│       │   ├── raffle/              # Raffle activity
-│       │   │   ├── index.js         # Activity configuration
-│       │   │   ├── manager/         # Teacher/manager views
-│       │   │   │   ├── RaffleManager.jsx
-│       │   │   │   ├── RaffleLink.jsx
-│       │   │   │   ├── TicketsList.jsx
-│       │   │   │   └── WinnerMessage.jsx
-│       │   │   └── student/         # Student views
-│       │   │       └── TicketPage.jsx
-│       │   ├── www-sim/             # WWW Simulation activity
-│       │   │   ├── index.js         # Activity configuration
-│       │   │   ├── manager/         # Teacher/manager views
-│       │   │   │   └── WwwSimManager.jsx
-│       │   │   ├── student/         # Student views
-│       │   │   │   └── WwwSim.jsx
-│       │   │   └── components/      # Activity-specific components
-│       │   │       ├── DNSLookupTable.jsx
-│       │   │       ├── StudentBrowserView.jsx
-│       │   │       ├── StudentHostPalette.jsx
-│       │   │       ├── StudentInfoPanel.jsx
-│       │   │       └── WwwSimInstructions.jsx
-│       │   └── java-string-practice/    # Java String methods activity
-│       │       ├── index.js             # Activity configuration
-│       │       ├── manager/             # Teacher/manager views
-│       │       │   └── JavaStringPracticeManager.jsx
-│       │       ├── student/             # Student views
-│       │       │   └── JavaStringPractice.jsx
-│       │       └── components/          # Activity-specific components
-│       │           ├── challengeLogic.js
-│       │           ├── ChallengeSelector.jsx
-│       │           ├── StringDisplay.jsx
-│       │           ├── AnswerSection.jsx
-│       │           ├── FeedbackDisplay.jsx
-│       │           ├── StatsPanel.jsx
-│       │           └── styles.css
-│       ├── components/
-│       │   ├── ui/                  # Shared UI components
-│       │   │   ├── Button.jsx
-│       │   │   ├── Modal.jsx
-│       │   │   └── RosterPill.jsx
-│       │   └── common/              # Common app components
-│       │       ├── ManageDashboard.jsx
-│       │       └── SessionRouter.jsx
+│       ├── activities/              # Loader that imports from /activities configs
+│       ├── components/              # Shared UI and common components
 │       └── App.jsx                  # Main app component
 └── server/
-    ├── activities/                   # Activity server modules
-    │   ├── raffle/
-    │   │   └── routes.js            # Raffle API routes
-    │   ├── www-sim/
-    │   │   ├── routes.js            # WWW Sim API routes
-    │   │   └── presetPassages.js    # Activity-specific data
-    │   └── java-string-practice/
-    │       └── routes.js            # Java String Practice API routes
-    ├── core/                         # Core server modules
-    │   ├── sessions.js              # Session management
-    │   └── wsRouter.js              # WebSocket router
-    └── server.js                     # Main server entry point
+    ├── activities/                  # Activity discovery/registry loader
+    ├── core/                        # Core server modules
+    └── server.js                    # Main server entry point
 ```
 
 ## User Flow

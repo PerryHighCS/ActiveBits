@@ -156,25 +156,7 @@ export default quizActivity;
 
 > 💡 **Note:** If your `footerContent` contains JSX (e.g., links with `<a>` tags), the file must have a `.jsx` extension and import React.
 
-### Step 5: Register the Activity
-
-**File: `client/src/activities/index.js`**
-
-```javascript
-import raffleActivity from './raffle';
-import wwwSimActivity from './www-sim';
-import quizActivity from './quiz';  // Add this
-
-export const activities = [
-  raffleActivity,
-  wwwSimActivity,
-  quizActivity,  // Add this
-];
-
-// ... rest of file
-```
-
-### Step 6: Create Server Routes
+### Step 5: Create Server Routes
 
 **File: `activities/quiz/server/routes.js`**
 
@@ -229,34 +211,23 @@ export default function setupQuizRoutes(app, sessions, ws) {
 }
 ```
 
-### Step 7: Register Activity in Server Registry
+### Step 6: Add the Activity Config (auto-discovery)
 
-**File: `server/activities/activityRegistry.js`**
-
-```javascript
-export const ALLOWED_ACTIVITIES = [
-  'raffle',
-  'www-sim', 
-  'java-string-practice',
-  'quiz',  // Add your activity here
-];
-
-export function isValidActivity(activityType) {
-  return ALLOWED_ACTIVITIES.includes(activityType);
-}
-```
-
-### Step 8: Register Server Routes
-
-**File: `server/server.js`**
+**File: `activities/quiz/activity.config.js`**
 
 ```javascript
-// Add import at top
-import setupQuizRoutes from './activities/quiz/routes.js';
-
-// Add after other route setups
-setupQuizRoutes(app, sessions, ws);
+export default {
+  id: 'quiz',
+  name: 'Quiz',
+  description: 'Ask students questions and collect responses',
+  color: 'purple',
+  soloMode: false,
+  clientEntry: './client/index.js',  // or .jsx if using JSX in footerContent
+  serverEntry: './server/routes.js',
+};
 ```
+
+Activities are auto-discovered from `activities/*/activity.config.js`; no central registry needs updating.
 
 ### Done! 🎉
 
