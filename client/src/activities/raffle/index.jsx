@@ -52,7 +52,7 @@ export const raffleActivity = {
   ),
   
   // Accent color for the activity card
-  color: 'blue',
+  color: 'red',
   
   // Whether this activity can be used in solo mode (without a teacher session)
   soloMode: false,

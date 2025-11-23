@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
+import SessionHeader from '@src/components/common/SessionHeader';
 
 /**
  * JavaStringPracticeManager - Teacher view for managing the Java String Practice activity
@@ -11,13 +13,9 @@ export default function JavaStringPracticeManager() {
   const navigate = useNavigate();
   
   const [students, setStudents] = useState([]);
-  const [copied, setCopied] = useState(false);
   const [selectedMethods, setSelectedMethods] = useState(new Set(['all']));
   const [sortBy, setSortBy] = useState('name'); // 'name', 'total', 'correct', 'accuracy', 'streak'
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
-
-  // Generate student join URL
-  const studentJoinUrl = sessionId ? `${window.location.origin}/${sessionId}` : '';
 
   // Available method types
   const methodTypes = [
@@ -28,18 +26,6 @@ export default function JavaStringPracticeManager() {
     { id: 'length', label: 'length()' },
     { id: 'compareTo', label: 'compareTo()' },
   ];
-
-  // Handler for copying student join link
-  async function copyLink() {
-    if (!studentJoinUrl) return;
-    try {
-      await navigator.clipboard.writeText(studentJoinUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      console.error('Failed to copy link');
-    }
-  }
 
   const handleMethodToggle = (methodId) => {
     const newMethods = new Set(selectedMethods);
@@ -192,22 +178,12 @@ export default function JavaStringPracticeManager() {
   const downloadCSV = () => {
     const sorted = getSortedStudents();
     
-    // Helper function to escape CSV fields
-    const escapeCSV = (field) => {
-      const str = String(field);
-      // If field contains comma, quote, or newline, wrap in quotes and escape internal quotes
-      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return '"' + str.replace(/"/g, '""') + '"';
-      }
-      return str;
-    };
-    
     // CSV headers
     const headers = ['Student Name', 'Total Attempts', 'Correct', 'Accuracy %', 'Longest Streak'];
     
     // CSV rows
     const rows = sorted.map(student => [
-      escapeCSV(student.name),
+      student.name,
       student.stats?.total || 0,
       student.stats?.correct || 0,
       (student.stats?.total || 0) > 0
@@ -216,22 +192,9 @@ export default function JavaStringPracticeManager() {
       student.stats?.longestStreak || 0,
     ]);
     
-    // Combine headers and rows
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-    
-    // Create blob and download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `java-string-practice-${sessionId}-${new Date().toISOString().slice(0, 10)}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const csvContent = arrayToCsv([headers, ...rows]);
+    const filename = `java-string-practice-${sessionId}-${new Date().toISOString().slice(0, 10)}`;
+    downloadCsv(csvContent, filename);
   };
 
   if (!sessionId) {
@@ -244,48 +207,33 @@ export default function JavaStringPracticeManager() {
   }
 
   return (
-    <div className="p-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <h2 className="text-2xl font-bold">Java String Practice Session</h2>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <input
-                value={studentJoinUrl}
-                readOnly
-                onFocus={(e) => e.target.select()}
-                className="w-64 border border-gray-300 rounded px-2 py-1 text-sm font-mono bg-gray-50"
-              />
-              <Button onClick={copyLink} variant="outline">
-                {copied ? 'Copied!' : 'Copy'}
-              </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm">Join Code:</span>
-              <code className="px-2 py-1 rounded bg-gray-100 font-mono text-lg">{sessionId}</code>
+    <div>
+      <SessionHeader 
+        activityName="Java String Practice Session"
+        sessionId={sessionId}
+      />
+      
+      <div className="p-6">
+        <div className="max-w-4xl mx-auto">
+          {/* Method Selection */}
+          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h3 className="text-xl font-semibold mb-4">Select Methods to Practice</h3>
+            <div className="flex flex-wrap gap-2">
+              {methodTypes.map(method => (
+                <button
+                  key={method.id}
+                  onClick={() => handleMethodToggle(method.id)}
+                  className={`px-4 py-2 rounded transition-colors ${
+                    selectedMethods.has(method.id)
+                      ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                      : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                  }`}
+                >
+                  {method.label}
+                </button>
+              ))}
             </div>
           </div>
-        </div>
-
-        {/* Method Selection */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h3 className="text-xl font-semibold mb-4">Select Methods to Practice</h3>
-          <div className="flex flex-wrap gap-2">
-            {methodTypes.map(method => (
-              <button
-                key={method.id}
-                onClick={() => handleMethodToggle(method.id)}
-                className={`px-4 py-2 rounded transition-colors ${
-                  selectedMethods.has(method.id)
-                    ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                }`}
-              >
-                {method.label}
-              </button>
-            ))}
-          </div>
-        </div>
 
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="flex items-center justify-between mb-4">
@@ -364,6 +312,7 @@ export default function JavaStringPracticeManager() {
               </table>
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>

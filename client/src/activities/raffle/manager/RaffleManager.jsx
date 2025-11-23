@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
+import SessionHeader from '@src/components/common/SessionHeader';
 import RaffleLink from './RaffleLink';
 import TicketsList from './TicketsList';
 import WinnerMessage from './WinnerMessage';
@@ -29,10 +30,6 @@ const RaffleManager = () => {
         setButtonUrl(url);
     }
 
-    let exitRaffle = () => {
-        navigate('/manage');
-    }
-
     // Keep track of the latest ticketPoll value
     useEffect(() => {
         ticketPollRef.current = ticketPoll;
@@ -45,42 +42,6 @@ const RaffleManager = () => {
         setTicketPoll(true);
     }, [raffleId]);
 
-    /**
-     * Delete the raffle by making a request to the server to delete the raffle
-     * and clear the raffleId from the URL.
-     */
-    let deleteRaffle = async () => {
-        if (raffleId) {
-            try {
-                const response = await fetch('/api/session/' + raffleId,
-                    {
-                        method: 'DELETE',
-                    }
-                );
-                if (!response.ok) {
-                    throw new Error(`${response.statusText}`, { cause: response, status: response.status });
-                }
-                const data = await response.json();
-                // The API returns { raffleId: "some-id" }
-                const successful = data.deleted == raffleId;
-                console.log('Deleted raffle:', successful, data);
-
-                if (successful) {
-                    // Update the query parameters to remove the raffle id.
-                    exitRaffle();
-                }
-            } catch (error) {
-                if (error.status !== 404) {
-                    setMessage('Failed to delete raffle id:' + error, '/manage');
-                }
-                else {
-                    // If the raffleId is not found, we can just clear it from the URL.
-                    exitRaffle();
-                }
-            } 
-        }
-    }
-    
     /**
      * Handle errors when fetching tickets. If the raffle is not found, clear the raffleId from the URL.
      * @param {Error} error - The error object.
@@ -169,9 +130,16 @@ const RaffleManager = () => {
     }
 
     return (
-        <div className='flex flex-col items-center justify-center w-full'>
+        <div className='flex flex-col w-full'>
+            <SessionHeader 
+                activityName="Raffle"
+                sessionId={raffleId}
+                // SessionHeader handles session termination/end-session controls
+            />
+            
+            <div className='flex flex-col items-center justify-center w-full p-6 space-y-4'>
             {/* Display a message if there is one */}
-            {message && <div className='border rounded border-red-500 p-4 mb-4'>
+            {message && <div className='border rounded border-red-500 p-4 mb-4 w-full max-w-4xl'>
                 <div className='text-center mb-2'>{message}</div>
                 {buttonUrl && (
                     <div className='flex justify-center'>
@@ -182,12 +150,7 @@ const RaffleManager = () => {
             }
             {/* Display the raffle ID and ticket list if a raffle ID is present */}
             {raffleId &&
-                <div className='flex flex-col items-center w-full border border-gray-300 p-4 rounded-lg shadow-md'>
-                    <div className='flex flex-row items-center justify-between w-full'>
-                        <h3 className='text-lg font-semibold block'>Raffle ID: {raffleId}</h3>
-                        <Button variant='text' className='block' onClick={deleteRaffle}>❌</Button>
-                    </div>
-
+                <div className='flex flex-col items-center w-full max-w-4xl border border-gray-300 p-4 rounded-lg shadow-md'>
                     {/* Display the raffle link or the winning raffle total */}
                     {(winners.length === 0) ? (
                         <RaffleLink raffleId={raffleId}></RaffleLink>
@@ -208,7 +171,7 @@ const RaffleManager = () => {
                     </div>
                 </div>
             }
-
+            </div>
         </div>
 
     );

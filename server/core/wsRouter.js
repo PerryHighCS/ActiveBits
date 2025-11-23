@@ -1,5 +1,23 @@
 import { WebSocketServer } from "ws";
 
+function getClientIp(req) {
+    const forwardedFor = req.headers["x-forwarded-for"];
+    if (forwardedFor) {
+        const value = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+        const forwardedIp = value.split(",").map(p => p.trim()).find(Boolean);
+        if (forwardedIp) return forwardedIp;
+    }
+
+    const forwarded = req.headers["forwarded"];
+    if (forwarded) {
+        const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+        const match = value.match(/for=([^;]+)/i);
+        if (match?.[1]) return match[1].replace(/^\[|\]$/g, "").replace(/"/g, "");
+    }
+
+    return req.socket?.remoteAddress || "";
+}
+
 /**
  * Creates a WebSocket router for handling connections in all activity modules.
  */
@@ -14,6 +32,7 @@ export function createWsRouter(server, sessions) {
             if (!onConn) return socket.destroy();
             wss.handleUpgrade(req, socket, head, (ws) => {
                 ws.isAlive = true;
+                ws.clientIp = getClientIp(req);
                 const touch = () => {
                     if (sessions && ws.sessionId) sessions[ws.sessionId];
                 };

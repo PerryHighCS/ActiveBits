@@ -8,6 +8,7 @@ import FeedbackDisplay from '../components/FeedbackDisplay';
 import StatsPanel from '../components/StatsPanel';
 import ChallengeQuestion from '../components/ChallengeQuestion';
 import { generateChallenge, validateAnswer, getExplanation } from '../components/challengeLogic';
+import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 
 /**
  * JavaStringPractice - Student view for practicing Java String methods
@@ -28,6 +29,10 @@ import { generateChallenge, validateAnswer, getExplanation } from '../components
 export default function JavaStringPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
   const initializedRef = useRef(false);
+  const wsRef = useRef(null);
+  
+  // Get session-ended handler
+  const attachSessionEndedHandler = useSessionEndedHandler();
   
   const [studentName, setStudentName] = useState('');
   const [studentId, setStudentId] = useState(null); // Unique student ID
@@ -109,6 +114,10 @@ export default function JavaStringPractice({ sessionData }) {
     const wsUrl = `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}${studentIdParam}`;
     console.log('Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    
+    // Attach session-ended handler
+    attachSessionEndedHandler(ws);
 
     ws.onopen = () => {
       console.log('WebSocket connected for session:', sessionId);
@@ -152,7 +161,7 @@ export default function JavaStringPractice({ sessionData }) {
         ws.close();
       }
     };
-  }, [sessionId, nameSubmitted, studentName, studentId, resetChallengeState]);
+  }, [sessionId, nameSubmitted, studentName, studentId, resetChallengeState, attachSessionEndedHandler]);
 
   // Load saved stats from localStorage
   useEffect(() => {

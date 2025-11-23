@@ -29,6 +29,14 @@ Future modules will include additional hands-on learning tools for computer scie
 - **Student site:** [`https://bits.mycode.run`](https://bits.mycode.run)  
 - **Instructor dashboard:** [`https://bits.mycode.run/manage`](https://bits.mycode.run/manage)
 
+### Persistent Sessions
+
+Teachers can create permanent activity links that persist across browser sessions:
+- Create permanent links from the management dashboard
+- Auto-authentication with unique teacher codes stored in browser cookies
+- Manage all permanent sessions from one place
+- Download CSV backup of permanent links
+
 ---
 
 ## 🛠️ Development

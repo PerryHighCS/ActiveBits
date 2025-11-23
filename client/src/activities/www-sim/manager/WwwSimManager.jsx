@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import Button from "@src/components/ui/Button";
 import RosterPill from "@src/components/ui/RosterPill";
 import StudentInfoPanel from "../components/StudentInfoPanel";
+import SessionHeader from "@src/components/common/SessionHeader";
 
 /**
  * WwwSimManager
@@ -24,7 +25,6 @@ export default function WwwSimManager() {
 
     const [displayCode, setDisplayCode] = useState(null);
     const [busy, setBusy] = useState(false);
-    const [copied, setCopied] = useState(false);
 
     const [students, setStudents] = useState([]); // [{ hostname, joined }]
     const [presetPassages, setPresetPassages] = useState([]);
@@ -125,8 +125,6 @@ export default function WwwSimManager() {
         run();
         return () => { cancelled = true; };
     }, [sessionId, navigate]);
-
-    const studentJoinUrl = displayCode ? `${window.location.origin}/${displayCode}` : "";
 
     useEffect(() => {
         if (!displayCode) return;
@@ -320,18 +318,6 @@ export default function WwwSimManager() {
         }
     }
 
-    // Handler for copying student join link
-    async function copyLink() {
-        if (!studentJoinUrl) return;
-        try {
-            await navigator.clipboard.writeText(studentJoinUrl);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-        } catch { 
-            console.error("Failed to copy link");
-        }
-    }
-
     // Assign fragments to students by requesting server to generate hosting map and templates
     const assignFragments = async () => {
         try {
@@ -349,28 +335,10 @@ export default function WwwSimManager() {
 
     return (
         <div className="p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <h1 className="text-2xl font-bold">Web Simulation: HTTP & DNS Protocols</h1>
-                {displayCode && (
-                    <>
-                        <div className="flex items-center gap-2 w-fit">
-                            <input
-                                value={studentJoinUrl}
-                                readOnly
-                                onFocus={(e) => e.target.select()}
-                                className="field-sizing-content w-100 border border-gray-300 rounded px-2 py-1 text-sm font-mono bg-gray-50"
-                            />
-                            <Button onClick={copyLink} variant="outline">
-                                {copied ? "Copied!" : "Copy"}
-                            </Button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-sm">Join Code:</span>
-                            <code className="px-2 py-1 rounded bg-gray-100 font-mono text-lg">{displayCode}</code>
-                        </div>
-                    </>
-                )}
-            </div>
+            <SessionHeader 
+                activityName="Web Simulation: HTTP & DNS Protocols"
+                sessionId={sessionId}
+            />
 
             {busy && <p>Loading session…</p>}
             {error && <p className="text-red-600">Error: {error}</p>}

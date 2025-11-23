@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
+import WaitingRoom from './WaitingRoom';
 import { getActivity, activities } from '../../activities';
 
 const CACHE_TTL = 1000 * 60 * 60 * 12; // 12 hours in milliseconds
@@ -35,11 +36,13 @@ const SessionRouter = () => {
     const [sessionIdInput, setSessionIdInput] = useState('');
     const [soloActivity, setSoloActivity] = useState(null);
 
-    const { sessionId } = useParams(); // the session ID from the URL
+    const { sessionId, activityName, hash } = useParams(); // Check for both regular and persistent session params
 
     const storageKey = `session-${sessionId}`;
 
     const [sessionData, setSessionData] = useState(null);
+    const [persistentSessionInfo, setPersistentSessionInfo] = useState(null);
+    const [isLoadingPersistent, setIsLoadingPersistent] = useState(false);
 
     const [error, setError] = useState(null);
     const navigate = useNavigate();
@@ -49,6 +52,26 @@ const SessionRouter = () => {
     }, []);
 
     useEffect(() => setError(null), [sessionIdInput]);
+
+    // Handle persistent session route
+    useEffect(() => {
+        if (hash && activityName) {
+            setIsLoadingPersistent(true);
+            fetch(`/api/persistent-session/${hash}?activityName=${activityName}`)
+                .then(res => {
+                    if (!res.ok) throw new Error('Persistent session not found');
+                    return res.json();
+                })
+                .then(data => {
+                    setPersistentSessionInfo(data);
+                    setIsLoadingPersistent(false);
+                })
+                .catch(err => {
+                    setError('Invalid persistent session link');
+                    setIsLoadingPersistent(false);
+                });
+        }
+    }, [hash, activityName]);
 
     useEffect(() => {
         if (!sessionId || sessionData) return; // Already cached
@@ -101,6 +124,38 @@ const SessionRouter = () => {
     };
 
     if (error) return <div className="text-red-500 text-center">{error}</div>;
+    
+    // Show waiting room for persistent sessions
+    if (hash && activityName) {
+        if (isLoadingPersistent) {
+            return <div className="text-center">Loading...</div>;
+        }
+        
+        if (persistentSessionInfo) {
+            // If session already started, redirect appropriately
+            if (persistentSessionInfo.isStarted && persistentSessionInfo.sessionId) {
+                // If user has teacher cookie, redirect to manage page
+                if (persistentSessionInfo.hasTeacherCookie) {
+                    // Use replace to avoid back-navigation to waiting room (already resolved)
+                    navigate(`/manage/${activityName}/${persistentSessionInfo.sessionId}`, { replace: true });
+                } else {
+                    // Student - redirect to session
+                    // Use replace to avoid back-navigation to waiting room (already resolved)
+                    navigate(`/${persistentSessionInfo.sessionId}`, { replace: true });
+                }
+                return <div className="text-center">Redirecting to session...</div>;
+            }
+            
+            // Show waiting room
+            return (
+                <WaitingRoom 
+                    activityName={activityName}
+                    hash={hash}
+                    hasTeacherCookie={persistentSessionInfo.hasTeacherCookie}
+                />
+            );
+        }
+    }
     
     // Solo mode - practice without a session
     if (soloActivity) {

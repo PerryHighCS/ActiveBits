@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto";
+import { findHashBySessionId, resetPersistentSession } from "./persistentSessions.js";
 
 /**
  * Create a session store with a TTL (time-to-live) for sessions.
@@ -72,8 +73,9 @@ export function createSession(store, { data = {} } = {}) {
  * Setup routes for managing sessions.
  * @param {Object} app - The Express application.
  * @param {Object} sessions - The session store.
+ * @param {Object} wss - The WebSocket server (optional).
  */
-export function setupSessionRoutes(app, sessions) {
+export function setupSessionRoutes(app, sessions, wss = null) {
     // GET /api/session/:sessionId -> fetch any session (any type)
     app.get("/api/session/:sessionId", (req, res) => {
         const { sessionId } = req.params;
@@ -86,6 +88,24 @@ export function setupSessionRoutes(app, sessions) {
     app.delete("/api/session/:sessionId", (req, res) => {
         const { sessionId } = req.params;
         if (!sessions[sessionId]) return res.status(404).json({ error: "invalid session" });
+        
+        // Broadcast session-ended message to all connected clients
+        if (wss) {
+            for (const client of wss.clients) {
+                // All WebSocket clients must set client.sessionId during initialization.
+                // If not set, this client will not receive session-ended broadcasts.
+                if (typeof client.sessionId !== 'undefined' && client.sessionId === sessionId && client.readyState === 1) {
+                    client.send(JSON.stringify({ type: 'session-ended' }));
+                }
+            }
+        }
+        
+        // Check if this is a persistent session and reset it for reuse
+        const hash = findHashBySessionId(sessionId);
+        if (hash) {
+            resetPersistentSession(hash);
+        }
+        
         delete sessions[sessionId];
         res.json({ success: true, deleted: sessionId });
     });

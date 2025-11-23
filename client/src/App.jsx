@@ -1,6 +1,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import SessionRouter from "./components/common/SessionRouter";
+import SessionEnded from "./components/common/SessionEnded";
 import ManageDashboard from './components/common/ManageDashboard';
 import { activities } from './activities';
 
@@ -46,6 +47,7 @@ export default function App() {
                 <div className='w-full flex-grow'>
                     <Routes>
                         <Route path="/manage" element={<ManageDashboard />} />
+                        <Route path="/session-ended" element={<SessionEnded />} />
                         
                         {/* Generate routes for all registered activities */}
                         {activities.map((activity) => {
@@ -57,6 +59,9 @@ export default function App() {
                                 </React.Fragment>
                             );
                         })}
+                        
+                        {/* Persistent session route */}
+                        <Route path="/activity/:activityName/:hash" element={<SessionRouter />} />
                         
                         <Route path="/:sessionId" element={<SessionRouter />} />
                         <Route path="/" element={<SessionRouter />} />

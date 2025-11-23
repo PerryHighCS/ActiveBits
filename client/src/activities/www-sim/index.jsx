@@ -50,7 +50,7 @@ export const wwwSimActivity = {
   ),
   
   // Accent color for the activity card
-  color: 'green',
+  color: 'yellow',
   
   // Whether this activity can be used in solo mode (without a teacher session)
   soloMode: false,

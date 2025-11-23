@@ -1,16 +1,14 @@
-import React, { useState } from "react";
+import React from "react";
+import { useClipboard } from "../../../hooks/useClipboard";
 
 const okHeader = `HTTP/1.1 200 OK\nContent-Type: text/plain`;
 
 function HostedFileChip({ fileName, fragment, header = okHeader }) {
-    const [copied, setCopied] = useState(false);
+    const { copyToClipboard, isCopied } = useClipboard(600);
     const fullContent = `${header}\n\n${fragment}`;
 
     function handleCopy() {
-        navigator.clipboard.writeText(fullContent).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 600);
-        });
+        copyToClipboard(fullContent);
     }
 
     function handleDragStart(e) {
@@ -29,9 +27,9 @@ function HostedFileChip({ fileName, fragment, header = okHeader }) {
             </div>
             <button
                 onClick={handleCopy}
-                className={`text-xs text-blue-600 hover:underline ${copied ? "text-green-600 animate-pulse" : ""}`}
+                className={`text-xs text-blue-600 hover:underline ${isCopied(fullContent) ? "text-green-600 animate-pulse" : ""}`}
             >
-                {copied ? "Copied!" : "Copy with HTTP Header"}
+                {isCopied(fullContent) ? "Copied!" : "Copy with HTTP Header"}
             </button>
         </li>
     );

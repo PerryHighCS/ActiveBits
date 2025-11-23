@@ -64,11 +64,13 @@ export default function QuizPage({ sessionData }) {
 
 ```jsx
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 
 export default function QuizManager() {
   const { sessionId } = useParams();
+  const navigate = useNavigate();
   const [question, setQuestion] = useState('');
   const [responses, setResponses] = useState([]);
 
@@ -93,10 +95,18 @@ export default function QuizManager() {
     });
   };
 
+  const handleEndSession = async () => {
+    await fetch(`/api/session/${sessionId}`, { method: 'DELETE' });
+    navigate('/manage');
+  };
+
   return (
     <div className="p-6">
-      <h2 className="text-xl font-bold mb-4">Quiz Manager</h2>
-      <p className="mb-2">Session ID: <strong>{sessionId}</strong></p>
+      <SessionHeader 
+        activityName="Quiz"
+        sessionId={sessionId}
+        onEndSession={handleEndSession}
+      />
       
       <div className="mb-4">
         <label className="block mb-2">Question:</label>
@@ -219,7 +229,24 @@ export default function setupQuizRoutes(app, sessions, ws) {
 }
 ```
 
-### Step 7: Register Server Routes
+### Step 7: Register Activity in Server Registry
+
+**File: `server/activities/activityRegistry.js`**
+
+```javascript
+export const ALLOWED_ACTIVITIES = [
+  'raffle',
+  'www-sim', 
+  'java-string-practice',
+  'quiz',  // Add your activity here
+];
+
+export function isValidActivity(activityType) {
+  return ALLOWED_ACTIVITIES.includes(activityType);
+}
+```
+
+### Step 8: Register Server Routes
 
 **File: `server/server.js`**
 
@@ -245,12 +272,13 @@ When adding a new activity, create these files:
 
 **Client:**
 - [ ] `client/src/activities/{name}/index.js` (or `.jsx`) - Activity config
-- [ ] `client/src/activities/{name}/manager/Manager.jsx` - Teacher view
-- [ ] `client/src/activities/{name}/student/Student.jsx` - Student view
+- [ ] `client/src/activities/{name}/manager/Manager.jsx` - Teacher view (use SessionHeader)
+- [ ] `client/src/activities/{name}/student/Student.jsx` - Student view (use useSessionEndedHandler)
 - [ ] Update `client/src/activities/index.js` - Register activity
 
 **Server:**
 - [ ] `server/activities/{name}/routes.js` - API endpoints
+- [ ] Update `server/activities/activityRegistry.js` - Add to ALLOWED_ACTIVITIES array
 - [ ] Update `server/server.js` - Import and setup routes
 
 **Optional:**
@@ -264,6 +292,9 @@ When adding a new activity, create these files:
 3. **Follow naming conventions** - Use kebab-case for folder names, PascalCase for components
 4. **Keep activities self-contained** - All activity code should live in its folder
 5. **Reuse shared UI** - Import from `@src/components/ui/` when possible
+6. **Use SessionHeader** - All manager components should use the unified SessionHeader
+7. **Handle session termination** - Student components should use useSessionEndedHandler hook
+8. **Update activity registry** - Don't forget to add your activity to `activityRegistry.js`
 
 ## Solo Mode Activities
 
@@ -343,4 +374,61 @@ app.post('/api/my-activity/:sessionId/action', (req, res) => {
 ```
 
 ### WebSocket Support (Advanced)
-See `www-sim` activity for examples of real-time WebSocket communication.
+
+For activities that need real-time bidirectional communication, use WebSocket. See `www-sim` and `java-string-practice` for complete examples.
+
+**Example WebSocket setup with session-ended handling:**
+
+```jsx
+import React, { useState, useEffect, useRef } from 'react';
+import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
+
+export default function RealtimeActivity({ sessionData }) {
+  const { sessionId } = sessionData;
+  const wsRef = useRef(null);
+  const attachSessionEndedHandler = useSessionEndedHandler();
+  const [messages, setMessages] = useState([]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    // Create WebSocket connection
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host;
+    const ws = new WebSocket(`${protocol}//${host}/ws/my-activity?sessionId=${sessionId}`);
+    
+    wsRef.current = ws;
+    
+    // Attach session-ended handler (redirects to /session-ended when teacher ends session)
+    attachSessionEndedHandler(ws);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'update') {
+        setMessages(prev => [...prev, msg.payload]);
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [sessionId, attachSessionEndedHandler]);
+
+  return (
+    <div>
+      {messages.map((msg, i) => <div key={i}>{msg}</div>)}
+    </div>
+  );
+}
+```
+
+**Key points:**
+- Call `useSessionEndedHandler()` to get the `attachSessionEndedHandler` function
+- Create your WebSocket in `useEffect`
+- Call `attachSessionEndedHandler(ws)` immediately after creating the WebSocket
+- Include `attachSessionEndedHandler` in the dependency array
+- The handler automatically redirects students to `/session-ended` when the teacher ends the session
