@@ -45,7 +45,7 @@ From the project root:
 
 Install dependencies:
 ```bash
-npm run install-all
+npm install
 ```
 
 Start the dev server:
