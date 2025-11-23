@@ -10,12 +10,13 @@ import Modal from '../ui/Modal';
  * 
  * @param {object} props
  * @param {string} props.activityName - Display name of the activity
- * @param {string} props.sessionId - The session ID
+ * @param {string} [props.sessionId] - The session ID
+ * @param {boolean} [props.simple=false] - If true, render a lightweight header with just the title.
  * @param {function} [props.onEndSession] - Optional callback invoked after the session is successfully ended. 
  *                                          Called after the DELETE request completes but before navigation to /manage.
  *                                          Use this for activity-specific cleanup (e.g., closing WebSocket connections).
  */
-export default function SessionHeader({ activityName, sessionId, onEndSession }) {
+export default function SessionHeader({ activityName, sessionId, onEndSession, simple = false }) {
   const [showEndModal, setShowEndModal] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -26,6 +27,14 @@ export default function SessionHeader({ activityName, sessionId, onEndSession })
 
   const copyLink = () => copyToClipboard(studentJoinUrl);
   const copyCode = () => copyToClipboard(sessionId);
+
+  if (simple) {
+    return (
+      <div className="bg-white border-b border-gray-200 px-6 py-4 mb-4">
+        <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
+      </div>
+    );
+  }
 
   const handleEndSession = async () => {
     setIsEnding(true);

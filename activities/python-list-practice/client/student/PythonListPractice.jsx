@@ -927,6 +927,7 @@ export default function PythonListPractice({ sessionData }) {
   const [insertSelections, setInsertSelections] = useState([]);
   const statsLoadedRef = useRef(false);
   const sessionId = sessionData?.sessionId;
+  const isSolo = !sessionId || sessionId.startsWith('solo-');
   const [hintStage, setHintStage] = useState('none');
 
   const allowedTypeList = useMemo(() => {
@@ -935,10 +936,14 @@ export default function PythonListPractice({ sessionData }) {
     }
     return OPERATIONS.filter((type) => allowedTypes.has(type));
   }, [allowedTypes]);
+  const soloQuestionTypes = useMemo(() => ([
+    { id: 'all', label: 'All question types' },
+    ...OPERATIONS.filter((t) => t !== 'all').map((type) => ({ id: type, label: QUESTION_LABELS[type] || type })),
+  ]), []);
   const statsStorageKey = useMemo(() => {
-    if (!sessionId || !studentId) return null;
+    if (!sessionId || !studentId || isSolo) return null;
     return `python-list-practice-stats-${sessionId}-${studentId}`;
-  }, [sessionId, studentId]);
+  }, [sessionId, studentId, isSolo]);
   const applySelectedTypes = useCallback((types) => {
     const normalized = Array.isArray(types) && types.length > 0 ? types : ['all'];
     const nextSet = new Set(normalized);
@@ -948,6 +953,26 @@ export default function PythonListPractice({ sessionData }) {
     setFeedback(null);
     setShowNext(false);
   }, []);
+  const handleSoloToggleType = useCallback((typeId) => {
+    const next = new Set(allowedTypes);
+    if (typeId === 'all') {
+      next.clear();
+      next.add('all');
+    } else {
+      if (next.has('all')) {
+        next.clear();
+      }
+      if (next.has(typeId)) {
+        next.delete(typeId);
+      } else {
+        next.add(typeId);
+      }
+      if (next.size === 0) {
+        next.add('all');
+      }
+    }
+    applySelectedTypes(Array.from(next));
+  }, [allowedTypes, applySelectedTypes]);
 
   useEffect(() => {
     if (nameRef.current) {
@@ -981,7 +1006,7 @@ export default function PythonListPractice({ sessionData }) {
 
   // Connect to WebSocket after name submit to mark student as connected (for roster)
   useEffect(() => {
-    if (!sessionId) return undefined;
+    if (!sessionId || isSolo) return undefined;
     let ignore = false;
     const fetchConfig = async () => {
       try {
@@ -999,7 +1024,7 @@ export default function PythonListPractice({ sessionData }) {
     return () => {
       ignore = true;
     };
-  }, [sessionId, applySelectedTypes]);
+  }, [sessionId, applySelectedTypes, isSolo]);
 
   const ensureStudentId = () => {
     if (studentId) return studentId;
@@ -1071,7 +1096,7 @@ export default function PythonListPractice({ sessionData }) {
   }, [stats, statsStorageKey]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || isSolo) return;
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const encodedSession = encodeURIComponent(sessionId);
     const nameParam = submittedName ? `&studentName=${encodeURIComponent(submittedName)}` : '';
@@ -1101,7 +1126,7 @@ export default function PythonListPractice({ sessionData }) {
       ws.close();
       wsRef.current = null;
     };
-  }, [sessionId, submittedName, applySelectedTypes, sendStats]);
+  }, [sessionId, submittedName, applySelectedTypes, sendStats, isSolo]);
 
   const isListBuildVariant = challenge?.variant === 'insert-final' || challenge?.variant === 'list-final';
 
@@ -1344,11 +1369,9 @@ export default function PythonListPractice({ sessionData }) {
     }
   };
 
-  if (!sessionId) {
-    return <div className="p-6 text-center text-gray-700">Missing session.</div>;
-  }
+  const QUESTION_OPTIONS = useMemo(() => OPERATIONS.filter((t) => t !== 'all'), []);
 
-  if (!submittedName) {
+  if (!submittedName && !isSolo) {
     return (
       <div className="python-list-bg flex items-center justify-center px-4">
         <div className="python-list-join">
@@ -1381,14 +1404,34 @@ export default function PythonListPractice({ sessionData }) {
   return (
     <div className="python-list-bg">
       <div className="python-list-container">
-        <SessionHeader submittedName={submittedName} sessionId={sessionId} stats={stats} />
+        {!isSolo && <SessionHeader submittedName={submittedName} sessionId={sessionId} stats={stats} />}
+        {isSolo && (
+          <SessionHeader activityName="Python List Practice" stats={stats} simple />
+        )}
 
         <div className="python-list-content">
-          <div className="python-list-card">
-            <FocusSummary allowedTypeList={allowedTypeList} allowedTypes={allowedTypes} labels={QUESTION_LABELS} />
+          {isSolo && (
+            <div className="python-list-card">
+              <p className="text-sm font-semibold text-emerald-900 mb-2">Choose question types</p>
+              <div className="flex flex-wrap gap-2">
+                {soloQuestionTypes.map((type) => (
+                  <button
+                    key={type.id}
+                    type="button"
+                    className={`python-list-chip ${allowedTypes.has(type.id) ? 'selected' : ''}`}
+                    onClick={() => handleSoloToggleType(type.id)}
+                  >
+                    {type.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-          </div>
           <div className="python-list-card">
+            {!isSolo && (
+              <FocusSummary allowedTypeList={allowedTypeList} allowedTypes={allowedTypes} labels={QUESTION_LABELS} />
+            )}
             <QuestionHintSection
               challenge={challenge}
               hintStage={hintStage}
