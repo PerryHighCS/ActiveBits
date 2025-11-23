@@ -122,6 +122,8 @@ export const activityName = {
 };
 ```
 
+Each activity owns a config at `/activities/<id>/activity.config.js` that declares metadata plus pointers to the client and server entry files. The client auto-discovers these configs (and loads the client entries), and the server auto-discovers them to load route handlers. Adding a new activity only requires dropping a new folder with a config plus the corresponding client/server entry files—no central registry to update.
+
 ### Automatic Route Generation
 
 Routes are automatically generated in `App.jsx` based on registered activities:

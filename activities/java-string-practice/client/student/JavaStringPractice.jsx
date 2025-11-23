@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
@@ -30,6 +31,7 @@ export default function JavaStringPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
   const initializedRef = useRef(false);
   const wsRef = useRef(null);
+  const navigate = useNavigate();
   
   // Get session-ended handler
   const attachSessionEndedHandler = useSessionEndedHandler();
@@ -128,6 +130,10 @@ export default function JavaStringPractice({ sessionData }) {
       try {
         const message = JSON.parse(event.data);
         console.log('Parsed message:', message);
+        if (message.type === 'session-ended') {
+          navigate('/session-ended');
+          return;
+        }
         if (message.type === 'studentId') {
           // Store the unique student ID
           const newStudentId = message.payload.studentId;
@@ -161,7 +167,7 @@ export default function JavaStringPractice({ sessionData }) {
         ws.close();
       }
     };
-  }, [sessionId, nameSubmitted, studentName, studentId, resetChallengeState, attachSessionEndedHandler]);
+  }, [sessionId, nameSubmitted, studentName, studentId, resetChallengeState, attachSessionEndedHandler, navigate]);
 
   // Load saved stats from localStorage
   useEffect(() => {

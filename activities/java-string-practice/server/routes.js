@@ -1,4 +1,4 @@
-import { createSession } from '../../core/sessions.js';
+import { createSession } from '../../../server/core/sessions.js';
 
 /**
  * Java String Practice Routes
