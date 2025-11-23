@@ -4,10 +4,11 @@
     "version": "1.0.0",
     "workspaces": [
         "client",
-        "server"
+        "server",
+        "activities"
     ],
     "scripts": {
-    "install-all": "npm install --prefix client --production=false && npm install --prefix server && npm install --prefix activities",
+    "install-all": "npm install --workspaces --include-workspace-root",
     "deploy": "npm run install-all && npm run build --workspace client",
     "start": "npm start --prefix server",
     "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\"",
