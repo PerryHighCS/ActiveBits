@@ -2,6 +2,12 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import Button from '@src/components/ui/Button';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import '../styles.css';
+import SessionHeader from './components/SessionHeader';
+import QuestionHintSection from './components/QuestionHintSection';
+import FocusSummary from './components/FocusSummary';
+import InteractiveListSection from './components/InteractiveListSection';
+import AnswerPanel from './components/AnswerPanel';
+import HintDisplay from './components/HintDisplay';
 
 const WORD_LISTS = [
   ['apple', 'banana', 'cherry', 'date', 'fig', 'grape'],
@@ -187,6 +193,36 @@ function formatRangeLenDetail(label, info) {
   const { start, stop, step } = info;
   const stepText = step === 1 ? '' : ` with a step of ${step}`;
   return `${label} walks indexes from ${start} up to ${stop} via range(len(list))${stepText}, stopping before ${stop}.`;
+}
+
+function buildAnswerDetails(challenge) {
+  if (!challenge) return [];
+  const details = [];
+  if (challenge.filterDescription) {
+    details.push(challenge.filterDescription);
+  }
+  if (challenge.doubleLoopInfo) {
+    challenge.doubleLoopInfo.loops.forEach((loop, idx) => {
+      const label = challenge.doubleLoopInfo.loops.length > 1 ? `Loop ${idx + 1}` : 'This loop';
+      const detail = loop.type === 'range-len'
+        ? formatRangeLenDetail(label, loop)
+        : formatForRangeDetail(label, loop.start, loop.stop, loop.step);
+      const printer = loop.prints === 'value'
+        ? 'It prints the list value at that index.'
+        : loop.prints === 'index'
+          ? 'It prints the index number itself.'
+          : 'It prints the loop variable.';
+      details.push(`${detail} ${printer}`);
+    });
+  } else if (challenge.op === 'for-range' && typeof challenge.start === 'number') {
+    details.push(formatForRangeDetail('This loop', challenge.start, challenge.stop, challenge.step));
+  } else if (challenge.rangeLenInfo) {
+    details.push(formatRangeLenDetail('This loop', challenge.rangeLenInfo));
+  }
+  if (challenge.needsDuplicate) {
+    details.push('remove(value) only deletes the first matching value, so later duplicates stay in the list.');
+  }
+  return details;
 }
 
 function randomItem(arr) {
@@ -428,7 +464,7 @@ function generateChallenge(allowedTypesSet = new Set(['all'])) {
         list: mutated,
         op,
         idx,
-          variant: 'insert-final',
+        variant: 'insert-final',
         choices: chipPool,
       };
     }
@@ -489,42 +525,42 @@ function generateChallenge(allowedTypesSet = new Set(['all'])) {
       }
       const fallback = workingList[workingList.length - 1];
       const mutated = [...workingList];
-        mutated.pop();
-        const mode = Math.random();
-        if (mode < 0.4) {
-          return {
-            prompt: `${listName} = ${formatList(workingList)}\nresult = ${listName}.pop()`,
-            question: 'What value is assigned to result?',
-            expected: String(fallback),
-            type: 'value',
-            list: workingList,
-            op,
-            variant: 'value-selection',
-            choices: buildChoicePool(workingList, [], useWords),
-          };
-        } if (mode < 0.65) {
-          return {
-            prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop()`,
-            question: `After this pop, what is len(${listName})?`,
-            expected: String(mutated.length),
-            type: 'number',
-            list: mutated,
-            op,
-            variant: 'number-choice',
-            choices: buildLengthChoices(mutated.length, mutated[mutated.length - 1]),
-          };
-        } if (mode < 0.85) {
-          return {
-            prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop()`,
-            question: `After this pop, what is the full ${listName} list?`,
-            expected: `[${mutated.map((item) => (typeof item === 'string' ? `'${item}'` : String(item))).join(', ')}]`,
-            type: 'list',
-            list: mutated,
-            op,
-            variant: 'list-final',
-            choices: buildListFinalChoices(mutated, useWords, workingList.length, mutated.length, 8, workingList),
-          };
-        }
+      mutated.pop();
+      const mode = Math.random();
+      if (mode < 0.4) {
+        return {
+          prompt: `${listName} = ${formatList(workingList)}\nresult = ${listName}.pop()`,
+          question: 'What value is assigned to result?',
+          expected: String(fallback),
+          type: 'value',
+          list: workingList,
+          op,
+          variant: 'value-selection',
+          choices: buildChoicePool(workingList, [], useWords),
+        };
+      } if (mode < 0.65) {
+        return {
+          prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop()`,
+          question: `After this pop, what is len(${listName})?`,
+          expected: String(mutated.length),
+          type: 'number',
+          list: mutated,
+          op,
+          variant: 'number-choice',
+          choices: buildLengthChoices(mutated.length, mutated[mutated.length - 1]),
+        };
+      } if (mode < 0.85) {
+        return {
+          prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop()`,
+          question: `After this pop, what is the full ${listName} list?`,
+          expected: `[${mutated.map((item) => (typeof item === 'string' ? `'${item}'` : String(item))).join(', ')}]`,
+          type: 'list',
+          list: mutated,
+          op,
+          variant: 'list-final',
+          choices: buildListFinalChoices(mutated, useWords, workingList.length, mutated.length, 8, workingList),
+        };
+      }
       if (!mutated.length) {
         return {
           prompt: `${listName} = ${formatList(workingList)}\nresult = ${listName}.pop()`,
@@ -1086,6 +1122,9 @@ export default function PythonListPractice({ sessionData }) {
     return (challenge.expected || '').trim();
   }, [challenge, normalizeListAnswer]);
 
+  const hintDefinition = useMemo(() => getHintDefinition(challenge), [challenge]);
+  const answerDetails = useMemo(() => buildAnswerDetails(challenge), [challenge]);
+
   const handleShowDefinitionHint = () => {
     if (hintStage === 'none') {
       setHintStage('definition');
@@ -1094,56 +1133,6 @@ export default function PythonListPractice({ sessionData }) {
 
   const handleShowAnswerHint = () => {
     setHintStage('answer');
-  };
-
-  const renderAnswerDetails = () => {
-    if (!challenge) return null;
-    const details = [];
-    if (challenge.filterDescription) {
-      details.push(
-        <div key="filter" className="python-list-hint-detail">
-          {challenge.filterDescription}
-        </div>,
-      );
-    }
-    if (challenge.doubleLoopInfo) {
-      challenge.doubleLoopInfo.loops.forEach((loop, idx) => {
-        const label = challenge.doubleLoopInfo.loops.length > 1 ? `Loop ${idx + 1}` : 'This loop';
-        const detail = loop.type === 'range-len'
-          ? formatRangeLenDetail(label, loop)
-          : formatForRangeDetail(label, loop.start, loop.stop, loop.step);
-        const printer = loop.prints === 'value'
-          ? 'It prints the list value at that index.'
-          : loop.prints === 'index'
-            ? 'It prints the index number itself.'
-            : 'It prints the loop variable.';
-        details.push(
-          <div key={`loop-${idx}`} className="python-list-hint-detail">
-            {detail} {printer}
-          </div>,
-        );
-      });
-    } else if (challenge.op === 'for-range' && typeof challenge.start === 'number') {
-      details.push(
-        <div key="for-range-detail" className="python-list-hint-detail">
-          {formatForRangeDetail('This loop', challenge.start, challenge.stop, challenge.step)}
-        </div>,
-      );
-    } else if (challenge.rangeLenInfo) {
-      details.push(
-        <div key="range-len-detail" className="python-list-hint-detail">
-          {formatRangeLenDetail('This loop', challenge.rangeLenInfo)}
-        </div>,
-      );
-    }
-    if (challenge.needsDuplicate) {
-      details.push(
-        <div key="duplicate" className="python-list-hint-detail">
-          remove(value) only deletes the first matching value, so later duplicates stay in the list.
-        </div>,
-      );
-    }
-    return details;
   };
 
   const checkAnswer = () => {
@@ -1392,184 +1381,61 @@ export default function PythonListPractice({ sessionData }) {
   return (
     <div className="python-list-bg">
       <div className="python-list-container">
-        <div className="python-list-header">
-          <div className="python-list-header-top">
-            <div className="python-list-title">Python List Practice</div>
-            <div className="python-list-session-tag">Join Code: {sessionId}</div>
-          </div>
-          <div className="python-list-subtitle">Welcome, {submittedName}!</div>
-          <div className="python-list-stats">
-            <div className="python-list-stat">Total: {stats.total}</div>
-            <div className="python-list-stat">Correct: {stats.correct}</div>
-            <div className="python-list-stat">Streak: {stats.streak}</div>
-          </div>
-        </div>
+        <SessionHeader submittedName={submittedName} sessionId={sessionId} stats={stats} />
 
         <div className="python-list-content">
           <div className="python-list-card">
-          <div className="mb-3">
-            <p className="text-xs uppercase tracking-wide text-emerald-700 font-semibold mb-2">Current focus</p>
-            <div className="flex flex-wrap gap-2">
-              {allowedTypeList.map((type) => (
-                <span key={type} className={`python-list-chip ${allowedTypes.has(type) ? 'selected' : ''}`}>
-                  {QUESTION_LABELS[type] || type}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="python-list-prompt">
-            <code className="block whitespace-pre-wrap text-sm">
-              {challenge.prompt}
-            </code>
-          </div>
-          <div className="python-list-question-row">
-            <div className="python-list-question">
-              <span>{challenge.question || 'What is the output?'}</span>
-              {!feedback && (
-                <div className="python-list-hint-controls">
-                  {hintStage === 'none' && (
-                    <Button
-                      className="python-list-hint-btn"
-                      onClick={handleShowDefinitionHint}
-                    >
-                      💡 Show Hint
-                    </Button>
-                  )}
-                  {hintStage === 'definition' && (
-                    <Button
-                      className="python-list-hint-btn secondary"
-                      onClick={handleShowAnswerHint}
-                    >
-                      🎯 Show Answer
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          {interactiveList.length > 0 && (
-            <div className="python-list-visual mt-3">
-              <div className="text-sm text-emerald-900 mb-2">
-                {isListBuildVariant
-                  ? 'Tap values to build the final list in order.'
-                  : challenge?.op === 'for-range'
-                    ? 'Tap values in order to build the output sequence.'
-                    : ['value-selection', 'number-choice', 'index-value'].includes(challenge?.variant)
-                      ? 'Tap values to answer the question.'
-                      : 'Tap indexes (to answer with the index) or values (to answer with the value).'}
-              </div>
-              <div className="python-list-grid">
-                {interactiveList.map((item, idx) => {
-                  const inRange = selectedRange && idx >= selectedRange[0] && idx <= selectedRange[1];
-                  const isSequenceSelected = selectedSequence.includes(idx);
-                  const isSelectedValue = selectedValueIndex === idx || isSequenceSelected;
-                  const showIndexButton = !isListBuildVariant
-                    && !['value-selection', 'number-choice', 'index-value'].includes(challenge?.variant);
-                  return (
-                    <div className="python-list-slot" key={`slot-${idx}`}>
-                      {showIndexButton && (
-                        <button
-                          type="button"
-                          className={`python-list-index-btn ${selectedIndex === idx ? 'selected' : ''}`}
-                          onClick={(e) => handleIndexClick(idx, e)}
-                          title={`Index ${idx}`}
-                        >
-                          {idx}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className={`python-list-value-pill ${inRange ? 'range' :
-                          isSelectedValue ? 'selected' : ''}`}
-                        onClick={(e) => handleValueClick(idx, e)}
-                        onMouseDown={() => supportsSequenceSelection && startRangeSelection(idx)}
-                        onMouseEnter={() => supportsSequenceSelection && isDraggingRange && extendRangeSelection(idx)}
-                        onMouseUp={() => supportsSequenceSelection && isDraggingRange && finishRangeSelection()}
-                        title={`Value at index ${idx}`}
-                      >
-                        {String(item)}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {hintStage !== 'none' && (
-            <div className={`python-list-hint ${hintStage === 'answer' ? 'answer' : ''}`}>
-              <div>{getHintDefinition(challenge)}</div>
-              {hintStage === 'answer' && (
-                <div className="python-list-hint-answer">
-                  <div>Answer: {challenge?.expected}</div>
-                  {renderAnswerDetails()}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+            <FocusSummary allowedTypeList={allowedTypeList} allowedTypes={allowedTypes} labels={QUESTION_LABELS} />
 
-        <div className="python-list-card">
-          <label className="python-list-label">
-            Your Answer
-            <input
-              ref={answerInputRef}
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !showNext) {
-                  e.preventDefault();
-                  if (!loading && answer.trim()) {
-                    checkAnswer();
-                  }
-                }
-              }}
-              className="python-list-input mt-1"
-              placeholder="Type your answer (comma-separated for multiple values)"
-              disabled={showNext}
+          </div>
+          <div className="python-list-card">
+            <QuestionHintSection
+              challenge={challenge}
+              hintStage={hintStage}
+              showHintButtons={!feedback}
+              onShowHint={handleShowDefinitionHint}
+              onShowAnswer={handleShowAnswerHint}
+              hintDefinition={hintDefinition}
+              answerDetails={answerDetails}
+              showHintBody={false}
             />
-          </label>
-          {challenge.type === 'list' && (
-            <p className="text-xs text-emerald-700 mt-1">Enter values separated by commas.</p>
-          )}
-          {!showNext ? (
-            <div className="flex gap-2 mt-3">
-              <Button
-                onClick={checkAnswer}
-                disabled={loading || !answer.trim()}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white"
-              >
-                Check
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setAnswer('');
-                  setInsertSelections([]);
-                }}
-                className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
-              >
-                Clear
-              </Button>
-            </div>
-          ) : null}
-          {feedback && (
-            <div
-              className={`python-list-feedback ${feedback.isCorrect ? 'correct' : 'incorrect'} feedback-with-action`}
-            >
-              <div className="feedback-message">{feedback.message}</div>
-              {showNext && (
-                <div className="feedback-action">
-                  <Button
-                    onClick={nextChallenge}
-                    className="bg-emerald-700 hover:bg-emerald-800 text-white"
-                  >
-                    Next Challenge
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+            <InteractiveListSection
+              challenge={challenge}
+              interactiveList={interactiveList}
+              isListBuildVariant={isListBuildVariant}
+              supportsSequenceSelection={supportsSequenceSelection}
+              selectedRange={selectedRange}
+              selectedSequence={selectedSequence}
+              selectedIndex={selectedIndex}
+              selectedValueIndex={selectedValueIndex}
+              onIndexClick={handleIndexClick}
+              onValueClick={handleValueClick}
+              onStartRange={startRangeSelection}
+              onExtendRange={(idx) => extendRangeSelection(idx)}
+              onFinishRange={finishRangeSelection}
+            />
+            <HintDisplay
+              hintStage={hintStage}
+              hintDefinition={hintDefinition}
+              answerDetails={answerDetails}
+              expected={challenge?.expected}
+            />
+            <AnswerPanel
+              answer={answer}
+              onAnswerChange={(value) => setAnswer(value)}
+              challenge={challenge}
+              answerRef={answerInputRef}
+              disabled={showNext}
+              loading={loading}
+              onSubmit={checkAnswer}
+              onClear={() => {
+                setAnswer('');
+                setInsertSelections([]);
+              }}
+              feedback={feedback}
+              onNext={nextChallenge}
+            />
+          </div>
         </div>
       </div>
     </div>

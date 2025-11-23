@@ -291,6 +291,10 @@
   color: #065f46;
 }
 
+.python-list-answer-panel {
+  margin-top: 12px;
+}
+
 .python-list-label {
   color: #064e3b;
   font-weight: 700;
