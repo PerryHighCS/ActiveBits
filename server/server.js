@@ -7,10 +7,7 @@ import { createSessionStore, setupSessionRoutes } from "./core/sessions.js";
 import { createWsRouter } from "./core/wsRouter.js";
 import { generatePersistentHash, getOrCreateActivePersistentSession } from "./core/persistentSessions.js";
 import { setupPersistentSessionWs } from "./core/persistentSessionWs.js";
-import setupRaffleRoutes from "./activities/raffle/routes.js";
-import setupWwwSimRoutes from "./activities/www-sim/routes.js";
-import setupJavaStringPracticeRoutes from "./activities/java-string-practice/routes.js";
-import { ALLOWED_ACTIVITIES, isValidActivity } from "./activities/activityRegistry.js";
+import { ALLOWED_ACTIVITIES, isValidActivity, registerActivityRoutes } from "./activities/activityRegistry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,10 +30,8 @@ setupSessionRoutes(app, sessions, ws.wss);
 // Setup persistent session WebSocket handling
 setupPersistentSessionWs(ws, sessions);
 
-// Attach feature-specific route handlers
-setupRaffleRoutes(app, sessions, ws);
-setupWwwSimRoutes(app, sessions, ws);
-setupJavaStringPracticeRoutes(app, sessions, ws);
+// Attach feature-specific route handlers (discover modules dynamically)
+await registerActivityRoutes(app, sessions, ws);
 
 /**
  * Parse persistent sessions cookie and normalize to array format

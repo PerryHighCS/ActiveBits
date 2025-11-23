@@ -9,13 +9,13 @@ This guide walks you through adding a new activity to ActiveBits with a complete
 ### Step 1: Create the Activity Structure
 
 ```bash
-mkdir -p client/src/activities/quiz/{manager,student}
-mkdir -p server/activities/quiz
+mkdir -p activities/quiz/client/{manager,student}
+mkdir -p activities/quiz/server
 ```
 
 ### Step 2: Create the Student Component
 
-**File: `client/src/activities/quiz/student/QuizPage.jsx`**
+**File: `activities/quiz/client/student/QuizPage.jsx`**
 
 ```jsx
 import React, { useState } from 'react';
@@ -60,7 +60,7 @@ export default function QuizPage({ sessionData }) {
 
 ### Step 3: Create the Manager Component
 
-**File: `client/src/activities/quiz/manager/QuizManager.jsx`**
+**File: `activities/quiz/client/manager/QuizManager.jsx`**
 
 ```jsx
 import React, { useState, useEffect } from 'react';
@@ -134,7 +134,7 @@ export default function QuizManager() {
 
 ### Step 4: Create the Activity Configuration
 
-**File: `client/src/activities/quiz/index.js`** (or `index.jsx` if using JSX in footerContent)
+**File: `activities/quiz/client/index.js`** (or `index.jsx` if using JSX in footerContent)
 
 ```javascript
 import QuizManager from './manager/QuizManager';
@@ -176,7 +176,7 @@ export const activities = [
 
 ### Step 6: Create Server Routes
 
-**File: `server/activities/quiz/routes.js`**
+**File: `activities/quiz/server/routes.js`**
 
 ```javascript
 import { createSession } from '../../core/sessions.js';
@@ -270,20 +270,16 @@ Your new activity is now fully integrated:
 
 When adding a new activity, create these files:
 
-**Client:**
-- [ ] `client/src/activities/{name}/index.js` (or `.jsx`) - Activity config
-- [ ] `client/src/activities/{name}/manager/Manager.jsx` - Teacher view (use SessionHeader)
-- [ ] `client/src/activities/{name}/student/Student.jsx` - Student view (use useSessionEndedHandler)
-- [ ] Update `client/src/activities/index.js` - Register activity
+**Client (inside `activities/{name}/client/`):**
+- [ ] `index.js` (or `.jsx`) - Activity config (exports id/name/description/etc. plus ManagerComponent/StudentComponent)
+- [ ] `manager/Manager.jsx` - Teacher view (use SessionHeader)
+- [ ] `student/Student.jsx` - Student view (use useSessionEndedHandler)
+- [ ] `components/` - Activity-specific UI (optional)
 
-**Server:**
-- [ ] `server/activities/{name}/routes.js` - API endpoints
-- [ ] Update `server/activities/activityRegistry.js` - Add to ALLOWED_ACTIVITIES array
-- [ ] Update `server/server.js` - Import and setup routes
+**Server (inside `activities/{name}/server/`):**
+- [ ] `routes.js` - API endpoints/WebSocket setup
 
-**Optional:**
-- [ ] `client/src/activities/{name}/components/` - Activity-specific UI
-- [ ] `server/activities/{name}/` - Activity-specific data files
+No central registry updates are needed; activities are auto-discovered from `activities/*/activity.config.js`.
 
 ## Tips
 
@@ -294,7 +290,6 @@ When adding a new activity, create these files:
 5. **Reuse shared UI** - Import from `@src/components/ui/` when possible
 6. **Use SessionHeader** - All manager components should use the unified SessionHeader
 7. **Handle session termination** - Student components should use useSessionEndedHandler hook
-8. **Update activity registry** - Don't forget to add your activity to `activityRegistry.js`
 
 ## Solo Mode Activities
 
