@@ -8,10 +8,10 @@
         "activities"
     ],
     "scripts": {
-        "deploy": "npm install --workspaces --include-workspace-root && npm run build --workspace client",
+        "deploy": "npm_config_production=false npm install --workspaces --include-workspace-root && npm run build --workspace client",
         "start": "npm start --prefix server",
         "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\"",
-        "verify:deploy": "npm install --workspaces --include-workspace-root && npm run build --workspace client",
+        "verify:deploy": "npm_config_production=false npm install --workspaces --include-workspace-root && npm run build --workspace client",
         "verify:server": "node scripts/verify-server.js",
         "test": "npm run verify:deploy && npm run verify:server"
     },
