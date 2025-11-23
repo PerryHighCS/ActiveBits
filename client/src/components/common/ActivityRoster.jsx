@@ -13,10 +13,12 @@ export default function ActivityRoster({
   loading = false,
   error = null,
   emptyMessage = 'No students yet.',
-  accent = 'emerald',
+  accent = 'neutral', // 'neutral' | 'emerald'
 }) {
-  const headerClass = accent === 'emerald' ? 'bg-emerald-50 text-emerald-900 border-emerald-100' : 'bg-gray-50 text-gray-900 border-gray-200';
-  const borderClass = accent === 'emerald' ? 'border-emerald-100' : 'border-gray-200';
+  const isEmerald = accent === 'emerald';
+  const containerBorder = isEmerald ? 'border-emerald-200' : 'border-gray-200';
+  const headerClass = isEmerald ? 'bg-emerald-50 text-emerald-900 border-emerald-100' : 'bg-gray-50 text-gray-900 border-gray-200';
+  const borderClass = isEmerald ? 'border-emerald-100' : 'border-gray-200';
 
   const SortIcon = ({ column }) => {
     if (!onSort) return null;
@@ -25,7 +27,7 @@ export default function ActivityRoster({
   };
 
   return (
-    <div className="bg-white/95 border border-emerald-200 shadow-lg rounded-xl overflow-hidden">
+    <div className={"bg-white/95 border " + containerBorder + " shadow-lg rounded-xl overflow-x-auto"}>
       <table className="w-full text-left">
         <thead className={`${headerClass} border-b`}>
           <tr>

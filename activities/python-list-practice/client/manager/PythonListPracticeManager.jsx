@@ -5,6 +5,20 @@ import Button from '@src/components/ui/Button';
 import ActivityRoster from '@src/components/common/ActivityRoster';
 import '../styles.css';
 
+const QUESTION_TYPES = [
+  { id: 'all', label: 'All Skills' },
+  { id: 'index-get', label: 'Index (read)' },
+  { id: 'index-set', label: 'Index (write)' },
+  { id: 'len', label: 'len(list)' },
+  { id: 'append', label: 'append()' },
+  { id: 'remove', label: 'remove()' },
+  { id: 'insert', label: 'insert()' },
+  { id: 'pop', label: 'pop()' },
+  { id: 'for-range', label: 'for range loop' },
+  { id: 'range-len', label: 'range(len(list))' },
+  { id: 'for-each', label: 'for each loop' },
+];
+
 function downloadCsv(students) {
   const headers = ['Student Name', 'Total Attempts', 'Correct', 'Accuracy %', 'Current Streak', 'Longest Streak'];
   const rows = students.map((s) => {
@@ -36,25 +50,35 @@ export default function PythonListPracticeManager() {
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedTypes, setSelectedTypes] = useState(new Set(['all']));
   const wsRef = useRef(null);
 
   useEffect(() => {
-    if (!sessionId) return;
-    // Initial fetch for server state
-    fetch(`/api/python-list-practice/${sessionId}/students`)
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to fetch students');
-        return res.json();
-      })
-      .then((data) => {
+    if (!sessionId) return undefined;
+    let cancelled = false;
+
+    const loadSession = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/python-list-practice/${sessionId}`);
+        if (!res.ok) throw new Error('Failed to fetch session');
+        const data = await res.json();
+        if (cancelled) return;
         setStudents(data.students || []);
+        setSelectedTypes(new Set(data.selectedQuestionTypes || ['all']));
         setError(null);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message || 'Failed to load students');
-        setLoading(false);
-      });
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message || 'Failed to load session');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadSession();
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${sessionId}`;
@@ -67,6 +91,8 @@ export default function PythonListPracticeManager() {
         if (msg.type === 'studentsUpdate') {
           setStudents(msg.payload?.students || []);
           setLoading(false);
+        } else if (msg.type === 'questionTypesUpdate') {
+          setSelectedTypes(new Set(msg.payload?.selectedQuestionTypes || ['all']));
         }
       } catch (e) {
         console.error('WS parse error', e);
@@ -75,10 +101,45 @@ export default function PythonListPracticeManager() {
     socket.onerror = () => setError('WebSocket error');
 
     return () => {
+      cancelled = true;
       socket.close();
       wsRef.current = null;
     };
   }, [sessionId]);
+
+  const persistQuestionTypes = (nextSet) => {
+    fetch(`/api/python-list-practice/${sessionId}/question-types`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ types: Array.from(nextSet) }),
+    }).catch((err) => {
+      console.error('Failed to update question types', err);
+      setError('Failed to update question types');
+    });
+  };
+
+  const handleToggleType = (typeId) => {
+    if (!sessionId) return;
+    const next = new Set(selectedTypes);
+    if (typeId === 'all') {
+      next.clear();
+      next.add('all');
+    } else {
+      if (next.has('all')) {
+        next.clear();
+      }
+      if (next.has(typeId)) {
+        next.delete(typeId);
+      } else {
+        next.add(typeId);
+      }
+      if (next.size === 0) {
+        next.add('all');
+      }
+    }
+    setSelectedTypes(next);
+    persistQuestionTypes(next);
+  };
 
   const stats = useMemo(() => {
     const totalStudents = students.length;
@@ -108,6 +169,22 @@ export default function PythonListPracticeManager() {
             </Button>
             {error && <div className="text-red-600 text-sm">{error}</div>}
             {loading && <div className="text-sm text-emerald-700">Loading…</div>}
+          </div>
+        </div>
+
+        <div className="python-list-card">
+          <h3 className="text-lg font-semibold text-emerald-900 mb-2">Select question types to practice</h3>
+          <p className="text-sm text-emerald-800 mb-3">Students will only see the skills you enable.</p>
+          <div className="flex flex-wrap gap-2">
+            {QUESTION_TYPES.map((type) => (
+              <button
+                key={type.id}
+                onClick={() => handleToggleType(type.id)}
+                className={`python-list-chip ${selectedTypes.has(type.id) ? 'selected' : ''}`}
+              >
+                {type.label}
+              </button>
+            ))}
           </div>
         </div>
 

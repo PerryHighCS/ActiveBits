@@ -4,7 +4,6 @@ import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
 import SessionHeader from '@src/components/common/SessionHeader';
 import ActivityRoster from '@src/components/common/ActivityRoster';
-import ActivityRoster from '@src/components/common/ActivityRoster';
 
 /**
  * JavaStringPracticeManager - Teacher view for managing the Java String Practice activity
@@ -247,6 +246,7 @@ export default function JavaStringPracticeManager() {
           
           <ActivityRoster
             students={getSortedStudents()}
+            accent="neutral"
             columns={[
               {
                 id: 'name',
@@ -276,7 +276,6 @@ export default function JavaStringPracticeManager() {
             sortDirection={sortDirection}
             onSort={handleSort}
             emptyMessage="No students have joined yet. Share the join code above."
-            accent="gray"
           />
         </div>
       </div>
