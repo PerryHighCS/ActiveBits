@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Button from '@src/components/ui/Button';
+import '../styles.css';
 
 const WORD_LISTS = [
   ['apple', 'banana', 'cherry', 'date'],
@@ -197,20 +198,20 @@ export default function PythonListPractice({ sessionData }) {
 
   if (!submittedName) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-emerald-100 flex items-center justify-center px-4">
-        <div className="bg-white/90 border border-emerald-200 shadow-lg rounded-xl p-6 w-full max-w-md">
+      <div className="python-list-bg flex items-center justify-center px-4">
+        <div className="python-list-join">
           <h1 className="text-2xl font-bold mb-4 text-center text-emerald-900">Join Python List Practice</h1>
           <p className="text-sm text-emerald-800 text-center mb-4">
             Practice indexing, loops, len, append/remove/insert/pop, and range.
           </p>
           <form onSubmit={submitName} className="space-y-3">
-            <label className="block text-sm font-semibold text-emerald-900">
+            <label className="python-list-label">
               Your Name
               <input
                 ref={nameRef}
                 value={studentName}
                 onChange={(e) => setStudentName(e.target.value)}
-                className="mt-1 w-full border border-emerald-200 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                className="python-list-input mt-1"
                 placeholder="Enter your name"
                 required
               />
@@ -226,45 +227,47 @@ export default function PythonListPractice({ sessionData }) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
-      <div className="p-6 max-w-4xl mx-auto space-y-5">
-        <div className="flex items-center justify-between bg-white/90 border border-emerald-200 shadow rounded-xl p-4">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-emerald-700 font-semibold">Python List Practice</p>
-            <h2 className="text-2xl font-bold text-emerald-900">Welcome, {submittedName}</h2>
-            <p className="text-sm text-emerald-800">Session ID: {sessionId}</p>
-          </div>
-          <div className="text-sm text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-            <div>Total: <span className="font-semibold">{stats.total}</span></div>
-            <div>Correct: <span className="font-semibold text-emerald-700">{stats.correct}</span></div>
-            <div>Streak: <span className="font-semibold text-emerald-700">{stats.streak}</span></div>
+    <div className="python-list-bg">
+      <div className="python-list-container">
+        <div className="python-list-header">
+          <div className="python-list-title">Python List Practice</div>
+          <div className="python-list-subtitle">Welcome, {submittedName} — Session {sessionId}</div>
+          <div className="python-list-stats">
+            <div className="python-list-stat">Total: {stats.total}</div>
+            <div className="python-list-stat">Correct: {stats.correct}</div>
+            <div className="python-list-stat">Streak: {stats.streak}</div>
           </div>
         </div>
 
-        <div className="bg-white/95 border border-emerald-200 shadow-lg rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-bold">?</span>
-            <p className="text-sm text-emerald-900">Answer the prompt below using Python list reasoning.</p>
+        <div className="python-list-content">
+          <div className="python-list-card">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 font-bold">?</span>
+              <p className="text-sm text-emerald-900">Answer the prompt using Python list reasoning.</p>
+            </div>
+            <div className="python-list-prompt">{challenge.prompt}</div>
           </div>
-          <pre className="whitespace-pre-wrap text-sm mb-3 bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-emerald-900">{challenge.prompt}</pre>
-          <label className="block text-sm font-semibold text-emerald-900">
-            Your Answer
-            <input
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              className="mt-1 w-full border border-emerald-200 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-              placeholder="Type your answer (comma-separated for multiple values)"
-            />
-          </label>
-          <div className="flex gap-2 mt-3">
-            <Button onClick={checkAnswer} disabled={loading || !answer.trim()} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-              Submit
-            </Button>
-            <Button variant="outline" onClick={() => setAnswer('')} className="border-emerald-300 text-emerald-800 hover:bg-emerald-50">
-              Clear
-            </Button>
+
+          <div className="python-list-card">
+            <label className="python-list-label">
+              Your Answer
+              <input
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                className="python-list-input mt-1"
+                placeholder="Type your answer (comma-separated for multiple values)"
+              />
+            </label>
+            <div className="flex gap-2 mt-3">
+              <Button onClick={checkAnswer} disabled={loading || !answer.trim()} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                Submit
+              </Button>
+              <Button variant="outline" onClick={() => setAnswer('')} className="border-emerald-300 text-emerald-800 hover:bg-emerald-50">
+                Clear
+              </Button>
+            </div>
+            {feedback && <div className="python-list-feedback">{feedback}</div>}
           </div>
-          {feedback && <div className="mt-3 text-sm text-emerald-900 bg-emerald-50 border border-emerald-100 rounded-lg p-3">{feedback}</div>}
         </div>
       </div>
     </div>

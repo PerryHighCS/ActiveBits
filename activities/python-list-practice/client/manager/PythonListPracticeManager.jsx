@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
+import '../styles.css';
 
 function downloadCsv(students) {
   const headers = ['Student Name', 'Total Attempts', 'Correct', 'Accuracy %', 'Current Streak', 'Longest Streak'];
@@ -91,11 +92,11 @@ export default function PythonListPracticeManager() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
+    <div className="python-list-manager">
       <div className="p-6 max-w-6xl mx-auto space-y-4">
         <SessionHeader activityName="Python List Practice" sessionId={sessionId} onEndSession={endSession} />
 
-        <div className="bg-white/90 border border-emerald-200 shadow rounded-xl p-4">
+        <div className="python-list-card" style={{ marginTop: 0 }}>
           <div className="flex flex-wrap items-center gap-4">
             <div>
               <div className="text-lg font-semibold text-emerald-900">{stats.connected} connected</div>
@@ -109,9 +110,9 @@ export default function PythonListPracticeManager() {
           </div>
         </div>
 
-        <div className="bg-white/95 border border-emerald-200 shadow-lg rounded-xl overflow-hidden">
-          <table className="w-full text-left">
-            <thead className="bg-emerald-50 border-b border-emerald-100">
+        <div className="bg-white/95 border border-emerald-200 shadow-lg rounded-xl overflow-hidden python-list-card">
+          <table className="w-full text-left python-list-table">
+            <thead>
               <tr className="text-emerald-900">
                 <th className="px-4 py-2">Student</th>
                 <th className="px-4 py-2 text-center">Total</th>
@@ -135,7 +136,7 @@ export default function PythonListPracticeManager() {
                 const correct = s.stats?.correct || 0;
                 const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
                 return (
-                  <tr key={s.id || s.name} className="border-b last:border-b-0 border-emerald-100">
+                  <tr key={s.id || s.name}>
                     <td className="px-4 py-3 text-emerald-900">{s.name}</td>
                     <td className="px-4 py-3 text-center text-emerald-900">{total}</td>
                     <td className="px-4 py-3 text-center text-emerald-900">{correct}</td>
