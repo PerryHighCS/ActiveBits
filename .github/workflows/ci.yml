@@ -18,7 +18,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install --workspaces --include-workspace-root
+        run: npm_config_production=false npm install --workspaces --include-workspace-root
 
 
       - name: Run tests
