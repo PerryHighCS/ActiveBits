@@ -1,4 +1,6 @@
 {
+  "name": "activebits-activities",
+  "version": "1.0.0",
   "type": "module",
   "dependencies": {
     "qrcode.react": "^4.2.0"
