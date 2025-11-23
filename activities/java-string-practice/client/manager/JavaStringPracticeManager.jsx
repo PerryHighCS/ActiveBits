@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
 import SessionHeader from '@src/components/common/SessionHeader';
+import ActivityRoster from '@src/components/common/ActivityRoster';
 
 /**
  * JavaStringPracticeManager - Teacher view for managing the Java String Practice activity
@@ -170,11 +171,6 @@ export default function JavaStringPracticeManager() {
     return sorted;
   };
 
-  const SortIcon = ({ column }) => {
-    if (sortBy !== column) return <span className="text-gray-400 ml-1">⇅</span>;
-    return sortDirection === 'asc' ? <span className="ml-1">↓</span> : <span className="ml-1">↑</span>;
-  };
-
   const downloadCSV = () => {
     const sorted = getSortedStudents();
     
@@ -248,72 +244,41 @@ export default function JavaStringPracticeManager() {
             </Button>
           </div>
           
-          {students.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">
-              No students have joined yet. Share the join code above.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b">
-                    <th 
-                      className="text-left py-2 px-4 cursor-pointer hover:bg-gray-50"
-                      onClick={() => handleSort('name')}
-                    >
-                      Student <SortIcon column="name" />
-                    </th>
-                    <th 
-                      className="text-center py-2 px-4 cursor-pointer hover:bg-gray-50"
-                      onClick={() => handleSort('total')}
-                    >
-                      Total Attempts <SortIcon column="total" />
-                    </th>
-                    <th 
-                      className="text-center py-2 px-4 cursor-pointer hover:bg-gray-50"
-                      onClick={() => handleSort('correct')}
-                    >
-                      Correct <SortIcon column="correct" />
-                    </th>
-                    <th 
-                      className="text-center py-2 px-4 cursor-pointer hover:bg-gray-50"
-                      onClick={() => handleSort('accuracy')}
-                    >
-                      Accuracy <SortIcon column="accuracy" />
-                    </th>
-                    <th 
-                      className="text-center py-2 px-4 cursor-pointer hover:bg-gray-50"
-                      onClick={() => handleSort('streak')}
-                    >
-                      Longest Streak <SortIcon column="streak" />
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {getSortedStudents().map((student) => (
-                    <tr key={student.name} className="border-b hover:bg-gray-50">
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full ${student.connected ? 'bg-green-500' : 'bg-gray-300'}`}></span>
-                          <span className="font-medium">{student.name}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-center">{student.stats?.total || 0}</td>
-                      <td className="py-3 px-4 text-center">{student.stats?.correct || 0}</td>
-                      <td className="py-3 px-4 text-center">
-                        {(student.stats?.total || 0) > 0
-                          ? Math.round(((student.stats?.correct || 0) / student.stats.total) * 100)
-                          : 0}%
-                      </td>
-                      <td className="py-3 px-4 text-center">{student.stats?.longestStreak || 0}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <ActivityRoster
+            students={getSortedStudents()}
+            accent="neutral"
+            columns={[
+              {
+                id: 'name',
+                label: 'Student',
+                render: (s) => (
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${s.connected ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+                    <span className="font-medium">{s.name}</span>
+                  </div>
+                ),
+              },
+              { id: 'total', label: 'Total Attempts', align: 'center', render: (s) => s.stats?.total || 0 },
+              { id: 'correct', label: 'Correct', align: 'center', render: (s) => s.stats?.correct || 0 },
+              {
+                id: 'accuracy',
+                label: 'Accuracy',
+                align: 'center',
+                render: (s) => {
+                  const total = s.stats?.total || 0;
+                  const correct = s.stats?.correct || 0;
+                  return total > 0 ? `${Math.round((correct / total) * 100)}%` : '0%';
+                },
+              },
+              { id: 'streak', label: 'Longest Streak', align: 'center', render: (s) => s.stats?.longestStreak || 0 },
+            ]}
+            sortBy={sortBy}
+            sortDirection={sortDirection}
+            onSort={handleSort}
+            emptyMessage="No students have joined yet. Share the join code above."
+          />
         </div>
-        </div>
+      </div>
       </div>
     </div>
   );
