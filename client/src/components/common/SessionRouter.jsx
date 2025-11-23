@@ -136,11 +136,11 @@ const SessionRouter = () => {
             if (persistentSessionInfo.isStarted && persistentSessionInfo.sessionId) {
                 // If user has teacher cookie, redirect to manage page
                 if (persistentSessionInfo.hasTeacherCookie) {
-                    // Use replace to avoid back-navigation to waiting room (already resolved)
+                    // Use replace to avoid back-navigation to waiting room
                     navigate(`/manage/${activityName}/${persistentSessionInfo.sessionId}`, { replace: true });
                 } else {
                     // Student - redirect to session
-                    // Use replace to avoid back-navigation to waiting room (already resolved)
+                    // Use replace to avoid back-navigation to waiting room
                     navigate(`/${persistentSessionInfo.sessionId}`, { replace: true });
                 }
                 return <div className="text-center">Redirecting to session...</div>;
