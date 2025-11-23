@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
+import ActivityRoster from '@src/components/common/ActivityRoster';
 import '../styles.css';
 
 function downloadCsv(students) {
@@ -110,48 +111,31 @@ export default function PythonListPracticeManager() {
           </div>
         </div>
 
-        <div className="bg-white/95 border border-emerald-200 shadow-lg rounded-xl overflow-hidden python-list-card">
-          <table className="w-full text-left python-list-table">
-            <thead>
-              <tr className="text-emerald-900">
-                <th className="px-4 py-2">Student</th>
-                <th className="px-4 py-2 text-center">Total</th>
-                <th className="px-4 py-2 text-center">Correct</th>
-                <th className="px-4 py-2 text-center">Accuracy</th>
-                <th className="px-4 py-2 text-center">Streak</th>
-                <th className="px-4 py-2 text-center">Longest Streak</th>
-                <th className="px-4 py-2 text-center">Connected</th>
-              </tr>
-            </thead>
-            <tbody>
-              {students.length === 0 && (
-                <tr>
-                  <td className="px-4 py-3 text-center text-emerald-700" colSpan={7}>
-                    No students yet. Share the join code above.
-                  </td>
-                </tr>
-              )}
-              {students.map((s) => {
+        <ActivityRoster
+          accent="emerald"
+          students={students}
+          columns={[
+            { id: 'name', label: 'Student' },
+            { id: 'total', label: 'Total', align: 'center', render: (s) => s.stats?.total || 0 },
+            { id: 'correct', label: 'Correct', align: 'center', render: (s) => s.stats?.correct || 0 },
+            {
+              id: 'accuracy',
+              label: 'Accuracy',
+              align: 'center',
+              render: (s) => {
                 const total = s.stats?.total || 0;
                 const correct = s.stats?.correct || 0;
-                const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
-                return (
-                  <tr key={s.id || s.name}>
-                    <td className="px-4 py-3 text-emerald-900">{s.name}</td>
-                    <td className="px-4 py-3 text-center text-emerald-900">{total}</td>
-                    <td className="px-4 py-3 text-center text-emerald-900">{correct}</td>
-                    <td className="px-4 py-3 text-center text-emerald-900">{accuracy}%</td>
-                    <td className="px-4 py-3 text-center text-emerald-900">{s.stats?.streak || 0}</td>
-                    <td className="px-4 py-3 text-center text-emerald-900">{s.stats?.longestStreak || 0}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`inline-block w-3 h-3 rounded-full ${s.connected ? 'bg-emerald-500' : 'bg-gray-300'}`} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                return total > 0 ? `${Math.round((correct / total) * 100)}%` : '0%';
+              },
+            },
+            { id: 'streak', label: 'Streak', align: 'center', render: (s) => s.stats?.streak || 0 },
+            { id: 'longestStreak', label: 'Longest Streak', align: 'center', render: (s) => s.stats?.longestStreak || 0 },
+            { id: 'connected', label: 'Connected', align: 'center', render: (s) => <span className={`inline-block w-3 h-3 rounded-full ${s.connected ? 'bg-emerald-500' : 'bg-gray-300'}`} /> },
+          ]}
+          loading={loading}
+          error={error}
+          emptyMessage="No students yet. Share the join code above."
+        />
       </div>
     </div>
   );

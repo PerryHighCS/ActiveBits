@@ -27,6 +27,25 @@ function validateStats(stats) {
 }
 
 export default function setupPythonListPracticeRoutes(app, sessions, ws) {
+  const attachStudent = (session, name) => {
+    let student = session.data.students.find((s) => s.name === name);
+    if (!student) {
+      student = {
+        id: `${name}-${Date.now().toString(36)}`,
+        name,
+        stats: { total: 0, correct: 0, streak: 0, longestStreak: 0 },
+        connected: true,
+      };
+      session.data.students.push(student);
+    } else {
+      student.connected = true;
+      if (!student.stats) {
+        student.stats = { total: 0, correct: 0, streak: 0, longestStreak: 0 };
+      }
+    }
+    return student;
+  };
+
   const broadcastStudents = (session) => {
     const msg = JSON.stringify({ type: 'studentsUpdate', payload: { students: session.data.students } });
     for (const s of ws.wss.clients) {
@@ -62,15 +81,9 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
       return res.status(400).json({ error: 'invalid payload' });
     }
 
-    let student = session.data.students.find((s) => s.name === studentName);
-    if (!student) {
-      student = { id: `${studentName}-${Date.now().toString(36)}`, name: studentName, connected: true, stats };
-      session.data.students.push(student);
-    } else {
-      student.stats = stats;
-      student.connected = true;
-      student.lastSeen = Date.now();
-    }
+    const student = attachStudent(session, studentName);
+    student.stats = stats;
+    student.lastSeen = Date.now();
 
     broadcastStudents(session);
 
@@ -84,16 +97,7 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     if (socket.sessionId && socket.studentName) {
       const session = sessions[socket.sessionId];
       if (session && session.type === 'python-list-practice') {
-        let student = session.data.students.find((s) => s.name === socket.studentName);
-        if (!student) {
-          student = { id: `${socket.studentName}-${Date.now().toString(36)}`, name: socket.studentName, stats: { total: 0, correct: 0, streak: 0, longestStreak: 0 }, connected: true };
-          session.data.students.push(student);
-        } else {
-          student.connected = true;
-          if (!student.stats) {
-            student.stats = { total: 0, correct: 0, streak: 0, longestStreak: 0 };
-          }
-        }
+        const student = attachStudent(session, socket.studentName);
         broadcastStudents(session);
         socket.on('close', () => {
           student.connected = false;
