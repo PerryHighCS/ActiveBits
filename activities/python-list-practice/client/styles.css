@@ -2,7 +2,6 @@
 
 .python-list-bg {
   min-height: 100vh;
-  /* background: radial-gradient(circle at 10% 20%, #ecfdf3 0, #d1fae5 25%, #f0fdf4 50%, #ffffff 75%); */
 }
 
 .python-list-container {
@@ -22,6 +21,26 @@
   text-align: center;
 }
 
+.python-list-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  text-align: left;
+  flex-wrap: wrap;
+}
+
+.python-list-session-tag {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.15);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #ecfdf3;
+  white-space: nowrap;
+}
+
 .python-list-title {
   font-size: 32px;
   font-weight: 800;
@@ -32,6 +51,12 @@
 .python-list-subtitle {
   font-size: 16px;
   opacity: 0.9;
+}
+
+.python-list-subtitle-small {
+  font-size: 14px;
+  opacity: 0.85;
+  margin-bottom: 6px;
 }
 
 .python-list-stats {
@@ -74,6 +99,198 @@
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 }
 
+.python-list-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.python-list-visual {
+  background: #fff;
+  border-left: 1px dashed #a7f3d0;
+  border-right: 1px dashed #a7f3d0;
+  border-bottom: 1px dashed #a7f3d0;
+  border-radius: 0 0 12px 12px;
+  padding: 16px;
+}
+
+.python-list-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.python-list-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 72px;
+}
+
+.python-list-index-btn {
+  min-width: 40px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid #065f46;
+  background: #065f46;
+  color: #ecfdf3;
+  font-weight: 700;
+  font-size: 13px;
+  transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+}
+
+.python-list-index-btn:hover {
+  background: #047857;
+  border-color: #34d399;
+  transform: translateY(-1px);
+}
+
+.python-list-index-btn.selected {
+  background: #ecfdf3;
+  color: #065f46;
+  border-color: #34d399;
+}
+
+.python-list-value-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px 16px;
+  min-width: 96px;
+  border-radius: 999px;
+  border: 1px solid #d1fae5;
+  background: #f0fdf4;
+  color: #065f46;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.python-list-value-pill:hover {
+  transform: translateY(-1px);
+  border-color: #6ee7b7;
+  box-shadow: 0 6px 16px rgba(6, 95, 70, 0.12);
+}
+
+.python-list-value-pill.selected,
+.python-list-value-pill.range {
+  background: #065f46;
+  color: #ecfdf3;
+  border-color: #059669;
+}
+
+.python-list-value-pill.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.python-list-value-pill.placeholder {
+  background: #fefce8;
+  border-style: dashed;
+  border-color: #fcd34d;
+  color: #b45309;
+  cursor: default;
+  min-width: 80px;
+  padding: 12px 10px;
+}
+
+.python-list-chip {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #a7f3d0;
+  background: #ecfdf3;
+  color: #065f46;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.1s ease;
+}
+
+.python-list-chip:hover {
+  background: #d1fae5;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(6, 95, 70, 0.1);
+}
+
+.python-list-chip.selected {
+  background: #065f46;
+  border-color: #059669;
+  color: #ecfdf3;
+  box-shadow: 0 6px 16px rgba(6, 95, 70, 0.18);
+}
+
+.python-list-question {
+  margin-top: 16px;
+  padding: 14px 18px;
+  border-radius: 12px 12px 0 0;
+  background: #d1fae5;
+  color: #064e3b;
+  font-size: 1.1rem;
+  font-weight: 700;
+  border: 1px solid #6ee7b7;
+}
+
+.python-list-question-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.python-list-question {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.python-list-hint-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.python-list-hint-btn {
+  background: #047857;
+  color: #ecfdf3;
+  border: none;
+  font-weight: 600;
+  padding: 6px 12px;
+}
+
+.python-list-hint-btn.secondary {
+  background: #065f46;
+}
+
+.python-list-hint {
+  margin-top: 8px;
+  padding: 12px 16px;
+  border: 1px solid #a7f3d0;
+  border-radius: 10px;
+  background: #ecfdf3;
+  color: #044c33;
+  font-weight: 500;
+}
+
+.python-list-hint.answer {
+  border-color: #fcd34d;
+  background: #fefce8;
+}
+
+.python-list-hint-answer {
+  margin-top: 6px;
+  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.python-list-hint-detail {
+  font-weight: 600;
+  color: #065f46;
+}
+
 .python-list-label {
   color: #064e3b;
   font-weight: 700;
@@ -97,12 +314,42 @@
 }
 
 .python-list-feedback {
-  background: #ecfdf3;
-  border: 1px solid #a7f3d0;
-  color: #065f46;
   border-radius: 10px;
   padding: 12px;
   margin-top: 12px;
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+
+.python-list-feedback.feedback-with-action {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.python-list-feedback .feedback-action {
+  margin-left: auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.python-list-feedback .feedback-message {
+  flex: 1;
+  min-width: 200px;
+}
+
+.python-list-feedback.correct {
+  background: #ecfdf3;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.python-list-feedback.incorrect {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
 }
 
 .python-list-join {
@@ -118,7 +365,6 @@
 /* Manager table */
 .python-list-manager {
   min-height: 100vh;
-  background: linear-gradient(180deg, #ecfdf3 0%, #ffffff 50%, #d1fae5 100%);
 }
 
 .python-list-table thead {
