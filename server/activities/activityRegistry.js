@@ -9,13 +9,19 @@ const activitiesRoot = path.resolve(__dirname, '..', '..', 'activities');
 function discoverConfigPaths() {
   if (!fs.existsSync(activitiesRoot)) return [];
   const entries = fs.readdirSync(activitiesRoot, { withFileTypes: true });
-  return entries
+  const configs = entries
     .filter(entry => entry.isDirectory())
     .map(entry => {
       const configPath = path.join(activitiesRoot, entry.name, 'activity.config.js');
       return { id: entry.name, configPath };
     })
     .filter(entry => fs.existsSync(entry.configPath));
+
+  console.info(
+    `[activities] Discovered ${configs.length} activity configs:`,
+    configs.map(c => c.id).join(', ') || '(none)'
+  );
+  return configs;
 }
 
 const discoveredConfigs = discoverConfigPaths();
@@ -50,10 +56,12 @@ export async function registerActivityRoutes(app, sessions, ws) {
         console.warn(`No serverEntry defined for activity "${id}"`);
         continue;
       }
+      console.info(`[activities] Loading server entry for "${id}" from ${serverEntry}`);
       const mod = await import(serverEntry);
       const register = mod.default;
       if (typeof register === 'function') {
         register(app, sessions, ws);
+        console.info(`[activities] Registered routes for "${id}"`);
       } else {
         console.warn(`serverEntry for activity "${id}" does not export a default function`);
       }
