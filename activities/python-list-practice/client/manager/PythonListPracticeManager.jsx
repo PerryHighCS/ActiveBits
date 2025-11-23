@@ -91,64 +91,66 @@ export default function PythonListPracticeManager() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <SessionHeader activityName="Python List Practice" sessionId={sessionId} onEndSession={endSession} />
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-emerald-100">
+      <div className="p-6 max-w-6xl mx-auto space-y-4">
+        <SessionHeader activityName="Python List Practice" sessionId={sessionId} onEndSession={endSession} />
 
-      <div className="bg-white rounded-lg shadow p-4 mb-4 border border-gray-200">
-        <div className="flex flex-wrap items-center gap-4">
-          <div>
-            <div className="text-lg font-semibold">{stats.connected} connected</div>
-            <div className="text-sm text-gray-600">{stats.totalStudents} total students</div>
+        <div className="bg-white/90 border border-emerald-200 shadow rounded-xl p-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <div>
+              <div className="text-lg font-semibold text-emerald-900">{stats.connected} connected</div>
+              <div className="text-sm text-emerald-800">{stats.totalStudents} total students</div>
+            </div>
+            <Button variant="outline" onClick={() => downloadCsv(students)} className="border-emerald-300 text-emerald-800 hover:bg-emerald-50">
+              📊 Download CSV
+            </Button>
+            {error && <div className="text-red-600 text-sm">{error}</div>}
+            {loading && <div className="text-sm text-emerald-700">Loading…</div>}
           </div>
-          <Button variant="outline" onClick={() => downloadCsv(students)}>
-            📊 Download CSV
-          </Button>
-          {error && <div className="text-red-600 text-sm">{error}</div>}
-          {loading && <div className="text-sm text-gray-600">Loading…</div>}
         </div>
-      </div>
 
-      <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-gray-50 border-b">
-            <tr>
-              <th className="px-4 py-2">Student</th>
-              <th className="px-4 py-2 text-center">Total</th>
-              <th className="px-4 py-2 text-center">Correct</th>
-              <th className="px-4 py-2 text-center">Accuracy</th>
-              <th className="px-4 py-2 text-center">Streak</th>
-              <th className="px-4 py-2 text-center">Longest Streak</th>
-              <th className="px-4 py-2 text-center">Connected</th>
-            </tr>
-          </thead>
-          <tbody>
-            {students.length === 0 && (
-              <tr>
-                <td className="px-4 py-3 text-center text-gray-500" colSpan={7}>
-                  No students yet. Share the join code above.
-                </td>
+        <div className="bg-white/95 border border-emerald-200 shadow-lg rounded-xl overflow-hidden">
+          <table className="w-full text-left">
+            <thead className="bg-emerald-50 border-b border-emerald-100">
+              <tr className="text-emerald-900">
+                <th className="px-4 py-2">Student</th>
+                <th className="px-4 py-2 text-center">Total</th>
+                <th className="px-4 py-2 text-center">Correct</th>
+                <th className="px-4 py-2 text-center">Accuracy</th>
+                <th className="px-4 py-2 text-center">Streak</th>
+                <th className="px-4 py-2 text-center">Longest Streak</th>
+                <th className="px-4 py-2 text-center">Connected</th>
               </tr>
-            )}
-            {students.map((s) => {
-              const total = s.stats?.total || 0;
-              const correct = s.stats?.correct || 0;
-              const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
-              return (
-                <tr key={s.id || s.name} className="border-b last:border-b-0">
-                  <td className="px-4 py-3">{s.name}</td>
-                  <td className="px-4 py-3 text-center">{total}</td>
-                  <td className="px-4 py-3 text-center">{correct}</td>
-                  <td className="px-4 py-3 text-center">{accuracy}%</td>
-                  <td className="px-4 py-3 text-center">{s.stats?.streak || 0}</td>
-                  <td className="px-4 py-3 text-center">{s.stats?.longestStreak || 0}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`inline-block w-3 h-3 rounded-full ${s.connected ? 'bg-green-500' : 'bg-gray-300'}`} />
+            </thead>
+            <tbody>
+              {students.length === 0 && (
+                <tr>
+                  <td className="px-4 py-3 text-center text-emerald-700" colSpan={7}>
+                    No students yet. Share the join code above.
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              )}
+              {students.map((s) => {
+                const total = s.stats?.total || 0;
+                const correct = s.stats?.correct || 0;
+                const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+                return (
+                  <tr key={s.id || s.name} className="border-b last:border-b-0 border-emerald-100">
+                    <td className="px-4 py-3 text-emerald-900">{s.name}</td>
+                    <td className="px-4 py-3 text-center text-emerald-900">{total}</td>
+                    <td className="px-4 py-3 text-center text-emerald-900">{correct}</td>
+                    <td className="px-4 py-3 text-center text-emerald-900">{accuracy}%</td>
+                    <td className="px-4 py-3 text-center text-emerald-900">{s.stats?.streak || 0}</td>
+                    <td className="px-4 py-3 text-center text-emerald-900">{s.stats?.longestStreak || 0}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`inline-block w-3 h-3 rounded-full ${s.connected ? 'bg-emerald-500' : 'bg-gray-300'}`} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
