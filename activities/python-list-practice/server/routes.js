@@ -70,6 +70,14 @@ function validateStudentId(value) {
 
 export default function setupPythonListPracticeRoutes(app, sessions, ws) {
   const attachStudent = (session, name, studentId) => {
+    // Defensive: sessions restored without data/students should still work
+    if (!session.data || typeof session.data !== 'object') {
+      session.data = {};
+    }
+    if (!Array.isArray(session.data.students)) {
+      session.data.students = [];
+    }
+
     let student = null;
     if (studentId) {
       student = session.data.students.find((s) => s.id === studentId);
