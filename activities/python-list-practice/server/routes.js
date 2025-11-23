@@ -27,6 +27,15 @@ function validateStats(stats) {
 }
 
 export default function setupPythonListPracticeRoutes(app, sessions, ws) {
+  const broadcastStudents = (session) => {
+    const msg = JSON.stringify({ type: 'studentsUpdate', payload: { students: session.data.students } });
+    for (const s of ws.wss.clients) {
+      if (s.readyState === 1 && s.sessionId === session.id) {
+        try { s.send(msg); } catch (err) { console.error('WS send failed', err); }
+      }
+    }
+  };
+
   app.post('/api/python-list-practice/create', (req, res) => {
     const session = createSession(sessions, { data: {} });
     session.type = 'python-list-practice';
@@ -63,13 +72,7 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
       student.lastSeen = Date.now();
     }
 
-    // Broadcast updated roster to connected sockets for this session
-    const msg = JSON.stringify({ type: 'studentsUpdate', payload: { students: session.data.students } });
-    for (const s of ws.wss.clients) {
-      if (s.readyState === 1 && s.sessionId === session.id) {
-        try { s.send(msg); } catch (err) { console.error('WS send failed', err); }
-      }
-    }
+    broadcastStudents(session);
 
     res.json({ ok: true });
   });
@@ -88,8 +91,10 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
         } else {
           student.connected = true;
         }
+        broadcastStudents(session);
         socket.on('close', () => {
           student.connected = false;
+          broadcastStudents(session);
         });
       }
     }

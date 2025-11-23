@@ -1,9 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
-
-const POLL_INTERVAL_MS = 4000;
 
 function downloadCsv(students) {
   const headers = ['Student Name', 'Total Attempts', 'Correct', 'Accuracy %', 'Current Streak', 'Longest Streak'];
@@ -36,38 +34,47 @@ export default function PythonListPracticeManager() {
   const [students, setStudents] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const wsRef = useRef(null);
 
   useEffect(() => {
-    let active = true;
-    let timer;
+    if (!sessionId) return;
+    // Initial fetch for server state
+    fetch(`/api/python-list-practice/${sessionId}/students`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to fetch students');
+        return res.json();
+      })
+      .then((data) => {
+        setStudents(data.students || []);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.message || 'Failed to load students');
+        setLoading(false);
+      });
 
-    const fetchStudents = () => {
-      if (!sessionId) return;
-      fetch(`/api/python-list-practice/${sessionId}/students`)
-        .then((res) => {
-          if (!res.ok) throw new Error('Failed to fetch students');
-          return res.json();
-        })
-        .then((data) => {
-          if (!active) return;
-          setStudents(data.students || []);
-          setError(null);
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${sessionId}`;
+    const socket = new WebSocket(wsUrl);
+    wsRef.current = socket;
+
+    socket.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'studentsUpdate') {
+          setStudents(msg.payload?.students || []);
           setLoading(false);
-        })
-        .catch((err) => {
-          if (!active) return;
-          setError(err.message || 'Failed to load students');
-          setLoading(false);
-        })
-        .finally(() => {
-          timer = setTimeout(fetchStudents, POLL_INTERVAL_MS);
-        });
+        }
+      } catch (e) {
+        console.error('WS parse error', e);
+      }
     };
+    socket.onerror = () => setError('WebSocket error');
 
-    fetchStudents();
     return () => {
-      active = false;
-      if (timer) clearTimeout(timer);
+      socket.close();
+      wsRef.current = null;
     };
   }, [sessionId]);
 
