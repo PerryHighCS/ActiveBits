@@ -1,4 +1,4 @@
-import { createSession } from "../../core/sessions.js";
+import { createSession } from "../../../server/core/sessions.js";
 
 export default function setupRaffleRoutes(app, sessions, ws) {
   // Create raffle session

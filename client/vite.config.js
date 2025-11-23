@@ -16,6 +16,10 @@ export default defineConfig({
     },
   },
   server: {
+    fs: {
+      // Allow importing shared activity configs from the repo root
+      allow: ['..'],
+    },
     hmr: {
       // Disable HMR WebSocket in Codespaces to prevent connection errors
       clientPort: process.env.CODESPACES ? 443 : undefined,

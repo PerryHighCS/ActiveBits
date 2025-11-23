@@ -1,5 +1,5 @@
 import React from "react";
-import { useClipboard } from "../../../hooks/useClipboard";
+import { useClipboard } from "@src/hooks/useClipboard";
 
 const okHeader = `HTTP/1.1 200 OK\nContent-Type: text/plain`;
 
@@ -73,4 +73,3 @@ export default function StudentHostPalette({ fragments = [], hostname }) {
         </aside>
     );
 }
-

@@ -1,35 +1,43 @@
 /**
- * Activity Registry
- * 
- * This file centralizes all activity configurations, making it easy to:
- * - Add new activities
- * - Manage activity metadata
- * - Generate routes automatically
- * 
- * To add a new activity:
- * 1. Create a new folder in /activities with manager/ and student/ subdirectories
- * 2. Create an index.js file exporting the activity configuration
- * 3. Import and add it to the activities array below
+ * Activity Registry (auto-discovered)
+ *
+ * Activities declare metadata and entry points in `/activities/<id>/activity.config.js`.
+ * We eagerly glob those configs and import the client entry for each, so adding
+ * a new activity folder automatically registers it—no central list to update.
  */
 
-import raffleActivity from './raffle/index.jsx';
-import wwwSimActivity from './www-sim/index.jsx';
-import javaStringPracticeActivity from './java-string-practice';
+const configModules = import.meta.glob('../../../activities/*/activity.config.js', { eager: true });
+const clientModules = import.meta.glob('../../../activities/*/client/index.{js,jsx}', { eager: true });
 
-// Array of all registered activities
-export const activities = [
-  raffleActivity,
-  wwwSimActivity,
-  javaStringPracticeActivity,
-];
+const findClientModule = (activityId) => {
+  const key = Object.keys(clientModules).find(k => k.includes(`/activities/${activityId}/client/index`));
+  return key ? clientModules[key] : null;
+};
 
-// Create a map for quick lookup by activity ID
+export const activities = Object.entries(configModules).map(([path, mod]) => {
+  const cfg = mod.default;
+  const activityId = cfg?.id || path.split('/activities/')[1]?.split('/')[0];
+
+  if (!cfg?.id) {
+    console.warn(`Activity config at "${path}" is missing an id`);
+    return null;
+  }
+
+  const clientModule = findClientModule(activityId);
+  if (!clientModule) {
+    console.warn(`No client entry found for activity "${activityId}"`);
+    return null;
+  }
+
+  const components = clientModule.default ?? clientModule.activity ?? clientModule;
+  return { ...cfg, ...components };
+}).filter(Boolean);
+
 export const activityMap = activities.reduce((map, activity) => {
   map[activity.id] = activity;
   return map;
 }, {});
 
-// Helper to get activity by ID
 export const getActivity = (id) => activityMap[id];
 
 export default activities;
