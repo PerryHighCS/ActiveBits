@@ -10,15 +10,6 @@ import WwwSimManager from './manager/WwwSimManager';
 import WwwSim from './student/WwwSim';
 
 export const wwwSimActivity = {
-  // Unique identifier for this activity type
-  id: 'www-sim',
-  
-  // Display name for the activity
-  name: 'WWW Simulation',
-  
-  // Description shown in the dashboard
-  description: 'Simulate IP-based discovery and HTTP interactions',
-  
   // Manager component (teacher view)
   ManagerComponent: WwwSimManager,
   
@@ -48,12 +39,6 @@ export const wwwSimActivity = {
       </a>.
     </>
   ),
-  
-  // Accent color for the activity card
-  color: 'yellow',
-  
-  // Whether this activity can be used in solo mode (without a teacher session)
-  soloMode: false,
 };
 
 export default wwwSimActivity;
