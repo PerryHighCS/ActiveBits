@@ -10,15 +10,6 @@ import RaffleManager from './manager/RaffleManager';
 import TicketPage from './student/TicketPage';
 
 export const raffleActivity = {
-  // Unique identifier for this activity type
-  id: 'raffle',
-  
-  // Display name for the activity
-  name: 'Raffle',
-  
-  // Description shown in the dashboard
-  description: 'Students scan a QR code to receive a unique ticket',
-  
   // Manager component (teacher view)
   ManagerComponent: RaffleManager,
   
@@ -50,12 +41,6 @@ export const raffleActivity = {
       </a>.
     </>
   ),
-  
-  // Accent color for the activity card
-  color: 'red',
-  
-  // Whether this activity can be used in solo mode (without a teacher session)
-  soloMode: false,
 };
 
 export default raffleActivity;

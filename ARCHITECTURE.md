@@ -68,27 +68,39 @@ ActiveBits/
 
 ### Activity Configuration
 
-Each activity is defined by a configuration object in its `index.js` file:
+Each activity owns a config at `/activities/<id>/activity.config.js` that declares metadata plus pointers to the client and server entry files. The client auto-discovers these configs (and loads the client entries), and the server auto-discovers them to load route handlers. Adding a new activity only requires dropping a new folder with a config plus the corresponding client/server entry files—no central registry to update.
 
+`activity.config.js` (metadata + entry pointers):
 ```javascript
-export const activityName = {
-  id: 'activity-id',              // Unique identifier
-  name: 'Display Name',           // Human-readable name
+export default {
+  id: 'activity-id',            // Unique identifier
+  name: 'Display Name',         // Human-readable name
   description: 'Brief description', // Shown in dashboard
-  ManagerComponent: ManagerComp,  // Teacher view component
-  StudentComponent: StudentComp,  // Student view component
-  footerContent: null,            // JSX element or null (use .jsx if JSX)
-  color: 'blue',                 // Accent color for activity card
-  soloMode: false,               // Allow solo practice without teacher
+  color: 'blue',                // Accent color for activity card
+  soloMode: false,              // Allow solo practice without teacher
+  clientEntry: './client/index.js',  // Component entry (JS/JSX)
+  serverEntry: './server/routes.js', // Server routes
 };
 ```
 
-Each activity owns a config at `/activities/<id>/activity.config.js` that declares metadata plus pointers to the client and server entry files. The client auto-discovers these configs (and loads the client entries), and the server auto-discovers them to load route handlers. Adding a new activity only requires dropping a new folder with a config plus the corresponding client/server entry files—no central registry to update.
+`client/index.js` (components/footer only):
+```javascript
+import ManagerComp from './manager/ManagerComp';
+import StudentComp from './student/StudentComp';
+
+export default {
+  ManagerComponent: ManagerComp,
+  StudentComponent: StudentComp,
+  footerContent: null, // JSX if desired (use .jsx + import React)
+};
+```
+
+The loader merges `{...config, ...clientEntry}`; keeping metadata in `activity.config.js` avoids dueling sources of truth.
 
 ### Automatic Route Generation
 
 Routes are automatically generated in `App.jsx` based on registered activities:
-- `/manage/{activity-id}` - Create new session
+- `/manage/{activity-id}` - Manager view without a sessionId (manager components should create sessions via dashboard APIs)
 - `/manage/{activity-id}/{session-id}` - Manage existing session
 
 ### Adding a New Activity
@@ -147,7 +159,7 @@ Sessions are stored in-memory with a TTL (time-to-live). Each session has:
 
 ### Persistent Sessions
 Permanent sessions use HMAC-SHA256 authentication:
-- **Hash Format**: `{hash}-{salt}` where hash = HMAC(activityType + salt)
+- **Hash Format**: 20 characters of `salt(8 hex) + hmac(12 hex)` derived from `activityName|hashedTeacherCode|salt`
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
 - **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
 - **Auto-reset**: Session data resets each time teacher visits

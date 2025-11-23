@@ -132,29 +132,22 @@ export default function QuizManager() {
 }
 ```
 
-### Step 4: Create the Activity Configuration
+### Step 4: Create the Client Entry (components/footer only)
 
-**File: `activities/quiz/client/index.js`** (or `index.jsx` if using JSX in footerContent)
+**File: `activities/quiz/client/index.js`** (or `.jsx` if using JSX in `footerContent`)
 
 ```javascript
 import QuizManager from './manager/QuizManager';
 import QuizPage from './student/QuizPage';
 
-export const quizActivity = {
-  id: 'quiz',
-  name: 'Quiz',
-  description: 'Ask students questions and collect responses',
+export default {
   ManagerComponent: QuizManager,
   StudentComponent: QuizPage,
   footerContent: null, // Set to JSX element for custom footer, or null for no footer
-  color: 'purple',
-  soloMode: false, // Set to true if activity supports solo practice without teacher
 };
-
-export default quizActivity;
 ```
 
-> 💡 **Note:** If your `footerContent` contains JSX (e.g., links with `<a>` tags), the file must have a `.jsx` extension and import React.
+Keep metadata (id/name/description/color/soloMode) in `activity.config.js` to avoid dueling sources of truth. The loader merges `{...config, ...clientEntry}` at runtime.
 
 ### Step 5: Create Server Routes
 
