@@ -90,6 +90,9 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
           session.data.students.push(student);
         } else {
           student.connected = true;
+          if (!student.stats) {
+            student.stats = { total: 0, correct: 0, streak: 0, longestStreak: 0 };
+          }
         }
         broadcastStudents(session);
         socket.on('close', () => {

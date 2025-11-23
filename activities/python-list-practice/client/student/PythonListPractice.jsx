@@ -131,6 +131,7 @@ function sanitizeName(name) {
 export default function PythonListPractice({ sessionData }) {
   const [studentName, setStudentName] = useState('');
   const [submittedName, setSubmittedName] = useState(null);
+  const wsRef = useRef(null);
   const [challenge, setChallenge] = useState(generateChallenge());
   const [answer, setAnswer] = useState('');
   const [feedback, setFeedback] = useState(null);
@@ -146,6 +147,25 @@ export default function PythonListPractice({ sessionData }) {
       nameRef.current.focus();
     }
   }, []);
+
+  // Connect to WebSocket after name submit to mark student as connected (for roster)
+  useEffect(() => {
+    if (!sessionId || !submittedName) return;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${encodeURIComponent(sessionId)}&studentName=${encodeURIComponent(submittedName)}`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    ws.onopen = () => {
+      // send a zeroed stats payload on connect so the dashboard sees the student immediately
+      sendStats(stats);
+    };
+    ws.onerror = (err) => console.error('WS error', err);
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, submittedName]);
 
   const normalizedExpected = useMemo(() => {
     if (challenge.type === 'list') return challenge.expected.replace(/\s+/g, '');
