@@ -20,6 +20,13 @@ export default defineConfig({
     },
     preserveSymlinks: false,
   },
+  optimizeDeps: {
+    // Include colocated activity client code so their deps are scanned/prebundled
+    entries: [
+      'index.html',
+      '../../activities/*/client/**/*.{js,jsx}',
+    ],
+  },
   server: {
     fs: {
       // Allow importing shared activity configs from the repo root
