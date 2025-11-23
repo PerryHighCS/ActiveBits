@@ -7,11 +7,14 @@
         "server"
     ],
     "scripts": {
-        "install-all": "npm install --prefix client --production=false && npm install --prefix server && npm install --prefix activities",
-        "deploy": "npm run install-all && npm run build --workspace client",
-        "start": "npm start --prefix server",
-        "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\""
-    },
+    "install-all": "npm install --prefix client --production=false && npm install --prefix server && npm install --prefix activities",
+    "deploy": "npm run install-all && npm run build --workspace client",
+    "start": "npm start --prefix server",
+    "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\"",
+    "verify:deploy": "npm run install-all && npm run build --workspace client",
+    "verify:server": "node scripts/verify-server.js",
+    "test": "npm run verify:deploy && npm run verify:server"
+  },
     "keywords": [],
     "author": "",
     "license": "MIT",
