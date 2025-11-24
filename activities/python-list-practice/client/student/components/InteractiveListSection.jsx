@@ -11,10 +11,7 @@ export default function InteractiveListSection({
   selectedValueIndex,
   onIndexClick,
   onValueClick,
-  onStartRange,
-  onExtendRange,
-  onFinishRange,
-}) {
+  }) {
   if (!interactiveList.length) return null;
 
   const instructionText = isListBuildVariant
@@ -54,9 +51,6 @@ export default function InteractiveListSection({
                 className={`python-list-value-pill ${inRange ? 'range' :
                   isSelectedValue ? 'selected' : ''}`}
                 onClick={(e) => onValueClick(idx, e)}
-                onMouseDown={() => supportsSequenceSelection && onStartRange(idx)}
-                onMouseEnter={() => supportsSequenceSelection && onExtendRange(idx)}
-                onMouseUp={() => supportsSequenceSelection && onFinishRange()}
                 title={`Value at index ${idx}`}
               >
                 {String(item)}

@@ -18,6 +18,8 @@ import {
   sanitizeName,
 } from './challengeGenerator';
 import { normalizeListAnswer, normalizeExpected } from './utils/componentUtils';
+import usePersistentStats from './hooks/usePersistentStats';
+import useSequenceSelection from './hooks/useSequenceSelection';
 
 export default function PythonListPractice({ sessionData }) {
   const [studentName, setStudentName] = useState('');
@@ -25,27 +27,20 @@ export default function PythonListPractice({ sessionData }) {
   const [studentId, setStudentId] = useState(null);
   const wsRef = useRef(null);
   const attachSessionEndedHandler = useSessionEndedHandler(wsRef);
+  const sessionId = sessionData?.sessionId;
+  const isSolo = !sessionId || sessionId.startsWith('solo-');
   const [allowedTypes, setAllowedTypes] = useState(() => new Set(['all']));
   const [challenge, setChallenge] = useState(() => createChallengeForTypes(new Set(['all'])));
   const [answer, setAnswer] = useState('');
   const [feedback, setFeedback] = useState(null);
   const [showNext, setShowNext] = useState(false);
-  const [stats, setStats] = useState({ total: 0, correct: 0, streak: 0, longestStreak: 0 });
+  const { stats, setStats, sendStats, statsRef } = usePersistentStats({ sessionId, studentId, submittedName, isSolo });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const nameRef = useRef(null);
   const answerInputRef = useRef(null);
-  const [selectedIndex, setSelectedIndex] = useState(null);
-  const [selectedValueIndex, setSelectedValueIndex] = useState(null);
-  const [selectedRange, setSelectedRange] = useState(null);
-  const [selectedSequence, setSelectedSequence] = useState([]);
-  const [isDraggingRange, setIsDraggingRange] = useState(false);
-  const rangeStartRef = useRef(null);
-  const statsRef = useRef(stats);
+  // selection state is managed by useSequenceSelection
   const [insertSelections, setInsertSelections] = useState([]);
-  const statsLoadedRef = useRef(false);
-  const sessionId = sessionData?.sessionId;
-  const isSolo = !sessionId || sessionId.startsWith('solo-');
   const [hintStage, setHintStage] = useState('none');
 
   const allowedTypeList = useMemo(() => {
@@ -58,10 +53,7 @@ export default function PythonListPractice({ sessionData }) {
     { id: 'all', label: 'All question types' },
     ...OPERATIONS.filter((t) => t !== 'all').map((type) => ({ id: type, label: QUESTION_LABELS[type] || type })),
   ]), []);
-  const statsStorageKey = useMemo(() => {
-    if (!sessionId || !studentId || isSolo) return null;
-    return `python-list-practice-stats-${sessionId}-${studentId}`;
-  }, [sessionId, studentId, isSolo]);
+  
   const applySelectedTypes = useCallback((types) => {
     const normalized = Array.isArray(types) && types.length > 0 ? types : ['all'];
     const nextSet = new Set(normalized);
@@ -118,9 +110,7 @@ export default function PythonListPractice({ sessionData }) {
     }
   }, [challenge, showNext]);
 
-  useEffect(() => {
-    statsRef.current = stats;
-  }, [stats]);
+  
 
   // Connect to WebSocket after name submit to mark student as connected (for roster)
   useEffect(() => {
@@ -172,46 +162,7 @@ export default function PythonListPractice({ sessionData }) {
     setError(null);
   };
 
-  const sendStats = useCallback(async (nextStats) => {
-    if (!sessionId || !submittedName || !studentId) return;
-    try {
-      await fetch(`/api/python-list-practice/${sessionId}/stats`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentName: submittedName, studentId, stats: nextStats }),
-      });
-    } catch (err) {
-      console.error('Failed to send stats', err);
-    }
-  }, [sessionId, studentId, submittedName]);
-
-  useEffect(() => {
-    if (!statsStorageKey || statsLoadedRef.current) return;
-    try {
-      const stored = localStorage.getItem(statsStorageKey);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setStats(parsed);
-        statsRef.current = parsed;
-        if (submittedName) {
-          sendStats(parsed);
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to load saved stats', err);
-    } finally {
-      statsLoadedRef.current = true;
-    }
-  }, [statsStorageKey, sendStats, submittedName]);
-
-  useEffect(() => {
-    if (!statsStorageKey || !statsLoadedRef.current) return;
-    try {
-      localStorage.setItem(statsStorageKey, JSON.stringify(stats));
-    } catch (err) {
-      console.warn('Failed to save stats', err);
-    }
-  }, [stats, statsStorageKey]);
+  
 
   useEffect(() => {
     if (!sessionId || isSolo) return;
@@ -226,7 +177,7 @@ export default function PythonListPractice({ sessionData }) {
     ws.onopen = () => {
       // send a zeroed stats payload on connect so the dashboard sees the student immediately
       if (submittedName) {
-        sendStats(statsRef.current);
+        sendStats();
       }
     };
     ws.onmessage = (evt) => {
@@ -327,16 +278,7 @@ export default function PythonListPractice({ sessionData }) {
 
   const supportsSequenceSelection = !!(challenge && ['range-len', 'for-each'].includes(challenge.op));
 
-  useEffect(() => {
-    setSelectedIndex(null);
-    setSelectedValueIndex(null);
-    setSelectedRange(null);
-    setSelectedSequence([]);
-    rangeStartRef.current = null;
-    setIsDraggingRange(false);
-    setInsertSelections([]);
-    setHintStage('none');
-  }, [challenge]);
+  // selection reset is handled by the selection hook (see below)
 
   const getValueForIndex = useCallback((idx) => {
     if (!challenge) return undefined;
@@ -358,121 +300,38 @@ export default function PythonListPractice({ sessionData }) {
     return interactiveList[idx];
   }, [challenge, interactiveList]);
 
-  const applyRangeSelection = useCallback((startIdx, endIdx) => {
-    if (!supportsSequenceSelection || !interactiveList.length) return;
-    const rangeStart = Math.max(0, Math.min(startIdx, endIdx));
-    const rangeEnd = Math.min(interactiveList.length - 1, Math.max(startIdx, endIdx));
-    setSelectedRange([rangeStart, rangeEnd]);
-    const indices = [];
-    const direction = startIdx <= endIdx ? 1 : -1;
-    for (let i = startIdx; direction > 0 ? i <= endIdx : i >= endIdx; i += direction) {
-      if (i >= 0 && i < interactiveList.length) {
-        indices.push(i);
-      }
-    }
-    setSelectedSequence(indices);
-    const slice = indices.map((idx) => interactiveList[idx]);
-    if (isListBuildVariant) {
-      const formatted = slice.map((item) => (typeof item === 'string' ? `'${item}'` : String(item)));
-      setInsertSelections(formatted);
-    } else {
-      setAnswer(slice.map((item) => String(item)).join(', '));
-    }
-  }, [interactiveList, supportsSequenceSelection, isListBuildVariant]);
+  // wire up selection hook (handles clicks, shift-select ranges, and building answers)
+  const sequenceSelection = useSequenceSelection({
+    interactiveList,
+    isListBuildVariant,
+    supportsSequenceSelection,
+    showNext,
+    setAnswer,
+    setInsertSelections,
+    getValueForIndex,
+  });
 
-  const handleSequenceSelectionClick = useCallback((idx, event = null) => {
-    if (!supportsSequenceSelection || showNext) return;
-    if (isDraggingRange) return;
-    if (event && event.shiftKey && selectedSequence.length > 0) {
-      const last = selectedSequence[selectedSequence.length - 1];
-      applyRangeSelection(last, idx);
-      rangeStartRef.current = null;
-      setIsDraggingRange(false);
-      return;
-    }
-    const values = interactiveList[idx];
-    if (isListBuildVariant) {
-      const formatted = typeof values === 'string' ? `'${values}'` : String(values);
-      setInsertSelections((prev) => [...prev, formatted]);
-    } else {
-      setAnswer((prev) => (prev ? `${prev}, ${String(values)}` : String(values)));
-    }
-  }, [applyRangeSelection, interactiveList, isDraggingRange, selectedSequence, showNext, supportsSequenceSelection, isListBuildVariant]);
-
-  const startRangeSelection = useCallback((idx) => {
-    if (!supportsSequenceSelection || showNext) return;
-    rangeStartRef.current = idx;
-    setIsDraggingRange(true);
-    setSelectedRange([idx, idx]);
-  }, [applyRangeSelection, showNext, supportsSequenceSelection]);
-
-  const extendRangeSelection = useCallback((idx) => {
-    if (!supportsSequenceSelection || rangeStartRef.current === null || showNext) return;
-    applyRangeSelection(rangeStartRef.current, idx);
-  }, [applyRangeSelection, showNext, supportsSequenceSelection]);
-
-  const finishRangeSelection = useCallback(() => {
-    if (!supportsSequenceSelection) return;
-    rangeStartRef.current = null;
-    setIsDraggingRange(false);
-  }, [supportsSequenceSelection]);
+  const {
+    selectedIndex,
+    selectedValueIndex,
+    selectedRange,
+    selectedSequence,
+    handleIndexClick,
+    handleValueClick,
+    applyRangeSelection,
+    handleSequenceSelectionClick,
+    clearSelection,
+  } = sequenceSelection;
 
   useEffect(() => {
-    const handleMouseUp = () => {
-      if (isDraggingRange) {
-        finishRangeSelection();
-      }
-    };
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => window.removeEventListener('mouseup', handleMouseUp);
-  }, [finishRangeSelection, isDraggingRange]);
+    clearSelection();
+    setInsertSelections([]);
+    setHintStage('none');
+  }, [challenge, clearSelection]);
 
-  const handleIndexClick = (idx, event) => {
-    if (!challenge || showNext) return;
-    setSelectedIndex(idx);
-    setSelectedValueIndex(null);
-    setSelectedRange(null);
-    rangeStartRef.current = null;
-    if (challenge.op === 'pop' && idx !== interactiveList.length - 1) {
-      // allow any selection for pop questions
-    }
-    const formatted = String(idx);
-    setAnswer((prev) => (prev ? `${prev}, ${formatted}` : formatted));
-  };
+  
 
-  const handleValueClick = (idx, event) => {
-    if (!challenge || showNext) return;
-    const value = getValueForIndex(idx);
-    const resolvedValue = value !== undefined ? value : interactiveList[idx];
-    setSelectedValueIndex(idx);
-    setSelectedIndex(null);
-    setSelectedRange(null);
-    rangeStartRef.current = null;
-    if (isListBuildVariant) {
-      const formatted = typeof resolvedValue === 'string' ? `'${resolvedValue}'` : String(resolvedValue);
-      setInsertSelections((prev) => [...prev, formatted]);
-      return;
-    }
-    if (challenge.op === 'for-range') {
-      if (resolvedValue !== undefined) {
-        setAnswer((prev) => (prev ? `${prev}, ${String(resolvedValue)}` : String(resolvedValue)));
-      }
-      return;
-    }
-    if (supportsSequenceSelection) {
-      handleSequenceSelectionClick(idx, event);
-      return;
-    }
-    if (['index-get', 'index-set', 'pop'].includes(challenge.op)) {
-      if (resolvedValue !== undefined) {
-        setAnswer(String(resolvedValue));
-      }
-    } else if (['value-selection', 'number-choice', 'index-value'].includes(challenge.variant)) {
-      if (resolvedValue !== undefined) {
-        setAnswer(String(resolvedValue));
-      }
-    }
-  };
+  // index/value click handlers are provided by `useSequenceSelection`
 
   const QUESTION_OPTIONS = useMemo(() => OPERATIONS.filter((t) => t !== 'all'), []);
 
@@ -558,9 +417,7 @@ export default function PythonListPractice({ sessionData }) {
               selectedValueIndex={selectedValueIndex}
               onIndexClick={handleIndexClick}
               onValueClick={handleValueClick}
-              onStartRange={startRangeSelection}
-              onExtendRange={(idx) => extendRangeSelection(idx)}
-              onFinishRange={finishRangeSelection}
+              
             />
             <HintDisplay
               hintStage={hintStage}
