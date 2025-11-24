@@ -11,9 +11,7 @@ export default function InteractiveListSection({
   selectedValueIndex,
   onIndexClick,
   onValueClick,
-  onStartRange,
-  onExtendRange,
-  onFinishRange,
+  allowDuplicateValues = false,
 }) {
   if (!interactiveList.length) return null;
 
@@ -31,39 +29,45 @@ export default function InteractiveListSection({
         {instructionText}
       </div>
       <div className="python-list-grid">
-        {interactiveList.map((item, idx) => {
-          const inRange = selectedRange && idx >= selectedRange[0] && idx <= selectedRange[1];
-          const isSequenceSelected = selectedSequence.includes(idx);
-          const isSelectedValue = selectedValueIndex === idx || isSequenceSelected;
-          const showIndexButton = !isListBuildVariant
-            && !['value-selection', 'number-choice', 'index-value'].includes(challenge?.variant);
-          return (
-            <div className="python-list-slot" key={`slot-${idx}`}>
-              {showIndexButton && (
-                <button
-                  type="button"
-                  className={`python-list-index-btn ${selectedIndex === idx ? 'selected' : ''}`}
-                  onClick={(e) => onIndexClick(idx, e)}
-                  title={`Index ${idx}`}
-                >
-                  {idx}
-                </button>
-              )}
-              <button
-                type="button"
-                className={`python-list-value-pill ${inRange ? 'range' :
-                  isSelectedValue ? 'selected' : ''}`}
-                onClick={(e) => onValueClick(idx, e)}
-                onMouseDown={() => supportsSequenceSelection && onStartRange(idx)}
-                onMouseEnter={() => supportsSequenceSelection && onExtendRange(idx)}
-                onMouseUp={() => supportsSequenceSelection && onFinishRange()}
-                title={`Value at index ${idx}`}
-              >
-                {String(item)}
-              </button>
-            </div>
-          );
-        })}
+        {(() => {
+          const seen = new Set();
+          return interactiveList.map((item, idx) => {
+            const key = typeof item === 'string' ? `s:${item}` : `n:${item}`;
+            const isDuplicate = !allowDuplicateValues && seen.has(key);
+            if (!seen.has(key)) seen.add(key);
+            if (isDuplicate) return null;
+            const inRange = selectedRange && idx >= selectedRange[0] && idx <= selectedRange[1];
+            const isSequenceSelected = selectedSequence.includes(idx);
+            const isSelectedValue = selectedValueIndex === idx || isSequenceSelected;
+            const showIndexButton = !isListBuildVariant
+              && !['value-selection', 'number-choice', 'index-value'].includes(challenge?.variant);
+            return (
+              <div className="python-list-slot" key={`slot-${idx}`}>
+                {showIndexButton && (
+                  <button
+                    type="button"
+                    className={`python-list-index-btn ${selectedIndex === idx ? 'selected' : ''}`}
+                    onClick={(e) => onIndexClick(idx, e)}
+                    title={`Index ${idx}`}
+                  >
+                    {idx}
+                  </button>
+                )}
+                {isDuplicate ? null : (
+                  <button
+                    type="button"
+                    className={`python-list-value-pill ${inRange ? 'range' :
+                      isSelectedValue ? 'selected' : ''}`}
+                    onClick={(e) => onValueClick(idx, e)}
+                    title={`Value at index ${idx}`}
+                  >
+                    {String(item)}
+                  </button>
+                )}
+              </div>
+            );
+          });
+        })()}
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+/* eslint-env node */
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -34,7 +35,7 @@ export default defineConfig({
     },
     hmr: {
       // Disable HMR WebSocket in Codespaces to prevent connection errors
-      clientPort: process.env.CODESPACES ? 443 : undefined,
+      clientPort: (typeof globalThis !== 'undefined' && globalThis.process && globalThis.process.env && globalThis.process.env.CODESPACES) ? 443 : undefined,
     },
     proxy: {
       '/api': {

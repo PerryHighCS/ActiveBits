@@ -194,13 +194,14 @@ export default function ManageDashboard() {
         {activities.map((activity) => (
           <div
             key={activity.id}
-            className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all"
+            className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all flex flex-col h-full"
           >
             <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-4`}>
               <h3 className="text-xl font-semibold">{activity.name}</h3>
             </div>
-            <div className="bg-white px-6 py-4">
+            <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4 flex flex-col h-full`}>
               <p className="text-gray-600 mb-4">{activity.description}</p>
+              <div className="flex-1" />
               <div className="flex flex-col gap-2">
                 <button
                   onClick={() => createSession(activity.id)}

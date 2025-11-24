@@ -27,6 +27,12 @@ export default function SessionHeader({ activityName, sessionId, onEndSession, s
 
   const copyLink = () => copyToClipboard(studentJoinUrl);
   const copyCode = () => copyToClipboard(sessionId);
+  const handleCopyLinkClick = (event) => {
+    copyLink();
+    if (event.ctrlKey || event.metaKey) {
+      window.open(studentJoinUrl, '_blank');
+    }
+  };
 
   if (simple) {
     return (
@@ -83,7 +89,7 @@ export default function SessionHeader({ activityName, sessionId, onEndSession, s
                 </div>
 
                 {/* Copy URL Button */}
-                <Button onClick={copyLink} variant="outline">
+                <Button onClick={handleCopyLinkClick} variant="outline">
                   {isCopied(studentJoinUrl) ? '✓ Copied!' : 'Copy Join URL'}
                 </Button>
               </div>

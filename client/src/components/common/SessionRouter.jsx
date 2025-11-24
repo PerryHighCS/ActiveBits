@@ -66,7 +66,7 @@ const SessionRouter = () => {
                     setPersistentSessionInfo(data);
                     setIsLoadingPersistent(false);
                 })
-                .catch(err => {
+                .catch(() => {
                     setError('Invalid persistent session link');
                     setIsLoadingPersistent(false);
                 });
@@ -166,6 +166,22 @@ const SessionRouter = () => {
     if (!sessionId) {
         // Get all activities that support solo mode
         const soloActivities = activities.filter(activity => activity.soloMode);
+        const colorClasses = {
+            blue: 'bg-blue-600',
+            green: 'bg-green-600',
+            purple: 'bg-purple-600',
+            red: 'bg-red-600',
+            yellow: 'bg-yellow-600',
+            indigo: 'bg-indigo-600',
+        };
+        const bgColorClasses = {
+            blue: 'bg-blue-50',
+            green: 'bg-green-50',
+            purple: 'bg-purple-50',
+            red: 'bg-red-50',
+            yellow: 'bg-yellow-50',
+            indigo: 'bg-indigo-50',
+        };
         
         return (
             <div className="flex flex-col items-center gap-8 max-w-2xl mx-auto p-6">
@@ -188,10 +204,14 @@ const SessionRouter = () => {
                                 <div 
                                     key={activity.id} 
                                     onClick={() => setSoloActivity(activity)}
-                                    className="bg-white rounded-lg shadow-md p-6 w-full max-w-md border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                                    className="rounded-lg shadow-md overflow-hidden w-full max-w-md border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
                                 >
-                                    <h3 className="text-xl font-semibold mb-2 text-gray-800">{activity.name}</h3>
-                                    <p className="text-gray-600">{activity.description}</p>
+                                    <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>
+                                        <h3 className="text-xl font-semibold">{activity.name}</h3>
+                                    </div>
+                                    <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4`}>
+                                        <p className="text-gray-600">{activity.description}</p>
+                                    </div>
                                 </div>
                             ))}
                         </div>
