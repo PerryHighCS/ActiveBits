@@ -66,7 +66,7 @@ const SessionRouter = () => {
                     setPersistentSessionInfo(data);
                     setIsLoadingPersistent(false);
                 })
-                .catch(err => {
+                .catch(() => {
                     setError('Invalid persistent session link');
                     setIsLoadingPersistent(false);
                 });

@@ -192,7 +192,12 @@ export default function PythonListPracticeManager() {
           accent="emerald"
           students={students}
           columns={[
-            { id: 'name', label: 'Student' },
+            { id: 'name', label: 'Student', render: (s) => (
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${s.connected ? 'bg-emerald-500' : 'bg-gray-300'}`}></span>
+                <span className="font-medium">{s.name}</span>
+              </div>
+            ) },
             { id: 'total', label: 'Total', align: 'center', render: (s) => s.stats?.total || 0 },
             { id: 'correct', label: 'Correct', align: 'center', render: (s) => s.stats?.correct || 0 },
             {
@@ -207,7 +212,7 @@ export default function PythonListPracticeManager() {
             },
             { id: 'streak', label: 'Streak', align: 'center', render: (s) => s.stats?.streak || 0 },
             { id: 'longestStreak', label: 'Longest Streak', align: 'center', render: (s) => s.stats?.longestStreak || 0 },
-            { id: 'connected', label: 'Connected', align: 'center', render: (s) => <span className={`inline-block w-3 h-3 rounded-full ${s.connected ? 'bg-emerald-500' : 'bg-gray-300'}`} /> },
+            
           ]}
           loading={loading}
           error={error}

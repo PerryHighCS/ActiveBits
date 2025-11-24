@@ -43,8 +43,8 @@ export function useSessionEndedHandler(wsRef = null) {
       } catch (err) {
         // Silently ignore non-JSON messages (e.g., 'ping', 'pong') and JSON parse errors
         // This is expected behavior as WebSockets may receive various message formats
-        // Log errors in development for debugging
-        if (process.env.NODE_ENV === 'development') {
+        // Log errors in development for debugging (safe check for `process` via globalThis)
+        if (typeof globalThis !== 'undefined' && globalThis.process && globalThis.process.env && globalThis.process.env.NODE_ENV === 'development') {
           console.debug('[useSessionEndedHandler] Ignored non-JSON message:', event.data, err);
         }
       }
@@ -71,7 +71,8 @@ export function useSessionEndedHandler(wsRef = null) {
 
     attachHandler(wsRef.current);
     return () => cleanupRef.current?.();
-  }, [attachHandler, wsRef?.current]);
+    // `wsRef` is a stable ref object; include it (not `.current`) to satisfy the hook rule.
+  }, [attachHandler, wsRef]);
 
   // Ensure cleanup on unmount
   useEffect(() => () => cleanupRef.current?.(), []);
