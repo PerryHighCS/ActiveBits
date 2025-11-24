@@ -8,6 +8,7 @@ export default function useSequenceSelection({
   setAnswer,
   setInsertSelections,
   getValueForIndex,
+  challengeOp = null,
 } = {}) {
   const [selectedIndex, setSelectedIndex] = useState(null);
   const [selectedValueIndex, setSelectedValueIndex] = useState(null);
@@ -50,7 +51,7 @@ export default function useSequenceSelection({
       const values = interactiveList[idx];
       if (isListBuildVariant) {
         const formatted = typeof values === 'string' ? `'${values}'` : String(values);
-        setInsertSelections && setInsertSelections((prev) => [...prev, formatted]);
+        setInsertSelections && setInsertSelections((prev) => [...(prev || []), formatted]);
       } else {
         setAnswer && setAnswer((prev) => (prev ? `${prev}, ${String(values)}` : String(values)));
       }
@@ -93,21 +94,22 @@ export default function useSequenceSelection({
       setSelectedSequence([]);
       if (isListBuildVariant) {
         const formatted = typeof resolvedValue === 'string' ? `'${resolvedValue}'` : String(resolvedValue);
-        setInsertSelections && setInsertSelections((prev) => [...prev, formatted]);
+        setInsertSelections && setInsertSelections((prev) => [...(prev || []), formatted]);
+        return;
+      }
+      // Special-case: for-range questions append clicked values to the answer sequence
+      if (challengeOp === 'for-range') {
+        if (resolvedValue !== undefined) {
+          setAnswer && setAnswer((prev) => (prev ? `${prev}, ${String(resolvedValue)}` : String(resolvedValue)));
+        }
         return;
       }
       if (supportsSequenceSelection) {
         handleSequenceSelectionClick(idx, event);
         return;
       }
-      if (['index-get', 'index-set', 'pop'].includes(resolvedValue?.op)) {
-        if (resolvedValue !== undefined) {
-          setAnswer && setAnswer(String(resolvedValue));
-        }
-      } else {
-        if (resolvedValue !== undefined) {
-          setAnswer && setAnswer(String(resolvedValue));
-        }
+      if (resolvedValue !== undefined) {
+        setAnswer && setAnswer(String(resolvedValue));
       }
     },
     [
@@ -119,6 +121,7 @@ export default function useSequenceSelection({
       setInsertSelections,
       supportsSequenceSelection,
       setAnswer,
+      challengeOp,
     ],
   );
 

@@ -2,12 +2,11 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import Button from '@src/components/ui/Button';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import '../styles.css';
-import SessionHeader from './components/SessionHeader';
-import QuestionHintSection from './components/QuestionHintSection';
-import FocusSummary from './components/FocusSummary';
-import InteractiveListSection from './components/InteractiveListSection';
-import AnswerPanel from './components/AnswerPanel';
-import HintDisplay from './components/HintDisplay';
+// components consolidated into subcomponents: StatsPanel, ControlsPanel, QuestionPanel
+import NameForm from './components/NameForm';
+import ControlsPanel from './components/ControlsPanel';
+import QuestionPanel from './components/QuestionPanel';
+import StatsPanel from './components/StatsPanel';
 
 import {
   createChallengeForTypes,
@@ -309,6 +308,7 @@ export default function PythonListPractice({ sessionData }) {
     setAnswer,
     setInsertSelections,
     getValueForIndex,
+    challengeOp: challenge?.op,
   });
 
   const {
@@ -337,110 +337,57 @@ export default function PythonListPractice({ sessionData }) {
 
   if (!submittedName && !isSolo) {
     return (
-      <div className="python-list-bg flex items-center justify-center px-4">
-        <div className="python-list-join">
-          <h1 className="text-2xl font-bold mb-4 text-center text-emerald-900">Join Python List Practice</h1>
-          <p className="text-sm text-emerald-800 text-center mb-4">
-            Practice indexing, loops, len, append/remove/insert/pop, and range.
-          </p>
-          <form onSubmit={submitName} className="space-y-3">
-            <label className="python-list-label">
-              Your Name
-              <input
-                ref={nameRef}
-                value={studentName}
-                onChange={(e) => setStudentName(e.target.value)}
-                className="python-list-input mt-1"
-                placeholder="Enter your name"
-                required
-              />
-            </label>
-            {error && <div className="text-sm text-red-600">{error}</div>}
-            <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white">
-              Start Practicing
-            </Button>
-          </form>
-        </div>
-      </div>
+      <NameForm
+        studentName={studentName}
+        setStudentName={setStudentName}
+        nameRef={nameRef}
+        submitName={submitName}
+        error={error}
+      />
     );
   }
 
   return (
     <div className="python-list-bg">
       <div className="python-list-container">
-        {!isSolo && <SessionHeader submittedName={submittedName} sessionId={sessionId} stats={stats} />}
-        {isSolo && (
-          <SessionHeader activityName="Python List Practice" stats={stats} simple />
-        )}
+        <StatsPanel isSolo={isSolo} submittedName={submittedName} sessionId={sessionId} stats={stats} />
 
         <div className="python-list-content">
-          {isSolo && (
-            <div className="python-list-card">
-              <p className="text-sm font-semibold text-emerald-900 mb-2">Choose question types</p>
-              <div className="flex flex-wrap gap-2">
-                {soloQuestionTypes.map((type) => (
-                  <button
-                    key={type.id}
-                    type="button"
-                    className={`python-list-chip ${allowedTypes.has(type.id) ? 'selected' : ''}`}
-                    onClick={() => handleSoloToggleType(type.id)}
-                  >
-                    {type.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <ControlsPanel
+            isSolo={isSolo}
+            soloQuestionTypes={soloQuestionTypes}
+            allowedTypes={allowedTypes}
+            handleSoloToggleType={handleSoloToggleType}
+            allowedTypeList={allowedTypeList}
+            QUESTION_LABELS={QUESTION_LABELS}
+          />
 
-          <div className="python-list-card">
-            {!isSolo && (
-              <FocusSummary allowedTypeList={allowedTypeList} allowedTypes={allowedTypes} labels={QUESTION_LABELS} />
-            )}
-            <QuestionHintSection
-              challenge={challenge}
-              hintStage={hintStage}
-              showHintButtons={!feedback}
-              onShowHint={handleShowDefinitionHint}
-              onShowAnswer={handleShowAnswerHint}
-              hintDefinition={hintDefinition}
-              answerDetails={answerDetails}
-              showHintBody={false}
-            />
-            <InteractiveListSection
-              challenge={challenge}
-              interactiveList={interactiveList}
-              isListBuildVariant={isListBuildVariant}
-              supportsSequenceSelection={supportsSequenceSelection}
-              selectedRange={selectedRange}
-              selectedSequence={selectedSequence}
-              selectedIndex={selectedIndex}
-              selectedValueIndex={selectedValueIndex}
-              onIndexClick={handleIndexClick}
-              onValueClick={handleValueClick}
-              
-            />
-            <HintDisplay
-              hintStage={hintStage}
-              hintDefinition={hintDefinition}
-              answerDetails={answerDetails}
-              expected={challenge?.expected}
-            />
-            <AnswerPanel
-              answer={answer}
-              onAnswerChange={(value) => setAnswer(value)}
-              challenge={challenge}
-              answerRef={answerInputRef}
-              disabled={showNext}
-              loading={loading}
-              onSubmit={checkAnswer}
-              onClear={() => {
-                setAnswer('');
-                setInsertSelections([]);
-              }}
-              feedback={feedback}
-              onNext={nextChallenge}
-            />
-          </div>
+          <QuestionPanel
+            challenge={challenge}
+            hintStage={hintStage}
+            feedback={feedback}
+            hintDefinition={hintDefinition}
+            answerDetails={answerDetails}
+            interactiveList={interactiveList}
+            isListBuildVariant={isListBuildVariant}
+            supportsSequenceSelection={supportsSequenceSelection}
+            selectedRange={selectedRange}
+            selectedSequence={selectedSequence}
+            selectedIndex={selectedIndex}
+            selectedValueIndex={selectedValueIndex}
+            onIndexClick={handleIndexClick}
+            onValueClick={handleValueClick}
+            onShowHint={handleShowDefinitionHint}
+            onShowAnswer={handleShowAnswerHint}
+            answer={answer}
+            onAnswerChange={(value) => setAnswer(value)}
+            answerRef={answerInputRef}
+            disabled={showNext}
+            loading={loading}
+            onSubmit={checkAnswer}
+            onClear={() => { setAnswer(''); setInsertSelections([]); }}
+            onNext={nextChallenge}
+          />
         </div>
       </div>
     </div>
