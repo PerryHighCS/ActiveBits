@@ -17,6 +17,7 @@ import {
   buildAnswerDetails,
   sanitizeName,
 } from './challengeGenerator';
+import { normalizeListAnswer, normalizeExpected } from './utils/componentUtils';
 
 export default function PythonListPractice({ sessionData }) {
   const [studentName, setStudentName] = useState('');
@@ -247,22 +248,9 @@ export default function PythonListPractice({ sessionData }) {
 
   const isListBuildVariant = challenge?.variant === 'insert-final' || challenge?.variant === 'list-final';
 
-  const normalizeListAnswer = useCallback((text) => {
-    if (!text) return '';
-    const trimmed = text.trim();
-    if (!trimmed) return '';
-    const noBrackets = trimmed.replace(/^\[|\]$/g, '');
-    return noBrackets.split(',')
-      .map((token) => token.trim())
-      .filter((token) => token.length > 0)
-      .map((token) => token.replace(/^'(.*)'$/, '$1').replace(/^"(.*)"$/, '$1'))
-      .join(',');
-  }, []);
 
-  const normalizedExpected = useMemo(() => {
-    if (challenge.type === 'list') return normalizeListAnswer(challenge.expected);
-    return (challenge.expected || '').trim();
-  }, [challenge, normalizeListAnswer]);
+
+  const normalizedExpected = useMemo(() => normalizeExpected(challenge), [challenge]);
 
   const hintDefinition = useMemo(() => getHintDefinition(challenge), [challenge]);
   const answerDetails = useMemo(() => buildAnswerDetails(challenge), [challenge]);
