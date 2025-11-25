@@ -151,6 +151,8 @@ export default function ManageDashboard() {
     return activity ? activity.color : 'blue';
   };
 
+  const getSoloLink = (activityId) => `${window.location.origin}/solo/${activityId}`;
+
   // Map color names to Tailwind classes (Tailwind requires static class names)
   const colorClasses = {
     blue: 'bg-blue-600',
@@ -191,34 +193,46 @@ export default function ManageDashboard() {
       <p className="text-center text-gray-600 mb-8">Choose an activity to start a new session</p>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {activities.map((activity) => (
-          <div
-            key={activity.id}
-            className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all flex flex-col h-full"
-          >
-            <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-4`}>
-              <h3 className="text-xl font-semibold">{activity.name}</h3>
-            </div>
-            <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4 flex flex-col h-full`}>
-              <p className="text-gray-600 mb-4">{activity.description}</p>
-              <div className="flex-1" />
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={() => createSession(activity.id)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition-colors"
-                >
-                  Start Session Now
-                </button>
-                <button
-                  onClick={() => openPersistentModal(activity)}
-                  className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition-colors"
-                >
-                  Create Permanent Link
-                </button>
+        {activities.map((activity) => {
+          const soloLink = getSoloLink(activity.id);
+          
+          return (
+            <div
+              key={activity.id}
+              className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all flex flex-col h-full"
+            >
+              <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-4`}>
+                <h3 className="text-xl font-semibold">{activity.name}</h3>
+              </div>
+              <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4 flex flex-col h-full`}>
+                <p className="text-gray-600 mb-4">{activity.description}</p>
+                <div className="flex-1" />
+                <div className="flex flex-col gap-2">
+                  {activity.soloMode && (
+                    <button
+                      onClick={() => copyToClipboard(soloLink)}
+                      className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded transition-colors"
+                    >
+                      {isCopied(soloLink) ? '✓ Copied Solo Link' : 'Copy Solo Practice Link'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => createSession(activity.id)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition-colors"
+                  >
+                    Start Session Now
+                  </button>
+                  <button
+                    onClick={() => openPersistentModal(activity)}
+                    className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition-colors"
+                  >
+                    Create Permanent Link
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Persistent Sessions Section */}
