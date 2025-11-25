@@ -230,11 +230,6 @@ const SessionRouter = () => {
                         </div>
                     );
                 }
-
-                // Student - redirect to session
-                // Use replace to avoid back-navigation to waiting room
-                navigate(`/${persistentSessionInfo.sessionId}`, { replace: true });
-                return <div className="text-center">Redirecting to session...</div>;
             }
             
             // Show waiting room

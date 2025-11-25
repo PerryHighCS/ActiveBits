@@ -23,6 +23,9 @@ const sessionTtl = Number(process.env.SESSION_TTL_MS) || 60 * 60 * 1000;
 const sessions = createSessionStore(sessionTtl);
 app.locals.sessions = sessions;
 
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const MAX_SESSIONS_PER_COOKIE = 20;
+
 const ws = createWsRouter(server, sessions);
 
 setupSessionRoutes(app, sessions, ws.wss);
@@ -169,7 +172,6 @@ app.post("/api/persistent-session/create", (req, res) => {
     // FORMAT NOTE: We use an array format [{key, teacherCode}, ...] to maintain explicit insertion order
     // for FIFO eviction. This is more reliable than depending on object key insertion order.
     const cookieName = 'persistent_sessions';
-    const MAX_SESSIONS_PER_COOKIE = 20;
     let { sessions: existingSessions } = parsePersistentSessionsCookie(
         req.cookies[cookieName],
         'persistent_sessions (/api/persistent-session/create)'
@@ -195,7 +197,7 @@ app.post("/api/persistent-session/create", (req, res) => {
     // Teacher codes are retrieved via /api/persistent-session/list instead of document.cookie.
     // The secure flag ensures cookies are only sent over HTTPS in production.
     res.cookie(cookieName, JSON.stringify(existingSessions), {
-        maxAge: 365 * 24 * 60 * 60 * 1000, // 1 year
+        maxAge: ONE_YEAR_MS, // 1 year
         sameSite: 'lax',
         secure: process.env.NODE_ENV === 'production', // HTTPS only in production
         httpOnly: true, // Prevent client-side JavaScript access (XSS protection)
@@ -255,7 +257,7 @@ app.post("/api/persistent-session/authenticate", (req, res) => {
     }
 
     res.cookie(cookieName, JSON.stringify(existingSessions), {
-        maxAge: 365 * 24 * 60 * 60 * 1000, // 1 year
+        maxAge: ONE_YEAR_MS, // 1 year
         sameSite: 'lax',
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,

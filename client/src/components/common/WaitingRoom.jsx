@@ -17,7 +17,6 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
   const [teacherCode, setTeacherCode] = useState('');
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [teacherAuthRequested, setTeacherAuthRequested] = useState(false);
   const autoAuthAttemptedRef = useRef(false); // Use ref to avoid re-triggering effect
   const hasNavigatedRef = useRef(false); // Use ref to persist across re-renders
   const teacherAuthRequestedRef = useRef(false); // Tracks teacher intent across renders
@@ -30,7 +29,6 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
     setError(null);
     // Reset teacher intent when changing links
     teacherAuthRequestedRef.current = false;
-    setTeacherAuthRequested(false);
 
     // Connect to WebSocket
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -151,7 +149,6 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
     e.preventDefault();
     setError(null);
     setIsSubmitting(true);
-    setTeacherAuthRequested(true);
     teacherAuthRequestedRef.current = true;
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -162,7 +159,6 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
     } else {
       setError('Not connected. Please refresh the page.');
       setIsSubmitting(false);
-      setTeacherAuthRequested(false);
       teacherAuthRequestedRef.current = false;
     }
   };
@@ -188,11 +184,16 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
           <p className="text-lg text-gray-600 mb-2">
             Waiting for teacher to start the activity
           </p>
+          {(() => {
+            const otherWaiters = Math.max(waiterCount - 1, 0);
+            return (
           <p className="text-2xl font-bold text-blue-600">
-            {Math.max(waiterCount - 1, 0) === 0 && 'You are the first one here!'}
-            {Math.max(waiterCount - 1, 0) === 1 && 'You and 1 other person waiting'}
-            {Math.max(waiterCount - 1, 0) > 1 && `You and ${Math.max(waiterCount - 1, 0)} others waiting`}
+            {otherWaiters === 0 && 'You are the first one here!'}
+            {otherWaiters === 1 && 'You and 1 other person waiting'}
+            {otherWaiters > 1 && `You and ${otherWaiters} others waiting`}
           </p>
+            );
+          })()}
         </div>
 
         <div className="border-t-2 border-gray-200 pt-6 mt-6">

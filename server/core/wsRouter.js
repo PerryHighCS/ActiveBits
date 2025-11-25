@@ -1,6 +1,8 @@
 import { WebSocketServer } from "ws";
 import { findHashBySessionId, resetPersistentSession } from "./persistentSessions.js";
 
+const SESSION_CLEANUP_GRACE_PERIOD_MS = 5_000;
+
 function getClientIp(req) {
     const forwardedFor = req.headers["x-forwarded-for"];
     if (forwardedFor) {
@@ -48,6 +50,8 @@ export function createWsRouter(server, sessions) {
                     const hash = findHashBySessionId(sessionId);
                     if (hash) {
                         resetPersistentSession(hash);
+                    } else {
+                        console.warn(`No persistent hash found for session ${sessionId} during cleanup`);
                     }
                 } catch (err) {
                     console.error('Failed to reset persistent session during cleanup', err);
@@ -55,7 +59,7 @@ export function createWsRouter(server, sessions) {
                 delete sessions[sessionId];
                 console.log(`Ended session ${sessionId} because no clients remained connected.`);
             }
-        }, 5_000); // short grace period for quick reconnects
+        }, SESSION_CLEANUP_GRACE_PERIOD_MS); // short grace period for quick reconnects
 
         sessionCleanupTimers.set(sessionId, timer);
         timer.unref?.();
