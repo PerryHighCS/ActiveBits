@@ -51,6 +51,8 @@ export default function PythonListPracticeManager() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedTypes, setSelectedTypes] = useState(new Set(['all']));
+  const [sortBy, setSortBy] = useState('name');
+  const [sortDirection, setSortDirection] = useState('asc');
   const wsRef = useRef(null);
 
   useEffect(() => {
@@ -147,6 +149,60 @@ export default function PythonListPracticeManager() {
     return { totalStudents, connected };
   }, [students]);
 
+  const sortedStudents = useMemo(() => {
+    const sortable = [...students];
+    sortable.sort((a, b) => {
+      let aVal;
+      let bVal;
+
+      switch (sortBy) {
+        case 'name':
+          aVal = (a.name || '').toLowerCase();
+          bVal = (b.name || '').toLowerCase();
+          break;
+        case 'total':
+          aVal = a.stats?.total || 0;
+          bVal = b.stats?.total || 0;
+          break;
+        case 'correct':
+          aVal = a.stats?.correct || 0;
+          bVal = b.stats?.correct || 0;
+          break;
+        case 'accuracy': {
+          const aTotal = a.stats?.total || 0;
+          const bTotal = b.stats?.total || 0;
+          aVal = aTotal > 0 ? (a.stats?.correct || 0) / aTotal : 0;
+          bVal = bTotal > 0 ? (b.stats?.correct || 0) / bTotal : 0;
+          break;
+        }
+        case 'streak':
+          aVal = a.stats?.streak || 0;
+          bVal = b.stats?.streak || 0;
+          break;
+        case 'longestStreak':
+          aVal = a.stats?.longestStreak || 0;
+          bVal = b.stats?.longestStreak || 0;
+          break;
+        default:
+          return 0;
+      }
+
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sortable;
+  }, [students, sortBy, sortDirection]);
+
+  const handleSort = (columnId) => {
+    if (sortBy === columnId) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(columnId);
+      setSortDirection(columnId === 'name' ? 'asc' : 'desc');
+    }
+  };
+
   const endSession = async () => {
     if (!sessionId) return;
     await fetch(`/api/session/${sessionId}`, { method: 'DELETE' });
@@ -164,7 +220,7 @@ export default function PythonListPracticeManager() {
               <div className="text-lg font-semibold text-emerald-900">{stats.connected} connected</div>
               <div className="text-sm text-emerald-800">{stats.totalStudents} total students</div>
             </div>
-            <Button variant="outline" onClick={() => downloadCsv(students)} className="border-emerald-300 text-emerald-800 hover:bg-emerald-50">
+            <Button variant="outline" onClick={() => downloadCsv(sortedStudents)} className="border-emerald-300 text-emerald-800 hover:bg-emerald-50">
               📊 Download CSV
             </Button>
             {error && <div className="text-red-600 text-sm">{error}</div>}
@@ -190,7 +246,10 @@ export default function PythonListPracticeManager() {
 
         <ActivityRoster
           accent="emerald"
-          students={students}
+          students={sortedStudents}
+          sortBy={sortBy}
+          sortDirection={sortDirection}
+          onSort={handleSort}
           columns={[
             { id: 'name', label: 'Student', render: (s) => (
               <div className="flex items-center gap-2">

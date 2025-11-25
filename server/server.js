@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
 import { createSessionStore, setupSessionRoutes } from "./core/sessions.js";
 import { createWsRouter } from "./core/wsRouter.js";
-import { generatePersistentHash, getOrCreateActivePersistentSession } from "./core/persistentSessions.js";
+import { generatePersistentHash, getOrCreateActivePersistentSession, getPersistentSession, verifyTeacherCodeWithHash } from "./core/persistentSessions.js";
 import { setupPersistentSessionWs } from "./core/persistentSessionWs.js";
 import { ALLOWED_ACTIVITIES, isValidActivity, registerActivityRoutes } from "./activities/activityRegistry.js";
 
@@ -22,6 +22,9 @@ const server = http.createServer(app);
 const sessionTtl = Number(process.env.SESSION_TTL_MS) || 60 * 60 * 1000;
 const sessions = createSessionStore(sessionTtl);
 app.locals.sessions = sessions;
+
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const MAX_SESSIONS_PER_COOKIE = 20;
 
 const ws = createWsRouter(server, sessions);
 
@@ -169,7 +172,6 @@ app.post("/api/persistent-session/create", (req, res) => {
     // FORMAT NOTE: We use an array format [{key, teacherCode}, ...] to maintain explicit insertion order
     // for FIFO eviction. This is more reliable than depending on object key insertion order.
     const cookieName = 'persistent_sessions';
-    const MAX_SESSIONS_PER_COOKIE = 20;
     let { sessions: existingSessions } = parsePersistentSessionsCookie(
         req.cookies[cookieName],
         'persistent_sessions (/api/persistent-session/create)'
@@ -195,13 +197,79 @@ app.post("/api/persistent-session/create", (req, res) => {
     // Teacher codes are retrieved via /api/persistent-session/list instead of document.cookie.
     // The secure flag ensures cookies are only sent over HTTPS in production.
     res.cookie(cookieName, JSON.stringify(existingSessions), {
-        maxAge: 365 * 24 * 60 * 60 * 1000, // 1 year
+        maxAge: ONE_YEAR_MS, // 1 year
         sameSite: 'lax',
         secure: process.env.NODE_ENV === 'production', // HTTPS only in production
         httpOnly: true, // Prevent client-side JavaScript access (XSS protection)
     });
 
     res.json({ url, hash });
+});
+
+// Verify teacher code for an existing persistent link and store cookie for future visits
+app.post("/api/persistent-session/authenticate", (req, res) => {
+    const { activityName, hash, teacherCode } = req.body || {};
+
+    if (!activityName || !hash || !teacherCode) {
+        return res.status(400).json({ error: 'Missing activityName, hash, or teacherCode' });
+    }
+
+    if (!isValidActivity(activityName)) {
+        return res.status(400).json({
+            error: 'Invalid activity name',
+            allowedActivities: ALLOWED_ACTIVITIES
+        });
+    }
+
+    if (typeof teacherCode !== 'string') {
+        return res.status(400).json({ error: 'Teacher code must be a string' });
+    }
+
+    const MAX_TEACHER_CODE_LENGTH = 100;
+    if (teacherCode.length < 6) {
+        return res.status(400).json({ error: 'Teacher code must be at least 6 characters' });
+    }
+    if (teacherCode.length > MAX_TEACHER_CODE_LENGTH) {
+        return res.status(400).json({ error: `Teacher code must be at most ${MAX_TEACHER_CODE_LENGTH} characters` });
+    }
+
+    const validation = verifyTeacherCodeWithHash(activityName, hash, teacherCode);
+    if (!validation.valid) {
+        return res.status(401).json({ error: validation.error || 'Invalid teacher code' });
+    }
+
+    // Store/update cookie entry so the instructor is recognized on subsequent visits
+    const cookieName = 'persistent_sessions';
+    const MAX_SESSIONS_PER_COOKIE = 20;
+    let { sessions: existingSessions } = parsePersistentSessionsCookie(
+        req.cookies[cookieName],
+        'persistent_sessions (/api/persistent-session/authenticate)'
+    );
+
+    const newKey = `${activityName}:${hash}`;
+    const existingIndex = existingSessions.findIndex(s => s.key === newKey);
+    if (existingIndex !== -1) {
+        existingSessions.splice(existingIndex, 1);
+    }
+    existingSessions.push({ key: newKey, teacherCode });
+    if (existingSessions.length > MAX_SESSIONS_PER_COOKIE) {
+        existingSessions = existingSessions.slice(-MAX_SESSIONS_PER_COOKIE);
+    }
+
+    res.cookie(cookieName, JSON.stringify(existingSessions), {
+        maxAge: ONE_YEAR_MS, // 1 year
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+    });
+
+    const persistentSession = getPersistentSession(hash);
+
+    res.json({
+        success: true,
+        isStarted: !!persistentSession?.sessionId,
+        sessionId: persistentSession?.sessionId || null,
+    });
 });
 
 // Get persistent session info (for checking if teacher has cookie)

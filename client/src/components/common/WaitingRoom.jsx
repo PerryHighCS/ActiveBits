@@ -19,16 +19,28 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const autoAuthAttemptedRef = useRef(false); // Use ref to avoid re-triggering effect
   const hasNavigatedRef = useRef(false); // Use ref to persist across re-renders
+  const teacherAuthRequestedRef = useRef(false); // Tracks teacher intent across renders
   const wsRef = useRef(null);
+  const closedByCleanupRef = useRef(false); // Avoid treating deliberate closes as errors
   const navigate = useNavigate();
 
   useEffect(() => {
+    // New link load: clear stale errors
+    setError(null);
+    // Reset teacher intent when changing links
+    teacherAuthRequestedRef.current = false;
+
     // Connect to WebSocket
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/persistent-session?hash=${hash}&activityName=${activityName}`;
     
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    closedByCleanupRef.current = false;
+    const shouldIgnoreError = () => {
+      const state = wsRef.current?.readyState;
+      return closedByCleanupRef.current || hasNavigatedRef.current || state === WebSocket.CLOSING || state === WebSocket.CLOSED;
+    };
     const navigateOnce = (path) => {
       if (hasNavigatedRef.current) return;
       hasNavigatedRef.current = true;
@@ -41,6 +53,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
 
     ws.onopen = () => {
       console.log('Connected to waiting room');
+      setError(null);
       
       // If teacher has cookie, immediately try to auto-authenticate
       if (hasTeacherCookie && !autoAuthAttemptedRef.current) {
@@ -51,10 +64,14 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
           .then(data => {
             if (data.teacherCode) {
               console.log('Got teacher code from cookie, authenticating');
-              ws.send(JSON.stringify({
-                type: 'verify-teacher-code',
-                teacherCode: data.teacherCode,
-              }));
+              try {
+                ws.send(JSON.stringify({
+                  type: 'verify-teacher-code',
+                  teacherCode: data.teacherCode,
+                }));
+              } catch (sendErr) {
+                console.error('Failed to send teacher code over WS:', sendErr);
+              }
             } else {
               console.log('No teacher code found in cookie response:', data);
             }
@@ -92,7 +109,11 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
       } else if (message.type === 'session-started') {
         // Session was started by teacher, redirect to session
         console.log('Redirecting to student session:', message.sessionId);
-        navigateOnce(`/${message.sessionId}`);
+        if (teacherAuthRequestedRef.current) {
+          navigateOnce(`/manage/${activityName}/${message.sessionId}`);
+        } else {
+          navigateOnce(`/${message.sessionId}`);
+        }
       } else if (message.type === 'teacher-authenticated') {
         // This client is the teacher, redirect to manage page
         console.log('Redirecting to teacher manage page:', message.sessionId);
@@ -100,11 +121,14 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
       } else if (message.type === 'teacher-code-error') {
         setError(message.error);
         setIsSubmitting(false);
+        teacherAuthRequestedRef.current = false;
       }
     };
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+    ws.onerror = (event) => {
+      console.error('WebSocket error:', event);
+      // Ignore errors from deliberate closes or post-navigation teardown (common in StrictMode double-mount)
+      if (shouldIgnoreError()) return;
       setError('Connection error. Please refresh the page.');
     };
 
@@ -113,7 +137,9 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
     };
 
     return () => {
-      if (ws.readyState === WebSocket.OPEN) {
+      // Ensure we tear down the socket even if it's still connecting (React StrictMode mounts twice)
+      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+        closedByCleanupRef.current = true;
         ws.close();
       }
     };
@@ -123,6 +149,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
     e.preventDefault();
     setError(null);
     setIsSubmitting(true);
+    teacherAuthRequestedRef.current = true;
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
@@ -132,6 +159,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
     } else {
       setError('Not connected. Please refresh the page.');
       setIsSubmitting(false);
+      teacherAuthRequestedRef.current = false;
     }
   };
 
@@ -140,6 +168,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
       'raffle': 'Raffle',
       'www-sim': 'WWW Simulator',
       'java-string-practice': 'Java String Practice',
+      'python-list-practice': 'Python List Practice',
     };
     return names[activityName] || activityName;
   };
@@ -155,11 +184,16 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
           <p className="text-lg text-gray-600 mb-2">
             Waiting for teacher to start the activity
           </p>
+          {(() => {
+            const otherWaiters = Math.max(waiterCount - 1, 0);
+            return (
           <p className="text-2xl font-bold text-blue-600">
-            {waiterCount === 0 && 'You are the first one here!'}
-            {waiterCount === 1 && 'You and 1 other person waiting'}
-            {waiterCount > 1 && `You and ${waiterCount} others waiting`}
+            {otherWaiters === 0 && 'You are the first one here!'}
+            {otherWaiters === 1 && 'You and 1 other person waiting'}
+            {otherWaiters > 1 && `You and ${otherWaiters} others waiting`}
           </p>
+            );
+          })()}
         </div>
 
         <div className="border-t-2 border-gray-200 pt-6 mt-6">

@@ -43,9 +43,20 @@ const SessionRouter = () => {
     const [sessionData, setSessionData] = useState(null);
     const [persistentSessionInfo, setPersistentSessionInfo] = useState(null);
     const [isLoadingPersistent, setIsLoadingPersistent] = useState(false);
+    const [teacherCode, setTeacherCode] = useState('');
+    const [teacherAuthError, setTeacherAuthError] = useState('');
+    const [isAuthenticatingTeacher, setIsAuthenticatingTeacher] = useState(false);
 
     const [error, setError] = useState(null);
     const navigate = useNavigate();
+
+    useEffect(() => {
+        if (hash && activityName) {
+            setTeacherCode('');
+            setTeacherAuthError('');
+            setIsAuthenticatingTeacher(false);
+        }
+    }, [hash, activityName]);
 
     useEffect(() => {
         cleanExpiredSessions();
@@ -57,7 +68,8 @@ const SessionRouter = () => {
     useEffect(() => {
         if (hash && activityName) {
             setIsLoadingPersistent(true);
-            fetch(`/api/persistent-session/${hash}?activityName=${activityName}`)
+            setPersistentSessionInfo(null);
+            fetch(`/api/persistent-session/${hash}?activityName=${activityName}`, { credentials: 'include' })
                 .then(res => {
                     if (!res.ok) throw new Error('Persistent session not found');
                     return res.json();
@@ -138,12 +150,86 @@ const SessionRouter = () => {
                 if (persistentSessionInfo.hasTeacherCookie) {
                     // Use replace to avoid back-navigation to waiting room
                     navigate(`/manage/${activityName}/${persistentSessionInfo.sessionId}`, { replace: true });
+                    return <div className="text-center">Redirecting to session...</div>;
+                } else if (isAuthenticatingTeacher) {
+                    return (
+                        <div className="text-center">
+                            Verifying teacher code...
+                        </div>
+                    );
                 } else {
-                    // Student - redirect to session
-                    // Use replace to avoid back-navigation to waiting room
-                    navigate(`/${persistentSessionInfo.sessionId}`, { replace: true });
+                    const handleTeacherLogin = async (event) => {
+                        event.preventDefault();
+                        setTeacherAuthError('');
+                        setIsAuthenticatingTeacher(true);
+                        try {
+                            const res = await fetch('/api/persistent-session/authenticate', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                credentials: 'include',
+                                body: JSON.stringify({
+                                    activityName,
+                                    hash,
+                                    teacherCode: teacherCode.trim(),
+                                }),
+                            });
+
+                            if (!res.ok) {
+                                const data = await res.json().catch(() => ({}));
+                                throw new Error(data.error || 'Invalid teacher code');
+                            }
+
+                            const data = await res.json();
+                            navigate(`/manage/${activityName}/${data.sessionId || persistentSessionInfo.sessionId}`, { replace: true });
+                        } catch (err) {
+                            setTeacherAuthError(err.message);
+                            setIsAuthenticatingTeacher(false);
+                        }
+                    };
+
+                    return (
+                        <div className="max-w-lg mx-auto bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+                            <h1 className="text-2xl font-bold text-gray-800 mb-3 text-center">Session is already running</h1>
+                            <p className="text-gray-700 text-center mb-6">
+                                Enter your teacher code to open the manage dashboard, or join as a student instead.
+                            </p>
+                            <form onSubmit={handleTeacherLogin} className="space-y-4">
+                                <div className="flex flex-col gap-2">
+                                    <label className="text-sm font-semibold text-gray-700">Teacher Code</label>
+                                    <input
+                                        type="password"
+                                        value={teacherCode}
+                                        onChange={(e) => setTeacherCode(e.target.value)}
+                                        className="border-2 border-gray-300 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
+                                        placeholder="Enter teacher code"
+                                        autoComplete="off"
+                                        required
+                                    />
+                                    {teacherAuthError && (
+                                        <p className="text-sm text-red-600">{teacherAuthError}</p>
+                                    )}
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-3 justify-between">
+                                    <Button
+                                        type="submit"
+                                        disabled={!teacherCode.trim() || isAuthenticatingTeacher}
+                                    >
+                                        {isAuthenticatingTeacher ? 'Verifying...' : 'Go to Manage'}
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        type="button"
+                                        onClick={() => navigate(`/${persistentSessionInfo.sessionId}`, { replace: true })}
+                                    >
+                                        Join as Student
+                                    </Button>
+                                </div>
+                            </form>
+                        </div>
+                    );
                 }
-                return <div className="text-center">Redirecting to session...</div>;
             }
             
             // Show waiting room
@@ -155,6 +241,14 @@ const SessionRouter = () => {
                 />
             );
         }
+
+        return (
+            <WaitingRoom 
+                activityName={activityName}
+                hash={hash}
+                hasTeacherCookie={persistentSessionInfo?.hasTeacherCookie ?? false}
+            />
+        );
     }
     
     // Solo mode - practice without a session
