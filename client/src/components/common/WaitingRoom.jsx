@@ -121,7 +121,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
       } else if (message.type === 'teacher-code-error') {
         setError(message.error);
         setIsSubmitting(false);
-        setTeacherAuthRequested(false);
+        teacherAuthRequestedRef.current = false;
       }
     };
 
