@@ -1,4 +1,5 @@
 import { WebSocketServer } from "ws";
+import { findHashBySessionId, resetPersistentSession } from "./persistentSessions.js";
 
 function getClientIp(req) {
     const forwardedFor = req.headers["x-forwarded-for"];
@@ -24,6 +25,41 @@ function getClientIp(req) {
 export function createWsRouter(server, sessions) {
     const wss = new WebSocketServer({ noServer: true });
     const namespaces = new Map();
+    const sessionCleanupTimers = new Map();
+
+    const scheduleSessionCleanup = (sessionId) => {
+        if (!sessionId || !sessions) return;
+
+        // Clear any existing timer so only the latest one runs
+        const existingTimer = sessionCleanupTimers.get(sessionId);
+        if (existingTimer) clearTimeout(existingTimer);
+
+        const timer = setTimeout(() => {
+            const hasClients = Array.from(wss.clients).some(
+                (client) =>
+                    client.readyState === 1 && // OPEN
+                    client.sessionId === sessionId
+            );
+
+            if (hasClients) return; // Someone reconnected
+
+            if (sessions[sessionId]) {
+                try {
+                    const hash = findHashBySessionId(sessionId);
+                    if (hash) {
+                        resetPersistentSession(hash);
+                    }
+                } catch (err) {
+                    console.error('Failed to reset persistent session during cleanup', err);
+                }
+                delete sessions[sessionId];
+                console.log(`Ended session ${sessionId} because no clients remained connected.`);
+            }
+        }, 5_000); // short grace period for quick reconnects
+
+        sessionCleanupTimers.set(sessionId, timer);
+        timer.unref?.();
+    };
 
     server.on("upgrade", (req, socket, head) => {
         try {
@@ -48,6 +84,11 @@ export function createWsRouter(server, sessions) {
                 if (sessions && ws.sessionId) sessions[ws.sessionId];
                 ws.on("message", () => {
                     touch();
+                });
+                ws.on("close", () => {
+                    if (ws.sessionId) {
+                        scheduleSessionCleanup(ws.sessionId);
+                    }
                 });
             });
         } catch { socket.destroy(); }
