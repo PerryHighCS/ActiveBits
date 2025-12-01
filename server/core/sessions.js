@@ -1,37 +1,161 @@
 import { randomBytes } from "crypto";
 import { findHashBySessionId, resetPersistentSession } from "./persistentSessions.js";
+import { ValkeySessionStore } from "./valkeyStore.js";
+import { SessionCache } from "./sessionCache.js";
 
 /**
- * Create a session store with a TTL (time-to-live) for sessions.
- * @param {number} ttlMs - The time-to-live for sessions in milliseconds.
- * @returns {Object} - The session store.
+ * In-memory session store with automatic TTL cleanup (for development/fallback).
  */
-export function createSessionStore(ttlMs = 60 * 60 * 1000) {
-    const store = Object.create(null);
+class InMemorySessionStore {
+    constructor(ttlMs = 60 * 60 * 1000) {
+        this.ttlMs = ttlMs;
+        this.store = Object.create(null);
+        
+        // Simple janitor, uses sessions' last activity timestamp
+        this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
+        this.cleanupInterval.unref?.();
+    }
 
-    function cleanup() {
+    async get(id) {
+        const session = this.store[id];
+        if (session) {
+            session.lastActivity = Date.now();
+        }
+        return session || null;
+    }
+
+    async set(id, session) {
+        this.store[id] = session;
+    }
+
+    async delete(id) {
+        const existed = !!this.store[id];
+        delete this.store[id];
+        return existed;
+    }
+
+    async touch(id) {
+        const session = this.store[id];
+        if (session) {
+            session.lastActivity = Date.now();
+            return true;
+        }
+        return false;
+    }
+
+    async getAll() {
+        return Object.values(this.store);
+    }
+
+    async getAllIds() {
+        return Object.keys(this.store);
+    }
+
+    cleanup() {
         const now = Date.now();
-        for (const id in store) {
-            if (now - (store[id]?.lastActivity ?? 0) > ttlMs) delete store[id];
+        for (const id in this.store) {
+            if (now - (this.store[id]?.lastActivity ?? 0) > this.ttlMs) {
+                delete this.store[id];
+            }
         }
     }
 
-    // simple janitor, uses sessions' last activity timestamp
-    const t = setInterval(cleanup, 60_000);
-    // don't keep the event loop alive just for cleanup in dev
-    t.unref?.();
+    async close() {
+        clearInterval(this.cleanupInterval);
+    }
 
-    Object.defineProperty(store, "cleanup", { value: cleanup });
+    // Stub methods for compatibility with Valkey store
+    subscribeToBroadcast() {}
+    initializePubSub() {}
+    async publishBroadcast() {}
+}
 
-    return new Proxy(store, {
-        get(target, prop, receiver) {
-            const value = Reflect.get(target, prop, receiver);
-            if (value && typeof value === "object" && "id" in value) {
-                value.lastActivity = Date.now();
-            }
-            return value;
+/**
+ * Create a session store with a TTL (time-to-live) for sessions.
+ * If valkeyUrl is provided, uses Valkey with caching; otherwise uses in-memory store.
+ * @param {string|null} valkeyUrl - Valkey connection URL (null for in-memory)
+ * @param {number} ttlMs - The time-to-live for sessions in milliseconds.
+ * @returns {Object} - The session store with async API.
+ */
+export function createSessionStore(valkeyUrl = null, ttlMs = 60 * 60 * 1000) {
+    if (!valkeyUrl) {
+        console.log('Using in-memory session store (no VALKEY_URL configured)');
+        return new InMemorySessionStore(ttlMs);
+    }
+
+    console.log('Using Valkey session store with caching');
+    const valkeyStore = new ValkeySessionStore(valkeyUrl, { ttlMs });
+    const cache = new SessionCache({ ttlMs: 30_000, maxSize: 1000 });
+
+    // Wrapper that adds caching layer
+    return {
+        valkeyStore,
+        cache,
+
+        async get(id) {
+            return await cache.get(id, async (sessionId) => {
+                return await valkeyStore.get(sessionId);
+            });
         },
-    });
+
+        async set(id, session, ttl = null) {
+            await valkeyStore.set(id, session, ttl);
+            cache.set(id, session, false); // Update cache, not dirty since already written
+        },
+
+        async delete(id) {
+            cache.invalidate(id);
+            return await valkeyStore.delete(id);
+        },
+
+        async touch(id) {
+            // Touch in cache only - batched flush to Valkey later
+            const cached = await this.get(id); // Ensure in cache
+            if (cached) {
+                cache.touch(id);
+                return true;
+            }
+            return false;
+        },
+
+        async getAll() {
+            return await valkeyStore.getAll();
+        },
+
+        async getAllIds() {
+            return await valkeyStore.getAllIds();
+        },
+
+        cleanup() {
+            cache.cleanup();
+            // Valkey handles TTL automatically
+        },
+
+        async flushCache() {
+            await cache.flushTouches(async (id) => {
+                await valkeyStore.touch(id);
+            });
+        },
+
+        async close() {
+            await cache.shutdown(async (id) => {
+                await valkeyStore.touch(id);
+            });
+            await valkeyStore.close();
+        },
+
+        subscribeToBroadcast(channel, handler) {
+            valkeyStore.subscribeToBroadcast(channel, handler);
+        },
+
+        initializePubSub() {
+            valkeyStore.initializePubSub();
+        },
+
+        async publishBroadcast(channel, message) {
+            await valkeyStore.publishBroadcast(channel, message);
+        }
+    };
 }
 
 /**
@@ -40,14 +164,16 @@ export function createSessionStore(ttlMs = 60 * 60 * 1000) {
  * @param {Object} store - The session store to check for existing IDs.
  * @param {number} [length=5] - The minimum length of the ID.
  */
-export function generateHexId(store, length = 5) {
+export async function generateHexId(store, length = 5) {
     let attempts = 0;
     let len = length;
 
     while (true) {
         const bytes = randomBytes(Math.ceil(len / 2));
         const id = bytes.toString("hex").slice(0, len);
-        if (!store[id]) return id;
+        
+        const existing = await store.get(id);
+        if (!existing) return id;
 
         // Soft collision handling: after a few collisions, bump length by 1
         attempts += 1;
@@ -61,11 +187,11 @@ export function generateHexId(store, length = 5) {
  * @param {Object} [options={}] - Options for the session.
  * @param {Object} [options.data={}] - Initial data for the session.
  */
-export function createSession(store, { data = {} } = {}) {
-    const id = generateHexId(store);
+export async function createSession(store, { data = {} } = {}) {
+    const id = await generateHexId(store);
     const now = Date.now();
     const session = { id, created: now, lastActivity: now, data };
-    store[id] = session;
+    await store.set(id, session);
     return session;
 }
 
@@ -77,23 +203,26 @@ export function createSession(store, { data = {} } = {}) {
  */
 export function setupSessionRoutes(app, sessions, wss = null) {
     // GET /api/session/:sessionId -> fetch any session (any type)
-    app.get("/api/session/:sessionId", (req, res) => {
+    app.get("/api/session/:sessionId", async (req, res) => {
         const { sessionId } = req.params;
-        const session = sessions[sessionId];
+        const session = await sessions.get(sessionId);
         if (!session) return res.status(404).json({ error: "invalid session" });
         res.json({ session });
     });
 
     // DELETE /api/session/:sessionId -> delete any session (for cleanup/testing)
-    app.delete("/api/session/:sessionId", (req, res) => {
+    app.delete("/api/session/:sessionId", async (req, res) => {
         const { sessionId } = req.params;
-        if (!sessions[sessionId]) return res.status(404).json({ error: "invalid session" });
+        const session = await sessions.get(sessionId);
+        if (!session) return res.status(404).json({ error: "invalid session" });
         
-        // Broadcast session-ended message to all connected clients
-        if (wss) {
+        // Broadcast session-ended message
+        if (sessions.publishBroadcast) {
+            // Valkey mode: use pub/sub for cross-instance broadcast
+            await sessions.publishBroadcast('session-ended', { sessionId });
+        } else if (wss) {
+            // In-memory mode: direct WebSocket broadcast
             for (const client of wss.clients) {
-                // All WebSocket clients must set client.sessionId during initialization.
-                // If not set, this client will not receive session-ended broadcasts.
                 if (typeof client.sessionId !== 'undefined' && client.sessionId === sessionId && client.readyState === 1) {
                     client.send(JSON.stringify({ type: 'session-ended' }));
                 }
@@ -101,12 +230,12 @@ export function setupSessionRoutes(app, sessions, wss = null) {
         }
         
         // Check if this is a persistent session and reset it for reuse
-        const hash = findHashBySessionId(sessionId);
+        const hash = await findHashBySessionId(sessionId);
         if (hash) {
-            resetPersistentSession(hash);
+            await resetPersistentSession(hash);
         }
         
-        delete sessions[sessionId];
+        await sessions.delete(sessionId);
         res.json({ success: true, deleted: sessionId });
     });
 }

@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
 import { createSessionStore, setupSessionRoutes } from "./core/sessions.js";
 import { createWsRouter } from "./core/wsRouter.js";
-import { generatePersistentHash, getOrCreateActivePersistentSession, getPersistentSession, verifyTeacherCodeWithHash } from "./core/persistentSessions.js";
+import { generatePersistentHash, getOrCreateActivePersistentSession, getPersistentSession, verifyTeacherCodeWithHash, initializePersistentStorage } from "./core/persistentSessions.js";
 import { setupPersistentSessionWs } from "./core/persistentSessionWs.js";
 import { ALLOWED_ACTIVITIES, isValidActivity, registerActivityRoutes } from "./activities/activityRegistry.js";
 
@@ -18,10 +18,25 @@ app.use(cookieParser()); // Parse cookies (unsigned)
 
 const server = http.createServer(app);
 
-// In-memory store shared by all session types
+// Initialize session storage (Valkey if VALKEY_URL is set, otherwise in-memory)
+const valkeyUrl = process.env.VALKEY_URL || null;
 const sessionTtl = Number(process.env.SESSION_TTL_MS) || 60 * 60 * 1000;
-const sessions = createSessionStore(sessionTtl);
+const sessions = createSessionStore(valkeyUrl, sessionTtl);
 app.locals.sessions = sessions;
+
+// Initialize pub/sub if using Valkey
+if (sessions.initializePubSub) {
+  sessions.initializePubSub();
+}
+
+// Initialize persistent session storage backend
+if (valkeyUrl && sessions.valkeyStore) {
+  // Use the same Valkey client for persistent sessions
+  initializePersistentStorage(sessions.valkeyStore.client);
+} else {
+  // Use in-memory storage
+  initializePersistentStorage(null);
+}
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 const MAX_SESSIONS_PER_COOKIE = 20;
@@ -207,7 +222,7 @@ app.post("/api/persistent-session/create", (req, res) => {
 });
 
 // Verify teacher code for an existing persistent link and store cookie for future visits
-app.post("/api/persistent-session/authenticate", (req, res) => {
+app.post("/api/persistent-session/authenticate", async (req, res) => {
     const { activityName, hash, teacherCode } = req.body || {};
 
     if (!activityName || !hash || !teacherCode) {
@@ -263,7 +278,7 @@ app.post("/api/persistent-session/authenticate", (req, res) => {
         httpOnly: true,
     });
 
-    const persistentSession = getPersistentSession(hash);
+    const persistentSession = await getPersistentSession(hash);
 
     res.json({
         success: true,
@@ -273,7 +288,7 @@ app.post("/api/persistent-session/authenticate", (req, res) => {
 });
 
 // Get persistent session info (for checking if teacher has cookie)
-app.get("/api/persistent-session/:hash", (req, res) => {
+app.get("/api/persistent-session/:hash", async (req, res) => {
     const { hash } = req.params;
     const { activityName } = req.query;
     
@@ -282,7 +297,7 @@ app.get("/api/persistent-session/:hash", (req, res) => {
     }
     
     // Get or create the active session (this creates it in memory when first accessed)
-    const session = getOrCreateActivePersistentSession(activityName, hash);
+    const session = await getOrCreateActivePersistentSession(activityName, hash);
 
     // Check if user has the teacher code in their cookies
     const { sessions: sessionEntries, corrupted: cookieCorrupted } = parsePersistentSessionsCookie(
@@ -360,3 +375,49 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`ActiveBits server running on \x1b[1m\x1b[32mhttp://localhost:${PORT}\x1b[0m`);
 });
+
+// Graceful shutdown handler for hot redeployments
+async function shutdown(signal) {
+    console.log(`\n${signal} received. Starting graceful shutdown...`);
+    
+    // Stop accepting new connections
+    server.close(async () => {
+        console.log('HTTP server closed');
+        
+        // Flush cache to Valkey before shutdown
+        if (sessions.flushCache) {
+            console.log('Flushing session cache...');
+            await sessions.flushCache();
+        }
+        
+        // Close Valkey connections
+        if (sessions.close) {
+            console.log('Closing Valkey connections...');
+            await sessions.close();
+        }
+        
+        console.log('Graceful shutdown complete');
+        process.exit(0);
+    });
+    
+    // Force shutdown after 30 seconds
+    setTimeout(() => {
+        console.error('Forced shutdown after timeout');
+        process.exit(1);
+    }, 30000);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Periodic cache flush (every 30 seconds) to ensure data persistence
+if (sessions.flushCache) {
+    const flushInterval = setInterval(async () => {
+        try {
+            await sessions.flushCache();
+        } catch (err) {
+            console.error('Error flushing cache:', err);
+        }
+    }, 30000);
+    flushInterval.unref();
+}

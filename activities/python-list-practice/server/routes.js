@@ -105,25 +105,30 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     return student;
   };
 
-  const broadcast = (session, type, payload) => {
+  async function broadcast(type, payload, sessionId) {
     const msg = JSON.stringify({ type, payload });
+    if (sessions.publishBroadcast) {
+      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload });
+    }
+    // Local broadcast to WebSocket clients
     for (const s of ws.wss.clients) {
-      if (s.readyState === 1 && s.sessionId === session.id) {
+      if (s.readyState === 1 && s.sessionId === sessionId) {
         try { s.send(msg); } catch (err) { console.error('WS send failed', err); }
       }
     }
-  };
+  }
 
-  app.post('/api/python-list-practice/create', (req, res) => {
-    const session = createSession(sessions, { data: {} });
+  app.post('/api/python-list-practice/create', async (req, res) => {
+    const session = await createSession(sessions, { data: {} });
     session.type = 'python-list-practice';
     session.data.students = [];
     session.data.selectedQuestionTypes = ['all'];
+    await sessions.set(session.id, session);
     res.json({ id: session.id });
   });
 
-  app.get('/api/python-list-practice/:sessionId', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.get('/api/python-list-practice/:sessionId', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'python-list-practice') {
       return res.status(404).json({ error: 'invalid session' });
     }
@@ -133,16 +138,16 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     });
   });
 
-  app.get('/api/python-list-practice/:sessionId/students', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.get('/api/python-list-practice/:sessionId/students', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'python-list-practice') {
       return res.status(404).json({ error: 'invalid session' });
     }
     res.json({ students: session.data.students || [] });
   });
 
-  app.post('/api/python-list-practice/:sessionId/stats', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.post('/api/python-list-practice/:sessionId/stats', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'python-list-practice') {
       return res.status(404).json({ error: 'invalid session' });
     }
@@ -157,20 +162,22 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     student.stats = stats;
     student.lastSeen = Date.now();
 
-    broadcast(session, 'studentsUpdate', { students: session.data.students });
+    await sessions.set(session.id, session);
+    await broadcast('studentsUpdate', { students: session.data.students }, session.id);
 
     res.json({ ok: true });
   });
 
-  app.post('/api/python-list-practice/:sessionId/question-types', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.post('/api/python-list-practice/:sessionId/question-types', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'python-list-practice') {
       return res.status(404).json({ error: 'invalid session' });
     }
 
     const questionTypes = sanitizeQuestionTypes(req.body?.types);
     session.data.selectedQuestionTypes = questionTypes;
-    broadcast(session, 'questionTypesUpdate', { selectedQuestionTypes: questionTypes });
+    await sessions.set(session.id, session);
+    await broadcast('questionTypesUpdate', { selectedQuestionTypes: questionTypes }, session.id);
 
     res.json({ ok: true, selectedQuestionTypes: questionTypes });
   });
@@ -180,9 +187,9 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     socket.sessionId = qp.get('sessionId') || null;
     socket.studentName = validateName(qp.get('studentName') || '');
     socket.studentId = validateStudentId(qp.get('studentId') || '');
-    const sendQuestionTypesSnapshot = () => {
+    const sendQuestionTypesSnapshot = async () => {
       if (!socket.sessionId) return;
-      const session = sessions[socket.sessionId];
+      const session = await sessions.get(socket.sessionId);
       if (session && session.type === 'python-list-practice') {
         const payload = {
           selectedQuestionTypes: session.data.selectedQuestionTypes || ['all'],
@@ -200,16 +207,28 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     }
 
     if (socket.sessionId && socket.studentName) {
-      const session = sessions[socket.sessionId];
-      if (session && session.type === 'python-list-practice') {
-        const student = attachStudent(session, socket.studentName, socket.studentId);
-        broadcast(session, 'studentsUpdate', { students: session.data.students });
-        sendQuestionTypesSnapshot();
-        socket.on('close', () => {
-          student.connected = false;
-          broadcast(session, 'studentsUpdate', { students: session.data.students });
-        });
-      }
+      (async () => {
+        const session = await sessions.get(socket.sessionId);
+        if (session && session.type === 'python-list-practice') {
+          const student = attachStudent(session, socket.studentName, socket.studentId);
+          await sessions.set(session.id, session);
+          await broadcast('studentsUpdate', { students: session.data.students }, session.id);
+          sendQuestionTypesSnapshot();
+          socket.on('close', () => {
+            (async () => {
+              const sess = await sessions.get(socket.sessionId);
+              if (sess && sess.type === 'python-list-practice') {
+                const stu = sess.data.students.find(s => s.id === student.id);
+                if (stu) {
+                  stu.connected = false;
+                  await sessions.set(sess.id, sess);
+                  await broadcast('studentsUpdate', { students: sess.data.students }, sess.id);
+                }
+              }
+            })().catch(err => console.error('Error in close handler:', err));
+          });
+        }
+      })().catch(err => console.error('Error in WS handler:', err));
     }
   });
 }

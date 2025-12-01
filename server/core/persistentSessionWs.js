@@ -4,6 +4,7 @@ import {
   addWaiter,
   removeWaiter,
   getWaiterCount,
+  getWaiters,
   canAttemptTeacherCode,
   recordTeacherCodeAttempt,
   verifyTeacherCodeWithHash,
@@ -28,29 +29,31 @@ export function setupPersistentSessionWs(ws, sessions) {
       return;
     }
 
-    // Get or create the active session
-    const session = getOrCreateActivePersistentSession(activityName, hash);
+    // Get or create the active session (async IIFE)
+    (async () => {
+      const session = await getOrCreateActivePersistentSession(activityName, hash);
 
-    // Store hash on socket for cleanup
-    socket.persistentHash = hash;
+      // Store hash on socket for cleanup
+      socket.persistentHash = hash;
 
-    // If session already started, redirect to actual session
-    if (isSessionStarted(hash)) {
-      socket.send(JSON.stringify({
-        type: 'session-started',
-        sessionId: getSessionId(hash),
-      }));
-      socket.close(1000, "Session already started");
-      return;
-    }
+      // If session already started, redirect to actual session
+      if (await isSessionStarted(hash)) {
+        socket.send(JSON.stringify({
+          type: 'session-started',
+          sessionId: await getSessionId(hash),
+        }));
+        socket.close(1000, "Session already started");
+        return;
+      }
 
-    // Add to waiters
-    const waiterCount = addWaiter(hash, socket);
-    
-    // Broadcast waiter count to all waiters
-    broadcastWaiterCount(hash, session);
+      // Add to waiters
+      const waiterCount = addWaiter(hash, socket);
+      
+      // Broadcast waiter count to all waiters
+      await broadcastWaiterCount(hash, session);
 
-    console.log(`Waiter joined persistent session ${hash}, total waiters: ${waiterCount}`);
+      console.log(`Waiter joined persistent session ${hash}, total waiters: ${waiterCount}`);
+    })().catch(err => console.error('Error in persistent session setup:', err));
 
     socket.on("message", (data) => {
       try {
@@ -65,9 +68,12 @@ export function setupPersistentSessionWs(ws, sessions) {
     });
 
     socket.on("close", () => {
-      removeWaiter(hash, socket);
-      broadcastWaiterCount(hash, session);
-      console.log(`Waiter left persistent session ${hash}`);
+      (async () => {
+        removeWaiter(hash, socket);
+        const session = await getPersistentSession(hash);
+        await broadcastWaiterCount(hash, session);
+        console.log(`Waiter left persistent session ${hash}`);
+      })().catch(err => console.error('Error in waiter cleanup:', err));
     });
   });
 }
@@ -80,7 +86,7 @@ export function setupPersistentSessionWs(ws, sessions) {
  * @param {object} sessions - The session store
  * @param {object} wss - The WebSocket server
  */
-function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss) {
+async function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss) {
   // Validate teacherCode input
   if (!teacherCode || typeof teacherCode !== 'string') {
     socket.send(JSON.stringify({
@@ -107,7 +113,7 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
   const rateLimitKey = `${clientIp}:${hash}`;
   
   // Rate limiting check
-  if (!canAttemptTeacherCode(rateLimitKey)) {
+  if (!(await canAttemptTeacherCode(rateLimitKey))) {
     socket.send(JSON.stringify({
       type: 'teacher-code-error',
       error: 'Too many attempts. Please wait a minute.',
@@ -115,10 +121,10 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
     return;
   }
 
-  recordTeacherCodeAttempt(rateLimitKey);
+  await recordTeacherCodeAttempt(rateLimitKey);
 
   // Get the session and verify teacher code
-  const persistentSession = getPersistentSession(hash);
+  const persistentSession = await getPersistentSession(hash);
   if (!persistentSession) {
     socket.send(JSON.stringify({
       type: 'teacher-code-error',
@@ -146,7 +152,7 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
   }
 
   // Code is valid! Create the actual session
-  const newSession = createSession(sessions, { data: {} });
+  const newSession = await createSession(sessions, { data: {} });
   
   // Set up session based on activity type
   newSession.type = persistentSession.activityName;
@@ -167,11 +173,13 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
     default:
       break;
   }
+  
+  await sessions.set(newSession.id, newSession);
 
   console.log(`Created session ${newSession.id} for persistent session ${hash}`);
 
   // Mark persistent session as started
-  const waiters = startPersistentSession(hash, newSession.id, socket);
+  const waiters = await startPersistentSession(hash, newSession.id, socket);
 
   // Notify the teacher FIRST
   // Use a separate message type to ensure different handling on client
@@ -200,8 +208,8 @@ function handleTeacherCodeVerification(socket, hash, teacherCode, sessions, wss)
  * @param {string} hash - The persistent hash
  * @param {object} session - The persistent session data
  */
-function broadcastWaiterCount(hash, session) {
-  if (!session || !session.waiters) return;
+async function broadcastWaiterCount(hash, session) {
+  if (!session) return;
   
   const count = getWaiterCount(hash);
   const message = JSON.stringify({
@@ -209,7 +217,9 @@ function broadcastWaiterCount(hash, session) {
     count,
   });
 
-  for (const waiter of session.waiters) {
+  // Waiters are instance-local, no need to pub/sub
+  const waiters = getWaiters(hash);
+  for (const waiter of waiters) {
     if (waiter.readyState === 1) { // 1 = OPEN
       waiter.send(message);
     }
