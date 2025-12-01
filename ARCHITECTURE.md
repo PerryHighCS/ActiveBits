@@ -45,22 +45,22 @@ ActiveBits/
 1. Navigate to `/manage`
 2. Click "Make Permanent Link" for any activity
 3. System creates a persistent session with HMAC-authenticated hash
-4. Teacher receives unique teacher code stored in httpOnly cookie
+4. Teacher creates a teacher code stored in httpOnly cookie
 5. Permanent link is saved to teacher's session list
-6. Teacher can access the session at any time via `/activity/{activityName}/{hash}`
+6. Teacher can access the session at any time via their link ( `/activity/{activityName}/{hash}` )
 7. Auto-authentication using teacher code cookie
 8. Download CSV backup of all permanent links
 
 ### Student Flow
 1. Receive session ID or permanent link from teacher
-2. Navigate to `/{session-id}` or `/activity/{activityName}/{hash}` or enter ID at `/`
+2. Navigate to `/{session-id}` or enter ID at `/` or use permanent link ( `/activity/{activityName}/{hash}` )
 3. System fetches session data and determines activity type
 4. Student is shown the appropriate activity component
 5. Student interacts with the activity
 
 ### Session Lifecycle
 - **Temporary sessions**: Created on-demand, expire after inactivity
-- **Persistent sessions**: Permanent URLs that reset on each visit
+- **Persistent sessions**: Permanent URLs that create on-demand sessions and allow both teacher and student to enter
 - **Session termination**: Teacher can end any session, broadcasting to all connected students
 - **WebSocket notifications**: Students automatically redirected when session ends
 
