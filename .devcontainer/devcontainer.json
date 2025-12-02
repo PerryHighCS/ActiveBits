@@ -11,7 +11,7 @@
       "username": "vscode"
     }
   },
-  "postCreateCommand": "bash .devcontainer/setup-dev.sh && npm install --workspaces --include-workspace-root",
+  "postCreateCommand": "bash .devcontainer/setup-dev.sh && npm install --workspaces --include-workspace-root && git config --global --add safe.directory /workspaces/ActiveBits",
   "forwardPorts": [
     6379
   ],
