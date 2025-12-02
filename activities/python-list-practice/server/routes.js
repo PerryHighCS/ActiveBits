@@ -213,7 +213,7 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
           const student = attachStudent(session, socket.studentName, socket.studentId);
           await sessions.set(session.id, session);
           await broadcast('studentsUpdate', { students: session.data.students }, session.id);
-          sendQuestionTypesSnapshot();
+          await sendQuestionTypesSnapshot();
           socket.on('close', () => {
             (async () => {
               const sess = await sessions.get(socket.sessionId);
