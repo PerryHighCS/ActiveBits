@@ -17,10 +17,11 @@ ActiveBits/
 │   │   ├── activity.config.js
 │   │   ├── client/
 │   │   └── server/
-│   └── java-string-practice/
-│       ├── activity.config.js
-│       ├── client/
-│       └── server/
+│   ├── java-string-practice/
+│   │   ├── activity.config.js
+│   │   ├── client/
+│   │   └── server/
+│   └  ...
 ├── client/
 │   └── src/
 │       ├── activities/              # Loader that imports from /activities configs
@@ -308,16 +309,17 @@ Located within each activity's `components/` folder and imported with relative p
 5. **Consistency** - Standardized patterns across all activities
 6. **DRY Principle** - Routes and UI are generated from configuration
 
-For a detailed comparison of the old vs. new architecture, see [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md).
-
 ## Security Considerations
 
 ### Authentication
+This is not for true authentication - there are no users, no persistent storage. Activities are not gated, but
+to allow for convenience teachers can create persistent links that will get them and their students into an activity
+that contain a hash that allows teachers to use a code to enter the management dashboard.
+
 - **Teacher Codes**: User-created codes (minimum 6 characters) stored in httpOnly cookies for convenience
 - **HMAC Hashing**: SHA-256 with 8-character salt prevents URL tampering
 - **Cookie Security**: httpOnly flag prevents XSS, secure flag for HTTPS in production
 - **Secret Management**: Production deployments must set `PERSISTENT_SESSION_SECRET` environment variable
-- **Security Note**: Teacher codes are NOT meant for cryptographic security - they're simple barriers for educational use
 
 ### Input Validation
 - Activity names validated against centralized registry (`activityRegistry.js`)
@@ -334,10 +336,10 @@ For a detailed comparison of the old vs. new architecture, see [REFACTORING_SUMM
 ## Future Improvements
 
 - TypeScript for better type safety
-- Activity versioning
-- Activity hot-reloading in development
 - Activity marketplace/plugins
 - Per-activity settings and preferences
-- Database backend for true persistent storage
 - Rate limiting on all API endpoints
 - Activity-level permission system
+
+## Rejected Ideas
+- Database backend for true persistent storage - no persistent storage allowed
