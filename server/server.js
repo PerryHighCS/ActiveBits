@@ -1,6 +1,7 @@
 import http from "http";
 import express from "express";
 import path from "path";
+import os from "os";
 import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
 import { createSessionStore, setupSessionRoutes } from "./core/sessions.js";
@@ -343,6 +344,337 @@ app.get("/api/persistent-session/:hash/teacher-code", (req, res) => {
 // Health check
 app.get("/health-check", (req, res) => {
     res.json({ status: "ok", memory: process.memoryUsage() });
+});
+
+// HTML Status Dashboard (auto-updating)
+app.get("/status", (req, res) => {
+        const html = `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ActiveBits Status</title>
+    <style>
+        :root { --bg:#0e1116; --card:#151a22; --text:#e8eef8; --muted:#a7b0bf; --good:#38c172; --warn:#ffcc00; --bad:#e5534b; --accent:#4ea1ff; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, sans-serif; background: var(--bg); color: var(--text); }
+        header { padding: 16px 20px; border-bottom: 1px solid #1e2633; display:flex; align-items:center; gap:12px; }
+        header h1 { font-size: 18px; margin: 0; }
+        .container { padding: 16px 20px; display: grid; gap: 16px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+        .card { background: var(--card); border: 1px solid #1e2633; border-radius: 10px; padding: 12px; }
+        .card h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+        .value { font-size: 20px; font-weight: 700; }
+        .sub { font-size: 12px; color: var(--muted); }
+        .controls { display:flex; gap:8px; margin-left:auto; }
+        button, select { background:#1b2330; color:var(--text); border:1px solid #253043; border-radius:8px; padding:6px 10px; cursor:pointer; }
+        button:hover { background:#202a3a; }
+        .table-card { overflow:auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px; border-bottom: 1px solid #1f2836; text-align: left; white-space: nowrap; }
+        th { position: sticky; top: 0; background: #121721; z-index:1; font-size:12px; color: var(--muted); }
+        .ok { color: var(--good); }
+        .warn { color: var(--warn); }
+        .bad { color: var(--bad); }
+        code { background:#0c1016; padding:2px 6px; border-radius:6px; border:1px solid #1a2332; }
+        .kvs { display:grid; grid-template-columns: max-content 1fr; gap:6px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; }
+        .kvs div:nth-child(odd) { color: var(--muted); }
+    </style>
+    <script>
+        const fmtInt = n => (typeof n === 'number' && Number.isFinite(n)) ? n.toLocaleString() : '-';
+        const fmtBytes = n => {
+            if (!(Number.isFinite(n))) return '-';
+            const u=['B','KB','MB','GB','TB']; let i=0, v=n;
+            while (v >= 1024 && i < u.length-1) { v/=1024; i++; }
+            return v.toFixed(v<10?1:0)+' '+u[i];
+        };
+        const esc = s => String(s).replace(/[&<>"']/g, c => (
+            c === '&' ? '&amp;' :
+            c === '<' ? '&lt;' :
+            c === '>' ? '&gt;' :
+            c === '"' ? '&quot;' :
+            '&#39;'
+        ));
+        let timer = null;
+        let paused = false;
+        let last;
+        async function load() {
+            try {
+                const res = await fetch('/api/status', { cache: 'no-store' });
+                const data = await res.json();
+                last = data;
+                render(data);
+            } catch (e) {
+                console.error(e);
+                document.getElementById('error').textContent = 'Failed to load: ' + e;
+            }
+        }
+        function setPaused(p) {
+            paused = p;
+            document.getElementById('pauseBtn').style.display = p ? 'none' : '';
+            document.getElementById('resumeBtn').style.display = p ? '' : 'none';
+        }
+        function start(intervalMs) {
+            if (timer) clearInterval(timer);
+            timer = setInterval(() => { if (!paused) load(); }, intervalMs);
+        }
+        function render(data) {
+            // Header cards
+            document.getElementById('mode').textContent = data.storage?.mode || '-';
+            document.getElementById('ttl').textContent = (data.storage?.ttlMs ? (data.storage.ttlMs/1000)+'s' : '-');
+            document.getElementById('uptime').textContent = (data.process?.uptimeSeconds ?? '-') + 's';
+            const mem = data.process?.memory || {};
+            document.getElementById('rss').textContent = fmtBytes(mem.rss);
+            document.getElementById('heap').textContent = fmtBytes(mem.heapUsed) + ' / ' + fmtBytes(mem.heapTotal);
+            document.getElementById('wsClients').textContent = fmtInt(data.websocket?.connectedClients);
+            document.getElementById('sessionsCount').textContent = fmtInt(data.sessions?.count);
+            document.getElementById('sessionsBytes').textContent = fmtBytes(data.sessions?.approxTotalBytes);
+
+            // Session type distribution
+            const byType = data.sessions?.byType || {};
+            document.getElementById('byType').innerHTML = Object.keys(byType)
+                .sort()
+                .map(k => '<div>' + esc(k) + '</div><div>' + fmtInt(byType[k]) + '</div>')
+                .join('') || '<div>none</div><div>0</div>';
+
+            // Valkey block
+            const vk = data.valkey;
+            const vkEl = document.getElementById('valkey');
+            if (vk && !vk.error) {
+                vkEl.innerHTML = '<div>ping</div><div><code>' + esc(vk.ping) + '</code></div>'
+                                + '<div>dbsize</div><div>' + fmtInt(vk.dbsize) + '</div>'
+                                + '<div>used_memory</div><div>' + fmtBytes(Number(vk.memory?.used_memory)) + ' (' + esc(vk.memory?.used_memory_human || '-') + ')</div>'
+                                + '<div>used_memory_rss</div><div>' + fmtBytes(Number(vk.memory?.used_memory_rss)) + ' (' + esc(vk.memory?.used_memory_rss_human || '-') + ')</div>';
+            } else if (vk && vk.error) {
+                vkEl.innerHTML = '<div>error</div><div class="bad">' + esc(vk.error) + '</div>';
+            } else {
+                vkEl.innerHTML = '<div>info</div><div>not using Valkey</div>';
+            }
+
+            // Sessions table
+            const rows = (data.sessions?.list || []).sort((a,b)=>{
+                const as = a.lastActivity ? Date.parse(a.lastActivity) : 0;
+                const bs = b.lastActivity ? Date.parse(b.lastActivity) : 0;
+                return bs - as;
+            }).map(s => {
+                const ttl = (typeof s.ttlRemainingMs === 'number') ? (s.ttlRemainingMs/1000).toFixed(0)+'s' : '-';
+                const cls = (s.socketCount>0 ? 'ok' : '');
+                return '<tr>'
+                    + '<td><code>' + esc(s.id) + '</code></td>'
+                    + '<td>' + esc(s.type || '-') + '</td>'
+                    + '<td class="' + cls + '">' + fmtInt(s.socketCount) + '</td>'
+                    + '<td>' + esc(s.lastActivity || '-') + '</td>'
+                    + '<td>' + esc(s.expiresAt || '-') + '</td>'
+                    + '<td>' + ttl + '</td>'
+                    + '<td>' + fmtBytes(s.approxBytes) + '</td>'
+                + '</tr>';
+            }).join('');
+            document.getElementById('sessionsBody').innerHTML = rows || '<tr><td colspan="7" class="sub">No sessions</td></tr>';
+
+            document.getElementById('updated').textContent = new Date().toLocaleTimeString();
+        }
+        window.addEventListener('DOMContentLoaded', () => {
+            const intervalSel = document.getElementById('interval');
+            intervalSel.addEventListener('change', () => start(Number(intervalSel.value)));
+            document.getElementById('pauseBtn').addEventListener('click', ()=> setPaused(true));
+            document.getElementById('resumeBtn').addEventListener('click', ()=> setPaused(false));
+            start(Number(intervalSel.value));
+            load();
+        });
+    </script>
+    <meta http-equiv="refresh" content="3600" />
+</head>
+<body>
+    <header>
+        <h1>ActiveBits Status</h1>
+        <div class="sub">Last update: <span id="updated">—</span></div>
+        <div class="controls">
+            <label class="sub">Refresh:</label>
+            <select id="interval">
+                <option value="2000">2s</option>
+                <option value="5000">5s</option>
+                <option value="10000">10s</option>
+                <option value="30000">30s</option>
+            </select>
+            <button id="pauseBtn">Pause</button>
+            <button id="resumeBtn" style="display:none">Resume</button>
+        </div>
+    </header>
+    <div class="container">
+        <div class="grid">
+            <div class="card"><h3>Mode</h3><div class="value" id="mode">-</div><div class="sub">TTL: <span id="ttl">-</span></div></div>
+            <div class="card"><h3>Uptime</h3><div class="value" id="uptime">-</div><div class="sub">Node <code>${process.version}</code></div></div>
+            <div class="card"><h3>WS Clients</h3><div class="value" id="wsClients">-</div><div class="sub">Connected sockets</div></div>
+            <div class="card"><h3>RSS Memory</h3><div class="value" id="rss">-</div><div class="sub">Heap <span id="heap">-</span></div></div>
+            <div class="card"><h3>Sessions</h3><div class="value" id="sessionsCount">-</div><div class="sub">Approx size <span id="sessionsBytes">-</span></div></div>
+        </div>
+
+        <div class="grid">
+            <div class="card"><h3>Sessions by Type</h3><div class="kvs" id="byType"></div></div>
+            <div class="card"><h3>Valkey</h3><div class="kvs" id="valkey"></div></div>
+        </div>
+
+        <div class="card table-card">
+            <h3>Active Sessions</h3>
+            <div id="error" class="bad" style="margin-bottom:8px;"></div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Session ID</th>
+                        <th>Type</th>
+                        <th>Sockets</th>
+                        <th>Last Activity</th>
+                        <th>Expires At</th>
+                        <th>TTL</th>
+                        <th>Approx Size</th>
+                    </tr>
+                </thead>
+                <tbody id="sessionsBody"></tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>`;
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(html);
+});
+
+// Status endpoint with runtime and storage details
+app.get("/api/status", async (req, res) => {
+    try {
+        const usingValkey = Boolean(sessions && sessions.valkeyStore);
+        const valkeyClient = usingValkey ? sessions.valkeyStore.client : null;
+        const ttlMs = usingValkey ? sessions.valkeyStore.ttlMs : sessions.ttlMs;
+
+        // Gather active sessions
+        const allSessions = (await sessions.getAll()) || [];
+
+        // Compute per-session socket counts
+        const socketCounts = Object.create(null);
+        const clients = ws?.wss?.clients ? Array.from(ws.wss.clients) : [];
+        for (const c of clients) {
+            const id = c.sessionId || null;
+            if (!id) continue;
+            socketCounts[id] = (socketCounts[id] || 0) + 1;
+        }
+
+        // Helper to mask credentials in URLs
+        const maskUrl = (url) => {
+            try {
+                if (!url) return null;
+                const u = new URL(url);
+                if (u.password || u.username) {
+                    u.password = u.password ? "****" : "";
+                    u.username = u.username ? "****" : "";
+                }
+                return u.toString();
+            } catch {
+                return url;
+            }
+        };
+
+        // Build session summaries with expiry
+        const now = Date.now();
+        const sessionsSummary = [];
+        let approxBytes = 0;
+        for (const s of allSessions) {
+            let ttlRemainingMs = null;
+            if (usingValkey && valkeyClient && s?.id) {
+                try {
+                    // Prefer accurate TTL from Valkey if available
+                    // eslint-disable-next-line no-await-in-loop
+                    const pttl = await valkeyClient.pttl(`session:${s.id}`);
+                    ttlRemainingMs = pttl >= 0 ? pttl : Math.max(0, ttlMs - (now - (s.lastActivity || s.created || 0)));
+                } catch {
+                    ttlRemainingMs = Math.max(0, ttlMs - (now - (s.lastActivity || s.created || 0)));
+                }
+            } else {
+                ttlRemainingMs = Math.max(0, ttlMs - (now - (s.lastActivity || s.created || 0)));
+            }
+
+            const expiresAt = Number.isFinite(ttlRemainingMs) ? new Date(now + ttlRemainingMs).toISOString() : null;
+            const approxSize = Buffer.byteLength(JSON.stringify(s || {}));
+            approxBytes += approxSize;
+            sessionsSummary.push({
+                id: s.id,
+                type: s.type || null,
+                created: s.created ? new Date(s.created).toISOString() : null,
+                lastActivity: s.lastActivity ? new Date(s.lastActivity).toISOString() : null,
+                ttlRemainingMs,
+                expiresAt,
+                socketCount: socketCounts[s.id] || 0,
+                approxBytes: approxSize,
+            });
+        }
+
+        // Aggregate by activity type
+        const activityCounts = sessionsSummary.reduce((acc, s) => {
+            const key = s.type || "unknown";
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+        }, {});
+
+        // Valkey info (optional, only lightweight sections)
+        let valkeyInfo = null;
+        if (usingValkey && valkeyClient) {
+            try {
+                const [ping, infoMemory, dbsize] = await Promise.all([
+                    valkeyClient.ping(),
+                    valkeyClient.info("memory"),
+                    valkeyClient.dbsize(),
+                ]);
+                // Parse a couple of useful metrics from INFO memory
+                const mem = {};
+                for (const line of infoMemory.split("\n")) {
+                    const [k, v] = line.split(":");
+                    if (!k || v === undefined) continue;
+                    if (k === "used_memory" || k === "used_memory_rss" || k === "maxmemory") {
+                        mem[k] = Number(v.trim());
+                    }
+                    if (k === "used_memory_human" || k === "used_memory_rss_human") {
+                        mem[k] = v.trim();
+                    }
+                }
+                valkeyInfo = {
+                    ping,
+                    dbsize,
+                    memory: mem,
+                };
+            } catch (e) {
+                valkeyInfo = { error: String(e?.message || e) };
+            }
+        }
+
+        const response = {
+            storage: {
+                mode: usingValkey ? "valkey" : "in-memory",
+                ttlMs,
+                valkeyUrl: usingValkey ? maskUrl(process.env.VALKEY_URL) : null,
+            },
+            process: {
+                pid: process.pid,
+                node: process.version,
+                uptimeSeconds: Math.round(process.uptime()),
+                memory: process.memoryUsage(),
+                loadavg: os.loadavg(),
+            },
+            websocket: {
+                connectedClients: clients.length,
+            },
+            sessions: {
+                count: sessionsSummary.length,
+                approxTotalBytes: approxBytes,
+                byType: activityCounts,
+                list: sessionsSummary,
+            },
+            valkey: valkeyInfo,
+        };
+
+        res.json(response);
+    } catch (err) {
+        console.error("/api/status error", err);
+        res.status(500).json({ error: "internal_error", message: String(err?.message || err) });
+    }
 });
 
 // Static files / Vite proxy

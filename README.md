@@ -42,6 +42,29 @@ Teachers can create permanent activity links that persist across browser session
 
 ## 🛠️ Development
 
+### Dev Container Setup (Recommended)
+
+The project includes a dev container with Valkey pre-configured:
+
+```bash
+# Open in VS Code or GitHub Codespaces
+# The container will automatically:
+# - Install dependencies
+# - Start Valkey service
+# - Configure VALKEY_URL environment variable
+
+# Test Valkey connection
+cd server
+npm run test:valkey
+
+# Start the dev server (uses Valkey automatically)
+npm run dev
+```
+
+See **[docs/VALKEY_DEVELOPMENT.md](docs/VALKEY_DEVELOPMENT.md)** for debugging commands and architecture details.
+
+### Local Development (without container)
+
 From the project root:
 
 Install dependencies:

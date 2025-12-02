@@ -6,17 +6,26 @@
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "22"
+    },
+    "ghcr.io/devcontainers/features/common-utils": {
+      "username": "vscode"
     }
   },
-  "postCreateCommand": "npm install --workspaces --include-workspace-root",
+  "postCreateCommand": "bash .devcontainer/setup-dev.sh && npm install --workspaces --include-workspace-root",
   "forwardPorts": [
     6379
   ],
   "customizations": {
     "vscode": {
       "settings": {
-        "terminal.integrated.defaultProfile.linux": "bash"
-      }
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.env.linux": {
+          "VALKEY_URL": "redis://valkey:6379"
+        }
+      },
+      "extensions": [
+        "dbaeumer.vscode-eslint"
+      ]
     }
   },
   "remoteUser": "vscode"
