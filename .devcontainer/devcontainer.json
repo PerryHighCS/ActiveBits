@@ -11,10 +11,27 @@
       "username": "vscode"
     }
   },
-  "postCreateCommand": "bash .devcontainer/setup-dev.sh && npm install --workspaces --include-workspace-root && git config --global --add safe.directory /workspaces/ActiveBits",
+  "postCreateCommand": "git config --global --add safe.directory /workspaces/ActiveBits && npm install --workspaces --include-workspace-root",
+  "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Valkey check skipped'",
   "forwardPorts": [
-    6379
+    6379,
+    3000,
+    5173
   ],
+  "portsAttributes": {
+    "3000": {
+      "label": "ActiveBits Server",
+      "onAutoForward": "openPreview"
+    },
+    "5173": {
+      "label": "Vite Dev Server",
+      "onAutoForward": "notify"
+    },
+    "6379": {
+      "label": "Valkey",
+      "onAutoForward": "silent"
+    }
+  },
   "customizations": {
     "vscode": {
       "settings": {

@@ -1,7 +1,6 @@
 import http from "http";
 import express from "express";
 import path from "path";
-import os from "os";
 import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
 import { createSessionStore, setupSessionRoutes } from "./core/sessions.js";
@@ -256,6 +255,7 @@ app.post("/api/persistent-session/authenticate", async (req, res) => {
 
     // Store/update cookie entry so the instructor is recognized on subsequent visits
     const cookieName = 'persistent_sessions';
+    const MAX_SESSIONS_PER_COOKIE = 20;
     let { sessions: existingSessions } = parsePersistentSessionsCookie(
         req.cookies[cookieName],
         'persistent_sessions (/api/persistent-session/authenticate)'
@@ -345,143 +345,123 @@ app.get("/health-check", (req, res) => {
     res.json({ status: "ok", memory: process.memoryUsage() });
 });
 
-// HTML Status Dashboard removed; served by client SPA at /status
-
-// Status endpoint with runtime and storage details
+// Status endpoint for monitoring and troubleshooting
 app.get("/api/status", async (req, res) => {
     try {
-        const usingValkey = Boolean(sessions && sessions.valkeyStore);
-        const valkeyClient = usingValkey ? sessions.valkeyStore.client : null;
-        const ttlMs = usingValkey ? sessions.valkeyStore.ttlMs : sessions.ttlMs;
-
-        // Gather active sessions
-        const allSessions = (await sessions.getAll()) || [];
-
-        // Compute per-session socket counts
-        const socketCounts = Object.create(null);
-        const clients = ws?.wss?.clients ? Array.from(ws.wss.clients) : [];
-        for (const c of clients) {
-            const id = c.sessionId || null;
-            if (!id) continue;
-            socketCounts[id] = (socketCounts[id] || 0) + 1;
-        }
-
-        // Helper to mask credentials in URLs
-        const maskUrl = (url) => {
-            try {
-                if (!url) return null;
-                const u = new URL(url);
-                if (u.password || u.username) {
-                    u.password = u.password ? "****" : "";
-                    u.username = u.username ? "****" : "";
+        const allSessions = await sessions.getAll();
+        
+        // Group sessions by type
+        const byType = {};
+        let approxTotalBytes = 0;
+        
+        const sessionList = await Promise.all(allSessions.map(async (session) => {
+            const type = session.type || 'unknown';
+            byType[type] = (byType[type] || 0) + 1;
+            
+            // Approximate session size
+            const approxBytes = JSON.stringify(session).length;
+            approxTotalBytes += approxBytes;
+            
+            // Count connected WebSocket clients for this session
+            let socketCount = 0;
+            for (const client of ws.wss.clients) {
+                if (client.sessionId === session.id && client.readyState === 1) {
+                    socketCount++;
                 }
-                return u.toString();
-            } catch {
-                return url;
             }
-        };
-
-        // Build session summaries with expiry
-        const now = Date.now();
-        const sessionsSummary = [];
-        let approxBytes = 0;
-        for (const s of allSessions) {
+            
+            // Calculate TTL
             let ttlRemainingMs = null;
-            if (usingValkey && valkeyClient && s?.id) {
+            let expiresAt = null;
+            
+            if (sessions.valkeyStore) {
+                // Valkey mode: use PTTL
                 try {
-                    // Prefer accurate TTL from Valkey if available
-                    // eslint-disable-next-line no-await-in-loop
-                    const pttl = await valkeyClient.pttl(`session:${s.id}`);
-                    ttlRemainingMs = pttl >= 0 ? pttl : Math.max(0, ttlMs - (now - (s.lastActivity || s.created || 0)));
-                } catch {
-                    ttlRemainingMs = Math.max(0, ttlMs - (now - (s.lastActivity || s.created || 0)));
+                    const pttl = await sessions.valkeyStore.client.pttl(`session:${session.id}`);
+                    ttlRemainingMs = pttl > 0 ? pttl : 0;
+                    if (ttlRemainingMs > 0) {
+                        expiresAt = new Date(Date.now() + ttlRemainingMs).toISOString();
+                    }
+                } catch (err) {
+                    console.error(`Failed to get TTL for session ${session.id}:`, err);
                 }
             } else {
-                ttlRemainingMs = Math.max(0, ttlMs - (now - (s.lastActivity || s.created || 0)));
+                // In-memory mode: derive from lastActivity
+                const lastActivity = session.lastActivity || session.created || Date.now();
+                const ttlMs = sessions.ttlMs || sessionTtl;
+                ttlRemainingMs = Math.max(0, (lastActivity + ttlMs) - Date.now());
+                if (ttlRemainingMs > 0) {
+                    expiresAt = new Date(lastActivity + ttlMs).toISOString();
+                }
             }
-
-            const expiresAt = Number.isFinite(ttlRemainingMs) ? new Date(now + ttlRemainingMs).toISOString() : null;
-            const approxSize = Buffer.byteLength(JSON.stringify(s || {}));
-            approxBytes += approxSize;
-            sessionsSummary.push({
-                id: s.id,
-                type: s.type || null,
-                created: s.created ? new Date(s.created).toISOString() : null,
-                lastActivity: s.lastActivity ? new Date(s.lastActivity).toISOString() : null,
+            
+            return {
+                id: session.id,
+                type,
+                created: session.created ? new Date(session.created).toISOString() : null,
+                lastActivity: session.lastActivity ? new Date(session.lastActivity).toISOString() : null,
                 ttlRemainingMs,
                 expiresAt,
-                socketCount: socketCounts[s.id] || 0,
-                approxBytes: approxSize,
-            });
-        }
-
-        // Aggregate by activity type
-        const activityCounts = sessionsSummary.reduce((acc, s) => {
-            const key = s.type || "unknown";
-            acc[key] = (acc[key] || 0) + 1;
-            return acc;
-        }, {});
-
-        // Valkey info (optional, only lightweight sections)
+                socketCount,
+                approxBytes,
+            };
+        }));
+        
+        // Valkey info (if available)
         let valkeyInfo = null;
-        if (usingValkey && valkeyClient) {
+        if (sessions.valkeyStore) {
             try {
-                const [ping, infoMemory, dbsize] = await Promise.all([
-                    valkeyClient.ping(),
-                    valkeyClient.info("memory"),
-                    valkeyClient.dbsize(),
-                ]);
-                // Parse a couple of useful metrics from INFO memory
-                const mem = {};
-                for (const line of infoMemory.split("\n")) {
-                    const [k, v] = line.split(":");
-                    if (!k || v === undefined) continue;
-                    if (k === "used_memory" || k === "used_memory_rss" || k === "maxmemory") {
-                        mem[k] = Number(v.trim());
-                    }
-                    if (k === "used_memory_human" || k === "used_memory_rss_human") {
-                        mem[k] = v.trim();
+                const ping = await sessions.valkeyStore.client.ping();
+                const dbsize = await sessions.valkeyStore.client.dbsize();
+                const memoryInfo = await sessions.valkeyStore.client.call('INFO', 'memory');
+                
+                // Parse memory info
+                const memoryLines = memoryInfo.split('\r\n');
+                const memory = {};
+                for (const line of memoryLines) {
+                    if (line.includes(':')) {
+                        const [key, value] = line.split(':');
+                        if (key.startsWith('used_memory')) {
+                            memory[key] = value;
+                        }
                     }
                 }
-                valkeyInfo = {
-                    ping,
-                    dbsize,
-                    memory: mem,
-                };
-            } catch (e) {
-                valkeyInfo = { error: String(e?.message || e) };
+                
+                valkeyInfo = { ping, dbsize, memory };
+            } catch (err) {
+                valkeyInfo = { error: err.message };
             }
         }
-
-        const response = {
+        
+        const status = {
             storage: {
-                mode: usingValkey ? "valkey" : "in-memory",
-                ttlMs,
-                valkeyUrl: usingValkey ? maskUrl(process.env.VALKEY_URL) : null,
+                mode: sessions.valkeyStore ? 'valkey' : 'in-memory',
+                ttlMs: sessions.ttlMs || sessionTtl,
+                valkeyUrl: valkeyUrl ? '***masked***' : null,
             },
             process: {
                 pid: process.pid,
                 node: process.version,
-                uptimeSeconds: Math.round(process.uptime()),
+                uptimeSeconds: Math.floor(process.uptime()),
                 memory: process.memoryUsage(),
-                loadavg: os.loadavg(),
+                loadavg: typeof process.loadavg === 'function' ? process.loadavg() : null,
             },
             websocket: {
-                connectedClients: clients.length,
+                connectedClients: ws.wss.clients.size,
             },
             sessions: {
-                count: sessionsSummary.length,
-                approxTotalBytes: approxBytes,
-                byType: activityCounts,
-                list: sessionsSummary,
+                count: allSessions.length,
+                approxTotalBytes,
+                byType,
+                list: sessionList,
             },
             valkey: valkeyInfo,
         };
-
-        res.json(response);
+        
+        res.json(status);
     } catch (err) {
-        console.error("/api/status error", err);
-        res.status(500).json({ error: "internal_error", message: String(err?.message || err) });
+        console.error('Error in /api/status:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -489,43 +469,66 @@ app.get("/api/status", async (req, res) => {
 const env = process.env.NODE_ENV || "development";
 if (!env.startsWith("dev")) {
     // In production mode, serve static files from the React build directory
-    const distDir = path.join(__dirname, "../client/dist");
-    app.use(express.static(distDir));
+    app.use(express.static(path.join(__dirname, "../client/dist")));
 
-    // SPA fallback: serve index.html for non-API routes
-    // Use a middleware instead of a route to avoid path-to-regexp parsing issues
-    app.use((req, res, next) => {
-        if (req.path.startsWith("/api") || req.path.startsWith("/ws")) return next();
-        res.sendFile(path.join(distDir, "index.html"));
+    // All other requests should simply serve the React app
+    app.get("/*fallback", (req, res) => {
+        res.sendFile(path.join(__dirname, "../client/dist/index.html"));
     });
 } else {
     // Development mode: proxy requests to Vite
+    process.on("warning", e => console.warn(e.stack));
     const { createProxyMiddleware } = await import("http-proxy-middleware");
+    // Reuse a single upstream connection for the many small module requests Vite serves.
+    // This significantly reduces waterfall latency from repeated TCP handshakes.
+    const keepAliveAgent = new http.Agent({ keepAlive: true, maxSockets: 128, keepAliveMsecs: 30000 });
     const viteProxy = createProxyMiddleware({
-        target: "http://localhost:5173",
+        target: "http://127.0.0.1:5173",
         changeOrigin: true,
-        logLevel: "warn",
-        timeout: 30000,
+        ws: true,
+        xfwd: true,
+        logLevel: "silent",
+        agent: keepAliveAgent,
         proxyTimeout: 30000,
+        timeout: 30000,
+        headers: {
+            connection: 'keep-alive',
+        },
+        // Only proxy Vite assets and HMR path; leave app WS under /ws untouched
+        pathFilter: (path) => {
+            if (path.startsWith('/api')) return false;
+            if (path.startsWith('/ws')) return false; // app WS
+            return true; // Vite assets and /vite-hmr
+        },
+        onProxyReq(proxyReq) {
+            // Ensure upstream sees keep-alive, which helps with many 304s
+            proxyReq.setHeader('Connection', 'keep-alive');
+        },
     });
     app.use((req, res, next) => {
         if (req.path.startsWith("/api")) return next();
-        if (req.path.startsWith("/ws")) return next();
         return viteProxy(req, res, next);
+    });
+
+    // Proxy WebSocket upgrades for Vite HMR
+    server.on('upgrade', (req, socket, head) => {
+        // Proxy only Vite HMR websocket upgrades
+        if (req.url && req.url.startsWith('/vite-hmr')) {
+            viteProxy.upgrade?.(req, socket, head);
+            return;
+        }
+        // App-managed websocket routes (e.g., /ws) are handled elsewhere
     });
 }
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+const HOST = process.env.HOST || '0.0.0.0';
+server.listen(PORT, HOST, () => {
     console.log(`ActiveBits server running on \x1b[1m\x1b[32mhttp://localhost:${PORT}\x1b[0m`);
 });
 
 // Graceful shutdown handler for hot redeployments
-let shutdownInProgress = false;
 async function shutdown(signal) {
-    if (shutdownInProgress) return;
-    shutdownInProgress = true;
-    
     console.log(`\n${signal} received. Starting graceful shutdown...`);
     
     // Stop accepting new connections
@@ -555,8 +558,8 @@ async function shutdown(signal) {
     }, 30000);
 }
 
-process.once('SIGTERM', () => shutdown('SIGTERM'));
-process.once('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 // Periodic cache flush (every 30 seconds) to ensure data persistence
 if (sessions.flushCache) {

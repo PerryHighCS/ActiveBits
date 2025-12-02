@@ -8,6 +8,8 @@ import path, { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const isCodespaces = Boolean(process.env.CODESPACES) || Boolean(process.env.CODESPACE_NAME) || Boolean(process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN);
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(),],
@@ -32,11 +34,26 @@ export default defineConfig({
       // Allow importing shared activity configs from the repo root
       allow: ['..'],
     },
-    hmr: {
-      // Disable HMR WebSocket in Codespaces to prevent connection errors
-      clientPort: (typeof globalThis !== 'undefined' && globalThis.process && globalThis.process.env && globalThis.process.env.CODESPACES) ? 443 : undefined,
+    // Disable HMR in Codespaces to avoid WebSocket proxy issues
+    // The app works fine without live reload; just refresh the page after edits
+    hmr: !isCodespaces, //? false : true,
+    host: true,
+    port: 5173,
+    strictPort: true,
+    // Proxy backend API and app WebSockets to the Express server when
+    // accessing Vite directly at :5173. This avoids the double-proxy path
+    // and typically makes reloads faster.
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: true,
+        ws: false,
+      },
+      '/ws': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: true,
+        ws: true,
+      },
     },
-    // No proxy needed - access via Express port 3000 which proxies to Vite
-    // OR access Vite directly at 5173 (API calls will fail unless you use port 3000)
   },
 })

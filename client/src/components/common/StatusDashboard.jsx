@@ -192,7 +192,18 @@ export default function StatusDashboard() {
               {sessionRows.length > 0 ? (
                 sessionRows.map((s) => (
                   <tr key={s.id}>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", color: "#111827" }}><code>{s.id}</code></td>
+                    <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", color: "#111827" }}>
+                      <a 
+                        href={`/manage/${s.type}/${s.id}`} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        style={{ color: "#2563eb", textDecoration: "none", cursor: "pointer" }}
+                        onMouseEnter={(e) => e.target.style.textDecoration = "underline"}
+                        onMouseLeave={(e) => e.target.style.textDecoration = "none"}
+                      >
+                        <code>{s.id}</code>
+                      </a>
+                    </td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", color: "#111827" }}>{s.type}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", color: s.socketCount > 0 ? "#059669" : "#111827" }}>{fmtInt(s.socketCount)}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", color: "#111827" }}>{s.lastActivity}</td>
