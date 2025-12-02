@@ -63,6 +63,29 @@ npm run dev
 
 See **[docs/VALKEY_DEVELOPMENT.md](docs/VALKEY_DEVELOPMENT.md)** for debugging commands and architecture details.
 
+### Status & Monitoring
+
+The server exposes a live status API and dashboard:
+
+- `GET /api/status` — Machine-readable JSON with:
+  - Storage mode (`valkey` or `in-memory`), `ttlMs`, masked `VALKEY_URL`
+  - Process info: `pid`, Node version, `uptimeSeconds`, `memory` (RSS/heap), `loadavg`
+  - WebSocket: `connectedClients`
+  - Sessions: `count`, `byType`, `approxTotalBytes`, and detailed `list` with per-session
+    `id`, `type`, `created`, `lastActivity`, `ttlRemainingMs`, `expiresAt`, `socketCount`, `approxBytes`
+  - Valkey (when enabled): `ping`, `dbsize`, selected memory metrics parsed from `INFO memory`
+
+- `GET /status` — Lightweight HTML dashboard that auto-refreshes by polling `/api/status`.
+  - Refresh interval controls (2s/5s/10s/30s) with Pause/Resume
+  - Summary cards (mode/TTL, uptime, RSS/heap, sockets, sessions)
+  - Sessions-by-type breakdown and Valkey block
+  - Table of active sessions with expiry and socket counts
+
+Notes:
+- Valkey URL is masked in output to avoid leaking credentials
+- Per-session TTL uses Valkey `PTTL` when available; falls back to `lastActivity + ttlMs` in memory mode
+- Designed to be low overhead; avoids heavy Valkey `INFO` sections
+
 ### Local Development (without container)
 
 From the project root:

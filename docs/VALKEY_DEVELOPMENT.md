@@ -59,3 +59,24 @@ redis-cli -h valkey get 'session:SESSIONID'
 # View persistent sessions
 redis-cli -h valkey keys 'persistent:*'
 ```
+
+## Status Endpoints (Local)
+
+While developing, use the built-in status endpoints:
+
+```bash
+# JSON status (machine-readable)
+curl -s http://localhost:3000/api/status | jq .
+
+# HTML dashboard
+"$BROWSER" http://localhost:3000/status
+```
+
+What to expect in Valkey mode:
+- `storage.mode` should be `valkey`
+- `valkey.ping` returns `PONG`
+- `sessions.list[*].ttlRemainingMs` aligns with Valkey `PTTL`
+
+In in-memory mode:
+- `storage.mode` is `in-memory`
+- TTL derived from `lastActivity + ttlMs`

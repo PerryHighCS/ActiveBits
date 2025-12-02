@@ -199,6 +199,30 @@ Each activity defines its own endpoints under `/api/{activity-id}/...`
 5. Server validates HMAC and teacher code, creates/resets session
 6. Teacher auto-authenticated and redirected to manager view
 
+## Status & Metrics
+
+The server exposes runtime status for troubleshooting and monitoring.
+
+- `/api/status` (JSON)
+  - `storage`: `{ mode: 'valkey'|'in-memory', ttlMs, valkeyUrl? }` (URL masked)
+  - `process`: `{ pid, node, uptimeSeconds, memory, loadavg }`
+  - `websocket`: `{ connectedClients }`
+  - `sessions`: `{ count, approxTotalBytes, byType, list: [...] }`
+    - `list[*]`: `{ id, type, created, lastActivity, ttlRemainingMs, expiresAt, socketCount, approxBytes }`
+  - `valkey`: `{ ping, dbsize, memory }` or `{ error }` when unavailable
+    - `memory` includes selected metrics parsed from `INFO memory` (e.g., `used_memory`, `used_memory_rss`, humanized variants)
+
+- `/status` (HTML)
+  - Lightweight dashboard that polls `/api/status` on an interval (2s/5s/10s/30s)
+  - Summary cards: mode/TTL, uptime, RSS/heap, connected sockets, session count/size
+  - Sessions-by-type breakdown, Valkey info block
+  - Table of active sessions (ID, type, sockets, last activity, expiry, TTL, approx size)
+
+Notes
+- Per-session TTL uses Valkey `PTTL` when available; otherwise derived from `lastActivity + ttlMs` in memory mode
+- Valkey URL is masked to avoid credential leaks
+- Endpoint is designed to be low-overhead; avoids heavy `INFO` sections beyond memory
+
 ## Component Patterns
 
 ### Manager Component
