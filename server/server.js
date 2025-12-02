@@ -493,7 +493,8 @@ if (!env.startsWith("dev")) {
     app.use(express.static(distDir));
 
     // SPA fallback: serve index.html for non-API routes
-    app.get("*", (req, res, next) => {
+    // Use a middleware instead of a route to avoid path-to-regexp parsing issues
+    app.use((req, res, next) => {
         if (req.path.startsWith("/api") || req.path.startsWith("/ws")) return next();
         res.sendFile(path.join(distDir, "index.html"));
     });
