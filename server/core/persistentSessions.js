@@ -11,6 +11,9 @@ import { ValkeyPersistentStore } from './valkeyStore.js';
 // Storage backend (either in-memory Map or Valkey)
 let persistentStore = null;
 
+// In-memory cache for persistent session metadata (reduces Valkey reads)
+const persistentCache = new Map(); // hash -> session metadata
+
 // In-memory waiters tracking (WebSockets are instance-specific, never stored in Valkey)
 const waitersByHash = new Map(); // hash -> WebSocket[]
 
@@ -156,25 +159,37 @@ export function verifyTeacherCodeWithHash(activityName, hash, teacherCode) {
  * @param {string} hashedTeacherCode - The hashed teacher code (optional, for verification)
  */
 export async function getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode = null) {
-  let session = await persistentStore.get(hash);
+  // Check cache first
+  let session = persistentCache.get(hash);
   
   if (!session) {
-    session = {
-      activityName,
-      hashedTeacherCode,
-      createdAt: Date.now(),
-      sessionId: null,
-      teacherSocketId: null,
-    };
-    await persistentStore.set(hash, session);
+    // Cache miss - check persistent store
+    session = await persistentStore.get(hash);
     
-    // Initialize waiter array (instance-specific, not stored)
-    waitersByHash.set(hash, []);
+    if (!session) {
+      session = {
+        activityName,
+        hashedTeacherCode,
+        createdAt: Date.now(),
+        sessionId: null,
+        teacherSocketId: null,
+      };
+      await persistentStore.set(hash, session);
+      
+      // Initialize waiter array (instance-specific, not stored)
+      waitersByHash.set(hash, []);
+      
+      // Start cleanup timer if this is the first session
+      ensureCleanupTimer();
+    } else if (!waitersByHash.has(hash)) {
+      // Metadata exists in store but no local waiters yet
+      waitersByHash.set(hash, []);
+    }
     
-    // Start cleanup timer if this is the first session
-    ensureCleanupTimer();
+    // Cache the session
+    persistentCache.set(hash, session);
   } else if (!waitersByHash.has(hash)) {
-    // Metadata exists in store but no local waiters yet
+    // Cached but no waiters array yet
     waitersByHash.set(hash, []);
   }
   
@@ -182,6 +197,7 @@ export async function getOrCreateActivePersistentSession(activityName, hash, has
   if (hashedTeacherCode && !session.hashedTeacherCode) {
     session.hashedTeacherCode = hashedTeacherCode;
     await persistentStore.set(hash, session);
+    persistentCache.set(hash, session); // Update cache
   }
   
   return session;
@@ -193,7 +209,15 @@ export async function getOrCreateActivePersistentSession(activityName, hash, has
  * @returns {Promise<object|null>} - The session data or null
  */
 export async function getPersistentSession(hash) {
-  return await persistentStore.get(hash);
+  // Check cache first
+  let session = persistentCache.get(hash);
+  if (!session) {
+    session = await persistentStore.get(hash);
+    if (session) {
+      persistentCache.set(hash, session);
+    }
+  }
+  return session;
 }
 
 /**
@@ -276,12 +300,13 @@ export async function recordTeacherCodeAttempt(rateLimitKey) {
  * @returns {Promise<object[]>} - Array of waiter WebSocket connections
  */
 export async function startPersistentSession(hash, sessionId, teacherWs) {
-  const session = await persistentStore.get(hash);
+  const session = await getPersistentSession(hash);
   if (!session) return [];
 
   session.sessionId = sessionId;
   session.teacherSocketId = teacherWs.id;
   await persistentStore.set(hash, session);
+  persistentCache.set(hash, session); // Update cache
 
   // Return copy of waiters array (instance-local)
   const waiters = waitersByHash.get(hash) || [];
@@ -294,7 +319,7 @@ export async function startPersistentSession(hash, sessionId, teacherWs) {
  * @returns {Promise<boolean>} - True if started, false otherwise
  */
 export async function isSessionStarted(hash) {
-  const session = await persistentStore.get(hash);
+  const session = await getPersistentSession(hash);
   return session?.sessionId != null;
 }
 
@@ -304,7 +329,7 @@ export async function isSessionStarted(hash) {
  * @returns {Promise<string|null>} - The session ID or null
  */
 export async function getSessionId(hash) {
-  const session = await persistentStore.get(hash);
+  const session = await getPersistentSession(hash);
   return session?.sessionId ?? null;
 }
 

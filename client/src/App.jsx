@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import SessionRouter from "./components/common/SessionRouter";
 import SessionEnded from "./components/common/SessionEnded";
 import ManageDashboard from './components/common/ManageDashboard';
+import StatusDashboard from './components/common/StatusDashboard';
 import { activities } from './activities';
 
 const footerClass = "text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto";
@@ -46,6 +47,7 @@ export default function App() {
 
                 <div className='w-full flex-grow'>
                     <Routes>
+                        <Route path="/status" element={<StatusDashboard />} />
                         <Route path="/manage" element={<ManageDashboard />} />
                         <Route path="/session-ended" element={<SessionEnded />} />
                         

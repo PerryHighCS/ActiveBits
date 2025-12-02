@@ -22,11 +22,10 @@ export default defineConfig({
     preserveSymlinks: false,
   },
   optimizeDeps: {
-    // Include colocated activity client code so their deps are scanned/prebundled
-    entries: [
-      'index.html',
-      '../../activities/*/client/**/*.{js,jsx}',
-    ],
+    // Pre-bundle common dependencies
+    include: ['react', 'react-dom', 'react-router-dom'],
+    // Don't scan activity client code upfront - let Vite discover on demand
+    // This speeds up initial server start
   },
   server: {
     fs: {
@@ -37,15 +36,7 @@ export default defineConfig({
       // Disable HMR WebSocket in Codespaces to prevent connection errors
       clientPort: (typeof globalThis !== 'undefined' && globalThis.process && globalThis.process.env && globalThis.process.env.CODESPACES) ? 443 : undefined,
     },
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
-      '/ws': {
-        target: 'ws://localhost:3000',
-        ws: true,
-      },
-    },
+    // No proxy needed - access via Express port 3000 which proxies to Vite
+    // OR access Vite directly at 5173 (API calls will fail unless you use port 3000)
   },
 })
