@@ -10,8 +10,12 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     });
 
     // Broadcast helper
-    function broadcast(type, payload, sessionId) {
+    async function broadcast(type, payload, sessionId) {
         const msg = JSON.stringify({ type, payload });
+        if (sessions.publishBroadcast) {
+            await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload });
+        }
+        // Local broadcast to WebSocket clients
         for (const s of ws.wss.clients) {
             if (s.readyState === 1 && s.sessionId === sessionId) {
                 try { s.send(msg); } catch { }
@@ -102,7 +106,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     }
 
     // Send fragments assigned to a specific hostname
-    function sendFragmentAssignments(hostname, session) {
+    async function sendFragmentAssignments(hostname, session) {
         const hostFragments = [];
 
         for (const { fragment, assignedTo } of session.data.fragments || []) {
@@ -117,7 +121,8 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         if (!requests && session.data.fragments && session.data.fragments.length > 0) {
             requests = generateHtmlTemplate(hostname, session.data.fragments, session.data.passage?.title);
             session.data.studentTemplates[hostname] = requests;
-            broadcast("template-assigned", { hostname, template: requests }, session.id);
+            await sessions.set(session.id, session);
+            await broadcast("template-assigned", { hostname, template: requests }, session.id);
         }
 
         if (hostFragments.length > 0 || requests) {
@@ -153,15 +158,16 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     });
 
     // Create a new WWW simulation session
-    app.post("/api/www-sim/create", (req, res) => {
-        const session = createSession(sessions, { data: { students: [], studentTemplates: {} } });
+    app.post("/api/www-sim/create", async (req, res) => {
+        const session = await createSession(sessions, { data: { students: [], studentTemplates: {} } });
         session.type = "www-sim"; // Set the session type
+        await sessions.set(session.id, session);
         res.json({ id: session.id }); // Respond with the new session ID
     });
 
     // Get a specific WWW simulation session
-    app.get("/api/www-sim/:id", (req, res) => {
-        const session = sessions[req.params.id];
+    app.get("/api/www-sim/:id", async (req, res) => {
+        const session = await sessions.get(req.params.id);
 
         // Check if the session exists and is of type 'www-sim'
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
@@ -170,8 +176,8 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     });
 
     // Join a WWW simulation session
-    app.post("/api/www-sim/:id/join", (req, res) => {
-        const session = sessions[req.params.id];
+    app.post("/api/www-sim/:id/join", async (req, res) => {
+        const session = await sessions.get(req.params.id);
         if (!session || session.type !== "www-sim") {
             return res.status(404).json({ error: "invalid session" });
         }
@@ -194,17 +200,18 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
             session.data.students.push({ hostname, joined: now });
         }
 
+        await sessions.set(session.id, session);
         console.log("Student joined session", session.id, "as", hostname);
-        broadcast("student-joined", { hostname, joined: now }, session.id);
+        await broadcast("student-joined", { hostname, joined: now }, session.id);
         res.json({ message: `Joined session as ${hostname}` });
 
         // If fragments exist for this student, send them
-        sendFragmentAssignments(hostname, session);
+        await sendFragmentAssignments(hostname, session);
     });
 
     // Edit hostname
-    app.patch("/api/www-sim/:id/students/:hostname", (req, res) => {
-        const session = sessions[req.params.id];
+    app.patch("/api/www-sim/:id/students/:hostname", async (req, res) => {
+        const session = await sessions.get(req.params.id);
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
         const current = req.params.hostname?.trim().toLowerCase();
@@ -263,28 +270,30 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
             }
         }
 
-        broadcast("student-updated", { oldHostname: current, newHostname }, session.id);
+        await sessions.set(session.id, session);
+        await broadcast("student-updated", { oldHostname: current, newHostname }, session.id);
 
         console.log("Renamed student ", current, " to ", newHostname);
         res.json({ message: `Updated hostname to ${newHostname}`, students: session.data.students });
     });
 
     // Remove student
-    app.delete("/api/www-sim/:id/students/:hostname", (req, res) => {
-        const session = sessions[req.params.id];
+    app.delete("/api/www-sim/:id/students/:hostname", async (req, res) => {
+        const session = await sessions.get(req.params.id);
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
         const index = session.data.students.findIndex(stu => stu.hostname === req.params.hostname);
         if (index === -1) return res.status(404).json({ error: "student not found" });
 
         const removed = session.data.students.splice(index, 1)[0];
-        broadcast("student-removed", { hostname: removed.hostname }, session.id);
+        await sessions.set(session.id, session);
+        await broadcast("student-removed", { hostname: removed.hostname }, session.id);
         res.json({ message: `Removed student ${removed.hostname}`, students: session.data.students });
     });
 
     // Assign fragments for students to host and HTML templates for them to fill
-    app.post("/api/www-sim/:id/assign", (req, res) => {
-        const session = sessions[req.params.id];
+    app.post("/api/www-sim/:id/assign", async (req, res) => {
+        const session = await sessions.get(req.params.id);
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
         const { passage } = req.body || {};
@@ -310,11 +319,12 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         session.data.studentTemplates = studentTemplates;
         session.data.passage = passage;
 
-        broadcast("fragments-assigned", { studentTemplates, hostingMap }, session.id);
+        await sessions.set(session.id, session);
+        await broadcast("fragments-assigned", { studentTemplates, hostingMap }, session.id);
 
         for (const frag of hostingMap) {
             for (const { hostname } of frag.assignedTo || []) {
-                sendFragmentAssignments(hostname, session);
+                await sendFragmentAssignments(hostname, session);
             }
         }
 
@@ -322,9 +332,9 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         res.json({ message: "Fragments assigned" });
     });
 
-    app.put("/api/www-sim/:id/assign", (req, res) => {
+    app.put("/api/www-sim/:id/assign", async (req, res) => {
 
-        const session = sessions[req.params.id];
+        const session = await sessions.get(req.params.id);
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
         const { hostname, template } = req.body || {};
@@ -335,7 +345,8 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         session.data.studentTemplates ??= {};
         session.data.studentTemplates[hostname] = template;
 
-        broadcast("template-assigned", { hostname, template }, session.id);
+        await sessions.set(session.id, session);
+        await broadcast("template-assigned", { hostname, template }, session.id);
 
         console.log("Template only assigned to", hostname);
         res.json({ message: "Template assigned" });
@@ -343,8 +354,8 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
 
 
     // Get fragments for a specific student
-    app.get("/api/www-sim/:id/fragments/:hostname", (req, res) => {
-        const session = sessions[req.params.id];
+    app.get("/api/www-sim/:id/fragments/:hostname", async (req, res) => {
+        const session = await sessions.get(req.params.id);
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
 
         const { hostname } = req.params;

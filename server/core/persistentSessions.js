@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { ValkeyPersistentStore } from './valkeyStore.js';
 
 /**
  * Persistent Session Management
@@ -7,11 +8,11 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
  * The hash is generated from activityName + hashedTeacherCode + salt, and can be verified without storage.
  */
 
-// In-memory active sessions (only while waiting/active): hash -> { waiters, sessionId, ... }
-const activePersistentSessions = new Map();
+// Storage backend (either in-memory Map or Valkey)
+let persistentStore = null;
 
-// Rate limiting for teacher code attempts: socketId -> { attempts, lastAttempt }
-const teacherCodeAttempts = new Map();
+// In-memory waiters tracking (WebSockets are instance-specific, never stored in Valkey)
+const waitersByHash = new Map(); // hash -> WebSocket[]
 
 const MAX_ATTEMPTS = 5;
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
@@ -20,6 +21,39 @@ const CLEANUP_INTERVAL = 60000; // 1 minute
 
 // Secret for HMAC (MUST be set in production via environment variable)
 const HMAC_SECRET = process.env.PERSISTENT_SESSION_SECRET || 'default-secret-change-in-production';
+
+/**
+ * Initialize persistent session storage backend.
+ * @param {Object|null} valkeyClient - Valkey client instance (null for in-memory)
+ */
+export function initializePersistentStorage(valkeyClient = null) {
+  if (valkeyClient) {
+    console.log('Using Valkey for persistent session metadata');
+    persistentStore = new ValkeyPersistentStore(valkeyClient);
+  } else {
+    console.log('Using in-memory storage for persistent session metadata');
+    // In-memory store compatible with Valkey API
+    const memoryStore = new Map();
+    persistentStore = {
+      async get(hash) { return memoryStore.get(hash) || null; },
+      async set(hash, data) { memoryStore.set(hash, data); },
+      async delete(hash) { memoryStore.delete(hash); },
+      async getAllHashes() { return Array.from(memoryStore.keys()); },
+      async incrementAttempts(key) {
+        const current = memoryStore.get(`rl:${key}`) || 0;
+        memoryStore.set(`rl:${key}`, current + 1);
+        setTimeout(() => memoryStore.delete(`rl:${key}`), 60000);
+        return current + 1;
+      },
+      async getAttempts(key) {
+        return memoryStore.get(`rl:${key}`) || 0;
+      }
+    };
+  }
+  
+  // Start cleanup timer
+  ensureCleanupTimer();
+}
 
 // Security check: warn if using default secret in production or if secret is weak
 const weakSecrets = [
@@ -116,32 +150,38 @@ export function verifyTeacherCodeWithHash(activityName, hash, teacherCode) {
 }
 
 /**
- * Create or get an active persistent session (in-memory while people are waiting)
+ * Create or get an active persistent session
  * @param {string} activityName - The activity name
  * @param {string} hash - The persistent hash
  * @param {string} hashedTeacherCode - The hashed teacher code (optional, for verification)
  */
-export function getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode = null) {
-  let session = activePersistentSessions.get(hash);
+export async function getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode = null) {
+  let session = await persistentStore.get(hash);
   
   if (!session) {
     session = {
       activityName,
       hashedTeacherCode,
-      waiters: [],
       createdAt: Date.now(),
       sessionId: null,
       teacherSocketId: null,
     };
-    activePersistentSessions.set(hash, session);
+    await persistentStore.set(hash, session);
+    
+    // Initialize waiter array (instance-specific, not stored)
+    waitersByHash.set(hash, []);
     
     // Start cleanup timer if this is the first session
     ensureCleanupTimer();
+  } else if (!waitersByHash.has(hash)) {
+    // Metadata exists in store but no local waiters yet
+    waitersByHash.set(hash, []);
   }
   
   // Update hashed teacher code if provided
   if (hashedTeacherCode && !session.hashedTeacherCode) {
     session.hashedTeacherCode = hashedTeacherCode;
+    await persistentStore.set(hash, session);
   }
   
   return session;
@@ -150,10 +190,10 @@ export function getOrCreateActivePersistentSession(activityName, hash, hashedTea
 /**
  * Get a persistent session by hash
  * @param {string} hash - The persistent hash
- * @returns {object|undefined} - The session data or undefined
+ * @returns {Promise<object|null>} - The session data or null
  */
-export function getPersistentSession(hash) {
-  return activePersistentSessions.get(hash);
+export async function getPersistentSession(hash) {
+  return await persistentStore.get(hash);
 }
 
 /**
@@ -163,14 +203,18 @@ export function getPersistentSession(hash) {
  * @returns {number} - The new waiter count
  */
 export function addWaiter(hash, ws) {
-  const session = activePersistentSessions.get(hash);
-  if (!session) return 0;
+  let waiters = waitersByHash.get(hash);
+  if (!waiters) {
+    waiters = [];
+    waitersByHash.set(hash, waiters);
+  }
 
   // Remove if already waiting (reconnection)
-  session.waiters = session.waiters.filter(w => w !== ws);
+  const filtered = waiters.filter(w => w !== ws);
+  filtered.push(ws);
+  waitersByHash.set(hash, filtered);
   
-  session.waiters.push(ws);
-  return session.waiters.length;
+  return filtered.length;
 }
 
 /**
@@ -179,10 +223,10 @@ export function addWaiter(hash, ws) {
  * @param {object} ws - The WebSocket connection
  */
 export function removeWaiter(hash, ws) {
-  const session = activePersistentSessions.get(hash);
-  if (!session) return;
+  const waiters = waitersByHash.get(hash);
+  if (!waiters) return;
   
-  session.waiters = session.waiters.filter(w => w !== ws);
+  waitersByHash.set(hash, waiters.filter(w => w !== ws));
 }
 
 /**
@@ -191,27 +235,28 @@ export function removeWaiter(hash, ws) {
  * @returns {number} - The waiter count
  */
 export function getWaiterCount(hash) {
-  const session = activePersistentSessions.get(hash);
-  return session ? session.waiters.length : 0;
+  const waiters = waitersByHash.get(hash);
+  return waiters ? waiters.length : 0;
+}
+
+/**
+ * Get waiters array for a hash (for broadcasting)
+ * @param {string} hash - The persistent hash
+ * @returns {Array} - Array of WebSocket connections
+ */
+export function getWaiters(hash) {
+  return waitersByHash.get(hash) || [];
 }
 
 /**
  * Check if a socket can attempt to enter a teacher code
  * Uses IP+hash combination to prevent shared IP false positives
  * @param {string} rateLimitKey - The rate limit key (e.g., "IP:hash")
- * @returns {boolean} - True if allowed, false if rate limited
+ * @returns {Promise<boolean>} - True if allowed, false if rate limited
  */
-export function canAttemptTeacherCode(rateLimitKey) {
-  const record = teacherCodeAttempts.get(rateLimitKey);
-  if (!record) return true;
-
-  const now = Date.now();
-  if (now - record.lastAttempt > RATE_LIMIT_WINDOW) {
-    teacherCodeAttempts.delete(rateLimitKey);
-    return true;
-  }
-
-  return record.attempts < MAX_ATTEMPTS;
+export async function canAttemptTeacherCode(rateLimitKey) {
+  const attempts = await persistentStore.getAttempts(rateLimitKey);
+  return attempts < MAX_ATTEMPTS;
 }
 
 /**
@@ -219,16 +264,8 @@ export function canAttemptTeacherCode(rateLimitKey) {
  * Uses IP+hash combination to prevent shared IP false positives
  * @param {string} rateLimitKey - The rate limit key (e.g., "IP:hash")
  */
-export function recordTeacherCodeAttempt(rateLimitKey) {
-  const record = teacherCodeAttempts.get(rateLimitKey);
-  const now = Date.now();
-
-  if (!record || now - record.lastAttempt > RATE_LIMIT_WINDOW) {
-    teacherCodeAttempts.set(rateLimitKey, { attempts: 1, lastAttempt: now });
-  } else {
-    record.attempts++;
-    record.lastAttempt = now;
-  }
+export async function recordTeacherCodeAttempt(rateLimitKey) {
+  await persistentStore.incrementAttempts(rateLimitKey);
 }
 
 /**
@@ -236,36 +273,39 @@ export function recordTeacherCodeAttempt(rateLimitKey) {
  * @param {string} hash - The persistent hash
  * @param {string} sessionId - The actual session ID that was created
  * @param {object} teacherWs - The teacher's WebSocket connection
- * @returns {object[]} - Array of waiter WebSocket connections
+ * @returns {Promise<object[]>} - Array of waiter WebSocket connections
  */
-export function startPersistentSession(hash, sessionId, teacherWs) {
-  const session = activePersistentSessions.get(hash);
+export async function startPersistentSession(hash, sessionId, teacherWs) {
+  const session = await persistentStore.get(hash);
   if (!session) return [];
 
   session.sessionId = sessionId;
   session.teacherSocketId = teacherWs.id;
+  await persistentStore.set(hash, session);
 
-  // Return copy of waiters array
-  return [...session.waiters];
+  // Return copy of waiters array (instance-local)
+  const waiters = waitersByHash.get(hash) || [];
+  return [...waiters];
 }
 
 /**
  * Check if a persistent session has been started
  * @param {string} hash - The persistent hash
- * @returns {boolean} - True if started, false otherwise
+ * @returns {Promise<boolean>} - True if started, false otherwise
  */
-export function isSessionStarted(hash) {
-  const session = activePersistentSessions.get(hash);
+export async function isSessionStarted(hash) {
+  const session = await persistentStore.get(hash);
   return session?.sessionId != null;
 }
 
 /**
  * Get the session ID for a started persistent session
  * @param {string} hash - The persistent hash
- * @returns {string|null} - The session ID or null
+ * @returns {Promise<string|null>} - The session ID or null
  */
-export function getSessionId(hash) {
-  return activePersistentSessions.get(hash)?.sessionId ?? null;
+export async function getSessionId(hash) {
+  const session = await persistentStore.get(hash);
+  return session?.sessionId ?? null;
 }
 
 /**
@@ -273,23 +313,26 @@ export function getSessionId(hash) {
  * This allows the persistent link to be reused after ending a session
  * @param {string} hash - The persistent hash
  */
-export function resetPersistentSession(hash) {
-  const session = activePersistentSessions.get(hash);
+export async function resetPersistentSession(hash) {
+  const session = await persistentStore.get(hash);
   if (session) {
     session.sessionId = null;
     session.teacherSocketId = null;
-    // Keep waiters array and other data for reuse
+    await persistentStore.set(hash, session);
+    // Keep waiters array (instance-local) for reuse
   }
 }
 
 /**
  * Find hash by sessionId (for cleanup when session ends)
  * @param {string} sessionId - The session ID
- * @returns {string|null} - The hash or null
+ * @returns {Promise<string|null>} - The hash or null
  */
-export function findHashBySessionId(sessionId) {
-  for (const [hash, session] of activePersistentSessions.entries()) {
-    if (session.sessionId === sessionId) {
+export async function findHashBySessionId(sessionId) {
+  const hashes = await persistentStore.getAllHashes();
+  for (const hash of hashes) {
+    const session = await persistentStore.get(hash);
+    if (session?.sessionId === sessionId) {
       return hash;
     }
   }
@@ -300,11 +343,13 @@ export function findHashBySessionId(sessionId) {
  * Clean up a persistent session
  * @param {string} hash - The persistent hash
  */
-export function cleanupPersistentSession(hash) {
-  activePersistentSessions.delete(hash);
+export async function cleanupPersistentSession(hash) {
+  await persistentStore.delete(hash);
+  waitersByHash.delete(hash);
   
   // Stop cleanup timer if no active sessions
-  if (activePersistentSessions.size === 0 && cleanupTimer) {
+  const hashes = await persistentStore.getAllHashes();
+  if (hashes.length === 0 && cleanupTimer) {
     clearInterval(cleanupTimer);
     cleanupTimer = null;
   }
@@ -318,18 +363,24 @@ let cleanupTimer = null;
  */
 function ensureCleanupTimer() {
   if (!cleanupTimer) {
-    cleanupTimer = setInterval(() => {
+    cleanupTimer = setInterval(async () => {
       const now = Date.now();
+      const hashes = await persistentStore.getAllHashes();
       
-      for (const [hash, session] of activePersistentSessions.entries()) {
+      for (const hash of hashes) {
+        const session = await persistentStore.get(hash);
+        const waiters = waitersByHash.get(hash) || [];
+        
         // For sessions that haven't started, check if they're old and empty
-        if (!session.sessionId && session.waiters.length === 0 && now - session.createdAt > WAITER_TIMEOUT) {
-          activePersistentSessions.delete(hash);
+        if (session && !session.sessionId && waiters.length === 0 && now - session.createdAt > WAITER_TIMEOUT) {
+          await persistentStore.delete(hash);
+          waitersByHash.delete(hash);
         }
       }
       
       // Stop timer if no sessions remain
-      if (activePersistentSessions.size === 0) {
+      const remaining = await persistentStore.getAllHashes();
+      if (remaining.length === 0) {
         clearInterval(cleanupTimer);
         cleanupTimer = null;
       }

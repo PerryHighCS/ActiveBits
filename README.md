@@ -21,6 +21,7 @@ Future modules will include additional hands-on learning tools for computer scie
 
 - **[Adding Activities](ADDING_ACTIVITIES.md)** - Start here! Complete tutorial with working code examples
 - **[Architecture Guide](ARCHITECTURE.md)** - Deep dive into codebase structure, patterns, and design decisions
+- **[Deployment Guide](DEPLOYMENT.md)** - Production deployment to Render with Valkey session storage
 
 ---
 
@@ -59,22 +60,59 @@ npm run dev
 
 ## 🚀 Production (via Render)
 
-This project can be deployed directly on [Render](https://render.com) as a Web Service with the following settings:
+### Quick Deploy
 
-Build Command _(to install dependencies and build before each deployment)_:
+This project can be deployed directly on [Render](https://render.com) with persistent session storage using Valkey (Redis-compatible).
+
+**Two Deployment Modes:**
+
+1. **In-Memory Mode** (Simple, no persistence)
+   - Sessions lost on restart
+   - No external dependencies
+   - Good for testing
+
+2. **Valkey Mode** (Recommended for production)
+   - Sessions survive hot redeployments
+   - Supports horizontal scaling
+   - Automatic when `VALKEY_URL` is set
+
+### Basic Setup
+
+Build Command:
 ```bash
 npm run deploy
 ```
 
-Start Command _(to start the server itself)_:
+Start Command:
 ```bash
 npm run start
 ```
 
+**Required Environment Variables:**
+```
+NODE_ENV=production
+PERSISTENT_SESSION_SECRET=<your-random-32-char-secret>
+```
+
+**Optional (for persistence):**
+```
+VALKEY_URL=<your-render-redis-internal-url>
+```
+
+### Full Deployment Guide
+
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for:
+- Complete Render setup instructions
+- Valkey configuration
+- Horizontal scaling with sticky sessions
+- Environment variables reference
+- Monitoring and troubleshooting
+- Security best practices
+
 ### Pre-deploy check (local)
 
-Run the same steps Render uses to catch missing dependencies (e.g., activity packages) before pushing:
+Run the same steps Render uses to catch missing dependencies before pushing:
 ```bash
 npm test
 ```
-This installs all workspaces (including `activities/`), performs a production Vite build of the client, starts the server on a test port, and hits `/health-check` to confirm it boots.
+This installs all workspaces, performs a production build, starts the server, and confirms it boots via `/health-check`.

@@ -29,6 +29,18 @@ export function createWsRouter(server, sessions) {
     const namespaces = new Map();
     const sessionCleanupTimers = new Map();
 
+    // Subscribe to session-ended broadcasts if using Valkey
+    if (sessions && sessions.subscribeToBroadcast) {
+        sessions.subscribeToBroadcast('session-ended', ({ sessionId }) => {
+            // Broadcast to local WebSocket clients when session ends
+            for (const client of wss.clients) {
+                if (typeof client.sessionId !== 'undefined' && client.sessionId === sessionId && client.readyState === 1) {
+                    client.send(JSON.stringify({ type: 'session-ended' }));
+                }
+            }
+        });
+    }
+
     const scheduleSessionCleanup = (sessionId) => {
         if (!sessionId || !sessions) return;
 
@@ -36,7 +48,7 @@ export function createWsRouter(server, sessions) {
         const existingTimer = sessionCleanupTimers.get(sessionId);
         if (existingTimer) clearTimeout(existingTimer);
 
-        const timer = setTimeout(() => {
+        const timer = setTimeout(async () => {
             const hasClients = Array.from(wss.clients).some(
                 (client) =>
                     client.readyState === 1 && // OPEN
@@ -45,18 +57,19 @@ export function createWsRouter(server, sessions) {
 
             if (hasClients) return; // Someone reconnected
 
-            if (sessions[sessionId]) {
+            const session = await sessions.get(sessionId);
+            if (session) {
                 try {
-                    const hash = findHashBySessionId(sessionId);
+                    const hash = await findHashBySessionId(sessionId);
                     if (hash) {
-                        resetPersistentSession(hash);
+                        await resetPersistentSession(hash);
                     } else {
                         console.warn(`No persistent hash found for session ${sessionId} during cleanup`);
                     }
                 } catch (err) {
                     console.error('Failed to reset persistent session during cleanup', err);
                 }
-                delete sessions[sessionId];
+                await sessions.delete(sessionId);
                 console.log(`Ended session ${sessionId} because no clients remained connected.`);
             }
         }, SESSION_CLEANUP_GRACE_PERIOD_MS); // short grace period for quick reconnects
@@ -73,8 +86,8 @@ export function createWsRouter(server, sessions) {
             wss.handleUpgrade(req, socket, head, (ws) => {
                 ws.isAlive = true;
                 ws.clientIp = getClientIp(req);
-                const touch = () => {
-                    if (sessions && ws.sessionId) sessions[ws.sessionId];
+                const touch = async () => {
+                    if (sessions && ws.sessionId) await sessions.touch(ws.sessionId);
                 };
                 ws.on("pong", () => {
                     ws.isAlive = true;
@@ -85,7 +98,7 @@ export function createWsRouter(server, sessions) {
                     touch();
                 });
                 onConn(ws, url.searchParams, wss);
-                if (sessions && ws.sessionId) sessions[ws.sessionId];
+                if (sessions && ws.sessionId) touch();
                 ws.on("message", () => {
                     touch();
                 });

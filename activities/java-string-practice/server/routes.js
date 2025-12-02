@@ -118,57 +118,70 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
     
     // If student name is provided and valid, add/update student in session
     if (socket.sessionId && socket.studentName) {
-      const session = sessions[socket.sessionId];
-      console.log(`Found session:`, session ? 'yes' : 'no');
-      if (session && session.type === 'java-string-practice') {
-        // Try to find by ID first, then by name for backwards compatibility
-        let existing = studentId 
-          ? session.data.students.find(s => s.id === studentId)
-          : session.data.students.find(s => s.name === socket.studentName && !s.id);
-        
-        if (existing) {
-          console.log(`Reconnecting student: ${socket.studentName} (${existing.id})`);
-          existing.connected = true;
-          existing.lastSeen = Date.now();
-          socket.studentId = existing.id;
-        } else {
-          console.log(`New student joining: ${socket.studentName}`);
-          const newId = generateStudentId(socket.studentName, socket.sessionId);
-          socket.studentId = newId;
-          session.data.students.push({
-            id: newId,
-            name: socket.studentName,
-            connected: true,
-            joined: Date.now(),
-            lastSeen: Date.now(),
-            stats: { total: 0, correct: 0, streak: 0, longestStreak: 0 }
-          });
+      (async () => {
+        const session = await sessions.get(socket.sessionId);
+        console.log(`Found session:`, session ? 'yes' : 'no');
+        if (session && session.type === 'java-string-practice') {
+          // Try to find by ID first, then by name for backwards compatibility
+          let existing = studentId 
+            ? session.data.students.find(s => s.id === studentId)
+            : session.data.students.find(s => s.name === socket.studentName && !s.id);
+          
+          if (existing) {
+            console.log(`Reconnecting student: ${socket.studentName} (${existing.id})`);
+            existing.connected = true;
+            existing.lastSeen = Date.now();
+            socket.studentId = existing.id;
+          } else {
+            console.log(`New student joining: ${socket.studentName}`);
+            const newId = generateStudentId(socket.studentName, socket.sessionId);
+            socket.studentId = newId;
+            session.data.students.push({
+              id: newId,
+              name: socket.studentName,
+              connected: true,
+              joined: Date.now(),
+              lastSeen: Date.now(),
+              stats: { total: 0, correct: 0, streak: 0, longestStreak: 0 }
+            });
+          }
+          await sessions.set(session.id, session);
+          console.log(`Total students in session:`, session.data.students.length);
+          // Broadcast updated student list to manager
+          await broadcast('studentsUpdate', { students: session.data.students }, session.id);
+          // Send the student ID back to the client
+          socket.send(JSON.stringify({ type: 'studentId', payload: { studentId: socket.studentId } }));
         }
-        console.log(`Total students in session:`, session.data.students.length);
-        // Broadcast updated student list to manager
-        broadcast('studentsUpdate', { students: session.data.students }, session.id);
-        // Send the student ID back to the client
-        socket.send(JSON.stringify({ type: 'studentId', payload: { studentId: socket.studentId } }));
-      }
+      })().catch(err => console.error('Error in student join:', err));
     }
 
     socket.on('close', () => {
       if (socket.sessionId && socket.studentId) {
-        const session = sessions[socket.sessionId];
-        if (session && session.type === 'java-string-practice') {
-          const student = session.data.students.find(s => s.id === socket.studentId);
-          if (student) {
-            student.connected = false;
-            broadcast('studentsUpdate', { students: session.data.students }, session.id);
+        (async () => {
+          const session = await sessions.get(socket.sessionId);
+          if (session && session.type === 'java-string-practice') {
+            const student = session.data.students.find(s => s.id === socket.studentId);
+            if (student) {
+              student.connected = false;
+              await sessions.set(session.id, session);
+              await broadcast('studentsUpdate', { students: session.data.students }, session.id);
+            }
           }
-        }
+        })().catch(err => console.error('Error in student disconnect:', err));
       }
     });
   });
 
   // Broadcast helper - sends updates to all students in a session
-  function broadcast(type, payload, sessionId) {
+  async function broadcast(type, payload, sessionId) {
     const msg = JSON.stringify({ type, payload });
+    
+    // Valkey mode: publish to all instances via pub/sub
+    if (sessions.publishBroadcast) {
+      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload });
+    }
+    
+    // Always broadcast to local WebSocket clients (both modes)
     let clientCount = 0;
     for (const s of ws.wss.clients) {
       if (s.readyState === 1 && s.sessionId === sessionId) {
@@ -182,19 +195,27 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
     }
     console.log(`Broadcast ${type} to ${clientCount} clients in session ${sessionId}`);
   }
+  
+  // Subscribe to broadcasts from other instances if using Valkey
+  if (sessions.subscribeToBroadcast) {
+    // We'll subscribe to all session broadcasts dynamically,
+    // but for simplicity we can handle this at the WebSocket level
+    // The broadcast function above will publish and local clients will receive
+  }
 
   // Create session
-  app.post('/api/java-string-practice/create', (req, res) => {
-    const session = createSession(sessions, { data: {} });
+  app.post('/api/java-string-practice/create', async (req, res) => {
+    const session = await createSession(sessions, { data: {} });
     session.type = 'java-string-practice';
     session.data.students = [];
     session.data.selectedMethods = ['all']; // Default to all methods
+    await sessions.set(session.id, session);
     res.json({ id: session.id });
   });
 
   // Get session data
-  app.get('/api/java-string-practice/:sessionId', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.get('/api/java-string-practice/:sessionId', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'java-string-practice') {
       return res.status(404).json({ error: 'invalid session' });
     }
@@ -206,8 +227,8 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
   });
 
   // Update selected methods (teacher sets which methods students should practice)
-  app.post('/api/java-string-practice/:sessionId/methods', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.post('/api/java-string-practice/:sessionId/methods', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'java-string-practice') {
       return res.status(404).json({ error: 'invalid session' });
     }
@@ -221,16 +242,17 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
     
     console.log(`Updating methods for session ${session.id}:`, methods);
     session.data.selectedMethods = methods;
+    await sessions.set(session.id, session);
     
     // Broadcast the update to all connected students
-    broadcast('methodsUpdate', { selectedMethods: methods }, session.id);
+    await broadcast('methodsUpdate', { selectedMethods: methods }, session.id);
     
     res.json({ success: true, selectedMethods: methods });
   });
 
   // Submit student progress
-  app.post('/api/java-string-practice/:sessionId/progress', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.post('/api/java-string-practice/:sessionId/progress', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'java-string-practice') {
       return res.status(404).json({ error: 'invalid session' });
     }
@@ -257,17 +279,18 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
     if (student) {
       student.stats = stats;
       student.lastSeen = Date.now();
+      await sessions.set(session.id, session);
       
       // Broadcast updated student list to manager
-      broadcast('studentsUpdate', { students: session.data.students }, session.id);
+      await broadcast('studentsUpdate', { students: session.data.students }, session.id);
     }
     
     res.json({ success: true });
   });
 
   // Get students for a session
-  app.get('/api/java-string-practice/:sessionId/students', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.get('/api/java-string-practice/:sessionId/students', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'java-string-practice') {
       return res.status(404).json({ error: 'invalid session' });
     }
