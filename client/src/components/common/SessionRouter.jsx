@@ -36,7 +36,7 @@ const SessionRouter = () => {
     const [sessionIdInput, setSessionIdInput] = useState('');
     const [soloActivity, setSoloActivity] = useState(null);
 
-    const { sessionId, activityName, hash, soloActivityId } = useParams(); // Check for both regular and persistent session params
+    const { sessionId, activityName, hash, soloActivityId } = useParams(); // Check for regular, persistent, and solo routes
 
     const storageKey = `session-${sessionId}`;
 
@@ -49,27 +49,6 @@ const SessionRouter = () => {
 
     const [error, setError] = useState(null);
     const navigate = useNavigate();
-    
-    const renderSoloStudentView = (activity, requestedId = null) => {
-        if (!activity) {
-            const label = requestedId || 'this activity';
-            return <div className="text-red-500 text-center">Unknown activity: {label}</div>;
-        }
-
-        if (!activity.soloMode) {
-            return <div className="text-center">Solo mode is not available for this activity.</div>;
-        }
-
-        const StudentComponent = activity.StudentComponent;
-        return (
-            <StudentComponent 
-                sessionData={{ 
-                    sessionId: `solo-${activity.id}`, 
-                    studentName: 'Solo Student' 
-                }} 
-            />
-        );
-    };
 
     useEffect(() => {
         if (hash && activityName) {
@@ -78,6 +57,30 @@ const SessionRouter = () => {
             setIsAuthenticatingTeacher(false);
         }
     }, [hash, activityName]);
+
+    useEffect(() => {
+        if (!soloActivityId) {
+            setSoloActivity(null);
+            setError(null);
+            return;
+        }
+
+        const activity = activities.find((act) => act.id === soloActivityId);
+        if (!activity) {
+            setSoloActivity(null);
+            setError('Unknown solo activity');
+            return;
+        }
+
+        if (!activity.soloMode) {
+            setSoloActivity(null);
+            setError('This activity does not support solo mode');
+            return;
+        }
+
+        setError(null);
+        setSoloActivity(activity);
+    }, [soloActivityId]);
 
     useEffect(() => {
         cleanExpiredSessions();
@@ -155,12 +158,6 @@ const SessionRouter = () => {
             navigate(`/${sessionIdInput.trim()}`);
         }
     };
-
-    // Solo route (direct link)
-    if (soloActivityId) {
-        const activity = getActivity(soloActivityId);
-        return renderSoloStudentView(activity, soloActivityId);
-    }
 
     if (error) return <div className="text-red-500 text-center">{error}</div>;
     
@@ -280,7 +277,8 @@ const SessionRouter = () => {
     
     // Solo mode - practice without a session
     if (soloActivity) {
-        return renderSoloStudentView(soloActivity);
+        const StudentComponent = soloActivity.StudentComponent;
+        return <StudentComponent sessionData={{ sessionId: `solo-${soloActivity.id}`, studentName: 'Solo Student' }} />;
     }
     
     if (!sessionId) {
@@ -323,7 +321,7 @@ const SessionRouter = () => {
                             {soloActivities.map(activity => (
                                 <div 
                                     key={activity.id} 
-                                    onClick={() => setSoloActivity(activity)}
+                                    onClick={() => navigate(`/solo/${activity.id}`)}
                                     className="rounded-lg shadow-md overflow-hidden w-full max-w-md border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
                                 >
                                     <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>

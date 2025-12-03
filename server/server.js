@@ -8,6 +8,7 @@ import { createWsRouter } from "./core/wsRouter.js";
 import { generatePersistentHash, getOrCreateActivePersistentSession, getPersistentSession, verifyTeacherCodeWithHash, initializePersistentStorage } from "./core/persistentSessions.js";
 import { setupPersistentSessionWs } from "./core/persistentSessionWs.js";
 import { ALLOWED_ACTIVITIES, isValidActivity, registerActivityRoutes } from "./activities/activityRegistry.js";
+import { registerStatusRoute } from "./routes/statusRoute.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,6 +51,9 @@ setupPersistentSessionWs(ws, sessions);
 
 // Attach feature-specific route handlers (discover modules dynamically)
 await registerActivityRoutes(app, sessions, ws);
+
+// Status endpoint
+registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl });
 
 /**
  * Parse persistent sessions cookie and normalize to array format
@@ -359,20 +363,48 @@ if (!env.startsWith("dev")) {
     // Development mode: proxy requests to Vite
     process.on("warning", e => console.warn(e.stack));
     const { createProxyMiddleware } = await import("http-proxy-middleware");
+    // Reuse a single upstream connection for the many small module requests Vite serves.
+    // This significantly reduces waterfall latency from repeated TCP handshakes.
+    const keepAliveAgent = new http.Agent({ keepAlive: true, maxSockets: 128, keepAliveMsecs: 30000 });
     const viteProxy = createProxyMiddleware({
-        target: "http://localhost:5173",
+        target: "http://127.0.0.1:5173",
         changeOrigin: true,
+        ws: true,
+        xfwd: true,
         logLevel: "silent",
+        agent: keepAliveAgent,
+        proxyTimeout: 30000,
+        timeout: 30000,
+        headers: {
+            connection: 'keep-alive',
+        },
+        // Only proxy Vite assets and HMR path; leave app WS under /ws untouched
+        pathFilter: (path) => {
+            if (path.startsWith('/api')) return false;
+            if (path.startsWith('/ws')) return false; // app WS
+            return true; // Vite assets and /vite-hmr
+        },
+        onProxyReq(proxyReq) {
+            // Ensure upstream sees keep-alive, which helps with many 304s
+            proxyReq.setHeader('Connection', 'keep-alive');
+        },
     });
-    app.use((req, res, next) => {
-        if (req.path.startsWith("/api")) return next();
-        if (req.path.startsWith("/ws")) return next();
-        return viteProxy(req, res, next);
+    app.use(viteProxy);
+
+    // Proxy WebSocket upgrades for Vite HMR
+    server.on('upgrade', (req, socket, head) => {
+        // Proxy only Vite HMR websocket upgrades
+        if (req.url && req.url.startsWith('/vite-hmr')) {
+            viteProxy.upgrade?.(req, socket, head);
+            return;
+        }
+        // App-managed websocket routes (e.g., /ws) are handled elsewhere
     });
 }
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+const HOST = process.env.HOST || '127.0.0.1';
+server.listen(PORT, HOST, () => {
     console.log(`ActiveBits server running on \x1b[1m\x1b[32mhttp://localhost:${PORT}\x1b[0m`);
 });
 

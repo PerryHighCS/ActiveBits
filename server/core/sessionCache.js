@@ -8,10 +8,11 @@ export class SessionCache {
         this.ttlMs = options.ttlMs || 30_000; // 30 seconds cache TTL
         this.cache = new Map(); // sessionId -> { session, timestamp, dirty }
         this.touchQueue = new Set(); // Sessions that need touch() written to Valkey
+        this.touchFn = typeof options.touchFn === 'function' ? options.touchFn : null;
         
         // Periodic flush to Valkey
         this.flushInterval = setInterval(() => {
-            this.flushTouches();
+            this.flushTouches(this.touchFn);
         }, 5_000); // Flush every 5 seconds
         
         this.flushInterval.unref?.();
@@ -28,6 +29,7 @@ export class SessionCache {
         
         // Cache hit and not expired
         if (cached && Date.now() - cached.timestamp < this.ttlMs) {
+            this._markRecentlyUsed(id, cached);
             return cached.session;
         }
         
@@ -58,12 +60,18 @@ export class SessionCache {
             this.cache.delete(oldestKey);
             this.touchQueue.delete(oldestKey);
         }
-        
-        this.cache.set(id, {
+
+        const entry = {
             session,
             timestamp: Date.now(),
             dirty
-        });
+        };
+
+        // If key exists, delete before re-inserting to update iteration order
+        if (this.cache.has(id)) {
+            this.cache.delete(id);
+        }
+        this.cache.set(id, entry);
         
         if (dirty) {
             this.touchQueue.add(id);
@@ -80,6 +88,7 @@ export class SessionCache {
         if (cached) {
             cached.session.lastActivity = Date.now();
             cached.timestamp = Date.now();
+            this._markRecentlyUsed(id, cached);
             this.touchQueue.add(id);
         }
     }
@@ -124,6 +133,7 @@ export class SessionCache {
             await setFn(id, cached.session);
             cached.dirty = false;
             this.touchQueue.delete(id);
+            this._markRecentlyUsed(id, cached);
         }
     }
 
@@ -149,6 +159,15 @@ export class SessionCache {
     }
 
     /**
+     * Check if a session exists in cache.
+     * @param {string} id
+     * @returns {boolean}
+     */
+    has(id) {
+        return this.cache.has(id);
+    }
+
+    /**
      * Shutdown cache and clear interval.
      */
     async shutdown(touchFn = null) {
@@ -160,5 +179,17 @@ export class SessionCache {
         }
         
         this.clear();
+    }
+
+    /**
+     * Mark a cache entry as most recently used by re-inserting it.
+     * @param {string} id
+     * @param {object} cached
+     * @private
+     */
+    _markRecentlyUsed(id, cached) {
+        if (!this.cache.has(id)) return;
+        this.cache.delete(id);
+        this.cache.set(id, cached);
     }
 }

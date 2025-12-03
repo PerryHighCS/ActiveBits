@@ -85,7 +85,13 @@ export function createSessionStore(valkeyUrl = null, ttlMs = 60 * 60 * 1000) {
 
     console.log('Using Valkey session store with caching');
     const valkeyStore = new ValkeySessionStore(valkeyUrl, { ttlMs });
-    const cache = new SessionCache({ ttlMs: 30_000, maxSize: 1000 });
+    const cache = new SessionCache({
+        ttlMs: 30_000,
+        maxSize: 1000,
+        touchFn: async (id) => {
+            await valkeyStore.touch(id);
+        },
+    });
 
     // Wrapper that adds caching layer
     return {
@@ -109,13 +115,18 @@ export function createSessionStore(valkeyUrl = null, ttlMs = 60 * 60 * 1000) {
         },
 
         async touch(id) {
-            // Touch in cache only - batched flush to Valkey later
-            const cached = await this.get(id); // Ensure in cache
-            if (cached) {
-                cache.touch(id);
-                return true;
+            const wasCached = cache.has(id);
+            const cached = await this.get(id); // Ensure cached, updates lastActivity locally
+            if (!cached) return false;
+
+            cache.touch(id);
+
+            if (!wasCached) {
+                // Extend TTL immediately for freshly cached sessions
+                await valkeyStore.touch(id);
             }
-            return false;
+
+            return true;
         },
 
         async getAll() {

@@ -1,4 +1,5 @@
 import { createSession } from '../../../server/core/sessions.js';
+import { createBroadcastSubscriptionHelper } from '../../../server/core/broadcastUtils.js';
 
 const VALID_QUESTION_TYPES = new Set([
   'all',
@@ -69,6 +70,7 @@ function validateStudentId(value) {
 }
 
 export default function setupPythonListPracticeRoutes(app, sessions, ws) {
+  const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws);
   const attachStudent = (session, name, studentId) => {
     // Defensive: sessions restored without data/students should still work
     if (!session.data || typeof session.data !== 'object') {
@@ -124,6 +126,7 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     session.data.students = [];
     session.data.selectedQuestionTypes = ['all'];
     await sessions.set(session.id, session);
+    ensureBroadcastSubscription(session.id);
     res.json({ id: session.id });
   });
 
@@ -185,6 +188,7 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
   // Minimal WebSocket namespace for connection tracking
   ws.register('/ws/python-list-practice', (socket, qp) => {
     socket.sessionId = qp.get('sessionId') || null;
+    ensureBroadcastSubscription(socket.sessionId);
     socket.studentName = validateName(qp.get('studentName') || '');
     socket.studentId = validateStudentId(qp.get('studentId') || '');
     const sendQuestionTypesSnapshot = async () => {
@@ -203,7 +207,9 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     };
 
     if (socket.sessionId) {
-      sendQuestionTypesSnapshot();
+      sendQuestionTypesSnapshot().catch(err => {
+        console.error('Failed to send initial question types snapshot:', err);
+      });
     }
 
     if (socket.sessionId && socket.studentName) {
@@ -213,7 +219,7 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
           const student = attachStudent(session, socket.studentName, socket.studentId);
           await sessions.set(session.id, session);
           await broadcast('studentsUpdate', { students: session.data.students }, session.id);
-          sendQuestionTypesSnapshot();
+          await sendQuestionTypesSnapshot();
           socket.on('close', () => {
             (async () => {
               const sess = await sessions.get(socket.sessionId);

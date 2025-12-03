@@ -68,6 +68,7 @@ ActiveBits supports two session storage modes:
    VALKEY_URL=<paste-internal-redis-url-from-step-1>
    PERSISTENT_SESSION_SECRET=<generate-random-32+-char-string>
    SESSION_TTL_MS=3600000
+   HOST=0.0.0.0 
    ```
 
    **Important**: Generate a strong random secret for `PERSISTENT_SESSION_SECRET`:
@@ -173,11 +174,16 @@ When a new deployment is triggered:
    - Valkey keys with prefix `session:*`
    - Valkey keys with prefix `persistent:*`
 
-3. **Cache Hit Rate**:
+3. **Runtime Status Endpoints**:
+   - `GET /health-check` — Basic liveness + process memory
+   - `GET /api/status` — Detailed JSON (storage mode, TTLs, process metrics, WebSocket clients, sessions summary, Valkey info)
+   - `GET /status` — HTML dashboard that auto-updates, useful for quick checks during deployment or incidents
+
+4. **Cache Hit Rate**:
    - Not exposed by default; add custom metrics if needed
    - Effective cache reduces Valkey read operations
 
-4. **WebSocket Connections**:
+5. **WebSocket Connections**:
    - Monitor active WebSocket count
    - Check reconnection patterns after deployment
 
@@ -194,6 +200,10 @@ When a new deployment is triggered:
 **Symptoms**: WebSocket disconnects frequently
 - **Cause**: Scaling without session affinity
 - **Fix**: Enable sticky sessions or use single instance
+
+**Symptoms**: Status dashboard shows "not using Valkey" unexpectedly
+- **Cause**: `VALKEY_URL` missing or misconfigured; container cannot reach Valkey
+- **Fix**: Verify `VALKEY_URL` (use internal URL on Render), check Valkey instance health; confirm `/api/status` shows `mode: valkey` and Valkey `ping: PONG`
 
 **Symptoms**: High Valkey latency
 - **Cause**: Valkey instance in different region or overloaded

@@ -6,17 +6,44 @@
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "22"
+    },
+    "ghcr.io/devcontainers/features/common-utils": {
+      "username": "vscode"
     }
   },
-  "postCreateCommand": "npm install --workspaces --include-workspace-root",
+  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && npm install --workspaces --include-workspace-root",
+  "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Valkey check skipped'",
   "forwardPorts": [
-    6379
+    6379,
+    3000,
+    5173
   ],
+  "portsAttributes": {
+    "3000": {
+      "label": "ActiveBits Server",
+      "onAutoForward": "openPreview"
+    },
+    "5173": {
+      "label": "Vite Dev Server",
+      "onAutoForward": "notify"
+    },
+    "6379": {
+      "label": "Valkey",
+      "onAutoForward": "silent"
+    }
+  },
   "customizations": {
     "vscode": {
       "settings": {
-        "terminal.integrated.defaultProfile.linux": "bash"
-      }
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.env.linux": {
+          "VALKEY_URL": "redis://valkey:6379",
+          "HOST": "0.0.0.0"
+        }
+      },
+      "extensions": [
+        "dbaeumer.vscode-eslint"
+      ]
     }
   },
   "remoteUser": "vscode"

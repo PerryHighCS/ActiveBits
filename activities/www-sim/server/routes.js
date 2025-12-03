@@ -1,11 +1,14 @@
 import crypto from "crypto";
 import { createSession } from "../../../server/core/sessions.js";
+import { createBroadcastSubscriptionHelper } from "../../../server/core/broadcastUtils.js";
 import presetPassages from "./presetPassages.js";
 
 export default function setupWwwSimRoutes(app, sessions, ws) {
+    const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws);
     // WS namespace
     ws.register("/ws/www-sim", (socket, qp) => {
         socket.sessionId = qp.get("sessionId") || null;
+        ensureBroadcastSubscription(socket.sessionId);
         socket.hostname = qp.get("hostname")?.trim().toLowerCase() || null;
     });
 
@@ -162,6 +165,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         const session = await createSession(sessions, { data: { students: [], studentTemplates: {} } });
         session.type = "www-sim"; // Set the session type
         await sessions.set(session.id, session);
+        ensureBroadcastSubscription(session.id);
         res.json({ id: session.id }); // Respond with the new session ID
     });
 

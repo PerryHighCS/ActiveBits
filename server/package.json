@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js --trace-warnings"
+    "dev": "node server.js --trace-warnings",
+    "test:valkey": "node test-valkey.js",
+    "monitor:valkey": "node monitor-valkey.js"
   },
   "keywords": [],
   "author": "",
