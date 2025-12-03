@@ -29,9 +29,15 @@ async function testValkey() {
         const version = info.match(/redis_version:([^\r\n]+)/)?.[1];
         console.log('✅ Server version:', version);
 
-        // Test 4: Count session keys
-        const sessionKeys = await client.keys('session:*');
-        console.log('✅ Active sessions:', sessionKeys.length);
+        // Test 4: Count session keys using SCAN
+        let sessionCount = 0;
+        let cursor = '0';
+        do {
+            const [nextCursor, keys] = await client.scan(cursor, 'MATCH', 'session:*', 'COUNT', 100);
+            sessionCount += keys.length;
+            cursor = nextCursor;
+        } while (cursor !== '0');
+        console.log('✅ Active sessions:', sessionCount);
 
         // Test 5: Pub/Sub test
         const subscriber = new Redis(VALKEY_URL);
