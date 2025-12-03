@@ -68,6 +68,7 @@ ActiveBits supports two session storage modes:
    VALKEY_URL=<paste-internal-redis-url-from-step-1>
    PERSISTENT_SESSION_SECRET=<generate-random-32+-char-string>
    SESSION_TTL_MS=3600000
+   HOST=0.0.0.0  # Render binds to all interfaces
    ```
 
    **Important**: Generate a strong random secret for `PERSISTENT_SESSION_SECRET`:
