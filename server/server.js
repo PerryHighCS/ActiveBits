@@ -420,7 +420,10 @@ async function shutdown(signal) {
         }
 
         let remaining = clients.length;
+        let finalized = false;
         const finalize = () => {
+            if (finalized) return;
+            finalized = true;
             ws.wss.close(() => resolve());
         };
 

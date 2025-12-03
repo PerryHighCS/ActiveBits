@@ -73,11 +73,14 @@ export default function WwwSim({ sessionData }) {
                             url: frag.url.replace(regex, `//${newHostname}/`)
                         }));
 
-                        setTemplateRequests((prev) => ({
-                            title: prev?.title,
-                            ...prev,
-                            fragments: next
-                        }));
+                        setTemplateRequests((prev) => {
+                            const current = prev ?? {};
+                            return {
+                                ...current,
+                                fragments: next,
+                                title: current.title,
+                            };
+                        });
                     }
                     break;
                 }

@@ -85,7 +85,7 @@ export default function JavaStringPractice({ sessionData }) {
       setStudentId(savedId);
       setNameSubmitted(true);
     }
-  }, [sessionId]);
+  }, [sessionId, isSoloSession]);
 
   useEffect(() => {
     studentIdRef.current = studentId;
@@ -172,7 +172,7 @@ export default function JavaStringPractice({ sessionData }) {
     return () => {
       disconnectStudentWs();
     };
-  }, [nameSubmitted, sessionId, connectStudentWs, disconnectStudentWs]);
+  }, [nameSubmitted, sessionId, isSoloSession, connectStudentWs, disconnectStudentWs]);
 
   // Load saved stats from localStorage
   useEffect(() => {

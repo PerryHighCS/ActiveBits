@@ -111,9 +111,12 @@ export function useResilientWebSocket({
     };
 
     ws.onclose = (event) => {
+      const isLatestSocket = socketRef.current === ws;
       onCloseRef.current?.(event, ws);
-      socketRef.current = null;
-      if (!manualCloseRef.current && shouldReconnect) {
+      if (isLatestSocket) {
+        socketRef.current = null;
+      }
+      if (!manualCloseRef.current && shouldReconnect && isLatestSocket) {
         const delay = Math.min(
           reconnectDelayMax,
           reconnectDelayBase * 2 ** reconnectAttemptsRef.current++
