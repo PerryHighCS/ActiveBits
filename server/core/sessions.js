@@ -6,6 +6,33 @@ import { SessionCache } from "./sessionCache.js";
 /**
  * In-memory session store with automatic TTL cleanup (for development/fallback).
  */
+function normalizeSessionData(session) {
+    if (!session || typeof session !== 'object') return session;
+    session.data ??= {};
+    // Initialize common fields
+    session.type ??= session.type; // no-op, placeholder for future
+
+    // Activity-specific defaults
+    switch (session.type) {
+        case 'java-string-practice':
+            session.data.students = Array.isArray(session.data.students) ? session.data.students : [];
+            session.data.selectedMethods = Array.isArray(session.data.selectedMethods) ? session.data.selectedMethods : ['all'];
+            break;
+        case 'www-sim':
+            session.data.students = Array.isArray(session.data.students) ? session.data.students : [];
+            session.data.studentTemplates = session.data.studentTemplates && typeof session.data.studentTemplates === 'object' ? session.data.studentTemplates : {};
+            session.data.fragments = Array.isArray(session.data.fragments) ? session.data.fragments : [];
+            break;
+        case 'raffle':
+            session.data.tickets = Array.isArray(session.data.tickets) ? session.data.tickets : [];
+            break;
+        default:
+            // No defaults
+            break;
+    }
+    return session;
+}
+
 class InMemorySessionStore {
     constructor(ttlMs = 60 * 60 * 1000) {
         this.ttlMs = ttlMs;
@@ -99,14 +126,16 @@ export function createSessionStore(valkeyUrl = null, ttlMs = 60 * 60 * 1000) {
         cache,
 
         async get(id) {
-            return await cache.get(id, async (sessionId) => {
+            const s = await cache.get(id, async (sessionId) => {
                 return await valkeyStore.get(sessionId);
             });
+            return normalizeSessionData(s);
         },
 
         async set(id, session, ttl = null) {
-            await valkeyStore.set(id, session, ttl);
-            cache.set(id, session, false); // Update cache, not dirty since already written
+            const normalized = normalizeSessionData(session);
+            await valkeyStore.set(id, normalized, ttl);
+            cache.set(id, normalized, false); // Update cache, not dirty since already written
         },
 
         async delete(id) {
@@ -130,7 +159,8 @@ export function createSessionStore(valkeyUrl = null, ttlMs = 60 * 60 * 1000) {
         },
 
         async getAll() {
-            return await valkeyStore.getAll();
+            const all = await valkeyStore.getAll();
+            return Array.isArray(all) ? all.map(normalizeSessionData) : all;
         },
 
         async getAllIds() {
@@ -201,7 +231,7 @@ export async function generateHexId(store, length = 5) {
 export async function createSession(store, { data = {} } = {}) {
     const id = await generateHexId(store);
     const now = Date.now();
-    const session = { id, created: now, lastActivity: now, data };
+    const session = normalizeSessionData({ id, created: now, lastActivity: now, data });
     await store.set(id, session);
     return session;
 }
@@ -213,10 +243,15 @@ export async function createSession(store, { data = {} } = {}) {
  * @param {Object} wss - The WebSocket server (optional).
  */
 export function setupSessionRoutes(app, sessions, wss = null) {
+    // Utility to normalize a fetched session before use
+    const getNormalized = async (id) => {
+        const s = await sessions.get(id);
+        return s ? normalizeSessionData(s) : null;
+    };
     // GET /api/session/:sessionId -> fetch any session (any type)
     app.get("/api/session/:sessionId", async (req, res) => {
         const { sessionId } = req.params;
-        const session = await sessions.get(sessionId);
+        const session = await getNormalized(sessionId);
         if (!session) return res.status(404).json({ error: "invalid session" });
         res.json({ session });
     });
@@ -224,7 +259,7 @@ export function setupSessionRoutes(app, sessions, wss = null) {
     // DELETE /api/session/:sessionId -> delete any session (for cleanup/testing)
     app.delete("/api/session/:sessionId", async (req, res) => {
         const { sessionId } = req.params;
-        const session = await sessions.get(sessionId);
+        const session = await getNormalized(sessionId);
         if (!session) return res.status(404).json({ error: "invalid session" });
         
         // Broadcast session-ended message
