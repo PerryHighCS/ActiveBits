@@ -17,12 +17,15 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
   const [teacherCode, setTeacherCode] = useState('');
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const autoAuthAttemptedRef = useRef(false); // Use ref to avoid re-triggering effect
-  const hasNavigatedRef = useRef(false); // Use ref to persist across re-renders
-  const teacherAuthRequestedRef = useRef(false); // Tracks teacher intent across renders
+  const shouldAutoAuthRef = useRef(hasTeacherCookie);
+  const hasNavigatedRef = useRef(false);
+  const teacherAuthRequestedRef = useRef(false);
   const wsRef = useRef(null);
-  const closedByCleanupRef = useRef(false); // Avoid treating deliberate closes as errors
   const navigate = useNavigate();
+  // Keep ref updated when cookie state changes
+  useEffect(() => {
+    shouldAutoAuthRef.current = hasTeacherCookie;
+  }, [hasTeacherCookie]);
 
   useEffect(() => {
     // New link load: clear stale errors
@@ -36,11 +39,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
     
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
-    closedByCleanupRef.current = false;
-    const shouldIgnoreError = () => {
-      const state = wsRef.current?.readyState;
-      return closedByCleanupRef.current || hasNavigatedRef.current || state === WebSocket.CLOSING || state === WebSocket.CLOSED;
-    };
+    
     const navigateOnce = (path) => {
       if (hasNavigatedRef.current) return;
       hasNavigatedRef.current = true;
@@ -52,38 +51,24 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
     };
 
     ws.onopen = () => {
-      console.log('Connected to waiting room');
       setError(null);
-      
-      // If teacher has cookie, immediately try to auto-authenticate
-      if (hasTeacherCookie && !autoAuthAttemptedRef.current) {
-        console.log('Attempting auto-authentication as teacher');
-        
+      // Auto-auth if cookie exists
+      if (shouldAutoAuthRef.current) {
         fetch(`/api/persistent-session/${hash}/teacher-code?activityName=${activityName}`, { credentials: 'include' })
           .then(res => res.json())
           .then(data => {
             if (data.teacherCode) {
-              console.log('Got teacher code from cookie, authenticating');
               try {
                 ws.send(JSON.stringify({
                   type: 'verify-teacher-code',
                   teacherCode: data.teacherCode,
                 }));
-              } catch (sendErr) {
-                console.error('Failed to send teacher code over WS:', sendErr);
+              } catch (err) {
+                console.error('Failed to send teacher code over WS:', err);
               }
-            } else {
-              console.log('No teacher code found in cookie response:', data);
             }
           })
-          .catch(err => {
-            console.error('Failed to fetch teacher code:', err);
-          })
-          .finally(() => {
-            // Mark as attempted after fetch completes (success or failure)
-            // This prevents duplicate attempts on reconnection
-            autoAuthAttemptedRef.current = true;
-          });
+          .catch(err => console.error('Failed to fetch teacher code:', err));
       }
     };
 
@@ -96,11 +81,8 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
         return; // Ignore malformed messages
       }
       
-      console.log('Received WebSocket message:', message.type, message);
-      
       // If already navigated, ignore all messages
       if (hasNavigatedRef.current) {
-        console.log('Ignoring message, already navigated');
         return;
       }
       
@@ -108,15 +90,15 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
         setWaiterCount(message.count);
       } else if (message.type === 'session-started') {
         // Session was started by teacher, redirect to session
-        console.log('Redirecting to student session:', message.sessionId);
         if (teacherAuthRequestedRef.current) {
           navigateOnce(`/manage/${activityName}/${message.sessionId}`);
         } else {
           navigateOnce(`/${message.sessionId}`);
         }
+      } else if (message.type === 'session-ended') {
+        navigateOnce('/session-ended');
       } else if (message.type === 'teacher-authenticated') {
         // This client is the teacher, redirect to manage page
-        console.log('Redirecting to teacher manage page:', message.sessionId);
         navigateOnce(`/manage/${activityName}/${message.sessionId}`);
       } else if (message.type === 'teacher-code-error') {
         setError(message.error);
@@ -125,25 +107,27 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
       }
     };
 
-    ws.onerror = (event) => {
-      console.error('WebSocket error:', event);
-      // Ignore errors from deliberate closes or post-navigation teardown (common in StrictMode double-mount)
-      if (shouldIgnoreError()) return;
-      setError('Connection error. Please refresh the page.');
+    ws.onerror = () => {
+      // Show a minimal error; do not trigger reconnect loops
+      if (hasNavigatedRef.current) return;
+      setError('Connection error.');
     };
 
     ws.onclose = () => {
-      console.log('Disconnected from waiting room');
+      // Don't attempt reconnecting here; keep network logic simple like main
+      if (hasNavigatedRef.current) return;
+      setError('Connection closed.');
     };
 
     return () => {
       // Ensure we tear down the socket even if it's still connecting (React StrictMode mounts twice)
       if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
-        closedByCleanupRef.current = true;
         ws.close();
       }
     };
-  }, [activityName, hash, navigate, hasTeacherCookie]);
+   }, [activityName, hash, navigate]);
+
+  // No reconnect timers in simplified/main-like network code
 
   const handleTeacherCodeSubmit = (e) => {
     e.preventDefault();

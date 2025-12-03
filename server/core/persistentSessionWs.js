@@ -53,7 +53,9 @@ export function setupPersistentSessionWs(ws, sessions) {
       await broadcastWaiterCount(hash, session);
 
       console.log(`Waiter joined persistent session ${hash}, total waiters: ${waiterCount}`);
-    })().catch(err => console.error('Error in persistent session setup:', err));
+     })().catch(err => {
+       console.error('Error in persistent session setup:', err);
+     });
 
     socket.on("message", (data) => {
       try {
@@ -69,10 +71,14 @@ export function setupPersistentSessionWs(ws, sessions) {
 
     socket.on("close", () => {
       (async () => {
-        removeWaiter(hash, socket);
-        const session = await getPersistentSession(hash);
-        await broadcastWaiterCount(hash, session);
-        console.log(`Waiter left persistent session ${hash}`);
+        const wasRemoved = removeWaiter(hash, socket);
+        // Only broadcast waiter count if someone was actually removed
+        // (avoids duplicate broadcasts when teacher socket closes after authentication)
+        if (wasRemoved) {
+          const session = await getPersistentSession(hash);
+          await broadcastWaiterCount(hash, session);
+          console.log(`Waiter left persistent session ${hash}`);
+        }
       })().catch(err => console.error('Error in waiter cleanup:', err));
     });
   });
@@ -181,6 +187,10 @@ async function handleTeacherCodeVerification(socket, hash, teacherCode, sessions
   // Mark persistent session as started
   const waiters = await startPersistentSession(hash, newSession.id, socket);
 
+  // Remove teacher from waiters IMMEDIATELY to prevent close handler from triggering broadcasts
+  // This must happen before sending any messages to avoid race conditions
+  removeWaiter(hash, socket);
+
   // Notify the teacher FIRST
   // Use a separate message type to ensure different handling on client
   socket.send(JSON.stringify({
@@ -200,7 +210,7 @@ async function handleTeacherCodeVerification(socket, hash, teacherCode, sessions
     }
   }
   
-  console.log(`Started persistent session ${hash} -> ${newSession.id}, notified ${waiters.length} waiters`);
+  console.log(`Started persistent session ${hash} -> ${newSession.id}, notified ${waiters.length - 1} student waiters`);
 }
 
 /**

@@ -46,6 +46,7 @@ const SessionRouter = () => {
     const [teacherCode, setTeacherCode] = useState('');
     const [teacherAuthError, setTeacherAuthError] = useState('');
     const [isAuthenticatingTeacher, setIsAuthenticatingTeacher] = useState(false);
+    const [showTeacherAuth, setShowTeacherAuth] = useState(false);
 
     const [error, setError] = useState(null);
     const navigate = useNavigate();
@@ -55,6 +56,7 @@ const SessionRouter = () => {
             setTeacherCode('');
             setTeacherAuthError('');
             setIsAuthenticatingTeacher(false);
+            setShowTeacherAuth(false);
         }
     }, [hash, activityName]);
 
@@ -110,6 +112,38 @@ const SessionRouter = () => {
     }, [hash, activityName]);
 
     useEffect(() => {
+        if (!hash || !activityName) return undefined;
+        if (!persistentSessionInfo?.isStarted) return undefined;
+
+        let isCancelled = false;
+
+        const pollStatus = async () => {
+            try {
+                const res = await fetch(`/api/persistent-session/${hash}?activityName=${activityName}`, { credentials: 'include' });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (isCancelled) return;
+                setPersistentSessionInfo(data);
+                if (!data.isStarted) {
+                    navigate('/session-ended');
+                }
+            } catch (err) {
+                if (!isCancelled) {
+                    console.error('Failed to poll persistent session status:', err);
+                }
+            }
+        };
+
+        const intervalId = setInterval(pollStatus, 5000);
+        pollStatus();
+
+        return () => {
+            isCancelled = true;
+            clearInterval(intervalId);
+        };
+    }, [hash, activityName, persistentSessionInfo?.isStarted, navigate]);
+
+    useEffect(() => {
         if (!sessionId || sessionData) return; // Already cached
 
         const cached = localStorage.getItem(storageKey);
@@ -163,7 +197,8 @@ const SessionRouter = () => {
     
     // Show waiting room for persistent sessions
     if (hash && activityName) {
-        if (isLoadingPersistent) {
+        // Show loading if we haven't fetched session info yet
+        if (isLoadingPersistent || persistentSessionInfo === null) {
             return <div className="text-center">Loading...</div>;
         }
         
@@ -175,12 +210,6 @@ const SessionRouter = () => {
                     // Use replace to avoid back-navigation to waiting room
                     navigate(`/manage/${activityName}/${persistentSessionInfo.sessionId}`, { replace: true });
                     return <div className="text-center">Redirecting to session...</div>;
-                } else if (isAuthenticatingTeacher) {
-                    return (
-                        <div className="text-center">
-                            Verifying teacher code...
-                        </div>
-                    );
                 } else {
                     const handleTeacherLogin = async (event) => {
                         event.preventDefault();
@@ -213,44 +242,66 @@ const SessionRouter = () => {
                         }
                     };
 
+                    const handleStudentJoin = () => {
+                        navigate(`/${persistentSessionInfo.sessionId}`, { replace: true });
+                    };
+
                     return (
                         <div className="max-w-lg mx-auto bg-white rounded-lg shadow-lg p-6 border border-gray-200">
                             <h1 className="text-2xl font-bold text-gray-800 mb-3 text-center">Session is already running</h1>
                             <p className="text-gray-700 text-center mb-6">
-                                Enter your teacher code to open the manage dashboard, or join as a student instead.
+                                Join the session now or log in as a teacher to open the manage dashboard.
                             </p>
-                            <form onSubmit={handleTeacherLogin} className="space-y-4">
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-sm font-semibold text-gray-700">Teacher Code</label>
-                                    <input
-                                        type="password"
-                                        value={teacherCode}
-                                        onChange={(e) => setTeacherCode(e.target.value)}
-                                        className="border-2 border-gray-300 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
-                                        placeholder="Enter teacher code"
-                                        autoComplete="off"
-                                        required
-                                    />
-                                    {teacherAuthError && (
-                                        <p className="text-sm text-red-600">{teacherAuthError}</p>
-                                    )}
-                                </div>
-                                <div className="flex flex-col sm:flex-row gap-3 justify-between">
-                                    <Button
-                                        type="submit"
-                                        disabled={!teacherCode.trim() || isAuthenticatingTeacher}
-                                    >
-                                        {isAuthenticatingTeacher ? 'Verifying...' : 'Go to Manage'}
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        type="button"
-                                        onClick={() => navigate(`/${persistentSessionInfo.sessionId}`, { replace: true })}
-                                    >
-                                        Join as Student
-                                    </Button>
-                                </div>
-                            </form>
+
+                            <div className="flex flex-col sm:flex-row gap-3 justify-between">
+                                <Button
+                                    variant="outline"
+                                    type="button"
+                                    onClick={() => {
+                                        if (!showTeacherAuth) {
+                                            setShowTeacherAuth(true);
+                                        }
+                                        setTeacherAuthError('');
+                                    }}
+                                >
+                                    Join as Teacher
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={handleStudentJoin}
+                                >
+                                    Join Session
+                                </Button>
+                            </div>
+
+                            {showTeacherAuth && (
+                                <form onSubmit={handleTeacherLogin} className="space-y-4 mt-6 border-t border-gray-200 pt-6">
+                                    <div className="flex flex-col gap-2">
+                                        <label className="text-sm font-semibold text-gray-700">Teacher Code</label>
+                                        <input
+                                            type="password"
+                                            value={teacherCode}
+                                            onChange={(e) => setTeacherCode(e.target.value)}
+                                            className="border-2 border-gray-300 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
+                                            placeholder="Enter teacher code"
+                                            autoComplete="off"
+                                            required
+                                            disabled={isAuthenticatingTeacher}
+                                        />
+                                        {teacherAuthError && (
+                                            <p className="text-sm text-red-600">{teacherAuthError}</p>
+                                        )}
+                                    </div>
+                                    <div className="flex justify-end">
+                                        <Button
+                                            type="submit"
+                                            disabled={!teacherCode.trim() || isAuthenticatingTeacher}
+                                        >
+                                            {isAuthenticatingTeacher ? 'Verifying...' : 'Manage Session'}
+                                        </Button>
+                                    </div>
+                                </form>
+                            )}
                         </div>
                     );
                 }
@@ -340,7 +391,6 @@ const SessionRouter = () => {
     }
 
     if (!sessionData) return <div className="text-center">Loading session...</div>;
-    console.log('session data', sessionData);
 
     // Get the activity configuration for this session type
     const activity = getActivity(sessionData.type);

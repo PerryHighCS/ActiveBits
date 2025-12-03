@@ -221,12 +221,17 @@ export function addWaiter(hash, ws) {
  * Remove a waiter from a persistent session
  * @param {string} hash - The persistent hash
  * @param {object} ws - The WebSocket connection
+ * @returns {boolean} - True if a waiter was actually removed, false otherwise
  */
 export function removeWaiter(hash, ws) {
   const waiters = waitersByHash.get(hash);
-  if (!waiters) return;
+  if (!waiters) return false;
   
-  waitersByHash.set(hash, waiters.filter(w => w !== ws));
+  const originalLength = waiters.length;
+  const filtered = waiters.filter(w => w !== ws);
+  waitersByHash.set(hash, filtered);
+  
+  return filtered.length < originalLength;
 }
 
 /**
@@ -246,6 +251,22 @@ export function getWaiterCount(hash) {
  */
 export function getWaiters(hash) {
   return waitersByHash.get(hash) || [];
+}
+
+function broadcastToWaiters(hash, payload) {
+  const waiters = waitersByHash.get(hash);
+  if (!waiters || waiters.length === 0) return;
+
+  const message = JSON.stringify(payload);
+  for (const waiter of waiters) {
+    if (waiter?.readyState === 1) {
+      try {
+        waiter.send(message);
+      } catch (err) {
+        console.error('Failed to notify persistent session waiter:', err);
+      }
+    }
+  }
 }
 
 /**
@@ -321,6 +342,8 @@ export async function resetPersistentSession(hash) {
     await persistentStore.set(hash, session);
     // Keep waiters array (instance-local) for reuse
   }
+
+  broadcastToWaiters(hash, { type: 'session-ended' });
 }
 
 /**
