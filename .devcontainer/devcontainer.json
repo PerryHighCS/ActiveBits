@@ -11,7 +11,7 @@
       "username": "vscode"
     }
   },
-  "postCreateCommand": "git config --global --add safe.directory /workspaces/ActiveBits && npm install --workspaces --include-workspace-root",
+  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && npm install --workspaces --include-workspace-root",
   "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Valkey check skipped'",
   "forwardPorts": [
     6379,
