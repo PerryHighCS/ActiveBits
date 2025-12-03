@@ -12,11 +12,11 @@ export function registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl }
         try {
             const allSessions = await sessions.getAll();
             const exposeSessionIds = process.env.NODE_ENV !== 'production';
-            
+
             // Group sessions by type
             const byType = {};
             let approxTotalBytes = 0;
-            
+
             let pttlValues = null;
             if (sessions.valkeyStore && allSessions.length > 0) {
                 try {
@@ -33,58 +33,58 @@ export function registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl }
                     pttlValues = null;
                 }
             }
-        
+
             const sessionList = await Promise.all(allSessions.map(async (session, index) => {
                 const type = session.type || 'unknown';
                 byType[type] = (byType[type] || 0) + 1;
-            
-            // Approximate session size
-            const approxBytes = JSON.stringify(session).length;
-            approxTotalBytes += approxBytes;
-        
-            // Count connected WebSocket clients for this session
-            let socketCount = 0;
-            for (const client of ws.wss.clients) {
-                if (client.sessionId === session.id && client.readyState === 1) {
-                    socketCount++;
+
+                // Approximate session size
+                const approxBytes = JSON.stringify(session).length;
+                approxTotalBytes += approxBytes;
+
+                // Count connected WebSocket clients for this session
+                let socketCount = 0;
+                for (const client of ws.wss.clients) {
+                    if (client.sessionId === session.id && client.readyState === 1) {
+                        socketCount++;
+                    }
                 }
-            }
-        
-            // Calculate TTL
-            let ttlRemainingMs = null;
-            let expiresAt = null;
-        
-            if (sessions.valkeyStore) {
-                const pttl = pttlValues ? pttlValues[index] : -1;
-                ttlRemainingMs = pttl > 0 ? pttl : 0;
-                if (ttlRemainingMs > 0) {
-                    expiresAt = new Date(Date.now() + ttlRemainingMs).toISOString();
+
+                // Calculate TTL
+                let ttlRemainingMs = null;
+                let expiresAt = null;
+
+                if (sessions.valkeyStore) {
+                    const pttl = pttlValues ? pttlValues[index] : -1;
+                    ttlRemainingMs = pttl > 0 ? pttl : 0;
+                    if (ttlRemainingMs > 0) {
+                        expiresAt = new Date(Date.now() + ttlRemainingMs).toISOString();
+                    }
+                } else {
+                    // In-memory mode: derive from lastActivity
+                    const lastActivity = session.lastActivity || session.created || Date.now();
+                    const ttlMs = sessions.ttlMs || sessionTtl;
+                    ttlRemainingMs = Math.max(0, (lastActivity + ttlMs) - Date.now());
+                    if (ttlRemainingMs > 0) {
+                        expiresAt = new Date(lastActivity + ttlMs).toISOString();
+                    }
                 }
-            } else {
-                // In-memory mode: derive from lastActivity
-                const lastActivity = session.lastActivity || session.created || Date.now();
-                const ttlMs = sessions.ttlMs || sessionTtl;
-                ttlRemainingMs = Math.max(0, (lastActivity + ttlMs) - Date.now());
-                if (ttlRemainingMs > 0) {
-                    expiresAt = new Date(lastActivity + ttlMs).toISOString();
+
+                const info = {
+                    type,
+                    created: session.created ? new Date(session.created).toISOString() : null,
+                    lastActivity: session.lastActivity ? new Date(session.lastActivity).toISOString() : null,
+                    ttlRemainingMs,
+                    expiresAt,
+                    socketCount,
+                    approxBytes,
+                };
+                if (exposeSessionIds) {
+                    info.id = session.id;
                 }
-            }
-        
-            const info = {
-                type,
-                created: session.created ? new Date(session.created).toISOString() : null,
-                lastActivity: session.lastActivity ? new Date(session.lastActivity).toISOString() : null,
-                ttlRemainingMs,
-                expiresAt,
-                socketCount,
-                approxBytes,
-            };
-            if (exposeSessionIds) {
-                info.id = session.id;
-            }
-            return info;
-        }));
-            
+                return info;
+            }));
+
             // Valkey info (if available)
             let valkeyInfo = null;
             if (sessions.valkeyStore) {
@@ -92,7 +92,7 @@ export function registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl }
                     const ping = await sessions.valkeyStore.client.ping();
                     const dbsize = await sessions.valkeyStore.client.dbsize();
                     const memoryInfo = await sessions.valkeyStore.client.call('INFO', 'memory');
-                    
+
                     // Parse memory info
                     const memoryLines = memoryInfo.split('\r\n');
                     const memory = {};
@@ -104,13 +104,13 @@ export function registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl }
                             }
                         }
                     }
-                    
+
                     valkeyInfo = { ping, dbsize, memory };
                 } catch (err) {
                     valkeyInfo = { error: err.message };
                 }
             }
-            
+
             const status = {
                 storage: {
                     mode: sessions.valkeyStore ? 'valkey' : 'in-memory',
@@ -136,7 +136,7 @@ export function registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl }
                 },
                 valkey: valkeyInfo,
             };
-            
+
             res.json(status);
         } catch (err) {
             console.error('Error in /api/status:', err);
