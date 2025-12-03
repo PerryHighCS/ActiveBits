@@ -403,7 +403,7 @@ if (!env.startsWith("dev")) {
 }
 
 const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = process.env.HOST || '127.0.0.1';
 server.listen(PORT, HOST, () => {
     console.log(`ActiveBits server running on \x1b[1m\x1b[32mhttp://localhost:${PORT}\x1b[0m`);
 });

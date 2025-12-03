@@ -37,7 +37,8 @@
       "settings": {
         "terminal.integrated.defaultProfile.linux": "bash",
         "terminal.integrated.env.linux": {
-          "VALKEY_URL": "redis://valkey:6379"
+          "VALKEY_URL": "redis://valkey:6379",
+          "HOST": "0.0.0.0"
         }
       },
       "extensions": [

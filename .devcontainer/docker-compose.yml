@@ -9,6 +9,7 @@ services:
     command: sleep infinity
     environment:
       VALKEY_URL: redis://valkey:6379
+      HOST: 0.0.0.0
     depends_on:
       - valkey
 
