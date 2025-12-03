@@ -144,6 +144,10 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
         const session = await sessions.get(socket.sessionId);
         console.log(`Found session:`, session ? 'yes' : 'no');
         if (session && session.type === 'java-string-practice') {
+          // Ensure students is an array to avoid runtime errors
+          if (!Array.isArray(session.data.students)) {
+            session.data.students = [];
+          }
           // Try to find by ID first, then by name for backwards compatibility
           let existing = studentId 
             ? session.data.students.find(s => s.id === studentId)
@@ -185,6 +189,9 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
         (async () => {
           const session = await sessions.get(socket.sessionId);
           if (session && session.type === 'java-string-practice') {
+            if (!Array.isArray(session.data.students)) {
+              session.data.students = [];
+            }
             const student = session.data.students.find(s => s.id === socket.studentId);
             if (student) {
               student.connected = false;
