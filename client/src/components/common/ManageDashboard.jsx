@@ -208,6 +208,18 @@ export default function ManageDashboard() {
                 <p className="text-gray-600 mb-4">{activity.description}</p>
                 <div className="flex-1" />
                 <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => createSession(activity.id)}
+                    className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition-colors"
+                  >
+                    Start Session Now
+                  </button>
+                  <button
+                    onClick={() => openPersistentModal(activity)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition-colors"
+                  >
+                    Create Permanent Link
+                  </button>
                   {activity.soloMode && (
                     <button
                       onClick={() => copyToClipboard(soloLink)}
@@ -216,18 +228,6 @@ export default function ManageDashboard() {
                       {isCopied(soloLink) ? '✓ Copied Solo Link' : 'Copy Solo Practice Link'}
                     </button>
                   )}
-                  <button
-                    onClick={() => createSession(activity.id)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition-colors"
-                  >
-                    Start Session Now
-                  </button>
-                  <button
-                    onClick={() => openPersistentModal(activity)}
-                    className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition-colors"
-                  >
-                    Create Permanent Link
-                  </button>
                 </div>
               </div>
             </div>
