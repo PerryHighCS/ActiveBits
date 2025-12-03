@@ -251,15 +251,10 @@ export async function createSession(store, { data = {} } = {}) {
  * @param {Object} wss - The WebSocket server (optional).
  */
 export function setupSessionRoutes(app, sessions, wss = null) {
-    // Utility to normalize a fetched session before use
-    const getNormalized = async (id) => {
-        const s = await sessions.get(id);
-        return s ? normalizeSessionData(s) : null;
-    };
     // GET /api/session/:sessionId -> fetch any session (any type)
     app.get("/api/session/:sessionId", async (req, res) => {
         const { sessionId } = req.params;
-        const session = await getNormalized(sessionId);
+        const session = await sessions.get(sessionId);
         if (!session) return res.status(404).json({ error: "invalid session" });
         res.json({ session });
     });
@@ -267,7 +262,7 @@ export function setupSessionRoutes(app, sessions, wss = null) {
     // DELETE /api/session/:sessionId -> delete any session (for cleanup/testing)
     app.delete("/api/session/:sessionId", async (req, res) => {
         const { sessionId } = req.params;
-        const session = await getNormalized(sessionId);
+        const session = await sessions.get(sessionId);
         if (!session) return res.status(404).json({ error: "invalid session" });
         
         // Broadcast session-ended message
