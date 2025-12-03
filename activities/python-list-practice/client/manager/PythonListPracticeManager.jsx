@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 import ActivityRoster from '@src/components/common/ActivityRoster';
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import '../styles.css';
 
 const QUESTION_TYPES = [
@@ -53,61 +54,72 @@ export default function PythonListPracticeManager() {
   const [selectedTypes, setSelectedTypes] = useState(new Set(['all']));
   const [sortBy, setSortBy] = useState('name');
   const [sortDirection, setSortDirection] = useState('asc');
-  const wsRef = useRef(null);
+  const loadSession = useCallback(async (showSpinner = true) => {
+    if (!sessionId) return;
+    if (showSpinner) {
+      setLoading(true);
+    }
+    try {
+      const res = await fetch(`/api/python-list-practice/${sessionId}`);
+      if (!res.ok) throw new Error('Failed to fetch session');
+      const data = await res.json();
+      const list = Array.isArray(data.students) ? data.students : [];
+      setStudents(list);
+      setSelectedTypes(new Set(data.selectedQuestionTypes || ['all']));
+      setError(null);
+    } catch (err) {
+      setError(err.message || 'Failed to load session');
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionId]);
+
+  const handleWsMessage = useCallback((evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'studentsUpdate') {
+        const list = Array.isArray(msg.payload?.students) ? msg.payload.students : [];
+        setStudents(list);
+        setLoading(false);
+      } else if (msg.type === 'questionTypesUpdate') {
+        setSelectedTypes(new Set(msg.payload?.selectedQuestionTypes || ['all']));
+      }
+    } catch (e) {
+      console.error('WS parse error', e);
+    }
+  }, []);
+
+  const handleWsError = useCallback(() => {
+    setError('WebSocket error');
+  }, []);
+
+  const handleWsOpen = useCallback(() => {
+    setError(null);
+    loadSession(false);
+  }, [loadSession]);
+
+  const buildWsUrl = useCallback(() => {
+    if (!sessionId) return null;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${sessionId}`;
+  }, [sessionId]);
+
+  const { connect, disconnect } = useResilientWebSocket({
+    buildUrl: buildWsUrl,
+    shouldReconnect: Boolean(sessionId),
+    onOpen: handleWsOpen,
+    onMessage: handleWsMessage,
+    onError: handleWsError,
+  });
 
   useEffect(() => {
     if (!sessionId) return undefined;
-    let cancelled = false;
-
-    const loadSession = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/python-list-practice/${sessionId}`);
-        if (!res.ok) throw new Error('Failed to fetch session');
-        const data = await res.json();
-        if (cancelled) return;
-        setStudents(data.students || []);
-        setSelectedTypes(new Set(data.selectedQuestionTypes || ['all']));
-        setError(null);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.message || 'Failed to load session');
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
     loadSession();
-
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${sessionId}`;
-    const socket = new WebSocket(wsUrl);
-    wsRef.current = socket;
-
-    socket.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data);
-        if (msg.type === 'studentsUpdate') {
-          setStudents(msg.payload?.students || []);
-          setLoading(false);
-        } else if (msg.type === 'questionTypesUpdate') {
-          setSelectedTypes(new Set(msg.payload?.selectedQuestionTypes || ['all']));
-        }
-      } catch (e) {
-        console.error('WS parse error', e);
-      }
-    };
-    socket.onerror = () => setError('WebSocket error');
-
+    connect();
     return () => {
-      cancelled = true;
-      socket.close();
-      wsRef.current = null;
+      disconnect();
     };
-  }, [sessionId]);
+  }, [sessionId, loadSession, connect, disconnect]);
 
   const persistQuestionTypes = (nextSet) => {
     fetch(`/api/python-list-practice/${sessionId}/question-types`, {
@@ -144,13 +156,15 @@ export default function PythonListPracticeManager() {
   };
 
   const stats = useMemo(() => {
-    const totalStudents = students.length;
-    const connected = students.filter((s) => s.connected).length;
+    const list = Array.isArray(students) ? students : [];
+    const totalStudents = list.length;
+    const connected = list.filter((s) => s.connected).length;
     return { totalStudents, connected };
   }, [students]);
 
   const sortedStudents = useMemo(() => {
-    const sortable = [...students];
+    const list = Array.isArray(students) ? students : [];
+    const sortable = [...list];
     sortable.sort((a, b) => {
       let aVal;
       let bVal;

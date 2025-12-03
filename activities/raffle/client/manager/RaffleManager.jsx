@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 import SessionHeader from '@src/components/common/SessionHeader';
 import RaffleLink from './RaffleLink';
 import TicketsList from './TicketsList';
 import WinnerMessage from './WinnerMessage';
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 
 /** 
  * This component manages the raffle process, including creating a new raffle,
@@ -19,76 +20,64 @@ const RaffleManager = () => {
     const [raffleType, setRaffleType] = useState('standard');
     const [message, setMessageText] = useState('');
     const [buttonUrl, setButtonUrl] = useState('');
-    const [ticketPoll, setTicketPoll] = useState(true);
-    const ticketPollRef = useRef(ticketPoll);
 
     const { sessionId: raffleId } = useParams(); // the session ID from the URL as the raffleId
     const navigate = useNavigate();
 
-    let setMessage = (msg, url) => {
+    const setMessage = (msg, url = '') => {
         setMessageText(msg);
         setButtonUrl(url);
-    }
-
-    // Keep track of the latest ticketPoll value
-    useEffect(() => {
-        ticketPollRef.current = ticketPoll;
-    }, [ticketPoll]);
+    };
 
     // Clear the winners and tickets when the raffleId changes.
     useEffect(() => {
         setWinners([]);
         setTickets([]);
-        setTicketPoll(true);
+        if (!raffleId) {
+            setMessage('Raffle not found. Please create a new raffle.', '/manage');
+        }
     }, [raffleId]);
 
-    /**
-     * Handle errors when fetching tickets. If the raffle is not found, clear the raffleId from the URL.
-     * @param {Error} error - The error object.
-     */
-    const handleTicketError = useCallback((error) => {
-        if (error.cause && error.cause.status === 404) {
-            setMessage('Raffle not found. Please create a new raffle.', '/manage');
-        } else {
-            setMessage('An error occurred while fetching tickets: ' + error, '');
-            setTicketPoll(false);
+    const handleWsMessage = useCallback((event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'tickets-update') {
+                setTickets(data.tickets || []);
+                setMessage('');
+            } else if (data.type === 'raffle-error') {
+                setTickets([]);
+                setMessage(data.error || 'Raffle not found.', '/manage');
+            }
+        } catch (err) {
+            console.error('Failed to parse raffle WS message', err);
         }
     }, []);
 
-    // Fetch tickets for the current raffleId every 3 seconds by polling the server to keep the ticket list updated.
+    const handleWsError = useCallback(() => {
+        setMessage('Live updates unavailable. Trying to reconnect...', '');
+    }, []);
+
+    const buildWsUrl = useCallback(() => {
+        if (!raffleId) return null;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${window.location.host}/ws/raffle?raffleId=${raffleId}`;
+    }, [raffleId]);
+
+    const { connect, disconnect } = useResilientWebSocket({
+        buildUrl: buildWsUrl,
+        shouldReconnect: Boolean(raffleId),
+        onMessage: handleWsMessage,
+        onError: handleWsError,
+    });
+
     useEffect(() => {
         if (!raffleId) {
-            setTicketPoll(false);
-            return;
+            disconnect();
+            return undefined;
         }
-
-        // Fetch tickets unless polling is stopped
-        const fetchTickets = () => {
-            if (!raffleId || !ticketPollRef.current) return;
-
-            fetch(`/api/raffle/listTickets/${raffleId}`)
-                .then((response) => {
-                    if (!response.ok) {
-                        setTicketPoll(false);
-                        // Handle errors here if necessary
-                        throw new Error('Failed to fetch tickets', { cause: response, status: response.status });
-                    }
-                    setMessage('');
-                    return response.json();
-                })
-                .then((data) => {
-                    // Assume the API returns { tickets: [ { id, number }, ... ] }
-                    setTickets(data.tickets || []);
-                })
-                .catch((error) => handleTicketError(error));
-        };
-
-        // Fetch immediately
-        fetchTickets();
-        // And poll every 3 seconds (adjust as needed)
-        const intervalId = setInterval(fetchTickets, 3000);
-        return () => clearInterval(intervalId);
-    }, [raffleId, handleTicketError]);
+        connect();
+        return () => disconnect();
+    }, [raffleId, connect, disconnect]);
 
     /**
      *  Perform the raffle by randomly selecting a given number of tickets from the list of tickets.
@@ -160,7 +149,7 @@ const RaffleManager = () => {
 
                     {/* Display the list of tickets */}
                     <div className='border-t border-b border-gray-300 w-full mt-4'>
-                        <TicketsList raffleId={raffleId} tickets={tickets} onError={handleTicketError}></TicketsList>
+                        <TicketsList tickets={tickets} />
                     </div>
 
                     {/* Display the raffle buttons to run the raffle if there is an minimum number of tickets */}

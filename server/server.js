@@ -411,10 +411,42 @@ server.listen(PORT, HOST, () => {
 // Graceful shutdown handler for hot redeployments
 async function shutdown(signal) {
     console.log(`\n${signal} received. Starting graceful shutdown...`);
+    const closeWebSockets = () => new Promise((resolve) => {
+        if (!ws?.wss) return resolve();
+        const clients = Array.from(ws.wss.clients);
+        if (clients.length === 0) {
+            ws.wss.close(() => resolve());
+            return;
+        }
+
+        let remaining = clients.length;
+        const finalize = () => {
+            ws.wss.close(() => resolve());
+        };
+
+        const onClientClosed = () => {
+            remaining -= 1;
+            if (remaining <= 0) finalize();
+        };
+
+        clients.forEach((client) => {
+            client.once('close', onClientClosed);
+            try {
+                client.close(1001, 'Server shutting down');
+            } catch {
+                onClientClosed();
+            }
+        });
+
+        setTimeout(finalize, 1000);
+    });
+    const webSocketClosePromise = closeWebSockets();
     
     // Stop accepting new connections
     server.close(async () => {
         console.log('HTTP server closed');
+
+        await webSocketClosePromise;
         
         // Flush cache to Valkey before shutdown
         if (sessions.flushCache) {

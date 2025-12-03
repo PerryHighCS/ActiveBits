@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Button from "@src/components/ui/Button";
 import RosterPill from "@src/components/ui/RosterPill";
 import StudentInfoPanel from "../components/StudentInfoPanel";
 import SessionHeader from "@src/components/common/SessionHeader";
+import { useResilientWebSocket } from "@src/hooks/useResilientWebSocket";
 
 /**
  * WwwSimManager
@@ -15,11 +16,8 @@ import SessionHeader from "@src/components/common/SessionHeader";
 export default function WwwSimManager() {
     const { sessionId } = useParams();
     const navigate = useNavigate();
-    const wsRef = useRef(null);
     const heartbeatRef = useRef(null);
     const httpKeepAliveRef = useRef(null);
-    const reconnectTimeoutRef = useRef(null);
-    const reconnectAttemptsRef = useRef(0);
 
     const [error, setError] = useState(null);
 
@@ -142,152 +140,136 @@ export default function WwwSimManager() {
         return () => { cancelled = true; };
     }, [displayCode]);
 
-    // WebSocket hookup (connect when displayCode exists)
-    useEffect(() => {
-        if (!displayCode) return;
-
-        let cancelled = false;
-
-        function connect() {
-            if (cancelled) return;
-
-            const proto = window.location.protocol === "https:" ? "wss" : "ws";
-            const url = `${proto}://${window.location.host}/ws/www-sim?sessionId=${encodeURIComponent(displayCode)}`;
-            const ws = new WebSocket(url);
-
-            wsRef.current?.close();            // close any previous connection
-            wsRef.current = ws;
-
-            ws.onopen = () => {
-                reconnectAttemptsRef.current = 0;
-                if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-                heartbeatRef.current = setInterval(() => {
-                    try { ws.send('ping'); } catch { /* ignore */ }
-                }, 30000);
-                if (httpKeepAliveRef.current) clearInterval(httpKeepAliveRef.current);
-                const keepAlive = () => fetch('/', { method: 'HEAD' }).catch(() => {});
-                keepAlive();
-                httpKeepAliveRef.current = setInterval(keepAlive, 300000);
-            };
-          
-            ws.onmessage = async (evt) => {
-                if (evt.data === 'pong' || evt.data === 'ping') return;
-                let msg;
-                try { msg = JSON.parse(evt.data); } catch { return; }
-                if (msg.type === 'ping' || msg.type === 'pong') return;
-
-            if (msg.type === "student-joined") {
-                // If a student has joined
-                console.log("Student joined: ", msg);
-
-                // Update student list
-                setStudents(prev => {
-                    const { hostname, joined } = msg.payload;
-                    const i = prev.findIndex(s => s.hostname === hostname);
-                    if (i === -1) return [...prev, { hostname, joined }];
-
-                    const next = prev.slice();
-                    next[i] = { ...next[i], joined };
-                    return next;
-                });
-
-            } else if (msg.type === "student-removed") {
-                // If a student has been removed, update the student list
-                console.log("Student removed: ", msg.payload);
-                setStudents(prev => prev.filter(s => s.hostname !== msg.payload.hostname));
-
-                if (msg.payload.hostname === selectedStudent?.hostname) {
-                    setSelectedStudent(null);
-                }
-
-            } else if (msg.type === "student-updated") {
-                // If a student has been updated, update the student list
-                console.log("Student updated: ", msg.payload);
-
-                const { oldHostname: oldName, newHostname: newName } = msg.payload;
-                const nextHostingMap = hostingMapRef.current.map((fragment) => ({
-                    ...fragment,
-                    assignedTo: fragment.assignedTo.map(assn => ({
-                        ...assn,
-                        hostname: assn.hostname === oldName ? newName : assn.hostname
-                    }))
-                })
-                );
-
-                const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const regex = new RegExp(`//${escaped}/`, "g");
-
-                const nextTemplates = Object.fromEntries(Object.entries(studentTemplatesRef.current).map(([hostname, template]) =>
-                    [hostname === oldName ? newName : hostname, {
-                        ...template,
-                        fragments: template.fragments.map((fragment) => ({
-                            ...fragment,
-                            url: fragment.url.replace(regex, `//${newName}/`)
-                        }))
-                    }]
-                ));
-
-                const nextRoster = studentsRef.current.map((s) => (s.hostname === oldName ? { ...s, hostname: newName } : s));
-
-                // Commit updates using functional setters, then sync refs
-                setHostingMap(() => nextHostingMap);
-                setStudentTemplates(() => nextTemplates);
-                setStudents(() => nextRoster);
-                hostingMapRef.current = nextHostingMap;
-                studentTemplatesRef.current = nextTemplates;
-                studentsRef.current = nextRoster;
-
-                if (selectedStudentRef.current?.hostname === oldName) {
-                    setSelectedStudent({ ...selectedStudentRef.current, hostname: newName });
-                }
-
-            } else if (msg.type === "fragments-assigned") {
-                // If fragments have been assigned
-                console.log("Fragments assigned: ", msg.payload);
-
-                // Update hosting map, student templates, and the list of fragments
-                const { studentTemplates: st, hostingMap: hm } = msg.payload;
-                setStudentTemplates(st || []);
-                setHostingMap(hm || []);
-                setFragments(hm.map(f => f.fragment));
-
-                // Lock the assignment feature
-                const lock = !(!st || !hm);
-                setAssignmentLocked(lock);
-
-            } else if (msg.type === "template-assigned") {
-                // If a template has been assigned to a student
-                console.log("Template assigned to: ", msg.payload?.hostname);
-
-                const { hostname, template } = msg.payload;
-                setStudentTemplates(prev => ({
-                    ...prev,
-                    [hostname]: template
-                }));
-            }
-        };
-
-        ws.onerror = (e) => console.warn("WS error", e);
-        ws.onclose = () => {
-            if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-            if (httpKeepAliveRef.current) clearInterval(httpKeepAliveRef.current);
-
-            if (cancelled) return;
-            const delay = Math.min(30000, 1000 * 2 ** reconnectAttemptsRef.current++);
-            reconnectTimeoutRef.current = setTimeout(connect, delay);
-        };
-    }
-
-        connect();
-        return () => {
-            cancelled = true;
+    const clearWsIntervals = useCallback(() => {
+        if (heartbeatRef.current) {
             clearInterval(heartbeatRef.current);
+            heartbeatRef.current = null;
+        }
+        if (httpKeepAliveRef.current) {
             clearInterval(httpKeepAliveRef.current);
+            httpKeepAliveRef.current = null;
+        }
+    }, []);
 
-            clearTimeout(reconnectTimeoutRef.current);
-            try { wsRef.current?.close(); } catch { console.error("Error closing WebSocket"); }
+    const handleWsMessage = useCallback((evt) => {
+        if (evt.data === 'pong' || evt.data === 'ping') return;
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch { return; }
+        if (msg.type === 'ping' || msg.type === 'pong') return;
+
+        if (msg.type === "student-joined") {
+            console.log("Student joined: ", msg);
+            setStudents(prev => {
+                const { hostname, joined } = msg.payload;
+                const i = prev.findIndex(s => s.hostname === hostname);
+                if (i === -1) return [...prev, { hostname, joined }];
+
+                const next = prev.slice();
+                next[i] = { ...next[i], joined };
+                return next;
+            });
+        } else if (msg.type === "student-removed") {
+            console.log("Student removed: ", msg.payload);
+            setStudents(prev => prev.filter(s => s.hostname !== msg.payload.hostname));
+
+            if (msg.payload.hostname === selectedStudentRef.current?.hostname) {
+                setSelectedStudent(null);
+            }
+        } else if (msg.type === "student-updated") {
+            console.log("Student updated: ", msg.payload);
+
+            const { oldHostname: oldName, newHostname: newName } = msg.payload;
+            const nextHostingMap = hostingMapRef.current.map((fragment) => ({
+                ...fragment,
+                assignedTo: fragment.assignedTo.map(assn => ({
+                    ...assn,
+                    hostname: assn.hostname === oldName ? newName : assn.hostname
+                }))
+            }));
+
+            const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`//${escaped}/`, "g");
+
+            const nextTemplates = Object.fromEntries(Object.entries(studentTemplatesRef.current).map(([hostname, template]) =>
+                [hostname === oldName ? newName : hostname, {
+                    ...template,
+                    fragments: template.fragments.map((fragment) => ({
+                        ...fragment,
+                        url: fragment.url.replace(regex, `//${newName}/`)
+                    }))
+                }]
+            ));
+
+            const nextRoster = studentsRef.current.map((s) => (s.hostname === oldName ? { ...s, hostname: newName } : s));
+
+            setHostingMap(() => nextHostingMap);
+            setStudentTemplates(() => nextTemplates);
+            setStudents(() => nextRoster);
+            hostingMapRef.current = nextHostingMap;
+            studentTemplatesRef.current = nextTemplates;
+            studentsRef.current = nextRoster;
+
+            if (selectedStudentRef.current?.hostname === oldName) {
+                setSelectedStudent({ ...selectedStudentRef.current, hostname: newName });
+            }
+        } else if (msg.type === "fragments-assigned") {
+            console.log("Fragments assigned: ", msg.payload);
+            const { studentTemplates: st, hostingMap: hm } = msg.payload;
+            setStudentTemplates(st || []);
+            setHostingMap(hm || []);
+            setFragments(hm.map(f => f.fragment));
+
+            const lock = !(!st || !hm);
+            setAssignmentLocked(lock);
+        } else if (msg.type === "template-assigned") {
+            console.log("Template assigned to: ", msg.payload?.hostname);
+            const { hostname, template } = msg.payload;
+            setStudentTemplates(prev => ({
+                ...prev,
+                [hostname]: template
+            }));
+        }
+    }, []);
+
+    const handleWsOpen = useCallback((_, ws) => {
+        clearWsIntervals();
+        heartbeatRef.current = setInterval(() => {
+            try { ws.send('ping'); } catch { /* ignore */ }
+        }, 30000);
+        const keepAlive = () => fetch('/', { method: 'HEAD' }).catch(() => {});
+        keepAlive();
+        httpKeepAliveRef.current = setInterval(keepAlive, 300000);
+    }, [clearWsIntervals]);
+
+    const handleWsClose = useCallback(() => {
+        clearWsIntervals();
+    }, [clearWsIntervals]);
+
+    const buildWsUrl = useCallback(() => {
+        if (!displayCode) return null;
+        const proto = window.location.protocol === "https:" ? "wss" : "ws";
+        return `${proto}://${window.location.host}/ws/www-sim?sessionId=${encodeURIComponent(displayCode)}`;
+    }, [displayCode]);
+
+    const { connect: connectWs, disconnect: disconnectWs } = useResilientWebSocket({
+        buildUrl: buildWsUrl,
+        shouldReconnect: Boolean(displayCode),
+        onOpen: handleWsOpen,
+        onMessage: handleWsMessage,
+        onError: (e) => console.warn("WS error", e),
+        onClose: handleWsClose,
+    });
+
+    useEffect(() => {
+        if (!displayCode) {
+            disconnectWs();
+            return undefined;
+        }
+        connectWs();
+        return () => {
+            disconnectWs();
         };
-    }, [displayCode, selectedStudent?.hostname]);
+    }, [displayCode, connectWs, disconnectWs]);
 
     // Handler for removing student pill
     async function removeStudent(hn) {

@@ -109,6 +109,25 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
     return `${name}-${timestamp}-${random}`;
   };
 
+  function closeDuplicateStudentSockets(currentSocket) {
+    if (!currentSocket.sessionId || !currentSocket.studentId) return;
+    for (const client of ws.wss.clients) {
+      if (
+        client !== currentSocket &&
+        client.readyState === 1 &&
+        client.sessionId === currentSocket.sessionId &&
+        client.studentId === currentSocket.studentId
+      ) {
+        client.ignoreDisconnect = true;
+        try {
+          client.close(4000, 'Replaced by new connection');
+        } catch (err) {
+          console.error('Failed to close duplicate student socket', err);
+        }
+      }
+    }
+  }
+
   // Register WebSocket namespace
   ws.register("/ws/java-string-practice", (socket, qp) => {
     socket.sessionId = qp.get("sessionId") || null;
@@ -135,6 +154,7 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
             existing.connected = true;
             existing.lastSeen = Date.now();
             socket.studentId = existing.id;
+            closeDuplicateStudentSockets(socket);
           } else {
             console.log(`New student joining: ${socket.studentName}`);
             const newId = generateStudentId(socket.studentName, socket.sessionId);
@@ -147,6 +167,7 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
               lastSeen: Date.now(),
               stats: { total: 0, correct: 0, streak: 0, longestStreak: 0 }
             });
+            closeDuplicateStudentSockets(socket);
           }
           await sessions.set(session.id, session);
           console.log(`Total students in session:`, session.data.students.length);
@@ -159,6 +180,7 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
     }
 
     socket.on('close', () => {
+      if (socket.ignoreDisconnect) return;
       if (socket.sessionId && socket.studentId) {
         (async () => {
           const session = await sessions.get(socket.sessionId);

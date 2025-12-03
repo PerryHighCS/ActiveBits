@@ -301,4 +301,4 @@ For local testing with Valkey:
 
 - **2024-12**: Initial Valkey integration with pub/sub support
 - **2024-12**: Added keepalive caching layer for performance
-- **2024-12**: Implemented graceful shutdown for hot redeployments
+- **2024-12**: Implemented graceful shutdown for hot redeployments (WebSockets now drain in ~1s before the process exits)
