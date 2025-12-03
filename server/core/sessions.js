@@ -6,6 +6,12 @@ import { SessionCache } from "./sessionCache.js";
 /**
  * In-memory session store with automatic TTL cleanup (for development/fallback).
  */
+/**
+ * Normalize session data to ensure expected data structures exist.
+ * This is critical for sessions loaded from Valkey after server restart/redeploy.
+ * @param {Object} session - The session object to normalize
+ * @returns {Object} The normalized session object
+ */
 function normalizeSessionData(session) {
     if (!session || typeof session !== 'object') return session;
     session.data ??= {};
@@ -17,6 +23,10 @@ function normalizeSessionData(session) {
         case 'java-string-practice':
             session.data.students = Array.isArray(session.data.students) ? session.data.students : [];
             session.data.selectedMethods = Array.isArray(session.data.selectedMethods) ? session.data.selectedMethods : ['all'];
+            break;
+        case 'python-list-practice':
+            session.data.students = Array.isArray(session.data.students) ? session.data.students : [];
+            session.data.selectedQuestionTypes = Array.isArray(session.data.selectedQuestionTypes) ? session.data.selectedQuestionTypes : ['all'];
             break;
         case 'www-sim':
             session.data.students = Array.isArray(session.data.students) ? session.data.students : [];
