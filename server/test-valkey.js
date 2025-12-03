@@ -13,6 +13,7 @@ async function testValkey() {
     console.log(`   URL: ${VALKEY_URL}\n`);
 
     const client = new Redis(VALKEY_URL);
+    let subscriber = null;
 
     try {
         // Test 1: Ping
@@ -40,7 +41,7 @@ async function testValkey() {
         console.log('✅ Active sessions:', sessionCount);
 
         // Test 5: Pub/Sub test
-        const subscriber = new Redis(VALKEY_URL);
+        subscriber = new Redis(VALKEY_URL);
         const testChannel = 'test-channel';
         let messageReceived = false;
 
@@ -74,10 +75,21 @@ async function testValkey() {
 
     } catch (error) {
         console.error('\n❌ Test failed:', error.message);
-        try {
-            await client.quit();
-        } catch (cleanupErr) {
+        const cleanupTasks = [];
+        if (subscriber) {
+            cleanupTasks.push(
+                subscriber.quit().catch((cleanupErr) => {
+                    console.error('Failed to close Valkey subscriber cleanly:', cleanupErr.message);
+                })
+            );
+        }
+        cleanupTasks.push(client.quit().catch((cleanupErr) => {
             console.error('Failed to close Valkey client cleanly:', cleanupErr.message);
+        }));
+        try {
+            await Promise.allSettled(cleanupTasks);
+        } catch (cleanupErr) {
+            console.error('Cleanup encountered errors:', cleanupErr.message);
         }
         process.exit(1);
     }
