@@ -1,4 +1,4 @@
-module.exports = [
+export default [
   // Minimal root config to satisfy VS Code ESLint for non-client folders.
   // Client-specific linting remains in client/eslint.config.js.
   {
@@ -8,7 +8,7 @@ module.exports = [
       "**/build/**",
       "**/.vite/**",
       "**/.next/**",
-      "**/.cache/**"
+      "**/.cache/**",
     ],
   },
 ];
