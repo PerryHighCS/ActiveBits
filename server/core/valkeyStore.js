@@ -261,6 +261,17 @@ export class ValkeyPersistentStore {
         this.ttlMs = 10 * 60 * 1000; // 10 minutes for persistent metadata
     }
 
+    async _scanKeys(pattern) {
+        const keys = [];
+        let cursor = '0';
+        do {
+            const [nextCursor, batch] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+            keys.push(...batch);
+            cursor = nextCursor;
+        } while (cursor !== '0');
+        return keys;
+    }
+
     /**
      * Get persistent session metadata by hash.
      * @param {string} hash - Persistent session hash
