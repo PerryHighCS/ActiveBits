@@ -12,8 +12,8 @@ The `VALKEY_URL` environment variable is automatically set to `redis://valkey:63
 # Test Valkey connection (using redis-cli - fully compatible)
 redis-cli -h valkey ping
 
-# View all keys
-redis-cli -h valkey keys '*'
+# View keys (use SCAN to avoid blocking)
+redis-cli -h valkey scan 0
 
 # Monitor commands in real-time
 redis-cli -h valkey monitor
@@ -51,13 +51,13 @@ To view session data:
 
 ```bash
 # List all session keys
-redis-cli -h valkey keys 'session:*'
+redis-cli -h valkey scan 0 match 'session:*'
 
 # Get specific session
 redis-cli -h valkey get 'session:SESSIONID'
 
 # View persistent sessions
-redis-cli -h valkey keys 'persistent:*'
+redis-cli -h valkey scan 0 match 'persistent:*'
 ```
 
 ## Status Endpoints (Local)
