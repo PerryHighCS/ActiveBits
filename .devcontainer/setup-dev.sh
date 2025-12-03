@@ -25,11 +25,12 @@ echo "✨ Development environment is ready!"
 echo ""
 echo "Environment variables:"
 if [ -n "$VALKEY_URL" ]; then
-  masked_url="$(echo "$VALKEY_URL" | sed -E 's#(redis://[^:@]*:)[^@]+@#\1****@#')"
-  if [ "$masked_url" = "$VALKEY_URL" ]; then
-    masked_url="$(echo "$VALKEY_URL" | sed -E 's#(redis://):[^@]+@#\1:****@#')"
+  # Avoid printing credentials; only show scheme and host
+  parsed_host="$(echo "$VALKEY_URL" | sed -E 's#(rediss?://)([^:/@]+(:[^@]+)?@)?([^:/]+)(:.*)?#\1****@'\''\4'\''#')"
+  if [ "$parsed_host" = "$VALKEY_URL" ]; then
+    parsed_host="(hidden)"
   fi
-  echo "  VALKEY_URL=${masked_url}"
+  echo "  VALKEY_URL=${parsed_host}"
 fi
 echo ""
 echo "To test Valkey manually (if installed), run:"
