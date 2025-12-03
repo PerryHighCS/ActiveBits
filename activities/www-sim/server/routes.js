@@ -185,6 +185,9 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         if (!session || session.type !== "www-sim") {
             return res.status(404).json({ error: "invalid session" });
         }
+        if (!Array.isArray(session.data.students)) {
+            session.data.students = [];
+        }
 
         let { hostname } = req.body || {};
         if (!hostname) {
@@ -217,6 +220,9 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     app.patch("/api/www-sim/:id/students/:hostname", async (req, res) => {
         const session = await sessions.get(req.params.id);
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
+        if (!Array.isArray(session.data.students)) {
+            session.data.students = [];
+        }
 
         const current = req.params.hostname?.trim().toLowerCase();
         const student = session.data.students.find(stu => stu.hostname === current);
@@ -285,6 +291,9 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     app.delete("/api/www-sim/:id/students/:hostname", async (req, res) => {
         const session = await sessions.get(req.params.id);
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
+        if (!Array.isArray(session.data.students)) {
+            session.data.students = [];
+        }
 
         const index = session.data.students.findIndex(stu => stu.hostname === req.params.hostname);
         if (index === -1) return res.status(404).json({ error: "student not found" });
@@ -299,6 +308,9 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
     app.post("/api/www-sim/:id/assign", async (req, res) => {
         const session = await sessions.get(req.params.id);
         if (!session || session.type !== "www-sim") return res.status(404).json({ error: "invalid session" });
+        if (!Array.isArray(session.data.students)) {
+            session.data.students = [];
+        }
 
         const { passage } = req.body || {};
         if (!passage || typeof passage !== "object" || typeof passage.value !== "string") {
