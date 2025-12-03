@@ -12,10 +12,16 @@ fi
 echo "Stopping server PIDs: $PIDS"
 kill $PIDS
 
+deadline=$((SECONDS + 10))
 for pid in $PIDS; do
-  if kill -0 "$pid" 2>/dev/null; then
-    wait "$pid" 2>/dev/null || true
-  fi
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      echo "PID $pid did not exit in time, sending SIGKILL"
+      kill -9 "$pid" 2>/dev/null || true
+      break
+    fi
+    sleep 0.2
+  done
 done
 
 echo "Server stopped."

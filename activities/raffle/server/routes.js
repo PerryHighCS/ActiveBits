@@ -24,13 +24,15 @@ function broadcastTicketsUpdate(raffleId, tickets) {
   const set = raffleSubscribers.get(raffleId);
   if (!set || set.size === 0) return;
   const payload = JSON.stringify({ type: "tickets-update", tickets });
+  const stale = [];
   for (const socket of set) {
     if (socket.readyState === 1) {
       socket.send(payload);
     } else {
-      set.delete(socket);
+      stale.push(socket);
     }
   }
+  stale.forEach(socket => set.delete(socket));
   if (set.size === 0) {
     raffleSubscribers.delete(raffleId);
   }

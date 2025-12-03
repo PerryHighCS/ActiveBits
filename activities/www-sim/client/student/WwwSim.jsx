@@ -157,7 +157,7 @@ export default function WwwSim({ sessionData }) {
         return () => {
             disconnectWs();
         };
-    }, [joined, sessionId, connectWs, disconnectWs]);
+    }, [joined, sessionId, hostname, connectWs, disconnectWs]);
 
 
     async function handleConnect() {
