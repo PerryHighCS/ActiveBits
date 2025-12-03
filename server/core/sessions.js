@@ -15,8 +15,6 @@ import { SessionCache } from "./sessionCache.js";
 function normalizeSessionData(session) {
     if (!session || typeof session !== 'object') return session;
     session.data ??= {};
-    // Initialize common fields
-    session.type ??= session.type; // no-op, placeholder for future
 
     // Activity-specific defaults
     switch (session.type) {
