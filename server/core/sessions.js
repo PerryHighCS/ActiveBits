@@ -28,7 +28,7 @@ function normalizeSessionData(session) {
             break;
         case 'www-sim':
             session.data.students = Array.isArray(session.data.students) ? session.data.students : [];
-            session.data.studentTemplates = session.data.studentTemplates && typeof session.data.studentTemplates === 'object' ? session.data.studentTemplates : {};
+            session.data.studentTemplates = (!Array.isArray(session.data.studentTemplates) && session.data.studentTemplates && typeof session.data.studentTemplates === 'object') ? session.data.studentTemplates : {};
             session.data.fragments = Array.isArray(session.data.fragments) ? session.data.fragments : [];
             break;
         case 'raffle':
