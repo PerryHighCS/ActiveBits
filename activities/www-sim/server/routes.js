@@ -1,30 +1,10 @@
 import crypto from "crypto";
 import { createSession } from "../../../server/core/sessions.js";
+import { createBroadcastSubscriptionHelper } from "../../../server/core/broadcastUtils.js";
 import presetPassages from "./presetPassages.js";
 
 export default function setupWwwSimRoutes(app, sessions, ws) {
-    const subscribedSessions = new Set();
-
-    const ensureBroadcastSubscription = (sessionId) => {
-        if (!sessions.subscribeToBroadcast || !sessionId || subscribedSessions.has(sessionId)) {
-            return;
-        }
-
-        const channel = `session:${sessionId}:broadcast`;
-        sessions.subscribeToBroadcast(channel, (message) => {
-            const payload = JSON.stringify(message);
-            for (const client of ws.wss.clients) {
-                if (client.readyState === 1 && client.sessionId === sessionId) {
-                    try {
-                        client.send(payload);
-                    } catch (err) {
-                        console.error('Failed to forward broadcast to client:', err);
-                    }
-                }
-            }
-        });
-        subscribedSessions.add(sessionId);
-    };
+    const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws);
     // WS namespace
     ws.register("/ws/www-sim", (socket, qp) => {
         socket.sessionId = qp.get("sessionId") || null;

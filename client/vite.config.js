@@ -37,7 +37,7 @@ export default defineConfig({
     },
     // Disable HMR in Codespaces to avoid WebSocket proxy issues
     // The app works fine without live reload; just refresh the page after edits
-    hmr: !isCodespaces, //? false : true,
+    hmr: !isCodespaces,
     host: true,
     port: 5173,
     strictPort: true,

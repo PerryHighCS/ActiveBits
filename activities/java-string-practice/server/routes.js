@@ -1,4 +1,5 @@
 import { createSession } from '../../../server/core/sessions.js';
+import { createBroadcastSubscriptionHelper } from '../../../server/core/broadcastUtils.js';
 
 /**
  * Java String Practice Routes
@@ -100,28 +101,7 @@ function validateMethods(methods) {
 }
 
 export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
-  const subscribedSessions = new Set();
-
-  const ensureBroadcastSubscription = (sessionId) => {
-    if (!sessions.subscribeToBroadcast || !sessionId || subscribedSessions.has(sessionId)) {
-      return;
-    }
-
-    const channel = `session:${sessionId}:broadcast`;
-    sessions.subscribeToBroadcast(channel, (message) => {
-      const payload = JSON.stringify(message);
-      for (const socket of ws.wss.clients) {
-        if (socket.readyState === 1 && socket.sessionId === sessionId) {
-          try {
-            socket.send(payload);
-          } catch (err) {
-            console.error('Failed to forward broadcast to client:', err);
-          }
-        }
-      }
-    });
-    subscribedSessions.add(sessionId);
-  };
+  const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws);
   // Helper to generate unique student ID
   const generateStudentId = (name, sessionId) => {
     const timestamp = Date.now().toString(36);
