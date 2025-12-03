@@ -238,9 +238,18 @@ function normalizeSessionData(session) {
 
 **Key points:**
 - Use `Array.isArray(...)` to verify arrays before defaulting
-- Use `typeof ... === 'object'` for nested objects
+- For plain objects, use: `!Array.isArray(...) && ... !== null && typeof ... === 'object'`
+  - JavaScript's `typeof null === 'object'` and `typeof [] === 'object'`, so both checks are needed
 - Use nullish coalescing (`??`) for primitive fields with defaults
 - This ensures sessions loaded from Valkey have complete structures
+
+**Example for nested objects:**
+```javascript
+session.data.config = (!Array.isArray(session.data.config) && 
+                       session.data.config !== null && 
+                       typeof session.data.config === 'object') 
+                       ? session.data.config : {};
+```
 
 ### Step 6: Add the Activity Config (auto-discovery)
 
