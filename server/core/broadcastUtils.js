@@ -21,19 +21,22 @@ export function createBroadcastSubscriptionHelper(sessions, ws) {
     }
 
     const channel = `session:${sessionId}:broadcast`;
-    sessions.subscribeToBroadcast(channel, (message) => {
-      const payload = JSON.stringify(message);
-      for (const client of ws.wss.clients) {
-        if (client.readyState === 1 && client.sessionId === sessionId) {
-          try {
-            client.send(payload);
-          } catch (err) {
-            console.error('Failed to forward broadcast to client:', err);
+    try {
+      sessions.subscribeToBroadcast(channel, (message) => {
+        const payload = JSON.stringify(message);
+        for (const client of ws.wss.clients) {
+          if (client.readyState === 1 && client.sessionId === sessionId) {
+            try {
+              client.send(payload);
+            } catch (err) {
+              console.error('Failed to forward broadcast to client:', err);
+            }
           }
         }
-      }
-    });
-
-    subscribedSessions.add(sessionId);
+      });
+      subscribedSessions.add(sessionId);
+    } catch (err) {
+      console.error(`Failed to subscribe to broadcast channel ${channel}:`, err);
+    }
   };
 }
