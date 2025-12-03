@@ -349,17 +349,35 @@ app.get("/health-check", (req, res) => {
 app.get("/api/status", async (req, res) => {
     try {
         const allSessions = await sessions.getAll();
+        const exposeSessionIds = process.env.NODE_ENV !== 'production';
         
         // Group sessions by type
         const byType = {};
         let approxTotalBytes = 0;
         
-        const sessionList = await Promise.all(allSessions.map(async (session) => {
+    let pttlValues = null;
+    if (sessions.valkeyStore && allSessions.length > 0) {
+        try {
+            pttlValues = await Promise.all(
+                allSessions.map((session) =>
+                    sessions.valkeyStore.client.pttl(`session:${session.id}`).catch((err) => {
+                        console.error(`Failed to get TTL for session ${session.id}:`, err);
+                        return -1;
+                    })
+                )
+            );
+        } catch (err) {
+            console.error('Failed to batch fetch session TTLs:', err);
+            pttlValues = null;
+        }
+    }
+
+        const sessionList = await Promise.all(allSessions.map(async (session, index) => {
             const type = session.type || 'unknown';
             byType[type] = (byType[type] || 0) + 1;
-            
-            // Approximate session size
-            const approxBytes = JSON.stringify(session).length;
+        
+        // Approximate session size
+        const approxBytes = JSON.stringify(session).length;
             approxTotalBytes += approxBytes;
             
             // Count connected WebSocket clients for this session
@@ -374,17 +392,12 @@ app.get("/api/status", async (req, res) => {
             let ttlRemainingMs = null;
             let expiresAt = null;
             
-            if (sessions.valkeyStore) {
-                // Valkey mode: use PTTL
-                try {
-                    const pttl = await sessions.valkeyStore.client.pttl(`session:${session.id}`);
-                    ttlRemainingMs = pttl > 0 ? pttl : 0;
-                    if (ttlRemainingMs > 0) {
-                        expiresAt = new Date(Date.now() + ttlRemainingMs).toISOString();
-                    }
-                } catch (err) {
-                    console.error(`Failed to get TTL for session ${session.id}:`, err);
-                }
+        if (sessions.valkeyStore) {
+            const pttl = pttlValues ? pttlValues[index] : -1;
+            ttlRemainingMs = pttl > 0 ? pttl : 0;
+            if (ttlRemainingMs > 0) {
+                expiresAt = new Date(Date.now() + ttlRemainingMs).toISOString();
+            }
             } else {
                 // In-memory mode: derive from lastActivity
                 const lastActivity = session.lastActivity || session.created || Date.now();
@@ -395,8 +408,7 @@ app.get("/api/status", async (req, res) => {
                 }
             }
             
-            return {
-                id: session.id,
+            const sessionInfo = {
                 type,
                 created: session.created ? new Date(session.created).toISOString() : null,
                 lastActivity: session.lastActivity ? new Date(session.lastActivity).toISOString() : null,
@@ -405,6 +417,10 @@ app.get("/api/status", async (req, res) => {
                 socketCount,
                 approxBytes,
             };
+            if (exposeSessionIds) {
+                sessionInfo.id = session.id;
+            }
+            return sessionInfo;
         }));
         
         // Valkey info (if available)
@@ -454,6 +470,7 @@ app.get("/api/status", async (req, res) => {
                 approxTotalBytes,
                 byType,
                 list: sessionList,
+                showSessionIds: exposeSessionIds,
             },
             valkey: valkeyInfo,
         };

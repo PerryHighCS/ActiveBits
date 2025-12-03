@@ -68,7 +68,11 @@ async function testValkey() {
 
     } catch (error) {
         console.error('\n❌ Test failed:', error.message);
-        await client.quit();
+        try {
+            await client.quit();
+        } catch (cleanupErr) {
+            console.error('Failed to close Valkey client cleanly:', cleanupErr.message);
+        }
         process.exit(1);
     }
 }

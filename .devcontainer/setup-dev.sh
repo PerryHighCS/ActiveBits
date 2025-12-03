@@ -24,7 +24,10 @@ fi
 echo "✨ Development environment is ready!"
 echo ""
 echo "Environment variables:"
-echo "  VALKEY_URL=$VALKEY_URL"
+if [ -n "$VALKEY_URL" ]; then  
+  masked="$(echo "$VALKEY_URL" | sed -E 's#(redis://[^:]+:)[^@]+#\1****#')"  
+  echo "  VALKEY_URL=${masked}"  
+fi 
 echo ""
 echo "To test Valkey manually (if installed), run:"
 echo "  redis-cli -h valkey"

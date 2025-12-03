@@ -69,6 +69,28 @@ function validateStudentId(value) {
 }
 
 export default function setupPythonListPracticeRoutes(app, sessions, ws) {
+  const subscribedSessions = new Set();
+
+  const ensureBroadcastSubscription = (sessionId) => {
+    if (!sessions.subscribeToBroadcast || !sessionId || subscribedSessions.has(sessionId)) {
+      return;
+    }
+
+    const channel = `session:${sessionId}:broadcast`;
+    sessions.subscribeToBroadcast(channel, (message) => {
+      const payload = JSON.stringify(message);
+      for (const client of ws.wss.clients) {
+        if (client.readyState === 1 && client.sessionId === sessionId) {
+          try {
+            client.send(payload);
+          } catch (err) {
+            console.error('Failed to forward broadcast to client:', err);
+          }
+        }
+      }
+    });
+    subscribedSessions.add(sessionId);
+  };
   const attachStudent = (session, name, studentId) => {
     // Defensive: sessions restored without data/students should still work
     if (!session.data || typeof session.data !== 'object') {
@@ -124,6 +146,7 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     session.data.students = [];
     session.data.selectedQuestionTypes = ['all'];
     await sessions.set(session.id, session);
+    ensureBroadcastSubscription(session.id);
     res.json({ id: session.id });
   });
 
@@ -185,6 +208,7 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
   // Minimal WebSocket namespace for connection tracking
   ws.register('/ws/python-list-practice', (socket, qp) => {
     socket.sessionId = qp.get('sessionId') || null;
+    ensureBroadcastSubscription(socket.sessionId);
     socket.studentName = validateName(qp.get('studentName') || '');
     socket.studentId = validateStudentId(qp.get('studentId') || '');
     const sendQuestionTypesSnapshot = async () => {
@@ -203,7 +227,9 @@ export default function setupPythonListPracticeRoutes(app, sessions, ws) {
     };
 
     if (socket.sessionId) {
-      sendQuestionTypesSnapshot();
+      sendQuestionTypesSnapshot().catch(err => {
+        console.error('Failed to send initial question types snapshot:', err);
+      });
     }
 
     if (socket.sessionId && socket.studentName) {

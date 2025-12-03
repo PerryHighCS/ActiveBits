@@ -178,11 +178,11 @@ When a new deployment is triggered:
    - `GET /api/status` — Detailed JSON (storage mode, TTLs, process metrics, WebSocket clients, sessions summary, Valkey info)
    - `GET /status` — HTML dashboard that auto-updates, useful for quick checks during deployment or incidents
 
-3. **Cache Hit Rate**:
+4. **Cache Hit Rate**:
    - Not exposed by default; add custom metrics if needed
    - Effective cache reduces Valkey read operations
 
-4. **WebSocket Connections**:
+5. **WebSocket Connections**:
    - Monitor active WebSocket count
    - Check reconnection patterns after deployment
 

@@ -3,9 +3,32 @@ import { createSession } from "../../../server/core/sessions.js";
 import presetPassages from "./presetPassages.js";
 
 export default function setupWwwSimRoutes(app, sessions, ws) {
+    const subscribedSessions = new Set();
+
+    const ensureBroadcastSubscription = (sessionId) => {
+        if (!sessions.subscribeToBroadcast || !sessionId || subscribedSessions.has(sessionId)) {
+            return;
+        }
+
+        const channel = `session:${sessionId}:broadcast`;
+        sessions.subscribeToBroadcast(channel, (message) => {
+            const payload = JSON.stringify(message);
+            for (const client of ws.wss.clients) {
+                if (client.readyState === 1 && client.sessionId === sessionId) {
+                    try {
+                        client.send(payload);
+                    } catch (err) {
+                        console.error('Failed to forward broadcast to client:', err);
+                    }
+                }
+            }
+        });
+        subscribedSessions.add(sessionId);
+    };
     // WS namespace
     ws.register("/ws/www-sim", (socket, qp) => {
         socket.sessionId = qp.get("sessionId") || null;
+        ensureBroadcastSubscription(socket.sessionId);
         socket.hostname = qp.get("hostname")?.trim().toLowerCase() || null;
     });
 
@@ -162,6 +185,7 @@ export default function setupWwwSimRoutes(app, sessions, ws) {
         const session = await createSession(sessions, { data: { students: [], studentTemplates: {} } });
         session.type = "www-sim"; // Set the session type
         await sessions.set(session.id, session);
+        ensureBroadcastSubscription(session.id);
         res.json({ id: session.id }); // Respond with the new session ID
     });
 

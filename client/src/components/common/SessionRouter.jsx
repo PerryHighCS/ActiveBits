@@ -36,7 +36,7 @@ const SessionRouter = () => {
     const [sessionIdInput, setSessionIdInput] = useState('');
     const [soloActivity, setSoloActivity] = useState(null);
 
-    const { sessionId, activityName, hash } = useParams(); // Check for both regular and persistent session params
+    const { sessionId, activityName, hash, soloActivityId } = useParams(); // Check for regular, persistent, and solo routes
 
     const storageKey = `session-${sessionId}`;
 
@@ -57,6 +57,30 @@ const SessionRouter = () => {
             setIsAuthenticatingTeacher(false);
         }
     }, [hash, activityName]);
+
+    useEffect(() => {
+        if (!soloActivityId) {
+            setSoloActivity(null);
+            setError(null);
+            return;
+        }
+
+        const activity = activities.find((act) => act.id === soloActivityId);
+        if (!activity) {
+            setSoloActivity(null);
+            setError('Unknown solo activity');
+            return;
+        }
+
+        if (!activity.soloMode) {
+            setSoloActivity(null);
+            setError('This activity does not support solo mode');
+            return;
+        }
+
+        setError(null);
+        setSoloActivity(activity);
+    }, [soloActivityId]);
 
     useEffect(() => {
         cleanExpiredSessions();
@@ -297,7 +321,7 @@ const SessionRouter = () => {
                             {soloActivities.map(activity => (
                                 <div 
                                     key={activity.id} 
-                                    onClick={() => setSoloActivity(activity)}
+                                    onClick={() => navigate(`/solo/${activity.id}`)}
                                     className="rounded-lg shadow-md overflow-hidden w-full max-w-md border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
                                 >
                                     <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>

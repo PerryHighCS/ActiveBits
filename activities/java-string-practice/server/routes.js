@@ -100,6 +100,28 @@ function validateMethods(methods) {
 }
 
 export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
+  const subscribedSessions = new Set();
+
+  const ensureBroadcastSubscription = (sessionId) => {
+    if (!sessions.subscribeToBroadcast || !sessionId || subscribedSessions.has(sessionId)) {
+      return;
+    }
+
+    const channel = `session:${sessionId}:broadcast`;
+    sessions.subscribeToBroadcast(channel, (message) => {
+      const payload = JSON.stringify(message);
+      for (const socket of ws.wss.clients) {
+        if (socket.readyState === 1 && socket.sessionId === sessionId) {
+          try {
+            socket.send(payload);
+          } catch (err) {
+            console.error('Failed to forward broadcast to client:', err);
+          }
+        }
+      }
+    });
+    subscribedSessions.add(sessionId);
+  };
   // Helper to generate unique student ID
   const generateStudentId = (name, sessionId) => {
     const timestamp = Date.now().toString(36);
@@ -110,6 +132,7 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
   // Register WebSocket namespace
   ws.register("/ws/java-string-practice", (socket, qp) => {
     socket.sessionId = qp.get("sessionId") || null;
+    ensureBroadcastSubscription(socket.sessionId);
     const rawStudentName = qp.get("studentName") || null;
     socket.studentName = validateStudentName(rawStudentName);
     const studentId = qp.get("studentId") || null; // Check for existing ID
@@ -210,6 +233,7 @@ export default function setupJavaStringPracticeRoutes(app, sessions, ws) {
     session.data.students = [];
     session.data.selectedMethods = ['all']; // Default to all methods
     await sessions.set(session.id, session);
+    ensureBroadcastSubscription(session.id);
     res.json({ id: session.id });
   });
 

@@ -166,8 +166,19 @@ export class ValkeySessionStore {
      * @returns {Promise<string[]>} Array of session IDs
      */
     async getAllIds() {
+        const scanKeys = async (pattern) => {
+            const keys = [];
+            let cursor = '0';
+            do {
+                const [nextCursor, batch] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+                keys.push(...batch);
+                cursor = nextCursor;
+            } while (cursor !== '0');
+            return keys;
+        };
+
         try {
-            const keys = await this.client.keys('session:*');
+            const keys = await scanKeys('session:*');
             return keys.map(key => key.replace('session:', ''));
         } catch (err) {
             console.error('Failed to get all session IDs:', err);
@@ -294,8 +305,19 @@ export class ValkeyPersistentStore {
      * @returns {Promise<string[]>}
      */
     async getAllHashes() {
+        const scanKeys = async (pattern) => {
+            const keys = [];
+            let cursor = '0';
+            do {
+                const [nextCursor, batch] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+                keys.push(...batch);
+                cursor = nextCursor;
+            } while (cursor !== '0');
+            return keys;
+        };
+
         try {
-            const keys = await this.client.keys('persistent:*');
+            const keys = await scanKeys('persistent:*');
             return keys.map(key => key.replace('persistent:', ''));
         } catch (err) {
             console.error('Failed to get all persistent session hashes:', err);
@@ -310,9 +332,21 @@ export class ValkeyPersistentStore {
      */
     async incrementAttempts(key) {
         try {
-            const result = await this.client.incr(`ratelimit:${key}`);
-            await this.client.expire(`ratelimit:${key}`, 60); // 1 minute expiry
-            return result;
+            const script = `
+                local value = redis.call('INCR', KEYS[1])
+                if value == 1 then
+                    redis.call('EXPIRE', KEYS[1], ARGV[1])
+                end
+                return value
+            `;
+            const ttlSeconds = 60;
+            const result = await this.client.eval(
+                script,
+                1,
+                `ratelimit:${key}`,
+                ttlSeconds
+            );
+            return typeof result === 'number' ? result : parseInt(result, 10) || 0;
         } catch (err) {
             console.error(`Failed to increment attempts for ${key}:`, err);
             return 0;

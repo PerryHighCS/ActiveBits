@@ -44,6 +44,8 @@ export default function StatusDashboard() {
     return Object.entries(byType).sort((a, b) => a[0].localeCompare(b[0]));
   }, [data]);
 
+  const showSessionIds = data?.sessions?.showSessionIds !== false;
+
   const sessionRows = useMemo(() => {
     const list = data?.sessions?.list || [];
     return [...list]
@@ -72,8 +74,8 @@ export default function StatusDashboard() {
             Last update: {lastUpdatedRef.current ? lastUpdatedRef.current.toLocaleTimeString() : "—"}
           </div>
           <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
-            <label style={{ fontSize: 12, color: "#6b7280" }}>Refresh:</label>
-            <select value={intervalMs} onChange={(e) => setIntervalMs(Number(e.target.value))}
+            <label htmlFor="refresh-interval" style={{ fontSize: 12, color: "#6b7280" }}>Refresh:</label>
+            <select id="refresh-interval" value={intervalMs} onChange={(e) => setIntervalMs(Number(e.target.value))}
               style={{ background: "#fff", color: "#1f2937", border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px" }}>
               <option value={2000}>2s</option>
               <option value={5000}>5s</option>
@@ -81,9 +83,9 @@ export default function StatusDashboard() {
               <option value={30000}>30s</option>
             </select>
             {!paused ? (
-              <button onClick={() => setPaused(true)} style={{ background: "#fff", color: "#1f2937", border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>Pause</button>
+              <button type="button" onClick={() => setPaused(true)} style={{ background: "#fff", color: "#1f2937", border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>Pause</button>
             ) : (
-              <button onClick={() => setPaused(false)} style={{ background: "#fff", color: "#1f2937", border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>Resume</button>
+              <button type="button" onClick={() => setPaused(false)} style={{ background: "#fff", color: "#1f2937", border: "1px solid #d1d5db", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>Resume</button>
             )}
           </div>
         </div>
@@ -190,19 +192,16 @@ export default function StatusDashboard() {
             </thead>
             <tbody>
               {sessionRows.length > 0 ? (
-                sessionRows.map((s) => (
-                  <tr key={s.id}>
+                sessionRows.map((s, idx) => (
+                  <tr key={`${s.id || 'session'}-${idx}`}>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", color: "#111827" }}>
-                      <a 
-                        href={`/manage/${s.type}/${s.id}`} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        style={{ color: "#2563eb", textDecoration: "none", cursor: "pointer" }}
-                        onMouseEnter={(e) => e.target.style.textDecoration = "underline"}
-                        onMouseLeave={(e) => e.target.style.textDecoration = "none"}
-                      >
-                        <code>{s.id}</code>
-                      </a>
+                      {showSessionIds && s.id ? (
+                        <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>
+                          <code>{s.id}</code>
+                        </span>
+                      ) : (
+                        <span style={{ color: "#6b7280" }}>hidden</span>
+                      )}
                     </td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", color: "#111827" }}>{s.type}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #f3f4f6", color: s.socketCount > 0 ? "#059669" : "#111827" }}>{fmtInt(s.socketCount)}</td>
