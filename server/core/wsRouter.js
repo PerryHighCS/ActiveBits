@@ -1,5 +1,4 @@
 import { WebSocketServer } from "ws";
-import { findHashBySessionId, resetPersistentSession } from "./persistentSessions.js";
 
 const SESSION_CLEANUP_GRACE_PERIOD_MS = 5_000;
 
@@ -44,35 +43,22 @@ export function createWsRouter(server, sessions) {
     const scheduleSessionCleanup = (sessionId) => {
         if (!sessionId || !sessions) return;
 
-        // Clear any existing timer so only the latest one runs
         const existingTimer = sessionCleanupTimers.get(sessionId);
         if (existingTimer) clearTimeout(existingTimer);
 
         const timer = setTimeout(async () => {
             const hasClients = Array.from(wss.clients).some(
                 (client) =>
-                    client.readyState === 1 && // OPEN
+                    client.readyState === 1 &&
                     client.sessionId === sessionId
             );
 
-            if (hasClients) return; // Someone reconnected
-
-            const session = await sessions.get(sessionId);
-            if (session) {
-                try {
-                    const hash = await findHashBySessionId(sessionId);
-                    if (hash) {
-                        await resetPersistentSession(hash);
-                    } else {
-                        console.warn(`No persistent hash found for session ${sessionId} during cleanup`);
-                    }
-                } catch (err) {
-                    console.error('Failed to reset persistent session during cleanup', err);
-                }
-                await sessions.delete(sessionId);
-                console.log(`Ended session ${sessionId} because no clients remained connected.`);
+            if (!hasClients) {
+                console.log(`No clients remain connected to session ${sessionId}; preserving data until TTL or manual deletion.`);
             }
-        }, SESSION_CLEANUP_GRACE_PERIOD_MS); // short grace period for quick reconnects
+
+            sessionCleanupTimers.delete(sessionId);
+        }, SESSION_CLEANUP_GRACE_PERIOD_MS);
 
         sessionCleanupTimers.set(sessionId, timer);
         timer.unref?.();
