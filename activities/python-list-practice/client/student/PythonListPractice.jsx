@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Button from '@src/components/ui/Button';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import '../styles.css';
 // components consolidated into subcomponents: StatsPanel, ControlsPanel, QuestionPanel
 import NameForm from './components/NameForm';
@@ -24,8 +25,7 @@ export default function PythonListPractice({ sessionData }) {
   const [studentName, setStudentName] = useState('');
   const [submittedName, setSubmittedName] = useState(null);
   const [studentId, setStudentId] = useState(null);
-  const wsRef = useRef(null);
-  const attachSessionEndedHandler = useSessionEndedHandler(wsRef);
+  const attachSessionEndedHandler = useSessionEndedHandler();
   const sessionId = sessionData?.sessionId;
   const isSolo = !sessionId || sessionId.startsWith('solo-');
   const [allowedTypes, setAllowedTypes] = useState(() => new Set(['all']));
@@ -163,38 +163,51 @@ export default function PythonListPractice({ sessionData }) {
 
   
 
-  useEffect(() => {
-    if (!sessionId || isSolo) return;
+  const handleStudentMessage = useCallback((evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'questionTypesUpdate') {
+        applySelectedTypes(msg.payload?.selectedQuestionTypes || ['all']);
+      }
+    } catch (err) {
+      console.error('WS message error', err);
+    }
+  }, [applySelectedTypes]);
+
+  const handleStudentOpen = useCallback(() => {
+    if (submittedName) {
+      sendStats();
+    }
+  }, [submittedName, sendStats]);
+
+  const buildStudentWsUrl = useCallback(() => {
+    if (!sessionId || isSolo) return null;
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const encodedSession = encodeURIComponent(sessionId);
     const nameParam = submittedName ? `&studentName=${encodeURIComponent(submittedName)}` : '';
     const idParam = studentId ? `&studentId=${encodeURIComponent(studentId)}` : '';
-    const wsUrl = `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${encodedSession}${nameParam}${idParam}`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    attachSessionEndedHandler(ws);
-    ws.onopen = () => {
-      // send a zeroed stats payload on connect so the dashboard sees the student immediately
-      if (submittedName) {
-        sendStats();
-      }
-    };
-    ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data);
-        if (msg.type === 'questionTypesUpdate') {
-          applySelectedTypes(msg.payload?.selectedQuestionTypes || ['all']);
-        }
-      } catch (err) {
-        console.error('WS message error', err);
-      }
-    };
-    ws.onerror = (err) => console.error('WS error', err);
+    return `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${encodedSession}${nameParam}${idParam}`;
+  }, [sessionId, submittedName, studentId, isSolo]);
+
+  const { connect: connectStudentWs, disconnect: disconnectStudentWs } = useResilientWebSocket({
+    buildUrl: buildStudentWsUrl,
+    shouldReconnect: Boolean(sessionId && !isSolo),
+    onOpen: handleStudentOpen,
+    onMessage: handleStudentMessage,
+    onError: (err) => console.error('WS error', err),
+    attachSessionEndedHandler,
+  });
+
+  useEffect(() => {
+    if (!sessionId || isSolo) {
+      disconnectStudentWs();
+      return undefined;
+    }
+    connectStudentWs();
     return () => {
-      ws.close();
-      wsRef.current = null;
+      disconnectStudentWs();
     };
-  }, [sessionId, submittedName, applySelectedTypes, sendStats, isSolo]);
+  }, [sessionId, isSolo, connectStudentWs, disconnectStudentWs]);
 
   const isListBuildVariant = challenge?.variant === 'insert-final' || challenge?.variant === 'list-final';
 

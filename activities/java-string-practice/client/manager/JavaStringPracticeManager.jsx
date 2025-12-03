@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
 import SessionHeader from '@src/components/common/SessionHeader';
 import ActivityRoster from '@src/components/common/ActivityRoster';
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 
 /**
  * JavaStringPracticeManager - Teacher view for managing the Java String Practice activity
@@ -67,60 +68,69 @@ export default function JavaStringPracticeManager() {
     });
   };
 
-  useEffect(() => {
+  const fetchStudents = useCallback(async () => {
     if (!sessionId) return;
-
-    // Fetch students initially
-    const fetchStudents = async () => {
-      try {
-        const res = await fetch(`/api/java-string-practice/${sessionId}/students`);
-        if (!res.ok) throw new Error('Failed to fetch students');
-        const data = await res.json();
-        setStudents(data.students || []);
-      } catch (err) {
-        console.error('Failed to fetch students:', err);
-      }
-    };
-
-    fetchStudents();
-
-    // Set up WebSocket for real-time updates
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}`;
-    const ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      console.log('Manager WebSocket connected');
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        console.log('Manager received message:', message);
-        if (message.type === 'studentsUpdate') {
-          console.log('Updating students:', message.payload.students);
-          setStudents(message.payload.students || []);
-        }
-      } catch (err) {
-        console.error('Failed to parse WebSocket message:', err);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('Manager WebSocket error:', error);
-    };
-
-    ws.onclose = () => {
-      console.log('Manager WebSocket disconnected');
-    };
-
-    return () => {
-      if (ws) {
-        ws.close();
-      }
-    };
+    try {
+      const res = await fetch(`/api/java-string-practice/${sessionId}/students`);
+      if (!res.ok) throw new Error('Failed to fetch students');
+      const data = await res.json();
+      const list = Array.isArray(data.students) ? data.students : [];
+      setStudents(list);
+    } catch (err) {
+      console.error('Failed to fetch students:', err);
+    }
   }, [sessionId]);
+
+  const handleWsMessage = useCallback((event) => {
+    try {
+      const message = JSON.parse(event.data);
+      console.log('Manager received message:', message);
+      if (message.type === 'studentsUpdate') {
+        console.log('Updating students:', message.payload.students);
+        const list = Array.isArray(message.payload?.students) ? message.payload.students : [];
+        setStudents(list);
+      }
+    } catch (err) {
+      console.error('Failed to parse WebSocket message:', err);
+    }
+  }, []);
+
+  const handleWsOpen = useCallback(() => {
+    console.log('Manager WebSocket connected');
+    fetchStudents();
+  }, [fetchStudents]);
+
+  const buildWsUrl = useCallback(() => {
+    if (!sessionId) return null;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws/java-string-practice?sessionId=${sessionId}`;
+  }, [sessionId]);
+
+  const handleWsError = useCallback((error) => {
+    console.error('Manager WebSocket error:', error);
+  }, []);
+
+  const handleWsClose = useCallback(() => {
+    console.log('Manager WebSocket disconnected');
+  }, []);
+
+  const { connect, disconnect } = useResilientWebSocket({
+    buildUrl: buildWsUrl,
+    shouldReconnect: Boolean(sessionId),
+    onOpen: handleWsOpen,
+    onMessage: handleWsMessage,
+    onError: handleWsError,
+    onClose: handleWsClose,
+  });
+
+  useEffect(() => {
+    if (!sessionId) return undefined;
+    fetchStudents();
+    connect();
+    return () => {
+      disconnect();
+    };
+  }, [sessionId, fetchStudents, connect, disconnect]);
 
   const handleSort = (column) => {
     if (sortBy === column) {
@@ -135,7 +145,8 @@ export default function JavaStringPracticeManager() {
   };
 
   const getSortedStudents = () => {
-    const sorted = [...students].sort((a, b) => {
+    const base = Array.isArray(students) ? students : [];
+    const sorted = [...base].sort((a, b) => {
       let aVal, bVal;
       
       switch (sortBy) {
@@ -202,6 +213,8 @@ export default function JavaStringPracticeManager() {
     );
   }
 
+  const safeStudents = Array.isArray(students) ? students : [];
+
   return (
     <div>
       <SessionHeader 
@@ -236,7 +249,7 @@ export default function JavaStringPracticeManager() {
             <div>
               <h3 className="text-xl font-semibold">Student Progress</h3>
               <p className="text-sm text-gray-600 mt-1">
-                {students.filter(s => s.connected).length} connected / {students.length} total students
+                {safeStudents.filter(s => s.connected).length} connected / {safeStudents.length} total students
               </p>
             </div>
             <Button onClick={downloadCSV} variant="outline">

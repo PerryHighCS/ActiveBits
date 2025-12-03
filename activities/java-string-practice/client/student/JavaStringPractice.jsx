@@ -10,6 +10,7 @@ import StatsPanel from '../components/StatsPanel';
 import ChallengeQuestion from '../components/ChallengeQuestion';
 import { generateChallenge, validateAnswer, getExplanation } from '../components/challengeLogic';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 
 /**
  * JavaStringPractice - Student view for practicing Java String methods
@@ -29,8 +30,9 @@ import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
  */
 export default function JavaStringPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
+  const isSoloSession = sessionId ? sessionId.startsWith('solo-') : false;
   const initializedRef = useRef(false);
-  const wsRef = useRef(null);
+  const studentIdRef = useRef(null);
   const navigate = useNavigate();
   
   // Get session-ended handler
@@ -70,7 +72,7 @@ export default function JavaStringPractice({ sessionData }) {
 
   // Check for saved student name and ID
   useEffect(() => {
-    if (sessionId.startsWith('solo-')) {
+    if (isSoloSession) {
       setStudentName('Solo Student');
       setNameSubmitted(true);
       return;
@@ -85,89 +87,92 @@ export default function JavaStringPractice({ sessionData }) {
     }
   }, [sessionId]);
 
-  // Fetch allowed methods from server (teacher's selection)
   useEffect(() => {
-    if (!nameSubmitted) return; // Wait for name to be submitted
-    
-    if (sessionId.startsWith('solo-')) {
-      // Solo mode - allow all methods
-      return;
+    studentIdRef.current = studentId;
+  }, [studentId]);
+
+  const fetchAllowedMethods = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`/api/java-string-practice/${sessionId}`);
+      if (!res.ok) throw new Error('Failed to fetch session');
+      const data = await res.json();
+      const methods = data.selectedMethods || ['all'];
+      setSelectedTypes(new Set(methods));
+    } catch (err) {
+      console.error('Failed to fetch allowed methods:', err);
     }
+  }, [sessionId]);
 
-    // Fetch initial methods
-    const fetchAllowedMethods = async () => {
-      try {
-        const res = await fetch(`/api/java-string-practice/${sessionId}`);
-        if (!res.ok) throw new Error('Failed to fetch session');
-        const data = await res.json();
-        const methods = data.selectedMethods || ['all'];
-        setSelectedTypes(new Set(methods));
-      } catch (err) {
-        console.error('Failed to fetch allowed methods:', err);
+  const handleWsMessage = useCallback((event) => {
+    console.log('WebSocket message received:', event.data);
+    try {
+      const message = JSON.parse(event.data);
+      console.log('Parsed message:', message);
+      if (message.type === 'session-ended') {
+        navigate('/session-ended');
+        return;
       }
-    };
+      if (message.type === 'studentId') {
+        const newStudentId = message.payload.studentId;
+        setStudentId(newStudentId);
+        localStorage.setItem(`student-id-${sessionId}`, newStudentId);
+        console.log('Received student ID:', newStudentId);
+      } else if (message.type === 'methodsUpdate') {
+        const methods = message.payload.selectedMethods || ['all'];
+        console.log('Updating methods to:', methods);
+        setSelectedTypes(new Set(methods));
+        const challenge = generateChallenge(new Set(methods));
+        setCurrentChallenge(challenge);
+        resetChallengeState();
+      }
+    } catch (err) {
+      console.error('Failed to parse WebSocket message:', err);
+    }
+  }, [navigate, resetChallengeState, sessionId]);
 
+  const handleWsOpen = useCallback(() => {
+    console.log('WebSocket connected for session:', sessionId);
     fetchAllowedMethods();
+  }, [fetchAllowedMethods, sessionId]);
 
-    // Set up WebSocket for real-time updates
+  const handleWsError = useCallback((error) => {
+    console.error('WebSocket error:', error);
+  }, []);
+
+  const handleWsClose = useCallback(() => {
+    console.log('WebSocket disconnected for session:', sessionId);
+  }, [sessionId]);
+
+  const buildWsUrl = useCallback(() => {
+    if (!nameSubmitted || isSoloSession) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const studentIdParam = studentId ? `&studentId=${encodeURIComponent(studentId)}` : '';
-    const wsUrl = `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}${studentIdParam}`;
-    console.log('Connecting to WebSocket:', wsUrl);
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    
-    // Attach session-ended handler
-    attachSessionEndedHandler(ws);
+    const currentId = studentIdRef.current;
+    const studentIdParam = currentId ? `&studentId=${encodeURIComponent(currentId)}` : '';
+    return `${protocol}//${host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}${studentIdParam}`;
+  }, [nameSubmitted, sessionId, studentName, isSoloSession]);
 
-    ws.onopen = () => {
-      console.log('WebSocket connected for session:', sessionId);
-    };
+  const { connect: connectStudentWs, disconnect: disconnectStudentWs } = useResilientWebSocket({
+    buildUrl: buildWsUrl,
+    shouldReconnect: Boolean(nameSubmitted && !isSoloSession),
+    onOpen: handleWsOpen,
+    onMessage: handleWsMessage,
+    onError: handleWsError,
+    onClose: handleWsClose,
+    attachSessionEndedHandler,
+  });
 
-    ws.onmessage = (event) => {
-      console.log('WebSocket message received:', event.data);
-      try {
-        const message = JSON.parse(event.data);
-        console.log('Parsed message:', message);
-        if (message.type === 'session-ended') {
-          navigate('/session-ended');
-          return;
-        }
-        if (message.type === 'studentId') {
-          // Store the unique student ID
-          const newStudentId = message.payload.studentId;
-          setStudentId(newStudentId);
-          localStorage.setItem(`student-id-${sessionId}`, newStudentId);
-          console.log('Received student ID:', newStudentId);
-        } else if (message.type === 'methodsUpdate') {
-          const methods = message.payload.selectedMethods || ['all'];
-          console.log('Updating methods to:', methods);
-          setSelectedTypes(new Set(methods));
-          // Generate new challenge with updated methods
-          const challenge = generateChallenge(new Set(methods));
-          setCurrentChallenge(challenge);
-          resetChallengeState();
-        }
-      } catch (err) {
-        console.error('Failed to parse WebSocket message:', err);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket disconnected for session:', sessionId);
-    };
-
+  useEffect(() => {
+    if (!nameSubmitted || isSoloSession) {
+      disconnectStudentWs();
+      return undefined;
+    }
+    connectStudentWs();
     return () => {
-      if (ws) {
-        ws.close();
-      }
+      disconnectStudentWs();
     };
-  }, [sessionId, nameSubmitted, studentName, studentId, resetChallengeState, attachSessionEndedHandler, navigate]);
+  }, [nameSubmitted, sessionId, connectStudentWs, disconnectStudentWs]);
 
   // Load saved stats from localStorage
   useEffect(() => {
@@ -187,7 +192,7 @@ export default function JavaStringPractice({ sessionData }) {
       localStorage.setItem(`java-string-stats-${sessionId}`, JSON.stringify(stats));
       
       // Send progress to server for teacher-managed sessions
-      if (!sessionId.startsWith('solo-') && nameSubmitted) {
+      if (!isSoloSession && nameSubmitted) {
         fetch(`/api/java-string-practice/${sessionId}/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -274,7 +279,7 @@ export default function JavaStringPractice({ sessionData }) {
   };
 
   // Show name prompt for teacher-managed sessions
-  if (!sessionId.startsWith('solo-') && !nameSubmitted) {
+  if (!isSoloSession && !nameSubmitted) {
     return (
       <div className="java-string-container">
         <div className="java-string-header">
@@ -320,7 +325,7 @@ export default function JavaStringPractice({ sessionData }) {
           <div className="challenge-header">
             <ChallengeSelector
               selectedTypes={selectedTypes}
-              onTypeSelect={sessionId.startsWith('solo-') ? handleTypeSelection : undefined}
+              onTypeSelect={isSoloSession ? handleTypeSelection : undefined}
             />
           </div>
 

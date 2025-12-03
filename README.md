@@ -6,6 +6,7 @@ It currently supports:
 - 🎟️ **Raffle Tickets** – Students scan a QR code to receive a unique ticket.
   * Use raffles to explore search algorithms: run a raffle, assign tickets, choose a winner, and search for that ticket.
   * Use pair and group raffles to highlight the difference between reasonable and unreasonable algorithms (e.g., finding sets that sum to a target).
+  * Teacher dashboard receives live ticket updates over WebSockets—no refresh required.
 
 - 🌐 **Network Scavenger Hunts** – Simulate IP-based discovery and HTTP interactions.
 
