@@ -161,24 +161,30 @@ export class ValkeySessionStore {
     }
 
     /**
+     * Helper to scan keys with a given pattern.
+     * @param {string} pattern
+     * @returns {Promise<string[]>}
+     * @private
+     */
+    async _scanKeys(pattern) {
+        const keys = [];
+        let cursor = '0';
+        do {
+            const [nextCursor, batch] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+            keys.push(...batch);
+            cursor = nextCursor;
+        } while (cursor !== '0');
+        return keys;
+    }
+
+    /**
      * Get all session IDs (for cleanup/iteration).
      * Use sparingly - expensive operation.
      * @returns {Promise<string[]>} Array of session IDs
      */
     async getAllIds() {
-        const scanKeys = async (pattern) => {
-            const keys = [];
-            let cursor = '0';
-            do {
-                const [nextCursor, batch] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
-                keys.push(...batch);
-                cursor = nextCursor;
-            } while (cursor !== '0');
-            return keys;
-        };
-
         try {
-            const keys = await scanKeys('session:*');
+            const keys = await this._scanKeys('session:*');
             return keys.map(key => key.replace('session:', ''));
         } catch (err) {
             console.error('Failed to get all session IDs:', err);
@@ -305,19 +311,8 @@ export class ValkeyPersistentStore {
      * @returns {Promise<string[]>}
      */
     async getAllHashes() {
-        const scanKeys = async (pattern) => {
-            const keys = [];
-            let cursor = '0';
-            do {
-                const [nextCursor, batch] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
-                keys.push(...batch);
-                cursor = nextCursor;
-            } while (cursor !== '0');
-            return keys;
-        };
-
         try {
-            const keys = await scanKeys('persistent:*');
+            const keys = await this._scanKeys('persistent:*');
             return keys.map(key => key.replace('persistent:', ''));
         } catch (err) {
             console.error('Failed to get all persistent session hashes:', err);
