@@ -154,32 +154,34 @@ Keep metadata (id/name/description/color/soloMode) in `activity.config.js` to av
 **File: `activities/quiz/server/routes.js`**
 
 ```javascript
-import { createSession } from '../../core/sessions.js';
+import { createSession } from '../../../server/core/sessions.js';
 
 export default function setupQuizRoutes(app, sessions, ws) {
   // Create quiz session
-  app.post('/api/quiz/create', (req, res) => {
-    const session = createSession(sessions, { data: {} });
+  app.post('/api/quiz/create', async (req, res) => {
+    const session = await createSession(sessions, { data: {} });
     session.type = 'quiz';
     session.data.question = '';
     session.data.responses = [];
+    await sessions.set(session.id, session);
     res.json({ id: session.id });
   });
 
   // Set question
-  app.post('/api/quiz/:sessionId/setup', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.post('/api/quiz/:sessionId/setup', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'quiz') {
       return res.status(404).json({ error: 'invalid session' });
     }
     
     session.data.question = req.body.question;
+    await sessions.set(session.id, session);
     res.json({ success: true });
   });
 
   // Submit answer
-  app.post('/api/quiz/:sessionId/submit', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.post('/api/quiz/:sessionId/submit', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'quiz') {
       return res.status(404).json({ error: 'invalid session' });
     }
@@ -189,12 +191,13 @@ export default function setupQuizRoutes(app, sessions, ws) {
       timestamp: Date.now(),
     });
     
+    await sessions.set(session.id, session);
     res.json({ success: true });
   });
 
   // Get responses
-  app.get('/api/quiz/:sessionId/responses', (req, res) => {
-    const session = sessions[req.params.sessionId];
+  app.get('/api/quiz/:sessionId/responses', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
     if (!session || session.type !== 'quiz') {
       return res.status(404).json({ error: 'invalid session' });
     }
@@ -202,6 +205,50 @@ export default function setupQuizRoutes(app, sessions, ws) {
     res.json({ responses: session.data.responses });
   });
 }
+```
+
+**Important:** Always use `await sessions.get()` and `await sessions.set()` - the session store is async.
+
+### Step 5a: Register Session Data Normalization (Required for Valkey/Cache)
+
+When using Valkey for session persistence, sessions loaded after a server restart may have incomplete or missing data structures. To prevent runtime errors, add your activity's data structure defaults to the normalization function.
+
+**File: `server/core/sessions.js`**
+
+Find the `normalizeSessionData()` function and add a case for your activity type:
+
+```javascript
+function normalizeSessionData(session) {
+    if (!session || typeof session !== 'object') return session;
+    session.data ??= {};
+
+    // Activity-specific defaults
+    switch (session.type) {
+        case 'quiz':
+            session.data.question = session.data.question ?? '';
+            session.data.responses = Array.isArray(session.data.responses) ? session.data.responses : [];
+            break;
+        // ... other activity cases
+        default:
+            break;
+    }
+    return session;
+}
+```
+
+**Key points:**
+- Use `Array.isArray(...)` to verify arrays before defaulting
+- For plain objects, use: `!Array.isArray(...) && ... !== null && typeof ... === 'object'`
+  - JavaScript's `typeof null === 'object'` and `typeof [] === 'object'`, so both checks are needed
+- Use nullish coalescing (`??`) for primitive fields with defaults
+- This ensures sessions loaded from Valkey have complete structures
+
+**Example for nested objects:**
+```javascript
+session.data.config = (!Array.isArray(session.data.config) && 
+                       session.data.config !== null && 
+                       typeof session.data.config === 'object') 
+                       ? session.data.config : {};
 ```
 
 ### Step 6: Add the Activity Config (auto-discovery)
