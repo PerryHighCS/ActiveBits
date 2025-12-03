@@ -227,7 +227,7 @@ export default function ManageDashboard() {
                     >
                       {isCopied(soloLink) ? '✓ Copied Solo Link' : 'Copy Solo Practice Link'}
                     </button>
-                  )}                  
+                  )}
                 </div>
               </div>
             </div>
