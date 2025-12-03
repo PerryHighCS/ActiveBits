@@ -259,21 +259,31 @@ export default function MyActivityManager() {
 Receives `sessionData` prop from `SessionRouter`. Should handle session termination:
 
 ```jsx
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect } from 'react';
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 
-export default function MyActivityStudent({ sessionData, wsRef }) {
+export default function MyActivityStudent({ sessionData }) {
   const attachSessionEndedHandler = useSessionEndedHandler();
-  
+
+  const buildWsUrl = useCallback(() => {
+    if (!sessionData?.sessionId) return null;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/ws/my-activity?sessionId=${sessionData.sessionId}`;
+  }, [sessionData?.sessionId]);
+
+  const { connect, disconnect } = useResilientWebSocket({
+    buildUrl: buildWsUrl,
+    shouldReconnect: Boolean(sessionData?.sessionId),
+    onMessage: handleIncomingMessage,
+    attachSessionEndedHandler,
+  });
+
   useEffect(() => {
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    
-    // Attach handler after creating WebSocket
-    attachSessionEndedHandler(ws);
-    
-    // Activity WebSocket setup...
-  }, [attachSessionEndedHandler]);
+    if (!sessionData?.sessionId) return undefined;
+    connect();
+    return () => disconnect();
+  }, [sessionData?.sessionId, connect, disconnect]);
 }
 ```
 
@@ -296,6 +306,7 @@ Located in `components/common/`:
 Located in `hooks/`:
 
 - **useSessionEndedHandler** - Centralized WebSocket listener for session termination
+- **useResilientWebSocket** - Shared reconnection + lifecycle manager for all activity WebSockets (handles retries, cleanup, and integrates with `useSessionEndedHandler`)
 
 ### Activity-Specific Components
 Located within each activity's `components/` folder and imported with relative paths.

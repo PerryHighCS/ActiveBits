@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useSessionEndedHandler } from "@src/hooks/useSessionEndedHandler";
+import { useResilientWebSocket } from "@src/hooks/useResilientWebSocket";
 import Button from "@src/components/ui/Button";
 import StudentHostPalette from "../components/StudentHostPalette";
 import StudentBrowserView from "../components/StudentBrowserView";
@@ -28,143 +29,135 @@ export default function WwwSim({ sessionData }) {
     const [templateRequests, setTemplateRequests] = useState([]);
 
     const templateRequestsRef = useRef();
-    const wsRef = useRef(null);
     const heartbeatRef = useRef(null);
     const httpKeepAliveRef = useRef(null);
     
     // Get session-ended handler
     const attachSessionEndedHandler = useSessionEndedHandler();
 
-    const reconnectTimeoutRef = useRef(null);
-    const reconnectAttemptsRef = useRef(0);
     useEffect(() => {
         templateRequestsRef.current = templateRequests;
     }, [templateRequests]);
 
+    const clearWsIntervals = useCallback(() => {
+        if (heartbeatRef.current) {
+            clearInterval(heartbeatRef.current);
+            heartbeatRef.current = null;
+        }
+        if (httpKeepAliveRef.current) {
+            clearInterval(httpKeepAliveRef.current);
+            httpKeepAliveRef.current = null;
+        }
+    }, []);
 
+    const handleWsMessage = useCallback((event) => {
+        if (event.data === 'pong' || event.data === 'ping') return;
+        try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'ping' || msg.type === 'pong') return;
+            switch (msg.type) {
+                case "student-updated": {
+                    const { oldHostname, newHostname } = msg.payload;
+                    if (oldHostname === hostname) {
+                        setHostname(newHostname);
+                        localStorage.setItem(storageKey, newHostname);
+                        setMessage(`Hostname updated to "${newHostname}"`);
+                    }
+
+                    if (templateRequestsRef.current?.fragments) {
+                        const escaped = oldHostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const regex = new RegExp(`//${escaped}/`, "g");
+
+                        const next = templateRequestsRef.current.fragments.map(frag => ({
+                            ...frag,
+                            url: frag.url.replace(regex, `//${newHostname}/`)
+                        }));
+
+                        setTemplateRequests((prev) => {
+                            const current = prev ?? {};
+                            return {
+                                ...current,
+                                fragments: next,
+                                title: current.title,
+                            };
+                        });
+                    }
+                    break;
+                }
+                case "student-removed": {
+                    const { hostname: removed } = msg.payload;
+                    if (removed === hostname) {
+                        setMessage("You have been removed by the instructor.");
+                        setJoined(false);
+                        setHostname("");
+                        localStorage.removeItem(storageKey);
+                    }
+                    break;
+                }
+                case "assigned-fragments": {
+                    console.log("Fragments assigned", msg.payload);
+                    const { host, requests } = msg.payload || {};
+                    setHostAssignments(host || []);
+                    setTemplateRequests(requests || []);
+                    break;
+                }
+                case "template-assigned": {
+                    console.log("template assigned", msg.payload);
+                    const { hostname: hn, template } = msg.payload || {};
+                    if (hostname === hn) {
+                        setTemplateRequests(template);
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        } catch (err) {
+            console.error("Failed to parse WS message", err);
+        }
+    }, [hostname, storageKey]);
+
+    const handleWsOpen = useCallback((_, ws) => {
+        clearWsIntervals();
+        heartbeatRef.current = setInterval(() => {
+            try { ws.send('ping'); } catch { /* ignore */ }
+        }, 30000);
+        const keepAlive = () => fetch('/', { method: 'HEAD' }).catch(() => {});
+        keepAlive();
+        httpKeepAliveRef.current = setInterval(keepAlive, 300000);
+    }, [clearWsIntervals]);
+
+    const handleWsClose = useCallback(() => {
+        clearWsIntervals();
+    }, [clearWsIntervals]);
+
+    const buildWsUrl = useCallback(() => {
+        if (!joined || !sessionId) return null;
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const host = window.location.host;
+        return `${protocol}//${host}/ws/www-sim?sessionId=${sessionId}&hostname=${hostname}`;
+    }, [joined, sessionId, hostname]);
+
+    const { connect: connectWs, disconnect: disconnectWs } = useResilientWebSocket({
+        buildUrl: buildWsUrl,
+        shouldReconnect: Boolean(joined && sessionId),
+        onOpen: handleWsOpen,
+        onMessage: handleWsMessage,
+        onError: (err) => console.error("WebSocket error (student)", err),
+        onClose: handleWsClose,
+        attachSessionEndedHandler,
+    });
 
     useEffect(() => {
-        if (!joined || !sessionId) return;
-
-        let cancelled = false;
-
-        function connect() {
-            if (cancelled) return;
-
-            let protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            let host = window.location.host;
-            const ws = new WebSocket(`${protocol}//${host}/ws/www-sim?sessionId=${sessionId}&hostname=${hostname}`);
-
-            wsRef.current?.close();
-            wsRef.current = ws;
-            
-            // Attach session-ended handler
-            attachSessionEndedHandler(ws);
-
-            ws.onopen = () => {
-                reconnectAttemptsRef.current = 0;
-                if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-                heartbeatRef.current = setInterval(() => {
-                    try { ws.send('ping'); } catch { /* ignore */ }
-                }, 30000);
-                if (httpKeepAliveRef.current) clearInterval(httpKeepAliveRef.current);
-                const keepAlive = () => fetch('/', { method: 'HEAD' }).catch(() => {});
-                keepAlive();
-                httpKeepAliveRef.current = setInterval(keepAlive, 300000);
-
-            };
-
-            ws.addEventListener("message", (event) => {
-                if (event.data === 'pong' || event.data === 'ping') return;
-                try {
-                    const msg = JSON.parse(event.data);
-                    if (msg.type === 'ping' || msg.type === 'pong') return;
-                    switch (msg.type) {
-                        case "student-updated": {
-                            const { oldHostname, newHostname } = msg.payload;
-                            if (oldHostname === hostname) {
-                                setHostname(newHostname);
-                                localStorage.setItem(storageKey, newHostname);
-                                setMessage(`Hostname updated to "${newHostname}"`);
-                            }
-
-                            // Update templateRequests fragment URLs
-                            if (templateRequestsRef.current?.fragments) {
-                                const escaped = oldHostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                                const regex = new RegExp(`//${escaped}/`, "g");
-
-                                const next = templateRequestsRef.current.fragments.map(frag => ({
-                                    ...frag,
-                                    url: frag.url.replace(regex, `//${newHostname}/`)
-                                }));
-
-                                console.log("Updated templateRequests fragments:", next);
-                                setTemplateRequests((prev) => ({
-                                    title: prev.title,
-                                    ...prev,
-                                    fragments: next
-                                }));
-                            }
-
-
-                            break;
-                        }
-
-                        case "student-removed": {
-                            const { hostname: removed } = msg.payload;
-                            if (removed === hostname) {
-                                setMessage("You have been removed by the instructor.");
-                                setJoined(false);
-                                setHostname("");
-                                localStorage.removeItem(storageKey);
-                            }
-                            break;
-                        }
-                        case "assigned-fragments": {
-                            console.log("Fragments assigned", msg.payload);
-                            const { host, requests } = msg.payload || {};
-                            setHostAssignments(host || []);
-                            setTemplateRequests(requests || []);
-                            break;
-                        }
-
-                        case "template-assigned": {
-                            console.log("template assigned", msg.payload);
-                            const {hostname: hn, template} = msg.payload || {};
-                            console.log("Got template", template);
-                            if (hostname === hn) {
-                                setTemplateRequests(template);
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.error("Failed to parse WS message", err);
-                }
-            });
-
-            ws.addEventListener("error", (err) => {
-                console.error("WebSocket error (student)", err);
-            });
-
-            ws.onclose = () => {
-                if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-                if (httpKeepAliveRef.current) clearInterval(httpKeepAliveRef.current);
-
-                if (cancelled) return;
-                const delay = Math.min(30000, 1000 * 2 ** reconnectAttemptsRef.current++);
-                reconnectTimeoutRef.current = setTimeout(connect, delay);
-            };
+        if (!joined || !sessionId) {
+            disconnectWs();
+            return undefined;
         }
-
-        connect();
+        connectWs();
         return () => {
-            cancelled = true;
-            clearInterval(heartbeatRef.current);
-            clearInterval(httpKeepAliveRef.current);
-            clearTimeout(reconnectTimeoutRef.current);
-            wsRef.current?.close();
+            disconnectWs();
         };
-    }, [joined, sessionId, hostname, storageKey]);
+    }, [joined, sessionId, hostname, connectWs, disconnectWs]);
 
 
     async function handleConnect() {
