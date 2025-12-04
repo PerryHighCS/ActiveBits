@@ -269,11 +269,11 @@ export default {
 
 Activities are auto-discovered from `activities/*/activity.config.js`; no central registry needs updating.
 
-### Step 7: Update the Activity Test
+### Step 7: Update the Activity Tests
 
 **File: `client/src/activities/index.test.js`**
 
-Add your new activity to the `EXPECTED_ACTIVITIES` array to ensure it's properly discovered:
+Add your new activity to the `EXPECTED_ACTIVITIES` array to ensure it's properly discovered on the client side:
 
 ```javascript
 const EXPECTED_ACTIVITIES = [
@@ -285,8 +285,23 @@ const EXPECTED_ACTIVITIES = [
 ];
 ```
 
-This test verifies that:
+**File: `server/activities/activityRegistry.test.js`**
+
+Also add your new activity to the `EXPECTED_ACTIVITIES` array in the server-side test:
+
+```javascript
+const EXPECTED_ACTIVITIES = [
+  "java-string-practice",
+  "python-list-practice",
+  "quiz",  // Add your new activity here
+  "raffle",
+  "www-sim",
+];
+```
+
+These tests verify that:
 - All expected activities exist with the required file structure
+- Activity configs have all required fields (server test)
 - No unexpected activities have been added
 - Activity count matches expectations
 
@@ -294,6 +309,9 @@ Run the tests to verify your activity is properly set up:
 
 ```bash
 npm run test:unit --workspace client
+npm test --workspace server
+# Or run all tests from the root:
+npm test
 ```
 
 ### Done! 🎉
@@ -320,6 +338,7 @@ When adding a new activity, create these files:
 
 **Tests:**
 - [ ] Add activity ID to `EXPECTED_ACTIVITIES` in `client/src/activities/index.test.js`
+- [ ] Add activity ID to `EXPECTED_ACTIVITIES` in `server/activities/activityRegistry.test.js`
 
 No central registry updates are needed; activities are auto-discovered from `activities/*/activity.config.js`.
 
