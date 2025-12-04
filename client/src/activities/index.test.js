@@ -1,112 +1,98 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, statSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
- * Tests for activity registry path parsing logic
- * 
- * These tests verify that the activity ID extraction works correctly
- * regardless of whether Vite resolves the @activities alias to a relative
- * path or keeps it as the alias.
+ * Expected activities in the system
+ * Update this list when adding or removing activities
  */
+const EXPECTED_ACTIVITIES = [
+  "java-string-practice",
+  "python-list-practice",
+  "raffle",
+  "www-sim",
+];
 
-// Extract the path parsing logic to test it independently
-function extractActivityIdFromPath(path) {
-  const pathParts = path.split(/[@\/]activities\//)[1]?.split('/');
-  return pathParts?.[0];
-}
+/**
+ * Test that verifies all expected activities exist and are properly structured
+ */
+test("all expected activities exist with required files", () => {
+  const activitiesDir = join(__dirname, "../../../activities");
+  
+  for (const activityId of EXPECTED_ACTIVITIES) {
+    const activityPath = join(activitiesDir, activityId);
+    const configPath = join(activityPath, "activity.config.js");
+    const clientDir = join(activityPath, "client");
+    const clientIndexJs = join(clientDir, "index.js");
+    const clientIndexJsx = join(clientDir, "index.jsx");
+    
+    assert.ok(
+      statSync(activityPath).isDirectory(),
+      `Activity directory exists: ${activityId}`
+    );
+    
+    assert.ok(
+      existsSync(configPath),
+      `Activity config exists: ${activityId}/activity.config.js`
+    );
+    
+    assert.ok(
+      statSync(clientDir).isDirectory(),
+      `Client directory exists: ${activityId}/client`
+    );
+    
+    assert.ok(
+      existsSync(clientIndexJs) || existsSync(clientIndexJsx),
+      `Client entry point exists: ${activityId}/client/index.{js,jsx}`
+    );
+  }
+});
 
-function findClientModuleKey(clientModuleKeys, activityId) {
-  return clientModuleKeys.find(k => 
-    k.includes(`/${activityId}/client/index`) || k.includes(`@activities/${activityId}/client/index`)
+/**
+ * Test that verifies no unexpected activities exist
+ */
+test("no unexpected activities in activities directory", () => {
+  const activitiesDir = join(__dirname, "../../../activities");
+  const entries = readdirSync(activitiesDir);
+  
+  const activityDirs = entries.filter(entry => {
+    const entryPath = join(activitiesDir, entry);
+    return statSync(entryPath).isDirectory() && entry !== "node_modules";
+  });
+  
+  const unexpectedActivities = activityDirs.filter(
+    dir => !EXPECTED_ACTIVITIES.includes(dir)
   );
-}
-
-test("extractActivityIdFromPath handles @activities alias format", () => {
-  const path = "@activities/java-string-practice/activity.config.js";
-  const activityId = extractActivityIdFromPath(path);
-  assert.equal(activityId, "java-string-practice");
-});
-
-test("extractActivityIdFromPath handles resolved relative path format", () => {
-  const path = "../activities/python-list-practice/activity.config.js";
-  const activityId = extractActivityIdFromPath(path);
-  assert.equal(activityId, "python-list-practice");
-});
-
-test("extractActivityIdFromPath handles absolute path format", () => {
-  const path = "/workspaces/ActiveBits/activities/raffle/activity.config.js";
-  const activityId = extractActivityIdFromPath(path);
-  assert.equal(activityId, "raffle");
-});
-
-test("extractActivityIdFromPath handles path with /activities/ subdirectory", () => {
-  const path = "/some/path/activities/www-sim/activity.config.js";
-  const activityId = extractActivityIdFromPath(path);
-  assert.equal(activityId, "www-sim");
-});
-
-test("findClientModuleKey finds module with alias format", () => {
-  const keys = [
-    "@activities/java-string-practice/client/index.js",
-    "@activities/python-list-practice/client/index.jsx",
-    "@activities/raffle/client/index.jsx",
-  ];
   
-  const found = findClientModuleKey(keys, "python-list-practice");
-  assert.equal(found, "@activities/python-list-practice/client/index.jsx");
+  assert.deepEqual(
+    unexpectedActivities,
+    [],
+    `Found unexpected activities: ${unexpectedActivities.join(", ")}`
+  );
 });
 
-test("findClientModuleKey finds module with resolved relative path", () => {
-  const keys = [
-    "../activities/java-string-practice/client/index.js",
-    "../activities/python-list-practice/client/index.jsx",
-    "../activities/raffle/client/index.jsx",
-  ];
+/**
+ * Test that verifies the activity count matches expectations
+ */
+test("activity count matches expected count", () => {
+  const activitiesDir = join(__dirname, "../../../activities");
+  const entries = readdirSync(activitiesDir);
   
-  const found = findClientModuleKey(keys, "java-string-practice");
-  assert.equal(found, "../activities/java-string-practice/client/index.js");
-});
-
-test("findClientModuleKey finds module with absolute path", () => {
-  const keys = [
-    "/workspaces/ActiveBits/activities/java-string-practice/client/index.js",
-    "/workspaces/ActiveBits/activities/python-list-practice/client/index.jsx",
-  ];
+  const activityDirs = entries.filter(entry => {
+    const entryPath = join(activitiesDir, entry);
+    return statSync(entryPath).isDirectory() && 
+           entry !== "node_modules" &&
+           existsSync(join(entryPath, "activity.config.js"));
+  });
   
-  const found = findClientModuleKey(keys, "java-string-practice");
-  assert.equal(found, "/workspaces/ActiveBits/activities/java-string-practice/client/index.js");
-});
-
-test("findClientModuleKey handles .js and .jsx extensions", () => {
-  const keys = [
-    "../activities/raffle/client/index.jsx",
-    "../activities/www-sim/client/index.js",
-  ];
-  
-  const foundJsx = findClientModuleKey(keys, "raffle");
-  const foundJs = findClientModuleKey(keys, "www-sim");
-  
-  assert.equal(foundJsx, "../activities/raffle/client/index.jsx");
-  assert.equal(foundJs, "../activities/www-sim/client/index.js");
-});
-
-test("findClientModuleKey returns undefined for non-existent activity", () => {
-  const keys = [
-    "@activities/java-string-practice/client/index.js",
-  ];
-  
-  const found = findClientModuleKey(keys, "non-existent-activity");
-  assert.equal(found, undefined);
-});
-
-test("extractActivityIdFromPath handles mixed formats in same codebase", () => {
-  const paths = [
-    "@activities/activity-one/activity.config.js",
-    "../activities/activity-two/activity.config.js",
-    "/full/path/activities/activity-three/activity.config.js",
-  ];
-  
-  const ids = paths.map(extractActivityIdFromPath);
-  
-  assert.deepEqual(ids, ["activity-one", "activity-two", "activity-three"]);
+  assert.equal(
+    activityDirs.length,
+    EXPECTED_ACTIVITIES.length,
+    `Expected ${EXPECTED_ACTIVITIES.length} activities, found ${activityDirs.length}`
+  );
 });
