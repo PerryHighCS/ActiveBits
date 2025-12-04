@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { activities } from "@src/activities";
 
 function fmtInt(n) {
   return typeof n === "number" && Number.isFinite(n) ? n.toLocaleString() : "-";
@@ -41,7 +42,12 @@ export default function StatusDashboard() {
 
   const byTypeEntries = useMemo(() => {
     const byType = data?.sessions?.byType || {};
-    return Object.entries(byType).sort((a, b) => a[0].localeCompare(b[0]));
+    // Include all available activity types, with 0 count if no sessions exist
+    const allTypes = {};
+    activities.forEach(activity => {
+      allTypes[activity.id] = byType[activity.id] || 0;
+    });
+    return Object.entries(allTypes).sort((a, b) => a[0].localeCompare(b[0]));
   }, [data]);
 
   const showSessionIds = data?.sessions?.showSessionIds !== false;
@@ -127,20 +133,13 @@ export default function StatusDashboard() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12, marginBottom: 12 }}>
         <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>
           <h3 style={{ margin: 0, marginBottom: 6, fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Sessions by Type</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "6px 12px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 }}>
-            {byTypeEntries.length > 0 ? (
-              byTypeEntries.map(([k, v]) => (
-                <React.Fragment key={k}>
-                  <div style={{ color: "#6b7280" }}>{k}</div>
-                  <div style={{ color: "#111827" }}>{fmtInt(v)}</div>
-                </React.Fragment>
-              ))
-            ) : (
-              <>
-                <div style={{ color: "#6b7280" }}>none</div>
-                <div style={{ color: "#111827" }}>0</div>
-              </>
-            )}
+          <div style={{ maxHeight: 200, overflowY: "auto", display: "grid", gridTemplateColumns: "max-content 1fr", gap: "6px 12px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 }}>
+            {byTypeEntries.map(([k, v]) => (
+              <React.Fragment key={k}>
+                <div style={{ color: "#6b7280" }}>{k}</div>
+                <div style={{ color: "#111827" }}>{fmtInt(v)}</div>
+              </React.Fragment>
+            ))}
           </div>
         </div>
         <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>
