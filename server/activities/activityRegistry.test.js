@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -104,7 +104,8 @@ test("all activity configs have required fields", async () => {
   
   for (const activityId of EXPECTED_ACTIVITIES) {
     const configPath = join(activitiesDir, activityId, "activity.config.js");
-    const { default: config } = await import(`file://${configPath}`);
+    const configUrl = pathToFileURL(configPath).href;
+    const { default: config } = await import(configUrl);
     
     assert.ok(config.id, `${activityId}: config has 'id' field`);
     assert.equal(config.id, activityId, `${activityId}: config.id matches directory name`);
