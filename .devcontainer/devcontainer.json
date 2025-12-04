@@ -12,19 +12,22 @@
     }
   },
   "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && npm install --workspaces --include-workspace-root",
-  "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Valkey check skipped'",
-  "forwardPorts": [6379, 3000, 5173],
+  "postStartCommand": "bash .devcontainer/setup-dev.sh &",
+  "forwardPorts": [
+    6379,
+    3000,
+    5173
+  ],
   "portsAttributes": {
     "3000": {
       "label": "ActiveBits Server",
-      "onAutoForward": "openBrowserOnce",
+      "onAutoForward": "openBrowser",
       "protocol": "http",
-      "requireLocalPort": true,
-      "elevateIfNeeded": false
+      "requireLocalPort": false
     },
     "5173": {
       "label": "Vite Dev Server",
-      "onAutoForward": "notify",
+      "onAutoForward": "silent",
       "protocol": "http",
       "requireLocalPort": false
     },
