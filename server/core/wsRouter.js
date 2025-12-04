@@ -56,22 +56,20 @@ export function createWsRouter(server, sessions) {
                     );
 
                     if (!hasClients) {
-                        let sessionExists = false;
                         if (sessions?.get) {
                             try {
-                                sessionExists = (await sessions.get(sessionId)) != null;
+                                const sessionExists = Boolean(await sessions.get(sessionId));
+                                if (sessionExists) {
+                                    console.log(`No clients remain connected to session ${sessionId}; preserving data until TTL or manual deletion.`);
+                                } else {
+                                    console.log(`Session ${sessionId} ended and no clients remain connected.`);
+                                }
                             } catch (err) {
-                                console.error(`Session store error while checking session ${sessionId} existence during cleanup:`, err);
-                                // Assume session doesn't exist if we can't verify
+                                console.error(`Failed to check session ${sessionId} existence during cleanup:`, err);
+                                console.log(`No clients remain connected to session ${sessionId}; session status unknown.`);
                             }
-                        } else if (sessions) {
-                            console.warn(`Session store is available but missing get() method for session ${sessionId} cleanup check. Unable to verify session existence; assuming session does not exist for cleanup purposes. Please ensure the session store implementation includes a get() method.`);
-                        }
-
-                        if (sessionExists) {
-                            console.log(`No clients remain connected to session ${sessionId}; preserving data until TTL or manual deletion.`);
                         } else {
-                            console.log(`Session ${sessionId} ended and no clients remain connected.`);
+                            console.warn(`Session store implementation is missing required get() method; cannot check session existence for cleanup of session ${sessionId}.`);
                         }
                     }
 
