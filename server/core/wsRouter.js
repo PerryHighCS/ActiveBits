@@ -61,11 +61,11 @@ export function createWsRouter(server, sessions) {
                             try {
                                 sessionExists = (await sessions.get(sessionId)) != null;
                             } catch (err) {
-                                console.error(`Session store error while checking session ${sessionId} existence during cleanup:`, err.message || err);
+                                console.error(`Session store error while checking session ${sessionId} existence during cleanup:`, err);
                                 // Assume session doesn't exist if we can't verify
                             }
                         } else if (sessions) {
-                            console.warn(`Session store is available but missing get() method for session ${sessionId} cleanup check`);
+                            console.warn(`Session store is available but missing get() method for session ${sessionId} cleanup check. Please ensure the session store implementation includes a get() method.`);
                         }
 
                         if (sessionExists) {
