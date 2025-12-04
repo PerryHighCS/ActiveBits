@@ -69,7 +69,7 @@ export function createWsRouter(server, sessions) {
                                 console.log(`No clients remain connected to session ${sessionId}; session status unknown.`);
                             }
                         } else {
-                            console.log(`No clients remain connected to session ${sessionId}.`);
+                            console.warn(`Session store implementation is missing required get() method; cannot check session existence for cleanup of session ${sessionId}.`);
                         }
                     }
 
