@@ -20,7 +20,7 @@ const findClientModule = (activityId) => {
 export const activities = Object.entries(configModules).map(([path, mod]) => {
   const cfg = mod.default;
   // Vite resolves @activities to relative path like ../activities/, so handle both
-  const pathParts = path.split(/[@\/]activities\//)[1]?.split('/');
+  const pathParts = path.split(/[@/]activities\//)[1]?.split('/');
   const activityId = cfg?.id || pathParts?.[0];
 
   if (!cfg?.id) {
