@@ -65,7 +65,7 @@ export function createWsRouter(server, sessions) {
                                 // Assume session doesn't exist if we can't verify
                             }
                         } else if (sessions) {
-                            console.warn(`Session store is available but missing get() method for session ${sessionId} cleanup check. Please ensure the session store implementation includes a get() method.`);
+                            console.warn(`Session store is available but missing get() method for session ${sessionId} cleanup check. Unable to verify session existence; assuming session does not exist for cleanup purposes. Please ensure the session store implementation includes a get() method.`);
                         }
 
                         if (sessionExists) {
