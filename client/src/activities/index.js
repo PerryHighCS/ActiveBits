@@ -6,8 +6,8 @@
  * a new activity folder automatically registers it—no central list to update.
  */
 
-const configModules = import.meta.glob('../../../activities/*/activity.config.js', { eager: true });
-const clientModules = import.meta.glob('../../../activities/*/client/index.{js,jsx}', { eager: true });
+const configModules = import.meta.glob('@activities/*/activity.config.js', { eager: true });
+const clientModules = import.meta.glob('@activities/*/client/index.{js,jsx}', { eager: true });
 
 const findClientModule = (activityId) => {
   const key = Object.keys(clientModules).find(k => k.includes(`/activities/${activityId}/client/index`));

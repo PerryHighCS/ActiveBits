@@ -46,18 +46,41 @@ export function createWsRouter(server, sessions) {
         const existingTimer = sessionCleanupTimers.get(sessionId);
         if (existingTimer) clearTimeout(existingTimer);
 
-        const timer = setTimeout(async () => {
-            const hasClients = Array.from(wss.clients).some(
-                (client) =>
-                    client.readyState === 1 &&
-                    client.sessionId === sessionId
-            );
+        const timer = setTimeout(() => {
+            (async () => {
+                try {
+                    const hasClients = Array.from(wss.clients).some(
+                        (client) =>
+                            client.readyState === 1 &&
+                            client.sessionId === sessionId
+                    );
 
-            if (!hasClients) {
-                console.log(`No clients remain connected to session ${sessionId}; preserving data until TTL or manual deletion.`);
-            }
+                    if (!hasClients) {
+                        let sessionExists = false;
+                        if (sessions?.get) {
+                            try {
+                                sessionExists = (await sessions.get(sessionId)) != null;
+                            } catch (err) {
+                                console.error(`Session store error while checking session ${sessionId} existence during cleanup:`, err);
+                                // Assume session doesn't exist if we can't verify
+                            }
+                        } else if (sessions) {
+                            console.warn(`Session store is available but missing get() method for session ${sessionId} cleanup check. Unable to verify session existence; assuming session does not exist for cleanup purposes. Please ensure the session store implementation includes a get() method.`);
+                        }
 
-            sessionCleanupTimers.delete(sessionId);
+                        if (sessionExists) {
+                            console.log(`No clients remain connected to session ${sessionId}; preserving data until TTL or manual deletion.`);
+                        } else {
+                            console.log(`Session ${sessionId} ended and no clients remain connected.`);
+                        }
+                    }
+
+                    sessionCleanupTimers.delete(sessionId);
+                } catch (err) {
+                    console.error(`Unexpected error during session ${sessionId} cleanup:`, err);
+                    sessionCleanupTimers.delete(sessionId);
+                }
+            })();
         }, SESSION_CLEANUP_GRACE_PERIOD_MS);
 
         sessionCleanupTimers.set(sessionId, timer);

@@ -17,6 +17,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@src': path.resolve(__dirname, 'src'),
+      '@activities': path.resolve(__dirname, '..', 'activities'),
       // Explicitly resolve React deps for files outside client/ (colocated activities)
       'react': path.resolve(__dirname, '..', 'node_modules/react'),
       'react-dom': path.resolve(__dirname, '..', 'node_modules/react-dom'),

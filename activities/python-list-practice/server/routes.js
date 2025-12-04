@@ -1,5 +1,5 @@
-import { createSession } from '../../../server/core/sessions.js';
-import { createBroadcastSubscriptionHelper } from '../../../server/core/broadcastUtils.js';
+import { createSession } from 'activebits-server/core/sessions.js';
+import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js';
 
 const VALID_QUESTION_TYPES = new Set([
   'all',

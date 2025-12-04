@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import { createSession } from "../../../server/core/sessions.js";
-import { createBroadcastSubscriptionHelper } from "../../../server/core/broadcastUtils.js";
+import { createSession } from "activebits-server/core/sessions.js";
+import { createBroadcastSubscriptionHelper } from "activebits-server/core/broadcastUtils.js";
 import presetPassages from "./presetPassages.js";
 
 export default function setupWwwSimRoutes(app, sessions, ws) {

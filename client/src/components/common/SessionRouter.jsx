@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 import WaitingRoom from './WaitingRoom';
-import { getActivity, activities } from '../../activities';
+import { getActivity, activities } from '@src/activities';
 
 const CACHE_TTL = 1000 * 60 * 60 * 12; // 12 hours in milliseconds
 
