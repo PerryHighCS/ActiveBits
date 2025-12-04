@@ -21,16 +21,25 @@
   "portsAttributes": {
     "3000": {
       "label": "ActiveBits Server",
-      "onAutoForward": "openPreview"
+      "onAutoForward": "openPreview",
+      "protocol": "http",
+      "requireLocalPort": true,
+      "elevateIfNeeded": false
     },
     "5173": {
       "label": "Vite Dev Server",
-      "onAutoForward": "notify"
+      "onAutoForward": "notify",
+      "protocol": "http",
+      "requireLocalPort": false
     },
     "6379": {
       "label": "Valkey",
-      "onAutoForward": "silent"
+      "onAutoForward": "silent",
+      "protocol": "tcp"
     }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
   },
   "customizations": {
     "vscode": {
