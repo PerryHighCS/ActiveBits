@@ -269,12 +269,40 @@ export default {
 
 Activities are auto-discovered from `activities/*/activity.config.js`; no central registry needs updating.
 
+### Step 7: Update the Activity Test
+
+**File: `client/src/activities/index.test.js`**
+
+Add your new activity to the `EXPECTED_ACTIVITIES` array to ensure it's properly discovered:
+
+```javascript
+const EXPECTED_ACTIVITIES = [
+  "java-string-practice",
+  "python-list-practice",
+  "quiz",  // Add your new activity here
+  "raffle",
+  "www-sim",
+];
+```
+
+This test verifies that:
+- All expected activities exist with the required file structure
+- No unexpected activities have been added
+- Activity count matches expectations
+
+Run the tests to verify your activity is properly set up:
+
+```bash
+npm run test:unit --workspace client
+```
+
 ### Done! 🎉
 
 Your new activity is now fully integrated:
 - ✅ Automatically appears in the management dashboard
 - ✅ Routes are automatically generated
 - ✅ Students can join using the session ID
+- ✅ Tests verify the activity is properly discovered
 - ✅ Fully functional and ready to use
 
 ## File Checklist
@@ -289,6 +317,9 @@ When adding a new activity, create these files:
 
 **Server (inside `activities/{name}/server/`):**
 - [ ] `routes.js` - API endpoints/WebSocket setup
+
+**Tests:**
+- [ ] Add activity ID to `EXPECTED_ACTIVITIES` in `client/src/activities/index.test.js`
 
 No central registry updates are needed; activities are auto-discovered from `activities/*/activity.config.js`.
 
