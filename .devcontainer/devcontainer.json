@@ -15,13 +15,9 @@
   "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Valkey check skipped'",
   "forwardPorts": [6379, 3000, 5173],
   "portsAttributes": {
-    "6379": {
-      "label": "Valkey",
-      "onAutoForward": "silent"
-    },
     "3000": {
       "label": "ActiveBits Server",
-      "onAutoForward": "openPreview",
+      "onAutoForward": "openBrowserOnce",
       "protocol": "http",
       "requireLocalPort": true,
       "elevateIfNeeded": false
@@ -34,7 +30,7 @@
     },
     "6379": {
       "label": "Valkey",
-      "onAutoForward": "silent",
+      "onAutoForward": "silent"
     }
   },
   "otherPortsAttributes": {
