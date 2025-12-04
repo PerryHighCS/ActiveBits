@@ -54,7 +54,20 @@ export function createWsRouter(server, sessions) {
             );
 
             if (!hasClients) {
-                console.log(`No clients remain connected to session ${sessionId}; preserving data until TTL or manual deletion.`);
+                let sessionExists = true;
+                if (sessions?.get) {
+                    try {
+                        sessionExists = Boolean(await sessions.get(sessionId));
+                    } catch (err) {
+                        console.error(`Failed to check session ${sessionId} existence during cleanup:`, err);
+                    }
+                }
+
+                if (sessionExists) {
+                    console.log(`No clients remain connected to session ${sessionId}; preserving data until TTL or manual deletion.`);
+                } else {
+                    console.log(`Session ${sessionId} ended and no clients remain connected.`);
+                }
             }
 
             sessionCleanupTimers.delete(sessionId);

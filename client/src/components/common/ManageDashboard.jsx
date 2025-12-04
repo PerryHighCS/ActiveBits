@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { activities } from '../../activities';
-import { arrayToCsv, downloadCsv } from '../../utils/csvUtils';
-import { useClipboard } from '../../hooks/useClipboard';
+import { activities } from '@src/activities';
+import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
+import { useClipboard } from '@src/hooks/useClipboard';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 

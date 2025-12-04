@@ -1,4 +1,4 @@
-import { createSession } from "../../../server/core/sessions.js";
+import { createSession } from "activebits-server/core/sessions.js";
 
 const raffleSubscribers = new Map(); // raffleId -> Set<WebSocket>
 
