@@ -12,7 +12,7 @@
     }
   },
   "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && npm install --workspaces --include-workspace-root",
-  "postStartCommand": "bash .devcontainer/setup-dev.sh &",
+  "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Setup script failed'",
   "forwardPorts": [
     6379,
     3000,
