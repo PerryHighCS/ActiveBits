@@ -13,12 +13,12 @@
   },
   "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && npm install --workspaces --include-workspace-root",
   "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Valkey check skipped'",
-  "forwardPorts": [
-    6379,
-    3000,
-    5173
-  ],
+  "forwardPorts": [6379, 3000, 5173],
   "portsAttributes": {
+    "6379": {
+      "label": "Valkey",
+      "onAutoForward": "silent"
+    },
     "3000": {
       "label": "ActiveBits Server",
       "onAutoForward": "openPreview"
@@ -26,10 +26,6 @@
     "5173": {
       "label": "Vite Dev Server",
       "onAutoForward": "notify"
-    },
-    "6379": {
-      "label": "Valkey",
-      "onAutoForward": "silent"
     }
   },
   "customizations": {
