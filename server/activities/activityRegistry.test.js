@@ -31,7 +31,7 @@ test("all expected activities exist with required server files", () => {
     const serverRoutes = join(serverDir, "routes.js");
     
     assert.ok(
-      statSync(activityPath).isDirectory(),
+      existsSync(activityPath) && statSync(activityPath).isDirectory(),
       `Activity directory exists: ${activityId}`
     );
     
@@ -41,7 +41,7 @@ test("all expected activities exist with required server files", () => {
     );
     
     assert.ok(
-      statSync(serverDir).isDirectory(),
+      existsSync(serverDir) && statSync(serverDir).isDirectory(),
       `Server directory exists: ${activityId}/server`
     );
     

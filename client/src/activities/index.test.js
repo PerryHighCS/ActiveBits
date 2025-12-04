@@ -32,7 +32,7 @@ test("all expected activities exist with required files", () => {
     const clientIndexJsx = join(clientDir, "index.jsx");
     
     assert.ok(
-      statSync(activityPath).isDirectory(),
+      existsSync(activityPath) && statSync(activityPath).isDirectory(),
       `Activity directory exists: ${activityId}`
     );
     
@@ -42,7 +42,7 @@ test("all expected activities exist with required files", () => {
     );
     
     assert.ok(
-      statSync(clientDir).isDirectory(),
+      existsSync(clientDir) && statSync(clientDir).isDirectory(),
       `Client directory exists: ${activityId}/client`
     );
     
