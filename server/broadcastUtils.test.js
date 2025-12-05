@@ -41,6 +41,8 @@ test("createBroadcastSubscriptionHelper subscribes once and forwards messages", 
     assert.equal(subscribedChannel, "session:abc:broadcast");
     assert.ok(broadcastHandler, "handler registered");
 
+    // The following test intentionally triggers a send error to verify error handling
+    console.log("[TEST] Testing error handling (expected error output follows):");
     assert.doesNotThrow(() => broadcastHandler({ type: "foo" }));
     assert.equal(sentPayloads.length, 1);
     assert.equal(sentPayloads[0], JSON.stringify({ type: "foo" }));
