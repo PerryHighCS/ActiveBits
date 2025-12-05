@@ -9,6 +9,8 @@
 const configModules = import.meta.glob('@activities/*/activity.config.js', { eager: true });
 const clientModules = import.meta.glob('@activities/*/client/index.{js,jsx}', { eager: true });
 
+const isDevelopment = import.meta.env.MODE === 'development';
+
 const findClientModule = (activityId) => {
   // Vite resolves @activities alias to relative path, so check both formats
   const key = Object.keys(clientModules).find(k => 
@@ -25,6 +27,11 @@ export const activities = Object.entries(configModules).map(([path, mod]) => {
 
   if (!cfg?.id) {
     console.warn(`Activity config at "${path}" is missing an id`);
+    return null;
+  }
+
+  // Skip dev-only activities in production builds
+  if (cfg.isDev && !isDevelopment) {
     return null;
   }
 
