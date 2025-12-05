@@ -46,11 +46,8 @@ async function filterConfigsByDevFlag(configs) {
       }
     } catch (err) {
       console.error(`\n[ERROR] Failed to check isDev flag for activity "${config.id}" at "${config.configPath}":\n`, err);
-      if (!isDevelopment) {
-        console.error(`[FATAL] Cannot load activity config for "${config.id}" in production. Exiting startup.`);
-        process.exit(1);
-      }
-      // In development, be conservative and exclude in case of error
+      console.error(`[FATAL] Cannot load activity config for "${config.id}" in production. Exiting startup.`);
+      process.exit(1);
     }
   }
   return filtered;

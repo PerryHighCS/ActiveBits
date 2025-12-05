@@ -124,7 +124,6 @@ test("activity count matches expected count", async () => {
     } catch (err) {
       // If config can't be loaded, count it as non-dev
       console.error(`Failed to load config for activity "${dir}":`, err);
-      // If config can't be loaded, count it as non-dev
       nonDevActivityCount++;
     }
   }
