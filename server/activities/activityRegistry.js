@@ -25,6 +25,18 @@ function discoverConfigPaths() {
   return configs;
 }
 
+async function loadConfig(configPath) {
+  const moduleUrl = pathToFileURL(configPath);
+  const mod = await import(moduleUrl.href);
+  const cfg = mod.default || {};
+  const baseUrl = new URL('.', moduleUrl.href);
+  return {
+    ...cfg,
+    baseUrl,
+    serverEntry: cfg.serverEntry ? new URL(cfg.serverEntry, baseUrl).href : null,
+  };
+}
+
 /**
  * Filter discovered configs to exclude dev-only activities in production.
  * Requires loading the config to check the isDev flag.
@@ -54,11 +66,13 @@ async function filterConfigsByDevFlag(configs) {
 }
 
 const discoveredConfigs = discoverConfigPaths();
-let ALLOWED_ACTIVITIES = discoveredConfigs.map(c => c.id);
+// Populated by initializeActivityRegistry() - must be called before using isValidActivity() or getAllowedActivities()
+let ALLOWED_ACTIVITIES = [];
 
 /**
  * Get the current list of allowed activities.
  * This list is filtered during initializeActivityRegistry() to exclude dev-only activities in production.
+ * @returns {string[]} Array of allowed activity IDs (empty until initializeActivityRegistry() is called)
  */
 export function getAllowedActivities() {
   return ALLOWED_ACTIVITIES;
@@ -77,20 +91,8 @@ export async function initializeActivityRegistry() {
   ALLOWED_ACTIVITIES = filtered.map(c => c.id);
   const devCount = discoveredConfigs.length - filtered.length;
   if (devCount > 0) {
-    console.info(`[activities] Excluded ${devCount} dev-only activity/activities`);
+    console.info(`[activities] Excluded ${devCount} dev-only ${devCount === 1 ? 'activity' : 'activities'}`);
   }
-}
-
-async function loadConfig(configPath) {
-  const moduleUrl = pathToFileURL(configPath);
-  const mod = await import(moduleUrl.href);
-  const cfg = mod.default || {};
-  const baseUrl = new URL('.', moduleUrl.href);
-  return {
-    ...cfg,
-    baseUrl,
-    serverEntry: cfg.serverEntry ? new URL(cfg.serverEntry, baseUrl).href : null,
-  };
 }
 
 /**

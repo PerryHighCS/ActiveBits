@@ -7,6 +7,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Counter for cache-busting module imports to avoid race conditions
+let testImportCounter = 0;
+
 /**
  * Expected activities in the system (excluding dev-only activities)
  * Update this list when adding or removing production activities
@@ -204,7 +207,7 @@ test("initializeActivityRegistry filters dev activities in production mode", asy
     
     // Re-import to get fresh module with new environment
     const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
-    const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+    const freshModule = await import(`${moduleUrl}?t=${Date.now()}-${testImportCounter++}`);
     
     await freshModule.initializeActivityRegistry();
     const allowedActivities = freshModule.getAllowedActivities();
@@ -258,7 +261,7 @@ test("initializeActivityRegistry preserves dev activities in development mode", 
     
     // Re-import to get fresh module with new environment
     const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
-    const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+    const freshModule = await import(`${moduleUrl}?t=${Date.now()}-${testImportCounter++}`);
     
     await freshModule.initializeActivityRegistry();
     const allowedActivities = freshModule.getAllowedActivities();
@@ -281,11 +284,8 @@ test("initializeActivityRegistry preserves dev activities in development mode", 
 
 test("getAllowedActivities returns correct filtered list after initialization", async (t) => {
   const { initializeActivityRegistry, getAllowedActivities } = await import(
-    pathToFileURL(join(__dirname, 'activityRegistry.js')).href + `?t=${Date.now()}`
+    pathToFileURL(join(__dirname, 'activityRegistry.js')).href + `?t=${Date.now()}-${testImportCounter++}`
   );
-  
-  // Get list before initialization
-  const beforeInit = getAllowedActivities();
   
   // Initialize
   await initializeActivityRegistry();
@@ -349,7 +349,7 @@ test("initializeActivityRegistry handles config load failure in production", asy
     try {
       // Re-import to get fresh module with broken config
       const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
-      const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+      const freshModule = await import(`${moduleUrl}?t=${Date.now()}-${testImportCounter++}`);
       
       // This should trigger process.exit(1) in production
       await assert.rejects(
@@ -401,7 +401,7 @@ test("initializeActivityRegistry handles config load failure in development", as
     try {
       // Re-import to get fresh module
       const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
-      const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+      const freshModule = await import(`${moduleUrl}?t=${Date.now()}-${testImportCounter++}`);
       
       // In development, broken configs should not crash initialization
       // The activity should simply be discovered but the import will fail
@@ -455,7 +455,7 @@ test("initializeActivityRegistry handles missing isDev flag (defaults to product
     try {
       // Re-import to get fresh module
       const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
-      const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+      const freshModule = await import(`${moduleUrl}?t=${Date.now()}-${testImportCounter++}`);
       
       await freshModule.initializeActivityRegistry();
       const allowedActivities = freshModule.getAllowedActivities();
