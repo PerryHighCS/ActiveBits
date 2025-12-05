@@ -112,6 +112,10 @@ export function registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl }
             }
 
             const status = {
+                environment: {
+                    nodeEnv: process.env.NODE_ENV || 'development',
+                    isDevelopment: process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev',
+                },
                 storage: {
                     mode: sessions.valkeyStore ? 'valkey' : 'in-memory',
                     ttlMs: sessions.valkeyStore ? sessions.valkeyStore.ttlMs : sessionTtl,

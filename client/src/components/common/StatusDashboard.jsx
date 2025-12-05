@@ -103,7 +103,14 @@ export default function StatusDashboard() {
       {/* Summary cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, marginBottom: 12 }}>
         <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>
-          <h3 style={{ margin: 0, marginBottom: 6, fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Mode</h3>
+          <h3 style={{ margin: 0, marginBottom: 6, fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Environment</h3>
+          <div style={{ fontSize: 20, fontWeight: 700, color: data?.environment?.isDevelopment ? "#0ea5e9" : "#059669" }}>
+            {data?.environment?.isDevelopment ? "Development" : "Production"}
+          </div>
+          <div style={{ fontSize: 12, color: "#6b7280" }}>NODE_ENV: {data?.environment?.nodeEnv || "-"}</div>
+        </div>
+        <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>
+          <h3 style={{ margin: 0, marginBottom: 6, fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Storage</h3>
           <div style={{ fontSize: 20, fontWeight: 700, color: "#111827" }}>{data?.storage?.mode || "-"}</div>
           <div style={{ fontSize: 12, color: "#6b7280" }}>TTL: {data?.storage?.ttlMs ? `${Math.round(data.storage.ttlMs/1000)}s` : "-"}</div>
         </div>
@@ -122,24 +129,26 @@ export default function StatusDashboard() {
           <div style={{ fontSize: 20, fontWeight: 700, color: "#111827" }}>{fmtBytes(data?.process?.memory?.rss)}</div>
           <div style={{ fontSize: 12, color: "#6b7280" }}>Heap {fmtBytes(data?.process?.memory?.heapUsed)} / {fmtBytes(data?.process?.memory?.heapTotal)}</div>
         </div>
-        <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>
-          <h3 style={{ margin: 0, marginBottom: 6, fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Sessions</h3>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#111827" }}>{fmtInt(data?.sessions?.count)}</div>
-          <div style={{ fontSize: 12, color: "#6b7280" }}>Approx size {fmtBytes(data?.sessions?.approxTotalBytes)}</div>
-        </div>
+        
       </div>
 
       {/* By type + Valkey */}
+      
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12, marginBottom: 12 }}>
         <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>
-          <h3 style={{ margin: 0, marginBottom: 6, fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Sessions by Type</h3>
-          <div style={{ maxHeight: 200, overflowY: "auto", display: "grid", gridTemplateColumns: "max-content 1fr", gap: "6px 12px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 }}>
-            {byTypeEntries.map(([k, v]) => (
-              <React.Fragment key={k}>
-                <div style={{ color: "#6b7280" }}>{k}</div>
-                <div style={{ color: "#111827" }}>{fmtInt(v)}</div>
-              </React.Fragment>
-            ))}
+          <h3 style={{ margin: 0, marginBottom: 6, fontSize: 13, color: "#6b7280", fontWeight: 600 }}>Sessions</h3>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 8 }}>{fmtInt(data?.sessions?.count)}</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>Approx size {fmtBytes(data?.sessions?.approxTotalBytes)}</div>
+          <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 8 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, marginBottom: 6 }}>BY TYPE</div>
+            <div style={{ maxHeight: 150, overflowY: "auto", display: "grid", gridTemplateColumns: "max-content 1fr", gap: "6px 12px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12 }}>
+              {byTypeEntries.map(([k, v]) => (
+                <React.Fragment key={k}>
+                  <div style={{ color: "#6b7280" }}>{k}</div>
+                  <div style={{ color: "#111827" }}>{fmtInt(v)}</div>
+                </React.Fragment>
+              ))}
+            </div>
           </div>
         </div>
         <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>

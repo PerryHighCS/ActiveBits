@@ -7,7 +7,7 @@ import { createSessionStore, setupSessionRoutes } from "./core/sessions.js";
 import { createWsRouter } from "./core/wsRouter.js";
 import { generatePersistentHash, getOrCreateActivePersistentSession, getPersistentSession, verifyTeacherCodeWithHash, initializePersistentStorage } from "./core/persistentSessions.js";
 import { setupPersistentSessionWs } from "./core/persistentSessionWs.js";
-import { ALLOWED_ACTIVITIES, isValidActivity, registerActivityRoutes } from "./activities/activityRegistry.js";
+import { getAllowedActivities, isValidActivity, registerActivityRoutes, initializeActivityRegistry } from "./activities/activityRegistry.js";
 import { registerStatusRoute } from "./routes/statusRoute.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -48,6 +48,9 @@ setupSessionRoutes(app, sessions, ws.wss);
 
 // Setup persistent session WebSocket handling
 setupPersistentSessionWs(ws, sessions);
+
+// Initialize activity registry (filters out dev-only activities in production)
+await initializeActivityRegistry();
 
 // Attach feature-specific route handlers (discover modules dynamically)
 await registerActivityRoutes(app, sessions, ws);
@@ -161,7 +164,7 @@ app.post("/api/persistent-session/create", (req, res) => {
     if (!isValidActivity(activityName)) {
         return res.status(400).json({ 
             error: 'Invalid activity name', 
-            allowedActivities: ALLOWED_ACTIVITIES 
+            allowedActivities: getAllowedActivities() 
         });
     }
 
@@ -236,7 +239,7 @@ app.post("/api/persistent-session/authenticate", async (req, res) => {
     if (!isValidActivity(activityName)) {
         return res.status(400).json({
             error: 'Invalid activity name',
-            allowedActivities: ALLOWED_ACTIVITIES
+            allowedActivities: getAllowedActivities()
         });
     }
 

@@ -41,6 +41,8 @@ test("createBroadcastSubscriptionHelper subscribes once and forwards messages", 
     assert.equal(subscribedChannel, "session:abc:broadcast");
     assert.ok(broadcastHandler, "handler registered");
 
+    // The following test intentionally triggers a send error from a WebSocket client to verify that broadcast errors from individual send failures do not crash the handler  
+    console.log("[TEST] Testing broadcast robustness against individual WebSocket send failures (expected error output follows):");
     assert.doesNotThrow(() => broadcastHandler({ type: "foo" }));
     assert.equal(sentPayloads.length, 1);
     assert.equal(sentPayloads[0], JSON.stringify({ type: "foo" }));
