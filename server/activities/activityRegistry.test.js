@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -156,5 +156,323 @@ test("all activity configs have required fields", async () => {
       "boolean",
       `${activityId}: config.soloMode is a boolean`
     );
+  }
+});
+
+/**
+ * Tests for initializeActivityRegistry() and getAllowedActivities()
+ * 
+ * These tests verify the dev activity filtering mechanism:
+ * 1. Production mode excludes activities with isDev: true
+ * 2. Development mode includes all activities regardless of isDev flag
+ * 3. getAllowedActivities() returns the correct filtered list
+ * 4. Config load failures are handled appropriately in both modes
+ * 5. Activities without isDev flag default to production (included)
+ * 
+ * Each test creates temporary activity configs and cleans them up after execution.
+ */
+test("initializeActivityRegistry filters dev activities in production mode", async (t) => {
+  // Create a temporary test directory structure
+  const testRoot = join(__dirname, "../../activities/test-activity-dev");
+  const testConfigPath = join(testRoot, "activity.config.js");
+  
+  // Clean up before test
+  if (existsSync(testRoot)) {
+    rmSync(testRoot, { recursive: true, force: true });
+  }
+  
+  try {
+    // Create test activity with isDev: true
+    mkdirSync(testRoot, { recursive: true });
+    writeFileSync(
+      testConfigPath,
+      `export default {
+  id: 'test-activity-dev',
+  name: 'Test Dev Activity',
+  description: 'A test dev activity',
+  color: 'blue',
+  soloMode: true,
+  isDev: true,
+  clientEntry: './client/index.jsx',
+  serverEntry: './server/routes.js',
+};`
+    );
+    
+    // Set production environment
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    
+    // Re-import to get fresh module with new environment
+    const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
+    const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+    
+    await freshModule.initializeActivityRegistry();
+    const allowedActivities = freshModule.getAllowedActivities();
+    
+    // Verify dev activity is excluded in production
+    assert.ok(
+      !allowedActivities.includes('test-activity-dev'),
+      'Dev activity should be excluded in production mode'
+    );
+    
+    // Restore environment
+    process.env.NODE_ENV = originalEnv;
+  } finally {
+    // Clean up test files
+    if (existsSync(testRoot)) {
+      rmSync(testRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("initializeActivityRegistry preserves dev activities in development mode", async (t) => {
+  // Create a temporary test directory structure
+  const testRoot = join(__dirname, "../../activities/test-activity-dev2");
+  const testConfigPath = join(testRoot, "activity.config.js");
+  
+  // Clean up before test
+  if (existsSync(testRoot)) {
+    rmSync(testRoot, { recursive: true, force: true });
+  }
+  
+  try {
+    // Create test activity with isDev: true
+    mkdirSync(testRoot, { recursive: true });
+    writeFileSync(
+      testConfigPath,
+      `export default {
+  id: 'test-activity-dev2',
+  name: 'Test Dev Activity 2',
+  description: 'A test dev activity',
+  color: 'green',
+  soloMode: false,
+  isDev: true,
+  clientEntry: './client/index.jsx',
+  serverEntry: './server/routes.js',
+};`
+    );
+    
+    // Set development environment
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    
+    // Re-import to get fresh module with new environment
+    const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
+    const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+    
+    await freshModule.initializeActivityRegistry();
+    const allowedActivities = freshModule.getAllowedActivities();
+    
+    // Verify dev activity is included in development
+    assert.ok(
+      allowedActivities.includes('test-activity-dev2'),
+      'Dev activity should be included in development mode'
+    );
+    
+    // Restore environment
+    process.env.NODE_ENV = originalEnv;
+  } finally {
+    // Clean up test files
+    if (existsSync(testRoot)) {
+      rmSync(testRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("getAllowedActivities returns correct filtered list after initialization", async (t) => {
+  const { initializeActivityRegistry, getAllowedActivities } = await import(
+    pathToFileURL(join(__dirname, 'activityRegistry.js')).href + `?t=${Date.now()}`
+  );
+  
+  // Get list before initialization
+  const beforeInit = getAllowedActivities();
+  
+  // Initialize
+  await initializeActivityRegistry();
+  
+  // Get list after initialization
+  const afterInit = getAllowedActivities();
+  
+  // Verify list is an array
+  assert.ok(Array.isArray(afterInit), 'getAllowedActivities should return an array');
+  
+  // Verify all production activities are included
+  for (const activity of EXPECTED_ACTIVITIES) {
+    assert.ok(
+      afterInit.includes(activity),
+      `Expected production activity "${activity}" should be in allowed list`
+    );
+  }
+  
+  // Verify the list doesn't include any undefined or null values
+  assert.ok(
+    afterInit.every(id => id && typeof id === 'string'),
+    'All activity IDs should be non-empty strings'
+  );
+});
+
+test("initializeActivityRegistry handles config load failure in production", async (t) => {
+  // Create a temporary test directory with a broken config
+  const testRoot = join(__dirname, "../../activities/test-activity-broken");
+  const testConfigPath = join(testRoot, "activity.config.js");
+  
+  // Clean up before test
+  if (existsSync(testRoot)) {
+    rmSync(testRoot, { recursive: true, force: true });
+  }
+  
+  try {
+    // Create test activity with invalid config
+    mkdirSync(testRoot, { recursive: true });
+    writeFileSync(
+      testConfigPath,
+      `export default {
+  // Intentionally broken config - missing required fields
+  this will cause a syntax error
+};`
+    );
+    
+    // Set production environment
+    const originalEnv = process.env.NODE_ENV;
+    const originalExit = process.exit;
+    process.env.NODE_ENV = 'production';
+    
+    // Mock process.exit to capture the call
+    let exitCalled = false;
+    let exitCode = null;
+    process.exit = (code) => {
+      exitCalled = true;
+      exitCode = code;
+      throw new Error(`process.exit(${code})`);
+    };
+    
+    try {
+      // Re-import to get fresh module with broken config
+      const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
+      const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+      
+      // This should trigger process.exit(1) in production
+      await assert.rejects(
+        async () => await freshModule.initializeActivityRegistry(),
+        (err) => err.message === 'process.exit(1)',
+        'Should call process.exit(1) when config fails to load in production'
+      );
+      
+      assert.ok(exitCalled, 'process.exit should be called');
+      assert.equal(exitCode, 1, 'Should exit with code 1');
+    } finally {
+      // Restore process.exit and environment
+      process.exit = originalExit;
+      process.env.NODE_ENV = originalEnv;
+    }
+  } finally {
+    // Clean up test files
+    if (existsSync(testRoot)) {
+      rmSync(testRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("initializeActivityRegistry handles config load failure in development", async (t) => {
+  // Create a temporary test directory with a broken config
+  const testRoot = join(__dirname, "../../activities/test-activity-broken-dev");
+  const testConfigPath = join(testRoot, "activity.config.js");
+  
+  // Clean up before test
+  if (existsSync(testRoot)) {
+    rmSync(testRoot, { recursive: true, force: true });
+  }
+  
+  try {
+    // Create test activity with invalid config
+    mkdirSync(testRoot, { recursive: true });
+    writeFileSync(
+      testConfigPath,
+      `export default {
+  // Intentionally broken config
+  this will cause a syntax error
+};`
+    );
+    
+    // Set development environment
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    
+    try {
+      // Re-import to get fresh module
+      const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
+      const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+      
+      // In development, broken configs should not crash initialization
+      // The activity should simply be discovered but the import will fail
+      // This is acceptable in development mode
+      await freshModule.initializeActivityRegistry();
+      
+      // If we get here without throwing, development mode is more permissive
+      assert.ok(true, 'Development mode should be more permissive with config errors');
+    } finally {
+      // Restore environment
+      process.env.NODE_ENV = originalEnv;
+    }
+  } finally {
+    // Clean up test files
+    if (existsSync(testRoot)) {
+      rmSync(testRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("initializeActivityRegistry handles missing isDev flag (defaults to production)", async (t) => {
+  // Create a temporary test directory with config without isDev flag
+  const testRoot = join(__dirname, "../../activities/test-activity-no-flag");
+  const testConfigPath = join(testRoot, "activity.config.js");
+  
+  // Clean up before test
+  if (existsSync(testRoot)) {
+    rmSync(testRoot, { recursive: true, force: true });
+  }
+  
+  try {
+    // Create test activity without isDev flag
+    mkdirSync(testRoot, { recursive: true });
+    writeFileSync(
+      testConfigPath,
+      `export default {
+  id: 'test-activity-no-flag',
+  name: 'Test Activity No Flag',
+  description: 'A test activity without isDev flag',
+  color: 'purple',
+  soloMode: true,
+  clientEntry: './client/index.jsx',
+  serverEntry: './server/routes.js',
+};`
+    );
+    
+    // Set production environment
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    
+    try {
+      // Re-import to get fresh module
+      const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
+      const freshModule = await import(`${moduleUrl}?t=${Date.now()}`);
+      
+      await freshModule.initializeActivityRegistry();
+      const allowedActivities = freshModule.getAllowedActivities();
+      
+      // Activity without isDev flag should be included (defaults to production)
+      assert.ok(
+        allowedActivities.includes('test-activity-no-flag'),
+        'Activity without isDev flag should be included in production'
+      );
+    } finally {
+      // Restore environment
+      process.env.NODE_ENV = originalEnv;
+    }
+  } finally {
+    // Clean up test files
+    if (existsSync(testRoot)) {
+      rmSync(testRoot, { recursive: true, force: true });
+    }
   }
 });
