@@ -120,6 +120,7 @@ test("activity count matches expected count", async () => {
       const { default: config } = await import(pathToFileURL(configPath).href);
       if (!config.isDev) {
         nonDevActivityCount++;
+      }
     } catch (err) {
       // If config can't be loaded, count it as non-dev
       console.error(`Failed to load config for activity "${dir}":`, err);
