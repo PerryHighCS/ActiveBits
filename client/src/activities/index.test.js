@@ -2,14 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
- * Expected activities in the system
- * Update this list when adding or removing activities
+ * Expected activities in the system (excluding dev-only activities)
+ * Update this list when adding or removing production activities
+ * Dev activities (with isDev: true) are automatically excluded from these tests
  */
 const EXPECTED_ACTIVITIES = [
   "java-string-practice",
@@ -55,8 +56,9 @@ test("all expected activities exist with required files", () => {
 
 /**
  * Test that verifies no unexpected activities exist
+ * Dev activities (with isDev: true) are allowed and ignored
  */
-test("no unexpected activities in activities directory", () => {
+test("no unexpected activities in activities directory", async () => {
   const activitiesDir = join(__dirname, "../../../activities");
   const entries = readdirSync(activitiesDir);
   
@@ -65,21 +67,40 @@ test("no unexpected activities in activities directory", () => {
     return statSync(entryPath).isDirectory() && entry !== "node_modules";
   });
   
-  const unexpectedActivities = activityDirs.filter(
-    dir => !EXPECTED_ACTIVITIES.includes(dir)
-  );
+  // Filter out dev activities by checking their configs
+  const unexpectedActivities = [];
+  for (const dir of activityDirs) {
+    if (EXPECTED_ACTIVITIES.includes(dir)) continue;
+    
+    const configPath = join(activitiesDir, dir, "activity.config.js");
+    if (existsSync(configPath)) {
+      try {
+        const { default: config } = await import(pathToFileURL(configPath).href);
+        // Only flag as unexpected if it's NOT a dev activity
+        if (!config.isDev) {
+          unexpectedActivities.push(dir);
+        }
+      } catch {
+        // If config can't be loaded, flag as unexpected
+        unexpectedActivities.push(dir);
+      }
+    } else {
+      unexpectedActivities.push(dir);
+    }
+  }
   
   assert.deepEqual(
     unexpectedActivities,
     [],
-    `Found unexpected activities: ${unexpectedActivities.join(", ")}`
+    `Found unexpected non-dev activities: ${unexpectedActivities.join(", ")}`
   );
 });
 
 /**
  * Test that verifies the activity count matches expectations
+ * Excludes dev activities from the count
  */
-test("activity count matches expected count", () => {
+test("activity count matches expected count", async () => {
   const activitiesDir = join(__dirname, "../../../activities");
   const entries = readdirSync(activitiesDir);
   
@@ -90,9 +111,24 @@ test("activity count matches expected count", () => {
            existsSync(join(entryPath, "activity.config.js"));
   });
   
+  // Filter out dev activities
+  let nonDevActivityCount = 0;
+  for (const dir of activityDirs) {
+    const configPath = join(activitiesDir, dir, "activity.config.js");
+    try {
+      const { default: config } = await import(pathToFileURL(configPath).href);
+      if (!config.isDev) {
+        nonDevActivityCount++;
+      }
+    } catch {
+      // If config can't be loaded, count it as non-dev
+      nonDevActivityCount++;
+    }
+  }
+  
   assert.equal(
-    activityDirs.length,
+    nonDevActivityCount,
     EXPECTED_ACTIVITIES.length,
-    `Expected ${EXPECTED_ACTIVITIES.length} activities, found ${activityDirs.length}`
+    `Expected ${EXPECTED_ACTIVITIES.length} non-dev activities, found ${nonDevActivityCount}`
   );
 });
