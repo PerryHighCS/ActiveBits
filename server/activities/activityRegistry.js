@@ -83,7 +83,7 @@ let filteredConfigs = [];
  * @returns {string[]} Array of allowed activity IDs (empty until initializeActivityRegistry() is called)
  */
 export function getAllowedActivities() {
-  return ALLOWED_ACTIVITIES;
+  return [...ALLOWED_ACTIVITIES];
 }
 
 export function isValidActivity(activityName) {
