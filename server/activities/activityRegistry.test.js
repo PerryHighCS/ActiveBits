@@ -79,8 +79,9 @@ test("no unexpected activities in activities directory", async () => {
         if (!config.isDev) {
           unexpectedActivities.push(dir);
         }
-      } catch {
-        // If config can't be loaded, flag as unexpected
+      } catch (err) {
+        // If config can't be loaded, log the error and flag as unexpected
+        console.error(`Failed to load config for activity "${dir}":`, err);
         unexpectedActivities.push(dir);
       }
     } else {
@@ -119,8 +120,9 @@ test("activity count matches expected count", async () => {
       if (!config.isDev) {
         nonDevActivityCount++;
       }
-    } catch {
+    } catch (err) {
       // If config can't be loaded, count it as non-dev
+      console.error(`Failed to load config for activity "${dir}" at "${configPath}":`, err);
       nonDevActivityCount++;
     }
   }
