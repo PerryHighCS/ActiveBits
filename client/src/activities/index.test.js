@@ -14,6 +14,7 @@ const __dirname = dirname(__filename);
  */
 const EXPECTED_ACTIVITIES = [
   "java-string-practice",
+  "java-format-practice",
   "python-list-practice",
   "raffle",
   "www-sim",
