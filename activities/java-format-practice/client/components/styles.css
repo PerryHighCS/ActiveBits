@@ -532,23 +532,28 @@
 
 /* Stats Panel */
 .stats-panel {
-  background: #f7fafc;
-  border: 2px solid #e2e8f0;
+  background: linear-gradient(315deg, #ff9f1c 0%, #ffb703 100%);
+  border: 2px solid #ff9f1c;
   border-radius: 12px;
-  padding: 20px;
+  padding: 0;
   margin-top: 30px;
+  overflow: hidden;
 }
 
 .stats-panel h3 {
-  color: #1a365d;
+  color: white;
   font-size: 18px;
-  margin-bottom: 15px;
+  margin: 0;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 15px;
+  background: white;
+  padding: 20px;
 }
 
 .stat-item {

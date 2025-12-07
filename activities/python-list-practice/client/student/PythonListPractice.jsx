@@ -8,6 +8,7 @@ import NameForm from './components/NameForm';
 import ControlsPanel from './components/ControlsPanel';
 import QuestionPanel from './components/QuestionPanel';
 import StatsPanel from './components/StatsPanel';
+import SessionHeader from './components/SessionHeader';
 
 import {
   createChallengeForTypes,
@@ -363,7 +364,13 @@ export default function PythonListPractice({ sessionData }) {
   return (
     <div className="python-list-bg">
       <div className="python-list-container">
-        <StatsPanel isSolo={isSolo} submittedName={submittedName} sessionId={sessionId} stats={stats} />
+        <SessionHeader 
+          isSolo={isSolo} 
+          submittedName={submittedName} 
+          sessionId={sessionId}
+          simple={isSolo}
+          activityName="Python List Practice"
+        />
 
         <div className="python-list-content">
           <ControlsPanel
@@ -401,6 +408,8 @@ export default function PythonListPractice({ sessionData }) {
             onClear={() => { setAnswer(''); setInsertSelections([]); }}
             onNext={nextChallenge}
           />
+
+          <StatsPanel stats={stats} />
         </div>
       </div>
     </div>

@@ -615,7 +615,6 @@ export default function JavaFormatPractice({ sessionData }) {
   }
 
   const formatCall = getCurrentFormatCall();
-  const progressText = `${currentFormatCallIndex + 1}/${currentChallenge.formatCalls.length}`;
   const hasInput = (() => {
     if (selectedDifficulty === 'beginner') {
       const parts = userAnswers[currentFormatCallIndex] || [];
@@ -658,9 +657,7 @@ export default function JavaFormatPractice({ sessionData }) {
     <div className="java-format-container">
       <div className="java-format-header">
         <div className="format-title">Format Practice</div>
-        <div className="format-subtitle">
-          {currentChallenge.theme} - {progressText}
-        </div>
+        <StatsPanel stats={stats} />
       </div>
 
       <div className="java-format-content">
@@ -781,8 +778,6 @@ export default function JavaFormatPractice({ sessionData }) {
             showNextButton={feedback?.isCorrect === true}
           />
         </div>
-
-        <StatsPanel stats={stats} />
       </div>
     </div>
   );
