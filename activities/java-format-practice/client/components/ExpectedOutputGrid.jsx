@@ -1,8 +1,46 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { formatWithMask } from '../challenges';
 
 // ExpectedOutputGrid for String.format problems - shows expected output with variable names as row labels
 export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3, variables = [] }) {
+  const [hoveredCol, setHoveredCol] = useState(null);
+  const [selectionStart, setSelectionStart] = useState(null);
+  const [selectionEnd, setSelectionEnd] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  const handleMouseDown = (colIdx) => {
+    // Always start a new selection on mouse down
+    setSelectionStart(colIdx);
+    setSelectionEnd(colIdx);
+    setIsDragging(true);
+  };
+  
+  const handleMouseEnter = (colIdx) => {
+    if (!isDragging) {
+      setHoveredCol(colIdx);
+    }
+    if (isDragging) {
+      setSelectionEnd(colIdx);
+    }
+  };
+  
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+  
+  const isSelected = (colIdx) => {
+    if (selectionStart === null || selectionEnd === null) return false;
+    const start = Math.min(selectionStart, selectionEnd);
+    const end = Math.max(selectionStart, selectionEnd);
+    return colIdx >= start && colIdx <= end;
+  };
+  
+  const getSelectionInfo = () => {
+    if (selectionStart === null || selectionEnd === null) return null;
+    const start = Math.min(selectionStart, selectionEnd);
+    const end = Math.max(selectionStart, selectionEnd);
+    return { start, end, count: end - start + 1 };
+  };
   // Build the expected output for each line by computing the format calls
   const lines = formatCalls.map((call) => {
     let varName = '';
@@ -81,25 +119,53 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
     return { varName, expectedText, expectedMask };
   });
 
+  const selection = getSelectionInfo();
+  
   return (
-    <div className="character-grid-container">
+    <div className="character-grid-container" onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
       <table className="character-grid">
         <thead>
           <tr>
             <th className="grid-row-label" style={{ width: '80px' }}></th>
-            {Array.from({ length: width }).map((_, i) => (
-              <th key={`tens-${i}`} className="grid-column-header grid-column-header-tens">
-                {i % 10 === 0 ? Math.floor(i / 10) : '\u00A0'}
-              </th>
-            ))}
+            {Array.from({ length: width }).map((_, i) => {
+              const selected = isSelected(i);
+              const isSelectionStart = selection && i === selection.start;
+              const isInSelection = selected && !isSelectionStart;
+              
+              // Skip rendering cells that are part of the colspan
+              if (isInSelection) return null;
+              
+              return (
+                <th 
+                  key={`tens-${i}`} 
+                  className={`grid-column-header grid-column-header-tens ${hoveredCol === i ? 'grid-column-hovered' : ''} ${selected ? 'grid-column-selected' : ''}`}
+                  colSpan={isSelectionStart ? selection.count : 1}
+                  data-count={isSelectionStart ? selection.count : undefined}
+                  onMouseDown={() => handleMouseDown(i)}
+                  onMouseEnter={() => handleMouseEnter(i)}
+                  onMouseLeave={() => setHoveredCol(null)}
+                >
+                  {isSelectionStart ? selection.count : ((hoveredCol === i || i % 10 === 0) ? Math.floor(i / 10) : '\u00A0')}
+                </th>
+              );
+            }).filter(Boolean)}
           </tr>
           <tr>
             <th className="grid-row-label" style={{ width: '80px' }}></th>
-            {Array.from({ length: width }).map((_, i) => (
-              <th key={`ones-${i}`} className="grid-column-header">
-                {i % 10}
-              </th>
-            ))}
+            {Array.from({ length: width }).map((_, i) => {
+              const selected = isSelected(i);
+              return (
+                <th 
+                  key={`ones-${i}`} 
+                  className={`grid-column-header ${hoveredCol === i ? 'grid-column-hovered' : ''} ${selected ? 'grid-column-selected' : ''}`}
+                  onMouseDown={() => handleMouseDown(i)}
+                  onMouseEnter={() => handleMouseEnter(i)}
+                  onMouseLeave={() => setHoveredCol(null)}
+                >
+                  {i % 10}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -131,8 +197,16 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
                     }
                   }
                   
+                  const selected = isSelected(colIdx);
                   return (
-                    <td key={colIdx} className="grid-cell" style={{ background: bgColor, borderColor: borderColor }}>
+                    <td 
+                      key={colIdx} 
+                      className={`grid-cell ${hoveredCol === colIdx ? 'grid-cell-hovered' : ''} ${selected ? 'grid-cell-selected' : ''}`}
+                      style={{ background: bgColor, borderColor: borderColor }}
+                      onMouseDown={() => handleMouseDown(colIdx)}
+                      onMouseEnter={() => handleMouseEnter(colIdx)}
+                      onMouseLeave={() => setHoveredCol(null)}
+                    >
                       {char || '\u00A0'}
                     </td>
                   );
