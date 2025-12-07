@@ -7,6 +7,7 @@ export default function AnswerSection({
   currentIndex = 0,
   userAnswers = [],
   solvedAnswers = [],
+  lineErrors = {},
   onAnswerChange,
   onSubmit,
   isDisabled,
@@ -40,7 +41,11 @@ export default function AnswerSection({
   const parsedCalls = useMemo(() => {
     return formatCalls.map((call) => {
       const { skeleton, answer, inputs = [] } = call;
-      const parts = splitParts(answer || '');
+      
+      // For advanced difficulty, keep answer as single string (no splitting by comma)
+      // For beginner/intermediate, split by comma to create separate input boxes
+      const parts = difficulty === 'advanced' ? [answer || ''] : splitParts(answer || '');
+      
       if (!skeleton || !answer) {
         return { before: skeleton || '', after: '', answer, parts, inputs };
       }
@@ -83,7 +88,7 @@ export default function AnswerSection({
       // Fallback
       return { before: skeleton, after: '', answer, parts, inputs };
     });
-  }, [formatCalls]);
+  }, [formatCalls, difficulty]);
 
   const handleInputChange = (callIdx, partIdx, value) => {
     if (!onAnswerChange) return;
@@ -147,35 +152,55 @@ export default function AnswerSection({
                     {active && parsed.inputs && parsed.inputs.length > 0 ? (
                       <>
                         <span className="ide-static" aria-hidden="true">{parsed.before}</span>
-                        {parsed.parts.map((part, partIdx) => {
-                          const val = values[partIdx] || '';
-                          const isLast = partIdx === parsed.parts.length - 1;
-                          const isFirstInput = idx === currentIndex && partIdx === 0;
-                          const inputMeta = parsed.inputs?.[partIdx] || {};
-                          const isFormatString = inputMeta.type === 'format-string';
-                          const isStringLiteral = inputMeta.type === 'string-literal';
-                          const isConstantString = inputMeta.type === 'constant-string';
-                          // In beginner mode, format strings and string literals get quotes, but constant-strings don't
-                          const shouldHaveQuotes = difficulty === 'beginner' && (isFormatString || isStringLiteral) && !isConstantString;
-                          return (
-                            <React.Fragment key={`call-${idx}-part-${partIdx}`}>
-                              {shouldHaveQuotes && <span className="ide-static">"</span>}
-                              <input
-                                aria-label={`Line ${idx + 1} part ${partIdx + 1} input`}
-                                className="ide-input"
-                                type="text"
-                                value={val}
-                                onChange={(e) => handleInputChange(idx, partIdx, e.target.value)}
-                                disabled={isDisabled}
-                                ref={isFirstInput ? firstInputRef : null}
-                                onKeyDown={handleKeyDown}
-                                style={{ width: `${Math.max(val.length, 1)}ch` }}
-                              />
-                              {shouldHaveQuotes && <span className="ide-static">"</span>}
-                              {!isLast && <span className="ide-static ide-comma">, </span>}
-                            </React.Fragment>
-                          );
-                        })}
+                        {difficulty === 'advanced' ? (
+                          // Advanced mode: single input for entire answer
+                          <input
+                            aria-label={`Line ${idx + 1} input`}
+                            className="ide-input ide-input-advanced"
+                            type="text"
+                            value={values[0] || ''}
+                            onChange={(e) => handleInputChange(idx, 0, e.target.value)}
+                            disabled={isDisabled}
+                            ref={idx === currentIndex ? firstInputRef : null}
+                            onKeyDown={handleKeyDown}
+                            style={{ width: `${Math.max((values[0] || '').length, 20)}ch` }}
+                            spellCheck={false}
+                            autoComplete="off"
+                          />
+                        ) : (
+                          // Beginner/Intermediate mode: separate inputs for each part
+                          parsed.parts.map((part, partIdx) => {
+                            const val = values[partIdx] || '';
+                            const isLast = partIdx === parsed.parts.length - 1;
+                            const isFirstInput = idx === currentIndex && partIdx === 0;
+                            const inputMeta = parsed.inputs?.[partIdx] || {};
+                            const isFormatString = inputMeta.type === 'format-string';
+                            const isStringLiteral = inputMeta.type === 'string-literal';
+                            const isConstantString = inputMeta.type === 'constant-string';
+                            // In beginner mode, format strings and string literals get quotes, but constant-strings don't
+                            const shouldHaveQuotes = difficulty === 'beginner' && (isFormatString || isStringLiteral) && !isConstantString;
+                            return (
+                              <React.Fragment key={`call-${idx}-part-${partIdx}`}>
+                                {shouldHaveQuotes && <span className="ide-static">"</span>}
+                                <input
+                                  aria-label={`Line ${idx + 1} part ${partIdx + 1} input`}
+                                  className="ide-input"
+                                  type="text"
+                                  value={val}
+                                  onChange={(e) => handleInputChange(idx, partIdx, e.target.value)}
+                                  disabled={isDisabled}
+                                  ref={isFirstInput ? firstInputRef : null}
+                                  onKeyDown={handleKeyDown}
+                                  style={{ width: `${Math.max(val.length, 1)}ch` }}
+                                  spellCheck={false}
+                                  autoComplete="off"
+                                />
+                                {shouldHaveQuotes && <span className="ide-static">"</span>}
+                                {!isLast && <span className="ide-static ide-comma">, </span>}
+                              </React.Fragment>
+                            );
+                          })
+                        )}
                         <span className="ide-static" aria-hidden="true">{parsed.after}</span>
                       </>
                     ) : active && (!parsed.inputs || parsed.inputs.length === 0) ? (
@@ -206,6 +231,14 @@ export default function AnswerSection({
                     )}
                   </code>
                 </div>
+                {lineErrors[idx] && (
+                  <div className="ide-line ide-error-line">
+                    <div className="ide-gutter"></div>
+                    <code className="ide-code ide-error">
+                      {lineErrors[idx]}
+                    </code>
+                  </div>
+                )}
               </React.Fragment>
             );
           })}

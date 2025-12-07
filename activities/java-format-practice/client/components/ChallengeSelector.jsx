@@ -20,8 +20,8 @@ export default function ChallengeSelector({
   const themes = [
     { id: 'all', label: 'All Themes' },
     { id: 'wanted-poster', label: 'Wanted Poster' },
-    { id: 'fantasy-menu', label: 'Fantasy Menu' },
     { id: 'spy-badge', label: 'Spy Badge' },
+    { id: 'fantasy-menu', label: 'Fantasy Menu' },
   ];
 
   return (

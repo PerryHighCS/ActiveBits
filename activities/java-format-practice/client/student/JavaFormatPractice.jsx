@@ -1,3 +1,17 @@
+import InterleavedOutputGrid from '../components/InterleavedOutputGrid';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import Button from '@src/components/ui/Button';
+import '../components/styles.css';
+import ChallengeSelector from '../components/ChallengeSelector';
+import CharacterGrid from '../components/CharacterGrid';
+import AnswerSection from '../components/AnswerSection';
+import FeedbackDisplay from '../components/FeedbackDisplay';
+import StatsPanel from '../components/StatsPanel';
+import { getRandomChallenge, formatWithMask, evaluateArgs } from '../challenges';
+import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
+
 // Highlight the first difference between two strings
 function highlightDiff(expected, actual) {
   if (expected === actual) return { expected, actual };
@@ -20,18 +34,6 @@ function highlightDiff(expected, actual) {
     actual.slice(actual.length - j);
   return { expected: expDiff, actual: actDiff };
 }
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import Button from '@src/components/ui/Button';
-import '../components/styles.css';
-import ChallengeSelector from '../components/ChallengeSelector';
-import CharacterGrid from '../components/CharacterGrid';
-import AnswerSection from '../components/AnswerSection';
-import FeedbackDisplay from '../components/FeedbackDisplay';
-import StatsPanel from '../components/StatsPanel';
-import ChallengeQuestion from '../components/ChallengeQuestion';
-import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
-import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 
 /**
  * Evaluate a Java format string with given arguments
@@ -162,511 +164,6 @@ function evaluateFormatString(formatStr, args = []) {
   return result;
 }
 
-// Local challenge data (embedded directly for client-side use)
-// In a production app, these could also be fetched from the server
-const PRESET_CHALLENGES = [
-  {
-    id: 'wanted-poster-beginner',
-    title: 'Wanted Poster - Basic Info',
-    difficulty: 'beginner',
-    theme: 'wanted-poster',
-    scenario: 'Create a wanted poster for a fictional criminal. Complete each line of the poster by choosing the right format specifier.',
-    variables: [
-      { name: 'name', type: 'String', value: '"The Bandit"' },
-      { name: 'crime', type: 'String', value: '"Grand Theft"' },
-      { name: 'reward', type: 'int', value: '5000' },
-    ],
-    formatCalls: [
-      {
-        method: 'printf',
-        prompt: 'Print the title "WANTED" with a newline',
-        skeleton: 'System.out.printf("%s%n", "WANTED");',
-        answer: '%s%n, WANTED',
-        inputs: [
-          { type: 'format-string', expected: '%s%n' },
-          { type: 'string-literal', expected: 'WANTED' },
-        ],
-        explanation: '%s formats string values, %n adds newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Print the criminal name',
-        skeleton: 'System.out.printf("Name: %s%n", name);',
-        answer: 'Name: %s%n, name',
-        inputs: [
-          { type: 'format-string', expected: 'Name: %s%n' },
-          { type: 'variable', expected: 'name' },
-        ],
-        explanation: 'Use %s for the name variable, %n adds newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Print the crime',
-        skeleton: 'System.out.printf("Crime: %s%n", crime);',
-        answer: 'Crime: %s%n, crime',
-        inputs: [
-          { type: 'format-string', expected: 'Crime: %s%n' },
-          { type: 'variable', expected: 'crime' },
-        ],
-        explanation: 'Another string using %s, %n for newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Print the reward amount',
-        skeleton: 'System.out.printf("Reward: $%d%n", reward);',
-        answer: 'Reward: $%d%n, reward',
-        inputs: [
-          { type: 'format-string', expected: 'Reward: $%d%n' },
-          { type: 'variable', expected: 'reward' },
-        ],
-        explanation: '%d formats integers without decimals, %n for newline',
-      },
-    ],
-    expectedOutput: 'WANTED\nName: The Bandit\nCrime: Grand Theft\nReward: $5000\n',
-    hints: [
-      'Use %d for integers (whole numbers)',
-      'Use %s for strings (text)',
-      'Use %n as the newline format specifier in printf strings',
-    ],
-    gridWidth: 30,
-    gridHeight: 5,
-  },
-  {
-    id: 'restaurant-menu-beginner',
-    title: 'Restaurant Menu - Price Display',
-    difficulty: 'beginner',
-    theme: 'restaurant-menu',
-    scenario: 'Build a restaurant menu listing items and their prices. Each line of the menu is a separate format challenge.',
-    variables: [
-      { name: 'dish1', type: 'String', value: '"Spaghetti Carbonara"' },
-      { name: 'price1', type: 'double', value: '12.99' },
-      { name: 'dish2', type: 'String', value: '"Tiramisu"' },
-      { name: 'price2', type: 'double', value: '6.50' },
-    ],
-    formatCalls: [
-      {
-        method: 'printf',
-        prompt: 'Line 1: Display first dish name',
-        skeleton: 'System.out.printf("%s%n", dish1);',
-        answer: '%s%n, dish1',
-        inputs: [
-          { type: 'format-string', expected: '%s%n' },
-          { type: 'variable', expected: 'dish1' },
-        ],
-        explanation: '%s formats string values, %n adds newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 2: Display first price with 2 decimal places',
-        skeleton: 'System.out.printf("Price: $%.2f%n", price1);',
-        answer: 'Price: $%.2f%n, price1',
-        inputs: [
-          { type: 'format-string', expected: 'Price: $%.2f%n' },
-          { type: 'variable', expected: 'price1' },
-        ],
-        explanation: '%.2f formats decimals with exactly 2 places, %n for newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 3: Display second dish name',
-        skeleton: 'System.out.printf("%s%n", dish2);',
-        answer: '%s%n, dish2',
-        inputs: [
-          { type: 'format-string', expected: '%s%n' },
-          { type: 'variable', expected: 'dish2' },
-        ],
-        explanation: 'Use %s for another string, %n for newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 4: Display second price',
-        skeleton: 'System.out.printf("Price: $%.2f%n", price2);',
-        answer: 'Price: $%.2f%n, price2',
-        inputs: [
-          { type: 'format-string', expected: 'Price: $%.2f%n' },
-          { type: 'variable', expected: 'price2' },
-        ],
-        explanation: 'Same format for consistency, %n for newline',
-      },
-    ],
-    expectedOutput: 'Spaghetti Carbonara\nPrice: $12.99\nTiramisu\nPrice: $6.50\n',
-    hints: [
-      'Use %.2f to display money with 2 decimal places',
-      'The number after the dot controls decimal precision',
-      'Use %n as the newline format specifier to separate lines',
-    ],
-    gridWidth: 30,
-    gridHeight: 5,
-  },
-  {
-    id: 'diagnostic-panel-beginner',
-    title: 'System Diagnostic - Status Display',
-    difficulty: 'beginner',
-    theme: 'diagnostic-panel',
-    scenario: 'Create a system diagnostic display showing various statuses and percentages. Each line is a separate format call.',
-    variables: [
-      { name: 'progress', type: 'int', value: '85' },
-      { name: 'status', type: 'String', value: '"INITIALIZING"' },
-    ],
-    formatCalls: [
-      {
-        method: 'printf',
-        prompt: 'Line 1: Display the system component name (constant)',
-        skeleton: 'System.out.printf("System Boot%n");',
-        answer: 'System Boot%n',
-        inputs: [
-          { type: 'constant-string', expected: 'System Boot%n' },
-        ],
-        explanation: 'No format specifiers needed for a constant string, %n adds newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 2: Display progress as percentage',
-        skeleton: 'System.out.printf("Progress: %d%%%n", progress);',
-        answer: 'Progress: %d%%%n, progress',
-        inputs: [
-          { type: 'format-string', expected: 'Progress: %d%%%n' },
-          { type: 'variable', expected: 'progress' },
-        ],
-        explanation: '%d formats integers, %% outputs literal percent sign, %n for newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 3: Display status message from variable',
-        skeleton: 'System.out.printf("Status: %s%n", status);',
-        answer: 'Status: %s%n, status',
-        inputs: [
-          { type: 'format-string', expected: 'Status: %s%n' },
-          { type: 'variable', expected: 'status' },
-        ],
-        explanation: 'Use %s for the status variable, %n for newline',
-      },
-    ],
-    expectedOutput: 'System Boot\nProgress: 85%\nStatus: INITIALIZING\n',
-    hints: [
-      'Use %% to print a literal percent sign',
-      'A single % starts a format specifier, so %% escapes it',
-      'Use %n as the newline format specifier in printf',
-    ],
-    gridWidth: 30,
-    gridHeight: 4,
-  },
-  {
-    id: 'hacker-terminal-intermediate',
-    title: 'Hacker Terminal - System Override',
-    difficulty: 'intermediate',
-    theme: 'hacker-terminal',
-    scenario: 'Create a hacker terminal display simulating system override. Each line shows a different access attempt with field alignment.',
-    variables: [
-      { name: 'user', type: 'String', value: '"admin"' },
-      { name: 'attempts', type: 'int', value: '3' },
-      { name: 'accessLevel', type: 'int', value: '9' },
-      { name: 'timestamp', type: 'double', value: '1621.847' },
-    ],
-    formatCalls: [
-      {
-        method: 'printf',
-        prompt: 'Line 1: Display header with user name left-aligned',
-        skeleton: 'System.out.printf("%-15s | Attempting access%n", user);',
-        answer: '%-15s | Attempting access%n", user',
-        inputs: [
-          { type: 'format-string', expected: '%-15s | Attempting access%n' },
-          { type: 'variable', expected: 'user' },
-        ],
-        explanation: '%-15s left-aligns string in 15 character field, %n for newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 2: Show failed attempts and access level right-aligned',
-        skeleton: 'System.out.printf("Failed: %2d | Level: %2d%n", attempts, accessLevel);',
-        answer: '%2d | Level: %2d%n", attempts, accessLevel',
-        inputs: [
-          { type: 'format-string', expected: '%2d | Level: %2d%n' },
-          { type: 'variable', expected: 'attempts' },
-          { type: 'variable', expected: 'accessLevel' },
-        ],
-        explanation: '%2d right-aligns integers in 2 character field, %n for newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 3: Display timestamp with 2 decimal precision',
-        skeleton: 'System.out.printf("Timestamp: %.2f seconds%n", timestamp);',
-        answer: '%.2f seconds%n", timestamp',
-        inputs: [
-          { type: 'format-string', expected: '%.2f seconds%n' },
-          { type: 'variable', expected: 'timestamp' },
-        ],
-        explanation: '%.2f shows decimal numbers with 2 places, %n for newline',
-      },
-    ],
-    expectedOutput: 'admin           | Attempting access\nFailed:  3 | Level:  9\nTimestamp: 1621.85 seconds\n',
-    hints: [
-      'Use %-20s to left-align strings',
-      'Use %5d to right-align numbers in 5 character width',
-      'Order of arguments must match order of format specifiers',
-    ],
-    gridWidth: 40,
-    gridHeight: 4,
-  },
-  {
-    id: 'restaurant-menu-intermediate',
-    title: 'Restaurant Menu - Aligned Columns',
-    difficulty: 'intermediate',
-    theme: 'restaurant-menu',
-    scenario: 'Create a restaurant menu with aligned columns for dish names and prices. Format creates clean columnar layout.',
-    variables: [
-      { name: 'item1', type: 'String', value: '"Lasagna"' },
-      { name: 'price1', type: 'double', value: '14.99' },
-      { name: 'item2', type: 'String', value: '"Risotto"' },
-      { name: 'price2', type: 'double', value: '13.50' },
-    ],
-    formatCalls: [
-      {
-        method: 'format',
-        prompt: 'Format menu row 1 with left-aligned dish name (20 chars) and price',
-        skeleton: 'String row1 = String.format("%-20s $%6.2f", item1, price1);',
-        answer: '%-20s $%6.2f", item1, price1',
-        inputs: [
-          { type: 'format-string', expected: '%-20s $%6.2f' },
-          { type: 'variable', expected: 'item1' },
-          { type: 'variable', expected: 'price1' },
-        ],
-        explanation: '%-20s left-aligns string in 20 character field, %6.2f right-aligns price',
-      },
-      {
-        method: 'format',
-        prompt: 'Format menu row 2 with same alignment',
-        skeleton: 'String row2 = String.format("%-20s $%6.2f", item2, price2);',
-        answer: '%-20s $%6.2f", item2, price2',
-        inputs: [
-          { type: 'format-string', expected: '%-20s $%6.2f' },
-          { type: 'variable', expected: 'item2' },
-          { type: 'variable', expected: 'price2' },
-        ],
-        explanation: 'Same format ensures columns align vertically',
-      },
-    ],
-    expectedOutput: 'Lasagna              $  14.99\nRisotto              $  13.50\n',
-    hints: [
-      'Use %-20s to left-align text in a 20-character field',
-      'Use %6.2f to right-align numbers with 6 total width and 2 decimals',
-      'Consistent widths create clean columnar alignment',
-    ],
-    gridWidth: 35,
-    gridHeight: 3,
-  },
-  {
-    id: 'battle-display-intermediate',
-    title: 'Battle Status Display - RPG Stats',
-    difficulty: 'intermediate',
-    theme: 'battle-display',
-    scenario: 'Create an RPG battle status display with right-aligned stat columns. Each line shows different combatant stats.',
-    variables: [
-      { name: 'name1', type: 'String', value: '"Knight"' },
-      { name: 'hp1', type: 'int', value: '85' },
-      { name: 'damage1', type: 'int', value: '12' },
-      { name: 'name2', type: 'String', value: '"Wizard"' },
-      { name: 'hp2', type: 'int', value: '42' },
-      { name: 'damage2', type: 'int', value: '18' },
-    ],
-    formatCalls: [
-      {
-        method: 'printf',
-        prompt: 'Line 1: Display first combatant with right-aligned stats',
-        skeleton: 'System.out.printf("%-10s HP: %3d  DMG: %3d%n", name1, hp1, damage1);',
-        answer: '%-10s HP: %3d  DMG: %3d%n", name1, hp1, damage1',
-        inputs: [
-          { type: 'format-string', expected: '%-10s HP: %3d  DMG: %3d%n' },
-          { type: 'variable', expected: 'name1' },
-          { type: 'variable', expected: 'hp1' },
-          { type: 'variable', expected: 'damage1' },
-        ],
-        explanation: '%-10s left-aligns name, %3d right-aligns numbers, %n for newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 2: Display second combatant with same format',
-        skeleton: 'System.out.printf("%-10s HP: %3d  DMG: %3d%n", name2, hp2, damage2);',
-        answer: '%-10s HP: %3d  DMG: %3d%n", name2, hp2, damage2',
-        inputs: [
-          { type: 'format-string', expected: '%-10s HP: %3d  DMG: %3d%n' },
-          { type: 'variable', expected: 'name2' },
-          { type: 'variable', expected: 'hp2' },
-          { type: 'variable', expected: 'damage2' },
-        ],
-        explanation: 'Identical format ensures columns align, %n for newline',
-      },
-    ],
-    expectedOutput: 'Knight     HP:  85  DMG:  12\nWizard     HP:  42  DMG:  18\n',
-    hints: [
-      'Use %3d to right-align numbers in 3-character field',
-      'Numbers are right-aligned by default when you specify width',
-      'Consistent formatting creates organized columnar data',
-    ],
-    gridWidth: 35,
-    gridHeight: 3,
-  },
-  {
-    id: 'wanted-poster-advanced',
-    title: 'Professional Wanted Poster - Full Details',
-    difficulty: 'advanced',
-    theme: 'wanted-poster',
-    scenario: 'Create a professional wanted poster with full details including reward with thousands separator and precise measurements.',
-    variables: [
-      { name: 'name', type: 'String', value: '"Dr. Devious"' },
-      { name: 'height', type: 'double', value: '5.92' },
-      { name: 'weight', type: 'int', value: '187' },
-      { name: 'reward', type: 'int', value: '500000' },
-      { name: 'successRate', type: 'double', value: '94.5' },
-    ],
-    formatCalls: [
-      {
-        method: 'printf',
-        prompt: 'Line 1: Display "=== WANTED POSTER ===" header',
-        skeleton: 'System.out.printf("%n=== WANTED POSTER ===%n");',
-        answer: '%n=== WANTED POSTER ===%n',
-        explanation: '%n is platform-independent newline (preferred over \\n)',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 2: Display criminal name and measurements',
-        skeleton: 'System.out.printf("Name: %-20s Height: %.2f ft  Weight: %4d lbs%n", name, height, weight);',
-        answer: '%-20s Height: %.2f ft  Weight: %4d lbs%n", name, height, weight',
-        explanation: 'Combine left-aligned string with right-aligned numbers, %n for newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 3: Display reward with thousands separator',
-        skeleton: 'System.out.printf("Reward: $%,d%n", reward);',
-        answer: '$%,d%n", reward',
-        explanation: '%,d adds thousands separators (500,000)',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 4: Display success rate percentage with borders',
-        skeleton: 'System.out.printf("Success Rate: %6.1f%%%n", successRate);',
-        answer: '%6.1f%%%n", successRate',
-        explanation: '%% escapes percent, %6.1f right-aligns decimal',
-      },
-    ],
-    expectedOutput: '\n=== WANTED POSTER ===\nName: Dr. Devious        Height: 5.92 ft  Weight:  187 lbs\nReward: $500,000\nSuccess Rate:  94.5%\n',
-    hints: [
-      'Use %,d to add thousands separators to integers',
-      'Use %6.1f for right-aligned decimal with 1 decimal place',
-      'Use %% to print a literal percent sign',
-      'Use %n for cross-platform newlines',
-    ],
-    gridWidth: 50,
-    gridHeight: 5,
-  },
-  {
-    id: 'restaurant-menu-advanced',
-    title: 'Restaurant Invoice - Detailed Calculation',
-    difficulty: 'advanced',
-    theme: 'restaurant-menu',
-    scenario: 'Create a detailed restaurant invoice with subtotal, tax, and total. Uses width specifiers, decimal precision, and right-alignment.',
-    variables: [
-      { name: 'subtotal', type: 'double', value: '127.50' },
-      { name: 'taxRate', type: 'double', value: '0.08' },
-      { name: 'itemCount', type: 'int', value: '8' },
-    ],
-    formatCalls: [
-      {
-        method: 'format',
-        prompt: 'Line 1: Show subtotal right-aligned with 2 decimal places in 10-char width',
-        skeleton: 'String line1 = String.format("Subtotal: %10.2f", subtotal);',
-        answer: '%10.2f", subtotal',
-        explanation: '%10.2f allocates 10 characters total, right-aligned, 2 decimals',
-      },
-      {
-        method: 'format',
-        prompt: 'Line 2: Show calculated tax (8%%) on separate line',
-        skeleton: 'String line2 = String.format("Tax (8%%): %10.2f", subtotal * taxRate);',
-        answer: '%10.2f", subtotal * taxRate',
-        explanation: '%% escapes the percent sign in format string',
-      },
-      {
-        method: 'format',
-        prompt: 'Line 3: Show item count padded with leading zeros to 3 digits',
-        skeleton: 'String line3 = String.format("Items: %03d", itemCount);',
-        answer: '%03d", itemCount',
-        explanation: '%03d pads with leading zeros to 3 digits total',
-      },
-    ],
-    expectedOutput: 'Subtotal:    127.50\nTax (8%):     10.20\nItems: 008\n',
-    hints: [
-      'Use %10.2f for total width of 10 with 2 decimal places',
-      'Use %03d to pad numbers with leading zeros',
-      'The 0 flag pads with zeros instead of spaces',
-    ],
-    gridWidth: 25,
-    gridHeight: 4,
-  },
-  {
-    id: 'diagnostic-panel-advanced',
-    title: 'Diagnostic Panel - System Readout',
-    difficulty: 'advanced',
-    theme: 'diagnostic-panel',
-    scenario: 'Create a detailed system diagnostic panel with memory stats, percentages, and system codes in hexadecimal.',
-    variables: [
-      { name: 'mission', type: 'String', value: '"Arctic Storm"' },
-      { name: 'duration', type: 'int', value: '142' },
-      { name: 'successRate', type: 'double', value: '98.7' },
-      { name: 'errorCode', type: 'int', value: '255' },
-    ],
-    formatCalls: [
-      {
-        method: 'printf',
-        prompt: 'Line 1: Display mission name left-aligned in 20 chars with status',
-        skeleton: 'System.out.printf("%-20s STATUS: COMPLETE%n", mission);',
-        answer: '%-20s STATUS: COMPLETE%n", mission',
-        explanation: '%-20s left-aligns in 20 character field, %n for newline',
-      },
-      {
-        method: 'printf',
-        prompt: 'Line 2: Show duration in minutes and success percentage',
-        skeleton: 'System.out.printf("Duration: %4d min | Success: %6.1f%%%n", duration, successRate);',
-        answer: '%4d min | Success: %6.1f%%%n", duration, successRate',
-        explanation: 'Combine multiple formats with careful spacing, %n for newline',
-      },
-      {
-        method: 'format',
-        prompt: 'Line 3: Convert error code to uppercase hexadecimal',
-        skeleton: 'String hexCode = String.format("Code: %04X", errorCode);',
-        answer: '%04X", errorCode',
-        explanation: '%X displays integer as hexadecimal (uppercase), 04 pads to 4 digits',
-      },
-    ],
-    expectedOutput: 'Arctic Storm        STATUS: COMPLETE\nDuration:  142 min | Success:  98.7%\nCode: 00FF\n',
-    hints: [
-      'Use %X for uppercase hexadecimal representation',
-      'Use %x for lowercase hexadecimal',
-      '%04X pads hexadecimal with leading zeros to 4 digits',
-      'Use %6.1f for width 6 with 1 decimal precision',
-    ],
-    gridWidth: 45,
-    gridHeight: 4,
-  },
-];
-
-function getRandomChallenge(theme = null, difficulty = null) {
-  let challenges = PRESET_CHALLENGES;
-
-  if (theme) {
-    challenges = challenges.filter((c) => c.theme === theme);
-  }
-
-  if (difficulty) {
-    challenges = challenges.filter((c) => c.difficulty === difficulty);
-  }
-
-  if (challenges.length === 0) {
-    return PRESET_CHALLENGES[0];
-  }
-
-  return challenges[Math.floor(Math.random() * challenges.length)];
-}
-
 /**
  * JavaFormatPractice - Student view for practicing Java printf and String.format
  * 
@@ -681,6 +178,162 @@ function getRandomChallenge(theme = null, difficulty = null) {
  * - Streak: Consecutive correct answers WITHOUT any hints
  * - Longest Streak: Best streak achieved during the session
  */
+
+// ExpectedOutputGrid for String.format problems - shows expected output with variable names as row labels
+function ExpectedOutputGrid({ formatCalls, width = 30, height = 3, variables = [] }) {
+  // Build the expected output for each line by computing the format calls
+  const lines = formatCalls.map((call) => {
+    let varName = '';
+    const skeletonMatch = call.skeleton?.match(/String\s+(\w+)\s*=/);
+    if (skeletonMatch) {
+      varName = skeletonMatch[1];
+    }
+    
+    // Compute expected output by parsing and evaluating the answer
+    let expectedText = '';
+    let expectedMask = '';
+    const answerStr = call.answer || '';
+    if (answerStr.trim()) {
+      try {
+        // Split arguments properly, respecting quoted strings
+        const answerParts = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < answerStr.length; i++) {
+          const char = answerStr[i];
+          const prevChar = i > 0 ? answerStr[i - 1] : '';
+          
+          if (char === '"' && prevChar !== '\\') {
+            inQuotes = !inQuotes;
+            current += char;
+          } else if (char === ',' && !inQuotes) {
+            answerParts.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        if (current.trim()) {
+          answerParts.push(current.trim());
+        }
+        
+        if (answerParts[0].startsWith('"') && answerParts[0].endsWith('"')) {
+          const fmt = answerParts[0].slice(1, -1);
+          const argExprs = answerParts.slice(1);
+          
+          // Build value map from variables
+          const valueMap = {};
+          (variables || []).forEach((v) => {
+            let val = v.value;
+            if (v.type === 'String') {
+              val = val.replace(/^"(.*)"$/, '$1');
+            }
+            valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+          });
+          
+          // Evaluate arguments
+          const argValues = argExprs.map((expr) => {
+            const trimmed = expr.trim();
+            if (!trimmed) return '';
+            const keys = Object.keys(valueMap);
+            const vals = Object.values(valueMap);
+            try {
+              // eslint-disable-next-line no-new-func
+              return new Function(...keys, `return ${trimmed};`)(...vals);
+            } catch {
+              return '';
+            }
+          });
+          
+          // Use formatWithMask to properly format
+          const result = formatWithMask(fmt, argValues);
+          expectedText = result.text.replace(/%n/g, '').replace(/\n/g, '');
+          expectedMask = result.mask.replace(/%n/g, '').replace(/\n/g, '');
+        }
+      } catch {
+        // If we can't compute expected, leave it empty
+      }
+    }
+    
+    return { varName, expectedText, expectedMask };
+  });
+
+  return (
+    <div className="character-grid-container">
+      <table className="character-grid">
+        <thead>
+          <tr>
+            <th className="grid-row-label" style={{ width: '80px' }}></th>
+            {Array.from({ length: width }).map((_, i) => (
+              <th key={`tens-${i}`} className="grid-column-header grid-column-header-tens">
+                {i % 10 === 0 ? Math.floor(i / 10) : '\u00A0'}
+              </th>
+            ))}
+          </tr>
+          <tr>
+            <th className="grid-row-label" style={{ width: '80px' }}></th>
+            {Array.from({ length: width }).map((_, i) => (
+              <th key={`ones-${i}`} className="grid-column-header">
+                {i % 10}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((line, idx) => {
+            const displayLines = line.expectedText ? line.expectedText.split(/\n/) : [''];
+            const maskLines = line.expectedMask ? line.expectedMask.split(/\n/) : [''];
+            
+            return displayLines.map((displayLine, lineIdx) => (
+              <tr key={`${idx}-${lineIdx}`}>
+                <td className="grid-row-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
+                  {lineIdx === 0 ? line.varName : ''}
+                </td>
+                {Array.from({ length: width }).map((_, colIdx) => {
+                  const char = displayLine?.[colIdx] || '';
+                  const maskChar = maskLines[lineIdx]?.[colIdx] || '';
+                  const isEmpty = !char;
+                  
+                  // Color based on mask: 'S' = static (orange), 'D' = dynamic (blue), empty = gray
+                  let bgColor = '#f3f4f6'; // Gray for empty
+                  let borderColor = '#ccc';
+                  
+                  if (!isEmpty) {
+                    if (maskChar === 'S') {
+                      bgColor = '#fef3c7'; // Orange for static
+                      borderColor = '#f59e0b';
+                    } else if (maskChar === 'D' || maskChar === 'V') {
+                      bgColor = '#dbeafe'; // Blue for dynamic
+                      borderColor = '#3b82f6';
+                    }
+                  }
+                  
+                  return (
+                    <td key={colIdx} className="grid-cell" style={{ background: bgColor, borderColor: borderColor }}>
+                      {char || '\u00A0'}
+                    </td>
+                  );
+                })}
+              </tr>
+            ));
+          })}
+        </tbody>
+      </table>
+      <div className="grid-legend">
+        <div className="grid-legend-item">
+          <div className="grid-legend-box" style={{ background: '#fef3c7', borderColor: '#f59e0b', border: '2px solid #f59e0b' }}></div>
+          <span>Static characters (format string)</span>
+        </div>
+        <div className="grid-legend-item">
+          <div className="grid-legend-box" style={{ background: '#dbeafe', borderColor: '#3b82f6', border: '2px solid #3b82f6' }}></div>
+          <span>Dynamic characters (from arguments)</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function JavaFormatPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
   const isSoloSession = sessionId ? sessionId.startsWith('solo-') : false;
@@ -701,6 +354,8 @@ export default function JavaFormatPractice({ sessionData }) {
   const [userAnswers, setUserAnswers] = useState([]);
   const [solvedAnswers, setSolvedAnswers] = useState([]);
   const [feedback, setFeedback] = useState(null);
+  const [lineErrors, setLineErrors] = useState({});
+  const [lineOutputs, setLineOutputs] = useState({});
   const [hintShown, setHintShown] = useState(false);
 
   const [stats, setStats] = useState({
@@ -714,19 +369,75 @@ export default function JavaFormatPractice({ sessionData }) {
 
   const splitAnswerParts = useCallback((answer = '') => answer.split(',').map((part) => part.trim()), []);
 
+  // Helper function to split arguments respecting quoted strings
+  const splitArgumentsRespectingQuotes = useCallback((str) => {
+    const parts = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < str.length; i++) {
+      const char = str[i];
+      const prevChar = i > 0 ? str[i - 1] : '';
+
+      if (char === '"' && prevChar !== '\\') {
+        inQuotes = !inQuotes;
+        current += char;
+      } else if (char === ',' && !inQuotes) {
+        parts.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+
+    if (current.trim()) {
+      parts.push(current.trim());
+    }
+
+    return parts;
+  }, []);
+
+  // Validate that all variable names in expressions are defined
+  const validateVariableReferences = useCallback((expressions, valueMap) => {
+    const definedVars = Object.keys(valueMap);
+    const javaKeywords = ['true', 'false', 'null', 'undefined', 'int', 'long', 'float', 'double', 'boolean', 'byte', 'char', 'short'];
+    
+    for (const expr of expressions) {
+      // Remove quoted strings first to avoid checking variables inside string literals
+      const exprWithoutStrings = expr.replace(/"[^"]*"/g, '').replace(/'[^']*'/g, '');
+      
+      // Extract variable names from the expression (simple regex: word characters)
+      const varPattern = /\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g;
+      let match;
+      while ((match = varPattern.exec(exprWithoutStrings)) !== null) {
+        const varName = match[1];
+        // Skip Java keywords and type names
+        if (javaKeywords.includes(varName)) continue;
+        if (!definedVars.includes(varName)) {
+          throw new Error(`Variable '${varName}' is not defined`);
+        }
+      }
+    }
+  }, []);
+
   const buildAnswerString = useCallback((parts = []) => {
     return parts.map((p) => p.trim()).join(', ');
   }, []);
 
   const createEmptyAnswers = useCallback(
-    (formatCalls = []) => formatCalls.map((call) => new Array(splitAnswerParts(call.answer).length).fill('')),
+    (formatCalls = [], difficulty) =>
+      formatCalls.map((call) =>
+        difficulty === 'advanced'
+          ? ['']
+          : new Array(splitAnswerParts(call.answer).length).fill('')
+      ),
     [splitAnswerParts]
   );
 
   // Helper to reset challenge state
   const resetChallengeState = useCallback(
-    (formatCalls = []) => {
-      setUserAnswers(createEmptyAnswers(formatCalls));
+    (formatCalls = [], difficulty) => {
+      setUserAnswers(createEmptyAnswers(formatCalls, difficulty));
       setSolvedAnswers(Array.from({ length: formatCalls.length }, () => ''));
       setFeedback(null);
       setHintShown(false);
@@ -757,9 +468,9 @@ export default function JavaFormatPractice({ sessionData }) {
 
   useEffect(() => {
     if (!currentChallenge || !currentChallenge.formatCalls) return;
-    resetChallengeState(currentChallenge.formatCalls);
+    resetChallengeState(currentChallenge.formatCalls, selectedDifficulty);
     setCurrentFormatCallIndex(0);
-  }, [currentChallenge, resetChallengeState]);
+  }, [currentChallenge, resetChallengeState, selectedDifficulty]);
 
   // Load stats from localStorage
   useEffect(() => {
@@ -787,7 +498,7 @@ export default function JavaFormatPractice({ sessionData }) {
       );
       setCurrentChallenge(challenge);
       setCurrentFormatCallIndex(0);
-      resetChallengeState(challenge.formatCalls || []);
+      resetChallengeState(challenge.formatCalls || [], selectedDifficulty);
       setFocusToken((t) => t + 1);
     }
   }, [nameSubmitted, selectedDifficulty, selectedTheme]);
@@ -923,26 +634,20 @@ export default function JavaFormatPractice({ sessionData }) {
       const userParts = userAnswers[currentFormatCallIndex] || [];
       const expectedParts = splitAnswerParts(formatCall.answer);
       
-      // Adjust expected parts for string literals in beginner mode
       const inputsMeta = formatCall.inputs || [];
       const adjustedExpectedParts = expectedParts.map((part, idx) => {
         const meta = inputsMeta[idx];
         if (meta?.type === 'string-literal') {
-          // User should NOT type quotes, so add them back for comparison
           return `"${part}"`;
         }
-        // Format strings and variables don't get quotes
         return part;
       });
       
-      // Adjust user parts similarly
       const adjustedUserParts = userParts.map((part, idx) => {
         const meta = inputsMeta[idx];
         if (meta?.type === 'string-literal') {
-          // User typed without quotes, add them for comparison
           return `"${part.trim()}"`;
         }
-        // Format strings and variables don't get quotes
         return part.trim();
       });
 
@@ -950,7 +655,6 @@ export default function JavaFormatPractice({ sessionData }) {
       const expected = adjustedExpectedParts.join(', ');
       const isCorrect = submitted === expected;
 
-      // Provide detailed feedback about which part is wrong
       let detailedMessage = '';
       let wrongParts = [];
       if (!isCorrect && userParts.length === expectedParts.length) {
@@ -970,16 +674,6 @@ export default function JavaFormatPractice({ sessionData }) {
           detailedMessage = `Incorrect ${wrongParts.join(', ')}`;
         }
       }
-
-      console.log('Checking answer:', {
-        submitted,
-        expected,
-        userAnswers: userParts,
-        adjustedUserParts,
-        adjustedExpectedParts,
-        isCorrect,
-        detailedMessage
-      });
 
       if (isCorrect) {
         setSolvedAnswers((prev) => {
@@ -1008,12 +702,10 @@ export default function JavaFormatPractice({ sessionData }) {
         return newStats;
       });
 
-      // Only show explanation for incorrect answers if the wrong part is a format specifier or string literal.
       let explanation = undefined;
       if (isCorrect) {
         explanation = formatCall.explanation;
       } else if (wrongParts.length > 0) {
-        // Only show explanation if the wrong part is a format specifier or string literal
         const wrongTypes = userParts.map((part, idx) => adjustedUserParts[idx] !== adjustedExpectedParts[idx] ? (inputsMeta[idx]?.type) : null).filter(Boolean);
         if (wrongTypes.includes('format-string') || wrongTypes.includes('string-literal')) {
           explanation = formatCall.explanation;
@@ -1028,50 +720,127 @@ export default function JavaFormatPractice({ sessionData }) {
         explanation,
       });
     } else {
-      // Intermediate/Advanced mode: validate all lines
-      let allCorrect = true;
-      let detailedFeedback = [];
+      // Intermediate/Advanced mode: validate all lines and collect valid outputs
+      setHasSubmitted(true);
+      let validOutputs = [];
+      const outputsByLine = {};
       
       calls.forEach((call, idx) => {
         const userSubmitted = buildAnswerString(userAnswers[idx] || []);
-        const expected = call.answer;
+        if (!userSubmitted) return;
         
-        if (userSubmitted !== expected) {
-          allCorrect = false;
-          const { expected: expDiff, actual: actDiff } = highlightDiff(expected, userSubmitted);
-          const lineNum = idx + 1;
-          detailedFeedback.push(`Line ${lineNum}: Expected <code>${expDiff}</code>, got <code>${actDiff}</code>`);
-        }
-      });
-
-      setStats((prev) => {
-        const newStats = { ...prev };
-        newStats.total += 1;
-
-        if (allCorrect && !hintShown) {
-          newStats.correct += 1;
-          newStats.streak += 1;
-          if (newStats.streak > newStats.longestStreak) {
-            newStats.longestStreak = newStats.streak;
+        let syntaxError = '';
+        let userOutputText = '';
+        
+        try {
+          const userParts = splitArgumentsRespectingQuotes(userSubmitted);
+          if (!userParts[0].startsWith('"') || !userParts[0].endsWith('"')) {
+            syntaxError = 'Format string must be enclosed in double quotes.';
+          } else {
+            const userFmt = userParts[0].slice(1, -1);
+            const valueMap = {};
+            (currentChallenge.variables || []).forEach((v) => {
+              let val = v.value;
+              if (v.type === 'String') {
+                val = val.replace(/^"(.*)"$/, '$1');
+              }
+              valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+            });
+            const userArgExprs = userParts.slice(1);
+            let userArgValues = [];
+            try {
+              // Validate that all variable references are defined
+              validateVariableReferences(userArgExprs, valueMap);
+              userArgValues = evaluateArgs(userArgExprs, valueMap);
+              const userOutput = formatWithMask(userFmt, userArgValues);
+              userOutputText = userOutput.text;
+            } catch (err) {
+              syntaxError = `Undefined variable or error: ${err.message}`;
+            }
           }
-        } else if (!allCorrect) {
-          newStats.streak = 0;
-        } else {
-          newStats.streak = 0;
+        } catch (err) {
+          syntaxError = 'Syntax error in format string.';
         }
-
-        return newStats;
+        
+        // Only store output if there are no syntax errors
+        if (!syntaxError && userOutputText) {
+          validOutputs.push(userOutputText);
+          console.log(`Line ${idx + 1} output:`, userOutputText);
+          
+          // Calculate expected output for this line from the call's answer
+          let expectedOutputText = '';
+          let expectedMask = '';
+          const answerStr = call.answer || '';
+          if (answerStr.trim()) {
+            try {
+              const answerParts = splitArgumentsRespectingQuotes(answerStr);
+              if (answerParts[0].startsWith('"') && answerParts[0].endsWith('"')) {
+                const expectedFmt = answerParts[0].slice(1, -1);
+                const expectedArgExprs = answerParts.slice(1);
+                const valueMap = {};
+                (currentChallenge.variables || []).forEach((v) => {
+                  let val = v.value;
+                  if (v.type === 'String') {
+                    val = val.replace(/^"(.*)"$/, '$1');
+                  }
+                  valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+                });
+                const expectedArgValues = evaluateArgs(expectedArgExprs, valueMap);
+                const expectedOutput = formatWithMask(expectedFmt, expectedArgValues);
+                expectedOutputText = expectedOutput.text;
+                expectedMask = expectedOutput.mask;
+              }
+            } catch (err) {
+              // If we can't compute expected, just leave it empty
+            }
+          }
+          
+          // Extract variable name from skeleton (e.g., "String line1 = ..." -> "line1")
+          let varName = '';
+          const skeletonMatch = call.skeleton?.match(/String\s+(\w+)\s*=/);
+          if (skeletonMatch) {
+            varName = skeletonMatch[1];
+          }
+          
+          // Store per-line output comparison
+          outputsByLine[idx] = {
+            expectedOutput: expectedOutputText,
+            userOutput: userOutputText,
+            expectedMask: expectedMask,
+            varName: varName,
+          };
+        }
+        
+        if (syntaxError) {
+          setLineErrors((prev) => ({ ...prev, [idx]: syntaxError }));
+        } else {
+          setLineErrors((prev) => {
+            const updated = { ...prev };
+            delete updated[idx];
+            return updated;
+          });
+        }
       });
+      
+      // Update lineOutputs with collected outputs
+      setLineOutputs(outputsByLine);
 
-      setFeedback({
-        isCorrect: allCorrect,
-        message: allCorrect
-          ? `All lines correct! ${hintShown ? '(but you used a hint)' : ''}`
-          : detailedFeedback.length > 0
-          ? detailedFeedback.join('<br/>')
-          : 'Some lines are incorrect. Check your format specifiers and arguments.',
-        explanation: allCorrect ? calls[0]?.explanation : undefined,
+      // Check if all lines match (normalized for grid comparison)
+      const allLinesMatch = Object.values(outputsByLine).length > 0 && Object.values(outputsByLine).every(line => {
+        const normalize = s => (s || '').replace(/%n/g, '↵').replace(/\n/g, '');
+        return normalize(line.expectedOutput) === normalize(line.userOutput);
       });
+      if (allLinesMatch) {
+        setFeedback({
+          isCorrect: true,
+          message: 'All lines correct! Great job.',
+        });
+      } else {
+        setFeedback({
+          isCorrect: false,
+          message: 'Some lines are incorrect. Please check your output and try again.',
+        });
+      }
     }
   };
 
@@ -1213,6 +982,29 @@ export default function JavaFormatPractice({ sessionData }) {
       return parts.length === expected && parts.every((p) => p.trim());
     }
     const calls = currentChallenge.formatCalls || [];
+    if (selectedDifficulty === 'advanced') {
+      // After first submission, allow checking partial lines
+      if (hasSubmitted) {
+        // Allow checking if at least one line has input
+        return calls.some((call, idx) => {
+          const parts = userAnswers[idx] || [];
+          return parts.length === 1 && parts[0].trim();
+        });
+      }
+      // Before first submission, require all lines to be filled
+      return calls.every((call, idx) => {
+        const parts = userAnswers[idx] || [];
+        return parts.length === 1 && parts[0].trim();
+      });
+    }
+    // Intermediate: after first submission, allow checking partial lines; otherwise require all
+    if (hasSubmitted) {
+      return calls.some((call, idx) => {
+        const parts = userAnswers[idx] || [];
+        const expected = splitAnswerParts(call.answer).length;
+        return parts.length === expected && parts.every((p) => p.trim());
+      });
+    }
     return calls.every((call, idx) => {
       const parts = userAnswers[idx] || [];
       const expected = splitAnswerParts(call.answer).length;
@@ -1251,17 +1043,72 @@ export default function JavaFormatPractice({ sessionData }) {
 
           <p className="scenario-text">{currentChallenge.scenario}</p>
 
-          {currentChallenge.expectedOutput && (
+          {/* For intermediate/advanced: show expected output only before submission */}
+          {(selectedDifficulty === 'intermediate' || selectedDifficulty === 'advanced') && currentChallenge.expectedOutput && !hasSubmitted && (
+            <>
+              <h4>Expected Output:</h4>
+              {currentChallenge.formatCalls?.[0]?.method === 'format' ? (
+                // String.format: show expected output with variable names
+                <ExpectedOutputGrid
+                  formatCalls={currentChallenge.formatCalls}
+                  variables={currentChallenge.variables}
+                  width={currentChallenge.gridWidth || 30}
+                  height={currentChallenge.gridHeight || 3}
+                />
+              ) : (
+                // printf: show combined expected output
+                <CharacterGrid
+                  text={currentChallenge.expectedOutput}
+                  mask={currentChallenge.expectedOutputMask}
+                  width={currentChallenge.gridWidth || 30}
+                  height={currentChallenge.gridHeight || 3}
+                  showRows={false}
+                />
+              )}
+            </>
+          )}
+          {/* Single Interleaved Expected/Actual Output Grid for intermediate/advanced after first check */}
+          {(selectedDifficulty === 'intermediate' || selectedDifficulty === 'advanced') && hasSubmitted && (
+            <>
+              <h4>Output Comparison:</h4>
+              {currentChallenge.formatCalls?.[0]?.method === 'format' ? (
+                // String.format: pass lineData with variable names, keep %n to display as ↵
+                <InterleavedOutputGrid
+                  lineData={Object.entries(lineOutputs).map(([idx, lo]) => ({
+                    expected: lo.expectedOutput || '',
+                    actual: lo.userOutput || '',
+                    expectedMask: lo.expectedMask || '',
+                    varName: lo.varName || `Line ${parseInt(idx) + 1}`,
+                  }))}
+                  width={currentChallenge.gridWidth || 30}
+                  height={currentChallenge.gridHeight || 3}
+                />
+              ) : (
+                // printf: use combined output approach
+                <InterleavedOutputGrid
+                  expected={Object.values(lineOutputs).map(lo => lo.expectedOutput || '').join('')}
+                  actual={Object.values(lineOutputs).map(lo => lo.userOutput || '').join('')}
+                  width={currentChallenge.gridWidth || 30}
+                  height={currentChallenge.gridHeight || 3}
+                />
+              )}
+            </>
+          )}
+          {/* Original Expected Output grid for beginner mode */}
+          {selectedDifficulty === 'beginner' && currentChallenge.expectedOutput && (
             <>
               <h4>Expected Output:</h4>
               <CharacterGrid
                 text={currentChallenge.expectedOutput}
+                mask={currentChallenge.expectedOutputMask}
                 width={currentChallenge.gridWidth || 30}
                 height={currentChallenge.gridHeight || 3}
                 showRows={false}
               />
             </>
           )}
+
+
 
           <AnswerSection
             formatCalls={currentChallenge.formatCalls}
@@ -1270,10 +1117,12 @@ export default function JavaFormatPractice({ sessionData }) {
             currentIndex={currentFormatCallIndex}
             userAnswers={userAnswers}
             solvedAnswers={solvedAnswers}
+            lineErrors={lineErrors}
             onAnswerChange={(updater) => {
               setUserAnswers(updater);
               if (hasSubmitted && !feedback?.isCorrect) {
                 setFeedback(null);
+                setLineErrors({});
                 setHasSubmitted(false);
               }
             }}
@@ -1288,7 +1137,7 @@ export default function JavaFormatPractice({ sessionData }) {
           <FeedbackDisplay
             feedback={feedback}
             onNewChallenge={handleNextChallenge}
-            showNextButton={selectedDifficulty === 'beginner' ? feedback?.isCorrect : !!feedback}
+            showNextButton={feedback?.isCorrect === true}
           />
         </div>
 

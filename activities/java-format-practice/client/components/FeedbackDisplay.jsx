@@ -1,4 +1,5 @@
 import React from 'react';
+import CharacterGrid from './CharacterGrid';
 
 /**
  * FeedbackDisplay - Shows correct/incorrect feedback with explanations
