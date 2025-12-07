@@ -153,7 +153,6 @@ function evaluateArgs(expressions, valueMap) {
         jsExpr = jsExpr + ')'.repeat(truncCalls);
       }
       
-      // eslint-disable-next-line no-new-func
       return new Function(...keys, `return ${jsExpr};`)(...vals);
     } catch (err) {
       console.warn('Failed to evaluate expression', trimmed, err);
