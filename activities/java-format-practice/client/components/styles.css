@@ -531,7 +531,7 @@
 }
 
 /* Stats Panel */
-.stats-panel {
+.java-format-stats-panel {
   background: linear-gradient(315deg, #ff9f1c 0%, #ffb703 100%);
   border: 2px solid #ff9f1c;
   border-radius: 12px;
@@ -540,12 +540,14 @@
   overflow: hidden;
 }
 
-.stats-panel h3 {
+.java-format-stats-panel h3 {
   color: white;
   font-size: 18px;
   margin: 0;
   padding: 20px;
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+  font-weight: 700;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .stats-grid {

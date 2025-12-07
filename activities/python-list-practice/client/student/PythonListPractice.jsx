@@ -7,7 +7,6 @@ import '../styles.css';
 import NameForm from './components/NameForm';
 import ControlsPanel from './components/ControlsPanel';
 import QuestionPanel from './components/QuestionPanel';
-import StatsPanel from './components/StatsPanel';
 import SessionHeader from './components/SessionHeader';
 
 import {
@@ -365,9 +364,9 @@ export default function PythonListPractice({ sessionData }) {
     <div className="python-list-bg">
       <div className="python-list-container">
         <SessionHeader 
-          isSolo={isSolo} 
-          submittedName={submittedName} 
+          submittedName={submittedName}
           sessionId={sessionId}
+          stats={stats}
           simple={isSolo}
           activityName="Python List Practice"
         />
@@ -408,8 +407,6 @@ export default function PythonListPractice({ sessionData }) {
             onClear={() => { setAnswer(''); setInsertSelections([]); }}
             onNext={nextChallenge}
           />
-
-          <StatsPanel stats={stats} />
         </div>
       </div>
     </div>

@@ -7,7 +7,7 @@ export default function StatsPanel({ stats }) {
   const accuracy = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
 
   return (
-    <div className="stats-panel">
+    <div className="java-format-stats-panel">
       <h3>Your Progress</h3>
       <div className="stats-grid">
         <div className="stat-item">
