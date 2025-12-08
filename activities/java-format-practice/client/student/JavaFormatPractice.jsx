@@ -1,6 +1,6 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InterleavedOutputGrid from '../components/InterleavedOutputGrid';
 import ExpectedOutputGrid from '../components/ExpectedOutputGrid';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
@@ -15,7 +15,6 @@ import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { splitArgumentsRespectingQuotes, buildAnswerString, highlightDiff } from '../utils/stringUtils';
 import { validateVariableReferences } from '../utils/validationUtils';
-import { safeEvaluate } from '../utils/safeEvaluator';
 
 /**
  * JavaFormatPractice - Student view for practicing Java printf and String.format
@@ -732,17 +731,6 @@ export default function JavaFormatPractice({ sessionData }) {
     return { outputs, hasMismatch, mismatchInfo };
   };
 
-  const getCurrentCycleVariablesDisplay = () => {
-    if (!variableCycles || !variableCycles[cycleIndex]) return '';
-    const vars = variableCycles[cycleIndex];
-    return Object.entries(vars)
-      .map(([key, value]) => {
-        if (typeof value === 'string') return `${key} = "${value}"`;
-        return `${key} = ${value}`;
-      })
-      .join(', ');
-  };
-
   // Get display variables - use cycling values if in cycling mode, otherwise original
   const getDisplayVariables = () => {
     if (!isCyclingMode || !variableCycles || !variableCycles[cycleIndex]) {
@@ -1168,6 +1156,7 @@ export default function JavaFormatPractice({ sessionData }) {
           <ReferenceModal 
             isOpen={showReference}
             onClose={() => setShowReference(false)}
+            referenceData={formatReferenceData}
           />
 
           <FeedbackDisplay

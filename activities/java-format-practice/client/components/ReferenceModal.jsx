@@ -1,7 +1,6 @@
 import React from 'react';
-import { formatReferenceData } from '../data/referenceData';
 
-export default function FormatReferenceModal({ isOpen, onClose }) {
+export default function FormatReferenceModal({ isOpen, onClose, referenceData }) {
   if (!isOpen) return null;
 
   const renderSection = (section) => {
@@ -87,12 +86,12 @@ export default function FormatReferenceModal({ isOpen, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>{formatReferenceData.title}</h2>
+          <h2>{referenceData?.title || 'Reference'}</h2>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
         
         <div className="modal-body">
-          {formatReferenceData.sections.map((section) => renderSection(section))}
+          {referenceData?.sections?.map((section) => renderSection(section))}
         </div>
       </div>
     </div>
