@@ -6,7 +6,6 @@ import React, { useState } from 'react';
 export default function InterleavedOutputGrid({ expected, actual, width = 30, height = 3, lineData = null }) {
   // Validate and constrain width and height parameters
   const validatedWidth = Math.max(1, Math.min(Number.isInteger(width) ? width : 30, 100));
-  const validatedHeight = Math.max(1, Math.min(Number.isInteger(height) ? height : 3, 100));
   
   const [hoveredCol, setHoveredCol] = useState(null);
   const [selectionStart, setSelectionStart] = useState(null);
