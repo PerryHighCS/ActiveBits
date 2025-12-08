@@ -146,7 +146,7 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
       <table className="character-grid">
         <thead>
           <tr>
-            <th className="grid-row-label" style={{ width: '80px' }}></th>
+            <th className="grid-row-label sticky-label" style={{ width: '80px' }}></th>
             {Array.from({ length: width }).map((_, i) => {
               const selected = isSelected(i);
               const isSelectionStart = selection && i === selection.start;
@@ -171,7 +171,7 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
             }).filter(Boolean)}
           </tr>
           <tr>
-            <th className="grid-row-label" style={{ width: '80px' }}></th>
+            <th className="grid-row-label sticky-label" style={{ width: '80px' }}></th>
             {Array.from({ length: validatedWidth }).map((_, i) => {
               const selected = isSelected(i);
               return (
@@ -195,7 +195,7 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
             
             return displayLines.map((displayLine, lineIdx) => (
               <tr key={`${idx}-${lineIdx}`}>
-                <td className="grid-row-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
+                <td className="grid-row-label sticky-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
                   {lineIdx === 0 ? line.varName : ''}
                 </td>
                 {Array.from({ length: validatedWidth }).map((_, colIdx) => {

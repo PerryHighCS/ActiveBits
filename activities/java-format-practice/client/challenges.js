@@ -305,7 +305,7 @@ const CHALLENGE_DEFINITIONS = [
     fileName: 'WantedPoster.java',
     startingLine: 15,
     scenario: 'Print a changing wanted poster where the suspect, crime, and reward values shuffle each round.',
-    gridWidth: 32,
+    gridWidth: 20,
     gridHeight: 4,
     variableTemplates: [
       {
@@ -381,7 +381,7 @@ const CHALLENGE_DEFINITIONS = [
     fileName: 'TavernMenu.java',
     startingLine: 42,
     scenario: 'Build a tavern menu with aligned columns where dish names and prices shuffle.',
-    gridWidth: 38,
+    gridWidth: 30,
     gridHeight: 2,
     variableTemplates: [
       {
@@ -444,7 +444,7 @@ const CHALLENGE_DEFINITIONS = [
     fileName: 'MissionControl.java',
     startingLine: 127,
     scenario: 'Create a detailed mission badge with agent stats, mission scores, and calculated threat assessment.',
-    gridWidth: 40,
+    gridWidth: 36,
     gridHeight: 6,
     variableTemplates: [
       {
@@ -556,7 +556,7 @@ const CHALLENGE_DEFINITIONS = [
     fileName: 'CriminalDatabase.java',
     startingLine: 67,
     scenario: 'Format a wanted poster with aligned columns for suspect info and reward.',
-    gridWidth: 40,
+    gridWidth: 30,
     gridHeight: 2,
     variableTemplates: [
       {
@@ -715,7 +715,7 @@ const CHALLENGE_DEFINITIONS = [
     fileName: 'TavernMenu.java',
     startingLine: 18,
     scenario: 'Print simple menu items for a fantasy tavern.',
-    gridWidth: 30,
+    gridWidth: 20,
     gridHeight: 3,
     variableTemplates: [
       {
@@ -775,7 +775,7 @@ const CHALLENGE_DEFINITIONS = [
     fileName: 'ReceiptGenerator.java',
     startingLine: 88,
     scenario: 'Create a formatted fantasy tavern receipt with aligned item descriptions, prices, subtotal, and calculated tax and total.',
-    gridWidth: 42,
+    gridWidth: 30,
     gridHeight: 5,
     variableTemplates: [
       {
@@ -871,7 +871,7 @@ const CHALLENGE_DEFINITIONS = [
     fileName: 'AgentBadge.java',
     startingLine: 23,
     scenario: 'Print a simple spy ID card with name and rank.',
-    gridWidth: 28,
+    gridWidth: 20,
     gridHeight: 2,
     variableTemplates: [
       {
@@ -921,7 +921,7 @@ const CHALLENGE_DEFINITIONS = [
     fileName: 'SecurityBadge.java',
     startingLine: 58,
     scenario: 'Create a formatted spy badge with aligned columns and field widths.',
-    gridWidth: 42,
+    gridWidth: 30,
     gridHeight: 2,
     variableTemplates: [
       {

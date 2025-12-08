@@ -52,7 +52,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
         <table className="character-grid">
           <thead>
             <tr>
-              <th className="grid-row-label" style={{ width: '80px' }}></th>
+              <th className="grid-row-label sticky-label" style={{ width: '80px' }}></th>
               {Array.from({ length: validatedWidth }).map((_, i) => {
                 const selected = isSelected(i);
                 const selection = getSelectionInfo();
@@ -78,7 +78,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
               }).filter(Boolean)}
             </tr>
             <tr>
-              <th className="grid-row-label" style={{ width: '80px' }}></th>
+              <th className="grid-row-label sticky-label" style={{ width: '80px' }}></th>
               {Array.from({ length: validatedWidth }).map((_, i) => {
                 const selected = isSelected(i);
                 return (
@@ -109,7 +109,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                 <React.Fragment key={idx}>
                   {/* Expected output row for this variable - with static/dynamic coloring from mask */}
                   <tr>
-                    <td className="grid-row-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
+                    <td className="grid-row-label sticky-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
                       {lineInfo.varName}
                     </td>
                     {Array.from({ length: validatedWidth }).map((_, colIdx) => {
@@ -156,7 +156,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                       const labelBg = lineIsCorrect ? '#dcfce7' : '#fee2e2'; // Green if correct, red if not
                       
                       return (
-                        <td className="grid-row-label" style={{ background: labelBg, fontWeight: 'bold', fontSize: '12px' }}>
+                        <td className="grid-row-label sticky-label" style={{ background: labelBg, fontWeight: 'bold', fontSize: '12px' }}>
                           Actual
                         </td>
                       );

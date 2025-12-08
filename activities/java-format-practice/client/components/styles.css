@@ -1,3 +1,14 @@
+/* Sticky row labels for interleaved and expected output grids */
+.sticky-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  box-shadow: 2px 0 2px -2px #888;
+  min-width: 80px;
+  width: 80px;
+  flex-shrink: 0;
+  background-color: #f7fafc;
+}
 /* Java Format Practice Activity Styles */
 
 .java-format-container {
@@ -179,10 +190,9 @@
 .character-grid-container {
   margin: 20px 0;
   overflow-x: auto;
+  overflow-y: visible;
   padding: 15px 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: block;
 }
 
 .character-grid {
@@ -514,6 +524,14 @@ tbody tr:last-child .grid-cell-hovered::before {
 
 .ide-input:focus {
   outline: none;
+  /* Sticky row labels for interleaved grid */
+  .sticky-label {
+    position: sticky;
+    left: 0;
+    background: #fff;
+    z-index: 2;
+    box-shadow: 2px 0 2px -2px #888;
+  }
   border-color: #f6ad55;
   box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25);
   background: rgba(251, 191, 36, 0.15);
