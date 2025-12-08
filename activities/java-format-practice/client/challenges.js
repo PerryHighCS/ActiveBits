@@ -1,6 +1,8 @@
 // Dynamic challenge generator for Java format practice
 // Provides variable name options, value variability, and per-character masks
 
+import { safeEvaluate } from './utils/safeEvaluator.js';
+
 function randomChoice(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
@@ -125,39 +127,7 @@ function formatWithMask(formatStr, args = []) {
 
 function evaluateArgs(expressions, valueMap) {
   return expressions.map((expr) => {
-    const trimmed = expr.trim();
-    if (!trimmed) return '';
-    const keys = Object.keys(valueMap);
-    const vals = Object.values(valueMap);
-    try {
-      // Replace Java type casts with JavaScript equivalents
-      let jsExpr = trimmed;
-      
-      // Handle (int)expression or (int)(expression) patterns
-      // Replace (int) followed by optional whitespace
-      jsExpr = jsExpr.replace(/\(int\)\s*/g, 'Math.trunc(');
-      jsExpr = jsExpr.replace(/\(long\)\s*/g, 'Math.trunc(');
-      
-      // (float) and (double) can just be removed since JS doesn't distinguish
-      jsExpr = jsExpr.replace(/\(float\)\s*/g, '');
-      jsExpr = jsExpr.replace(/\(double\)\s*/g, '');
-      
-      // Count Math.trunc( calls and make sure they're properly closed
-      const truncCalls = (jsExpr.match(/Math\.trunc\(/g) || []).length;
-      const closingParens = (jsExpr.match(/\)/g) || []).length;
-      
-      // If we have more Math.trunc calls than closing parens relative to opening parens in the original,
-      // we need to add closing parens for the Math.trunc wrappers
-      if (truncCalls > 0) {
-        // Each Math.trunc( needs a closing paren
-        jsExpr = jsExpr + ')'.repeat(truncCalls);
-      }
-      
-      return new Function(...keys, `return ${jsExpr};`)(...vals);
-    } catch (err) {
-      console.warn('Failed to evaluate expression', trimmed, err);
-      return '';
-    }
+    return safeEvaluate(expr, valueMap);
   });
 }
 
@@ -276,7 +246,7 @@ const CHALLENGE_DEFINITIONS = [
     theme: 'wanted-poster',
     scenario: 'Print a changing wanted poster where the suspect, crime, and reward values shuffle each round.',
     gridWidth: 32,
-    gridHeight: 6,
+    gridHeight: 4,
     variableTemplates: [
       {
         key: 'suspectName',
@@ -350,7 +320,7 @@ const CHALLENGE_DEFINITIONS = [
     theme: 'fantasy-menu',
     scenario: 'Build a tavern menu with aligned columns where dish names and prices shuffle.',
     gridWidth: 38,
-    gridHeight: 4,
+    gridHeight: 2,
     variableTemplates: [
       {
         key: 'dish1',
@@ -411,7 +381,7 @@ const CHALLENGE_DEFINITIONS = [
     theme: 'spy-badge',
     scenario: 'Create a detailed mission badge with agent stats, mission scores, and calculated threat assessment.',
     gridWidth: 40,
-    gridHeight: 7,
+    gridHeight: 6,
     variableTemplates: [
       {
         key: 'agent',
@@ -521,7 +491,7 @@ const CHALLENGE_DEFINITIONS = [
     theme: 'wanted-poster',
     scenario: 'Format a wanted poster with aligned columns for suspect info and reward.',
     gridWidth: 40,
-    gridHeight: 4,
+    gridHeight: 2,
     variableTemplates: [
       {
         key: 'name',
@@ -576,7 +546,7 @@ const CHALLENGE_DEFINITIONS = [
     theme: 'wanted-poster',
     scenario: 'Create a full wanted poster with suspect info, crimes, bounty, and calculated total reward.',
     gridWidth: 41,
-    gridHeight: 6,
+    gridHeight: 5,
     variableTemplates: [
       {
         key: 'criminalName',
@@ -676,7 +646,7 @@ const CHALLENGE_DEFINITIONS = [
     theme: 'fantasy-menu',
     scenario: 'Print simple menu items for a fantasy tavern.',
     gridWidth: 30,
-    gridHeight: 4,
+    gridHeight: 3,
     variableTemplates: [
       {
         key: 'food1',
@@ -734,7 +704,7 @@ const CHALLENGE_DEFINITIONS = [
     theme: 'fantasy-menu',
     scenario: 'Create a formatted fantasy tavern receipt with aligned item descriptions, prices, subtotal, and calculated tax and total.',
     gridWidth: 42,
-    gridHeight: 8,
+    gridHeight: 5,
     variableTemplates: [
       {
         key: 'item1',
@@ -828,7 +798,7 @@ const CHALLENGE_DEFINITIONS = [
     theme: 'spy-badge',
     scenario: 'Print a simple spy ID card with name and rank.',
     gridWidth: 28,
-    gridHeight: 3,
+    gridHeight: 2,
     variableTemplates: [
       {
         key: 'agentName',
@@ -876,7 +846,7 @@ const CHALLENGE_DEFINITIONS = [
     theme: 'spy-badge',
     scenario: 'Create a formatted spy badge with aligned columns and field widths.',
     gridWidth: 42,
-    gridHeight: 3,
+    gridHeight: 2,
     variableTemplates: [
       {
         key: 'codeName',
