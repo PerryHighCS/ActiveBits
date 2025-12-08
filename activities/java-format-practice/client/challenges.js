@@ -125,6 +125,55 @@ function formatWithMask(formatStr, args = []) {
   return { text: result, mask };
 }
 
+// Split arguments while respecting quotes and parentheses
+function splitArguments(argStr) {
+  const args = [];
+  let current = '';
+  let inQuotes = false;
+  let quoteChar = '';
+  let parenDepth = 0;
+  
+  for (let i = 0; i < argStr.length; i++) {
+    const char = argStr[i];
+    const prevChar = i > 0 ? argStr[i - 1] : '';
+    
+    // Handle quotes
+    if ((char === '"' || char === "'") && prevChar !== '\\') {
+      if (!inQuotes) {
+        inQuotes = true;
+        quoteChar = char;
+      } else if (char === quoteChar) {
+        inQuotes = false;
+        quoteChar = '';
+      }
+      current += char;
+    }
+    // Handle parentheses (only outside quotes)
+    else if (!inQuotes && char === '(') {
+      parenDepth++;
+      current += char;
+    } else if (!inQuotes && char === ')') {
+      parenDepth--;
+      current += char;
+    }
+    // Handle comma separator
+    else if (!inQuotes && parenDepth === 0 && char === ',') {
+      if (current.trim()) {
+        args.push(current.trim());
+      }
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  
+  if (current.trim()) {
+    args.push(current.trim());
+  }
+  
+  return args;
+}
+
 function evaluateArgs(expressions, valueMap) {
   return expressions.map((expr) => {
     return safeEvaluate(expr, valueMap);
@@ -193,14 +242,23 @@ function instantiate(definition) {
     
     // Check if format string is quoted (advanced mode)
     if (answerStr.trim().startsWith('"')) {
-      // Find the closing quote
-      const closeQuoteIdx = answerStr.indexOf('"', 1);
+      // Find the closing quote, accounting for escaped quotes
+      let closeQuoteIdx = -1;
+      for (let i = 1; i < answerStr.length; i++) {
+        if (answerStr[i] === '"' && answerStr[i - 1] !== '\\') {
+          closeQuoteIdx = i;
+          break;
+        }
+      }
+      
       if (closeQuoteIdx !== -1) {
         formatString = answerStr.slice(1, closeQuoteIdx);
         // Everything after the closing quote and comma
         const rest = answerStr.slice(closeQuoteIdx + 1).trim();
         if (rest.startsWith(',')) {
-          argExprs = rest.slice(1).split(',').map(p => p.trim()).filter(Boolean);
+          // Parse arguments, respecting quotes and parentheses
+          const argStr = rest.slice(1);
+          argExprs = splitArguments(argStr);
         }
       }
     } else {
@@ -211,7 +269,7 @@ function instantiate(definition) {
       if (separatorIdx !== -1) {
         formatString = answerStr.slice(0, separatorIdx).trim();
         const rest = answerStr.slice(separatorIdx + 1).trim();
-        argExprs = rest.split(',').map(p => p.trim()).filter(Boolean);
+        argExprs = splitArguments(rest);
       } else {
         // No arguments, just format string
         formatString = answerStr.trim();
