@@ -13,6 +13,7 @@ import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { splitArgumentsRespectingQuotes, buildAnswerString, highlightDiff } from '../utils/stringUtils';
 import { validateVariableReferences } from '../utils/validationUtils';
+import { safeEvaluate } from '../utils/safeEvaluator';
 
 /**
  * JavaFormatPractice - Student view for practicing Java printf and String.format
@@ -29,10 +30,82 @@ import { validateVariableReferences } from '../utils/validationUtils';
  * - Longest Streak: Best streak achieved during the session
  */
 
+// Generate multiple cycles of alternative variable values for testing format robustness
+// Cycle 0 is the original values, cycles 1-2 use alternative theme-appropriate values
+function generateVariableCycles(variables, variableTemplates, numCycles = 3) {
+  if (!variables || variables.length === 0) return [];
+  
+  const cycles = [];
+  
+  // Cycle 0: Original values
+  const originalCycle = {};
+  variables.forEach(v => {
+    let val = v.value;
+    // Remove quotes from string literals for the value map
+    if (v.type === 'String' && val.startsWith('"') && val.endsWith('"')) {
+      val = val.slice(1, -1);
+    }
+    originalCycle[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+  });
+  cycles.push(originalCycle);
+  
+  // Cycles 1+: Alternative values from variableTemplates
+  for (let c = 1; c < numCycles; c++) {
+    const cycleVarMap = {};
+    
+    variables.forEach(v => {
+      // Find the corresponding template for this variable
+      const template = variableTemplates?.find(vt => vt.names?.includes(v.name));
+      
+      let newValue;
+      if (template?.values && Array.isArray(template.values)) {
+        // Use theme-specific values from the template
+        const valueIndex = c % template.values.length;
+        newValue = template.values[valueIndex];
+      } else if (template?.range) {
+        // Generate from range
+        const { min, max, step = 1, precision } = template.range;
+        if (v.type === 'double') {
+          const options = [];
+          for (let val = min; val <= max && options.length < 5; val += (max - min) / 4) {
+            options.push(parseFloat(val.toFixed(precision ?? 2)));
+          }
+          newValue = options[c % options.length];
+        } else {
+          const options = [];
+          for (let val = min; val <= max && options.length < 5; val += Math.max(step, (max - min) / 4)) {
+            options.push(Math.round(val));
+          }
+          newValue = options[c % options.length];
+        }
+      } else {
+        // Fallback to generic values if no template found
+        if (v.type === 'String') {
+          const stringOptions = ['test', 'sample', 'data'];
+          newValue = stringOptions[c % stringOptions.length];
+        } else if (v.type === 'double') {
+          const doubleOptions = [1.5, 2.75, 3.333];
+          newValue = doubleOptions[c % doubleOptions.length];
+        } else {
+          const intOptions = [10, 25, 50];
+          newValue = intOptions[c % intOptions.length];
+        }
+      }
+      
+      // Store raw value (not quoted for strings)
+      cycleVarMap[v.name] = v.type === 'String' ? String(newValue) : Number(newValue);
+    });
+    
+    cycles.push(cycleVarMap);
+  }
+  return cycles;
+}
+
 export default function JavaFormatPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
   const isSoloSession = sessionId ? sessionId.startsWith('solo-') : false;
   const studentIdRef = useRef(null);
+  const cycleTimerRef = useRef(null);
   const navigate = useNavigate();
 
   // Get session-ended handler
@@ -60,6 +133,13 @@ export default function JavaFormatPractice({ sessionData }) {
   });
   const [focusToken, setFocusToken] = useState(0);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+
+  // Cycling feature: for advanced mode after correct answer
+  const [isCyclingMode, setIsCyclingMode] = useState(false);
+  const [cycleIndex, setCycleIndex] = useState(0);
+  const [variableCycles, setVariableCycles] = useState([]);
+  const [cycleOutputs, setCycleOutputs] = useState({});
+  const [cycleMismatchLine, setCycleMismatchLine] = useState(null);
 
   const splitAnswerParts = useCallback((answer = '') => answer.split(',').map((part) => part.trim()), []);
 
@@ -363,6 +443,7 @@ export default function JavaFormatPractice({ sessionData }) {
       setHasSubmitted(true);
       let validOutputs = [];
       const outputsByLine = {};
+      const newLineErrors = {}; // Track errors locally during this check
       
       calls.forEach((call, idx) => {
         const userSubmitted = buildAnswerString(userAnswers[idx] || []);
@@ -394,11 +475,17 @@ export default function JavaFormatPractice({ sessionData }) {
               const userOutput = formatWithMask(userFmt, userArgValues);
               userOutputText = userOutput.text;
             } catch (err) {
-              syntaxError = `Undefined variable or error: ${err.message}`;
+              const availableVars = Object.keys(valueMap).join(', ');
+              syntaxError = `${err.message}. Check your variable names and expressions. Available variables: ${availableVars}`;
+              console.error('Format evaluation error:', err, 'User expressions:', userArgExprs, 'Available vars:', valueMap);
             }
           }
         } catch (err) {
           syntaxError = 'Syntax error in format string.';
+        }
+        
+        if (syntaxError) {
+          newLineErrors[idx] = syntaxError;
         }
         
         // Only store output if there are no syntax errors
@@ -449,31 +536,48 @@ export default function JavaFormatPractice({ sessionData }) {
             varName: varName,
           };
         }
-        
-        if (syntaxError) {
-          setLineErrors((prev) => ({ ...prev, [idx]: syntaxError }));
-        } else {
-          setLineErrors((prev) => {
-            const updated = { ...prev };
-            delete updated[idx];
-            return updated;
-          });
-        }
       });
       
-      // Update lineOutputs with collected outputs
+      // Update lineOutputs and lineErrors with all collected data
       setLineOutputs(outputsByLine);
+      setLineErrors(newLineErrors);
+
+      // Check if any line has an error
+      const hasAnyLineErrors = Object.keys(newLineErrors).length > 0;
 
       // Check if all lines match (normalized for grid comparison)
       const allLinesMatch = Object.values(outputsByLine).length > 0 && Object.values(outputsByLine).every(line => {
         const normalize = s => (s || '').replace(/%n/g, '↵').replace(/\n/g, '');
         return normalize(line.expectedOutput) === normalize(line.userOutput);
       });
-      if (allLinesMatch) {
+
+      if (hasAnyLineErrors) {
+        // Don't enter cycling mode if there are syntax errors
         setFeedback({
-          isCorrect: true,
-          message: 'All lines correct! Great job.',
+          isCorrect: false,
+          message: 'Some lines have syntax errors. Please check your format strings.',
         });
+      } else if (allLinesMatch) {
+        // For advanced difficulty, enter cycling mode to test with different values
+        if (selectedDifficulty === 'advanced') {
+          const cycles = generateVariableCycles(currentChallenge.variables, currentChallenge.variableTemplates, 3);
+          setVariableCycles(cycles);
+          setCycleIndex(0);
+          setIsCyclingMode(true);
+          setCycleMismatchLine(null);
+          // Initialize cycleOutputs with the current (original) lineOutputs for cycle 0
+          setCycleOutputs(outputsByLine);
+          setFeedback({
+            isCorrect: true,
+            message: 'All lines correct! Testing with different values...',
+          });
+          // Automatic cycling will start via useEffect
+        } else {
+          setFeedback({
+            isCorrect: true,
+            message: 'All lines correct! Great job.',
+          });
+        }
       } else {
         setFeedback({
           isCorrect: false,
@@ -481,6 +585,182 @@ export default function JavaFormatPractice({ sessionData }) {
         });
       }
     }
+  };
+
+  const handleCycleNext = () => {
+    if (!variableCycles || cycleIndex >= variableCycles.length - 1) {
+      // All cycles completed successfully - advance to next challenge
+      setIsCyclingMode(false);
+      setCycleIndex(0);
+      setVariableCycles([]);
+      setCycleOutputs({});
+      handleNextChallenge();
+      return false;
+    }
+    
+    const nextIndex = cycleIndex + 1;
+    const nextVariables = variableCycles[nextIndex];
+    
+    // Re-evaluate with new variables and check for mismatches
+    const result = validateCycleOutputs(nextVariables);
+    setCycleIndex(nextIndex);
+    setCycleOutputs(result.outputs);
+    
+    if (result.hasMismatch) {
+      setCycleMismatchLine(result.mismatchInfo);
+      const varName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [, `variable ${result.mismatchInfo.lineNumber}`])[1];
+      setFeedback({
+        isCorrect: false,
+        message: `Your format works with the original values but fails with different values (error in ${varName}).`,
+      });
+      return false; // Stop cycling
+    } else {
+      setCycleMismatchLine(null);
+      return true; // Continue cycling
+    }
+  };
+
+  const handleCyclePrevious = () => {
+    if (cycleIndex <= 0) return;
+    
+    const prevIndex = cycleIndex - 1;
+    const prevVariables = variableCycles[prevIndex];
+    
+    // Re-evaluate with previous variables
+    const result = validateCycleOutputs(prevVariables);
+    setCycleIndex(prevIndex);
+    setCycleOutputs(result.outputs);
+    setCycleMismatchLine(null);
+  };
+
+  // Automatic cycling effect
+  useEffect(() => {
+    // Clear any existing timer
+    if (cycleTimerRef.current) {
+      clearTimeout(cycleTimerRef.current);
+      cycleTimerRef.current = null;
+    }
+
+    // Only auto-cycle if in cycling mode and no mismatch detected
+    if (isCyclingMode && !cycleMismatchLine) {
+      cycleTimerRef.current = setTimeout(() => {
+        handleCycleNext();
+      }, 1000);
+    }
+
+    // Cleanup on unmount or when cycling stops
+    return () => {
+      if (cycleTimerRef.current) {
+        clearTimeout(cycleTimerRef.current);
+        cycleTimerRef.current = null;
+      }
+    };
+  }, [isCyclingMode, cycleIndex, cycleMismatchLine]);
+
+  const validateCycleOutputs = (cycleVariables) => {
+    const outputs = {};
+    let hasMismatch = false;
+    let mismatchInfo = null;
+
+    // Re-evaluate all format calls with new variable values
+    for (let i = 0; i < currentChallenge.formatCalls.length; i++) {
+      const formatCall = currentChallenge.formatCalls[i];
+      const userSubmitted = buildAnswerString(userAnswers[i] || []);
+      
+      try {
+        // Parse and evaluate expected output with cycle variables
+        const answerParts = splitArgumentsRespectingQuotes(formatCall.answer || '');
+        let expectedOutputText = '';
+        let expectedMask = '';
+        if (answerParts[0]?.startsWith('"') && answerParts[0]?.endsWith('"')) {
+          const expectedFmt = answerParts[0].slice(1, -1);
+          const expectedArgExprs = answerParts.slice(1);
+          const expectedArgValues = evaluateArgs(expectedArgExprs, cycleVariables);
+          const expectedOutput = formatWithMask(expectedFmt, expectedArgValues);
+          expectedOutputText = expectedOutput.text;
+          expectedMask = expectedOutput.mask;
+        }
+        
+        // Parse and evaluate user output with cycle variables
+        const userParts = splitArgumentsRespectingQuotes(userSubmitted);
+        let userOutputText = '';
+        if (userParts[0]?.startsWith('"') && userParts[0]?.endsWith('"')) {
+          const userFmt = userParts[0].slice(1, -1);
+          const userArgExprs = userParts.slice(1);
+          const userArgValues = evaluateArgs(userArgExprs, cycleVariables);
+          const userOutput = formatWithMask(userFmt, userArgValues);
+          userOutputText = userOutput.text;
+        }
+        
+        // Normalize and compare
+        const normalize = s => (s || '').replace(/%n/g, '↵').replace(/\n/g, '');
+        if (normalize(expectedOutputText) !== normalize(userOutputText)) {
+          hasMismatch = true;
+          mismatchInfo = {
+            lineNumber: i + 1,
+            expectedOutput: expectedOutputText,
+            userOutput: userOutputText
+          };
+        }
+
+        // Extract variable name from skeleton
+        let varName = '';
+        const skeletonMatch = formatCall.skeleton?.match(/String\s+(\w+)\s*=/);
+        if (skeletonMatch) {
+          varName = skeletonMatch[1];
+        }
+
+        outputs[i] = {
+          expectedOutput: expectedOutputText,
+          userOutput: userOutputText,
+          expectedMask: expectedMask,
+          varName: varName,
+        };
+      } catch (error) {
+        hasMismatch = true;
+        mismatchInfo = {
+          lineNumber: i + 1,
+          error: error.message
+        };
+        outputs[i] = {
+          expectedOutput: '(error)',
+          userOutput: '(error)',
+          error: error.message
+        };
+      }
+    }
+    
+    return { outputs, hasMismatch, mismatchInfo };
+  };
+
+  const getCurrentCycleVariablesDisplay = () => {
+    if (!variableCycles || !variableCycles[cycleIndex]) return '';
+    const vars = variableCycles[cycleIndex];
+    return Object.entries(vars)
+      .map(([key, value]) => {
+        if (typeof value === 'string') return `${key} = "${value}"`;
+        return `${key} = ${value}`;
+      })
+      .join(', ');
+  };
+
+  // Get display variables - use cycling values if in cycling mode, otherwise original
+  const getDisplayVariables = () => {
+    if (!isCyclingMode || !variableCycles || !variableCycles[cycleIndex]) {
+      return currentChallenge?.variables || [];
+    }
+    
+    const cycleVars = variableCycles[cycleIndex];
+    return (currentChallenge?.variables || []).map(v => {
+      const cycleValue = cycleVars[v.name];
+      if (cycleValue !== undefined) {
+        return {
+          ...v,
+          value: v.type === 'String' ? `"${cycleValue}"` : String(cycleValue)
+        };
+      }
+      return v;
+    });
   };
 
   const handleHint = () => {
@@ -522,11 +802,18 @@ export default function JavaFormatPractice({ sessionData }) {
       });
     }
 
+    // Reset cycling state
+    setIsCyclingMode(false);
+    setCycleIndex(0);
+    setVariableCycles([]);
+    setCycleOutputs({});
+    setCycleMismatchLine(null);
+
     const pickChallenge = () => {
       const theme = selectedTheme === 'all' ? null : selectedTheme;
       let next = getRandomChallenge(theme, selectedDifficulty);
       let attempts = 0;
-      while (next && currentChallenge && next.id === currentChallenge.id && attempts < 5) {
+      while (next && currentChallenge && next.id === currentChallenge.id && attempts < 10) {
         next = getRandomChallenge(theme, selectedDifficulty);
         attempts += 1;
       }
@@ -708,11 +995,11 @@ export default function JavaFormatPractice({ sessionData }) {
           {/* Single Interleaved Expected/Actual Output Grid for intermediate/advanced after first check */}
           {(selectedDifficulty === 'intermediate' || selectedDifficulty === 'advanced') && hasSubmitted && (
             <>
-              <h4>Output Comparison:</h4>
+              <h4>Output Comparison{isCyclingMode ? ` (Testing Set ${cycleIndex + 1} of ${variableCycles?.length || 0})` : ''}:</h4>
               {currentChallenge.formatCalls?.[0]?.method === 'format' ? (
                 // String.format: pass lineData with variable names, keep %n to display as ↵
                 <InterleavedOutputGrid
-                  lineData={Object.entries(lineOutputs).map(([idx, lo]) => ({
+                  lineData={Object.entries(isCyclingMode && cycleOutputs && Object.keys(cycleOutputs).length > 0 ? cycleOutputs : lineOutputs).map(([idx, lo]) => ({
                     expected: lo.expectedOutput || '',
                     actual: lo.userOutput || '',
                     expectedMask: lo.expectedMask || '',
@@ -724,11 +1011,106 @@ export default function JavaFormatPractice({ sessionData }) {
               ) : (
                 // printf: use combined output approach
                 <InterleavedOutputGrid
-                  expected={Object.values(lineOutputs).map(lo => lo.expectedOutput || '').join('')}
-                  actual={Object.values(lineOutputs).map(lo => lo.userOutput || '').join('')}
+                  expected={Object.values(isCyclingMode && cycleOutputs && Object.keys(cycleOutputs).length > 0 ? cycleOutputs : lineOutputs).map(lo => lo.expectedOutput || '').join('')}
+                  actual={Object.values(isCyclingMode && cycleOutputs && Object.keys(cycleOutputs).length > 0 ? cycleOutputs : lineOutputs).map(lo => lo.userOutput || '').join('')}
                   width={currentChallenge.gridWidth || 30}
                   height={currentChallenge.gridHeight || 3}
                 />
+              )}
+
+              {/* Cycling controls - positioned below the grid */}
+              {isCyclingMode && (
+                <div style={{ marginTop: '12px', textAlign: 'center' }}>
+                  {cycleMismatchLine ? (
+                    // Show navigation buttons when mismatch detected (stopped)
+                    <>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '8px' }}>
+                        <button 
+                          onClick={handleCyclePrevious}
+                          disabled={cycleIndex === 0}
+                          style={{
+                            padding: '4px 10px',
+                            backgroundColor: cycleIndex === 0 ? '#ccc' : '#2196F3',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: cycleIndex === 0 ? 'not-allowed' : 'pointer',
+                            fontSize: '11px'
+                          }}
+                        >
+                          ← Previous
+                        </button>
+                        <span style={{ 
+                          padding: '4px 10px',
+                          color: '#666',
+                          fontSize: '11px',
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}>
+                          Testing Set {cycleIndex + 1} of {variableCycles?.length || 0}
+                        </span>
+                      </div>
+                      <div style={{ 
+                        padding: '8px', 
+                        backgroundColor: '#ffebee', 
+                        borderRadius: '4px',
+                        borderLeft: '4px solid #d32f2f'
+                      }}>
+                        <div style={{ fontWeight: 'bold', color: '#c62828', fontSize: '12px' }}>
+                          ✗ Format Error on Line {cycleMismatchLine.lineNumber}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    // Show automatic progress indicator with visual emphasis
+                    <div style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column',
+                      gap: '8px',
+                      alignItems: 'center',
+                      backgroundColor: cycleIndex > 0 ? '#e8f5e9' : '#fff',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: cycleIndex > 0 ? '2px solid #4CAF50' : '1px solid #e0e0e0',
+                      transition: 'all 0.3s ease',
+                      animation: cycleIndex > 0 ? 'pulse 0.5s ease' : 'none'
+                    }}>
+                      <span style={{ 
+                        padding: '4px 10px',
+                        color: cycleIndex > 0 ? '#2e7d32' : '#666',
+                        fontSize: '13px',
+                        fontWeight: 'bold',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>
+                        {cycleIndex === 0 ? '📋 Original Values' : `🔄 Testing Set ${cycleIndex + 1} of ${variableCycles?.length || 0}`}
+                      </span>
+                      <div style={{
+                        width: '250px',
+                        height: '6px',
+                        backgroundColor: '#e0e0e0',
+                        borderRadius: '3px',
+                        overflow: 'hidden',
+                        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.1)'
+                      }}>
+                        <div style={{
+                          width: `${((cycleIndex + 1) / (variableCycles?.length || 1)) * 100}%`,
+                          height: '100%',
+                          backgroundColor: cycleIndex >= (variableCycles?.length || 0) - 1 ? '#4CAF50' : '#2196F3',
+                          transition: 'width 0.5s ease, background-color 0.3s ease',
+                          boxShadow: '0 0 10px rgba(33, 150, 243, 0.5)'
+                        }} />
+                      </div>
+                      <span style={{
+                        fontSize: '11px',
+                        color: cycleIndex >= (variableCycles?.length || 0) - 1 ? '#2e7d32' : '#555',
+                        fontWeight: cycleIndex >= (variableCycles?.length || 0) - 1 ? 'bold' : 'normal'
+                      }}>
+                        {cycleIndex >= (variableCycles?.length || 0) - 1 ? '✓ All tests passing! Moving to next...' : '⏱️ Auto-testing with different values...'}
+                      </span>
+                    </div>
+                  )}
+                </div>
               )}
             </>
           )}
@@ -748,34 +1130,43 @@ export default function JavaFormatPractice({ sessionData }) {
 
 
 
-          <AnswerSection
-            formatCalls={currentChallenge.formatCalls}
-            variables={currentChallenge.variables}
-            difficulty={selectedDifficulty}
-            currentIndex={currentFormatCallIndex}
-            userAnswers={userAnswers}
-            solvedAnswers={solvedAnswers}
-            lineErrors={lineErrors}
-            onAnswerChange={(updater) => {
-              setUserAnswers(updater);
-              if (hasSubmitted && !feedback?.isCorrect) {
-                setFeedback(null);
-                setLineErrors({});
-                setHasSubmitted(false);
-              }
-            }}
-            onSubmit={checkAnswer}
-            isDisabled={feedback?.isCorrect === true}
-            submitDisabled={submitDisabled}
-            hintShown={hintShown}
-            onHint={handleHint}
-            focusToken={focusToken}
-          />
+          <div style={{
+            transition: 'all 0.3s ease',
+            backgroundColor: isCyclingMode && cycleIndex > 0 ? '#f1f8e9' : 'transparent',
+            padding: isCyclingMode && cycleIndex > 0 ? '12px' : '0',
+            borderRadius: '8px',
+            border: isCyclingMode && cycleIndex > 0 ? '2px solid #81c784' : 'none',
+            animation: isCyclingMode && cycleIndex > 0 ? 'pulse 0.5s ease' : 'none'
+          }}>
+            <AnswerSection
+              formatCalls={currentChallenge.formatCalls}
+              variables={getDisplayVariables()}
+              difficulty={selectedDifficulty}
+              currentIndex={currentFormatCallIndex}
+              userAnswers={userAnswers}
+              solvedAnswers={solvedAnswers}
+              lineErrors={lineErrors}
+              onAnswerChange={(updater) => {
+                setUserAnswers(updater);
+                if (hasSubmitted && !feedback?.isCorrect) {
+                  setFeedback(null);
+                  setLineErrors({});
+                  setHasSubmitted(false);
+                }
+              }}
+              onSubmit={checkAnswer}
+              isDisabled={feedback?.isCorrect === true}
+              submitDisabled={submitDisabled}
+              hintShown={hintShown}
+              onHint={handleHint}
+              focusToken={focusToken}
+            />
+          </div>
 
           <FeedbackDisplay
             feedback={feedback}
             onNewChallenge={handleNextChallenge}
-            showNextButton={feedback?.isCorrect === true}
+            showNextButton={feedback?.isCorrect === true && !isCyclingMode}
           />
         </div>
       </div>

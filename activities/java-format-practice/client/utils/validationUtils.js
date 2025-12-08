@@ -5,6 +5,7 @@
 export function validateVariableReferences(expressions, valueMap) {
   const definedVars = Object.keys(valueMap);
   const javaKeywords = ['true', 'false', 'null', 'undefined', 'int', 'long', 'float', 'double', 'boolean', 'byte', 'char', 'short'];
+  const allowedMathIdentifiers = ['Math', 'round', 'trunc', 'floor', 'ceil'];
   
   for (const expr of expressions) {
     // Remove quoted strings first to avoid checking variables inside string literals
@@ -15,8 +16,9 @@ export function validateVariableReferences(expressions, valueMap) {
     let match;
     while ((match = varPattern.exec(exprWithoutStrings)) !== null) {
       const varName = match[1];
-      // Skip Java keywords and type names
+      // Skip Java keywords, type names, and allowed Math identifiers
       if (javaKeywords.includes(varName)) continue;
+      if (allowedMathIdentifiers.includes(varName)) continue;
       if (!definedVars.includes(varName)) {
         throw new Error(`Variable '${varName}' is not defined`);
       }

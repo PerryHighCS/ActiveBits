@@ -103,12 +103,22 @@ export function safeEvaluate(expression, valueMap = {}) {
     const tokens = tokenize(processedExpr);
 
     // Validate tokens - ensure all identifiers are either known variables or casts
-    for (const token of tokens) {
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
       if (/^[a-zA-Z_]/.test(token)) {
         // It's an identifier
-        const isAllowedMathMethod = token === 'round' || token === 'trunc';
+        const isAllowedMathMethod = token === 'round' || token === 'trunc' || token === 'floor' || token === 'ceil';
+        
+        // Check if this is a Math method that's not allowed
+        if (i > 0 && tokens[i - 1] === '.' && tokens[i - 2] === 'Math') {
+          if (!isAllowedMathMethod) {
+            throw new Error(`Math.${token}() is not allowed. You can only use: Math.round(), Math.trunc(), Math.floor(), Math.ceil()`);
+          }
+        }
+        
         if (!(/^__CAST_\d+__$/.test(token) || /^__STRING_\d+__$/.test(token) || token in valueMap || token === 'Math' || isAllowedMathMethod)) {
-          throw new Error(`Unknown variable: ${token}`);
+          const availableVars = Object.keys(valueMap).join(', ');
+          throw new Error(`Unknown variable: ${token}. Available variables: ${availableVars}`);
         }
       }
     }
@@ -136,10 +146,11 @@ export function safeEvaluate(expression, valueMap = {}) {
 
     // Create the function with explicit parameters and Math available
     const fn = new Function('Math', ...keys, `return ${jsExpr};`);
-    return fn(Math, ...vals);
+    const result = fn(Math, ...vals);
+    return result;
   } catch (err) {
-    console.warn('Failed to evaluate expression:', expression, err.message);
-    return '';
+    console.error('Failed to evaluate expression:', expression, 'Error:', err.message, 'ValueMap:', valueMap);
+    throw err; // Re-throw to provide better error context
   }
 }
 
@@ -151,11 +162,11 @@ function validateExpressionSyntax(expr) {
   // First, remove string literals so they don't interfere with pattern matching
   let exprToCheck = expr.replace(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/g, '""');
   
-  // Disallow any function calls except Math.trunc and Math.round which we allow
-  const allowedMathFunctions = /Math\.(trunc|round)\(/g;
+  // Disallow any function calls except allowed Math functions
+  const allowedMathFunctions = /Math\.(trunc|round|floor|ceil)\(/g;
   const exprWithoutAllowedCalls = exprToCheck.replace(allowedMathFunctions, '');
   if (/[a-zA-Z_]\w*\s*\(/.test(exprWithoutAllowedCalls)) {
-    throw new Error('Function calls are not allowed');
+    throw new Error('Function calls are not allowed (except Math.round, Math.trunc, Math.floor, Math.ceil)');
   }
 
   // Disallow array/object access
