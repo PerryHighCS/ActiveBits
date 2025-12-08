@@ -133,9 +133,9 @@ export function safeEvaluate(expression, valueMap = {}) {
     const keys = Object.keys(valueMap);
     const vals = Object.values(valueMap);
 
-    // Create the function with explicit parameters
-    const fn = new Function(...keys, `return ${jsExpr};`);
-    return fn(...vals);
+    // Create the function with explicit parameters and Math available
+    const fn = new Function('Math', ...keys, `return ${jsExpr};`);
+    return fn(Math, ...vals);
   } catch (err) {
     console.warn('Failed to evaluate expression:', expression, err.message);
     return '';
@@ -147,8 +147,10 @@ export function safeEvaluate(expression, valueMap = {}) {
  * Checks for disallowed patterns
  */
 function validateExpressionSyntax(expr) {
-  // Disallow any function calls (except Math.trunc which we create)
-  if (/[a-zA-Z_]\w*\s*\(/.test(expr.replace(/Math\.trunc\(/g, ''))) {
+  // Disallow any function calls except Math.trunc and Math.round which we allow
+  const allowedMathFunctions = /Math\.(trunc|round)\(/g;
+  const exprWithoutAllowedCalls = expr.replace(allowedMathFunctions, '');
+  if (/[a-zA-Z_]\w*\s*\(/.test(exprWithoutAllowedCalls)) {
     throw new Error('Function calls are not allowed');
   }
 
