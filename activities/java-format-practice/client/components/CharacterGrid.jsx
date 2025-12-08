@@ -6,6 +6,10 @@ import React, { useState } from 'react';
  * Numbers columns by default, with option to include row numbers
  */
 export default function CharacterGrid({ text, mask, width = 20, height = 4, showRows = false }) {
+  // Validate and constrain width and height parameters
+  const validatedWidth = Math.max(1, Math.min(Number.isInteger(width) ? width : 20, 100));
+  const validatedHeight = Math.max(1, Math.min(Number.isInteger(height) ? height : 4, 100));
+  
   const [hoveredCol, setHoveredCol] = useState(null);
   const [selectionStart, setSelectionStart] = useState(null);
   const [selectionEnd, setSelectionEnd] = useState(null);
@@ -49,14 +53,14 @@ export default function CharacterGrid({ text, mask, width = 20, height = 4, show
 
   // Build grid from text
   const lines = text.split('\n');
-  const gridLines = lines.slice(0, height);
+  const gridLines = lines.slice(0, validatedHeight);
 
   // Build mask lines by parsing the mask string character-by-character
   // The mask string should have the same length as text (including \n characters)
   const maskLines = [];
   let maskIdx = 0;
   
-  for (let i = 0; i < lines.length && i < height; i++) {
+  for (let i = 0; i < lines.length && i < validatedHeight; i++) {
     const line = lines[i];
     const maskLine = [];
     
@@ -86,7 +90,7 @@ export default function CharacterGrid({ text, mask, width = 20, height = 4, show
         <thead>
           <tr>
             {showRows && <th className="grid-row-header"></th>}
-            {Array.from({ length: width }).map((_, i) => {
+            {Array.from({ length: validatedWidth }).map((_, i) => {
               const selected = isSelected(i);
               const isSelectionStart = selection && i === selection.start;
               const isInSelection = selected && !isSelectionStart;
@@ -111,7 +115,7 @@ export default function CharacterGrid({ text, mask, width = 20, height = 4, show
           </tr>
           <tr>
             {showRows && <th className="grid-row-header"></th>}
-            {Array.from({ length: width }).map((_, i) => {
+            {Array.from({ length: validatedWidth }).map((_, i) => {
               const selected = isSelected(i);
               return (
                 <th 
@@ -133,7 +137,7 @@ export default function CharacterGrid({ text, mask, width = 20, height = 4, show
               {showRows && (
                 <td className="grid-row-header">{rowIdx}</td>
               )}
-              {Array.from({ length: width }).map((_, colIdx) => {
+              {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                 const char = line[colIdx];
                 const maskChar = maskLines[rowIdx]?.[colIdx];
                 const isEmpty = char === undefined || char === '';

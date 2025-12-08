@@ -1,8 +1,13 @@
 import React, { useState } from 'react';
 import { formatWithMask } from '../challenges';
+import { safeEvaluate } from '../utils/safeEvaluator';
 
 // ExpectedOutputGrid for String.format problems - shows expected output with variable names as row labels
 export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3, variables = [] }) {
+  // Validate and constrain width and height parameters
+  const validatedWidth = Math.max(1, Math.min(Number.isInteger(width) ? width : 30, 100));
+  const validatedHeight = Math.max(1, Math.min(Number.isInteger(height) ? height : 3, 100));
+  
   const [hoveredCol, setHoveredCol] = useState(null);
   const [selectionStart, setSelectionStart] = useState(null);
   const [selectionEnd, setSelectionEnd] = useState(null);
@@ -94,16 +99,7 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
           
           // Evaluate arguments
           const argValues = argExprs.map((expr) => {
-            const trimmed = expr.trim();
-            if (!trimmed) return '';
-            const keys = Object.keys(valueMap);
-            const vals = Object.values(valueMap);
-            try {
-              // eslint-disable-next-line no-new-func
-              return new Function(...keys, `return ${trimmed};`)(...vals);
-            } catch {
-              return '';
-            }
+            return safeEvaluate(expr, valueMap);
           });
           
           // Use formatWithMask to properly format
@@ -152,7 +148,7 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
           </tr>
           <tr>
             <th className="grid-row-label" style={{ width: '80px' }}></th>
-            {Array.from({ length: width }).map((_, i) => {
+            {Array.from({ length: validatedWidth }).map((_, i) => {
               const selected = isSelected(i);
               return (
                 <th 
@@ -178,7 +174,7 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
                 <td className="grid-row-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
                   {lineIdx === 0 ? line.varName : ''}
                 </td>
-                {Array.from({ length: width }).map((_, colIdx) => {
+                {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                   const char = displayLine?.[colIdx] || '';
                   const maskChar = maskLines[lineIdx]?.[colIdx] || '';
                   const isEmpty = !char;

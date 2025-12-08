@@ -4,6 +4,10 @@ import React, { useState } from 'react';
 // For String.format: shows expected (static/dynamic coloring) and actual (correct/incorrect coloring) on alternating rows with variable names
 // For printf: shows combined output with static/dynamic and correct/incorrect coloring
 export default function InterleavedOutputGrid({ expected, actual, width = 30, height = 3, lineData = null }) {
+  // Validate and constrain width and height parameters
+  const validatedWidth = Math.max(1, Math.min(Number.isInteger(width) ? width : 30, 100));
+  const validatedHeight = Math.max(1, Math.min(Number.isInteger(height) ? height : 3, 100));
+  
   const [hoveredCol, setHoveredCol] = useState(null);
   const [selectionStart, setSelectionStart] = useState(null);
   const [selectionEnd, setSelectionEnd] = useState(null);
@@ -50,7 +54,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
           <thead>
             <tr>
               <th className="grid-row-label" style={{ width: '80px' }}></th>
-              {Array.from({ length: width }).map((_, i) => {
+              {Array.from({ length: validatedWidth }).map((_, i) => {
                 const selected = isSelected(i);
                 const selection = getSelectionInfo();
                 const isSelectionStart = selection && i === selection.start;
@@ -76,7 +80,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
             </tr>
             <tr>
               <th className="grid-row-label" style={{ width: '80px' }}></th>
-              {Array.from({ length: width }).map((_, i) => {
+              {Array.from({ length: validatedWidth }).map((_, i) => {
                 const selected = isSelected(i);
                 return (
                   <th 
@@ -106,7 +110,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                     <td className="grid-row-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
                       {lineInfo.varName}
                     </td>
-                    {Array.from({ length: width }).map((_, colIdx) => {
+                    {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                       const char = expDisplay?.[colIdx] || '';
                       const maskChar = lineInfo.expectedMask?.replace(/\n/g, '')?.[colIdx] || '';
                       const isEmpty = !char;
@@ -155,7 +159,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                         </td>
                       );
                     })()}
-                    {Array.from({ length: width }).map((_, colIdx) => {
+                    {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                       const expChar = expDisplay?.[colIdx] || '';
                       const actChar = actDisplay?.[colIdx] || '';
                       let bgColor = '#f3f4f6'; // Gray for empty
@@ -222,7 +226,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
         <thead>
           <tr>
             <th className="grid-row-label" style={{ width: '80px' }}></th>
-            {Array.from({ length: width }).map((_, i) => (
+            {Array.from({ length: validatedWidth }).map((_, i) => (
               <th key={`tens-${i}`} className="grid-column-header grid-column-header-tens">
                 {i % 10 === 0 ? Math.floor(i / 10) : '\u00A0'}
               </th>
@@ -230,7 +234,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
           </tr>
           <tr>
             <th className="grid-row-label" style={{ width: '80px' }}></th>
-            {Array.from({ length: width }).map((_, i) => (
+            {Array.from({ length: validatedWidth }).map((_, i) => (
               <th key={`ones-${i}`} className="grid-column-header">
                 {i % 10}
               </th>
@@ -245,7 +249,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                 <td className="grid-row-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
                   Expected
                 </td>
-                {Array.from({ length: width }).map((_, colIdx) => {
+                {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                   const char = expLines[idx]?.[colIdx] || '';
                   return (
                     <td key={colIdx} className="grid-cell" style={{ background: '#eee', color: '#666' }}>
@@ -259,7 +263,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                 <td className="grid-row-label" style={{ background: '#f0f0f0', fontWeight: 'bold', fontSize: '12px' }}>
                   Actual
                 </td>
-                {Array.from({ length: width }).map((_, colIdx) => {
+                {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                   const expChar = expLines[idx]?.[colIdx] || '';
                   const actChar = actLines[idx]?.[colIdx] || '';
                   let bgColor = '#fff';

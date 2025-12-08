@@ -16,7 +16,6 @@ export default function AnswerSection({
   onHint,
   focusToken,
 }) {
-  const calcSize = (val, min = 1, max = 60) => Math.max(min, Math.min(max, (val || '').length || 1));
   const firstInputRef = React.useRef(null);
 
   React.useEffect(() => {
