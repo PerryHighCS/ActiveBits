@@ -51,8 +51,11 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
   let preCompLines = [];
   let preCompMasks = [];
   if (preComputedOutput) {
-    preCompLines = preComputedOutput.split('\n').filter(line => line || preCompLines.length < formatCalls.length);
-    preCompMasks = preComputedMask ? preComputedMask.split('\n').filter(line => line || preCompMasks.length < formatCalls.length) : [];
+    // Split by newlines, keeping exactly formatCalls.length lines
+    const allLines = preComputedOutput.split('\n');
+    preCompLines = allLines.slice(0, formatCalls.length);
+    const allMasks = preComputedMask ? preComputedMask.split('\n') : [];
+    preCompMasks = allMasks.slice(0, formatCalls.length);
   }
   
   const lines = formatCalls.map((call, callIdx) => {
