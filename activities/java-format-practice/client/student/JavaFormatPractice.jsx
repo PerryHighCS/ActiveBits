@@ -690,6 +690,8 @@ export default function JavaFormatPractice({ sessionData }) {
                   variables={currentChallenge.variables}
                   width={currentChallenge.gridWidth || 30}
                   height={currentChallenge.gridHeight || 3}
+                  preComputedOutput={currentChallenge.expectedOutput}
+                  preComputedMask={currentChallenge.expectedOutputMask}
                 />
               ) : (
                 // printf: show combined expected output

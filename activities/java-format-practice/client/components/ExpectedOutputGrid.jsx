@@ -3,7 +3,7 @@ import { formatWithMask } from '../challenges';
 import { safeEvaluate } from '../utils/safeEvaluator';
 
 // ExpectedOutputGrid for String.format problems - shows expected output with variable names as row labels
-export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3, variables = [] }) {
+export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3, variables = [], preComputedOutput = null, preComputedMask = null }) {
   // Validate and constrain width and height parameters
   const validatedWidth = Math.max(1, Math.min(Number.isInteger(width) ? width : 30, 100));
   const validatedHeight = Math.max(1, Math.min(Number.isInteger(height) ? height : 3, 100));
@@ -47,68 +47,80 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
     return { start, end, count: end - start + 1 };
   };
   // Build the expected output for each line by computing the format calls
-  const lines = formatCalls.map((call) => {
+  // If preComputedOutput is provided, use that instead of re-computing
+  let preCompLines = [];
+  let preCompMasks = [];
+  if (preComputedOutput) {
+    preCompLines = preComputedOutput.split('\n').filter(line => line || preCompLines.length < formatCalls.length);
+    preCompMasks = preComputedMask ? preComputedMask.split('\n').filter(line => line || preCompMasks.length < formatCalls.length) : [];
+  }
+  
+  const lines = formatCalls.map((call, callIdx) => {
     let varName = '';
     const skeletonMatch = call.skeleton?.match(/String\s+(\w+)\s*=/);
     if (skeletonMatch) {
       varName = skeletonMatch[1];
     }
     
-    // Compute expected output by parsing and evaluating the answer
-    let expectedText = '';
-    let expectedMask = '';
-    const answerStr = call.answer || '';
-    if (answerStr.trim()) {
-      try {
-        // Split arguments properly, respecting quoted strings
-        const answerParts = [];
-        let current = '';
-        let inQuotes = false;
-        
-        for (let i = 0; i < answerStr.length; i++) {
-          const char = answerStr[i];
-          const prevChar = i > 0 ? answerStr[i - 1] : '';
+    // Use pre-computed output if available
+    let expectedText = preCompLines[callIdx] || '';
+    let expectedMask = preCompMasks[callIdx] || 'V'.repeat(expectedText.length);
+    
+    // If pre-computed output is not available, try to compute it
+    if (!preComputedOutput) {
+      const answerStr = call.answer || '';
+      if (answerStr.trim()) {
+        try {
+          // Split arguments properly, respecting quoted strings
+          const answerParts = [];
+          let current = '';
+          let inQuotes = false;
           
-          if (char === '"' && prevChar !== '\\') {
-            inQuotes = !inQuotes;
-            current += char;
-          } else if (char === ',' && !inQuotes) {
-            answerParts.push(current.trim());
-            current = '';
-          } else {
-            current += char;
-          }
-        }
-        if (current.trim()) {
-          answerParts.push(current.trim());
-        }
-        
-        if (answerParts[0].startsWith('"') && answerParts[0].endsWith('"')) {
-          const fmt = answerParts[0].slice(1, -1);
-          const argExprs = answerParts.slice(1);
-          
-          // Build value map from variables
-          const valueMap = {};
-          (variables || []).forEach((v) => {
-            let val = v.value;
-            if (v.type === 'String') {
-              val = val.replace(/^"(.*)"$/, '$1');
+          for (let i = 0; i < answerStr.length; i++) {
+            const char = answerStr[i];
+            const prevChar = i > 0 ? answerStr[i - 1] : '';
+            
+            if (char === '"' && prevChar !== '\\') {
+              inQuotes = !inQuotes;
+              current += char;
+            } else if (char === ',' && !inQuotes) {
+              answerParts.push(current.trim());
+              current = '';
+            } else {
+              current += char;
             }
-            valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
-          });
+          }
+          if (current.trim()) {
+            answerParts.push(current.trim());
+          }
           
-          // Evaluate arguments
-          const argValues = argExprs.map((expr) => {
-            return safeEvaluate(expr, valueMap);
-          });
-          
-          // Use formatWithMask to properly format
-          const result = formatWithMask(fmt, argValues);
-          expectedText = result.text.replace(/%n/g, '').replace(/\n/g, '');
-          expectedMask = result.mask.replace(/%n/g, '').replace(/\n/g, '');
+          if (answerParts[0].startsWith('"') && answerParts[0].endsWith('"')) {
+            const fmt = answerParts[0].slice(1, -1);
+            const argExprs = answerParts.slice(1);
+            
+            // Build value map from variables
+            const valueMap = {};
+            (variables || []).forEach((v) => {
+              let val = v.value;
+              if (v.type === 'String') {
+                val = val.replace(/^"(.*)"$/, '$1');
+              }
+              valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+            });
+            
+            // Evaluate arguments
+            const argValues = argExprs.map((expr) => {
+              return safeEvaluate(expr, valueMap);
+            });
+            
+            // Use formatWithMask to properly format
+            const result = formatWithMask(fmt, argValues);
+            expectedText = result.text.replace(/%n/g, '').replace(/\n/g, '');
+            expectedMask = result.mask.replace(/%n/g, '').replace(/\n/g, '');
+          }
+        } catch {
+          // If we can't compute expected, leave it empty
         }
-      } catch {
-        // If we can't compute expected, leave it empty
       }
     }
     
