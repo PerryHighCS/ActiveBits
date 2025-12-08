@@ -48,6 +48,18 @@ export const formatReferenceData = {
           type: 'Special',
           description: 'Literal percent sign',
           example: 'Prints %'
+        },
+        {
+          specifier: '%x',
+          type: 'Hex (lowercase)',
+          description: 'Hexadecimal number (lowercase a-f)',
+          example: '255 → ff'
+        },
+        {
+          specifier: '%X',
+          type: 'Hex (uppercase)',
+          description: 'Hexadecimal number (uppercase A-F)',
+          example: '255 → FF'
         }
       ]
     },

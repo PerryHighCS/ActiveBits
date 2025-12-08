@@ -8,7 +8,7 @@ import CharacterGrid from '../components/CharacterGrid';
 import AnswerSection from '../components/AnswerSection';
 import FeedbackDisplay from '../components/FeedbackDisplay';
 import StatsPanel from '../components/StatsPanel';
-import FormatReferenceModal from '../components/FormatReferenceModal';
+import ReferenceModal from '../components/ReferenceModal';
 import { formatReferenceData } from '../data/referenceData';
 import { getRandomChallenge, formatWithMask, evaluateArgs } from '../challenges';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
@@ -1161,7 +1161,7 @@ export default function JavaFormatPractice({ sessionData }) {
             />
           </div>
 
-          <FormatReferenceModal 
+          <ReferenceModal 
             isOpen={showReference}
             onClose={() => setShowReference(false)}
           />
