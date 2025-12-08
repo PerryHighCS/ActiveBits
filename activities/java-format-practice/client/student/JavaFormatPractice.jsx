@@ -454,6 +454,7 @@ export default function JavaFormatPractice({ sessionData }) {
         
         let syntaxError = '';
         let userOutputText = '';
+        let userMask = '';
         
         try {
           const userParts = splitArgumentsRespectingQuotes(userSubmitted);
@@ -477,6 +478,7 @@ export default function JavaFormatPractice({ sessionData }) {
               userArgValues = evaluateArgs(userArgExprs, valueMap);
               const userOutput = formatWithMask(userFmt, userArgValues);
               userOutputText = userOutput.text;
+              userMask = userOutput.mask;
             } catch (err) {
               const availableVars = Object.keys(valueMap).join(', ');
               syntaxError = `${err.message}. Check your variable names and expressions. Available variables: ${availableVars}`;
@@ -538,6 +540,7 @@ export default function JavaFormatPractice({ sessionData }) {
           expectedOutput: expectedOutputText,
           userOutput: userOutputText,
           expectedMask: expectedMask,
+          userMask: userMask,
           varName: varName,
         };
       });
@@ -552,7 +555,11 @@ export default function JavaFormatPractice({ sessionData }) {
       // Check if all lines match (normalized for grid comparison)
       const allLinesMatch = Object.values(outputsByLine).length > 0 && Object.values(outputsByLine).every(line => {
         const normalize = (s) => (s || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
-        return normalize(line.expectedOutput) === normalize(line.userOutput);
+        const normalizeMask = (m) => (m || '').replace(/\r\n/g, '\n');
+        return (
+          normalize(line.expectedOutput) === normalize(line.userOutput) &&
+          normalizeMask(line.expectedMask) === normalizeMask(line.userMask)
+        );
       });
 
       if (hasAnyLineErrors) {
@@ -688,17 +695,23 @@ export default function JavaFormatPractice({ sessionData }) {
         // Parse and evaluate user output with cycle variables
         const userParts = splitArgumentsRespectingQuotes(userSubmitted);
         let userOutputText = '';
+        let userMask = '';
         if (userParts[0]?.startsWith('"') && userParts[0]?.endsWith('"')) {
           const userFmt = userParts[0].slice(1, -1);
           const userArgExprs = userParts.slice(1);
           const userArgValues = evaluateArgs(userArgExprs, cycleVariables);
           const userOutput = formatWithMask(userFmt, userArgValues);
           userOutputText = userOutput.text;
+          userMask = userOutput.mask;
         }
         
         // Normalize and compare
         const normalize = (s) => (s || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
-        if (normalize(expectedOutputText) !== normalize(userOutputText)) {
+        const normalizeMask = (m) => (m || '').replace(/\r\n/g, '\n');
+        if (
+          normalize(expectedOutputText) !== normalize(userOutputText) ||
+          normalizeMask(expectedMask) !== normalizeMask(userMask)
+        ) {
           hasMismatch = true;
           mismatchInfo = {
             lineNumber: i + 1,
@@ -718,6 +731,7 @@ export default function JavaFormatPractice({ sessionData }) {
           expectedOutput: expectedOutputText,
           userOutput: userOutputText,
           expectedMask: expectedMask,
+          userMask: userMask,
           varName: varName,
         };
       } catch (error) {
@@ -1000,6 +1014,7 @@ export default function JavaFormatPractice({ sessionData }) {
                     expected: lo.expectedOutput || '',
                     actual: lo.userOutput || '',
                     expectedMask: lo.expectedMask || '',
+                    userMask: lo.userMask || '',
                     varName: lo.varName || `Line ${parseInt(idx) + 1}`,
                   }))}
                   width={currentChallenge.gridWidth || 30}

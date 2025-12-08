@@ -186,7 +186,8 @@
 }
 
 .character-grid {
-  border-collapse: collapse;
+  border-collapse: separate; /* allow per-cell border colors to show without collapsing */
+  border-spacing: 0;
   font-family: 'Monaco', 'Consolas', monospace;
   font-size: 12px;
   background: #f7fafc;

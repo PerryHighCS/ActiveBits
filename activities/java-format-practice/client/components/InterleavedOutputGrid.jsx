@@ -102,6 +102,8 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
               // Visualize newlines as ↵ so students see extra/ missing returns
               const expDisplay = (lineInfo.expected || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
               const actDisplay = (lineInfo.actual || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
+              const normalizedMask = (lineInfo.expectedMask || '').replace(/\n/g, 'S');
+              const normalizedUserMask = (lineInfo.userMask || '').replace(/\n/g, 'S');
               
               return (
                 <React.Fragment key={idx}>
@@ -112,7 +114,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                     </td>
                     {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                       const char = expDisplay?.[colIdx] || '';
-                      const maskChar = lineInfo.expectedMask?.replace(/\n/g, 'S')?.[colIdx] || '';
+                      const maskChar = normalizedMask?.[colIdx] || '';
                       const isEmpty = !char;
                       
                       let bgColor = '#f3f4f6'; // Gray for empty
@@ -162,7 +164,17 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                     {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                       const expChar = expDisplay?.[colIdx] || '';
                       const actChar = actDisplay?.[colIdx] || '';
+                      const maskChar = normalizedUserMask?.[colIdx] || '';
                       let bgColor = '#f3f4f6'; // Gray for empty
+                      let borderColor = '#b6b6b6';
+                      let borderWidth = '1px';
+                      if (maskChar === 'S') {
+                        borderColor = '#f59e0b'; // Orange border for static
+                        borderWidth = '2px';
+                      } else if (maskChar === 'D' || maskChar === 'V') {
+                        borderColor = '#3b82f6'; // Blue border for dynamic
+                        borderWidth = '2px';
+                      }
                       
                       if (actChar) {
                         if (actChar === expChar) {
@@ -177,7 +189,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                         <td 
                           key={colIdx} 
                           className={`grid-cell ${hoveredCol === colIdx ? 'grid-cell-hovered' : ''} ${selected ? 'grid-cell-selected' : ''}`}
-                          style={{ background: bgColor }}
+                          style={{ background: bgColor, borderColor: borderColor, borderWidth: borderWidth }}
                           onMouseDown={() => handleMouseDown(colIdx)}
                           onMouseEnter={() => handleMouseEnter(colIdx)}
                           onMouseLeave={() => setHoveredCol(null)}
