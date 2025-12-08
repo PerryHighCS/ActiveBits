@@ -840,6 +840,8 @@ export default function JavaFormatPractice({ sessionData }) {
     );
     setCurrentChallenge(challenge);
     setCurrentFormatCallIndex(0);
+    setHasSubmitted(false);
+    setFeedback(null);
     setFocusToken((t) => t + 1);
   };
 
@@ -858,6 +860,8 @@ export default function JavaFormatPractice({ sessionData }) {
     );
     setCurrentChallenge(challenge);
     setCurrentFormatCallIndex(0);
+    setHasSubmitted(false);
+    setFeedback(null);
     setFocusToken((t) => t + 1);
   };
 
