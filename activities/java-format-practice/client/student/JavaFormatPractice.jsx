@@ -8,6 +8,8 @@ import CharacterGrid from '../components/CharacterGrid';
 import AnswerSection from '../components/AnswerSection';
 import FeedbackDisplay from '../components/FeedbackDisplay';
 import StatsPanel from '../components/StatsPanel';
+import FormatReferenceModal from '../components/FormatReferenceModal';
+import { formatReferenceData } from '../data/referenceData';
 import { getRandomChallenge, formatWithMask, evaluateArgs } from '../challenges';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
@@ -123,7 +125,7 @@ export default function JavaFormatPractice({ sessionData }) {
   const [feedback, setFeedback] = useState(null);
   const [lineErrors, setLineErrors] = useState({});
   const [lineOutputs, setLineOutputs] = useState({});
-  const [hintShown, setHintShown] = useState(false);
+  const [showReference, setShowReference] = useState(false);
 
   const [stats, setStats] = useState({
     total: 0,
@@ -159,7 +161,6 @@ export default function JavaFormatPractice({ sessionData }) {
       setUserAnswers(createEmptyAnswers(formatCalls, difficulty));
       setSolvedAnswers(Array.from({ length: formatCalls.length }, () => ''));
       setFeedback(null);
-      setHintShown(false);
     },
     [createEmptyAnswers]
   );
@@ -406,14 +407,12 @@ export default function JavaFormatPractice({ sessionData }) {
         const newStats = { ...prev };
         newStats.total += 1;
 
-        if (isCorrect && !hintShown) {
+        if (isCorrect) {
           newStats.correct += 1;
           newStats.streak += 1;
           if (newStats.streak > newStats.longestStreak) {
             newStats.longestStreak = newStats.streak;
           }
-        } else if (!isCorrect) {
-          newStats.streak = 0;
         } else {
           newStats.streak = 0;
         }
@@ -434,7 +433,7 @@ export default function JavaFormatPractice({ sessionData }) {
       setFeedback({
         isCorrect,
         message: isCorrect
-          ? `Correct! ${hintShown ? '(but you used a hint)' : ''}`
+          ? 'Correct!'
           : detailedMessage || 'Not quite. Try again.',
         explanation,
       });
@@ -763,8 +762,8 @@ export default function JavaFormatPractice({ sessionData }) {
     });
   };
 
-  const handleHint = () => {
-    setHintShown(true);
+  const handleShowReference = () => {
+    setShowReference(true);
   };
 
   const handleNextChallenge = () => {
@@ -781,7 +780,6 @@ export default function JavaFormatPractice({ sessionData }) {
 
       setCurrentFormatCallIndex((idx) => idx + 1);
       setFeedback(null);
-      setHintShown(false);
       setHasSubmitted(false);
       setUserAnswers((prev) => {
         const next = [...prev];
@@ -1157,11 +1155,16 @@ export default function JavaFormatPractice({ sessionData }) {
               onSubmit={checkAnswer}
               isDisabled={feedback?.isCorrect === true}
               submitDisabled={submitDisabled}
-              hintShown={hintShown}
-              onHint={handleHint}
+              showReference={showReference}
+              onShowReference={handleShowReference}
               focusToken={focusToken}
             />
           </div>
+
+          <FormatReferenceModal 
+            isOpen={showReference}
+            onClose={() => setShowReference(false)}
+          />
 
           <FeedbackDisplay
             feedback={feedback}

@@ -12,8 +12,8 @@ export default function AnswerSection({
   onSubmit,
   isDisabled,
   submitDisabled,
-  hintShown,
-  onHint,
+  showReference,
+  onShowReference,
   focusToken,
 }) {
   const firstInputRef = React.useRef(null);
@@ -253,11 +253,11 @@ export default function AnswerSection({
           Check Answer
         </button>
         <button
-          className={`hint-btn ${hintShown ? 'hint-used' : ''}`}
-          onClick={onHint}
+          className="hint-btn"
+          onClick={onShowReference}
           disabled={isDisabled}
         >
-          💡 Hint {hintShown && '(used)'}
+          📚 Format Reference
         </button>
       </div>
     </div>
