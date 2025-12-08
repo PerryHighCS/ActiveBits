@@ -148,9 +148,12 @@ export function safeEvaluate(expression, valueMap = {}) {
  * Checks for disallowed patterns
  */
 function validateExpressionSyntax(expr) {
+  // First, remove string literals so they don't interfere with pattern matching
+  let exprToCheck = expr.replace(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/g, '""');
+  
   // Disallow any function calls except Math.trunc and Math.round which we allow
   const allowedMathFunctions = /Math\.(trunc|round)\(/g;
-  const exprWithoutAllowedCalls = expr.replace(allowedMathFunctions, '');
+  const exprWithoutAllowedCalls = exprToCheck.replace(allowedMathFunctions, '');
   if (/[a-zA-Z_]\w*\s*\(/.test(exprWithoutAllowedCalls)) {
     throw new Error('Function calls are not allowed');
   }
