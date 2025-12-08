@@ -106,7 +106,7 @@ export function safeEvaluate(expression, valueMap = {}) {
     for (const token of tokens) {
       if (/^[a-zA-Z_]/.test(token)) {
         // It's an identifier
-        if (!(/^__CAST_\d+__$/.test(token) || /^__STRING_\d+__$/.test(token) || token in valueMap)) {
+        if (!(/^__CAST_\d+__$/.test(token) || /^__STRING_\d+__$/.test(token) || token in valueMap || token === 'Math')) {
           throw new Error(`Unknown variable: ${token}`);
         }
       }
