@@ -1,4 +1,6 @@
 import React, { useMemo } from 'react';
+import FeedbackDisplay from './FeedbackDisplay';
+import { splitArgumentsRespectingQuotes } from '../utils/stringUtils';
 
 export default function AnswerSection({
   formatCalls = [],
@@ -15,15 +17,48 @@ export default function AnswerSection({
   showReference,
   onShowReference,
   focusToken,
+  fileName = 'FormatPractice.java',
+  startingLine = 1,
+  feedback = null,
+  onNewChallenge = null,
+  showNextButton = true,
+  onFeedbackDismiss = null,
 }) {
   const firstInputRef = React.useRef(null);
+  const errorLineToFocusRef = React.useRef(null);
 
   React.useEffect(() => {
     if (focusToken === undefined) return;
-    if (firstInputRef.current) {
-      firstInputRef.current.focus();
-    }
+    // Use setTimeout to ensure DOM is fully rendered before focusing
+    const timeoutId = setTimeout(() => {
+      if (firstInputRef.current && !firstInputRef.current.disabled) {
+        firstInputRef.current.focus();
+      }
+    }, 0);
+    return () => clearTimeout(timeoutId);
   }, [focusToken]);
+
+  React.useEffect(() => {
+    // When feedback appears with errors, store the line number to focus later
+    if (feedback && !feedback.isCorrect) {
+      const errorIndices = Object.keys(lineErrors).map(Number);
+      
+      if (errorIndices.length > 0) {
+        // Intermediate/Advanced mode with detected syntax errors
+        const firstErrorIdx = Math.min(...errorIndices);
+        const firstErrorLineNumber = startingLine + variables.length + (firstErrorIdx * 2) + 1;
+        errorLineToFocusRef.current = firstErrorLineNumber;
+      } else if (difficulty === 'beginner') {
+        // Beginner mode: focus the wrong part's input
+        const wrongPartIdx = feedback.wrongPartIdx !== undefined ? feedback.wrongPartIdx : 0;
+        const currentLineNumber = startingLine + variables.length + (currentIndex * 2) + 1;
+        // Store both the line number and part index so we can find the right input
+        errorLineToFocusRef.current = { lineNumber: currentLineNumber, partIdx: wrongPartIdx };
+      } else {
+        errorLineToFocusRef.current = null;
+      }
+    }
+  }, [feedback, lineErrors, startingLine, variables.length, difficulty, currentIndex]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !isDisabled && !submitDisabled && onSubmit) {
@@ -32,9 +67,10 @@ export default function AnswerSection({
     }
   };
 
+  // Use the smarter split function that respects format specifiers like %,d
   const splitParts = (text = '') => {
     if (!text.includes(',')) return [text];
-    return text.split(',').map((p) => p.trim());
+    return splitArgumentsRespectingQuotes(text);
   };
 
   const parsedCalls = useMemo(() => {
@@ -104,6 +140,39 @@ export default function AnswerSection({
 
   const isActive = (idx) => (difficulty === 'beginner' ? idx === currentIndex : true);
 
+  const getFeedbackTitle = () => {
+    if (!feedback) return fileName;
+    return feedback.isCorrect 
+      ? `${fileName} compiled successfully`
+      : `Error in ${fileName}`;
+  };
+
+  const handleFeedbackDismiss = () => {
+    // When dismissing feedback, focus the error input
+    if (feedback && !feedback.isCorrect && errorLineToFocusRef.current !== null) {
+      const focusInfo = errorLineToFocusRef.current;
+      
+      if (typeof focusInfo === 'object' && 'partIdx' in focusInfo) {
+        // Beginner mode: need to find the input by part index
+        const { lineNumber, partIdx } = focusInfo;
+        
+        // Query all inputs on this line and get the nth one (accounting for hidden quote spans)
+        const lineInputs = document.querySelectorAll(`input[data-error-line="${lineNumber}"]`);
+        if (lineInputs.length > partIdx) {
+          lineInputs[partIdx].focus();
+        }
+      } else {
+        // Intermediate/Advanced mode: just find by line number
+        const lineNumber = focusInfo;
+        const errorInput = document.querySelector(`input[data-error-line="${lineNumber}"]`);
+        if (errorInput) {
+          errorInput.focus();
+        }
+      }
+    } else {
+    }
+  };
+
   return (
     <div className="answer-section">
       <div className="ide-shell" aria-label="Format string editor">
@@ -111,13 +180,13 @@ export default function AnswerSection({
           <span className="ide-dot ide-dot-red" />
           <span className="ide-dot ide-dot-amber" />
           <span className="ide-dot ide-dot-green" />
-          <span className="ide-filename">FormatPractice.java</span>
+          <span className="ide-filename">{fileName}</span>
         </div>
 
         <div className="ide-body">
           {variables.map((v, idx) => (
             <div className="ide-line" key={`${v.name}-${idx}`}>
-              <div className="ide-gutter">{idx + 1}</div>
+              <div className="ide-gutter">{startingLine + idx}</div>
               <code className="ide-code">
                 <span className="ide-static">{`${v.type} ${v.name} = ${v.value};`}</span>
               </code>
@@ -128,7 +197,7 @@ export default function AnswerSection({
             const parsed = parsedCalls[idx];
             const solved = solvedAnswers[idx];
             const active = isActive(idx);
-            const lineNumberBase = variables.length + idx * 2 + 1;
+            const lineNumberBase = startingLine + variables.length + idx * 2;
             const values = Array.isArray(userAnswers[idx]) ? userAnswers[idx] : [];
             // Only show solved answer if solved and hasSubmitted (for intermediate/advanced)
             const showSolved = solved && (difficulty === 'beginner' || (typeof window !== 'undefined' && window.hasSubmitted === true));
@@ -160,18 +229,20 @@ export default function AnswerSection({
                             value={values[0] || ''}
                             onChange={(e) => handleInputChange(idx, 0, e.target.value)}
                             disabled={isDisabled}
-                            ref={idx === currentIndex ? firstInputRef : null}
+                            ref={idx === 0 ? firstInputRef : null}
                             onKeyDown={handleKeyDown}
                             style={{ width: `${Math.max((values[0] || '').length, 20)}ch` }}
                             spellCheck={false}
                             autoComplete="off"
+                            data-error-line={lineNumberBase + 1}
                           />
                         ) : (
                           // Beginner/Intermediate mode: separate inputs for each part
                           parsed.parts.map((part, partIdx) => {
                             const val = values[partIdx] || '';
                             const isLast = partIdx === parsed.parts.length - 1;
-                            const isFirstInput = idx === currentIndex && partIdx === 0;
+                            // For beginner: focus first input of current line; for intermediate: focus very first input
+                            const isFirstInput = (difficulty === 'beginner' ? idx === currentIndex : idx === 0) && partIdx === 0;
                             const inputMeta = parsed.inputs?.[partIdx] || {};
                             const isFormatString = inputMeta.type === 'format-string';
                             const isStringLiteral = inputMeta.type === 'string-literal';
@@ -193,6 +264,7 @@ export default function AnswerSection({
                                   style={{ width: `${Math.max(val.length, 1)}ch` }}
                                   spellCheck={false}
                                   autoComplete="off"
+                                  data-error-line={lineNumberBase + 1}
                                 />
                                 {shouldHaveQuotes && <span className="ide-static">"</span>}
                                 {!isLast && <span className="ide-static ide-comma">, </span>}
@@ -260,6 +332,16 @@ export default function AnswerSection({
           📚 Format Reference
         </button>
       </div>
+      
+      <FeedbackDisplay
+        feedback={feedback ? {...feedback, onDismiss: () => {
+          handleFeedbackDismiss();
+          if (onFeedbackDismiss) onFeedbackDismiss();
+        }} : null}
+        onNewChallenge={onNewChallenge}
+        showNextButton={showNextButton}
+        title={getFeedbackTitle()}
+      />
     </div>
   );
 }

@@ -99,8 +99,9 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
             {lineData.map((lineInfo, idx) => {
               // Replace %n with ↵ for display, but DON'T split on newlines for String.format problems
               // The ↵ symbol will just appear as a character in the row
-              const expDisplay = (lineInfo.expected || '').replace(/%n/g, '↵').replace(/\n/g, '');
-              const actDisplay = (lineInfo.actual || '').replace(/%n/g, '↵').replace(/\n/g, '');
+              // Visualize newlines as ↵ so students see extra/ missing returns
+              const expDisplay = (lineInfo.expected || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
+              const actDisplay = (lineInfo.actual || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
               
               return (
                 <React.Fragment key={idx}>
@@ -111,7 +112,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                     </td>
                     {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                       const char = expDisplay?.[colIdx] || '';
-                      const maskChar = lineInfo.expectedMask?.replace(/\n/g, '')?.[colIdx] || '';
+                      const maskChar = lineInfo.expectedMask?.replace(/\n/g, 'S')?.[colIdx] || '';
                       const isEmpty = !char;
                       
                       let bgColor = '#f3f4f6'; // Gray for empty
@@ -216,8 +217,16 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
   }
 
   // Original behavior for printf-style problems (combined output with newlines)
-  const expLines = (expected || '').split(/\n/);
-  const actLines = (actual || '').split(/\n/);
+    // Show newline characters explicitly so mismatches are visible
+    // Preserve newlines visually by inserting ↵ before splitting into rows
+    const expLines = (expected || '')
+      .replace(/%n/g, '↵')
+      .replace(/\n/g, '↵\n')
+      .split('\n');
+    const actLines = (actual || '')
+      .replace(/%n/g, '↵')
+      .replace(/\n/g, '↵\n')
+      .split('\n');
   
   return (
     <div className="character-grid-container">

@@ -142,7 +142,7 @@ export default function JavaFormatPractice({ sessionData }) {
   const [cycleOutputs, setCycleOutputs] = useState({});
   const [cycleMismatchLine, setCycleMismatchLine] = useState(null);
 
-  const splitAnswerParts = useCallback((answer = '') => answer.split(',').map((part) => part.trim()), []);
+  const splitAnswerParts = useCallback((answer = '') => splitArgumentsRespectingQuotes(answer), []);
 
   const createEmptyAnswers = useCallback(
     (formatCalls = [], difficulty) =>
@@ -224,10 +224,8 @@ export default function JavaFormatPractice({ sessionData }) {
 
   const handleWsMessage = useCallback(
     (event) => {
-      console.log('WebSocket message received:', event.data);
       try {
         const message = JSON.parse(event.data);
-        console.log('Parsed message:', message);
         if (message.type === 'session-ended') {
           navigate('/session-ended');
           return;
@@ -236,10 +234,8 @@ export default function JavaFormatPractice({ sessionData }) {
           const newStudentId = message.payload.studentId;
           setStudentId(newStudentId);
           localStorage.setItem(`student-id-${sessionId}`, newStudentId);
-          console.log('Received student ID:', newStudentId);
         } else if (message.type === 'difficultyUpdate') {
           const difficulty = message.payload.difficulty || 'beginner';
-          console.log('Updating difficulty to:', difficulty);
           setSelectedDifficulty(difficulty);
           const challenge = getRandomChallenge(
             selectedTheme === 'all' ? null : selectedTheme,
@@ -248,7 +244,6 @@ export default function JavaFormatPractice({ sessionData }) {
           setCurrentChallenge(challenge);
         } else if (message.type === 'themeUpdate') {
           const theme = message.payload.theme || 'all';
-          console.log('Updating theme to:', theme);
           setSelectedTheme(theme);
           const challenge = getRandomChallenge(
             theme === 'all' ? null : theme,
@@ -264,7 +259,6 @@ export default function JavaFormatPractice({ sessionData }) {
   );
 
   const handleWsOpen = useCallback(() => {
-    console.log('WebSocket connected for session:', sessionId);
   }, [sessionId]);
 
   const buildWsUrl = useCallback(() => {
@@ -383,7 +377,9 @@ export default function JavaFormatPractice({ sessionData }) {
             ? 'format specifier'
             : meta?.type === 'string-literal'
             ? 'string literal'
-            : 'variable';
+            : meta?.type === 'variable'
+            ? 'argument'
+            : 'entry';
           if (adjustedUserParts[idx] !== adjustedExpectedParts[idx]) {
             const { expected: expDiff, actual: actDiff } = highlightDiff(adjustedExpectedParts[idx], adjustedUserParts[idx] || '');
             wrongParts.push(`${partName} (expected: <code>${expDiff}</code>, got: <code>${actDiff}</code>)`);
@@ -420,12 +416,20 @@ export default function JavaFormatPractice({ sessionData }) {
       });
 
       let explanation = undefined;
+      let firstWrongPartIdx = -1;
       if (isCorrect) {
         explanation = formatCall.explanation;
       } else if (wrongParts.length > 0) {
         const wrongTypes = userParts.map((part, idx) => adjustedUserParts[idx] !== adjustedExpectedParts[idx] ? (inputsMeta[idx]?.type) : null).filter(Boolean);
         if (wrongTypes.includes('format-string') || wrongTypes.includes('string-literal')) {
           explanation = formatCall.explanation;
+        }
+        // Find the first wrong part index
+        for (let i = 0; i < adjustedUserParts.length; i++) {
+          if (adjustedUserParts[i] !== adjustedExpectedParts[i]) {
+            firstWrongPartIdx = i;
+            break;
+          }
         }
       }
 
@@ -435,6 +439,7 @@ export default function JavaFormatPractice({ sessionData }) {
           ? 'Correct!'
           : detailedMessage || 'Not quite. Try again.',
         explanation,
+        wrongPartIdx: firstWrongPartIdx,
       });
     } else {
       // Intermediate/Advanced mode: validate all lines and collect valid outputs
@@ -486,54 +491,55 @@ export default function JavaFormatPractice({ sessionData }) {
           newLineErrors[idx] = syntaxError;
         }
         
-        // Only store output if there are no syntax errors
+        // Store valid outputs if no syntax errors
         if (!syntaxError && userOutputText) {
           validOutputs.push(userOutputText);
-          console.log(`Line ${idx + 1} output:`, userOutputText);
-          
-          // Calculate expected output for this line from the call's answer
-          let expectedOutputText = '';
-          let expectedMask = '';
-          const answerStr = call.answer || '';
-          if (answerStr.trim()) {
-            try {
-              const answerParts = splitArgumentsRespectingQuotes(answerStr);
-              if (answerParts[0].startsWith('"') && answerParts[0].endsWith('"')) {
-                const expectedFmt = answerParts[0].slice(1, -1);
-                const expectedArgExprs = answerParts.slice(1);
-                const valueMap = {};
-                (currentChallenge.variables || []).forEach((v) => {
-                  let val = v.value;
-                  if (v.type === 'String') {
-                    val = val.replace(/^"(.*)"$/, '$1');
-                  }
-                  valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
-                });
-                const expectedArgValues = evaluateArgs(expectedArgExprs, valueMap);
-                const expectedOutput = formatWithMask(expectedFmt, expectedArgValues);
-                expectedOutputText = expectedOutput.text;
-                expectedMask = expectedOutput.mask;
-              }
-            } catch (err) {
-              // If we can't compute expected, just leave it empty
-            }
-          }
-          
-          // Extract variable name from skeleton (e.g., "String line1 = ..." -> "line1")
-          let varName = '';
-          const skeletonMatch = call.skeleton?.match(/String\s+(\w+)\s*=/);
-          if (skeletonMatch) {
-            varName = skeletonMatch[1];
-          }
-          
-          // Store per-line output comparison
-          outputsByLine[idx] = {
-            expectedOutput: expectedOutputText,
-            userOutput: userOutputText,
-            expectedMask: expectedMask,
-            varName: varName,
-          };
         }
+        
+        // Always calculate expected output for this line from the call's answer
+        // (even if there are syntax errors, so the grid shows what was expected)
+        let expectedOutputText = '';
+        let expectedMask = '';
+        const answerStr = call.answer || '';
+        if (answerStr.trim()) {
+          try {
+            const answerParts = splitArgumentsRespectingQuotes(answerStr);
+            if (answerParts.length > 0) {
+              // Support both quoted (advanced) and unquoted (beginner/intermediate) format strings
+              const expectedFmt = answerParts[0].replace(/^"(.*)"$/, '$1');
+              const expectedArgExprs = answerParts.slice(1);
+              const valueMap = {};
+              (currentChallenge.variables || []).forEach((v) => {
+                let val = v.value;
+                if (v.type === 'String') {
+                  val = val.replace(/^"(.*)"$/, '$1');
+                }
+                valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+              });
+              const expectedArgValues = evaluateArgs(expectedArgExprs, valueMap);
+              const expectedOutput = formatWithMask(expectedFmt, expectedArgValues);
+              expectedOutputText = expectedOutput.text;
+              expectedMask = expectedOutput.mask;
+            }
+          } catch (err) {
+            // If we can't compute expected, just leave it empty
+          }
+        }
+        
+        // Extract variable name from skeleton (e.g., "String line1 = ..." -> "line1")
+        let varName = '';
+        const skeletonMatch = call.skeleton?.match(/String\s+(\w+)\s*=/);
+        if (skeletonMatch) {
+          varName = skeletonMatch[1];
+        }
+        
+        // Store per-line output comparison
+        outputsByLine[idx] = {
+          expectedOutput: expectedOutputText,
+          userOutput: userOutputText,
+          expectedMask: expectedMask,
+          varName: varName,
+        };
       });
       
       // Update lineOutputs and lineErrors with all collected data
@@ -545,7 +551,7 @@ export default function JavaFormatPractice({ sessionData }) {
 
       // Check if all lines match (normalized for grid comparison)
       const allLinesMatch = Object.values(outputsByLine).length > 0 && Object.values(outputsByLine).every(line => {
-        const normalize = s => (s || '').replace(/%n/g, '↵').replace(/\n/g, '');
+        const normalize = (s) => (s || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
         return normalize(line.expectedOutput) === normalize(line.userOutput);
       });
 
@@ -691,7 +697,7 @@ export default function JavaFormatPractice({ sessionData }) {
         }
         
         // Normalize and compare
-        const normalize = s => (s || '').replace(/%n/g, '↵').replace(/\n/g, '');
+        const normalize = (s) => (s || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
         if (normalize(expectedOutputText) !== normalize(userOutputText)) {
           hasMismatch = true;
           mismatchInfo = {
@@ -811,6 +817,7 @@ export default function JavaFormatPractice({ sessionData }) {
     setCurrentFormatCallIndex(0);
     setHasSubmitted(false);
     setFocusToken((t) => t + 1);
+    setFeedback(null);
   };
 
   const handleDifficultyChange = (difficulty) => {
@@ -1150,6 +1157,12 @@ export default function JavaFormatPractice({ sessionData }) {
               showReference={showReference}
               onShowReference={handleShowReference}
               focusToken={focusToken}
+              fileName={currentChallenge.fileName}
+              startingLine={currentChallenge.startingLine}
+              feedback={feedback}
+              onNewChallenge={handleNextChallenge}
+              showNextButton={feedback?.isCorrect === true && !isCyclingMode}
+              onFeedbackDismiss={() => setFeedback(null)}
             />
           </div>
 
@@ -1157,12 +1170,6 @@ export default function JavaFormatPractice({ sessionData }) {
             isOpen={showReference}
             onClose={() => setShowReference(false)}
             referenceData={formatReferenceData}
-          />
-
-          <FeedbackDisplay
-            feedback={feedback}
-            onNewChallenge={handleNextChallenge}
-            showNextButton={feedback?.isCorrect === true && !isCyclingMode}
           />
         </div>
       </div>

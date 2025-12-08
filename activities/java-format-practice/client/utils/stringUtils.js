@@ -1,6 +1,8 @@
 /**
- * Split a comma-separated string into parts, respecting quoted strings.
+ * Split a comma-separated string into parts, respecting quoted strings and format specifiers.
+ * Format specifiers like %,d should not be split on their internal comma.
  * Example: '"Hello, World", name, 42' => ['"Hello, World"', 'name', '42']
+ * Example: 'Reward: $%,d, {{bounty}}' => ['Reward: $%,d', '{{bounty}}']
  */
 export function splitArgumentsRespectingQuotes(str) {
   const parts = [];
@@ -10,13 +12,41 @@ export function splitArgumentsRespectingQuotes(str) {
   for (let i = 0; i < str.length; i++) {
     const char = str[i];
     const prevChar = i > 0 ? str[i - 1] : '';
+    const nextChar = i < str.length - 1 ? str[i + 1] : '';
 
     if (char === '"' && prevChar !== '\\') {
       inQuotes = !inQuotes;
       current += char;
     } else if (char === ',' && !inQuotes) {
-      parts.push(current.trim());
-      current = '';
+      // Check if this comma is part of a format specifier
+      // A comma is part of a format specifier if:
+      // 1. It comes after a % and before a conversion character (s, d, f, x, X, etc.)
+      // Look ahead to see if there's a conversion character soon
+      let isFormatSpecifierComma = false;
+      
+      // Check if we're in the middle of a format specifier by looking back for %
+      // and ahead for a conversion character
+      const beforeComma = current;
+      const afterComma = str.slice(i + 1);
+      
+      // Find the last % in current string
+      const lastPercentIdx = beforeComma.lastIndexOf('%');
+      if (lastPercentIdx !== -1) {
+        // Check if there's a conversion character in the next few characters
+        // (accounting for possible width/precision digits)
+        const lookAhead = afterComma.match(/^(\d*[sdfxXbBhHcC])/);
+        if (lookAhead) {
+          // This comma is between % and a conversion char - it's a format flag
+          isFormatSpecifierComma = true;
+        }
+      }
+      
+      if (!isFormatSpecifierComma) {
+        parts.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
     } else {
       current += char;
     }
@@ -25,7 +55,6 @@ export function splitArgumentsRespectingQuotes(str) {
   if (current.trim()) {
     parts.push(current.trim());
   }
-
   return parts;
 }
 

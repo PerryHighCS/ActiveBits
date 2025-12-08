@@ -406,6 +406,7 @@ tbody tr:last-child .grid-cell-hovered::before {
   border-radius: 12px;
   padding: 20px;
   margin: 20px 0;
+  position: relative;
 }
 
 
@@ -603,7 +604,140 @@ tbody tr:last-child .grid-cell-hovered::before {
   cursor: not-allowed;
 }
 
-/* Feedback */
+/* Feedback Modal */
+.feedback-modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  border-radius: 12px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.feedback-modal {
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid #3f3f3f;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: modalSlideIn 0.3s ease-out;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(135deg, #1f1f1f 0%, #2d2d30 100%);
+}
+
+.feedback-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #3f3f3f;
+  background: linear-gradient(90deg, #1a1a1a 0%, #252526 100%);
+}
+
+.feedback-modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  flex: 1;
+  word-break: break-word;
+  color: #e8e8e8;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.feedback-modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  font-weight: 300;
+  cursor: pointer;
+  color: #888888;
+  padding: 0;
+  margin: -4px -4px -4px 12px;
+  width: 32px;
+  height: 32px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.feedback-modal-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #c8c8c8;
+}
+
+.feedback-modal-body {
+  padding: 20px 24px;
+  flex: 1;
+  color: #000000;
+  background: #f5f5f5;
+}
+
+.feedback-modal-footer {
+  padding: 12px 24px;
+  border-top: 1px solid #e0e0e0;
+  background: #f5f5f5;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.feedback-modal.correct {
+  border-color: #4a7c59;
+}
+
+.feedback-modal.correct .feedback-modal-header {
+  background: linear-gradient(90deg, #0f5a1f 0%, #1a7a2e 100%);
+  border-bottom-color: #4a7c59;
+}
+
+.feedback-modal.correct .feedback-modal-title {
+  color: #ffffff;
+}
+
+.feedback-modal.correct .feedback-modal-body {
+  background: #f5f5f5;
+  color: #000000;
+}
+
+.feedback-modal.correct .feedback-modal-footer {
+  background: #f5f5f5;
+  border-top-color: #e0e0e0;
+}
+
+.feedback-modal.incorrect {
+  border-color: #7c4a4a;
+}
+
+.feedback-modal.incorrect .feedback-modal-header {
+  background: linear-gradient(90deg, #5a1a1a 0%, #7a2e2e 100%);
+  border-bottom-color: #7c4a4a;
+}
+
+.feedback-modal.incorrect .feedback-modal-title {
+  color: #ffffff;
+}
+
+.feedback-modal.incorrect .feedback-modal-body {
+  background: #f5f5f5;
+  color: #000000;
+}
+
+.feedback-modal.incorrect .feedback-modal-footer {
+  background: #f5f5f5;
+  border-top-color: #e0e0e0;
+}
+
+/* Legacy feedback styles (kept for backward compatibility) */
 .feedback {
   padding: 20px;
   border-radius: 12px;
@@ -638,19 +772,41 @@ tbody tr:last-child .grid-cell-hovered::before {
 }
 
 .new-challenge-btn {
-  background: inherit;
-  color: inherit;
-  border: 2px solid currentColor;
+  background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%);
+  color: #ffffff;
+  border: 1px solid #003d7a;
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
   transition: all 0.2s;
+  font-size: 14px;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modalSlideIn {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .new-challenge-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  background: linear-gradient(135deg, #0073e6 0%, #0059b3 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
 }
 
 /* Stats Panel */
@@ -818,29 +974,44 @@ tbody tr:last-child .grid-cell-hovered::before {
 }
 
 .feedback .diff-highlight,
+.feedback-modal .diff-highlight,
 .diff-highlight {
-  background: #fff700 !important;
-  color: #b30000 !important;
-  font-weight: bold !important;
-  text-decoration: underline !important;
-  border-radius: 2px !important;
+  background: linear-gradient(135deg, #fff700 0%, #ffed4e 100%) !important;
+  color: #8b0000 !important;
+  font-weight: 600 !important;
+  border-radius: 4px !important;
+  padding: 2px 4px !important;
   border: none !important;
-  box-shadow: none !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15) !important;
   outline: none !important;
-  animation: diff-shake 0.5s cubic-bezier(.36,.07,.19,.97) 2 !important;
+  animation: diff-highlight-entrance 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
   display: inline-block !important;
   position: relative !important;
   z-index: 2 !important;
   min-width: 1ch;
+  transition: all 0.3s ease !important;
 }
 
 .diff-highlight:empty::after {
-  content: "_";
-  color: #b30000;
-  font-size: 1.2em;
-  font-weight: bold;
-  vertical-align: middle;
-  margin-left: 1px;
+  content: "␣";
+  color: #8b0000;
+  font-size: 1em;
+  font-weight: 600;
+  vertical-align: baseline;
+}
+
+@keyframes diff-highlight-entrance {
+  0% { 
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% { 
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 @keyframes diff-shake {
