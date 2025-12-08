@@ -79,7 +79,7 @@ export function safeEvaluate(expression, valueMap = {}) {
     // Extract string literals and replace with placeholders
     processedExpr = processedExpr.replace(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/g, (match) => {
       stringLiterals.push(match);
-      return `__STRING_${stringIndex}__`;
+      return `__STRING_${stringIndex++}__`;
     });
 
     // If the entire expression was a string literal, return its value
