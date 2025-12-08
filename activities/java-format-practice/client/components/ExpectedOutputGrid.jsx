@@ -51,14 +51,21 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
   let preCompLines = [];
   let preCompMasks = [];
   if (preComputedOutput) {
-    // Split by newlines, keeping exactly formatCalls.length lines
+    // Split output by newlines
     const allLines = preComputedOutput.split('\n');
     preCompLines = allLines.slice(0, formatCalls.length);
-    const allMasks = preComputedMask ? preComputedMask.split('\n') : [];
-    preCompMasks = allMasks.slice(0, formatCalls.length).map(maskLine => {
-      // Remove trailing 'S' that corresponds to the newline character we removed
-      return maskLine.endsWith('S') ? maskLine.slice(0, -1) : maskLine;
-    });
+    
+    // For masks, we need to split in sync with the output
+    // The mask string has same length as output (including newlines which are marked as 'S')
+    // Split the mask at the same newline positions as the output
+    if (preComputedMask) {
+      let maskIdx = 0;
+      for (let i = 0; i < formatCalls.length; i++) {
+        const lineLength = preCompLines[i].length;
+        preCompMasks[i] = preComputedMask.substring(maskIdx, maskIdx + lineLength);
+        maskIdx += lineLength + 1; // +1 for the 'S' that represents the newline
+      }
+    }
   }
   
   const lines = formatCalls.map((call, callIdx) => {
