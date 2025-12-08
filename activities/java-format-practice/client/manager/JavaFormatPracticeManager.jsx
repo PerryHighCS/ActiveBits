@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
 import SessionHeader from '@src/components/common/SessionHeader';
-import ActivityRoster from '@src/components/common/ActivityRoster';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 
 /**
@@ -12,7 +11,6 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
  */
 export default function JavaFormatPracticeManager() {
   const { sessionId } = useParams();
-  const navigate = useNavigate();
 
   const [students, setStudents] = useState([]);
   const [selectedDifficulty, setSelectedDifficulty] = useState('beginner');

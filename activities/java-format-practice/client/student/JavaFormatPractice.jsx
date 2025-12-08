@@ -2,7 +2,6 @@ import InterleavedOutputGrid from '../components/InterleavedOutputGrid';
 import ExpectedOutputGrid from '../components/ExpectedOutputGrid';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Button from '@src/components/ui/Button';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
@@ -33,7 +32,6 @@ import { validateVariableReferences } from '../utils/validationUtils';
 export default function JavaFormatPractice({ sessionData }) {
   const sessionId = sessionData?.sessionId;
   const isSoloSession = sessionId ? sessionId.startsWith('solo-') : false;
-  const initializedRef = useRef(false);
   const studentIdRef = useRef(null);
   const navigate = useNavigate();
 
