@@ -17,6 +17,7 @@ let testImportCounter = 0;
  */
 const EXPECTED_ACTIVITIES = [
   "java-string-practice",
+  "java-format-practice",
   "python-list-practice",
   "raffle",
   "www-sim",

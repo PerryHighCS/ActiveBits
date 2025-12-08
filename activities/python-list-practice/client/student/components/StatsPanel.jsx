@@ -1,9 +1,19 @@
 import React from 'react';
-import SessionHeader from '../components/SessionHeader';
 
-export default function StatsPanel({ isSolo, submittedName, sessionId, stats }) {
-  if (isSolo) {
-    return <SessionHeader activityName="Python List Practice" stats={stats} simple />;
-  }
-  return <SessionHeader submittedName={submittedName} sessionId={sessionId} stats={stats} />;
+export default function StatsPanel({ stats }) {
+  const total = stats?.total || 0;
+  const correct = stats?.correct || 0;
+  const streak = stats?.streak || 0;
+  const longestStreak = stats?.longestStreak || 0;
+  const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+
+  return (
+    <div className="python-list-stats">
+      <div className="python-list-stat">Total: {total}</div>
+      <div className="python-list-stat">Correct: {correct}</div>
+      <div className="python-list-stat">Accuracy: {accuracy}%</div>
+      <div className="python-list-stat">Streak: {streak}</div>
+      <div className="python-list-stat">Longest: {longestStreak}</div>
+    </div>
+  );
 }
