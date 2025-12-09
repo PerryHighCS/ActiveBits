@@ -1004,7 +1004,7 @@ tbody tr:last-child .grid-cell-hovered::before {
 }
 
 .diff-highlight:empty::after {
-  content: "␣";
+  content: "_";
   color: #8b0000;
   font-size: 1em;
   font-weight: 600;
