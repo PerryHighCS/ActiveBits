@@ -264,7 +264,7 @@ export default function AnswerSection({
                     {active && parsed.inputs && parsed.inputs.length > 0 ? (
                       <>
                         <span className="ide-static" aria-hidden="true">{parsed.before}</span>
-                        {difficulty === 'advanced' ? (
+                        ) : (
                           // Advanced mode: single input for entire answer
                           <input
                             aria-label={`Line ${idx + 1} input`}
@@ -273,7 +273,24 @@ export default function AnswerSection({
                             value={values[0] || ''}
                             onChange={(e) => handleInputChange(idx, 0, e.target.value)}
                             disabled={isDisabled}
-                            ref={idx === 0 ? firstInputRef : null}
+                            ref={(el) => {
+                              if (idx === 0) {
+                                firstInputRef.current = el;
+                              }
+                              // For advanced mode, also set errorInputRef if this is an error line
+                              if (
+                                errorLineToFocusRef.current &&
+                                errorLineToFocusRef.current.lineNumber === lineNumberBase + 1
+                              ) {
+                                console.log('[AnswerSection] Setting errorInputRef for advanced mode input:', {
+                                  idx,
+                                  lineNumber: lineNumberBase + 1,
+                                  errorLineToFocus: errorLineToFocusRef.current,
+                                  element: el
+                                });
+                                errorInputRef.current = el;
+                              }
+                            }}
                             onKeyDown={handleKeyDown}
                             style={{ width: `${Math.max((values[0] || '').length, 20)}ch` }}
                             spellCheck={false}
