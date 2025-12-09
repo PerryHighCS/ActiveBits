@@ -6,15 +6,15 @@ import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
 import AnswerSection from '../components/AnswerSection';
-import FeedbackDisplay from '../components/FeedbackDisplay';
 import StatsPanel from '../components/StatsPanel';
 import ReferenceModal from '../components/ReferenceModal';
 import { formatReferenceData } from '../data/referenceData';
 import { getRandomChallenge, formatWithMask, evaluateArgs } from '../challenges';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
-import { splitArgumentsRespectingQuotes, buildAnswerString, highlightDiff } from '../utils/stringUtils';
+import { splitArgumentsRespectingQuotes, buildAnswerString, highlightDiff, escapeHtml } from '../utils/stringUtils';
 import { validateVariableReferences } from '../utils/validationUtils';
+import { normalizeOutput, normalizeMask } from '../utils/formatUtils';
 
 /**
  * JavaFormatPractice - Student view for practicing Java printf and String.format
@@ -487,8 +487,8 @@ export default function JavaFormatPractice({ sessionData }) {
               userOutputText = userOutput.text;
               userMask = userOutput.mask;
             } catch (err) {
-              const availableVars = Object.keys(valueMap).join(', ');
-              syntaxError = `${err.message}. Check your variable names and expressions. Available variables: ${availableVars}`;
+              const availableVars = Object.keys(valueMap).map(escapeHtml).join(', ');
+              syntaxError = `${escapeHtml(err.message)}. Check your variable names and expressions. Available variables: ${availableVars}`;
               
               // Try to determine which argument has the error
               let errorArgIdx = 0;
@@ -588,10 +588,8 @@ export default function JavaFormatPractice({ sessionData }) {
 
       // Check if all lines match (normalized for grid comparison)
       const allLinesMatch = Object.values(outputsByLine).length > 0 && Object.values(outputsByLine).every(line => {
-        const normalize = (s) => (s || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
-        const normalizeMask = (m) => (m || '').replace(/\r\n/g, '\n');
         return (
-          normalize(line.expectedOutput) === normalize(line.userOutput) &&
+          normalizeOutput(line.expectedOutput) === normalizeOutput(line.userOutput) &&
           normalizeMask(line.expectedMask) === normalizeMask(line.userMask)
         );
       });
@@ -646,9 +644,7 @@ export default function JavaFormatPractice({ sessionData }) {
         // Determine which lines are wrong and try to identify which part
         const mismatchedLines = [];
         Object.entries(outputsByLine).forEach(([idx, line]) => {
-          const normalize = (s) => (s || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
-          const normalizeMask = (m) => (m || '').replace(/\r\n/g, '\n');
-          const outputMatches = normalize(line.expectedOutput) === normalize(line.userOutput);
+          const outputMatches = normalizeOutput(line.expectedOutput) === normalizeOutput(line.userOutput);
           const maskMatches = normalizeMask(line.expectedMask) === normalizeMask(line.userMask);
           
           if (!outputMatches || !maskMatches) {
@@ -696,7 +692,8 @@ export default function JavaFormatPractice({ sessionData }) {
       setCycleMismatchLine(result.mismatchInfo);
       // Map mismatch line number to gutter line number
       const gutterLineNum = (currentChallenge.startingLine || 1) + (currentChallenge.variables?.length || 0) + ((result.mismatchInfo.lineNumber - 1) * 2) + 1;
-      const varName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [, `variable ${result.mismatchInfo.lineNumber}`])[1];
+      const rawVarName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [, `variable ${result.mismatchInfo.lineNumber}`])[1];
+      const varName = escapeHtml(rawVarName);
       setFeedback({
         isCorrect: false,
         message: [
@@ -790,10 +787,8 @@ export default function JavaFormatPractice({ sessionData }) {
         }
         
         // Normalize and compare
-        const normalize = (s) => (s || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
-        const normalizeMask = (m) => (m || '').replace(/\r\n/g, '\n');
         if (
-          normalize(expectedOutputText) !== normalize(userOutputText) ||
+          normalizeOutput(expectedOutputText) !== normalizeOutput(userOutputText) ||
           normalizeMask(expectedMask) !== normalizeMask(userMask)
         ) {
           hasMismatch = true;

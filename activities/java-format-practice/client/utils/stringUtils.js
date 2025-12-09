@@ -70,26 +70,45 @@ export function buildAnswerString(parts = []) {
 }
 
 /**
+ * Escape HTML special characters to prevent XSS attacks.
+ * Converts <, >, &, ", and ' to their HTML entity equivalents.
+ */
+export function escapeHtml(str) {
+  if (typeof str !== 'string') return str;
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
  * Highlight the first difference between two strings with HTML spans.
+ * Escapes HTML in both strings before adding highlighting to prevent XSS.
  */
 export function highlightDiff(expected, actual) {
-  if (expected === actual) return { expected, actual };
+  // Escape HTML in both strings first
+  const safeExpected = escapeHtml(expected);
+  const safeActual = escapeHtml(actual);
+  
+  if (safeExpected === safeActual) return { expected: safeExpected, actual: safeActual };
   let i = 0;
-  while (i < expected.length && i < actual.length && expected[i] === actual[i]) i++;
+  while (i < safeExpected.length && i < safeActual.length && safeExpected[i] === safeActual[i]) i++;
   // Find end of difference
   let j = 0;
   while (
-    j < expected.length - i &&
-    j < actual.length - i &&
-    expected[expected.length - 1 - j] === actual[actual.length - 1 - j]
+    j < safeExpected.length - i &&
+    j < safeActual.length - i &&
+    safeExpected[safeExpected.length - 1 - j] === safeActual[safeActual.length - 1 - j]
   ) j++;
   const expDiff =
-    expected.slice(0, i) +
-    '<span class="diff-highlight">' + expected.slice(i, expected.length - j) + '</span>' +
-    expected.slice(expected.length - j);
+    safeExpected.slice(0, i) +
+    '<span class="diff-highlight">' + safeExpected.slice(i, safeExpected.length - j) + '</span>' +
+    safeExpected.slice(safeExpected.length - j);
   const actDiff =
-    actual.slice(0, i) +
-    '<span class="diff-highlight">' + actual.slice(i, actual.length - j) + '</span>' +
-    actual.slice(actual.length - j);
+    safeActual.slice(0, i) +
+    '<span class="diff-highlight">' + safeActual.slice(i, safeActual.length - j) + '</span>' +
+    safeActual.slice(safeActual.length - j);
   return { expected: expDiff, actual: actDiff };
 }

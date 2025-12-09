@@ -102,8 +102,9 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
               // Visualize newlines as ↵ so students see extra/ missing returns
               const expDisplay = (lineInfo.expected || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
               const actDisplay = (lineInfo.actual || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
-              const normalizedMask = (lineInfo.expectedMask || '').replace(/\n/g, 'S');
-              const normalizedUserMask = (lineInfo.userMask || '').replace(/\n/g, 'S');
+              // Masks should only contain 'S', 'V', or 'D' characters - no newlines to normalize
+              const normalizedMask = lineInfo.expectedMask || '';
+              const normalizedUserMask = lineInfo.userMask || '';
 
               return (
                 <React.Fragment key={idx}>

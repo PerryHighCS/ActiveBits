@@ -3,7 +3,7 @@
  * Focuses on splitArgumentsRespectingQuotes function with format specifiers
  */
 
-import { splitArgumentsRespectingQuotes } from './stringUtils.js';
+import { splitArgumentsRespectingQuotes, escapeHtml, highlightDiff } from './stringUtils.js';
 
 // Test cases
 const tests = [
@@ -194,4 +194,93 @@ tests.forEach(test => {
 });
 
 console.log(`\n${passed} passed, ${failed} failed out of ${tests.length} tests`);
-process.exit(failed > 0 ? 1 : 0);
+
+// Test escapeHtml function
+console.log('\n=== Testing escapeHtml ===');
+const escapeTests = [
+  { input: 'normal text', expected: 'normal text', name: 'Normal text unchanged' },
+  { input: '<script>alert("XSS")</script>', expected: '&lt;script&gt;alert(&quot;XSS&quot;)&lt;/script&gt;', name: 'Script tags escaped' },
+  { input: 'Hello & goodbye', expected: 'Hello &amp; goodbye', name: 'Ampersand escaped' },
+  { input: "It's a test", expected: 'It&#039;s a test', name: 'Single quote escaped' },
+  { input: '<img src="x" onerror="alert(1)">', expected: '&lt;img src=&quot;x&quot; onerror=&quot;alert(1)&quot;&gt;', name: 'Image tag with attributes escaped' },
+];
+
+let escapePassed = 0;
+let escapeFailed = 0;
+
+escapeTests.forEach(test => {
+  const result = escapeHtml(test.input);
+  if (result === test.expected) {
+    escapePassed++;
+    console.log(`✓ ${test.name}`);
+  } else {
+    escapeFailed++;
+    console.error(`✗ ${test.name}`);
+    console.error(`  Input:    ${test.input}`);
+    console.error(`  Expected: ${test.expected}`);
+    console.error(`  Got:      ${result}`);
+  }
+});
+
+console.log(`\n${escapePassed} passed, ${escapeFailed} failed out of ${escapeTests.length} escapeHtml tests`);
+
+// Test highlightDiff with HTML escaping
+console.log('\n=== Testing highlightDiff with HTML escaping ===');
+const diffTests = [
+  {
+    name: 'Malicious script in actual value',
+    expected: 'Hello World',
+    actual: '<script>alert(1)</script>',
+    shouldNotContain: '<script>',
+    shouldContain: '&lt;script&gt;'
+  },
+  {
+    name: 'Normal strings',
+    expected: 'abc',
+    actual: 'adc',
+    shouldContain: '<span class="diff-highlight">b</span>',
+  },
+  {
+    name: 'HTML in both strings',
+    expected: '<div>test</div>',
+    actual: '<div>best</div>',
+    shouldNotContain: '<div>',
+    shouldContain: '&lt;div&gt;'
+  }
+];
+
+let diffPassed = 0;
+let diffFailed = 0;
+
+diffTests.forEach(test => {
+  const result = highlightDiff(test.expected, test.actual);
+  let success = true;
+  
+  if (test.shouldNotContain) {
+    if (result.expected.includes(test.shouldNotContain) || result.actual.includes(test.shouldNotContain)) {
+      success = false;
+      console.error(`✗ ${test.name} - Found forbidden string: ${test.shouldNotContain}`);
+    }
+  }
+  
+  if (test.shouldContain) {
+    if (!result.expected.includes(test.shouldContain) && !result.actual.includes(test.shouldContain)) {
+      success = false;
+      console.error(`✗ ${test.name} - Missing expected string: ${test.shouldContain}`);
+    }
+  }
+  
+  if (success) {
+    diffPassed++;
+    console.log(`✓ ${test.name}`);
+  } else {
+    diffFailed++;
+    console.error(`  Expected: ${result.expected}`);
+    console.error(`  Actual:   ${result.actual}`);
+  }
+});
+
+console.log(`\n${diffPassed} passed, ${diffFailed} failed out of ${diffTests.length} highlightDiff tests`);
+
+const totalFailed = failed + escapeFailed + diffFailed;
+process.exit(totalFailed > 0 ? 1 : 0);

@@ -1,4 +1,16 @@
 /**
+ * formatUtils.js - Utilities for Java format string evaluation and normalization
+ * 
+ * This module provides:
+ * - Format string evaluation (evaluateFormatString)
+ * - Output and mask normalization for comparison (normalizeOutput, normalizeMask)
+ * 
+ * Note: These normalization functions are for COMPARISON purposes.
+ * For DISPLAY purposes (showing newlines as ↵ symbols), components should
+ * use their own display-specific transformations.
+ */
+
+/**
  * Evaluate a Java format string with given arguments.
  * Supports common format specifiers: %s, %d, %f, %n, %%
  * Also handles width and precision: %-20s, %3d, %.2f, %6.2f, %03d, etc.
@@ -125,4 +137,23 @@ export function evaluateFormatString(formatStr, args = []) {
   }
   
   return result;
+}
+
+/**
+ * Normalize output text for comparison.
+ * Converts %n to actual newlines and normalizes line endings to \n.
+ * This ensures consistent comparison between expected and actual output.
+ */
+export function normalizeOutput(text) {
+  return (text || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
+}
+
+/**
+ * Normalize mask for comparison.
+ * Normalizes line endings to \n.
+ * Masks should only contain 'S' (static), 'V' (value), or 'D' (dynamic) characters,
+ * but this handles any potential line ending inconsistencies.
+ */
+export function normalizeMask(mask) {
+  return (mask || '').replace(/\r\n/g, '\n');
 }
