@@ -169,7 +169,6 @@ export default function AnswerSection({
           errorInput.focus();
         }
       }
-    } else {
     }
   };
 
