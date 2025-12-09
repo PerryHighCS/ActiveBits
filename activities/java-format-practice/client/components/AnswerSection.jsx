@@ -192,7 +192,7 @@ export default function AnswerSection({
   const handleDismiss = useCallback(() => {
     handleFeedbackDismiss();
     if (onFeedbackDismiss) onFeedbackDismiss();
-  }, [onFeedbackDismiss]);
+  }, [feedback, onFeedbackDismiss]);
 
   const memoizedFeedback = useMemo(() => {
     if (!feedback) return null;
