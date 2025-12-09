@@ -417,6 +417,7 @@ export default function JavaFormatPractice({ sessionData }) {
 
       let explanation = undefined;
       let firstWrongPartIdx = -1;
+      let errorPartType = undefined;
       if (isCorrect) {
         explanation = formatCall.explanation;
       } else if (wrongParts.length > 0) {
@@ -424,10 +425,11 @@ export default function JavaFormatPractice({ sessionData }) {
         if (wrongTypes.includes('format-string') || wrongTypes.includes('string-literal')) {
           explanation = formatCall.explanation;
         }
-        // Find the first wrong part index
+        // Find the first wrong part index and its type
         for (let i = 0; i < adjustedUserParts.length; i++) {
           if (adjustedUserParts[i] !== adjustedExpectedParts[i]) {
             firstWrongPartIdx = i;
+            errorPartType = inputsMeta[i]?.type;
             break;
           }
         }
@@ -440,6 +442,7 @@ export default function JavaFormatPractice({ sessionData }) {
           : detailedMessage || 'Not quite. Try again.',
         explanation,
         wrongPartIdx: firstWrongPartIdx,
+        errorPartType,
       });
     } else {
       // Intermediate/Advanced mode: validate all lines and collect valid outputs

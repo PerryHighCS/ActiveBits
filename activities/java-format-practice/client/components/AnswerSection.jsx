@@ -50,6 +50,10 @@ export default function AnswerSection({
         errorLineToFocusRef.current = firstErrorLineNumber;
       } else if (difficulty === 'beginner') {
         // Beginner mode: focus the wrong part's input
+        // errorPartType indicates what went wrong:
+        // - 'format-string': The format specification (e.g., %d, %,d) is wrong
+        // - 'string-literal': A quoted string literal is wrong
+        // - other types: Variable/argument names are wrong
         const wrongPartIdx = feedback.wrongPartIdx !== undefined ? feedback.wrongPartIdx : 0;
         const currentLineNumber = startingLine + variables.length + (currentIndex * 2) + 1;
         // Store both the line number and part index so we can find the right input
