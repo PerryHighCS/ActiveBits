@@ -2,10 +2,14 @@ import React from 'react';
 
 /**
  * FeedbackDisplay - Shows correct/incorrect feedback with explanations as a modal dialog
+ * Includes accessibility features: ARIA attributes, focus trap, keyboard navigation
  */
 export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButton = true, title = 'Feedback' }) {
   const feedbackReadyRef = React.useRef(false);
   const buttonRef = React.useRef(null);
+  const modalRef = React.useRef(null);
+  const overlayRef = React.useRef(null);
+  const previousActiveElementRef = React.useRef(null);
 
   const handleDismiss = React.useCallback(() => {
     // For errors, just close without advancing by setting feedback to null
@@ -22,6 +26,9 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
 
   React.useEffect(() => {
     if (!feedback) return;
+
+    // Store the previously focused element so we can restore it when modal closes
+    previousActiveElementRef.current = document.activeElement;
 
     // Focus the button when feedback appears
     const focusTimer = setTimeout(() => {
@@ -47,6 +54,28 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
       if (e.key === 'Escape' && feedback && feedbackReadyRef.current) {
         handleDismiss();
       }
+      // Handle Tab key for focus trap
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusableElements = modalRef.current.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (e.shiftKey) {
+          // Shift + Tab
+          if (document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement.focus();
+          }
+        } else {
+          // Tab
+          if (document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
+      }
     };
 
     window.addEventListener('keydown', handleKeyPress);
@@ -54,19 +83,33 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
       clearTimeout(focusTimer);
       clearTimeout(readyTimer);
       window.removeEventListener('keydown', handleKeyPress);
+      // Restore focus to the previously focused element when modal closes
+      if (previousActiveElementRef.current && previousActiveElementRef.current.focus) {
+        previousActiveElementRef.current.focus();
+      }
     };
   }, [onNewChallenge, feedback, showNextButton, handleDismiss]);
 
   if (!feedback) return null;
 
   return (
-    <div className="feedback-modal-overlay" onClick={handleDismiss}>
-      <div 
+    <div
+      ref={overlayRef}
+      className="feedback-modal-overlay"
+      onClick={handleDismiss}
+      role="presentation"
+      aria-hidden="false"
+    >
+      <div
+        ref={modalRef}
         className={`feedback-modal ${feedback.isCorrect ? 'correct' : 'incorrect'}`}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="feedback-modal-title"
       >
         <div className="feedback-modal-header">
-          <h2 className="feedback-modal-title">{title}</h2>
+          <h2 id="feedback-modal-title" className="feedback-modal-title">{title}</h2>
         </div>
         <div className="feedback-modal-body">
           <div className="feedback-message" dangerouslySetInnerHTML={{ __html: feedback.message }} />
