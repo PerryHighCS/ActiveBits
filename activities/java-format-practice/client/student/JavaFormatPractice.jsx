@@ -487,8 +487,8 @@ export default function JavaFormatPractice({ sessionData }) {
               userOutputText = userOutput.text;
               userMask = userOutput.mask;
             } catch (err) {
-              const availableVars = Object.keys(valueMap).map(escapeHtml).join(', ');
-              syntaxError = `${escapeHtml(err.message)}. Check your variable names and expressions. Available variables: ${availableVars}`;
+              const availableVars = Object.keys(valueMap).join(', ');
+              syntaxError = `${err.message}. Check your variable names and expressions. Available variables: ${availableVars}`;
               
               // Try to determine which argument has the error
               let errorArgIdx = 0;
