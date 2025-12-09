@@ -188,12 +188,11 @@ export default function AnswerSection({
   const handleDismiss = useCallback(() => {
     // Focus error input BEFORE clearing feedback (to avoid ref being cleared)
     handleFeedbackDismiss();
-    
     // Then clear feedback and close modal
     if (onFeedbackDismiss) {
       onFeedbackDismiss();
     }
-  }, [feedback, onFeedbackDismiss]);
+  }, [onFeedbackDismiss]);
 
   const memoizedFeedback = useMemo(() => {
     if (!feedback) return null;

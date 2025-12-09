@@ -5,6 +5,12 @@ import React from 'react';
  * Includes accessibility features: ARIA attributes, focus trap, keyboard navigation
  */
 export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButton = true, title = 'Feedback' }) {
+    const dismissHandlerRef = React.useRef();
+
+    // Always keep the latest dismiss handler in the ref
+    React.useEffect(() => {
+      dismissHandlerRef.current = feedback?.onDismiss;
+    }, [feedback]);
   const feedbackReadyRef = React.useRef(false);
   const buttonRef = React.useRef(null);
   const modalRef = React.useRef(null);
@@ -14,10 +20,10 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
   const handleDismiss = React.useCallback(() => {
     // For errors, call the dismiss callback which will focus the error input
     // For correct answers, call onNewChallenge via the button click
-    if (feedback?.onDismiss) {
-      feedback.onDismiss();
+    if (dismissHandlerRef.current) {
+      dismissHandlerRef.current();
     }
-  }, [feedback]);
+  }, []);
 
   React.useEffect(() => {
     // Reset the ready flag when feedback changes (new problem)
@@ -52,7 +58,6 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
       if (e.target === buttonRef.current) {
         return;
       }
-      
       // Enter: advance for correct, dismiss for incorrect
       if (e.key === 'Enter' && feedback && feedbackReadyRef.current) {
         if (feedback.isCorrect) {
@@ -61,12 +66,12 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
           }
         } else {
           // Dismiss modal and focus error input
-          handleDismiss();
+          if (dismissHandlerRef.current) dismissHandlerRef.current();
         }
       }
       // Escape always dismisses modal and clears feedback
       if (e.key === 'Escape' && feedback && feedbackReadyRef.current) {
-        handleDismiss();
+        if (dismissHandlerRef.current) dismissHandlerRef.current();
       }
       // Handle Tab key for focus trap
       if (e.key === 'Tab' && modalRef.current) {
@@ -97,12 +102,14 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
       clearTimeout(focusTimer);
       clearTimeout(readyTimer);
       window.removeEventListener('keydown', handleKeyPress);
-      // Restore focus to the previously focused element when modal closes
-      if (previousActiveElementRef.current && previousActiveElementRef.current.focus) {
+    };
+    // Restore focus ONLY when modal is dismissed (feedback becomes null)
+    React.useEffect(() => {
+      if (feedback === null && previousActiveElementRef.current && previousActiveElementRef.current.focus) {
         previousActiveElementRef.current.focus();
       }
-    };
-  }, [onNewChallenge, feedback, showNextButton, handleDismiss]);
+    }, [feedback]);
+  }, [onNewChallenge, showNextButton, feedback]);
 
   if (!feedback) return null;
 
