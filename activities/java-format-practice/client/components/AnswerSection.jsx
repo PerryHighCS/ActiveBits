@@ -304,7 +304,6 @@ export default function AnswerSection({
                             const val = values[partIdx] || '';
                             const isLast = partIdx === parsed.parts.length - 1;
                             // For beginner: focus first input of current line; for intermediate: focus very first input
-                            const isFirstInput = (difficulty === 'beginner' ? idx === currentIndex : idx === 0) && partIdx === 0;
                             const inputMeta = parsed.inputs?.[partIdx] || {};
                             const isFormatString = inputMeta.type === 'format-string';
                             const isStringLiteral = inputMeta.type === 'string-literal';
