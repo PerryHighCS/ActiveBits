@@ -160,6 +160,8 @@ export default function JavaFormatPractice({ sessionData }) {
       setUserAnswers(createEmptyAnswers(formatCalls, difficulty));
       setSolvedAnswers(Array.from({ length: formatCalls.length }, () => ''));
       setFeedback(null);
+      setLineErrors({});
+      setHasSubmitted(false);
     },
     [createEmptyAnswers]
   );
