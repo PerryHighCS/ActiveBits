@@ -140,6 +140,19 @@ export default function AnswerSection({
 
   const isActive = (idx) => (difficulty === 'beginner' ? idx === currentIndex : true);
 
+  /**
+   * Safely convert a value to a string for use in data attributes.
+   * Ensures the value is a valid number or string before conversion.
+   * @param {*} value - The value to convert
+   * @param {string} defaultValue - The default value if conversion fails
+   * @returns {string} The safely converted string value
+   */
+  const safeDataAttribute = (value, defaultValue = '0') => {
+    const converted = String(value);
+    // Validate it's not empty and contains valid characters for data attributes
+    return converted && /^[\d-]+$/.test(converted) ? converted : defaultValue;
+  };
+
   const getFeedbackTitle = () => {
     if (!feedback) return fileName;
     return feedback.isCorrect 
@@ -157,16 +170,18 @@ export default function AnswerSection({
         const { lineNumber, partIdx } = focusInfo;
         
         // Use combined selector to uniquely identify the input
+        const safeLineNum = safeDataAttribute(lineNumber);
+        const safePartIdx = safeDataAttribute(partIdx);
         const errorInput = document.querySelector(
-          `input[data-error-line="${lineNumber}"][data-part-index="${partIdx}"]`
+          `input[data-error-line="${safeLineNum}"][data-part-index="${safePartIdx}"]`
         );
         if (errorInput) {
           errorInput.focus();
         }
       } else {
         // Intermediate/Advanced mode: just find by line number
-        const lineNumber = focusInfo;
-        const errorInput = document.querySelector(`input[data-error-line="${lineNumber}"]`);
+        const safeLineNum = safeDataAttribute(focusInfo);
+        const errorInput = document.querySelector(`input[data-error-line="${safeLineNum}"]`);
         if (errorInput) {
           errorInput.focus();
         }
@@ -248,7 +263,7 @@ export default function AnswerSection({
                             style={{ width: `${Math.max((values[0] || '').length, 20)}ch` }}
                             spellCheck={false}
                             autoComplete="off"
-                            data-error-line={lineNumberBase + 1}
+                            data-error-line={safeDataAttribute(lineNumberBase + 1)}
                             data-part-index="0"
                           />
                         ) : (
@@ -279,8 +294,8 @@ export default function AnswerSection({
                                   style={{ width: `${Math.max(val.length, 1)}ch` }}
                                   spellCheck={false}
                                   autoComplete="off"
-                                  data-error-line={lineNumberBase + 1}
-                                  data-part-index={partIdx}
+                                  data-error-line={safeDataAttribute(lineNumberBase + 1)}
+                                  data-part-index={safeDataAttribute(partIdx)}
                                 />
                                 {shouldHaveQuotes && <span className="ide-static">"</span>}
                                 {!isLast && <span className="ide-static ide-comma">, </span>}
