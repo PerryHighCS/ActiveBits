@@ -6,19 +6,19 @@ import React, { useState } from 'react';
 export default function InterleavedOutputGrid({ expected, actual, width = 30, height = 3, lineData = null }) {
   // Validate and constrain width and height parameters
   const validatedWidth = Math.max(1, Math.min(Number.isInteger(width) ? width : 30, 100));
-  
+
   const [hoveredCol, setHoveredCol] = useState(null);
   const [selectionStart, setSelectionStart] = useState(null);
   const [selectionEnd, setSelectionEnd] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
-  
+
   const handleMouseDown = (colIdx) => {
     // Always start a new selection on mouse down
     setSelectionStart(colIdx);
     setSelectionEnd(colIdx);
     setIsDragging(true);
   };
-  
+
   const handleMouseEnter = (colIdx) => {
     if (!isDragging) {
       setHoveredCol(colIdx);
@@ -27,18 +27,18 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
       setSelectionEnd(colIdx);
     }
   };
-  
+
   const handleMouseUp = () => {
     setIsDragging(false);
   };
-  
+
   const isSelected = (colIdx) => {
     if (selectionStart === null || selectionEnd === null) return false;
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);
     return colIdx >= start && colIdx <= end;
   };
-  
+
   const getSelectionInfo = () => {
     if (selectionStart === null || selectionEnd === null) return null;
     const start = Math.min(selectionStart, selectionEnd);
@@ -52,19 +52,19 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
         <table className="character-grid">
           <thead>
             <tr>
-              <th className="grid-row-label" style={{ width: '80px' }}></th>
+              <th className="grid-row-label sticky-label" style={{ width: '80px' }}></th>
               {Array.from({ length: validatedWidth }).map((_, i) => {
                 const selected = isSelected(i);
                 const selection = getSelectionInfo();
                 const isSelectionStart = selection && i === selection.start;
                 const isInSelection = selected && !isSelectionStart;
-                
+
                 // Skip rendering cells that are part of the colspan
                 if (isInSelection) return null;
-                
+
                 return (
-                  <th 
-                    key={`tens-${i}`} 
+                  <th
+                    key={`tens-${i}`}
                     className={`grid-column-header grid-column-header-tens ${hoveredCol === i ? 'grid-column-hovered' : ''} ${selected ? 'grid-column-selected' : ''}`}
                     colSpan={isSelectionStart ? selection.count : 1}
                     data-count={isSelectionStart ? selection.count : undefined}
@@ -78,12 +78,12 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
               }).filter(Boolean)}
             </tr>
             <tr>
-              <th className="grid-row-label" style={{ width: '80px' }}></th>
+              <th className="grid-row-label sticky-label" style={{ width: '80px' }}></th>
               {Array.from({ length: validatedWidth }).map((_, i) => {
                 const selected = isSelected(i);
                 return (
-                  <th 
-                    key={`ones-${i}`} 
+                  <th
+                    key={`ones-${i}`}
                     className={`grid-column-header ${hoveredCol === i ? 'grid-column-hovered' : ''} ${selected ? 'grid-column-selected' : ''}`}
                     onMouseDown={() => handleMouseDown(i)}
                     onMouseEnter={() => handleMouseEnter(i)}
@@ -99,24 +99,28 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
             {lineData.map((lineInfo, idx) => {
               // Replace %n with ↵ for display, but DON'T split on newlines for String.format problems
               // The ↵ symbol will just appear as a character in the row
-              const expDisplay = (lineInfo.expected || '').replace(/%n/g, '↵').replace(/\n/g, '');
-              const actDisplay = (lineInfo.actual || '').replace(/%n/g, '↵').replace(/\n/g, '');
-              
+              // Visualize newlines as ↵ so students see extra/missing returns
+              const expDisplay = (lineInfo.expected || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
+              const actDisplay = (lineInfo.actual || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
+              // Masks should only contain 'S', 'V', or 'D' characters - no newlines to normalize
+              const normalizedMask = lineInfo.expectedMask || '';
+              const normalizedUserMask = lineInfo.userMask || '';
+
               return (
                 <React.Fragment key={idx}>
                   {/* Expected output row for this variable - with static/dynamic coloring from mask */}
                   <tr>
-                    <td className="grid-row-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
+                    <td className="grid-row-label sticky-label" style={{ background: '#ccc', fontWeight: 'bold', fontSize: '12px' }}>
                       {lineInfo.varName}
                     </td>
                     {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                       const char = expDisplay?.[colIdx] || '';
-                      const maskChar = lineInfo.expectedMask?.replace(/\n/g, '')?.[colIdx] || '';
+                      const maskChar = normalizedMask?.[colIdx] || '';
                       const isEmpty = !char;
-                      
+
                       let bgColor = '#f3f4f6'; // Gray for empty
                       let borderColor = '#ccc';
-                      
+
                       if (!isEmpty) {
                         if (maskChar === 'S') {
                           bgColor = '#fef3c7'; // Orange for static
@@ -126,11 +130,11 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                           borderColor = '#3b82f6';
                         }
                       }
-                      
+
                       const selected = isSelected(colIdx);
                       return (
-                        <td 
-                          key={colIdx} 
+                        <td
+                          key={colIdx}
                           className={`grid-cell ${hoveredCol === colIdx ? 'grid-cell-hovered' : ''} ${selected ? 'grid-cell-selected' : ''}`}
                           style={{ background: bgColor, borderColor: borderColor }}
                           onMouseDown={() => handleMouseDown(colIdx)}
@@ -151,9 +155,9 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                         lineIsCorrect = false;
                       }
                       const labelBg = lineIsCorrect ? '#dcfce7' : '#fee2e2'; // Green if correct, red if not
-                      
+
                       return (
-                        <td className="grid-row-label" style={{ background: labelBg, fontWeight: 'bold', fontSize: '12px' }}>
+                        <td className="grid-row-label sticky-label" style={{ background: labelBg, fontWeight: 'bold', fontSize: '12px' }}>
                           Actual
                         </td>
                       );
@@ -161,8 +165,18 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                     {Array.from({ length: validatedWidth }).map((_, colIdx) => {
                       const expChar = expDisplay?.[colIdx] || '';
                       const actChar = actDisplay?.[colIdx] || '';
+                      const maskChar = normalizedUserMask?.[colIdx] || '';
                       let bgColor = '#f3f4f6'; // Gray for empty
-                      
+                      let borderColor = '#b6b6b6';
+                      let borderWidth = '1px';
+                      if (maskChar === 'S') {
+                        borderColor = '#f59e0b'; // Orange border for static
+                        borderWidth = '2px';
+                      } else if (maskChar === 'D' || maskChar === 'V') {
+                        borderColor = '#3b82f6'; // Blue border for dynamic
+                        borderWidth = '2px';
+                      }
+
                       if (actChar) {
                         if (actChar === expChar) {
                           bgColor = '#dcfce7'; // Light green for match
@@ -170,13 +184,13 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                           bgColor = '#fee2e2'; // Light red for mismatch
                         }
                       }
-                      
+
                       const selected = isSelected(colIdx);
                       return (
-                        <td 
-                          key={colIdx} 
+                        <td
+                          key={colIdx}
                           className={`grid-cell ${hoveredCol === colIdx ? 'grid-cell-hovered' : ''} ${selected ? 'grid-cell-selected' : ''}`}
-                          style={{ background: bgColor }}
+                          style={{ background: bgColor, borderColor: borderColor, borderWidth: borderWidth }}
                           onMouseDown={() => handleMouseDown(colIdx)}
                           onMouseEnter={() => handleMouseEnter(colIdx)}
                           onMouseLeave={() => setHoveredCol(null)}
@@ -216,9 +230,17 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
   }
 
   // Original behavior for printf-style problems (combined output with newlines)
-  const expLines = (expected || '').split(/\n/);
-  const actLines = (actual || '').split(/\n/);
-  
+  // Show newline characters explicitly so mismatches are visible
+  // Preserve newlines visually by inserting ↵ before splitting into rows
+  const expLines = (expected || '')
+    .replace(/%n/g, '↵')
+    .replace(/\n/g, '↵\n')
+    .split('\n');
+  const actLines = (actual || '')
+    .replace(/%n/g, '↵')
+    .replace(/\n/g, '↵\n')
+    .split('\n');
+
   return (
     <div className="character-grid-container">
       <table className="character-grid">
@@ -266,7 +288,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                   const expChar = expLines[idx]?.[colIdx] || '';
                   const actChar = actLines[idx]?.[colIdx] || '';
                   let bgColor = '#fff';
-                  
+
                   if (actChar) {
                     if (actChar === expChar) {
                       bgColor = '#90EE90'; // Green for match
@@ -274,7 +296,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
                       bgColor = '#FF6B6B'; // Red for mismatch
                     }
                   }
-                  
+
                   return (
                     <td key={colIdx} className="grid-cell" style={{ background: bgColor }}>
                       {actChar || '\u00A0'}

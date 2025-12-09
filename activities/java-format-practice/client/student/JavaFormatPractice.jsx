@@ -6,15 +6,15 @@ import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
 import AnswerSection from '../components/AnswerSection';
-import FeedbackDisplay from '../components/FeedbackDisplay';
 import StatsPanel from '../components/StatsPanel';
 import ReferenceModal from '../components/ReferenceModal';
 import { formatReferenceData } from '../data/referenceData';
 import { getRandomChallenge, formatWithMask, evaluateArgs } from '../challenges';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
-import { splitArgumentsRespectingQuotes, buildAnswerString, highlightDiff } from '../utils/stringUtils';
+import { splitArgumentsRespectingQuotes, buildAnswerString, highlightDiff, escapeHtml } from '../utils/stringUtils';
 import { validateVariableReferences } from '../utils/validationUtils';
+import { normalizeOutput, normalizeMask } from '../utils/formatUtils';
 
 /**
  * JavaFormatPractice - Student view for practicing Java printf and String.format
@@ -142,7 +142,7 @@ export default function JavaFormatPractice({ sessionData }) {
   const [cycleOutputs, setCycleOutputs] = useState({});
   const [cycleMismatchLine, setCycleMismatchLine] = useState(null);
 
-  const splitAnswerParts = useCallback((answer = '') => answer.split(',').map((part) => part.trim()), []);
+  const splitAnswerParts = useCallback((answer = '') => splitArgumentsRespectingQuotes(answer), []);
 
   const createEmptyAnswers = useCallback(
     (formatCalls = [], difficulty) =>
@@ -160,6 +160,8 @@ export default function JavaFormatPractice({ sessionData }) {
       setUserAnswers(createEmptyAnswers(formatCalls, difficulty));
       setSolvedAnswers(Array.from({ length: formatCalls.length }, () => ''));
       setFeedback(null);
+      setLineErrors({});
+      setHasSubmitted(false);
     },
     [createEmptyAnswers]
   );
@@ -224,10 +226,8 @@ export default function JavaFormatPractice({ sessionData }) {
 
   const handleWsMessage = useCallback(
     (event) => {
-      console.log('WebSocket message received:', event.data);
       try {
         const message = JSON.parse(event.data);
-        console.log('Parsed message:', message);
         if (message.type === 'session-ended') {
           navigate('/session-ended');
           return;
@@ -236,10 +236,8 @@ export default function JavaFormatPractice({ sessionData }) {
           const newStudentId = message.payload.studentId;
           setStudentId(newStudentId);
           localStorage.setItem(`student-id-${sessionId}`, newStudentId);
-          console.log('Received student ID:', newStudentId);
         } else if (message.type === 'difficultyUpdate') {
           const difficulty = message.payload.difficulty || 'beginner';
-          console.log('Updating difficulty to:', difficulty);
           setSelectedDifficulty(difficulty);
           const challenge = getRandomChallenge(
             selectedTheme === 'all' ? null : selectedTheme,
@@ -248,7 +246,6 @@ export default function JavaFormatPractice({ sessionData }) {
           setCurrentChallenge(challenge);
         } else if (message.type === 'themeUpdate') {
           const theme = message.payload.theme || 'all';
-          console.log('Updating theme to:', theme);
           setSelectedTheme(theme);
           const challenge = getRandomChallenge(
             theme === 'all' ? null : theme,
@@ -264,7 +261,6 @@ export default function JavaFormatPractice({ sessionData }) {
   );
 
   const handleWsOpen = useCallback(() => {
-    console.log('WebSocket connected for session:', sessionId);
   }, [sessionId]);
 
   const buildWsUrl = useCallback(() => {
@@ -383,7 +379,9 @@ export default function JavaFormatPractice({ sessionData }) {
             ? 'format specifier'
             : meta?.type === 'string-literal'
             ? 'string literal'
-            : 'variable';
+            : meta?.type === 'variable'
+            ? 'argument'
+            : 'entry';
           if (adjustedUserParts[idx] !== adjustedExpectedParts[idx]) {
             const { expected: expDiff, actual: actDiff } = highlightDiff(adjustedExpectedParts[idx], adjustedUserParts[idx] || '');
             wrongParts.push(`${partName} (expected: <code>${expDiff}</code>, got: <code>${actDiff}</code>)`);
@@ -420,12 +418,22 @@ export default function JavaFormatPractice({ sessionData }) {
       });
 
       let explanation = undefined;
+      let firstWrongPartIdx = -1;
+      let errorPartType = undefined;
       if (isCorrect) {
         explanation = formatCall.explanation;
       } else if (wrongParts.length > 0) {
         const wrongTypes = userParts.map((part, idx) => adjustedUserParts[idx] !== adjustedExpectedParts[idx] ? (inputsMeta[idx]?.type) : null).filter(Boolean);
         if (wrongTypes.includes('format-string') || wrongTypes.includes('string-literal')) {
           explanation = formatCall.explanation;
+        }
+        // Find the first wrong part index and its type
+        for (let i = 0; i < adjustedUserParts.length; i++) {
+          if (adjustedUserParts[i] !== adjustedExpectedParts[i]) {
+            firstWrongPartIdx = i;
+            errorPartType = inputsMeta[i]?.type;
+            break;
+          }
         }
       }
 
@@ -435,6 +443,8 @@ export default function JavaFormatPractice({ sessionData }) {
           ? 'Correct!'
           : detailedMessage || 'Not quite. Try again.',
         explanation,
+        wrongPartIdx: firstWrongPartIdx,
+        errorPartType,
       });
     } else {
       // Intermediate/Advanced mode: validate all lines and collect valid outputs
@@ -442,6 +452,7 @@ export default function JavaFormatPractice({ sessionData }) {
       let validOutputs = [];
       const outputsByLine = {};
       const newLineErrors = {}; // Track errors locally during this check
+      const lineErrorsMeta = {}; // Track which part (partIdx) has the error for each line
       
       calls.forEach((call, idx) => {
         const userSubmitted = buildAnswerString(userAnswers[idx] || []);
@@ -449,11 +460,14 @@ export default function JavaFormatPractice({ sessionData }) {
         
         let syntaxError = '';
         let userOutputText = '';
+        let userMask = '';
         
         try {
           const userParts = splitArgumentsRespectingQuotes(userSubmitted);
           if (!userParts[0].startsWith('"') || !userParts[0].endsWith('"')) {
             syntaxError = 'Format string must be enclosed in double quotes.';
+            // This is a format string error (partIdx 0)
+            lineErrorsMeta[idx] = 0;
           } else {
             const userFmt = userParts[0].slice(1, -1);
             const valueMap = {};
@@ -472,68 +486,97 @@ export default function JavaFormatPractice({ sessionData }) {
               userArgValues = evaluateArgs(userArgExprs, valueMap);
               const userOutput = formatWithMask(userFmt, userArgValues);
               userOutputText = userOutput.text;
+              userMask = userOutput.mask;
             } catch (err) {
               const availableVars = Object.keys(valueMap).join(', ');
               syntaxError = `${err.message}. Check your variable names and expressions. Available variables: ${availableVars}`;
+              
+              // Try to determine which argument has the error
+              let errorArgIdx = 0;
+              if (err.message && err.message.includes('not defined')) {
+                // Extract the variable name from error message
+                const varMatch = err.message.match(/Variable '(\w+)' is not defined/);
+                if (varMatch) {
+                  const undefinedVar = varMatch[1];
+                  // Find which argument expression contains this variable
+                  errorArgIdx = userArgExprs.findIndex(expr => expr.includes(undefinedVar));
+                  if (errorArgIdx === -1) errorArgIdx = 0;
+                  // partIdx is 1-indexed for arguments (0 is format string)
+                  errorArgIdx = errorArgIdx + 1;
+                }
+              }
+              
+              // Store error argument index in lineErrors metadata
+              newLineErrors[idx] = syntaxError;
+              if (lineErrorsMeta[idx] === undefined) {
+                lineErrorsMeta[idx] = errorArgIdx;
+              }
+              
               console.error('Format evaluation error:', err, 'User expressions:', userArgExprs, 'Available vars:', valueMap);
             }
           }
         } catch (err) {
           syntaxError = 'Syntax error in format string.';
+          // This is a format string error (partIdx 0)
+          if (lineErrorsMeta[idx] === undefined) {
+            lineErrorsMeta[idx] = 0;
+          }
         }
         
-        if (syntaxError) {
+        if (syntaxError && !newLineErrors[idx]) {
           newLineErrors[idx] = syntaxError;
         }
         
-        // Only store output if there are no syntax errors
+        // Store valid outputs if no syntax errors
         if (!syntaxError && userOutputText) {
           validOutputs.push(userOutputText);
-          console.log(`Line ${idx + 1} output:`, userOutputText);
-          
-          // Calculate expected output for this line from the call's answer
-          let expectedOutputText = '';
-          let expectedMask = '';
-          const answerStr = call.answer || '';
-          if (answerStr.trim()) {
-            try {
-              const answerParts = splitArgumentsRespectingQuotes(answerStr);
-              if (answerParts[0].startsWith('"') && answerParts[0].endsWith('"')) {
-                const expectedFmt = answerParts[0].slice(1, -1);
-                const expectedArgExprs = answerParts.slice(1);
-                const valueMap = {};
-                (currentChallenge.variables || []).forEach((v) => {
-                  let val = v.value;
-                  if (v.type === 'String') {
-                    val = val.replace(/^"(.*)"$/, '$1');
-                  }
-                  valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
-                });
-                const expectedArgValues = evaluateArgs(expectedArgExprs, valueMap);
-                const expectedOutput = formatWithMask(expectedFmt, expectedArgValues);
-                expectedOutputText = expectedOutput.text;
-                expectedMask = expectedOutput.mask;
-              }
-            } catch (err) {
-              // If we can't compute expected, just leave it empty
-            }
-          }
-          
-          // Extract variable name from skeleton (e.g., "String line1 = ..." -> "line1")
-          let varName = '';
-          const skeletonMatch = call.skeleton?.match(/String\s+(\w+)\s*=/);
-          if (skeletonMatch) {
-            varName = skeletonMatch[1];
-          }
-          
-          // Store per-line output comparison
-          outputsByLine[idx] = {
-            expectedOutput: expectedOutputText,
-            userOutput: userOutputText,
-            expectedMask: expectedMask,
-            varName: varName,
-          };
         }
+        
+        // Always calculate expected output for this line from the call's answer
+        // (even if there are syntax errors, so the grid shows what was expected)
+        let expectedOutputText = '';
+        let expectedMask = '';
+        const answerStr = call.answer || '';
+        if (answerStr.trim()) {
+          try {
+            const answerParts = splitArgumentsRespectingQuotes(answerStr);
+            if (answerParts.length > 0) {
+              // Support both quoted (advanced) and unquoted (beginner/intermediate) format strings
+              const expectedFmt = answerParts[0].replace(/^"(.*)"$/, '$1');
+              const expectedArgExprs = answerParts.slice(1);
+              const valueMap = {};
+              (currentChallenge.variables || []).forEach((v) => {
+                let val = v.value;
+                if (v.type === 'String') {
+                  val = val.replace(/^"(.*)"$/, '$1');
+                }
+                valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+              });
+              const expectedArgValues = evaluateArgs(expectedArgExprs, valueMap);
+              const expectedOutput = formatWithMask(expectedFmt, expectedArgValues);
+              expectedOutputText = expectedOutput.text;
+              expectedMask = expectedOutput.mask;
+            }
+          } catch (err) {
+            // If we can't compute expected, just leave it empty
+          }
+        }
+        
+        // Extract variable name from skeleton (e.g., "String line1 = ..." -> "line1")
+        let varName = '';
+        const skeletonMatch = call.skeleton?.match(/String\s+(\w+)\s*=/);
+        if (skeletonMatch) {
+          varName = skeletonMatch[1];
+        }
+        
+        // Store per-line output comparison
+        outputsByLine[idx] = {
+          expectedOutput: expectedOutputText,
+          userOutput: userOutputText,
+          expectedMask: expectedMask,
+          userMask: userMask,
+          varName: varName,
+        };
       });
       
       // Update lineOutputs and lineErrors with all collected data
@@ -545,15 +588,35 @@ export default function JavaFormatPractice({ sessionData }) {
 
       // Check if all lines match (normalized for grid comparison)
       const allLinesMatch = Object.values(outputsByLine).length > 0 && Object.values(outputsByLine).every(line => {
-        const normalize = s => (s || '').replace(/%n/g, '↵').replace(/\n/g, '');
-        return normalize(line.expectedOutput) === normalize(line.userOutput);
+        return (
+          normalizeOutput(line.expectedOutput) === normalizeOutput(line.userOutput) &&
+          normalizeMask(line.expectedMask) === normalizeMask(line.userMask)
+        );
       });
 
       if (hasAnyLineErrors) {
         // Don't enter cycling mode if there are syntax errors
+        // Show error modal with mapped line numbers
+        const errorMessages = [];
+        // Use the lineErrorsMeta that was already populated during error detection
+        // (it contains the correct partIdx for each error)
+        Object.entries(newLineErrors).forEach(([idx, msg]) => {
+          // Map idx to gutter line number
+          const lineNum = (currentChallenge.startingLine || 1) + (currentChallenge.variables?.length || 0) + (parseInt(idx) * 2) + 1;
+          // If lineErrorsMeta doesn't have this index, default to 0 (format string)
+          if (lineErrorsMeta[idx] === undefined) {
+            lineErrorsMeta[idx] = 0;
+          }
+          errorMessages.push({
+            text: 'Format error on line ',
+            emphasis: String(lineNum),
+            textAfter: `: ${msg}`
+          });
+        });
         setFeedback({
           isCorrect: false,
-          message: 'Some lines have syntax errors. Please check your format strings.',
+          message: errorMessages,
+          lineErrorsMeta,
         });
       } else if (allLinesMatch) {
         // For advanced difficulty, enter cycling mode to test with different values
@@ -577,9 +640,29 @@ export default function JavaFormatPractice({ sessionData }) {
           });
         }
       } else {
+        // Some lines have incorrect output (but no syntax errors)
+        // Determine which lines are wrong and try to identify which part
+        const mismatchedLines = [];
+        Object.entries(outputsByLine).forEach(([idx, line]) => {
+          const outputMatches = normalizeOutput(line.expectedOutput) === normalizeOutput(line.userOutput);
+          const maskMatches = normalizeMask(line.expectedMask) === normalizeMask(line.userMask);
+          
+          if (!outputMatches || !maskMatches) {
+            const lineIdx = parseInt(idx);
+            mismatchedLines.push(lineIdx);
+            
+            // If lineErrorsMeta wasn't already set (e.g., by variable error detection),
+            // default to 0 (format string) since that's most likely the issue
+            if (lineErrorsMeta[lineIdx] === undefined) {
+              lineErrorsMeta[lineIdx] = 0;
+            }
+          }
+        });
+        
         setFeedback({
           isCorrect: false,
           message: 'Some lines are incorrect. Please check your output and try again.',
+          lineErrorsMeta,
         });
       }
     }
@@ -606,10 +689,20 @@ export default function JavaFormatPractice({ sessionData }) {
     
     if (result.hasMismatch) {
       setCycleMismatchLine(result.mismatchInfo);
-      const varName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [, `variable ${result.mismatchInfo.lineNumber}`])[1];
+      // Map mismatch line number to gutter line number
+      const gutterLineNum = (currentChallenge.startingLine || 1) + (currentChallenge.variables?.length || 0) + ((result.mismatchInfo.lineNumber - 1) * 2) + 1;
+      const rawVarName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [, `variable ${result.mismatchInfo.lineNumber}`])[1];
+      const varName = escapeHtml(rawVarName);
       setFeedback({
         isCorrect: false,
-        message: `Your format works with the original values but fails with different values (error in ${varName}).`,
+        message: [
+          'Your format works with the original values but fails with different values.',
+          {
+            text: 'Format error on line ',
+            emphasis: String(gutterLineNum),
+            textAfter: ` (${varName})`
+          }
+        ],
       });
       return false; // Stop cycling
     } else {
@@ -682,17 +775,21 @@ export default function JavaFormatPractice({ sessionData }) {
         // Parse and evaluate user output with cycle variables
         const userParts = splitArgumentsRespectingQuotes(userSubmitted);
         let userOutputText = '';
+        let userMask = '';
         if (userParts[0]?.startsWith('"') && userParts[0]?.endsWith('"')) {
           const userFmt = userParts[0].slice(1, -1);
           const userArgExprs = userParts.slice(1);
           const userArgValues = evaluateArgs(userArgExprs, cycleVariables);
           const userOutput = formatWithMask(userFmt, userArgValues);
           userOutputText = userOutput.text;
+          userMask = userOutput.mask;
         }
         
         // Normalize and compare
-        const normalize = s => (s || '').replace(/%n/g, '↵').replace(/\n/g, '');
-        if (normalize(expectedOutputText) !== normalize(userOutputText)) {
+        if (
+          normalizeOutput(expectedOutputText) !== normalizeOutput(userOutputText) ||
+          normalizeMask(expectedMask) !== normalizeMask(userMask)
+        ) {
           hasMismatch = true;
           mismatchInfo = {
             lineNumber: i + 1,
@@ -712,6 +809,7 @@ export default function JavaFormatPractice({ sessionData }) {
           expectedOutput: expectedOutputText,
           userOutput: userOutputText,
           expectedMask: expectedMask,
+          userMask: userMask,
           varName: varName,
         };
       } catch (error) {
@@ -811,6 +909,7 @@ export default function JavaFormatPractice({ sessionData }) {
     setCurrentFormatCallIndex(0);
     setHasSubmitted(false);
     setFocusToken((t) => t + 1);
+    setFeedback(null);
   };
 
   const handleDifficultyChange = (difficulty) => {
@@ -993,6 +1092,7 @@ export default function JavaFormatPractice({ sessionData }) {
                     expected: lo.expectedOutput || '',
                     actual: lo.userOutput || '',
                     expectedMask: lo.expectedMask || '',
+                    userMask: lo.userMask || '',
                     varName: lo.varName || `Line ${parseInt(idx) + 1}`,
                   }))}
                   width={currentChallenge.gridWidth || 30}
@@ -1150,6 +1250,12 @@ export default function JavaFormatPractice({ sessionData }) {
               showReference={showReference}
               onShowReference={handleShowReference}
               focusToken={focusToken}
+              fileName={currentChallenge.fileName}
+              startingLine={currentChallenge.startingLine}
+              feedback={feedback}
+              onNewChallenge={handleNextChallenge}
+              showNextButton={feedback?.isCorrect === true && !isCyclingMode}
+              onFeedbackDismiss={() => setFeedback(null)}
             />
           </div>
 
@@ -1157,12 +1263,6 @@ export default function JavaFormatPractice({ sessionData }) {
             isOpen={showReference}
             onClose={() => setShowReference(false)}
             referenceData={formatReferenceData}
-          />
-
-          <FeedbackDisplay
-            feedback={feedback}
-            onNewChallenge={handleNextChallenge}
-            showNextButton={feedback?.isCorrect === true && !isCyclingMode}
           />
         </div>
       </div>
