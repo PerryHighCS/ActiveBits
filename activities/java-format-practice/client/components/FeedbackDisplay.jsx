@@ -112,7 +112,25 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
           <h2 id="feedback-modal-title" className="feedback-modal-title">{title}</h2>
         </div>
         <div className="feedback-modal-body">
-          <div className="feedback-message" dangerouslySetInnerHTML={{ __html: feedback.message }} />
+          {typeof feedback.message === 'string' ? (
+            <div className="feedback-message" dangerouslySetInnerHTML={{ __html: feedback.message }} />
+          ) : Array.isArray(feedback.message) ? (
+            <div className="feedback-message">
+              {feedback.message.map((line, idx) => (
+                <div key={idx}>
+                  {typeof line === 'string' ? line : (
+                    <>
+                      {line.text && <span>{line.text}</span>}
+                      {line.emphasis && <b>{line.emphasis}</b>}
+                      {line.textAfter && <span>{line.textAfter}</span>}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="feedback-message">{feedback.message}</div>
+          )}
           {feedback.explanation && (
             <div className="feedback-explanation">{feedback.explanation}</div>
           )}

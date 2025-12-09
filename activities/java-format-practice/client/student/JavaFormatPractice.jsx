@@ -568,11 +568,15 @@ export default function JavaFormatPractice({ sessionData }) {
         const errorMessages = Object.entries(newLineErrors).map(([idx, msg]) => {
           // Map idx to gutter line number
           const lineNum = (currentChallenge.startingLine || 1) + (currentChallenge.variables?.length || 0) + (parseInt(idx) * 2) + 1;
-          return `Format error on line <b>${lineNum}</b>: ${msg}`;
+          return {
+            text: 'Format error on line ',
+            emphasis: String(lineNum),
+            textAfter: `: ${msg}`
+          };
         });
         setFeedback({
           isCorrect: false,
-          message: errorMessages.join('<br>'),
+          message: errorMessages,
         });
       } else if (allLinesMatch) {
         // For advanced difficulty, enter cycling mode to test with different values
@@ -630,7 +634,14 @@ export default function JavaFormatPractice({ sessionData }) {
       const varName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [, `variable ${result.mismatchInfo.lineNumber}`])[1];
       setFeedback({
         isCorrect: false,
-        message: `Your format works with the original values but fails with different values.<br><b>Format error on line ${gutterLineNum}</b> (${varName})`,
+        message: [
+          'Your format works with the original values but fails with different values.',
+          {
+            text: 'Format error on line ',
+            emphasis: String(gutterLineNum),
+            textAfter: ` (${varName})`
+          }
+        ],
       });
       return false; // Stop cycling
     } else {
