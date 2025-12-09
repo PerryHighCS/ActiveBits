@@ -99,7 +99,7 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
             {lineData.map((lineInfo, idx) => {
               // Replace %n with ↵ for display, but DON'T split on newlines for String.format problems
               // The ↵ symbol will just appear as a character in the row
-              // Visualize newlines as ↵ so students see extra/ missing returns
+              // Visualize newlines as ↵ so students see extra/missing returns
               const expDisplay = (lineInfo.expected || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
               const actDisplay = (lineInfo.actual || '').replace(/%n/g, '↵').replace(/\n/g, '↵');
               // Masks should only contain 'S', 'V', or 'D' characters - no newlines to normalize

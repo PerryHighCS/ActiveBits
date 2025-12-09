@@ -74,7 +74,7 @@ export default function AnswerSection({
         errorLineToFocusRef.current = null;
       }
     }
-  }, [feedback, lineErrors, startingLine, variables.length, difficulty, currentIndex]);
+  }, [feedback, lineErrors, startingLine, variables, difficulty, currentIndex]);
 
   const handleKeyDown = (e) => {
     // Don't submit if feedback modal is showing - let the modal handle Enter
