@@ -153,13 +153,15 @@ export default function AnswerSection({
       const focusInfo = errorLineToFocusRef.current;
       
       if (typeof focusInfo === 'object' && 'partIdx' in focusInfo) {
-        // Beginner mode: need to find the input by part index
+        // Beginner mode: find the input by combining line number and part index
         const { lineNumber, partIdx } = focusInfo;
         
-        // Query all inputs on this line and get the nth one (accounting for hidden quote spans)
-        const lineInputs = document.querySelectorAll(`input[data-error-line="${lineNumber}"]`);
-        if (lineInputs.length > partIdx) {
-          lineInputs[partIdx].focus();
+        // Use combined selector to uniquely identify the input
+        const errorInput = document.querySelector(
+          `input[data-error-line="${lineNumber}"][data-part-index="${partIdx}"]`
+        );
+        if (errorInput) {
+          errorInput.focus();
         }
       } else {
         // Intermediate/Advanced mode: just find by line number
@@ -223,7 +225,7 @@ export default function AnswerSection({
                           // Advanced mode: single input for entire answer
                           <input
                             aria-label={`Line ${idx + 1} input`}
-                            className="ide-input ide-input-advanced"
+                            className="ide-input"
                             type="text"
                             value={values[0] || ''}
                             onChange={(e) => handleInputChange(idx, 0, e.target.value)}
@@ -234,6 +236,7 @@ export default function AnswerSection({
                             spellCheck={false}
                             autoComplete="off"
                             data-error-line={lineNumberBase + 1}
+                            data-part-index="0"
                           />
                         ) : (
                           // Beginner/Intermediate mode: separate inputs for each part
@@ -264,6 +267,7 @@ export default function AnswerSection({
                                   spellCheck={false}
                                   autoComplete="off"
                                   data-error-line={lineNumberBase + 1}
+                                  data-part-index={partIdx}
                                 />
                                 {shouldHaveQuotes && <span className="ide-static">"</span>}
                                 {!isLast && <span className="ide-static ide-comma">, </span>}
