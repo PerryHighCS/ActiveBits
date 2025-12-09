@@ -34,7 +34,7 @@ export function splitArgumentsRespectingQuotes(str) {
         // Check what's between the % and the comma
         const betweenPercentAndComma = beforeComma.slice(lastPercentIdx + 1);
         // Valid format specifier characters: flags (-, +, 0, (, #), comma itself, and width/precision digits
-        if (/^[-+0(#,\d.]*$/.test(betweenPercentAndComma)) {
+        if (/^[-+0(#\d.]*$/.test(betweenPercentAndComma)) {
           // Check if there's a conversion character in the next few characters
           // (accounting for possible width/precision digits)
           const lookAhead = afterComma.match(/^(\d*[sdfxXbBhHcC])/);
