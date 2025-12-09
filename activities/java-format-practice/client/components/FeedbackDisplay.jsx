@@ -12,14 +12,10 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
   const previousActiveElementRef = React.useRef(null);
 
   const handleDismiss = React.useCallback(() => {
-    // For errors, just close without advancing by setting feedback to null
-    // This is typically done by the parent component via setFeedback(null)
+    // For errors, call the dismiss callback which will focus the error input
+    // For correct answers, call onNewChallenge via the button click
     if (feedback?.onDismiss) {
-      // Use setTimeout to allow the modal to close first before focusing the input
-      // This prevents the modal from stealing focus from the newly focused input
-      setTimeout(() => {
-        feedback.onDismiss();
-      }, 0);
+      feedback.onDismiss();
     }
   }, [feedback]);
 
@@ -34,12 +30,16 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
     // Store the previously focused element so we can restore it when modal closes
     previousActiveElementRef.current = document.activeElement;
 
-    // Focus the button when feedback appears
-    const focusTimer = setTimeout(() => {
-      if (buttonRef.current) {
-        buttonRef.current.focus();
-      }
-    }, 0);
+    // For correct answers, focus the button when feedback appears
+    // For errors, let the error input get focused via the dismiss callback
+    let focusTimer;
+    if (feedback.isCorrect) {
+      focusTimer = setTimeout(() => {
+        if (buttonRef.current) {
+          buttonRef.current.focus();
+        }
+      }, 0);
+    }
 
     // Add a small delay to prevent the same Enter keystroke from triggering both
     // the answer check and the next challenge

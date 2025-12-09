@@ -187,20 +187,14 @@ export default function AnswerSection({
         }
         
         if (errorInput) {
-          // Use setTimeout to ensure focus happens after modal is removed
-          setTimeout(() => {
-            errorInput.focus();
-          }, 0);
+          errorInput.focus();
         }
       } else {
         // Intermediate/Advanced mode: just find by line number
         const safeLineNum = safeDataAttribute(focusInfo);
         const errorInput = document.querySelector(`input[data-error-line="${safeLineNum}"]`);
         if (errorInput) {
-          // Use setTimeout to ensure focus happens after modal is removed
-          setTimeout(() => {
-            errorInput.focus();
-          }, 0);
+          errorInput.focus();
         }
       }
     }
@@ -208,10 +202,8 @@ export default function AnswerSection({
 
   const handleDismiss = useCallback(() => {
     handleFeedbackDismiss();
-    // Defer calling onFeedbackDismiss (which sets feedback to null and removes the modal)
-    // until after the current event loop, allowing the input focus to take effect first
     if (onFeedbackDismiss) {
-      setTimeout(onFeedbackDismiss, 0);
+      onFeedbackDismiss();
     }
   }, [feedback, onFeedbackDismiss]);
 
