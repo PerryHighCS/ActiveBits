@@ -264,7 +264,7 @@ export default function AnswerSection({
                     {active && parsed.inputs && parsed.inputs.length > 0 ? (
                       <>
                         <span className="ide-static" aria-hidden="true">{parsed.before}</span>
-                        ) : (
+                        {difficulty === 'advanced' ? (
                           // Advanced mode: single input for entire answer
                           <input
                             aria-label={`Line ${idx + 1} input`}
