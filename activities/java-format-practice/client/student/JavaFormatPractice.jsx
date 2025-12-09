@@ -450,6 +450,7 @@ export default function JavaFormatPractice({ sessionData }) {
       let validOutputs = [];
       const outputsByLine = {};
       const newLineErrors = {}; // Track errors locally during this check
+      const lineErrorsMeta = {}; // Track which part (partIdx) has the error for each line
       
       calls.forEach((call, idx) => {
         const userSubmitted = buildAnswerString(userAnswers[idx] || []);
@@ -463,6 +464,9 @@ export default function JavaFormatPractice({ sessionData }) {
           const userParts = splitArgumentsRespectingQuotes(userSubmitted);
           if (!userParts[0].startsWith('"') || !userParts[0].endsWith('"')) {
             syntaxError = 'Format string must be enclosed in double quotes.';
+            // This is a format string error (partIdx 0)
+            lineErrorsMeta[idx] = 0;
+            console.log('[JavaFormatPractice] Set lineErrorsMeta for quote error:', { idx, partIdx: 0 });
           } else {
             const userFmt = userParts[0].slice(1, -1);
             const valueMap = {};
@@ -485,14 +489,41 @@ export default function JavaFormatPractice({ sessionData }) {
             } catch (err) {
               const availableVars = Object.keys(valueMap).join(', ');
               syntaxError = `${err.message}. Check your variable names and expressions. Available variables: ${availableVars}`;
+              
+              // Try to determine which argument has the error
+              let errorArgIdx = 0;
+              if (err.message && err.message.includes('not defined')) {
+                // Extract the variable name from error message
+                const varMatch = err.message.match(/Variable '(\w+)' is not defined/);
+                if (varMatch) {
+                  const undefinedVar = varMatch[1];
+                  // Find which argument expression contains this variable
+                  errorArgIdx = userArgExprs.findIndex(expr => expr.includes(undefinedVar));
+                  if (errorArgIdx === -1) errorArgIdx = 0;
+                  // partIdx is 1-indexed for arguments (0 is format string)
+                  errorArgIdx = errorArgIdx + 1;
+                }
+              }
+              
+              // Store error argument index in lineErrors metadata
+              newLineErrors[idx] = syntaxError;
+              if (lineErrorsMeta[idx] === undefined) {
+                lineErrorsMeta[idx] = errorArgIdx;
+                console.log('[JavaFormatPractice] Set lineErrorsMeta for variable error:', { idx, errorArgIdx, undefinedVar: varMatch?.[1], lineErrorsMeta });
+              }
+              
               console.error('Format evaluation error:', err, 'User expressions:', userArgExprs, 'Available vars:', valueMap);
             }
           }
         } catch (err) {
           syntaxError = 'Syntax error in format string.';
+          // This is a format string error (partIdx 0)
+          if (lineErrorsMeta[idx] === undefined) {
+            lineErrorsMeta[idx] = 0;
+          }
         }
         
-        if (syntaxError) {
+        if (syntaxError && !newLineErrors[idx]) {
           newLineErrors[idx] = syntaxError;
         }
         
@@ -568,18 +599,26 @@ export default function JavaFormatPractice({ sessionData }) {
       if (hasAnyLineErrors) {
         // Don't enter cycling mode if there are syntax errors
         // Show error modal with mapped line numbers
-        const errorMessages = Object.entries(newLineErrors).map(([idx, msg]) => {
+        const errorMessages = [];
+        // Use the lineErrorsMeta that was already populated during error detection
+        // (it contains the correct partIdx for each error)
+        Object.entries(newLineErrors).forEach(([idx, msg]) => {
           // Map idx to gutter line number
           const lineNum = (currentChallenge.startingLine || 1) + (currentChallenge.variables?.length || 0) + (parseInt(idx) * 2) + 1;
-          return {
+          // If lineErrorsMeta doesn't have this index, default to 0 (format string)
+          if (lineErrorsMeta[idx] === undefined) {
+            lineErrorsMeta[idx] = 0;
+          }
+          errorMessages.push({
             text: 'Format error on line ',
             emphasis: String(lineNum),
             textAfter: `: ${msg}`
-          };
+          });
         });
         setFeedback({
           isCorrect: false,
           message: errorMessages,
+          lineErrorsMeta,
         });
       } else if (allLinesMatch) {
         // For advanced difficulty, enter cycling mode to test with different values
@@ -603,9 +642,32 @@ export default function JavaFormatPractice({ sessionData }) {
           });
         }
       } else {
+        // Some lines have incorrect output (but no syntax errors)
+        // Determine which lines are wrong and try to identify which part
+        const mismatchedLines = [];
+        Object.entries(outputsByLine).forEach(([idx, line]) => {
+          const normalize = (s) => (s || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
+          const normalizeMask = (m) => (m || '').replace(/\r\n/g, '\n');
+          const outputMatches = normalize(line.expectedOutput) === normalize(line.userOutput);
+          const maskMatches = normalizeMask(line.expectedMask) === normalizeMask(line.userMask);
+          
+          if (!outputMatches || !maskMatches) {
+            const lineIdx = parseInt(idx);
+            mismatchedLines.push(lineIdx);
+            
+            // If lineErrorsMeta wasn't already set (e.g., by variable error detection),
+            // default to 0 (format string) since that's most likely the issue
+            if (lineErrorsMeta[lineIdx] === undefined) {
+              lineErrorsMeta[lineIdx] = 0;
+              console.log('[JavaFormatPractice] Output mismatch on line', lineIdx, '- defaulting to format string (partIdx 0)');
+            }
+          }
+        });
+        
         setFeedback({
           isCorrect: false,
           message: 'Some lines are incorrect. Please check your output and try again.',
+          lineErrorsMeta,
         });
       }
     }

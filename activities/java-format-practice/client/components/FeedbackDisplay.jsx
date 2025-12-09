@@ -48,13 +48,23 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
     }, 100);
 
     const handleKeyPress = (e) => {
+      // Don't handle keyboard events if the button is focused (let the button's onClick handle it)
+      if (e.target === buttonRef.current) {
+        return;
+      }
+      
+      // Enter: advance for correct, dismiss for incorrect
       if (e.key === 'Enter' && feedback && feedbackReadyRef.current) {
-        // On Enter, advance to next challenge (only for correct answers)
-        if (showNextButton && onNewChallenge) {
-          onNewChallenge();
+        if (feedback.isCorrect) {
+          if (showNextButton && onNewChallenge) {
+            onNewChallenge();
+          }
+        } else {
+          // Dismiss modal and focus error input
+          handleDismiss();
         }
       }
-      // Allow Escape to close the modal without advancing
+      // Escape always dismisses modal and clears feedback
       if (e.key === 'Escape' && feedback && feedbackReadyRef.current) {
         handleDismiss();
       }

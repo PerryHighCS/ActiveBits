@@ -25,29 +25,52 @@ export default function AnswerSection({
   onFeedbackDismiss = null,
 }) {
   const firstInputRef = React.useRef(null);
+  const errorInputRef = React.useRef(null);
   const errorLineToFocusRef = React.useRef(null);
 
   React.useEffect(() => {
     if (focusToken === undefined) return;
-    // Use setTimeout to ensure DOM is fully rendered before focusing
-    const timeoutId = setTimeout(() => {
-      if (firstInputRef.current && !firstInputRef.current.disabled) {
-        firstInputRef.current.focus();
-      }
-    }, 0);
-    return () => clearTimeout(timeoutId);
+    if (firstInputRef.current && !firstInputRef.current.disabled) {
+      firstInputRef.current.focus();
+    }
   }, [focusToken]);
+
+  // Focus error input after feedback is dismissed
+  const prevFeedbackRef = React.useRef(feedback);
+  React.useEffect(() => {
+    // Check if feedback was just cleared (dismissed)
+    if (prevFeedbackRef.current && !feedback && errorInputRef.current) {
+      console.log('[AnswerSection] Feedback dismissed, focusing error input:', errorInputRef.current);
+      requestAnimationFrame(() => {
+        if (errorInputRef.current) {
+          errorInputRef.current.focus();
+        }
+      });
+    }
+    prevFeedbackRef.current = feedback;
+  }, [feedback]);
 
   React.useEffect(() => {
     // When feedback appears with errors, store the line number to focus later
     if (feedback && !feedback.isCorrect) {
-      const errorIndices = Object.keys(lineErrors).map(Number);
+      console.log('[AnswerSection] Error feedback detected:', {
+        difficulty,
+        currentIndex,
+        lineErrors,
+        wrongPartIdx: feedback.wrongPartIdx,
+        errorPartType: feedback.errorPartType,
+        lineErrorsMeta: feedback.lineErrorsMeta
+      });
       
-      if (errorIndices.length > 0) {
-        // Intermediate/Advanced mode with detected syntax errors
+      // Check if we have lineErrorsMeta (works for both syntax errors and output mismatches)
+      if (feedback.lineErrorsMeta && Object.keys(feedback.lineErrorsMeta).length > 0) {
+        // Intermediate/Advanced mode: focus the first error input (line and part)
+        const errorIndices = Object.keys(feedback.lineErrorsMeta).map(Number);
         const firstErrorIdx = Math.min(...errorIndices);
+        const partIdx = feedback.lineErrorsMeta[firstErrorIdx] !== undefined ? feedback.lineErrorsMeta[firstErrorIdx] : 0;
         const firstErrorLineNumber = startingLine + variables.length + (firstErrorIdx * 2) + 1;
-        errorLineToFocusRef.current = firstErrorLineNumber;
+        errorLineToFocusRef.current = { lineNumber: firstErrorLineNumber, partIdx };
+        console.log('[AnswerSection] Intermediate/Advanced error focus set:', errorLineToFocusRef.current);
       } else if (difficulty === 'beginner') {
         // Beginner mode: focus the wrong part's input
         // errorPartType indicates what went wrong:
@@ -58,13 +81,20 @@ export default function AnswerSection({
         const currentLineNumber = startingLine + variables.length + (currentIndex * 2) + 1;
         // Store both the line number and part index so we can find the right input
         errorLineToFocusRef.current = { lineNumber: currentLineNumber, partIdx: wrongPartIdx };
+        console.log('[AnswerSection] Beginner error focus set:', errorLineToFocusRef.current);
       } else {
         errorLineToFocusRef.current = null;
+        console.log('[AnswerSection] No error focus set (no lineErrors and not beginner)');
       }
     }
   }, [feedback, lineErrors, startingLine, variables.length, difficulty, currentIndex]);
 
   const handleKeyDown = (e) => {
+    // Don't submit if feedback modal is showing - let the modal handle Enter
+    if (feedback) {
+      return;
+    }
+    
     if (e.key === 'Enter' && !isDisabled && !submitDisabled && onSubmit) {
       e.preventDefault();
       onSubmit();
@@ -165,43 +195,15 @@ export default function AnswerSection({
   };
 
   const handleFeedbackDismiss = () => {
-    // When dismissing feedback, focus the error input
-    if (feedback && !feedback.isCorrect && errorLineToFocusRef.current !== null) {
-      const focusInfo = errorLineToFocusRef.current;
-      
-      if (typeof focusInfo === 'object' && 'partIdx' in focusInfo) {
-        // Beginner mode: find the input by line and part index
-        const { lineNumber, partIdx } = focusInfo;
-        const safeLineNum = safeDataAttribute(lineNumber);
-        
-        // Try combined selector first
-        const combinedSelector = `input[data-error-line="${safeLineNum}"][data-part-index="${safeDataAttribute(partIdx)}"]`;
-        let errorInput = document.querySelector(combinedSelector);
-        
-        // If combined selector fails, fall back to finding nth input on the line
-        if (!errorInput) {
-          const lineInputs = document.querySelectorAll(`input[data-error-line="${safeLineNum}"]`);
-          if (lineInputs.length > partIdx) {
-            errorInput = lineInputs[partIdx];
-          }
-        }
-        
-        if (errorInput) {
-          errorInput.focus();
-        }
-      } else {
-        // Intermediate/Advanced mode: just find by line number
-        const safeLineNum = safeDataAttribute(focusInfo);
-        const errorInput = document.querySelector(`input[data-error-line="${safeLineNum}"]`);
-        if (errorInput) {
-          errorInput.focus();
-        }
-      }
-    }
+    // Focus is now handled by useEffect when feedback is cleared
+    console.log('[AnswerSection] handleFeedbackDismiss called - focus will happen in useEffect');
   };
 
   const handleDismiss = useCallback(() => {
+    // Focus error input BEFORE clearing feedback (to avoid ref being cleared)
     handleFeedbackDismiss();
+    
+    // Then clear feedback and close modal
     if (onFeedbackDismiss) {
       onFeedbackDismiss();
     }
@@ -302,7 +304,29 @@ export default function AnswerSection({
                                   value={val}
                                   onChange={(e) => handleInputChange(idx, partIdx, e.target.value)}
                                   disabled={isDisabled}
-                                  ref={isFirstInput ? firstInputRef : null}
+                                  ref={(el) => {
+                                    // Focus for first input in beginner/intermediate
+                                    if ((difficulty === 'beginner' ? idx === currentIndex : idx === 0) && partIdx === 0) {
+                                      firstInputRef.current = el;
+                                    }
+                                    
+                                    // ALWAYS set errorInputRef if this matches the error location
+                                    // (even if feedback hasn't appeared yet - we check errorLineToFocusRef which is set by useEffect)
+                                    if (
+                                      errorLineToFocusRef.current &&
+                                      errorLineToFocusRef.current.lineNumber === lineNumberBase + 1 &&
+                                      errorLineToFocusRef.current.partIdx === partIdx
+                                    ) {
+                                      console.log('[AnswerSection] Setting errorInputRef for input:', {
+                                        idx,
+                                        partIdx,
+                                        lineNumber: lineNumberBase + 1,
+                                        errorLineToFocus: errorLineToFocusRef.current,
+                                        element: el
+                                      });
+                                      errorInputRef.current = el;
+                                    }
+                                  }}
                                   onKeyDown={handleKeyDown}
                                   style={{ width: `${Math.max(val.length, 1)}ch` }}
                                   spellCheck={false}
