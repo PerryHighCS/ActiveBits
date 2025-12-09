@@ -170,24 +170,37 @@ export default function AnswerSection({
       const focusInfo = errorLineToFocusRef.current;
       
       if (typeof focusInfo === 'object' && 'partIdx' in focusInfo) {
-        // Beginner mode: find the input by combining line number and part index
+        // Beginner mode: find the input by line and part index
         const { lineNumber, partIdx } = focusInfo;
-        
-        // Use combined selector to uniquely identify the input
         const safeLineNum = safeDataAttribute(lineNumber);
-        const safePartIdx = safeDataAttribute(partIdx);
-        const errorInput = document.querySelector(
-          `input[data-error-line="${safeLineNum}"][data-part-index="${safePartIdx}"]`
-        );
+        
+        // Try combined selector first
+        const combinedSelector = `input[data-error-line="${safeLineNum}"][data-part-index="${safeDataAttribute(partIdx)}"]`;
+        let errorInput = document.querySelector(combinedSelector);
+        
+        // If combined selector fails, fall back to finding nth input on the line
+        if (!errorInput) {
+          const lineInputs = document.querySelectorAll(`input[data-error-line="${safeLineNum}"]`);
+          if (lineInputs.length > partIdx) {
+            errorInput = lineInputs[partIdx];
+          }
+        }
+        
         if (errorInput) {
-          errorInput.focus();
+          // Use setTimeout to ensure focus happens after modal is removed
+          setTimeout(() => {
+            errorInput.focus();
+          }, 0);
         }
       } else {
         // Intermediate/Advanced mode: just find by line number
         const safeLineNum = safeDataAttribute(focusInfo);
         const errorInput = document.querySelector(`input[data-error-line="${safeLineNum}"]`);
         if (errorInput) {
-          errorInput.focus();
+          // Use setTimeout to ensure focus happens after modal is removed
+          setTimeout(() => {
+            errorInput.focus();
+          }, 0);
         }
       }
     }
@@ -195,7 +208,11 @@ export default function AnswerSection({
 
   const handleDismiss = useCallback(() => {
     handleFeedbackDismiss();
-    if (onFeedbackDismiss) onFeedbackDismiss();
+    // Defer calling onFeedbackDismiss (which sets feedback to null and removes the modal)
+    // until after the current event loop, allowing the input focus to take effect first
+    if (onFeedbackDismiss) {
+      setTimeout(onFeedbackDismiss, 0);
+    }
   }, [feedback, onFeedbackDismiss]);
 
   const memoizedFeedback = useMemo(() => {

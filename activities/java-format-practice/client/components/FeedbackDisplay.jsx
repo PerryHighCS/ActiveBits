@@ -15,7 +15,11 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
     // For errors, just close without advancing by setting feedback to null
     // This is typically done by the parent component via setFeedback(null)
     if (feedback?.onDismiss) {
-      feedback.onDismiss();
+      // Use setTimeout to allow the modal to close first before focusing the input
+      // This prevents the modal from stealing focus from the newly focused input
+      setTimeout(() => {
+        feedback.onDismiss();
+      }, 0);
     }
   }, [feedback]);
 
