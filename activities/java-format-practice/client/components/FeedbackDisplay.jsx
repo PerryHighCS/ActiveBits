@@ -103,13 +103,14 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
       clearTimeout(readyTimer);
       window.removeEventListener('keydown', handleKeyPress);
     };
-    // Restore focus ONLY when modal is dismissed (feedback becomes null)
-    React.useEffect(() => {
-      if (feedback === null && previousActiveElementRef.current && previousActiveElementRef.current.focus) {
-        previousActiveElementRef.current.focus();
-      }
-    }, [feedback]);
   }, [onNewChallenge, showNextButton, feedback]);
+
+  // Restore focus ONLY when modal is dismissed (feedback becomes null)
+  React.useEffect(() => {
+    if (feedback === null && previousActiveElementRef.current && previousActiveElementRef.current.focus) {
+      previousActiveElementRef.current.focus();
+    }
+  }, [feedback]);
 
   if (!feedback) return null;
 

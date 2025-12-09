@@ -181,13 +181,8 @@ export default function AnswerSection({
       : `Error in ${fileName}`;
   };
 
-  const handleFeedbackDismiss = () => {
-    // Focus is now handled by useEffect when feedback is cleared
-  };
-
   const handleDismiss = useCallback(() => {
-    // Focus error input BEFORE clearing feedback (to avoid ref being cleared)
-    handleFeedbackDismiss();
+    // Focus error input is now handled by useEffect when feedback is cleared
     // Then clear feedback and close modal
     if (onFeedbackDismiss) {
       onFeedbackDismiss();
