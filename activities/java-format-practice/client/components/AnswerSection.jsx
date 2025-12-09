@@ -170,8 +170,8 @@ export default function AnswerSection({
    */
   const safeDataAttribute = (value, defaultValue = '0') => {
     const converted = String(value);
-    // Validate it's not empty and contains valid characters for data attributes
-    return converted && /^[\d-]+$/.test(converted) ? converted : defaultValue;
+    // Validate it's not empty and is a valid number (optional leading hyphen followed by digits)
+    return converted && /^-?\d+$/.test(converted) ? converted : defaultValue;
   };
 
   const getFeedbackTitle = () => {

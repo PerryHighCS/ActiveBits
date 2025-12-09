@@ -110,7 +110,7 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
     if (feedback === null && previousActiveElementRef.current && previousActiveElementRef.current.focus) {
       previousActiveElementRef.current.focus();
     }
-  }, [feedback]);
+  }, [feedback, handleDismiss]);
 
   if (!feedback) return null;
 
