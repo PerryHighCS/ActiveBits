@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import FeedbackDisplay from './FeedbackDisplay';
 import { splitArgumentsRespectingQuotes } from '../utils/stringUtils';
 
@@ -174,6 +174,19 @@ export default function AnswerSection({
     }
   };
 
+  const handleDismiss = useCallback(() => {
+    handleFeedbackDismiss();
+    if (onFeedbackDismiss) onFeedbackDismiss();
+  }, [onFeedbackDismiss]);
+
+  const memoizedFeedback = useMemo(() => {
+    if (!feedback) return null;
+    return {
+      ...feedback,
+      onDismiss: handleDismiss
+    };
+  }, [feedback, handleDismiss]);
+
   return (
     <div className="answer-section">
       <div className="ide-shell" aria-label="Format string editor">
@@ -337,10 +350,7 @@ export default function AnswerSection({
       </div>
       
       <FeedbackDisplay
-        feedback={feedback ? {...feedback, onDismiss: () => {
-          handleFeedbackDismiss();
-          if (onFeedbackDismiss) onFeedbackDismiss();
-        }} : null}
+        feedback={memoizedFeedback}
         onNewChallenge={onNewChallenge}
         showNextButton={showNextButton}
         title={getFeedbackTitle()}
