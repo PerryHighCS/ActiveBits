@@ -524,14 +524,6 @@ tbody tr:last-child .grid-cell-hovered::before {
 
 .ide-input:focus {
   outline: none;
-  /* Sticky row labels for interleaved grid */
-  .sticky-label {
-    position: sticky;
-    left: 0;
-    background: #fff;
-    z-index: 2;
-    box-shadow: 2px 0 2px -2px #888;
-  }
   border-color: #f6ad55;
   box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25);
   background: rgba(251, 191, 36, 0.15);

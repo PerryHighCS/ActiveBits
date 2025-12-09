@@ -20,7 +20,7 @@ export function splitArgumentsRespectingQuotes(str) {
       // Check if this comma is part of a format specifier
       // A comma is part of a format specifier if:
       // 1. It comes after a % and before a conversion character (s, d, f, x, X, etc.)
-      // Look ahead to see if there's a conversion character soon
+      // 2. Only valid format specifier characters appear between the % and comma
       let isFormatSpecifierComma = false;
       
       // Check if we're in the middle of a format specifier by looking back for %
@@ -31,12 +31,17 @@ export function splitArgumentsRespectingQuotes(str) {
       // Find the last % in current string
       const lastPercentIdx = beforeComma.lastIndexOf('%');
       if (lastPercentIdx !== -1) {
-        // Check if there's a conversion character in the next few characters
-        // (accounting for possible width/precision digits)
-        const lookAhead = afterComma.match(/^(\d*[sdfxXbBhHcC])/);
-        if (lookAhead) {
-          // This comma is between % and a conversion char - it's a format flag
-          isFormatSpecifierComma = true;
+        // Check what's between the % and the comma
+        const betweenPercentAndComma = beforeComma.slice(lastPercentIdx + 1);
+        // Valid format specifier characters: flags (-, +, 0, (, #), comma itself, and width/precision digits
+        if (/^[-+0(#,\d.]*$/.test(betweenPercentAndComma)) {
+          // Check if there's a conversion character in the next few characters
+          // (accounting for possible width/precision digits)
+          const lookAhead = afterComma.match(/^(\d*[sdfxXbBhHcC])/);
+          if (lookAhead) {
+            // This comma is between % and a conversion char - it's a format flag
+            isFormatSpecifierComma = true;
+          }
         }
       }
       
