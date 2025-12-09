@@ -154,9 +154,32 @@ const tests = [
 let passed = 0;
 let failed = 0;
 
+// Helper function for robust array equality check
+function arraysEqual(arr1, arr2) {
+  // Check if both are arrays
+  if (!Array.isArray(arr1) || !Array.isArray(arr2)) {
+    return false;
+  }
+  
+  // Check if lengths match
+  if (arr1.length !== arr2.length) {
+    return false;
+  }
+  
+  // Check each element (handles strings, numbers, and other primitives)
+  for (let i = 0; i < arr1.length; i++) {
+    // Use strict equality for primitive values and array elements
+    if (arr1[i] !== arr2[i]) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
 tests.forEach(test => {
   const result = splitArgumentsRespectingQuotes(test.input);
-  const success = JSON.stringify(result) === JSON.stringify(test.expected);
+  const success = arraysEqual(result, test.expected);
   
   if (success) {
     passed++;
