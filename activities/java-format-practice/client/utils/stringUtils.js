@@ -12,7 +12,6 @@ export function splitArgumentsRespectingQuotes(str) {
   for (let i = 0; i < str.length; i++) {
     const char = str[i];
     const prevChar = i > 0 ? str[i - 1] : '';
-    const nextChar = i < str.length - 1 ? str[i + 1] : '';
 
     if (char === '"' && prevChar !== '\\') {
       inQuotes = !inQuotes;
