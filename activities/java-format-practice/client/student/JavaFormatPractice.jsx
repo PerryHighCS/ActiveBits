@@ -468,7 +468,6 @@ export default function JavaFormatPractice({ sessionData }) {
             syntaxError = 'Format string must be enclosed in double quotes.';
             // This is a format string error (partIdx 0)
             lineErrorsMeta[idx] = 0;
-            console.log('[JavaFormatPractice] Set lineErrorsMeta for quote error:', { idx, partIdx: 0 });
           } else {
             const userFmt = userParts[0].slice(1, -1);
             const valueMap = {};
@@ -511,7 +510,6 @@ export default function JavaFormatPractice({ sessionData }) {
               newLineErrors[idx] = syntaxError;
               if (lineErrorsMeta[idx] === undefined) {
                 lineErrorsMeta[idx] = errorArgIdx;
-                console.log('[JavaFormatPractice] Set lineErrorsMeta for variable error:', { idx, errorArgIdx, undefinedVar: varMatch?.[1], lineErrorsMeta });
               }
               
               console.error('Format evaluation error:', err, 'User expressions:', userArgExprs, 'Available vars:', valueMap);
@@ -657,7 +655,6 @@ export default function JavaFormatPractice({ sessionData }) {
             // default to 0 (format string) since that's most likely the issue
             if (lineErrorsMeta[lineIdx] === undefined) {
               lineErrorsMeta[lineIdx] = 0;
-              console.log('[JavaFormatPractice] Output mismatch on line', lineIdx, '- defaulting to format string (partIdx 0)');
             }
           }
         });

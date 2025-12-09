@@ -40,7 +40,6 @@ export default function AnswerSection({
   React.useEffect(() => {
     // Check if feedback was just cleared (dismissed)
     if (prevFeedbackRef.current && !feedback && errorInputRef.current) {
-      console.log('[AnswerSection] Feedback dismissed, focusing error input:', errorInputRef.current);
       requestAnimationFrame(() => {
         if (errorInputRef.current) {
           errorInputRef.current.focus();
@@ -53,15 +52,6 @@ export default function AnswerSection({
   React.useEffect(() => {
     // When feedback appears with errors, store the line number to focus later
     if (feedback && !feedback.isCorrect) {
-      console.log('[AnswerSection] Error feedback detected:', {
-        difficulty,
-        currentIndex,
-        lineErrors,
-        wrongPartIdx: feedback.wrongPartIdx,
-        errorPartType: feedback.errorPartType,
-        lineErrorsMeta: feedback.lineErrorsMeta
-      });
-      
       // Check if we have lineErrorsMeta (works for both syntax errors and output mismatches)
       if (feedback.lineErrorsMeta && Object.keys(feedback.lineErrorsMeta).length > 0) {
         // Intermediate/Advanced mode: focus the first error input (line and part)
@@ -70,7 +60,6 @@ export default function AnswerSection({
         const partIdx = feedback.lineErrorsMeta[firstErrorIdx] !== undefined ? feedback.lineErrorsMeta[firstErrorIdx] : 0;
         const firstErrorLineNumber = startingLine + variables.length + (firstErrorIdx * 2) + 1;
         errorLineToFocusRef.current = { lineNumber: firstErrorLineNumber, partIdx };
-        console.log('[AnswerSection] Intermediate/Advanced error focus set:', errorLineToFocusRef.current);
       } else if (difficulty === 'beginner') {
         // Beginner mode: focus the wrong part's input
         // errorPartType indicates what went wrong:
@@ -81,10 +70,8 @@ export default function AnswerSection({
         const currentLineNumber = startingLine + variables.length + (currentIndex * 2) + 1;
         // Store both the line number and part index so we can find the right input
         errorLineToFocusRef.current = { lineNumber: currentLineNumber, partIdx: wrongPartIdx };
-        console.log('[AnswerSection] Beginner error focus set:', errorLineToFocusRef.current);
       } else {
         errorLineToFocusRef.current = null;
-        console.log('[AnswerSection] No error focus set (no lineErrors and not beginner)');
       }
     }
   }, [feedback, lineErrors, startingLine, variables.length, difficulty, currentIndex]);
@@ -196,7 +183,6 @@ export default function AnswerSection({
 
   const handleFeedbackDismiss = () => {
     // Focus is now handled by useEffect when feedback is cleared
-    console.log('[AnswerSection] handleFeedbackDismiss called - focus will happen in useEffect');
   };
 
   const handleDismiss = useCallback(() => {
@@ -282,12 +268,6 @@ export default function AnswerSection({
                                 errorLineToFocusRef.current &&
                                 errorLineToFocusRef.current.lineNumber === lineNumberBase + 1
                               ) {
-                                console.log('[AnswerSection] Setting errorInputRef for advanced mode input:', {
-                                  idx,
-                                  lineNumber: lineNumberBase + 1,
-                                  errorLineToFocus: errorLineToFocusRef.current,
-                                  element: el
-                                });
                                 errorInputRef.current = el;
                               }
                             }}
@@ -333,13 +313,6 @@ export default function AnswerSection({
                                       errorLineToFocusRef.current.lineNumber === lineNumberBase + 1 &&
                                       errorLineToFocusRef.current.partIdx === partIdx
                                     ) {
-                                      console.log('[AnswerSection] Setting errorInputRef for input:', {
-                                        idx,
-                                        partIdx,
-                                        lineNumber: lineNumberBase + 1,
-                                        errorLineToFocus: errorLineToFocusRef.current,
-                                        element: el
-                                      });
                                       errorInputRef.current = el;
                                     }
                                   }}
