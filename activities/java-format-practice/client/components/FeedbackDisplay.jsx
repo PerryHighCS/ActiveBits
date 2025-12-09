@@ -112,7 +112,6 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
       className="feedback-modal-overlay"
       onClick={handleDismiss}
       role="presentation"
-      aria-hidden="false"
     >
       <div
         ref={modalRef}
