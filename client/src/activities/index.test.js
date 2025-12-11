@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import "./gallery-walk/manager/ManagerPage.test.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

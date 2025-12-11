@@ -3,7 +3,6 @@ import Button from '@src/components/ui/Button';
 
 export default function ReviewerFeedbackForm({
   projectTitle,
-  stageBadge,
   message,
   onMessageChange,
   notice,
@@ -15,14 +14,10 @@ export default function ReviewerFeedbackForm({
 }) {
   return (
     <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Feedback form</h2>
-          <p className="text-gray-600 text-sm">
-            Reviewing <span className="font-semibold">{projectTitle || 'this project'}</span>
-          </p>
-        </div>
-        {stageBadge}
+      <div>
+        <h2 className="text-xl font-semibold">
+          Reviewing <span className="font-semibold">{projectTitle || 'this project'}</span>
+        </h2>
       </div>
       <form onSubmit={onSubmit} className="space-y-3">
         <textarea

@@ -453,14 +453,8 @@ export default function StudentPage({ sessionData }) {
           />
         )}
         {reviewerName && (
-          <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-green-800">
-            Reviewing as <strong>{reviewerName}</strong>
-          </div>
-        )}
-        {reviewerName && (
           <ReviewerFeedbackForm
             projectTitle={revieweeRecord?.projectTitle}
-            stageBadge={renderStageBadge()}
             message={reviewerMessage}
             onMessageChange={setReviewerMessage}
             notice={reviewerNotice}
