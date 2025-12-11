@@ -8,6 +8,7 @@ import LocalReviewerForm from '../components/LocalReviewerForm';
 import FeedbackCards from '../components/FeedbackCards';
 import ReviewerIdentityForm from '../components/ReviewerIdentityForm';
 import ReviewerFeedbackForm from '../components/ReviewerFeedbackForm';
+import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
 
 function generateShortId(length = 6) {
   const alphabet = 'BCDFGHJKLMNPQRSTVWXYZ23456789';
@@ -54,6 +55,7 @@ export default function StudentPage({ sessionData }) {
   const [showFeedbackView, setShowFeedbackView] = useState(stage === 'review');
   const [revieweeFeedback, setRevieweeFeedback] = useState([]);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
+  const [localStyleId, setLocalStyleId] = useState(DEFAULT_NOTE_STYLE_ID);
 
   // Reviewer state
   const [reviewerId, setReviewerId] = useState(null);
@@ -64,8 +66,28 @@ export default function StudentPage({ sessionData }) {
   const [reviewerMessage, setReviewerMessage] = useState('');
   const [reviewerNotice, setReviewerNotice] = useState(null);
   const [isSubmittingReviewerFeedback, setIsSubmittingReviewerFeedback] = useState(false);
+  const [canScanNext, setCanScanNext] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState(null);
+  const [reviewerStyleId, setReviewerStyleId] = useState(DEFAULT_NOTE_STYLE_ID);
+  const handleLocalFeedbackCancel = () => {
+    setLocalReviewerName('');
+    setLocalMessage('');
+    setLocalFormNotice(null);
+    setLocalStyleId(DEFAULT_NOTE_STYLE_ID);
+  };
+  const handleReviewerMessageChange = useCallback((value) => {
+    if (canScanNext) setCanScanNext(false);
+    setReviewerMessage(value);
+  }, [canScanNext]);
+
+  const handleReviewerStyleChange = useCallback((value) => {
+    if (!isNoteStyleId(value)) return;
+    setReviewerStyleId(value);
+    if (reviewerStoragePrefix) {
+      localStorage.setItem(`${reviewerStoragePrefix}:styleId`, value);
+    }
+  }, [reviewerStoragePrefix]);
 
   const kioskJoinUrl = useMemo(() => {
     if (!sessionId || !revieweeId || typeof window === 'undefined') return '';
@@ -83,10 +105,14 @@ export default function StudentPage({ sessionData }) {
     if (!isReviewerMode || !reviewerStoragePrefix) return;
     const cachedId = localStorage.getItem(`${reviewerStoragePrefix}:reviewerId`);
     const cachedName = localStorage.getItem(`${reviewerStoragePrefix}:reviewerName`);
+    const cachedStyle = localStorage.getItem(`${reviewerStoragePrefix}:styleId`);
     if (cachedId) setReviewerId(cachedId);
     if (cachedName) {
       setReviewerName(cachedName);
       setReviewerNameInput(cachedName);
+    }
+    if (cachedStyle && isNoteStyleId(cachedStyle)) {
+      setReviewerStyleId(cachedStyle);
     }
   }, [isReviewerMode, reviewerStoragePrefix]);
 
@@ -191,7 +217,7 @@ export default function StudentPage({ sessionData }) {
       const res = await fetch(`/api/gallery-walk/${sessionId}/feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revieweeId, reviewerId: kioskReviewerId, message }),
+        body: JSON.stringify({ revieweeId, reviewerId: kioskReviewerId, message, styleId: localStyleId }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -199,6 +225,7 @@ export default function StudentPage({ sessionData }) {
       }
       setLocalReviewerName('');
       setLocalMessage('');
+      setLocalStyleId(DEFAULT_NOTE_STYLE_ID);
       setLocalFormNotice('Feedback submitted. Thank you!');
       if (stage === 'review' && stageChangePending) {
         setStageChangePending(false);
@@ -328,7 +355,7 @@ export default function StudentPage({ sessionData }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold">Your feedback</h2>
-          <p className="text-gray-600">The teacher switched to review mode. Read through the comments gathered earlier.</p>
+          <p className="text-gray-600">The teacher switched to review mode. Read through the comments that were left for you.</p>
         </div>
         {renderStageBadge()}
       </div>
@@ -337,9 +364,11 @@ export default function StudentPage({ sessionData }) {
           This session has ended. You can still view and print your feedback.
         </p>
       )}
-      <Button onClick={() => window.print()} variant="outline">
-        Print my feedback
-      </Button>
+      <div className="flex justify-end">
+        <Button onClick={() => window.print()} variant="outline">
+          Print my feedback
+        </Button>
+      </div>
       <FeedbackCards entries={revieweeFeedback} isLoading={isLoadingFeedback} />
     </div>
   );
@@ -398,7 +427,7 @@ export default function StudentPage({ sessionData }) {
       const res = await fetch(`/api/gallery-walk/${sessionId}/feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revieweeId: requestedReviewee, reviewerId, message: trimmed }),
+        body: JSON.stringify({ revieweeId: requestedReviewee, reviewerId, message: trimmed, styleId: reviewerStyleId }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -406,11 +435,20 @@ export default function StudentPage({ sessionData }) {
       }
       setReviewerMessage('');
       setReviewerNotice('Feedback submitted. Thank you!');
+      setCanScanNext(true);
     } catch (err) {
       setReviewerNotice(err.message);
     } finally {
       setIsSubmittingReviewerFeedback(false);
     }
+  };
+
+  const handleReviewerCancel = () => {
+    if (reviewerMessage.trim()) {
+      setReviewerMessage('');
+      setReviewerNotice('Feedback draft cleared.');
+    }
+    setCanScanNext(true);
   };
 
   const handleScannerDetected = (content) => {
@@ -456,16 +494,20 @@ export default function StudentPage({ sessionData }) {
           <ReviewerFeedbackForm
             projectTitle={revieweeRecord?.projectTitle}
             message={reviewerMessage}
-            onMessageChange={setReviewerMessage}
+            onMessageChange={handleReviewerMessageChange}
             notice={reviewerNotice}
             isSubmitting={isSubmittingReviewerFeedback}
             onSubmit={handleReviewerFeedbackSubmit}
+            onCancel={handleReviewerCancel}
             onScan={() => {
               setScannerError(null);
               setIsScannerOpen(true);
             }}
             onCameraFallback={() => window.open(window.location.origin, '_blank')}
             scannerError={scannerError}
+            canScan={canScanNext}
+            styleId={reviewerStyleId}
+            onStyleChange={handleReviewerStyleChange}
           />
         )}
       </div>
@@ -496,6 +538,11 @@ export default function StudentPage({ sessionData }) {
             onNameChange={setLocalReviewerName}
             onMessageChange={setLocalMessage}
             onSubmit={handleLocalFeedbackSubmit}
+            onCancel={handleLocalFeedbackCancel}
+            styleId={localStyleId}
+            onStyleChange={(value) => {
+              if (isNoteStyleId(value)) setLocalStyleId(value);
+            }}
             disabled={stage === 'review' && showFeedbackView}
             notice={localFormNotice}
             isSubmitting={isSubmittingLocal}

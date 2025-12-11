@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import setupGalleryWalkRoutes from './routes.js';
 import { createSessionStore } from 'activebits-server/core/sessions.js';
+import { DEFAULT_NOTE_STYLE_ID, NOTE_STYLE_OPTIONS } from '../shared/noteStyles.js';
 
 function createWsStub() {
   return {
@@ -90,6 +91,7 @@ test('submits feedback and tracks stats', async (t) => {
   assert.equal(feedbackBody.ok, true);
   assert.equal(feedbackBody.feedback.to, 'stu-1');
   assert.equal(feedbackBody.feedback.fromNameSnapshot, 'Reviewer One');
+  assert.equal(feedbackBody.feedback.styleId, DEFAULT_NOTE_STYLE_ID);
   assert.equal(feedbackBody.stats.reviewees['stu-1'], 1);
   assert.equal(feedbackBody.stats.reviewers['rev-1'], 1);
 
@@ -147,4 +149,58 @@ test('exports and imports gallery walk data', async (t) => {
   assert.equal(Object.keys(importedSession.data.reviewees).length, 1);
   assert.equal(importedSession.data.feedback.length, 1);
   assert.equal(importedSession.data.feedback[0].message, 'Nice job');
+});
+test('allows reviewers to set sticky note styles', async (t) => {
+  const server = await startTestServer();
+  t.after(server.close);
+
+  const sessionId = await createSession(server.baseUrl);
+
+  await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/reviewee`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revieweeId: 'stu-3', name: 'Student Three' }),
+  });
+
+  await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/reviewer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reviewerId: 'rev-3', name: 'Reviewer Three' }),
+  });
+
+  const styleId = NOTE_STYLE_OPTIONS[1].id;
+  const feedbackRes = await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revieweeId: 'stu-3', reviewerId: 'rev-3', message: 'Love the visuals', styleId }),
+  });
+  const body = await feedbackRes.json();
+  assert.equal(body.feedback.styleId, styleId);
+});
+
+test('invalid note style falls back to default', async (t) => {
+  const server = await startTestServer();
+  t.after(server.close);
+
+  const sessionId = await createSession(server.baseUrl);
+
+  await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/reviewee`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revieweeId: 'stu-4', name: 'Student Four' }),
+  });
+
+  await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/reviewer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reviewerId: 'rev-4', name: 'Reviewer Four' }),
+  });
+
+  const feedbackRes = await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revieweeId: 'stu-4', reviewerId: 'rev-4', message: 'Invalid style test', styleId: 'unknown' }),
+  });
+  const body = await feedbackRes.json();
+  assert.equal(body.feedback.styleId, DEFAULT_NOTE_STYLE_ID);
 });

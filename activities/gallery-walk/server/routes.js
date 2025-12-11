@@ -1,6 +1,7 @@
 import { createSession } from 'activebits-server/core/sessions.js';
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js';
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js';
+import { normalizeNoteStyleId } from '../shared/noteStyles.js';
 
 const DEFAULT_STAGE = 'gallery';
 
@@ -33,7 +34,12 @@ registerSessionNormalizer('gallery-walk', (session) => {
   data.config = ensurePlainObject(data.config);
   data.reviewees = ensurePlainObject(data.reviewees);
   data.reviewers = ensurePlainObject(data.reviewers);
-  data.feedback = Array.isArray(data.feedback) ? data.feedback : [];
+  data.feedback = Array.isArray(data.feedback)
+    ? data.feedback.map((entry) => ({
+      ...entry,
+      styleId: normalizeNoteStyleId(entry?.styleId),
+    }))
+    : [];
   data.stats = ensurePlainObject(data.stats);
   data.stats.reviewees = ensurePlainObject(data.stats.reviewees);
   data.stats.reviewers = ensurePlainObject(data.stats.reviewers);
@@ -153,6 +159,7 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
     }
 
     const reviewer = session.data.reviewers[reviewerId];
+    const styleId = normalizeNoteStyleId(req.body?.styleId);
     const feedbackEntry = {
       id: createId(),
       to: revieweeId,
@@ -160,6 +167,7 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
       fromNameSnapshot: reviewer?.name || 'Anonymous Reviewer',
       message,
       createdAt: Date.now(),
+      styleId,
     };
 
     session.data.feedback.push(feedbackEntry);

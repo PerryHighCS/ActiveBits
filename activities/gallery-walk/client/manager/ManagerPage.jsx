@@ -3,7 +3,8 @@ import { Link, useParams } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
-import { sortFeedbackEntries } from './feedbackUtils';
+import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils';
+import { getTimestampMeta } from './managerUtils';
 
 export default function ManagerPage() {
   const { sessionId } = useParams();
@@ -93,7 +94,7 @@ export default function ManagerPage() {
       if (message.type === 'feedback-added') {
         const entry = message.payload?.feedback;
         if (entry) {
-          setFeedback((prev) => [entry, ...prev]);
+          setFeedback((prev) => insertFeedbackEntry(prev, entry));
         }
       }
     } catch {
@@ -152,8 +153,8 @@ export default function ManagerPage() {
           <tr>
             <th className="px-4 py-3">{renderTableHeaderCell('To', 'to')}</th>
             <th className="px-4 py-3">{renderTableHeaderCell('From', 'fromNameSnapshot')}</th>
+            <th className="px-4 py-3">{renderTableHeaderCell('Posted', 'createdAt')}</th>
             <th className="px-4 py-3">Message</th>
-            <th className="px-4 py-3">{renderTableHeaderCell('Time', 'createdAt')}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -163,11 +164,25 @@ export default function ManagerPage() {
                 {reviewees[entry.to]?.projectTitle || reviewees[entry.to]?.name || entry.to || '—'}
               </td>
               <td className="px-4 py-3">{entry.fromNameSnapshot || reviewers[entry.from]?.name || '—'}</td>
+
+              <td className="px-4 py-3 text-gray-600">
+                {(() => {
+                  const { date, showDateOnScreen } = getTimestampMeta(entry.createdAt);
+                  if (!date) return '—';
+                  const dateString = date.toLocaleDateString();
+                  const timeString = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                  const screenText = showDateOnScreen ? `${dateString} ${timeString}` : timeString;
+                  const printText = `${dateString} ${timeString}`.trim();
+                  return (
+                    <>
+                      <span className="print:hidden">{screenText}</span>
+                      <span className="hidden print:inline">{printText}</span>
+                    </>
+                  );
+                })()}
+              </td>
               <td className="px-4 py-3">
                 <p className="whitespace-pre-wrap">{entry.message}</p>
-              </td>
-              <td className="px-4 py-3 text-gray-600">
-                {entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '—'}
               </td>
             </tr>
           ))}

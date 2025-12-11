@@ -1,5 +1,6 @@
 import React from 'react';
 import Button from '@src/components/ui/Button';
+import NoteStyleSelect from './NoteStyleSelect.jsx';
 
 export default function ReviewerFeedbackForm({
   projectTitle,
@@ -8,16 +9,23 @@ export default function ReviewerFeedbackForm({
   notice,
   isSubmitting,
   onSubmit,
+  onCancel,
   onScan,
   onCameraFallback,
   scannerError,
+  canScan,
+  styleId,
+  onStyleChange,
 }) {
   return (
     <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow">
-      <div>
-        <h2 className="text-xl font-semibold">
-          Reviewing <span className="font-semibold">{projectTitle || 'this project'}</span>
-        </h2>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold">
+            Reviewing <span className="font-semibold">{projectTitle || 'this project'}</span>
+          </h2>
+        </div>
+        <NoteStyleSelect value={styleId} onChange={onStyleChange} label="Note style" />
       </div>
       <form onSubmit={onSubmit} className="space-y-3">
         <textarea
@@ -28,18 +36,27 @@ export default function ReviewerFeedbackForm({
           placeholder="Share what you liked and what could improve"
         />
         {notice && <p className="text-sm text-indigo-700">{notice}</p>}
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? 'Sending…' : 'Submit feedback'}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Sending…' : 'Submit feedback'}
+          </Button>
+          {onCancel && (
+            <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
+              Cancel
+            </Button>
+          )}
+        </div>
       </form>
-      <div className="flex flex-col gap-2">
-        <Button type="button" variant="outline" onClick={onScan}>
-          Scan QR to review another project
-        </Button>
-        <button type="button" className="text-sm text-blue-600 underline" onClick={onCameraFallback}>
-          Use your camera app instead
-        </button>
-      </div>
+      {canScan && (
+        <div className="flex flex-col gap-2">
+          <Button type="button" variant="outline" onClick={onScan}>
+            Scan QR to review another project
+          </Button>
+          <button type="button" className="text-sm text-blue-600 underline" onClick={onCameraFallback}>
+            Use your camera app instead
+          </button>
+        </div>
+      )}
       {scannerError === 'scanner-unavailable' && (
         <p className="text-sm text-red-600">
           Your browser will not open the scanner. Use your phone’s camera app to scan the next code.

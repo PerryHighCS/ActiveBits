@@ -5,9 +5,11 @@ export default function ProjectStationCard({ projectTitle, joinUrl, fallbackForm
   return (
     <div className="grid gap-6">
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">{projectTitle || 'Project station'}</h2>
-        </div>
+        { projectTitle && 
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">{projectTitle}</h2>
+          </div>
+  }
         <div className="mt-6 flex flex-col items-center gap-4">
           {joinUrl ? (
             <>

@@ -14,3 +14,9 @@ export function sortFeedbackEntries(entries = [], field = 'createdAt', direction
     return 0;
   });
 }
+
+export function insertFeedbackEntry(entries = [], nextEntry) {
+  if (!nextEntry || typeof nextEntry !== 'object') return entries;
+  const filtered = entries.filter((entry) => entry?.id !== nextEntry.id);
+  return [nextEntry, ...filtered];
+}
