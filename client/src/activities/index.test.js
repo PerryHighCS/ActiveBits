@@ -17,6 +17,7 @@ const EXPECTED_ACTIVITIES = [
   "java-format-practice",
   "python-list-practice",
   "raffle",
+  "gallery-walk",
   "www-sim",
 ];
 
