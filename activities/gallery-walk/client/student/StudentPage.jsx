@@ -1,8 +1,13 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { QRCodeSVG } from 'qrcode.react';
 import Button from '@src/components/ui/Button';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
+import QrScannerPanel from '@src/components/common/QrScannerPanel';
+import ProjectStationCard from '../components/ProjectStationCard';
+import LocalReviewerForm from '../components/LocalReviewerForm';
+import FeedbackCards from '../components/FeedbackCards';
+import ReviewerIdentityForm from '../components/ReviewerIdentityForm';
+import ReviewerFeedbackForm from '../components/ReviewerFeedbackForm';
 
 function generateShortId(length = 6) {
   const alphabet = 'BCDFGHJKLMNPQRSTVWXYZ23456789';
@@ -27,11 +32,13 @@ export default function StudentPage({ sessionData }) {
   const requestedReviewee = query.get('reviewee');
   const isReviewerMode = Boolean(requestedReviewee);
 
-  const storagePrefix = sessionId ? `gallery-walk:${sessionId}` : null;
+  const kioskStoragePrefix = sessionId ? `gallery-walk:${sessionId}` : null;
+  const reviewerStoragePrefix = sessionId ? `gallery-walk:${sessionId}:reviewer` : null;
+
   const [stage, setStage] = useState(() => sessionData?.data?.stage || 'gallery');
   const [sessionClosed, setSessionClosed] = useState(false);
 
-  // Reviewee (kiosk) state
+  // Kiosk state
   const [revieweeId, setRevieweeId] = useState(null);
   const [revieweeRecord, setRevieweeRecord] = useState(null);
   const [registrationName, setRegistrationName] = useState('');
@@ -39,43 +46,62 @@ export default function StudentPage({ sessionData }) {
   const [isRegistering, setIsRegistering] = useState(false);
   const [registrationError, setRegistrationError] = useState(null);
 
-  // Local fallback form state
   const [localReviewerName, setLocalReviewerName] = useState('');
   const [localMessage, setLocalMessage] = useState('');
   const [isSubmittingLocal, setIsSubmittingLocal] = useState(false);
   const [localFormNotice, setLocalFormNotice] = useState(null);
-
   const [stageChangePending, setStageChangePending] = useState(false);
   const [showFeedbackView, setShowFeedbackView] = useState(stage === 'review');
-
   const [revieweeFeedback, setRevieweeFeedback] = useState([]);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
 
-  const baseJoinUrl = useMemo(() => {
+  // Reviewer state
+  const [reviewerId, setReviewerId] = useState(null);
+  const [reviewerName, setReviewerName] = useState('');
+  const [reviewerNameInput, setReviewerNameInput] = useState('');
+  const [reviewerNameError, setReviewerNameError] = useState(null);
+  const [isSavingReviewerName, setIsSavingReviewerName] = useState(false);
+  const [reviewerMessage, setReviewerMessage] = useState('');
+  const [reviewerNotice, setReviewerNotice] = useState(null);
+  const [isSubmittingReviewerFeedback, setIsSubmittingReviewerFeedback] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannerError, setScannerError] = useState(null);
+
+  const kioskJoinUrl = useMemo(() => {
     if (!sessionId || !revieweeId || typeof window === 'undefined') return '';
     return `${window.location.origin}/${sessionId}?reviewee=${encodeURIComponent(revieweeId)}`;
   }, [sessionId, revieweeId]);
 
+  // Hydrate kiosk/reviewer IDs from storage
   useEffect(() => {
-    if (!storagePrefix) return;
-    const storedId = localStorage.getItem(`${storagePrefix}:revieweeId`);
-    if (storedId) {
-      setRevieweeId(storedId);
+    if (!kioskStoragePrefix) return;
+    const storedId = localStorage.getItem(`${kioskStoragePrefix}:revieweeId`);
+    if (storedId) setRevieweeId(storedId);
+  }, [kioskStoragePrefix]);
+
+  useEffect(() => {
+    if (!isReviewerMode || !reviewerStoragePrefix) return;
+    const cachedId = localStorage.getItem(`${reviewerStoragePrefix}:reviewerId`);
+    const cachedName = localStorage.getItem(`${reviewerStoragePrefix}:reviewerName`);
+    if (cachedId) setReviewerId(cachedId);
+    if (cachedName) {
+      setReviewerName(cachedName);
+      setReviewerNameInput(cachedName);
     }
-  }, [storagePrefix]);
+  }, [isReviewerMode, reviewerStoragePrefix]);
 
   const fetchSessionSnapshot = useCallback(async () => {
     if (!sessionId) return;
     try {
       const res = await fetch(`/api/gallery-walk/${sessionId}/feedback`);
-      if (!res.ok) throw new Error('Failed to fetch session snapshot');
+      if (!res.ok) throw new Error('Failed to fetch snapshot');
       const data = await res.json();
       setStage(data.stage || 'gallery');
       if (revieweeId && data.reviewees?.[revieweeId]) {
         setRevieweeRecord(data.reviewees[revieweeId]);
       }
     } catch (err) {
-      console.error('Failed to fetch gallery-walk snapshot:', err);
+      console.error('Failed to fetch gallery walk snapshot', err);
     }
   }, [sessionId, revieweeId]);
 
@@ -91,20 +117,16 @@ export default function StudentPage({ sessionData }) {
       if (!res.ok) throw new Error('Failed to fetch feedback');
       const data = await res.json();
       setRevieweeFeedback(Array.isArray(data.feedback) ? data.feedback : []);
-      if (data.reviewee) {
-        setRevieweeRecord(data.reviewee);
-      }
+      if (data.reviewee) setRevieweeRecord(data.reviewee);
     } catch (err) {
-      console.error('Failed to fetch reviewee feedback:', err);
+      console.error('Failed to fetch reviewee feedback', err);
     } finally {
       setIsLoadingFeedback(false);
     }
   }, [sessionId, revieweeId]);
 
   useEffect(() => {
-    if (showFeedbackView) {
-      fetchRevieweeFeedback();
-    }
+    if (showFeedbackView) fetchRevieweeFeedback();
   }, [showFeedbackView, fetchRevieweeFeedback]);
 
   const handleRevieweeRegistration = async (event) => {
@@ -131,18 +153,17 @@ export default function StudentPage({ sessionData }) {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Unable to register kiosk');
+        throw new Error(data.error || 'Unable to register');
       }
       const data = await res.json();
       const assignedId = data.revieweeId || newId;
       setRevieweeId(assignedId);
-      if (storagePrefix) {
-        localStorage.setItem(`${storagePrefix}:revieweeId`, assignedId);
+      if (kioskStoragePrefix) {
+        localStorage.setItem(`${kioskStoragePrefix}:revieweeId`, assignedId);
       }
       const latestRecord = data.reviewees?.[assignedId] || { name: trimmedName, projectTitle: trimmedProject };
       setRevieweeRecord(latestRecord);
     } catch (err) {
-      console.error(err);
       setRegistrationError(err.message);
     } finally {
       setIsRegistering(false);
@@ -152,25 +173,25 @@ export default function StudentPage({ sessionData }) {
   const handleLocalFeedbackSubmit = async (event) => {
     event.preventDefault();
     if (!sessionId || !revieweeId) return;
-    const reviewerName = localReviewerName.trim();
+    const reviewerNameInput = localReviewerName.trim();
     const message = localMessage.trim();
-    if (!reviewerName || !message) {
+    if (!reviewerNameInput || !message) {
       setLocalFormNotice('Please provide both a name and feedback message.');
       return;
     }
     setIsSubmittingLocal(true);
     setLocalFormNotice(null);
-    const reviewerId = generateShortId(8);
+    const kioskReviewerId = generateShortId(8);
     try {
       await fetch(`/api/gallery-walk/${sessionId}/reviewer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reviewerId, name: reviewerName }),
+        body: JSON.stringify({ reviewerId: kioskReviewerId, name: reviewerNameInput }),
       });
       const res = await fetch(`/api/gallery-walk/${sessionId}/feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revieweeId, reviewerId, message }),
+        body: JSON.stringify({ revieweeId, reviewerId: kioskReviewerId, message }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -185,13 +206,13 @@ export default function StudentPage({ sessionData }) {
         fetchRevieweeFeedback();
       }
     } catch (err) {
-      console.error(err);
       setLocalFormNotice(err.message);
     } finally {
       setIsSubmittingLocal(false);
     }
   };
 
+  // Stage transitions for kiosk
   useEffect(() => {
     if (stage === 'review') {
       if (localMessage.trim().length > 0 || isSubmittingLocal) {
@@ -221,7 +242,7 @@ export default function StudentPage({ sessionData }) {
         return;
       }
       if (message.type === 'session-ended') {
-        if (showFeedbackView) {
+        if (showFeedbackView || isReviewerMode) {
           setSessionClosed(true);
         } else {
           navigate('/session-ended');
@@ -230,9 +251,7 @@ export default function StudentPage({ sessionData }) {
       }
       if (message.type === 'reviewees-updated' && revieweeId) {
         const updated = message.reviewees?.[revieweeId] || message.payload?.reviewees?.[revieweeId];
-        if (updated) {
-          setRevieweeRecord(updated);
-        }
+        if (updated) setRevieweeRecord(updated);
       }
       if (message.type === 'feedback-added') {
         const payload = message.payload || {};
@@ -240,10 +259,10 @@ export default function StudentPage({ sessionData }) {
           fetchRevieweeFeedback();
         }
       }
-    } catch (err) {
-      // Ignore non-JSON payloads
+    } catch {
+      // ignore non-JSON payloads
     }
-  }, [fetchRevieweeFeedback, navigate, revieweeId, showFeedbackView]);
+  }, [fetchRevieweeFeedback, navigate, revieweeId, showFeedbackView, isReviewerMode]);
 
   const buildWsUrl = useCallback(() => {
     if (!sessionId) return null;
@@ -272,10 +291,9 @@ export default function StudentPage({ sessionData }) {
   const renderRegistrationForm = () => (
     <form onSubmit={handleRevieweeRegistration} className="space-y-4 bg-white shadow rounded-lg p-6">
       <div>
-        <h2 className="text-xl font-semibold">Set up your kiosk</h2>
+        <h2 className="text-xl font-semibold">Prepare for review</h2>
         <p className="text-gray-600 mt-1">
-          Enter your name (and optional project title). This information is sent to the teacher but
-          the kiosk screen stays anonymous.
+          Enter your name(s) (and optional project title). This information is sent to the teacher.
         </p>
       </div>
       <div>
@@ -298,118 +316,19 @@ export default function StudentPage({ sessionData }) {
           placeholder="Project title"
         />
       </div>
-      {registrationError && (
-        <p className="text-sm text-red-600">{registrationError}</p>
-      )}
+      {registrationError && <p className="text-sm text-red-600">{registrationError}</p>}
       <Button type="submit" disabled={isRegistering}>
-        {isRegistering ? 'Registering...' : 'Save kiosk'}
+        {isRegistering ? 'Registering…' : 'Save and continue'}
       </Button>
     </form>
   );
-
-  const renderLocalReviewerForm = () => (
-    <form onSubmit={handleLocalFeedbackSubmit} className="space-y-3">
-      <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1">Reviewer name</label>
-        <input
-          type="text"
-          className="w-full rounded border border-gray-300 px-3 py-2"
-          value={localReviewerName}
-          onChange={(e) => setLocalReviewerName(e.target.value)}
-          placeholder="Enter your name"
-          disabled={stage === 'review' && showFeedbackView}
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1">Feedback message</label>
-        <textarea
-          className="w-full rounded border border-gray-300 px-3 py-2"
-          rows={4}
-          value={localMessage}
-          onChange={(e) => setLocalMessage(e.target.value)}
-          placeholder="Leave your feedback here"
-          disabled={stage === 'review' && showFeedbackView}
-        />
-      </div>
-      {localFormNotice && (
-        <p className="text-sm text-indigo-700">{localFormNotice}</p>
-      )}
-      <Button type="submit" disabled={isSubmittingLocal || (stage === 'review' && showFeedbackView)}>
-        {isSubmittingLocal ? 'Sending...' : 'Submit feedback'}
-      </Button>
-    </form>
-  );
-
-  const renderKioskPanel = () => (
-    <div className="grid gap-6">
-      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-semibold">Welcome!</h2>
-            <p className="text-gray-600">
-              Share this QR code so classmates can review your project.
-            </p>
-          </div>
-          {renderStageBadge()}
-        </div>
-        <div className="mt-6 flex flex-col items-center gap-4">
-          {baseJoinUrl ? (
-            <>
-              <QRCodeSVG value={baseJoinUrl} size={240} />
-              <code className="rounded bg-gray-100 px-3 py-1 text-sm break-all">{baseJoinUrl}</code>
-            </>
-          ) : (
-            <p className="text-gray-500">Preparing QR code...</p>
-          )}
-          <p className="text-sm text-gray-600">
-            Reviewers can also scan with their own phone camera.
-          </p>
-        </div>
-      </div>
-      {stage !== 'review' && (
-        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow">
-          <h3 className="text-lg font-semibold mb-2">No phone? No problem.</h3>
-          <p className="text-gray-600 mb-4">
-            Reviewers can type their name and feedback below.
-          </p>
-          {renderLocalReviewerForm()}
-        </div>
-      )}
-    </div>
-  );
-
-  const renderFeedbackCards = () => {
-    if (isLoadingFeedback) {
-      return <p className="text-center text-gray-600">Loading feedback...</p>;
-    }
-    if (!revieweeFeedback.length) {
-      return <p className="text-center text-gray-600">No feedback yet.</p>;
-    }
-    return (
-      <div className="grid gap-4">
-        {revieweeFeedback.map((entry) => (
-          <div key={entry.id} className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 shadow-sm">
-            <p className="text-sm font-semibold text-yellow-900">{entry.fromNameSnapshot || 'Reviewer'}</p>
-            <p className="mt-1 text-gray-800 whitespace-pre-wrap">{entry.message}</p>
-            {entry.createdAt && (
-              <p className="mt-2 text-xs text-gray-500">
-                {new Date(entry.createdAt).toLocaleString()}
-              </p>
-            )}
-          </div>
-        ))}
-      </div>
-    );
-  };
 
   const renderFeedbackView = () => (
     <div className="rounded-lg border border-indigo-200 bg-white p-6 shadow space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold">Your feedback</h2>
-          <p className="text-gray-600">
-            The teacher switched to review mode. Read through the comments gathered earlier.
-          </p>
+          <p className="text-gray-600">The teacher switched to review mode. Read through the comments gathered earlier.</p>
         </div>
         {renderStageBadge()}
       </div>
@@ -421,56 +340,212 @@ export default function StudentPage({ sessionData }) {
       <Button onClick={() => window.print()} variant="outline">
         Print my feedback
       </Button>
-      {renderFeedbackCards()}
+      <FeedbackCards entries={revieweeFeedback} isLoading={isLoadingFeedback} />
     </div>
   );
+
+  const handleReviewerIdentitySave = async () => {
+    if (!sessionId || !requestedReviewee) return;
+    const trimmed = reviewerNameInput.trim();
+    if (!trimmed) {
+      setReviewerNameError('Name is required.');
+      return;
+    }
+    setReviewerNameError(null);
+    setIsSavingReviewerName(true);
+    const nextId = reviewerId || generateShortId(8);
+    try {
+      const res = await fetch(`/api/gallery-walk/${sessionId}/reviewer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewerId: nextId, name: trimmed }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Unable to save reviewer info');
+      }
+      setReviewerId(nextId);
+      setReviewerName(trimmed);
+      if (reviewerStoragePrefix) {
+        localStorage.setItem(`${reviewerStoragePrefix}:reviewerId`, nextId);
+        localStorage.setItem(`${reviewerStoragePrefix}:reviewerName`, trimmed);
+      }
+    } catch (err) {
+      setReviewerNameError(err.message);
+    } finally {
+      setIsSavingReviewerName(false);
+    }
+  };
+
+  const handleReviewerFeedbackSubmit = async (event) => {
+    event.preventDefault();
+    if (!sessionId || !requestedReviewee) {
+      setReviewerNotice('Invalid project link. Please rescan the QR code.');
+      return;
+    }
+    if (!reviewerId || !reviewerName) {
+      setReviewerNotice('Enter your name before leaving feedback.');
+      return;
+    }
+    const trimmed = reviewerMessage.trim();
+    if (!trimmed) {
+      setReviewerNotice('Please type your feedback first.');
+      return;
+    }
+    setIsSubmittingReviewerFeedback(true);
+    setReviewerNotice(null);
+    try {
+      const res = await fetch(`/api/gallery-walk/${sessionId}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revieweeId: requestedReviewee, reviewerId, message: trimmed }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to submit feedback');
+      }
+      setReviewerMessage('');
+      setReviewerNotice('Feedback submitted. Thank you!');
+    } catch (err) {
+      setReviewerNotice(err.message);
+    } finally {
+      setIsSubmittingReviewerFeedback(false);
+    }
+  };
+
+  const handleScannerDetected = (content) => {
+    setIsScannerOpen(false);
+    setScannerError(null);
+    try {
+      const target = new URL(content);
+      if (!sessionId || !target.pathname.endsWith(`/${sessionId}`)) {
+        setScannerError('scanner-invalid');
+        return;
+      }
+      window.location.href = target.toString();
+    } catch {
+      setScannerError('scanner-invalid');
+    }
+  };
+
+  const handleScannerError = () => {
+    setScannerError('scanner-unavailable');
+    setIsScannerOpen(false);
+  };
+
+  const renderReviewerContent = () => {
+    if (!requestedReviewee) {
+      return <p className="text-red-600">Missing project reference. Please scan a valid QR code.</p>;
+    }
+    return (
+      <div className="space-y-6">
+        {!reviewerName && (
+          <ReviewerIdentityForm
+            nameInput={reviewerNameInput}
+            onNameChange={setReviewerNameInput}
+            error={reviewerNameError}
+            hasExistingName={Boolean(reviewerId)}
+            isSaving={isSavingReviewerName}
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleReviewerIdentitySave();
+            }}
+          />
+        )}
+        {reviewerName && (
+          <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-green-800">
+            Reviewing as <strong>{reviewerName}</strong>
+          </div>
+        )}
+        {reviewerName && (
+          <ReviewerFeedbackForm
+            projectTitle={revieweeRecord?.projectTitle}
+            stageBadge={renderStageBadge()}
+            message={reviewerMessage}
+            onMessageChange={setReviewerMessage}
+            notice={reviewerNotice}
+            isSubmitting={isSubmittingReviewerFeedback}
+            onSubmit={handleReviewerFeedbackSubmit}
+            onScan={() => {
+              setScannerError(null);
+              setIsScannerOpen(true);
+            }}
+            onCameraFallback={() => window.open(window.location.origin, '_blank')}
+            scannerError={scannerError}
+          />
+        )}
+      </div>
+    );
+  };
 
   const renderModeContent = () => {
     if (!sessionId) {
       return <p className="text-red-600">Missing session information.</p>;
     }
-
     if (isReviewerMode) {
-      return (
-        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow">
-          <h2 className="text-xl font-semibold mb-2">Reviewer mode</h2>
-          <p className="text-gray-600">
-            The reviewer experience is coming soon. In the meantime, please use the kiosk screen or
-            enter feedback manually on that device.
-          </p>
-        </div>
-      );
+      return renderReviewerContent();
     }
-
     if (!revieweeId) {
       return renderRegistrationForm();
     }
-
     if (showFeedbackView) {
       return renderFeedbackView();
     }
-
-    return renderKioskPanel();
+    const fallbackForm =
+      stage !== 'review' ? (
+        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow">
+          <h3 className="text-lg font-semibold mb-2">No phone? No problem.</h3>
+          <p className="text-gray-600 mb-4">Type your name and feedback below.</p>
+          <LocalReviewerForm
+            reviewerName={localReviewerName}
+            message={localMessage}
+            onNameChange={setLocalReviewerName}
+            onMessageChange={setLocalMessage}
+            onSubmit={handleLocalFeedbackSubmit}
+            disabled={stage === 'review' && showFeedbackView}
+            notice={localFormNotice}
+            isSubmitting={isSubmittingLocal}
+          />
+        </div>
+      ) : null;
+    return (
+      <ProjectStationCard
+        projectTitle={revieweeRecord?.projectTitle}
+        joinUrl={kioskJoinUrl}
+        fallbackForm={fallbackForm}
+      />
+    );
   };
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold">Gallery Walk</h1>
-        <p className="text-gray-600">
-          Session ID: <span className="font-mono">{sessionId}</span>
-        </p>
-        {revieweeRecord?.projectTitle && (
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">Gallery Walk</h1>
+          </div>
           <p className="text-gray-600">
-            Project: <span className="font-semibold">{revieweeRecord.projectTitle}</span>
+            Session ID: <span className="font-mono">{sessionId}</span>
           </p>
-        )}
+        </div>
       </header>
       {renderModeContent()}
-      {stage === 'review' && !showFeedbackView && (
+      {stage === 'review' && !showFeedbackView && !isReviewerMode && (
         <p className="text-center text-sm text-gray-600">
           Review mode has started. Finish the current comment to see collected feedback.
         </p>
+      )}
+      {sessionClosed && isReviewerMode && (
+        <p className="text-center text-sm text-gray-600">
+          This session has ended. You can still leave notes for yourself, but new feedback will not reach the teacher.
+        </p>
+      )}
+      {isScannerOpen && (
+        <QrScannerPanel
+          onDetected={handleScannerDetected}
+          onError={handleScannerError}
+          onClose={() => setIsScannerOpen(false)}
+        />
       )}
     </div>
   );
