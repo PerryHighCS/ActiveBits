@@ -1,5 +1,14 @@
 import { createSession } from 'activebits-server/core/sessions.js';
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js';
+import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js';
+
+registerSessionNormalizer('python-list-practice', (session) => {
+  const data = session.data;
+  data.students = Array.isArray(data.students) ? data.students : [];
+  data.selectedQuestionTypes = Array.isArray(data.selectedQuestionTypes)
+    ? data.selectedQuestionTypes
+    : ['all'];
+});
 
 const VALID_QUESTION_TYPES = new Set([
   'all',

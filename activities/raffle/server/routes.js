@@ -1,4 +1,10 @@
 import { createSession } from "activebits-server/core/sessions.js";
+import { registerSessionNormalizer } from "activebits-server/core/sessionNormalization.js";
+
+registerSessionNormalizer("raffle", (session) => {
+  const data = session.data;
+  data.tickets = Array.isArray(data.tickets) ? data.tickets : [];
+});
 
 const raffleSubscribers = new Map(); // raffleId -> Set<WebSocket>
 

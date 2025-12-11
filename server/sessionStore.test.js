@@ -4,6 +4,7 @@ import http from 'node:http';
 import WebSocket from 'ws';
 import { createSessionStore, createSession } from './core/sessions.js';
 import { createWsRouter } from './core/wsRouter.js';
+import { registerSessionNormalizer, resetSessionNormalizersForTests } from './core/sessionNormalization.js';
 
 const wait = ms => new Promise(res => setTimeout(res, ms));
 
@@ -54,4 +55,25 @@ test('keepalive refreshes session activity', async () => {
 
     ws.close();
     await new Promise(res => server.close(res));
+});
+
+test('registered session normalizers populate activity defaults', async (t) => {
+    resetSessionNormalizersForTests();
+    registerSessionNormalizer('test-activity', (session) => {
+        session.data.items = Array.isArray(session.data.items) ? session.data.items : [];
+    });
+
+    const sessions = createSessionStore(null, 100);
+    t.after(async () => {
+        await sessions.close();
+        resetSessionNormalizersForTests();
+    });
+
+    const s = await createSession(sessions);
+    s.type = 'test-activity';
+    await sessions.set(s.id, s);
+
+    const loaded = await sessions.get(s.id);
+    assert.ok(Array.isArray(loaded.data.items));
+    assert.equal(loaded.data.items.length, 0);
 });
