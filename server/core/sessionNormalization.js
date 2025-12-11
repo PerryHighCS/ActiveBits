@@ -13,7 +13,11 @@ export function registerSessionNormalizer(activityType, normalizer) {
     }
 
     if (sessionNormalizers.has(activityType)) {
-        console.warn(`[sessionNormalization] Overriding session normalizer for "${activityType}"`);
+        if ((process.env.NODE_ENV || '').startsWith('dev')) {
+            throw new Error(`[sessionNormalization] Attempted to override session normalizer for "${activityType}" in development mode`);
+        } else {
+            console.warn(`[sessionNormalization] Overriding session normalizer for "${activityType}"`);
+        }
     }
 
     sessionNormalizers.set(activityType, normalizer);
