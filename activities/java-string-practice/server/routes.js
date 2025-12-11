@@ -1,5 +1,12 @@
 import { createSession } from 'activebits-server/core/sessions.js';
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js';
+import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js';
+
+registerSessionNormalizer('java-string-practice', (session) => {
+  const data = session.data;
+  data.students = Array.isArray(data.students) ? data.students : [];
+  data.selectedMethods = Array.isArray(data.selectedMethods) ? data.selectedMethods : ['all'];
+});
 
 /**
  * Java String Practice Routes

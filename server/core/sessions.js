@@ -2,45 +2,11 @@ import { randomBytes } from "crypto";
 import { findHashBySessionId, resetPersistentSession } from "./persistentSessions.js";
 import { ValkeySessionStore } from "./valkeyStore.js";
 import { SessionCache } from "./sessionCache.js";
+import { normalizeSessionData } from "./sessionNormalization.js";
 
 /**
  * In-memory session store with automatic TTL cleanup (for development/fallback).
  */
-/**
- * Normalize session data to ensure expected data structures exist.
- * This is critical for sessions loaded from Valkey after server restart/redeploy.
- * @param {Object} session - The session object to normalize
- * @returns {Object} The normalized session object
- */
-function normalizeSessionData(session) {
-    if (!session || typeof session !== 'object') return session;
-    session.data ??= {};
-
-    // Activity-specific defaults
-    switch (session.type) {
-        case 'java-string-practice':
-            session.data.students = Array.isArray(session.data.students) ? session.data.students : [];
-            session.data.selectedMethods = Array.isArray(session.data.selectedMethods) ? session.data.selectedMethods : ['all'];
-            break;
-        case 'python-list-practice':
-            session.data.students = Array.isArray(session.data.students) ? session.data.students : [];
-            session.data.selectedQuestionTypes = Array.isArray(session.data.selectedQuestionTypes) ? session.data.selectedQuestionTypes : ['all'];
-            break;
-        case 'www-sim':
-            session.data.students = Array.isArray(session.data.students) ? session.data.students : [];
-            session.data.studentTemplates = (!Array.isArray(session.data.studentTemplates) && session.data.studentTemplates && typeof session.data.studentTemplates === 'object') ? session.data.studentTemplates : {};
-            session.data.fragments = Array.isArray(session.data.fragments) ? session.data.fragments : [];
-            break;
-        case 'raffle':
-            session.data.tickets = Array.isArray(session.data.tickets) ? session.data.tickets : [];
-            break;
-        default:
-            // No defaults
-            break;
-    }
-    return session;
-}
-
 class InMemorySessionStore {
     constructor(ttlMs = 60 * 60 * 1000) {
         this.ttlMs = ttlMs;
@@ -54,13 +20,15 @@ class InMemorySessionStore {
     async get(id) {
         const session = this.store[id];
         if (session) {
+            normalizeSessionData(session);
             session.lastActivity = Date.now();
+            return session;
         }
-        return session || null;
+        return null;
     }
 
     async set(id, session) {
-        this.store[id] = session;
+        this.store[id] = normalizeSessionData(session);
     }
 
     async delete(id) {
@@ -79,7 +47,7 @@ class InMemorySessionStore {
     }
 
     async getAll() {
-        return Object.values(this.store);
+        return Object.values(this.store).map(normalizeSessionData);
     }
 
     async getAllIds() {

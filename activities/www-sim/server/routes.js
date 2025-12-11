@@ -1,7 +1,17 @@
 import crypto from "crypto";
 import { createSession } from "activebits-server/core/sessions.js";
 import { createBroadcastSubscriptionHelper } from "activebits-server/core/broadcastUtils.js";
+import { registerSessionNormalizer } from "activebits-server/core/sessionNormalization.js";
 import presetPassages from "./presetPassages.js";
+
+registerSessionNormalizer("www-sim", (session) => {
+    const data = session.data;
+    data.students = Array.isArray(data.students) ? data.students : [];
+    const templates = data.studentTemplates;
+    data.studentTemplates =
+        templates && typeof templates === "object" && !Array.isArray(templates) ? templates : {};
+    data.fragments = Array.isArray(data.fragments) ? data.fragments : [];
+});
 
 export default function setupWwwSimRoutes(app, sessions, ws) {
     const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws);

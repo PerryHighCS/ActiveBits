@@ -211,45 +211,25 @@ export default function setupQuizRoutes(app, sessions, ws) {
 
 ### Step 5a: Register Session Data Normalization (Required for Valkey/Cache)
 
-When using Valkey for session persistence, sessions loaded after a server restart may have incomplete or missing data structures. To prevent runtime errors, add your activity's data structure defaults to the normalization function.
+When using Valkey for session persistence, sessions loaded after a server restart may have incomplete or missing data structures. To prevent runtime errors, register activity-specific session normalizers inside your activity's server entry file.
 
-**File: `server/core/sessions.js`**
-
-Find the `normalizeSessionData()` function and add a case for your activity type:
+**File: `activities/<your-activity>/server/routes.js` (or wherever you set up routes)**
 
 ```javascript
-function normalizeSessionData(session) {
-    if (!session || typeof session !== 'object') return session;
-    session.data ??= {};
+import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js';
 
-    // Activity-specific defaults
-    switch (session.type) {
-        case 'quiz':
-            session.data.question = session.data.question ?? '';
-            session.data.responses = Array.isArray(session.data.responses) ? session.data.responses : [];
-            break;
-        // ... other activity cases
-        default:
-            break;
-    }
-    return session;
-}
+registerSessionNormalizer('quiz', (session) => {
+    session.data.question = typeof session.data.question === 'string' ? session.data.question : '';
+    session.data.responses = Array.isArray(session.data.responses) ? session.data.responses : [];
+});
 ```
 
 **Key points:**
-- Use `Array.isArray(...)` to verify arrays before defaulting
-- For plain objects, use: `!Array.isArray(...) && ... !== null && typeof ... === 'object'`
-  - JavaScript's `typeof null === 'object'` and `typeof [] === 'object'`, so both checks are needed
-- Use nullish coalescing (`??`) for primitive fields with defaults
-- This ensures sessions loaded from Valkey have complete structures
-
-**Example for nested objects:**
-```javascript
-session.data.config = (!Array.isArray(session.data.config) && 
-                       session.data.config !== null && 
-                       typeof session.data.config === 'object') 
-                       ? session.data.config : {};
-```
+- Always `import { registerSessionNormalizer }` from `activebits-server/core/sessionNormalization.js` within your activity server module.
+- The normalizer receives the live session object. Mutate `session.data` directly to ensure required fields exist.
+- Use `Array.isArray(...)` before assuming an array, and treat plain objects defensively (`value && typeof value === 'object' && !Array.isArray(value)`).
+- You only need to register the normalizer once per activity; the activity module is loaded during server startup.
+- These normalizers are applied automatically whenever sessions are loaded from Valkey or from the in-memory store, so you don't have to touch `server/core/sessions.js`.
 
 ### Step 6: Add the Activity Config (auto-discovery)
 

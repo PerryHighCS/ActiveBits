@@ -163,23 +163,7 @@ async function handleTeacherCodeVerification(socket, hash, teacherCode, sessions
   // Set up session based on activity type
   newSession.type = persistentSession.activityName;
   
-  // Initialize activity-specific data
-  switch (persistentSession.activityName) {
-    case 'raffle':
-      newSession.data.tickets = [];
-      break;
-    case 'www-sim':
-      newSession.data.students = [];
-      newSession.data.studentTemplates = {};
-      break;
-    case 'java-string-practice':
-      newSession.data.students = [];
-      newSession.data.selectedMethods = [];
-      break;
-    default:
-      break;
-  }
-  
+  // Activity-specific defaults are injected by registered session normalizers
   await sessions.set(newSession.id, newSession);
 
   console.log(`Created session ${newSession.id} for persistent session ${hash}`);
