@@ -621,9 +621,6 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
                 That QR code was not for this session. Make sure you scan the code shown on this station.
               </p>
             )}
-            <Button type="button" variant="ghost" onClick={() => setCanScanNext(false)}>
-              Leave another note here
-            </Button>
           </div>
         )}
       </div>
