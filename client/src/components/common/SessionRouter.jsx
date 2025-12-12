@@ -369,20 +369,24 @@ const SessionRouter = () => {
                         <h2 className="text-2xl font-bold text-center mb-4 text-gray-800">Solo Bits</h2>
                         <p className="text-center text-gray-600 mb-6">Practice on your own</p>
                         <div className="flex flex-col items-center gap-4">
-                            {soloActivities.map(activity => (
-                                <div 
-                                    key={activity.id} 
-                                    onClick={() => navigate(`/solo/${activity.id}`)}
-                                    className="rounded-lg shadow-md overflow-hidden w-full max-w-md border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
-                                >
-                                    <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>
-                                        <h3 className="text-xl font-semibold">{activity.name}</h3>
+                            {soloActivities.map(activity => {
+                                const soloTitle = activity.soloModeMeta?.title || activity.name;
+                                const soloDescription = activity.soloModeMeta?.description || activity.description;
+                                return (
+                                    <div 
+                                        key={activity.id} 
+                                        onClick={() => navigate(`/solo/${activity.id}`)}
+                                        className="rounded-lg shadow-md overflow-hidden w-full max-w-md border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                                    >
+                                        <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>
+                                            <h3 className="text-xl font-semibold">{soloTitle}</h3>
+                                        </div>
+                                        <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4`}>
+                                            <p className="text-gray-600">{soloDescription}</p>
+                                        </div>
                                     </div>
-                                    <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4`}>
-                                        <p className="text-gray-600">{activity.description}</p>
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 )}

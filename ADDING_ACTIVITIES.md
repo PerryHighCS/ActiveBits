@@ -147,7 +147,7 @@ export default {
 };
 ```
 
-Keep metadata (id/name/description/color/soloMode) in `activity.config.js` to avoid dueling sources of truth. The loader merges `{...config, ...clientEntry}` at runtime.
+Keep metadata (id/name/description/color/soloMode + optional soloModeMeta overrides) in `activity.config.js` to avoid dueling sources of truth. The loader merges `{...config, ...clientEntry}` at runtime.
 
 ### Step 5: Create Server Routes
 
@@ -242,6 +242,11 @@ export default {
   description: 'Ask students questions and collect responses',
   color: 'purple',
   soloMode: false,
+  soloModeMeta: {
+    title: 'Quiz practice',
+    description: 'Shown instead of description for Solo Bits cards (optional)',
+    buttonText: 'Copy Quiz Solo Link',
+  },
   clientEntry: './client/index.js',  // or .jsx if using JSX in footerContent
   serverEntry: './server/routes.js',
 };
@@ -364,6 +369,24 @@ export const practiceActivity = {
 - No teacher dashboard needed - ManagerComponent can be a stub
 - Store state in localStorage if persistence is needed
 - Server routes are optional for fully client-side activities
+
+### Customizing Solo Mode Labels
+
+Provide an optional `soloModeMeta` object in `activity.config.js` to override the Solo Bits card title/description and the "Copy Solo Practice Link" button text on the management dashboard:
+
+```javascript
+export default {
+  // ...
+  soloMode: true,
+  soloModeMeta: {
+    title: 'Review Gallery Walk Feedback',
+    description: 'Upload a .gw file to see the comments left for you.',
+    buttonText: 'Copy Feedback Review Link',
+  },
+};
+```
+
+If omitted, the UI falls back to `name`, `description`, and the default button label.
 
 ### Solo Mode Best Practices
 
