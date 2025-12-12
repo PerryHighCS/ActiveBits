@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
-import Button from '@src/components/ui/Button';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils';
 import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.jsx';
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
+import StageControls from '../components/StageControls.jsx';
 
 export default function ManagerPage() {
   const { sessionId } = useParams();
@@ -189,36 +189,6 @@ export default function ManagerPage() {
     return () => disconnectWs();
   }, [sessionId, connectWs, disconnectWs]);
 
-  const renderStageControls = () => {
-    const isGallery = stage === 'gallery';
-    const nextStage = isGallery ? 'review' : 'gallery';
-    const description = isGallery
-      ? (
-        <>
-          <strong className="font-semibold text-gray-900">Gallery Walk.</strong>
-          {' '}
-          Students provide peer feedback on each other&apos;s work. Feedback is not visible until review mode.
-        </>
-      )
-      : (
-        <>
-          <strong className="font-semibold text-gray-900">Feedback Review.</strong>
-          {' '}
-          Students can see feedback left by their peers.
-        </>
-      );
-    const buttonLabel = isGallery ? 'Switch to Feedback review mode' : 'Switch to Gallery Walk mode';
-    return (
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="text-sm font-semibold text-gray-700">Session mode</label>
-        <p className="text-sm text-gray-600 flex-1 min-w-[12rem]">{description}</p>
-        <Button type="button" variant="outline" onClick={() => handleStageChange(nextStage)}>
-          {buttonLabel}
-        </Button>
-      </div>
-    );
-  };
-
   const renderTableHeaderCell = (label, field) => (
     <button
       type="button"
@@ -356,7 +326,7 @@ export default function ManagerPage() {
                     placeholder="e.g., Spring Showcase"
                   />
                 </div>
-                {renderStageControls()}
+                <StageControls stage={stage} onChange={handleStageChange} />
               </div>
               <div className="md:w-64">
                 <div className="h-full rounded border border-gray-200 bg-gray-50 px-4 py-4 text-right flex flex-col justify-center">
