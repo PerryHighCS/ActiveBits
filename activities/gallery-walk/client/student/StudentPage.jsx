@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
-import QrScannerPanel from '@src/components/common/QrScannerPanel';
+import ReviewerScanner from '../components/ReviewerScanner.jsx';
 import ProjectStationCard from '../components/ProjectStationCard';
 import LocalReviewerForm from '../components/LocalReviewerForm';
 import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer.jsx';
@@ -436,39 +436,20 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     setCanScanNext(true);
   };
 
-  const handleScannerDetected = (content) => {
-    setIsScannerOpen(false);
-    setScannerError(null);
-    try {
-      const target = new URL(content);
-      if (!sessionId || target.origin !== window.location.origin) {
-        setScannerError('scanner-invalid');
-        return;
-      }
-      const pathSegments = target.pathname.split('/').filter(Boolean);
-      const lastSegment = pathSegments[pathSegments.length - 1];
-      if (lastSegment !== sessionId) {
-        setScannerError('scanner-invalid');
-        return;
-      }
-      const reviewee = target.searchParams.get('reviewee');
-      if (!reviewee || !REVIEWEE_ID_PATTERN.test(reviewee)) {
-        setScannerError('scanner-invalid');
-        return;
-      }
-      setCanScanNext(false);
-      setReviewerMessage('');
-      setReviewerNotice(null);
-      navigate(`${target.pathname}?reviewee=${encodeURIComponent(reviewee)}${target.hash}`);
-    } catch {
+  const handleScannerSuccess = useCallback(({ pathname, reviewee, hash }) => {
+    if (!reviewee || !REVIEWEE_ID_PATTERN.test(reviewee)) {
       setScannerError('scanner-invalid');
+      return;
     }
-  };
+    setCanScanNext(false);
+    setReviewerMessage('');
+    setReviewerNotice(null);
+    navigate(`${pathname}?reviewee=${encodeURIComponent(reviewee)}${hash}`);
+  }, [navigate]);
 
-  const handleScannerError = () => {
-    setScannerError('scanner-unavailable');
-    setIsScannerOpen(false);
-  };
+  const handleScannerState = useCallback((code) => {
+    setScannerError(code);
+  }, []);
 
   const renderReviewerContent = () => {
     if (!requestedReviewee) {
@@ -589,13 +570,13 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
           This session has ended. You can still leave notes for yourself, but new feedback will not reach the teacher.
         </p>
       )}
-      {isScannerOpen && (
-        <QrScannerPanel
-          onDetected={handleScannerDetected}
-          onError={handleScannerError}
-          onClose={() => setIsScannerOpen(false)}
-        />
-      )}
+      <ReviewerScanner
+        isOpen={isScannerOpen}
+        sessionId={sessionId}
+        onClose={() => setIsScannerOpen(false)}
+        onSuccess={handleScannerSuccess}
+        onError={handleScannerState}
+      />
     </div>
   );
 }
