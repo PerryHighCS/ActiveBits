@@ -77,6 +77,17 @@
   );
 }
 
+.note-style-field {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0.5rem;
+}
+
+.note-style-field textarea,
+.note-style-field input {
+  background: transparent;
+}
+
 @media print {
   .student-page {
     padding: 0;
@@ -116,19 +127,22 @@
     display: none !important;
   }
 
-  .manager-page .manager-notes-grid {
+  .manager-page .manager-notes-grid,
+  .solo-feedback-viewer .manager-notes-grid {
     display: flex !important;
     flex-wrap: wrap;
     gap: 1.5rem;
   }
 
-  .manager-page .notes-student-card {
+  .manager-page .notes-student-card,
+  .solo-feedback-viewer .notes-student-card {
     flex: 0 0 auto;
     width: auto !important;
     max-width: 6.5in;
   }
 
-  .manager-page .feedback-cards {
+  .manager-page .feedback-cards,
+  .solo-feedback-viewer .feedback-cards {
     display: flex !important;
     flex-wrap: wrap;
     justify-content: flex-start;
@@ -136,7 +150,8 @@
     width: auto;
   }
 
-  .manager-page .feedback-card {
+  .manager-page .feedback-card,
+  .solo-feedback-viewer .feedback-card {
     flex: 0 0 14rem !important;
     max-width: 18rem !important;
   }

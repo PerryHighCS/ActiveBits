@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../ui/Button';
+import { getActivity } from '@src/activities';
 
 /**
  * WaitingRoom component for persistent sessions
@@ -148,13 +149,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
   };
 
   const getActivityDisplayName = () => {
-    const names = {
-      'raffle': 'Raffle',
-      'www-sim': 'WWW Simulator',
-      'java-string-practice': 'Java String Practice',
-      'python-list-practice': 'Python List Practice',
-    };
-    return names[activityName] || activityName;
+    return getActivity(activityName)?.name || activityName;
   };
 
   return (

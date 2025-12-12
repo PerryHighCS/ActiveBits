@@ -6,6 +6,7 @@ import QrScannerPanel from '@src/components/common/QrScannerPanel';
 import ProjectStationCard from '../components/ProjectStationCard';
 import LocalReviewerForm from '../components/LocalReviewerForm';
 import FeedbackCards from '../components/FeedbackCards';
+import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer.jsx';
 import ReviewerIdentityForm from '../components/ReviewerIdentityForm';
 import ReviewerFeedbackForm from '../components/ReviewerFeedbackForm';
 import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
@@ -19,7 +20,7 @@ function generateShortId(length = 6) {
   return out;
 }
 
-export default function StudentPage({ sessionData }) {
+function GalleryWalkLiveStudentPage({ sessionData }) {
   const sessionId = sessionData?.sessionId || null;
   const location = useLocation();
   const navigate = useNavigate();
@@ -83,6 +84,27 @@ export default function StudentPage({ sessionData }) {
       localStorage.setItem(`${reviewerStoragePrefix}:styleId`, value);
     }
   }, [reviewerStoragePrefix]);
+  const handleStudentDownload = useCallback(() => {
+    if (!sessionId || !revieweeId) return;
+    const payload = {
+      version: 1,
+      exportedAt: Date.now(),
+      sessionId,
+      revieweeId,
+      reviewee: revieweeRecord || null,
+      feedback: revieweeFeedback,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const slugSource = revieweeRecord?.name || revieweeRecord?.projectTitle || revieweeId || 'student';
+    const slug = slugSource.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'student';
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `gallery-walk-${sessionId}-${slug}-${timestamp}.gw`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, [revieweeFeedback, revieweeRecord, revieweeId, sessionId]);
 
   const kioskJoinUrl = useMemo(() => {
     if (!sessionId || !revieweeId || typeof window === 'undefined') return '';
@@ -358,8 +380,11 @@ export default function StudentPage({ sessionData }) {
           This session has ended. You can still view and print your feedback.
         </p>
       )}
-      <div className="flex justify-end print:hidden">
-        <Button onClick={() => window.print()} variant="outline">
+      <div className="flex flex-wrap justify-end gap-3 print:hidden">
+        <Button type="button" variant="outline" onClick={handleStudentDownload}>
+          Download feedback
+        </Button>
+        <Button type="button" onClick={() => window.print()} variant="outline">
           Print my feedback
         </Button>
       </div>
@@ -584,4 +609,25 @@ export default function StudentPage({ sessionData }) {
       )}
     </div>
   );
+}
+
+export default function StudentPage({ sessionData }) {
+  const sessionId = sessionData?.sessionId || null;
+  const isSoloMode = typeof sessionId === 'string' && sessionId.startsWith('solo-gallery-walk');
+  if (isSoloMode) {
+    return (
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6 student-page">
+        <header className="student-header space-y-2">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h1 className="student-title text-3xl font-bold">Gallery Walk</h1>
+              <p className="text-gray-600">Upload saved feedback to review or print later.</p>
+            </div>
+          </div>
+        </header>
+        <GalleryWalkSoloViewer />
+      </div>
+    );
+  }
+  return <GalleryWalkLiveStudentPage sessionData={sessionData} />;
 }

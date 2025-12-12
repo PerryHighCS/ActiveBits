@@ -1,6 +1,7 @@
 import React from 'react';
 import Button from '@src/components/ui/Button';
 import NoteStyleSelect from './NoteStyleSelect.jsx';
+import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles.js';
 
 export default function ReviewerFeedbackForm({
   projectTitle,
@@ -17,6 +18,7 @@ export default function ReviewerFeedbackForm({
   styleId,
   onStyleChange,
 }) {
+  const noteStyleClass = getNoteStyleClassName(normalizeNoteStyleId(styleId));
   return (
     <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -28,13 +30,15 @@ export default function ReviewerFeedbackForm({
         <NoteStyleSelect value={styleId} onChange={onStyleChange} label="Note style" />
       </div>
       <form onSubmit={onSubmit} className="space-y-3">
-        <textarea
-          className="w-full rounded border border-gray-300 px-3 py-2"
-          rows={5}
-          value={message}
-          onChange={(e) => onMessageChange(e.target.value)}
-          placeholder="Share what you liked and what could improve"
-        />
+        <div className={`note-style-field ${noteStyleClass}`}>
+          <textarea
+            className="w-full border-0 bg-transparent px-3 py-2 text-gray-900 placeholder-gray-600 focus:outline-none focus:ring-0"
+            rows={5}
+            value={message}
+            onChange={(e) => onMessageChange(e.target.value)}
+            placeholder="Share what you liked and what could improve"
+          />
+        </div>
         {notice && <p className="text-sm text-indigo-700">{notice}</p>}
         <div className="flex flex-wrap gap-2">
           <Button type="submit" disabled={isSubmitting}>

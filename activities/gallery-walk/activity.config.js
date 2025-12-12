@@ -3,7 +3,7 @@ export default {
   name: 'Gallery Walk',
   description: 'Students showcase projects and leave peer feedback',
   color: 'blue',
-  soloMode: false,
+  soloMode: true,
   soloModeMeta: {
     title: 'Review Gallery Walk Feedback',
     description: 'Upload and review feedback that was left for you.',
