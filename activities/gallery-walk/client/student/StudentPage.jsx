@@ -9,6 +9,7 @@ import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer.jsx';
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
 import ReviewerIdentityForm from '../components/ReviewerIdentityForm';
 import ReviewerFeedbackForm from '../components/ReviewerFeedbackForm';
+import RegistrationForm from '../components/RegistrationForm.jsx';
 import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
 import { generateShortId } from '../../shared/id.js';
 
@@ -359,49 +360,6 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     return () => disconnectWs();
   }, [sessionId, connectWs, disconnectWs]);
 
-  const renderRegistrationForm = () => (
-    <form onSubmit={handleRevieweeRegistration} className="space-y-4 bg-white shadow rounded-lg p-6">
-      <div>
-        <h2 className="text-xl font-semibold">Prepare for review</h2>
-        <p className="text-gray-600 mt-1">
-          Enter your name(s) (and optional project title). This information is sent to the teacher.
-        </p>
-      </div>
-      <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1" htmlFor="reviewee-name-input">Your name</label>
-        <input
-          id="reviewee-name-input"
-          type="text"
-          className="w-full rounded border border-gray-300 px-3 py-2"
-          value={registrationName}
-          onChange={(e) => setRegistrationName(e.target.value)}
-          placeholder="Student name"
-          aria-required="true"
-          aria-invalid={Boolean(registrationError)}
-          aria-describedby={registrationError ? 'reviewee-name-error' : undefined}
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1">Project title (optional)</label>
-        <input
-          type="text"
-          className="w-full rounded border border-gray-300 px-3 py-2"
-          value={registrationProject}
-          onChange={(e) => setRegistrationProject(e.target.value)}
-          placeholder="Project title"
-        />
-      </div>
-      {registrationError && (
-        <p id="reviewee-name-error" className="text-sm text-red-600" aria-live="polite">
-          {registrationError}
-        </p>
-      )}
-      <Button type="submit" disabled={isRegistering}>
-        {isRegistering ? 'Registering…' : 'Save and continue'}
-      </Button>
-    </form>
-  );
-
   const renderFeedbackView = () => (
     <div className="rounded-lg border border-indigo-200 bg-white p-6 shadow space-y-4 print:border-0 print:shadow-none print:p-0">
       <div className="flex items-center justify-between">
@@ -637,7 +595,17 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       return renderReviewerContent();
     }
     if (!revieweeId) {
-      return renderRegistrationForm();
+      return (
+        <RegistrationForm
+          name={registrationName}
+          projectTitle={registrationProject}
+          onNameChange={setRegistrationName}
+          onProjectChange={setRegistrationProject}
+          onSubmit={handleRevieweeRegistration}
+          error={registrationError}
+          isSubmitting={isRegistering}
+        />
+      );
     }
     if (showFeedbackView) {
       return renderFeedbackView();
