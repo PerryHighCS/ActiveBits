@@ -166,38 +166,9 @@ body {
 
   .manager-page .manager-notes-grid,
   .solo-feedback-viewer .manager-notes-grid {
-    display: flex !important;
+    display: flex;
     flex-wrap: wrap;
     gap: 1.5rem;
-  }
-
-  .manager-page .notes-student-card,
-  .solo-feedback-viewer .notes-student-card {
-    flex: 0 0 auto;
-    width: auto !important;
-    max-width: 6.5in;
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-
-  .manager-page .notes-student-card {
-    width: 100% !important;
-    max-width: none !important;
-    page-break-after: always;
-  }
-
-  .manager-page .notes-student-card:last-of-type {
-    page-break-after: auto;
-  }
-
-  .solo-feedback-viewer .notes-student-card {
-    width: 100% !important;
-    max-width: none !important;
-  }
-
-  .solo-feedback-viewer .notes-student-card:last-of-type {
-    break-after: auto !important;
-    page-break-after: auto !important;
   }
 
   .manager-page .feedback-cards,
