@@ -7,7 +7,8 @@ import React, {
 } from 'react';
 import Button from '@src/components/ui/Button';
 import FeedbackCards from './FeedbackCards.jsx';
-import { getTimestampMeta } from '../manager/managerUtils.js';
+import GalleryWalkFeedbackTable from './GalleryWalkFeedbackTable.jsx';
+import GalleryWalkNotesView from './GalleryWalkNotesView.jsx';
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -18,11 +19,16 @@ export default function GalleryWalkSoloViewer() {
   const [fileResult, setFileResult] = useState(null);
   const [error, setError] = useState(null);
   const [viewMode, setViewMode] = useState('notes');
+  const [tableSortField, setTableSortField] = useState('createdAt');
+  const [tableSortDirection, setTableSortDirection] = useState('desc');
   const [notesReviewee, setNotesReviewee] = useState('all');
+  const [showFileMeta, setShowFileMeta] = useState(false);
 
   useEffect(() => {
     if (!fileResult) return;
     setViewMode(fileResult.type === 'teacher' ? 'table' : 'notes');
+    setTableSortField('createdAt');
+    setTableSortDirection('desc');
     setNotesReviewee('all');
   }, [fileResult]);
 
@@ -37,6 +43,7 @@ export default function GalleryWalkSoloViewer() {
         sessionId: data.sessionId || 'unknown',
         exportedAt: data.exportedAt || Date.now(),
         feedback,
+        config: isPlainObject(data.config) ? data.config : {},
       };
       if (isPlainObject(data.reviewees)) {
         setFileResult({
@@ -92,119 +99,79 @@ export default function GalleryWalkSoloViewer() {
     }, {});
   }, [sortedFeedback]);
 
-  const renderTeacherTable = () => {
-    const reviewees = fileResult?.data?.reviewees || {};
-    const reviewers = fileResult?.data?.reviewers || {};
-    return (
-      <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 bg-white shadow print:border-0 print:shadow-none">
-        <table className="min-w-full divide-y divide-gray-200 text-sm print:text-xs">
-          <thead className="bg-gray-50 print:bg-white">
-            <tr>
-              <th className="px-4 py-3 text-left font-semibold">To</th>
-              <th className="px-4 py-3 text-left font-semibold">From</th>
-              <th className="px-4 py-3 text-left font-semibold">Posted</th>
-              <th className="px-4 py-3 text-left font-semibold">Message</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {sortedFeedback.map((entry) => {
-              const recipient = reviewees[entry.to];
-              const timestamp = getTimestampMeta(entry.createdAt);
-              const screenText = timestamp.date
-                ? (timestamp.showDateOnScreen
-                  ? `${timestamp.date.toLocaleDateString()} ${timestamp.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-                  : timestamp.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))
-                : '—';
-              const printText = timestamp.date
-                ? `${timestamp.date.toLocaleDateString()} ${timestamp.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-                : '—';
-              return (
-                <tr key={entry.id}>
-                  <td className="px-4 py-3">
-                    {recipient?.name || recipient?.projectTitle || entry.to || '—'}
-                  </td>
-                  <td className="px-4 py-3">{entry.fromNameSnapshot || reviewers[entry.from]?.name || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">
-                    <span className="print:hidden">{screenText}</span>
-                    <span className="hidden print:inline">{printText}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="whitespace-pre-wrap">{entry.message}</p>
-                  </td>
-                </tr>
-              );
-            })}
-            {!sortedFeedback.length && (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
-                  No feedback entries in this file.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
+  const reviewees = fileResult?.data?.reviewees || {};
+  const reviewers = fileResult?.data?.reviewers || {};
+  const sessionTitle = fileResult?.data?.config?.title || 'Gallery Walk Feedback';
 
-  const renderTeacherNotes = () => {
-    const reviewees = fileResult?.data?.reviewees || {};
-    const revieweeEntries = Object.entries(reviewees);
-    const selectedIds = notesReviewee === 'all'
-      ? revieweeEntries.map(([id]) => id)
-      : revieweeEntries.some(([id]) => id === notesReviewee)
-        ? [notesReviewee]
-        : [];
+  const tableFeedback = useMemo(() => {
+    const entries = [...sortedFeedback];
+    const directionFactor = tableSortDirection === 'asc' ? 1 : -1;
+    const normalizeString = (value) => (value || '').toString().toLowerCase();
+    const getRecipientLabel = (entry) => (
+      reviewees[entry.to]?.name
+      || reviewees[entry.to]?.projectTitle
+      || entry.to
+      || ''
+    );
+    const getAuthorLabel = (entry) => (
+      entry.fromNameSnapshot
+      || reviewers[entry.from]?.name
+      || ''
+    );
+    entries.sort((a, b) => {
+      let aValue;
+      let bValue;
+      switch (tableSortField) {
+        case 'to':
+          aValue = normalizeString(getRecipientLabel(a));
+          bValue = normalizeString(getRecipientLabel(b));
+          break;
+        case 'from':
+          aValue = normalizeString(getAuthorLabel(a));
+          bValue = normalizeString(getAuthorLabel(b));
+          break;
+        case 'createdAt':
+        default:
+          aValue = a.createdAt || 0;
+          bValue = b.createdAt || 0;
+          break;
+      }
+      if (aValue < bValue) return -1 * directionFactor;
+      if (aValue > bValue) return 1 * directionFactor;
+      return 0;
+    });
+    return entries;
+  }, [sortedFeedback, tableSortDirection, tableSortField, reviewees, reviewers]);
+
+  const handleTableSortToggle = useCallback((field) => {
+    setTableSortDirection((prevDirection) => {
+      if (tableSortField === field) {
+        return prevDirection === 'asc' ? 'desc' : 'asc';
+      }
+      return 'asc';
+    });
+    setTableSortField(field);
+  }, [tableSortField]);
+
+  const summaryText = useMemo(() => {
+    if (!fileResult) return null;
+    const exportedAt = new Date(fileResult.data.exportedAt);
+    return exportedAt.toString() !== 'Invalid Date'
+      ? exportedAt.toLocaleString()
+      : null;
+  }, [fileResult]);
+
+  const renderFileMetaDetails = (variant = 'card') => {
+    if (!fileResult) return null;
+    const wrapperClass = variant === 'card'
+      ? 'rounded border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700'
+      : 'text-xs text-gray-500 space-y-1';
     return (
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-3 print:hidden">
-          <label htmlFor="solo-notes-select" className="text-sm font-semibold text-gray-700">Student view</label>
-          <select
-            id="solo-notes-select"
-            className="rounded border border-gray-300 px-3 py-1 text-sm"
-            value={notesReviewee}
-            onChange={(e) => setNotesReviewee(e.target.value)}
-          >
-            <option value="all">All students</option>
-            {revieweeEntries.map(([id, info]) => (
-              <option key={id} value={id}>
-                {info?.name || info?.projectTitle || id}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="manager-notes-grid grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {selectedIds.map((id) => {
-            const cards = feedbackByReviewee[id] || [];
-            const info = reviewees[id];
-            return (
-              <div key={id} className="notes-student-card rounded border border-gray-200 p-4 shadow-sm">
-                <div className="flex items-baseline justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-gray-500">Student</p>
-                    <p className="text-lg font-semibold text-gray-900">{info?.name || info?.projectTitle || id}</p>
-                    {info?.projectTitle && (
-                      <p className="text-sm text-gray-600">{info.projectTitle}</p>
-                    )}
-                  </div>
-                  <span className="text-sm text-gray-500">
-                    {cards.length} note{cards.length === 1 ? '' : 's'}
-                  </span>
-                </div>
-                {cards.length === 0 ? (
-                  <p className="mt-3 text-sm text-gray-500">No feedback for this student in the file.</p>
-                ) : (
-                  <div className="mt-4">
-                    <FeedbackCards entries={cards} isLoading={false} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {!selectedIds.length && (
-            <p className="text-sm text-gray-500">No students found in this export.</p>
-          )}
-        </div>
+      <div className={wrapperClass}>
+        <p className="font-semibold">{fileResult.fileName || 'Uploaded file'}</p>
+        <p>Session ID: {fileResult.data.sessionId}</p>
+        {summaryText && <p>Exported: {summaryText}</p>}
+        <p>Feedback entries: {sortedFeedback.length}</p>
       </div>
     );
   };
@@ -217,13 +184,33 @@ export default function GalleryWalkSoloViewer() {
           <div>
             {reviewee?.name && <p className="text-lg font-semibold text-gray-900">{reviewee.name}</p>}
             {reviewee?.projectTitle && <p className="text-sm text-gray-600">{reviewee.projectTitle}</p>}
-            <p className="text-xs text-gray-500">
-              {fileResult?.fileName || 'Uploaded file'}
-            </p>
+            {showFileMeta ? (
+              <div className="mt-1">
+                {renderFileMetaDetails('inline')}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">
+                {fileResult?.fileName || 'Uploaded file'}
+              </p>
+            )}
           </div>
-          <Button type="button" variant="outline" onClick={() => window.print()}>
-            Print
-          </Button>
+          <div className="flex items-center gap-2 print:hidden">
+            <Button
+                type="button"
+                aria-label={showFileMeta ? 'Hide file info' : 'Show file info'}
+                variant="outline"
+                // className="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+                onClick={() => setShowFileMeta((prev) => !prev)}
+              >
+                File info
+            </Button>
+            <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+              Upload another file
+            </Button>
+            <Button type="button" variant="outline" onClick={() => window.print()}>
+              Print
+            </Button>
+          </div>
         </div>
         <FeedbackCards entries={sortedFeedback} isLoading={false} />
       </div>
@@ -232,60 +219,129 @@ export default function GalleryWalkSoloViewer() {
 
   const renderLoadedContent = () => {
     if (!fileResult) return null;
-    const exportedAt = new Date(fileResult.data.exportedAt);
-    const summaryText = exportedAt.toString() !== 'Invalid Date'
-      ? exportedAt.toLocaleString()
-      : null;
     return (
       <div className="space-y-4 solo-feedback-loaded">
-        <div className="rounded border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-          <p className="font-semibold">{fileResult.fileName}</p>
-          <p>Session ID: {fileResult.data.sessionId}</p>
-          {summaryText && <p>Exported: {summaryText}</p>}
-          <p>Feedback entries: {sortedFeedback.length}</p>
-        </div>
+        {showFileMeta && fileResult.type !== 'student' && renderFileMetaDetails('card')}
         {fileResult.type === 'teacher' ? (
           <>
             <div className="flex flex-wrap items-center gap-3 print:hidden">
-              <Button
-                type="button"
-                variant={viewMode === 'table' ? 'default' : 'outline'}
-                onClick={() => setViewMode('table')}
-              >
-                Table view
-              </Button>
-              <Button
-                type="button"
-                variant={viewMode === 'notes' ? 'default' : 'outline'}
-                onClick={() => setViewMode('notes')}
-              >
-                Notes view
-              </Button>
-              <Button type="button" variant="outline" onClick={() => window.print()}>
-                Print
-              </Button>
+              <div className="me-auto">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setViewMode((prev) => (prev === 'table' ? 'notes' : 'table'))}
+                >
+                  {viewMode === 'table' ? 'Notes view' : 'Table view'}
+                </Button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  aria-label={showFileMeta ? 'Hide file info' : 'Show file info'}
+                  variant="outline"
+                  onClick={() => setShowFileMeta((prev) => !prev)}
+                >
+                  File info
+                </Button>
+                <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                  Upload another file
+                </Button>
+                <Button type="button" variant="outline" onClick={() => window.print()}>
+                  Print
+                </Button>
+              </div>
             </div>
-            {viewMode === 'table' ? renderTeacherTable() : renderTeacherNotes()}
+            {viewMode === 'table' ? (
+              <GalleryWalkFeedbackTable
+                feedback={tableFeedback}
+                reviewees={reviewees}
+                reviewers={reviewers}
+                containerClassName="mt-4"
+                emptyMessage="No feedback entries in this file."
+                headerOverrides={{
+                  to: (
+                    <>
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 text-left font-semibold text-gray-700 text-sm print:hidden"
+                        onClick={() => handleTableSortToggle('to')}
+                      >
+                        To
+                        {tableSortField === 'to' && (
+                          <span className="text-xs text-gray-500">
+                            {tableSortDirection === 'asc' ? '▲' : '▼'}
+                          </span>
+                        )}
+                      </button>
+                      <span className="hidden print:inline font-semibold">To</span>
+                    </>
+                  ),
+                  from: (
+                    <>
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 text-left font-semibold text-gray-700 text-sm print:hidden"
+                        onClick={() => handleTableSortToggle('from')}
+                      >
+                        From
+                        {tableSortField === 'from' && (
+                          <span className="text-xs text-gray-500">
+                            {tableSortDirection === 'asc' ? '▲' : '▼'}
+                          </span>
+                        )}
+                      </button>
+                      <span className="hidden print:inline font-semibold">From</span>
+                    </>
+                  ),
+                  posted: (
+                    <>
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 text-left font-semibold text-gray-700 text-sm print:hidden"
+                        onClick={() => handleTableSortToggle('createdAt')}
+                      >
+                        Posted
+                        {tableSortField === 'createdAt' && (
+                          <span className="text-xs text-gray-500">
+                            {tableSortDirection === 'asc' ? '▲' : '▼'}
+                          </span>
+                        )}
+                      </button>
+                      <span className="hidden print:inline font-semibold">Posted</span>
+                    </>
+                  ),
+                }}
+              />
+            ) : (
+              <GalleryWalkNotesView
+                reviewees={reviewees}
+                feedbackByReviewee={feedbackByReviewee}
+                selectedReviewee={notesReviewee}
+                onSelectReviewee={setNotesReviewee}
+                selectId="solo-notes-select"
+                gridClassName="grid-cols-1"
+                cardClassName="print:break-after-page"
+                emptySelectionText="No students found in this export."
+                noFeedbackText="No feedback for this student in the file."
+                printTitle={sessionTitle}
+              />
+            )}
           </>
         ) : (
-          renderStudentView()
+          renderStudentView(showFileMeta, setShowFileMeta)
         )}
       </div>
     );
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6 shadow space-y-4 solo-feedback-viewer">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold text-gray-900">Review saved feedback</h2>
-          <p className="text-gray-600">
-            Upload the `.gw` file exported from a student page or the teacher dashboard to view comments.
-          </p>
-        </div>
-        <Button type="button" onClick={() => fileInputRef.current?.click()}>
-          {fileResult ? 'Upload another file' : 'Upload feedback (.gw)'}
-        </Button>
+    <div className="rounded-lg border border-gray-200 bg-white p-6 shadow space-y-4 solo-feedback-viewer print:border-0 print:p-0 print:shadow-none print:bg-transparent">
+      <div className={"flex flex-wrap items-start justify-center gap-4 print:hidden" + (fileResult ? " hidden" : "")} >
+        {!fileResult && (
+          <Button type="button" onClick={() => fileInputRef.current?.click()}>
+            Upload feedback (.gw)
+          </Button>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -299,8 +355,7 @@ export default function GalleryWalkSoloViewer() {
         renderLoadedContent()
       ) : (
         <div className="rounded border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-gray-600">
-          <p>Use the buttons above to export feedback as `.gw` files from the student or teacher experience.</p>
-          <p>You can review those files here without needing a live session.</p>
+          <p>Upload the `.gw` file exported during a Gallery Walk to view or print comments.</p>
         </div>
       )}
     </div>

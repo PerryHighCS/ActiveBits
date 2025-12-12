@@ -4,9 +4,9 @@ import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils';
-import { getTimestampMeta } from './managerUtils';
 import { NOTE_STYLE_OPTIONS, getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles.js';
-import FeedbackCards from '../components/FeedbackCards.jsx';
+import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.jsx';
+import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
 
 export default function ManagerPage() {
   const { sessionId } = useParams();
@@ -19,11 +19,12 @@ export default function ManagerPage() {
   const [sortField, setSortField] = useState('createdAt');
   const [sortDirection, setSortDirection] = useState('desc');
   const [exportSignature, setExportSignature] = useState(null);
-  const [importPreview, setImportPreview] = useState(null);
-  const [importError, setImportError] = useState(null);
   const [showNotesView, setShowNotesView] = useState(false);
   const [notesReviewee, setNotesReviewee] = useState('all');
-  const fileInputRef = useRef(null);
+  const [sessionTitle, setSessionTitle] = useState('');
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const [titleSaveError, setTitleSaveError] = useState(null);
+  const titleInitializedRef = useRef(false);
 
   const loadSnapshot = useCallback(async () => {
     if (!sessionId) return;
@@ -39,6 +40,8 @@ export default function ManagerPage() {
       setFeedback(Array.isArray(data.feedback) ? data.feedback : []);
       setReviewees(data.reviewees || {});
       setReviewers(data.reviewers || {});
+      setSessionTitle(data.config?.title || '');
+      setTitleSaveError(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -49,6 +52,47 @@ export default function ManagerPage() {
   useEffect(() => {
     loadSnapshot();
   }, [loadSnapshot]);
+
+  useEffect(() => {
+    titleInitializedRef.current = false;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return undefined;
+    if (!titleInitializedRef.current) {
+      titleInitializedRef.current = true;
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(async () => {
+      setIsSavingTitle(true);
+      setTitleSaveError(null);
+      try {
+        const res = await fetch(`/api/gallery-walk/${sessionId}/title`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: sessionTitle }),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Unable to save title');
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          setTitleSaveError(err.message || 'Unable to save title');
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSavingTitle(false);
+        }
+      }
+    }, 600);
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
+  }, [sessionId, sessionTitle]);
 
   const handleStageChange = async (nextStage) => {
     if (!sessionId || stage === nextStage) return;
@@ -82,8 +126,8 @@ export default function ManagerPage() {
     [feedback, sortField, sortDirection],
   );
   const currentSignature = useMemo(
-    () => JSON.stringify({ reviewees, reviewers, feedback }),
-    [reviewees, reviewers, feedback],
+    () => JSON.stringify({ reviewees, reviewers, feedback, title: sessionTitle }),
+    [reviewees, reviewers, feedback, sessionTitle],
   );
   useEffect(() => {
     if (exportSignature === null) {
@@ -146,24 +190,35 @@ export default function ManagerPage() {
     return () => disconnectWs();
   }, [sessionId, connectWs, disconnectWs]);
 
-  const renderStageControls = () => (
-    <div className="flex gap-3">
-      <Button
-        type="button"
-        variant={stage === 'gallery' ? 'default' : 'outline'}
-        onClick={() => handleStageChange('gallery')}
-      >
-        Gallery Walk mode
-      </Button>
-      <Button
-        type="button"
-        variant={stage === 'review' ? 'default' : 'outline'}
-        onClick={() => handleStageChange('review')}
-      >
-        Feedback review mode
-      </Button>
-    </div>
-  );
+  const renderStageControls = () => {
+    const isGallery = stage === 'gallery';
+    const nextStage = isGallery ? 'review' : 'gallery';
+    const description = isGallery
+      ? (
+        <>
+          <strong className="font-semibold text-gray-900">Gallery Walk.</strong>
+          {' '}
+          Students provide peer feedback on each other&apos;s work. Feedback is not visible until review mode.
+        </>
+      )
+      : (
+        <>
+          <strong className="font-semibold text-gray-900">Feedback Review.</strong>
+          {' '}
+          Students can see feedback left by their peers.
+        </>
+      );
+    const buttonLabel = isGallery ? 'Switch to Feedback review mode' : 'Switch to Gallery Walk mode';
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-sm font-semibold text-gray-700">Session mode</label>
+        <p className="text-sm text-gray-600 flex-1 min-w-[12rem]">{description}</p>
+        <Button type="button" variant="outline" onClick={() => handleStageChange(nextStage)}>
+          {buttonLabel}
+        </Button>
+      </div>
+    );
+  };
 
   const renderTableHeaderCell = (label, field) => (
     <button
@@ -179,66 +234,33 @@ export default function ManagerPage() {
   );
 
   const renderFeedbackTable = () => (
-    <div className="mt-6 overflow-x-auto rounded-lg border border-gray-200 bg-white shadow print:border-0 print:shadow-none">
-      <table className="min-w-full divide-y divide-gray-200 text-sm print:text-xs">
-        <thead className="bg-gray-50 print:bg-white">
-          <tr>
-            <th className="px-4 py-3">
-              <span className="print:hidden">{renderTableHeaderCell('To', 'to')}</span>
-              <span className="hidden print:inline font-semibold">To</span>
-            </th>
-            <th className="px-4 py-3">
-              <span className="print:hidden">{renderTableHeaderCell('From', 'fromNameSnapshot')}</span>
-              <span className="hidden print:inline font-semibold">From</span>
-            </th>
-            <th className="px-4 py-3">
-              <span className="print:hidden">{renderTableHeaderCell('Posted', 'createdAt')}</span>
-              <span className="hidden print:inline font-semibold">Posted</span>
-            </th>
-            <th className="px-4 py-3">
-              <span className="font-semibold">Message</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {sortedFeedback.map((entry) => (
-            <tr key={entry.id}>
-              <td className="px-4 py-3">
-                {reviewees[entry.to]?.name || reviewees[entry.to]?.projectTitle || entry.to || '—'}
-              </td>
-              <td className="px-4 py-3">{entry.fromNameSnapshot || reviewers[entry.from]?.name || '—'}</td>
-
-              <td className="px-4 py-3 text-gray-600">
-                {(() => {
-                  const { date, showDateOnScreen } = getTimestampMeta(entry.createdAt);
-                  if (!date) return '—';
-                  const dateString = date.toLocaleDateString();
-                  const timeString = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-                  const screenText = showDateOnScreen ? `${dateString} ${timeString}` : timeString;
-                  const printText = `${dateString} ${timeString}`.trim();
-                  return (
-                    <>
-                      <span className="print:hidden">{screenText}</span>
-                      <span className="hidden print:inline">{printText}</span>
-                    </>
-                  );
-                })()}
-              </td>
-              <td className="px-4 py-3">
-                <p className="whitespace-pre-wrap">{entry.message}</p>
-              </td>
-            </tr>
-          ))}
-          {!sortedFeedback.length && (
-            <tr>
-              <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
-                No feedback yet.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+    <GalleryWalkFeedbackTable
+      feedback={sortedFeedback}
+      reviewees={reviewees}
+      reviewers={reviewers}
+      containerClassName="mt-6"
+      emptyMessage="No feedback yet."
+      headerOverrides={{
+        to: (
+          <>
+            <span className="print:hidden">{renderTableHeaderCell('To', 'to')}</span>
+            <span className="hidden print:inline font-semibold">To</span>
+          </>
+        ),
+        from: (
+          <>
+            <span className="print:hidden">{renderTableHeaderCell('From', 'fromNameSnapshot')}</span>
+            <span className="hidden print:inline font-semibold">From</span>
+          </>
+        ),
+        posted: (
+          <>
+            <span className="print:hidden">{renderTableHeaderCell('Posted', 'createdAt')}</span>
+            <span className="hidden print:inline font-semibold">Posted</span>
+          </>
+        ),
+      }}
+    />
   );
   const handleDownloadExport = async () => {
     if (!sessionId) return;
@@ -258,99 +280,11 @@ export default function ManagerPage() {
         reviewees: data.reviewees,
         reviewers: data.reviewers,
         feedback: data.feedback,
+        title: data.config?.title || '',
       }));
     } catch (err) {
       setError(err.message);
     }
-  };
-
-  const handleImportFile = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setImportError(null);
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      setImportPreview({
-        fileName: file.name,
-        loadedAt: new Date(),
-        data,
-      });
-    } catch (err) {
-      setImportPreview(null);
-      setImportError('Could not parse uploaded file. Make sure it is a valid JSON export.');
-    } finally {
-      event.target.value = '';
-    }
-  };
-
-  const renderImportPreview = () => {
-    if (!importPreview) return null;
-    const { data, fileName } = importPreview;
-    const previewFeedback = Array.isArray(data.feedback) ? data.feedback : [];
-    const previewReviewees = data.reviewees || {};
-    const previewReviewers = data.reviewers || {};
-    return (
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold">Imported file preview</h3>
-            <p className="text-sm text-blue-800">{fileName}</p>
-          </div>
-          <Button type="button" variant="outline" onClick={() => setImportPreview(null)}>
-            Close
-          </Button>
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <p className="font-semibold text-gray-700">Students</p>
-            <p>{Object.keys(previewReviewees).length}</p>
-          </div>
-          <div>
-            <p className="font-semibold text-gray-700">Reviewers</p>
-            <p>{Object.keys(previewReviewers).length}</p>
-          </div>
-          <div>
-            <p className="font-semibold text-gray-700">Feedback entries</p>
-            <p>{previewFeedback.length}</p>
-          </div>
-          <div>
-            <p className="font-semibold text-gray-700">Stage</p>
-            <p>{(data.stage || 'unknown').toUpperCase()}</p>
-          </div>
-        </div>
-        <div className="mt-4 max-h-60 overflow-auto rounded border border-blue-100 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-blue-100">
-              <tr>
-                <th className="px-3 py-2 text-left font-semibold">To</th>
-                <th className="px-3 py-2 text-left font-semibold">From</th>
-                <th className="px-3 py-2 text-left font-semibold">Message</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-blue-50">
-              {previewFeedback.slice(0, 8).map((entry) => (
-                <tr key={entry.id}>
-                  <td className="px-3 py-2">{previewReviewees[entry.to]?.name || entry.to}</td>
-                  <td className="px-3 py-2">{entry.fromNameSnapshot}</td>
-                  <td className="px-3 py-2">{entry.message}</td>
-                </tr>
-              ))}
-              {!previewFeedback.length && (
-                <tr>
-                  <td colSpan={3} className="px-3 py-4 text-center text-gray-500">
-                    No entries in this file.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-2 text-xs text-gray-600">
-          Uploading does not alter the live session. Use this preview to review saved feedback.
-        </p>
-      </div>
-    );
   };
 
   const feedbackByReviewee = useMemo(() => {
@@ -364,74 +298,27 @@ export default function ManagerPage() {
 
   const renderNotesView = () => {
     if (!showNotesView) return null;
-    const revieweeIds = notesReviewee === 'all'
-      ? Object.keys(feedbackByReviewee)
-      : notesReviewee
-        ? [notesReviewee]
-        : [];
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow">
-        <div className="flex flex-wrap items-center gap-3 notes-actions">
-          <label htmlFor="notesSelect" className="text-sm font-semibold text-gray-700">Student view</label>
-          <select
-            id="notesSelect"
-            className="rounded border border-gray-300 px-3 py-1 text-sm"
-            value={notesReviewee}
-            onChange={(e) => setNotesReviewee(e.target.value)}
-          >
-            <option value="all">All students</option>
-            {Object.entries(reviewees).map(([id, info]) => (
-              <option key={id} value={id}>
-                {info?.name || info?.projectTitle || id}
-              </option>
-            ))}
-          </select>
-          {/* <div className="ml-auto">
-            <Button type="button" variant="outline" onClick={() => window.print()}>
-              Print
-            </Button>
-          </div> */}
-        </div>
-        <div className="manager-notes-grid mt-4 grid gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 print:flex print:flex-wrap">
-          {revieweeIds.map((id) => {
-            const cards = feedbackByReviewee[id] || [];
-            const info = reviewees[id];
-            return (
-              <div key={id} className="notes-student-card rounded border border-gray-200 p-4 shadow-sm">
-                <div className="flex items-baseline justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-gray-500">Student</p>
-                    <p className="text-lg font-semibold text-gray-900">
-                      {info?.name || id}
-                    </p>
-                    {info?.projectTitle && (
-                      <p className="text-sm text-gray-600">{info.projectTitle}</p>
-                    )}
-                  </div>
-                  <span className="text-sm text-gray-500">
-                    {cards.length} note{cards.length === 1 ? '' : 's'}
-                  </span>
-                </div>
-                {cards.length === 0 ? (
-                  <p className="mt-3 text-sm text-gray-500">No feedback yet.</p>
-                ) : (
-                  <div className="mt-4">
-                    <FeedbackCards entries={cards} isLoading={false} />
-                  </div>
-                )}
-              </div>
+              <GalleryWalkNotesView
+                reviewees={reviewees}
+                feedbackByReviewee={feedbackByReviewee}
+                selectedReviewee={notesReviewee}
+                onSelectReviewee={setNotesReviewee}
+                selectId="notesSelect"
+                containerClassName="rounded-lg border border-gray-200 bg-white p-4 shadow"
+                filterClassName="notes-actions"
+                hideFilterOnPrint={false}
+                gridClassName="mt-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 print:flex print:flex-wrap"
+                emptySelectionText="No students selected for notes view."
+                noFeedbackText="No feedback yet."
+                includeAllRevieweesWhenAllSelected={false}
+                printTitle={sessionTitle || 'Gallery Walk Feedback'}
+              />
             );
-          })}
-          {!revieweeIds.length && (
-            <p className="text-sm text-gray-500">No students selected for notes view.</p>
-          )}
-        </div>
-      </div>
-    );
-  };
+          };
 
   return (
-    <div className="p-6 manager-page">
+    <div className="p-6 manager-page" data-print-title={sessionTitle || 'Gallery Walk Feedback'}>
       <div className="print:hidden">
         <SessionHeader activityName="Gallery Walk" sessionId={sessionId || 'unknown'} />
       </div>
@@ -445,16 +332,34 @@ export default function ManagerPage() {
       ) : (
         <div className="mt-6 space-y-6">
           <div className="rounded border border-gray-200 bg-white p-4 shadow print:hidden">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center">
-              {renderStageControls()}
-              <div className="flex flex-1 items-center justify-end gap-6">
-                <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-right">
+            <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
+              <div className="flex-1 space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <label htmlFor="manager-session-title" className="text-sm font-semibold text-gray-700">
+                      Session title
+                    </label>
+                    {titleSaveError ? (
+                      <span className="text-xs text-red-600">{titleSaveError}</span>
+                    ) : (
+                      <span className="text-xs text-gray-500">{isSavingTitle ? 'Saving…' : 'Saved'}</span>
+                    )}
+                  </div>
+                  <input
+                    id="manager-session-title"
+                    type="text"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                    value={sessionTitle}
+                    onChange={(event) => setSessionTitle(event.target.value)}
+                    placeholder="e.g., Spring Showcase"
+                  />
+                </div>
+                {renderStageControls()}
+              </div>
+              <div className="md:w-64">
+                <div className="h-full rounded border border-gray-200 bg-gray-50 px-4 py-4 text-right flex flex-col justify-center">
                   <p className="text-xs text-gray-500 uppercase tracking-wide">Connected students</p>
                   <p className="text-2xl font-semibold text-gray-900">{Object.keys(reviewees).length}</p>
-                </div>
-                <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-right">
-                  <p className="text-xs text-gray-500 uppercase tracking-wide">Connected reviewers</p>
-                  <p className="text-2xl font-semibold text-gray-900">{Object.keys(reviewers).length}</p>
                 </div>
               </div>
             </div>
@@ -473,27 +378,11 @@ export default function ManagerPage() {
               <Button type="button" onClick={handleDownloadExport} disabled={!feedback.length}>
                 Download feedback
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Upload saved feedback
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".gw,.json,application/json"
-                className="hidden"
-                onChange={handleImportFile}
-              />
               <Button type="button" variant="outline" onClick={() => window.print()}>
                 Print
               </Button>
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
-          {importError && <p className="text-sm text-red-600">{importError}</p>}
-          {renderImportPreview()}
           {isLoading ? (
             <p className="text-gray-600">Loading session data…</p>
           ) : (

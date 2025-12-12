@@ -126,29 +126,29 @@ test('exports and imports gallery walk data', async (t) => {
   const bundle = await exportRes.json();
   assert.equal(bundle.version, 1);
   assert.equal(bundle.feedback.length, 1);
+});
 
-  // Clear session data then import
-  const session = await server.sessions.get(sessionId);
-  session.data.reviewees = {};
-  session.data.reviewers = {};
-  session.data.feedback = [];
-  session.data.stats.reviewees = {};
-  session.data.stats.reviewers = {};
-  await server.sessions.set(session.id, session);
+test('updates session title metadata', async (t) => {
+  const server = await startTestServer();
+  t.after(server.close);
 
-  const importRes = await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/import`, {
+  const sessionId = await createSession(server.baseUrl);
+  const titleRes = await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/title`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(bundle),
+    body: JSON.stringify({ title: 'Showcase 2024' }),
   });
-  const importBody = await importRes.json();
-  assert.equal(importBody.ok, true);
-  assert.equal(importBody.counts.feedback, 1);
+  const titleBody = await titleRes.json();
+  assert.equal(titleBody.ok, true);
+  assert.equal(titleBody.title, 'Showcase 2024');
 
-  const importedSession = await server.sessions.get(sessionId);
-  assert.equal(Object.keys(importedSession.data.reviewees).length, 1);
-  assert.equal(importedSession.data.feedback.length, 1);
-  assert.equal(importedSession.data.feedback[0].message, 'Nice job');
+  const snapshotRes = await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/feedback`);
+  const snapshot = await snapshotRes.json();
+  assert.equal(snapshot.config.title, 'Showcase 2024');
+
+  const exportRes = await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/export`);
+  const bundle = await exportRes.json();
+  assert.equal(bundle.config.title, 'Showcase 2024');
 });
 test('allows reviewers to set sticky note styles', async (t) => {
   const server = await startTestServer();

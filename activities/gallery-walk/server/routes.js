@@ -190,6 +190,7 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
       reviewers: session.data.reviewers,
       stats: session.data.stats,
       stage: session.data.stage,
+      config: session.data.config,
     });
   });
 
@@ -204,6 +205,7 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
       reviewee: session.data.reviewees[revieweeId] || null,
       reviewers: session.data.reviewers,
       stage: session.data.stage,
+      config: session.data.config,
     });
   });
 
@@ -220,38 +222,20 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
       feedback: session.data.feedback,
       stats: session.data.stats,
       stage: session.data.stage,
+      config: session.data.config,
     };
 
     res.json(bundle);
   });
 
-  app.post('/api/gallery-walk/:sessionId/import', async (req, res) => {
+  app.post('/api/gallery-walk/:sessionId/title', async (req, res) => {
     const session = ensureGalleryWalkSession(await sessions.get(req.params.sessionId));
     if (!session) return res.status(404).json({ error: 'invalid session' });
 
-    const payload = req.body?.data && typeof req.body.data === 'object' ? req.body.data : req.body;
-    if (!payload || typeof payload !== 'object') {
-      return res.status(400).json({ error: 'invalid import payload' });
-    }
-
-    session.data.reviewees = ensurePlainObject(payload.reviewees);
-    session.data.reviewers = ensurePlainObject(payload.reviewers);
-    session.data.feedback = Array.isArray(payload.feedback) ? payload.feedback : [];
-    session.data.stats = ensurePlainObject(payload.stats);
-    session.data.stats.reviewees = ensurePlainObject(session.data.stats.reviewees);
-    session.data.stats.reviewers = ensurePlainObject(session.data.stats.reviewers);
-    if (payload.stage) {
-      session.data.stage = normalizeStage(payload.stage);
-    }
-
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    session.data.config = ensurePlainObject(session.data.config);
+    session.data.config.title = title;
     await sessions.set(session.id, session);
-    res.json({
-      ok: true,
-      counts: {
-        feedback: session.data.feedback.length,
-        reviewees: Object.keys(session.data.reviewees).length,
-        reviewers: Object.keys(session.data.reviewers).length,
-      },
-    });
+    res.json({ ok: true, title });
   });
 }

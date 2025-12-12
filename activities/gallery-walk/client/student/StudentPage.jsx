@@ -5,8 +5,8 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import QrScannerPanel from '@src/components/common/QrScannerPanel';
 import ProjectStationCard from '../components/ProjectStationCard';
 import LocalReviewerForm from '../components/LocalReviewerForm';
-import FeedbackCards from '../components/FeedbackCards';
 import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer.jsx';
+import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
 import ReviewerIdentityForm from '../components/ReviewerIdentityForm';
 import ReviewerFeedbackForm from '../components/ReviewerFeedbackForm';
 import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
@@ -52,6 +52,15 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
   const [revieweeFeedback, setRevieweeFeedback] = useState([]);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
   const [localStyleId, setLocalStyleId] = useState(DEFAULT_NOTE_STYLE_ID);
+  const [sessionTitle, setSessionTitle] = useState('');
+  const studentReviewees = useMemo(() => {
+    if (!revieweeId) return {};
+    return { [revieweeId]: revieweeRecord || {} };
+  }, [revieweeId, revieweeRecord]);
+  const studentFeedbackByReviewee = useMemo(() => {
+    if (!revieweeId) return {};
+    return { [revieweeId]: revieweeFeedback };
+  }, [revieweeId, revieweeFeedback]);
 
   // Reviewer state
   const [reviewerId, setReviewerId] = useState(null);
@@ -92,6 +101,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       sessionId,
       revieweeId,
       reviewee: revieweeRecord || null,
+      config: { title: sessionTitle || undefined },
       feedback: revieweeFeedback,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -104,7 +114,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     anchor.download = `gallery-walk-${sessionId}-${slug}-${timestamp}.gw`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [revieweeFeedback, revieweeRecord, revieweeId, sessionId]);
+  }, [revieweeFeedback, revieweeRecord, revieweeId, sessionId, sessionTitle]);
 
   const kioskJoinUrl = useMemo(() => {
     if (!sessionId || !revieweeId || typeof window === 'undefined') return '';
@@ -140,6 +150,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       if (!res.ok) throw new Error('Failed to fetch snapshot');
       const data = await res.json();
       setStage(data.stage || 'gallery');
+      setSessionTitle(data.config?.title || '');
       if (revieweeId && data.reviewees?.[revieweeId]) {
         setRevieweeRecord(data.reviewees[revieweeId]);
       }
@@ -161,6 +172,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       const data = await res.json();
       setRevieweeFeedback(Array.isArray(data.feedback) ? data.feedback : []);
       if (data.reviewee) setRevieweeRecord(data.reviewee);
+      if (data.config?.title) setSessionTitle(data.config.title);
     } catch (err) {
       console.error('Failed to fetch reviewee feedback', err);
     } finally {
@@ -369,6 +381,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
           <p className="text-gray-600 print:hidden">The teacher switched to review mode. Read through the comments that were left for you.</p>
           {revieweeRecord?.name && (
             <div className="student-name-print hidden text-gray-800 print:block">
+              <p className="text-sm uppercase tracking-wide text-gray-500">{sessionTitle || 'Gallery Walk Feedback'}</p>
               <p>{revieweeRecord.name}</p>
               {revieweeRecord?.projectTitle && <p>{revieweeRecord?.projectTitle}</p>}
             </div>
@@ -388,7 +401,18 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
           Print my feedback
         </Button>
       </div>
-      <FeedbackCards entries={revieweeFeedback} isLoading={isLoadingFeedback} />
+      <GalleryWalkNotesView
+        reviewees={studentReviewees}
+        feedbackByReviewee={studentFeedbackByReviewee}
+        selectedReviewee="all"
+        filterClassName="hidden"
+        containerClassName="pt-2 print:pt-0"
+        gridClassName="grid-cols-1"
+        cardClassName="print:break-after-page"
+        noFeedbackText={isLoadingFeedback ? 'Loading feedback…' : 'No feedback yet.'}
+        emptySelectionText={isLoadingFeedback ? 'Loading feedback…' : 'No feedback yet.'}
+        printTitle={sessionTitle || 'Gallery Walk Feedback'}
+      />
     </div>
   );
 
@@ -620,8 +644,7 @@ export default function StudentPage({ sessionData }) {
         <header className="student-header space-y-2">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h1 className="student-title text-3xl font-bold">Gallery Walk</h1>
-              <p className="text-gray-600">Upload saved feedback to review or print later.</p>
+              <h1 className="student-title text-3xl font-bold">Review Gallery Walk Feedback</h1>
             </div>
           </div>
         </header>

@@ -88,10 +88,23 @@
   background: transparent;
 }
 
+.notes-print-title {
+  display: none;
+}
+
 @media print {
+  .notes-print-title {
+    display: block;
+  }
+
   .student-page {
     padding: 0;
     max-width: none;
+  }
+
+  .manager-page,
+  .solo-feedback-viewer {
+    padding: 0;
   }
 
   .student-header,
@@ -120,6 +133,16 @@
     display: none !important;
   }
 
+  .manager-page::before,
+  .solo-feedback-viewer::before {
+    content: attr(data-print-title);
+    display: block;
+    text-align: center;
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+
   .manager-page input,
   .manager-page button,
   .manager-page select,
@@ -139,6 +162,28 @@
     flex: 0 0 auto;
     width: auto !important;
     max-width: 6.5in;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .manager-page .notes-student-card {
+    width: 100% !important;
+    max-width: none !important;
+    page-break-after: always;
+  }
+
+  .manager-page .notes-student-card:last-of-type {
+    page-break-after: auto;
+  }
+
+  .solo-feedback-viewer .notes-student-card {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  .solo-feedback-viewer .notes-student-card:last-of-type {
+    break-after: auto !important;
+    page-break-after: auto !important;
   }
 
   .manager-page .feedback-cards,
