@@ -11,9 +11,6 @@ const __dirname = dirname(__filename);
 
 const isCodespaces = Boolean(process.env.CODESPACES) || Boolean(process.env.CODESPACE_NAME) || Boolean(process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN);
 
-const activitiesPath = path.resolve(__dirname, '..', 'activities');
-console.log('[vite.config] Activities directory:', activitiesPath);
-
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [

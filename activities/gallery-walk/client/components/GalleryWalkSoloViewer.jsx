@@ -196,13 +196,12 @@ export default function GalleryWalkSoloViewer() {
           </div>
           <div className="flex items-center gap-2 print:hidden">
             <Button
-                type="button"
-                aria-label={showFileMeta ? 'Hide file info' : 'Show file info'}
-                variant="outline"
-                // className="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
-                onClick={() => setShowFileMeta((prev) => !prev)}
-              >
-                File info
+              type="button"
+              aria-label={showFileMeta ? 'Hide file info' : 'Show file info'}
+              variant="outline"
+              onClick={() => setShowFileMeta((prev) => !prev)}
+            >
+              File info
             </Button>
             <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
               Upload another file
@@ -328,7 +327,7 @@ export default function GalleryWalkSoloViewer() {
             )}
           </>
         ) : (
-          renderStudentView(showFileMeta, setShowFileMeta)
+          renderStudentView()
         )}
       </div>
     );
@@ -336,7 +335,12 @@ export default function GalleryWalkSoloViewer() {
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6 shadow space-y-4 solo-feedback-viewer print:border-0 print:p-0 print:shadow-none print:bg-transparent">
-      <div className={"flex flex-wrap items-start justify-center gap-4 print:hidden" + (fileResult ? " hidden" : "")} >
+      <div
+        className={[
+          'flex flex-wrap items-start justify-center gap-4 print:hidden',
+          fileResult && 'hidden',
+        ].filter(Boolean).join(' ')}
+      >
         {!fileResult && (
           <Button type="button" onClick={() => fileInputRef.current?.click()}>
             Upload feedback (.gw)

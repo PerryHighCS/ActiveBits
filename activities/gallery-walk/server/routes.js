@@ -22,10 +22,11 @@ function createId() {
   return out;
 }
 
-function sanitizeName(value, fallback = '') {
+function sanitizeName(value, fallback = '', maxLength = 200) {
   if (!value || typeof value !== 'string') return fallback;
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : fallback;
+  if (trimmed.length === 0) return fallback;
+  return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
 }
 
 registerSessionNormalizer('gallery-walk', (session) => {
@@ -107,7 +108,8 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
     const session = ensureGalleryWalkSession(await sessions.get(req.params.sessionId));
     if (!session) return res.status(404).json({ error: 'invalid session' });
 
-    const providedId = typeof req.body?.revieweeId === 'string' ? req.body.revieweeId.trim() : '';
+    const providedIdRaw = typeof req.body?.revieweeId === 'string' ? req.body.revieweeId.trim() : '';
+    const providedId = /^[A-Z0-9]{6}$/i.test(providedIdRaw) ? providedIdRaw.toUpperCase() : '';
     let revieweeId = providedId || createId();
     const name = sanitizeName(req.body?.name);
     const projectTitle = sanitizeName(req.body?.projectTitle || '', null);
@@ -152,7 +154,7 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
 
     const revieweeId = sanitizeName(req.body?.revieweeId || '');
     const reviewerId = sanitizeName(req.body?.reviewerId || '');
-    const message = sanitizeName(req.body?.message);
+    const message = sanitizeName(req.body?.message, '', 2000);
 
     if (!revieweeId || !reviewerId || !message) {
       return res.status(400).json({ error: 'revieweeId, reviewerId, and message are required' });

@@ -11,6 +11,10 @@ import ReviewerIdentityForm from '../components/ReviewerIdentityForm';
 import ReviewerFeedbackForm from '../components/ReviewerFeedbackForm';
 import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
 
+const REVIEWEE_ID_PATTERN = /^[A-Z0-9]{6}$/;
+const REVIEWER_ID_PATTERN = /^[A-Z0-9]{6,12}$/;
+const REVIEWER_NAME_MAX_LENGTH = 200;
+
 function generateShortId(length = 6) {
   const alphabet = 'BCDFGHJKLMNPQRSTVWXYZ23456789';
   let out = '';
@@ -125,7 +129,14 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
   useEffect(() => {
     if (!kioskStoragePrefix) return;
     const storedId = localStorage.getItem(`${kioskStoragePrefix}:revieweeId`);
-    if (storedId) setRevieweeId(storedId);
+    if (storedId) {
+      const safeId = storedId.trim();
+      if (REVIEWEE_ID_PATTERN.test(safeId)) {
+        setRevieweeId(safeId);
+      } else {
+        localStorage.removeItem(`${kioskStoragePrefix}:revieweeId`);
+      }
+    }
   }, [kioskStoragePrefix]);
 
   useEffect(() => {
@@ -133,10 +144,19 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     const cachedId = localStorage.getItem(`${reviewerStoragePrefix}:reviewerId`);
     const cachedName = localStorage.getItem(`${reviewerStoragePrefix}:reviewerName`);
     const cachedStyle = localStorage.getItem(`${reviewerStoragePrefix}:styleId`);
-    if (cachedId) setReviewerId(cachedId);
+    if (cachedId && REVIEWER_ID_PATTERN.test(cachedId.trim())) {
+      setReviewerId(cachedId.trim());
+    } else if (cachedId) {
+      localStorage.removeItem(`${reviewerStoragePrefix}:reviewerId`);
+    }
     if (cachedName) {
-      setReviewerName(cachedName);
-      setReviewerNameInput(cachedName);
+      const safeName = cachedName.trim();
+      if (safeName && safeName.length <= REVIEWER_NAME_MAX_LENGTH) {
+        setReviewerName(safeName);
+        setReviewerNameInput(safeName);
+      } else {
+        localStorage.removeItem(`${reviewerStoragePrefix}:reviewerName`);
+      }
     }
     if (cachedStyle && isNoteStyleId(cachedStyle)) {
       setReviewerStyleId(cachedStyle);
@@ -151,13 +171,22 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       const data = await res.json();
       setStage(data.stage || 'gallery');
       setSessionTitle(data.config?.title || '');
-      if (revieweeId && data.reviewees?.[revieweeId]) {
-        setRevieweeRecord(data.reviewees[revieweeId]);
+      if (revieweeId) {
+        const revieweeSnapshot = data.reviewees?.[revieweeId];
+        if (revieweeSnapshot) {
+          setRevieweeRecord(revieweeSnapshot);
+        } else {
+          setRevieweeId(null);
+          setRevieweeRecord(null);
+          if (kioskStoragePrefix) {
+            localStorage.removeItem(`${kioskStoragePrefix}:revieweeId`);
+          }
+        }
       }
     } catch (err) {
       console.error('Failed to fetch gallery walk snapshot', err);
     }
-  }, [sessionId, revieweeId]);
+  }, [sessionId, revieweeId, kioskStoragePrefix]);
 
   useEffect(() => {
     fetchSessionSnapshot();

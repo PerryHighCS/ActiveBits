@@ -247,7 +247,7 @@ const SessionRouter = () => {
                     };
 
                     return (
-                        <div className="max-w-lg mx-auto bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+                        <div className="max-w-lg mx-auto bg-white rounded-lg shadow-lg lg:p-6 border border-gray-200">
                             <h1 className="text-2xl font-bold text-gray-800 mb-3 text-center">Session is already running</h1>
                             <p className="text-gray-700 text-center mb-6">
                                 Join the session now or log in as a teacher to open the manage dashboard.

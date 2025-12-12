@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import { useZxing } from 'react-zxing';
 import Button from '@src/components/ui/Button';
 
 export default function QrScannerPanel({ onDetected, onError, onClose }) {
   const [errorCode, setErrorCode] = useState(null);
   const [hasDetected, setHasDetected] = useState(false);
+  const headingId = useId();
 
   const constraints = useMemo(() => ({
     video: {
@@ -47,9 +48,14 @@ export default function QrScannerPanel({ onDetected, onError, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-      <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl relative">
+      <div
+        className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl relative"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+      >
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold">Scan QR Code</h2>
+          <h2 id={headingId} className="text-lg font-semibold">Scan QR Code</h2>
           <Button type="button" variant="outline" onClick={onClose}>
             Close
           </Button>

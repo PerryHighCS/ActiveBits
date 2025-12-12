@@ -4,7 +4,6 @@ import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils';
-import { NOTE_STYLE_OPTIONS, getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles.js';
 import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.jsx';
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
 
