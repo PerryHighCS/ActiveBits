@@ -386,11 +386,11 @@ export default function ManagerPage() {
               </option>
             ))}
           </select>
-          <div className="ml-auto">
+          {/* <div className="ml-auto">
             <Button type="button" variant="outline" onClick={() => window.print()}>
               Print
             </Button>
-          </div>
+          </div> */}
         </div>
         <div className="mt-4 grid gap-6 md:grid-cols-2">
           {revieweeIds.map((id) => {
