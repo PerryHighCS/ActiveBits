@@ -7,8 +7,7 @@ import ProjectStationCard from '../components/ProjectStationCard';
 import LocalReviewerForm from '../components/LocalReviewerForm';
 import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer.jsx';
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
-import ReviewerIdentityForm from '../components/ReviewerIdentityForm';
-import ReviewerFeedbackForm from '../components/ReviewerFeedbackForm';
+import ReviewerPanel from '../components/ReviewerPanel.jsx';
 import RegistrationForm from '../components/RegistrationForm.jsx';
 import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
 import { generateShortId } from '../../shared/id.js';
@@ -520,70 +519,30 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       return <p className="text-red-600">Missing project reference. Please scan a valid QR code.</p>;
     }
     return (
-      <div className="space-y-6">
-        {!reviewerName && (
-          <ReviewerIdentityForm
-            nameInput={reviewerNameInput}
-            onNameChange={setReviewerNameInput}
-            error={reviewerNameError}
-            hasExistingName={Boolean(reviewerId)}
-            isSaving={isSavingReviewerName}
-            onSubmit={(event) => {
-              event.preventDefault();
-              handleReviewerIdentitySave();
-            }}
-          />
-        )}
-        {reviewerName && !canScanNext && (
-          <ReviewerFeedbackForm
-            projectTitle={revieweeRecord?.projectTitle}
-            message={reviewerMessage}
-            onMessageChange={handleReviewerMessageChange}
-            notice={reviewerNotice}
-            isSubmitting={isSubmittingReviewerFeedback}
-            onSubmit={handleReviewerFeedbackSubmit}
-            onCancel={handleReviewerCancel}
-            onScan={() => {
-              setScannerError(null);
-              setIsScannerOpen(true);
-            }}
-            scannerError={scannerError}
-            canScan={false}
-            styleId={reviewerStyleId}
-            onStyleChange={handleReviewerStyleChange}
-          />
-        )}
-        {reviewerName && canScanNext && (
-          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow space-y-4 sm:p-6">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">Ready for the next project?</h2>
-              <p className="text-gray-600">To leave feedback for another project, scan its QR code.</p>
-            </div>
-            <div className="flex justify-center">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setScannerError(null);
-                  setIsScannerOpen(true);
-                }}
-              >
-                Scan next QR code
-              </Button>
-            </div>
-            {scannerError === 'scanner-unavailable' && (
-              <p className="text-sm text-red-600">
-                Your browser will not open the scanner. Use your phone’s camera app to scan the next code.
-              </p>
-            )}
-            {scannerError === 'scanner-invalid' && (
-              <p className="text-sm text-red-600">
-                That QR code was not for this session. Make sure you scan the code shown on this station.
-              </p>
-            )}
-          </div>
-        )}
-      </div>
+      <ReviewerPanel
+        reviewerName={reviewerName}
+        reviewerNameInput={reviewerNameInput}
+        reviewerNameError={reviewerNameError}
+        hasExistingName={Boolean(reviewerId)}
+        isSavingReviewerName={isSavingReviewerName}
+        onNameChange={setReviewerNameInput}
+        onSaveIdentity={handleReviewerIdentitySave}
+        projectTitle={revieweeRecord?.projectTitle}
+        reviewerMessage={reviewerMessage}
+        onMessageChange={handleReviewerMessageChange}
+        reviewerNotice={reviewerNotice}
+        isSubmittingFeedback={isSubmittingReviewerFeedback}
+        onSubmitFeedback={handleReviewerFeedbackSubmit}
+        onCancelFeedback={handleReviewerCancel}
+        onOpenScanner={() => {
+          setScannerError(null);
+          setIsScannerOpen(true);
+        }}
+        scannerError={scannerError}
+        canScanNext={canScanNext}
+        reviewerStyleId={reviewerStyleId}
+        onStyleChange={handleReviewerStyleChange}
+      />
     );
   };
 
