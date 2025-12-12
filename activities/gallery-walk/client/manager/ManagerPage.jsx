@@ -7,6 +7,7 @@ import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.jsx
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
 import StageControls from '../components/StageControls.jsx';
 import TitleEditor from '../components/TitleEditor.jsx';
+import FeedbackViewSwitcher from '../components/FeedbackViewSwitcher.jsx';
 
 export default function ManagerPage() {
   const { sessionId } = useParams();
@@ -323,33 +324,29 @@ export default function ManagerPage() {
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-3 print:hidden">
-            <div className="me-auto">
-                <Button
-                  type="button"
-                  variant={showNotesView ? 'default' : 'outline'}
-                  onClick={() => setShowNotesView((prev) => !prev)}
-                >
-                  {showNotesView ? 'Table view' : 'Notes view'}
+          <FeedbackViewSwitcher
+            showNotesView={showNotesView}
+            onToggleView={() => setShowNotesView((prev) => !prev)}
+            toggleButtonVariant={showNotesView ? 'default' : 'outline'}
+            actionsClassName="print:hidden"
+            actionButtons={[
+              (
+                <Button type="button" onClick={handleDownloadExport} disabled={!feedback.length}>
+                  Download feedback
                 </Button>
-              </div>
-            
-              <Button type="button" onClick={handleDownloadExport} disabled={!feedback.length}>
-                Download feedback
-              </Button>
-              <Button type="button" variant="outline" onClick={() => window.print()}>
-                Print
-              </Button>
-          </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {isLoading ? (
-            <p className="text-gray-600">Loading session data…</p>
-          ) : (
-            <>
-              {!showNotesView && renderFeedbackTable()}
-              {showNotesView && renderNotesView()}
-            </>
-          )}
+              ),
+              (
+                <Button type="button" variant="outline" onClick={() => window.print()}>
+                  Print
+                </Button>
+              ),
+            ]}
+            error={error}
+            isLoading={isLoading}
+            loadingText="Loading session data…"
+            tableView={renderFeedbackTable()}
+            notesView={renderNotesView()}
+          />
         </div>
       )}
       {hasUnsavedChanges && (

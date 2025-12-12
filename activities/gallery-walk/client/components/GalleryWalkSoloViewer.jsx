@@ -9,6 +9,7 @@ import Button from '@src/components/ui/Button';
 import FeedbackCards from './FeedbackCards.jsx';
 import GalleryWalkFeedbackTable from './GalleryWalkFeedbackTable.jsx';
 import GalleryWalkNotesView from './GalleryWalkNotesView.jsx';
+import FeedbackViewSwitcher from './FeedbackViewSwitcher.jsx';
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -223,108 +224,110 @@ export default function GalleryWalkSoloViewer() {
         {showFileMeta && fileResult.type !== 'student' && renderFileMetaDetails('card')}
         {fileResult.type === 'teacher' ? (
           <>
-            <div className="flex flex-wrap items-center gap-3 print:hidden">
-              <div className="me-auto">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setViewMode((prev) => (prev === 'table' ? 'notes' : 'table'))}
-                >
-                  {viewMode === 'table' ? 'Notes view' : 'Table view'}
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  aria-label={showFileMeta ? 'Hide file info' : 'Show file info'}
-                  variant="outline"
-                  onClick={() => setShowFileMeta((prev) => !prev)}
-                >
-                  File info
-                </Button>
-                <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
-                  Upload another file
-                </Button>
-                <Button type="button" variant="outline" onClick={() => window.print()}>
-                  Print
-                </Button>
-              </div>
-            </div>
-            {viewMode === 'table' ? (
-              <GalleryWalkFeedbackTable
-                feedback={tableFeedback}
-                reviewees={reviewees}
-                reviewers={reviewers}
-                containerClassName="mt-4"
-                emptyMessage="No feedback entries in this file."
-                headerOverrides={{
-                  to: (
-                    <>
-                      <button
-                        type="button"
-                        className="flex items-center gap-1 text-left font-semibold text-gray-700 text-sm print:hidden"
-                        onClick={() => handleTableSortToggle('to')}
-                      >
-                        To
-                        {tableSortField === 'to' && (
-                          <span className="text-xs text-gray-500">
-                            {tableSortDirection === 'asc' ? '▲' : '▼'}
-                          </span>
-                        )}
-                      </button>
-                      <span className="hidden print:inline font-semibold">To</span>
-                    </>
-                  ),
-                  from: (
-                    <>
-                      <button
-                        type="button"
-                        className="flex items-center gap-1 text-left font-semibold text-gray-700 text-sm print:hidden"
-                        onClick={() => handleTableSortToggle('from')}
-                      >
-                        From
-                        {tableSortField === 'from' && (
-                          <span className="text-xs text-gray-500">
-                            {tableSortDirection === 'asc' ? '▲' : '▼'}
-                          </span>
-                        )}
-                      </button>
-                      <span className="hidden print:inline font-semibold">From</span>
-                    </>
-                  ),
-                  posted: (
-                    <>
-                      <button
-                        type="button"
-                        className="flex items-center gap-1 text-left font-semibold text-gray-700 text-sm print:hidden"
-                        onClick={() => handleTableSortToggle('createdAt')}
-                      >
-                        Posted
-                        {tableSortField === 'createdAt' && (
-                          <span className="text-xs text-gray-500">
-                            {tableSortDirection === 'asc' ? '▲' : '▼'}
-                          </span>
-                        )}
-                      </button>
-                      <span className="hidden print:inline font-semibold">Posted</span>
-                    </>
-                  ),
-                }}
-              />
-            ) : (
-              <GalleryWalkNotesView
-                reviewees={reviewees}
-                feedbackByReviewee={feedbackByReviewee}
-                selectedReviewee={notesReviewee}
-                onSelectReviewee={setNotesReviewee}
-                selectId="solo-notes-select"
-                gridClassName="grid-cols-1"
-                cardClassName="print:break-after-page"
-                emptySelectionText="No students found in this export."
-                noFeedbackText="No feedback for this student in the file."
-                printTitle={sessionTitle}
-              />
-            )}
+            <FeedbackViewSwitcher
+              showNotesView={viewMode === 'notes'}
+              onToggleView={() => setViewMode((prev) => (prev === 'table' ? 'notes' : 'table'))}
+              toggleButtonVariant="outline"
+              actionsClassName="print:hidden"
+              actionButtons={[
+                (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      aria-label={showFileMeta ? 'Hide file info' : 'Show file info'}
+                      variant="outline"
+                      onClick={() => setShowFileMeta((prev) => !prev)}
+                    >
+                      File info
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                      Upload another file
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => window.print()}>
+                      Print
+                    </Button>
+                  </div>
+                ),
+              ]}
+              error={null}
+              isLoading={false}
+              tableView={(
+                <GalleryWalkFeedbackTable
+                  feedback={tableFeedback}
+                  reviewees={reviewees}
+                  reviewers={reviewers}
+                  containerClassName="mt-4"
+                  emptyMessage="No feedback entries in this file."
+                  headerOverrides={{
+                    to: (
+                      <>
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 text-left font-semibold text-gray-700 text-sm print:hidden"
+                          onClick={() => handleTableSortToggle('to')}
+                        >
+                          To
+                          {tableSortField === 'to' && (
+                            <span className="text-xs text-gray-500">
+                              {tableSortDirection === 'asc' ? '▲' : '▼'}
+                            </span>
+                          )}
+                        </button>
+                        <span className="hidden print:inline font-semibold">To</span>
+                      </>
+                    ),
+                    from: (
+                      <>
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 text-left font-semibold text-gray-700 text-sm print:hidden"
+                          onClick={() => handleTableSortToggle('from')}
+                        >
+                          From
+                          {tableSortField === 'from' && (
+                            <span className="text-xs text-gray-500">
+                              {tableSortDirection === 'asc' ? '▲' : '▼'}
+                            </span>
+                          )}
+                        </button>
+                        <span className="hidden print:inline font-semibold">From</span>
+                      </>
+                    ),
+                    posted: (
+                      <>
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 text-left font-semibold text-gray-700 text-sm print:hidden"
+                          onClick={() => handleTableSortToggle('createdAt')}
+                        >
+                          Posted
+                          {tableSortField === 'createdAt' && (
+                            <span className="text-xs text-gray-500">
+                              {tableSortDirection === 'asc' ? '▲' : '▼'}
+                            </span>
+                          )}
+                        </button>
+                        <span className="hidden print:inline font-semibold">Posted</span>
+                      </>
+                    ),
+                  }}
+                />
+              )}
+              notesView={(
+                <GalleryWalkNotesView
+                  reviewees={reviewees}
+                  feedbackByReviewee={feedbackByReviewee}
+                  selectedReviewee={notesReviewee}
+                  onSelectReviewee={setNotesReviewee}
+                  selectId="solo-notes-select"
+                  gridClassName="grid-cols-1"
+                  cardClassName="print:break-after-page"
+                  emptySelectionText="No students found in this export."
+                  noFeedbackText="No feedback for this student in the file."
+                  printTitle={sessionTitle}
+                />
+              )}
+            />
           </>
         ) : (
           renderStudentView()
