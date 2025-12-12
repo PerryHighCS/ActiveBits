@@ -6,6 +6,7 @@ import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils';
 import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.jsx';
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
 import StageControls from '../components/StageControls.jsx';
+import TitleEditor from '../components/TitleEditor.jsx';
 
 export default function ManagerPage() {
   const { sessionId } = useParams();
@@ -306,26 +307,12 @@ export default function ManagerPage() {
           <div className="rounded border border-gray-200 bg-white p-4 shadow print:hidden">
             <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
               <div className="flex-1 space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <label htmlFor="manager-session-title" className="text-sm font-semibold text-gray-700">
-                      Session title
-                    </label>
-                    {titleSaveError ? (
-                      <span className="text-xs text-red-600">{titleSaveError}</span>
-                    ) : (
-                      <span className="text-xs text-gray-500">{isSavingTitle ? 'Saving…' : 'Saved'}</span>
-                    )}
-                  </div>
-                  <input
-                    id="manager-session-title"
-                    type="text"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
-                    value={sessionTitle}
-                    onChange={(event) => setSessionTitle(event.target.value)}
-                    placeholder="e.g., Spring Showcase"
-                  />
-                </div>
+                <TitleEditor
+                  value={sessionTitle}
+                  onChange={setSessionTitle}
+                  isSaving={isSavingTitle}
+                  error={titleSaveError}
+                />
                 <StageControls stage={stage} onChange={handleStageChange} />
               </div>
               <div className="md:w-64">
