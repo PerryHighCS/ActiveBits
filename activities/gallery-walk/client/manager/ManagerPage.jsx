@@ -224,7 +224,7 @@ export default function ManagerPage() {
                 emptySelectionText="No students selected for notes view."
                 noFeedbackText="No feedback yet."
                 includeAllRevieweesWhenAllSelected={false}
-                printTitle={sessionTitle || 'Gallery Walk Feedback'}
+                printTitle=""
               />
             );
           };

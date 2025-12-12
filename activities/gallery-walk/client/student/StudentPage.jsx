@@ -418,6 +418,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     if (!requestedReviewee) {
       return <p className="text-red-600">Missing project reference. Please scan a valid QR code.</p>;
     }
+    const targetRevieweeRecord = reviewees?.[requestedReviewee] || revieweeRecord;
     return (
       <ReviewerPanel
         reviewerName={reviewerName}
@@ -427,7 +428,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
         isSavingReviewerName={isSavingReviewerName}
         onNameChange={setReviewerNameInput}
         onSaveIdentity={handleReviewerIdentitySave}
-        projectTitle={revieweeRecord?.projectTitle}
+        projectTitle={targetRevieweeRecord?.projectTitle}
         reviewerMessage={reviewerMessage}
         onMessageChange={handleReviewerMessageChange}
         reviewerNotice={reviewerNotice}
