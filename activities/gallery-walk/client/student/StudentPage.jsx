@@ -528,14 +528,25 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     setScannerError(null);
     try {
       const target = new URL(content);
-      if (!sessionId || !target.pathname.endsWith(`/${sessionId}`) || target.origin !== window.location.origin) {
+      if (!sessionId || target.origin !== window.location.origin) {
+        setScannerError('scanner-invalid');
+        return;
+      }
+      const pathSegments = target.pathname.split('/').filter(Boolean);
+      const lastSegment = pathSegments[pathSegments.length - 1];
+      if (lastSegment !== sessionId) {
+        setScannerError('scanner-invalid');
+        return;
+      }
+      const reviewee = target.searchParams.get('reviewee');
+      if (!reviewee || !REVIEWEE_ID_PATTERN.test(reviewee)) {
         setScannerError('scanner-invalid');
         return;
       }
       setCanScanNext(false);
       setReviewerMessage('');
       setReviewerNotice(null);
-      navigate(`${target.pathname}${target.search}${target.hash}`);
+      navigate(`${target.pathname}?reviewee=${encodeURIComponent(reviewee)}${target.hash}`);
     } catch {
       setScannerError('scanner-invalid');
     }

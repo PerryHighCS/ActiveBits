@@ -77,7 +77,16 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
   });
 
   app.post('/api/gallery-walk/create', async (req, res) => {
-    const session = await createSession(sessions, { data: {} });
+    const session = await createSession(sessions, {
+      data: {
+        stage: DEFAULT_STAGE,
+        config: {},
+        reviewees: {},
+        reviewers: {},
+        feedback: [],
+        stats: { reviewees: {}, reviewers: {} },
+      },
+    });
     session.type = 'gallery-walk';
     session.data.stage = DEFAULT_STAGE;
     await sessions.set(session.id, session);
