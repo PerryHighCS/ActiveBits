@@ -164,13 +164,6 @@ body {
     display: none !important;
   }
 
-  .manager-page .manager-notes-grid,
-  .solo-feedback-viewer .manager-notes-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1.5rem;
-  }
-
   .manager-page .feedback-cards,
   .solo-feedback-viewer .feedback-cards {
     display: flex !important;
