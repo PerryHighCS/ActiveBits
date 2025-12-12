@@ -235,7 +235,7 @@ export default function ManagerPage() {
       className={`manager-page p-6${hasUnsavedChanges ? ' pb-28' : ''}`}
       data-print-title={!showNotesView ? (sessionTitle || 'Gallery Walk Feedback') : undefined}
     >
-      <div className={showNotesView ? 'print:hidden' : ''}>
+      <div className="print:hidden">
         <SessionHeader activityName="Gallery Walk" sessionId={sessionId || 'unknown'} />
       </div>
       {!sessionId ? (
