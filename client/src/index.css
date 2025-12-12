@@ -177,11 +177,29 @@ body {
     width: auto;
   }
 
-  .manager-page .feedback-card,
-  .solo-feedback-viewer .feedback-card {
-    flex: 0 0 14rem !important;
-    max-width: 18rem !important;
+
+.manager-notes-card {
+  width: 100%;
+}
+
+.manager-page .feedback-card,
+.solo-feedback-viewer .feedback-card {
+  flex: 0 0 14rem !important;
+  max-width: 18rem !important;
+}
+
+@media print {
+  .manager-notes-card {
+    width: 100% !important;
+    max-width: none !important;
+    break-inside: avoid;
+    page-break-after: always;
   }
+
+  .manager-notes-card:last-of-type {
+    page-break-after: auto !important;
+  }
+}
 
   .manager-page .rounded-lg {
     box-shadow: none !important;
