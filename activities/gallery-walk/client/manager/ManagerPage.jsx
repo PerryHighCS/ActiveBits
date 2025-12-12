@@ -392,12 +392,12 @@ export default function ManagerPage() {
             </Button>
           </div> */}
         </div>
-        <div className="mt-4 grid gap-6 md:grid-cols-2">
+        <div className="manager-notes-grid mt-4 grid gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 print:flex print:flex-wrap">
           {revieweeIds.map((id) => {
             const cards = feedbackByReviewee[id] || [];
             const info = reviewees[id];
             return (
-              <div key={id} className="rounded border border-gray-200 p-4 shadow-sm">
+              <div key={id} className="notes-student-card rounded border border-gray-200 p-4 shadow-sm">
                 <div className="flex items-baseline justify-between">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-gray-500">Student</p>

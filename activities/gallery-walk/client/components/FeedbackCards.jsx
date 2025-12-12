@@ -11,13 +11,13 @@ export default function FeedbackCards({ entries, isLoading }) {
   }
 
   return (
-    <div className="flex flex-wrap gap-4 justify-start">
+    <div className="feedback-cards flex flex-wrap gap-4 justify-start">
       {entries.map((entry) => {
         const styleClass = getNoteStyleClassName(normalizeNoteStyleId(entry?.styleId));
         return (
           <div
             key={entry.id}
-            className={`min-h-[14rem] flex flex-col rounded-lg border border-black/5 p-4 shadow-md ${styleClass}`}
+            className={`feedback-card min-h-[14rem] flex flex-col rounded-lg border border-black/5 p-4 shadow-md ${styleClass}`}
             style={{ minWidth: '12rem', width: '14rem', maxWidth: '18rem', flex: '0 0 14rem' }}
           >
             <p className="text-base font-semibold text-gray-900 whitespace-pre-wrap">{entry.message}</p>

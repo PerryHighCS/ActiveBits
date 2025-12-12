@@ -116,6 +116,31 @@
     display: none !important;
   }
 
+  .manager-page .manager-notes-grid {
+    display: flex !important;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+  }
+
+  .manager-page .notes-student-card {
+    flex: 0 0 auto;
+    width: auto !important;
+    max-width: 6.5in;
+  }
+
+  .manager-page .feedback-cards {
+    display: flex !important;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 1rem;
+    width: auto;
+  }
+
+  .manager-page .feedback-card {
+    flex: 0 0 14rem !important;
+    max-width: 18rem !important;
+  }
+
   .manager-page .rounded-lg {
     box-shadow: none !important;
     border: 0 !important;
