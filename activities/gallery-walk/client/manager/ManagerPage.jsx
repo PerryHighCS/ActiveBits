@@ -270,7 +270,10 @@ export default function ManagerPage() {
             showNotesView={showNotesView}
             onToggleView={() => setShowNotesView((prev) => !prev)}
             toggleButtonVariant={showNotesView ? 'default' : 'outline'}
-            actionsClassName="print:hidden"
+            actionsClassName={[
+              'print:hidden',
+              showNotesView ? 'print:block' : 'print:hidden',
+            ].filter(Boolean).join(' ')}
             actionButtons={[
               (
                 <Button type="button" onClick={handleDownloadExport} disabled={!feedback.length}>
