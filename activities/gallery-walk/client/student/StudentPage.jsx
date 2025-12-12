@@ -1,6 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import ReviewerScanner from '../components/ReviewerScanner.jsx';
 import ProjectStationCard from '../components/ProjectStationCard';
 import LocalReviewerForm from '../components/LocalReviewerForm';
@@ -8,6 +7,7 @@ import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer.jsx';
 import FeedbackView from '../components/FeedbackView.jsx';
 import ReviewerPanel from '../components/ReviewerPanel.jsx';
 import RegistrationForm from '../components/RegistrationForm.jsx';
+import useGalleryWalkSession from '../hooks/useGalleryWalkSession.js';
 import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
 import { generateShortId } from '../../shared/id.js';
 
@@ -27,7 +27,6 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
   const kioskStoragePrefix = sessionId ? `gallery-walk:${sessionId}` : null;
   const reviewerStoragePrefix = sessionId ? `gallery-walk:${sessionId}:reviewer` : null;
 
-  const [stage, setStage] = useState(() => sessionData?.data?.stage || 'gallery');
   const [sessionClosed, setSessionClosed] = useState(false);
 
   // Kiosk state
@@ -43,11 +42,30 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
   const [isSubmittingLocal, setIsSubmittingLocal] = useState(false);
   const [localFormNotice, setLocalFormNotice] = useState(null);
   const [stageChangePending, setStageChangePending] = useState(false);
-  const [showFeedbackView, setShowFeedbackView] = useState(stage === 'review');
+  const [showFeedbackView, setShowFeedbackView] = useState(() => (sessionData?.data?.stage || 'gallery') === 'review');
   const [revieweeFeedback, setRevieweeFeedback] = useState([]);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
   const [localStyleId, setLocalStyleId] = useState(DEFAULT_NOTE_STYLE_ID);
-  const [sessionTitle, setSessionTitle] = useState('');
+  const {
+    stage,
+    reviewees,
+    sessionTitle,
+    setSessionTitle,
+    lastMessage,
+  } = useGalleryWalkSession(sessionId, { initialData: sessionData?.data });
+  useEffect(() => {
+    if (!revieweeId) return;
+    const record = reviewees[revieweeId];
+    if (record) {
+      setRevieweeRecord(record);
+    } else if (Object.keys(reviewees || {}).length > 0) {
+      setRevieweeId(null);
+      setRevieweeRecord(null);
+      if (kioskStoragePrefix) {
+        localStorage.removeItem(`${kioskStoragePrefix}:revieweeId`);
+      }
+    }
+  }, [revieweeId, reviewees, kioskStoragePrefix]);
   const studentReviewees = useMemo(() => {
     if (!revieweeId) return {};
     return { [revieweeId]: revieweeRecord || {} };
@@ -153,35 +171,6 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       setReviewerStyleId(cachedStyle);
     }
   }, [isReviewerMode, reviewerStoragePrefix]);
-
-  const fetchSessionSnapshot = useCallback(async () => {
-    if (!sessionId) return;
-    try {
-      const res = await fetch(`/api/gallery-walk/${sessionId}/feedback`);
-      if (!res.ok) throw new Error('Failed to fetch snapshot');
-      const data = await res.json();
-      setStage(data.stage || 'gallery');
-      setSessionTitle(data.config?.title || '');
-      if (revieweeId) {
-        const revieweeSnapshot = data.reviewees?.[revieweeId];
-        if (revieweeSnapshot) {
-          setRevieweeRecord(revieweeSnapshot);
-        } else {
-          setRevieweeId(null);
-          setRevieweeRecord(null);
-          if (kioskStoragePrefix) {
-            localStorage.removeItem(`${kioskStoragePrefix}:revieweeId`);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch gallery walk snapshot', err);
-    }
-  }, [sessionId, revieweeId, kioskStoragePrefix]);
-
-  useEffect(() => {
-    fetchSessionSnapshot();
-  }, [fetchSessionSnapshot]);
 
   const fetchRevieweeFeedback = useCallback(async () => {
     if (!sessionId || !revieweeId) return;
@@ -310,53 +299,27 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     }
   }, [stage, stageChangePending, localMessage, isSubmittingLocal]);
 
-  const handleWsMessage = useCallback((event) => {
-    try {
-      const message = JSON.parse(event.data);
-      if (message.type === 'stage-changed') {
-        setStage(message.stage || message.payload?.stage || 'gallery');
-        return;
-      }
-      if (message.type === 'session-ended') {
-        if (showFeedbackView || isReviewerMode) {
-          setSessionClosed(true);
-        } else {
-          navigate('/session-ended');
-        }
-        return;
-      }
-      if (message.type === 'reviewees-updated' && revieweeId) {
-        const updated = message.reviewees?.[revieweeId] || message.payload?.reviewees?.[revieweeId];
-        if (updated) setRevieweeRecord(updated);
-      }
-      if (message.type === 'feedback-added') {
-        const payload = message.payload || {};
-        if (payload.feedback?.to === revieweeId && showFeedbackView) {
-          fetchRevieweeFeedback();
-        }
-      }
-    } catch {
-      // ignore non-JSON payloads
-    }
-  }, [fetchRevieweeFeedback, navigate, revieweeId, showFeedbackView, isReviewerMode]);
-
-  const buildWsUrl = useCallback(() => {
-    if (!sessionId) return null;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws/gallery-walk?sessionId=${sessionId}`;
-  }, [sessionId]);
-
-  const { connect: connectWs, disconnect: disconnectWs } = useResilientWebSocket({
-    buildUrl: buildWsUrl,
-    shouldReconnect: Boolean(sessionId),
-    onMessage: handleWsMessage,
-  });
-
   useEffect(() => {
-    if (!sessionId) return undefined;
-    connectWs();
-    return () => disconnectWs();
-  }, [sessionId, connectWs, disconnectWs]);
+    if (!lastMessage) return;
+    if (lastMessage.type === 'session-ended') {
+      if (showFeedbackView || isReviewerMode) {
+        setSessionClosed(true);
+      } else {
+        navigate('/session-ended');
+      }
+      return;
+    }
+    if (lastMessage.type === 'reviewees-updated' && revieweeId) {
+      const updated = lastMessage.payload?.reviewees?.[revieweeId];
+      if (updated) setRevieweeRecord(updated);
+    }
+    if (lastMessage.type === 'feedback-added') {
+      const payload = lastMessage.payload || {};
+      if (payload.feedback?.to === revieweeId && showFeedbackView) {
+        fetchRevieweeFeedback();
+      }
+    }
+  }, [lastMessage, showFeedbackView, isReviewerMode, navigate, revieweeId, fetchRevieweeFeedback]);
 
   const handleReviewerIdentitySave = async () => {
     if (!sessionId || !requestedReviewee) return;

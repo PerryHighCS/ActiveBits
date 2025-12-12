@@ -1,58 +1,38 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
-import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
-import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils';
+import { sortFeedbackEntries } from './feedbackUtils';
 import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.jsx';
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
 import StageControls from '../components/StageControls.jsx';
 import TitleEditor from '../components/TitleEditor.jsx';
 import FeedbackViewSwitcher from '../components/FeedbackViewSwitcher.jsx';
+import useGalleryWalkSession from '../hooks/useGalleryWalkSession.js';
 
 export default function ManagerPage() {
   const { sessionId } = useParams();
-  const [stage, setStage] = useState('gallery');
-  const [feedback, setFeedback] = useState([]);
-  const [reviewees, setReviewees] = useState({});
-  const [reviewers, setReviewers] = useState({});
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
+
+  const {
+    stage,
+    setStage,
+    feedback,
+    reviewees,
+    reviewers,
+    sessionTitle,
+    setSessionTitle,
+    isLoading,
+    error,
+    setError,
+  } = useGalleryWalkSession(sessionId);
+
   const [sortField, setSortField] = useState('createdAt');
   const [sortDirection, setSortDirection] = useState('desc');
   const [exportSignature, setExportSignature] = useState(null);
   const [showNotesView, setShowNotesView] = useState(false);
   const [notesReviewee, setNotesReviewee] = useState('all');
-  const [sessionTitle, setSessionTitle] = useState('');
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [titleSaveError, setTitleSaveError] = useState(null);
   const titleInitializedRef = useRef(false);
-
-  const loadSnapshot = useCallback(async () => {
-    if (!sessionId) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/gallery-walk/${sessionId}/feedback`);
-      if (!res.ok) {
-        throw new Error('Failed to load session data');
-      }
-      const data = await res.json();
-      setStage(data.stage || 'gallery');
-      setFeedback(Array.isArray(data.feedback) ? data.feedback : []);
-      setReviewees(data.reviewees || {});
-      setReviewers(data.reviewers || {});
-      setSessionTitle(data.config?.title || '');
-      setTitleSaveError(null);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [sessionId]);
-
-  useEffect(() => {
-    loadSnapshot();
-  }, [loadSnapshot]);
 
   useEffect(() => {
     titleInitializedRef.current = false;
@@ -150,46 +130,6 @@ export default function ManagerPage() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [hasUnsavedChanges]);
-
-  const buildWsUrl = useCallback(() => {
-    if (!sessionId) return null;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws/gallery-walk?sessionId=${sessionId}`;
-  }, [sessionId]);
-
-  const handleWsMessage = useCallback((event) => {
-    try {
-      const message = JSON.parse(event.data);
-      if (message.type === 'stage-changed') {
-        setStage(message.payload?.stage || message.stage || 'gallery');
-        return;
-      }
-      if (message.type === 'reviewees-updated') {
-        setReviewees(message.payload?.reviewees || {});
-        return;
-      }
-      if (message.type === 'feedback-added') {
-        const entry = message.payload?.feedback;
-        if (entry) {
-          setFeedback((prev) => insertFeedbackEntry(prev, entry));
-        }
-      }
-    } catch {
-      // ignore malformed events
-    }
-  }, []);
-
-  const { connect: connectWs, disconnect: disconnectWs } = useResilientWebSocket({
-    buildUrl: buildWsUrl,
-    shouldReconnect: Boolean(sessionId),
-    onMessage: handleWsMessage,
-  });
-
-  useEffect(() => {
-    if (!sessionId) return undefined;
-    connectWs();
-    return () => disconnectWs();
-  }, [sessionId, connectWs, disconnectWs]);
 
   const renderTableHeaderCell = (label, field) => (
     <button
