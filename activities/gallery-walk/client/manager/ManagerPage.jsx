@@ -220,7 +220,7 @@ export default function ManagerPage() {
         containerClassName="rounded-lg border border-gray-200 bg-white p-4 shadow"
         filterClassName="notes-actions"
         hideFilterOnPrint
-        gridClassName="mt-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+        gridClassName="mt-4 grid-cols-1 xl:grid-cols-2"
         cardClassName="manager-notes-card"
         emptySelectionText="No students selected for notes view."
         noFeedbackText="No feedback yet."
