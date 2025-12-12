@@ -599,18 +599,20 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow space-y-4 sm:p-6">
             <div>
               <h2 className="text-xl font-semibold text-gray-900">Ready for the next project?</h2>
-              <p className="text-gray-600">Scan the next station&apos;s QR code to continue leaving feedback.</p>
+              <p className="text-gray-600">To leave feedback for another project, scan its QR code.</p>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setScannerError(null);
-                setIsScannerOpen(true);
-              }}
-            >
-              Scan next QR code
-            </Button>
+            <div className="flex justify-center">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setScannerError(null);
+                  setIsScannerOpen(true);
+                }}
+              >
+                Scan next QR code
+              </Button>
+            </div>
             {scannerError === 'scanner-unavailable' && (
               <p className="text-sm text-red-600">
                 Your browser will not open the scanner. Use your phone’s camera app to scan the next code.
