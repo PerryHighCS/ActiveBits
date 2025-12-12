@@ -4,12 +4,14 @@ import React, {
   useEffect,
   useMemo,
   useId,
+  useCallback,
 } from 'react';
 import { NOTE_STYLE_OPTIONS } from '../../shared/noteStyles.js';
 
 export default function NoteStyleSelect({ value, onChange, label = 'Note style' }) {
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [dropdownPlacement, setDropdownPlacement] = useState('bottom');
   const containerRef = useRef(null);
   const triggerRef = useRef(null);
   const listboxRef = useRef(null);
@@ -23,6 +25,19 @@ export default function NoteStyleSelect({ value, onChange, label = 'Note style' 
   );
   const selected = NOTE_STYLE_OPTIONS[selectedIndex] || NOTE_STYLE_OPTIONS[0];
 
+  const updatePlacement = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const dropdownHeight = 280; // approximate dropdown height (16rem + padding)
+    if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+      setDropdownPlacement('top');
+    } else {
+      setDropdownPlacement('bottom');
+    }
+  }, []);
+
   useEffect(() => {
     if (!isOpen) return undefined;
     function handleClick(event) {
@@ -33,6 +48,18 @@ export default function NoteStyleSelect({ value, onChange, label = 'Note style' 
     window.addEventListener('mousedown', handleClick);
     return () => window.removeEventListener('mousedown', handleClick);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    updatePlacement();
+    const scrollOptions = { capture: true };
+    window.addEventListener('resize', updatePlacement);
+    window.addEventListener('scroll', updatePlacement, scrollOptions);
+    return () => {
+      window.removeEventListener('resize', updatePlacement);
+      window.removeEventListener('scroll', updatePlacement, scrollOptions);
+    };
+  }, [isOpen, updatePlacement]);
 
   useEffect(() => {
     if (isOpen) {
@@ -134,7 +161,10 @@ export default function NoteStyleSelect({ value, onChange, label = 'Note style' 
           aria-activedescendant={NOTE_STYLE_OPTIONS[highlightedIndex]?.id ? `note-style-option-${NOTE_STYLE_OPTIONS[highlightedIndex].id}` : undefined}
           tabIndex={-1}
           ref={listboxRef}
-          className="absolute z-10 mt-2 w-64 max-h-[16rem] overflow-auto rounded border border-gray-200 bg-white p-3 shadow-lg focus:outline-none"
+          className="absolute z-10 w-64 max-h-[16rem] overflow-auto rounded border border-gray-200 bg-white p-3 shadow-lg focus:outline-none"
+          style={dropdownPlacement === 'top'
+            ? { bottom: 'calc(100% + 0.5rem)' }
+            : { top: 'calc(100% + 0.5rem)' }}
           onKeyDown={handleListboxKeyDown}
         >
           <div className="grid grid-cols-2 gap-2">
