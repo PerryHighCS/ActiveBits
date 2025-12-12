@@ -15,6 +15,7 @@ export default function GalleryWalkNotesView({
   cardClassName = '',
   selectId = 'gallery-walk-notes-select',
   hideFilterOnPrint = true,
+  hideCardHeaderOnPrint = false,
   emptySelectionText = 'No students selected.',
   noFeedbackText = 'No feedback yet.',
   allOptionLabel = 'All students',
@@ -81,7 +82,7 @@ export default function GalleryWalkNotesView({
                   {printTitle}
                 </p>
               )}
-              <div className="flex items-baseline justify-between">
+              <div className={['flex items-baseline justify-between', hideCardHeaderOnPrint ? 'print:hidden' : ''].filter(Boolean).join(' ')}>
                 <div>
                   <p className="text-lg font-semibold text-gray-900">
                     {info?.name || info?.projectTitle || id}

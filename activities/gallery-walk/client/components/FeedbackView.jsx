@@ -49,6 +49,7 @@ export default function FeedbackView({
         containerClassName="pt-2 print:pt-0"
         gridClassName="grid-cols-1"
         cardClassName="print:break-after-page"
+        hideCardHeaderOnPrint
         noFeedbackText={isLoadingFeedback ? 'Loading feedback…' : 'No feedback yet.'}
         emptySelectionText={isLoadingFeedback ? 'Loading feedback…' : 'No feedback yet.'}
         printTitle=""
