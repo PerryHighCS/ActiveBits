@@ -142,6 +142,10 @@ body {
   .student-feedback-print {
     page-break-inside: avoid;
   }
+  .student-page .notes-student-card:last-of-type {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
 
   .manager-page .print:hidden {
     display: none !important;
