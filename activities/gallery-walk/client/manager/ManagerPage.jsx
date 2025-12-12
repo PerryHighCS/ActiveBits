@@ -4,6 +4,7 @@ import SessionHeader from '@src/components/common/SessionHeader';
 import { sortFeedbackEntries } from './feedbackUtils';
 import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.jsx';
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
+import Button from '@src/components/ui/Button';
 import StageControls from '../components/StageControls.jsx';
 import TitleEditor from '../components/TitleEditor.jsx';
 import FeedbackViewSwitcher from '../components/FeedbackViewSwitcher.jsx';

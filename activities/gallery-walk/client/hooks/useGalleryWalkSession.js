@@ -85,7 +85,11 @@ export default function useGalleryWalkSession(sessionId, options = {}) {
       if (message.type === 'feedback-added') {
         const entry = message.payload?.feedback;
         if (entry) {
-          setFeedback((prev) => [...prev, entry]);
+          setFeedback((prev) => {
+            const next = prev.filter((item) => item.id !== entry.id);
+            next.unshift(entry);
+            return next;
+          });
         }
         return;
       }
