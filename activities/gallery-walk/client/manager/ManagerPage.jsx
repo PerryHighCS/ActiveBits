@@ -211,23 +211,24 @@ export default function ManagerPage() {
   const renderNotesView = () => {
     if (!showNotesView) return null;
     return (
-              <GalleryWalkNotesView
-                reviewees={reviewees}
-                feedbackByReviewee={feedbackByReviewee}
-                selectedReviewee={notesReviewee}
-                onSelectReviewee={setNotesReviewee}
-                selectId="notesSelect"
-                containerClassName="rounded-lg border border-gray-200 bg-white p-4 shadow"
-                filterClassName="notes-actions"
-                hideFilterOnPrint={false}
-                gridClassName="mt-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 print:flex print:flex-wrap"
-                emptySelectionText="No students selected for notes view."
-                noFeedbackText="No feedback yet."
-                includeAllRevieweesWhenAllSelected={false}
-                printTitle=""
-              />
-            );
-          };
+      <GalleryWalkNotesView
+        reviewees={reviewees}
+        feedbackByReviewee={feedbackByReviewee}
+        selectedReviewee={notesReviewee}
+        onSelectReviewee={setNotesReviewee}
+        selectId="notesSelect"
+        containerClassName="rounded-lg border border-gray-200 bg-white p-4 shadow"
+        filterClassName="notes-actions"
+        hideFilterOnPrint
+        gridClassName="mt-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+        cardClassName="manager-notes-card"
+        emptySelectionText="No students selected for notes view."
+        noFeedbackText="No feedback yet."
+        includeAllRevieweesWhenAllSelected={false}
+        printTitle={sessionTitle || 'Gallery Walk Feedback'}
+      />
+    );
+  };
 
   return (
     <div
