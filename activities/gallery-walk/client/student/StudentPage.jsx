@@ -19,11 +19,6 @@ function generateShortId(length = 6) {
   return out;
 }
 
-const STAGE_LABELS = {
-  gallery: 'Gallery Walk',
-  review: 'Feedback Review',
-};
-
 export default function StudentPage({ sessionData }) {
   const sessionId = sessionData?.sessionId || null;
   const location = useLocation();
@@ -309,12 +304,6 @@ export default function StudentPage({ sessionData }) {
     return () => disconnectWs();
   }, [sessionId, connectWs, disconnectWs]);
 
-  const renderStageBadge = () => (
-    <span className="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
-      {STAGE_LABELS[stage] || 'Gallery Walk'}
-    </span>
-  );
-
   const renderRegistrationForm = () => (
     <form onSubmit={handleRevieweeRegistration} className="space-y-4 bg-white shadow rounded-lg p-6">
       <div>
@@ -351,20 +340,25 @@ export default function StudentPage({ sessionData }) {
   );
 
   const renderFeedbackView = () => (
-    <div className="rounded-lg border border-indigo-200 bg-white p-6 shadow space-y-4">
+    <div className="rounded-lg border border-indigo-200 bg-white p-6 shadow space-y-4 print:border-0 print:shadow-none print:p-0">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold">Your feedback</h2>
-          <p className="text-gray-600">The teacher switched to review mode. Read through the comments that were left for you.</p>
+          <h2 className="text-xl font-semibold print:hidden">Your feedback</h2>
+          <p className="text-gray-600 print:hidden">The teacher switched to review mode. Read through the comments that were left for you.</p>
+          {revieweeRecord?.name && (
+            <div className="student-name-print hidden text-gray-800 print:block">
+              <p>{revieweeRecord.name}</p>
+              {revieweeRecord?.projectTitle && <p>{revieweeRecord?.projectTitle}</p>}
+            </div>
+          )}
         </div>
-        {renderStageBadge()}
       </div>
       {sessionClosed && (
         <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">
           This session has ended. You can still view and print your feedback.
         </p>
       )}
-      <div className="flex justify-end">
+      <div className="flex justify-end print:hidden">
         <Button onClick={() => window.print()} variant="outline">
           Print my feedback
         </Button>
@@ -559,13 +553,13 @@ export default function StudentPage({ sessionData }) {
   };
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
-      <header className="space-y-2">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6 student-page">
+      <header className="student-header space-y-2">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold">Gallery Walk</h1>
+            <h1 className="student-title text-3xl font-bold">Gallery Walk</h1>
           </div>
-          <p className="text-gray-600">
+          <p className="text-gray-600 student-session">
             Session ID: <span className="font-mono">{sessionId}</span>
           </p>
         </div>

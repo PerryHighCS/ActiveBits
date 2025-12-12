@@ -76,3 +76,52 @@
     transparent 8px 16px
   );
 }
+
+@media print {
+  .student-page {
+    padding: 0;
+    max-width: none;
+  }
+
+  .student-header,
+  .student-session,
+  .student-title,
+  .student-page button,
+  .student-page input,
+  .student-page textarea,
+  .student-page select,
+  .student-page .student-actions {
+    display: none !important;
+  }
+
+  .student-name-print {
+    display: block;
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+
+  .student-feedback-print {
+    page-break-inside: avoid;
+  }
+
+  .manager-page .print:hidden {
+    display: none !important;
+  }
+
+  .manager-page input,
+  .manager-page button,
+  .manager-page select,
+  .manager-page .notes-actions {
+    display: none !important;
+  }
+
+  .manager-page .rounded-lg {
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+
+  .manager-page .fixed {
+    display: none !important;
+  }
+}

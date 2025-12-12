@@ -17,7 +17,8 @@ export default function FeedbackCards({ entries, isLoading }) {
         return (
           <div
             key={entry.id}
-            className={`w-56 max-w-[18rem] min-h-[14rem] rounded-lg border border-black/5 p-4 shadow-md flex flex-col ${styleClass}`}
+            className={`min-h-[14rem] flex flex-col rounded-lg border border-black/5 p-4 shadow-md ${styleClass}`}
+            style={{ minWidth: '12rem', width: '14rem', maxWidth: '18rem' }}
           >
             <p className="text-base font-semibold text-gray-900 whitespace-pre-wrap">{entry.message}</p>
             <div className="mt-4 flex flex-col items-end gap-1 text-right mt-auto">
