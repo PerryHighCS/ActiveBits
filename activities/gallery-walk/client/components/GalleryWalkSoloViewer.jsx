@@ -337,7 +337,10 @@ export default function GalleryWalkSoloViewer() {
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6 shadow space-y-4 solo-feedback-viewer print:border-0 print:p-0 print:shadow-none print:bg-transparent">
+    <div
+      className="rounded-lg border border-gray-200 bg-white p-6 shadow space-y-4 solo-feedback-viewer print:border-0 print:p-0 print:shadow-none print:bg-transparent"
+      data-print-title={fileResult?.data?.config?.title || 'Gallery Walk Feedback'}
+    >
       <div
         className={[
           'flex flex-wrap items-start justify-center gap-4 print:hidden',
