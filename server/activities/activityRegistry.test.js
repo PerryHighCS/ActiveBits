@@ -20,6 +20,7 @@ const EXPECTED_ACTIVITIES = [
   "java-format-practice",
   "python-list-practice",
   "raffle",
+  "gallery-walk",
   "www-sim",
 ];
 
@@ -160,6 +161,25 @@ test("all activity configs have required fields", async () => {
       "boolean",
       `${activityId}: config.soloMode is a boolean`
     );
+    if (config.soloModeMeta !== undefined) {
+      assert.equal(
+        typeof config.soloModeMeta,
+        "object",
+        `${activityId}: config.soloModeMeta is an object when provided`
+      );
+      if (config.soloModeMeta) {
+        const { title, description, buttonText } = config.soloModeMeta;
+        if (title !== undefined) {
+          assert.equal(typeof title, "string", `${activityId}: soloModeMeta.title must be a string`);
+        }
+        if (description !== undefined) {
+          assert.equal(typeof description, "string", `${activityId}: soloModeMeta.description must be a string`);
+        }
+        if (buttonText !== undefined) {
+          assert.equal(typeof buttonText, "string", `${activityId}: soloModeMeta.buttonText must be a string`);
+        }
+      }
+    }
   }
 });
 

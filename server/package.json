@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js --trace-warnings",
-    "test": "node --test activities/activityRegistry.test.js broadcastUtils.test.js sessionStore.test.js statusRoute.test.js",
+    "test": "node --test activities/activityRegistry.test.js broadcastUtils.test.js galleryWalkRoutes.test.js sessionStore.test.js statusRoute.test.js",
     "test:valkey": "node test-valkey.js",
     "monitor:valkey": "node monitor-valkey.js"
   },

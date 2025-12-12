@@ -225,7 +225,12 @@ export default function ManageDashboard() {
                       onClick={() => copyToClipboard(soloLink)}
                       className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded transition-colors"
                     >
-                      {isCopied(soloLink) ? '✓ Copied Solo Link' : 'Copy Solo Practice Link'}
+                      {(() => {
+                        const label = activity.soloModeMeta?.buttonText || 'Copy Solo Practice Link';
+                        if (!isCopied(soloLink)) return label;
+                        const trimmed = label.replace(/^Copy\s+/i, '');
+                        return `✓ Copied ${trimmed || 'Solo Link'}`;
+                      })()}
                     </button>
                   )}
                 </div>
