@@ -91,6 +91,9 @@
 .notes-print-title {
   display: none;
 }
+.manager-print-title {
+  display: none;
+}
 
 html,
 body,
@@ -109,6 +112,9 @@ body {
 @media print {
   .notes-print-title {
     display: block;
+  }
+  .manager-print-title {
+    display: block !important;
   }
 
   .student-page {

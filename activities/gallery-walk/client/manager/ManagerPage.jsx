@@ -238,6 +238,11 @@ export default function ManagerPage() {
       <div className="print:hidden">
         <SessionHeader activityName="Gallery Walk" sessionId={sessionId || 'unknown'} />
       </div>
+      {!showNotesView && (
+        <p className="manager-print-title hidden print:block text-center text-lg font-semibold mb-4">
+          {sessionTitle || 'Gallery Walk Feedback'}
+        </p>
+      )}
       {!sessionId ? (
         <div className="mt-6 text-gray-600 space-y-2">
           <p>No session selected. Start a Gallery Walk from the dashboard to get a join code.</p>
