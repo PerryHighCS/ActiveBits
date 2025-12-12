@@ -51,7 +51,7 @@ export default function FeedbackView({
         cardClassName="print:break-after-page"
         noFeedbackText={isLoadingFeedback ? 'Loading feedback…' : 'No feedback yet.'}
         emptySelectionText={isLoadingFeedback ? 'Loading feedback…' : 'No feedback yet.'}
-        printTitle={sessionTitle || 'Gallery Walk Feedback'}
+        printTitle=""
       />
     </div>
   );
