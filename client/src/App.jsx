@@ -42,7 +42,7 @@ function Footer() {
 export default function App() {
     return (
         /* The main App component that sets up the routing for the application, using React Router */
-        <div className='w-full flex flex-col items-center min-h-screen pt-10 px-10 print:pt-0 print:px-0'>
+        <div className='w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'>
             <BrowserRouter>
 
                 <div className='w-full flex-grow'>

@@ -499,11 +499,14 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     setScannerError(null);
     try {
       const target = new URL(content);
-      if (!sessionId || !target.pathname.endsWith(`/${sessionId}`)) {
+      if (!sessionId || !target.pathname.endsWith(`/${sessionId}`) || target.origin !== window.location.origin) {
         setScannerError('scanner-invalid');
         return;
       }
-      window.location.href = target.toString();
+      setCanScanNext(false);
+      setReviewerMessage('');
+      setReviewerNotice(null);
+      navigate(`${target.pathname}${target.search}${target.hash}`);
     } catch {
       setScannerError('scanner-invalid');
     }
@@ -533,7 +536,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
             }}
           />
         )}
-        {reviewerName && (
+        {reviewerName && !canScanNext && (
           <ReviewerFeedbackForm
             projectTitle={revieweeRecord?.projectTitle}
             message={reviewerMessage}
@@ -546,12 +549,42 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
               setScannerError(null);
               setIsScannerOpen(true);
             }}
-            onCameraFallback={() => window.open(window.location.origin, '_blank')}
             scannerError={scannerError}
-            canScan={canScanNext}
+            canScan={false}
             styleId={reviewerStyleId}
             onStyleChange={handleReviewerStyleChange}
           />
+        )}
+        {reviewerName && canScanNext && (
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow space-y-4 sm:p-6">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Ready for the next project?</h2>
+              <p className="text-gray-600">Scan the next station&apos;s QR code to continue leaving feedback.</p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setScannerError(null);
+                setIsScannerOpen(true);
+              }}
+            >
+              Scan next QR code
+            </Button>
+            {scannerError === 'scanner-unavailable' && (
+              <p className="text-sm text-red-600">
+                Your browser will not open the scanner. Use your phone’s camera app to scan the next code.
+              </p>
+            )}
+            {scannerError === 'scanner-invalid' && (
+              <p className="text-sm text-red-600">
+                That QR code was not for this session. Make sure you scan the code shown on this station.
+              </p>
+            )}
+            <Button type="button" variant="ghost" onClick={() => setCanScanNext(false)}>
+              Leave another note here
+            </Button>
+          </div>
         )}
       </div>
     );

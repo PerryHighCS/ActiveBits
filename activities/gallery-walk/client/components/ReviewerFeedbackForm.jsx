@@ -12,7 +12,6 @@ export default function ReviewerFeedbackForm({
   onSubmit,
   onCancel,
   onScan,
-  onCameraFallback,
   scannerError,
   canScan,
   styleId,
@@ -20,7 +19,7 @@ export default function ReviewerFeedbackForm({
 }) {
   const noteStyleClass = getNoteStyleClassName(normalizeNoteStyleId(styleId));
   return (
-    <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow">
+    <div className="space-y-4 rounded-none border-0 bg-transparent p-0 sm:rounded-lg sm:border sm:border-gray-200 sm:bg-white sm:p-6 sm:shadow">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold">
@@ -52,14 +51,9 @@ export default function ReviewerFeedbackForm({
         </div>
       </form>
       {canScan && (
-        <div className="flex flex-col gap-2">
-          <Button type="button" variant="outline" onClick={onScan}>
-            Scan QR to review another project
-          </Button>
-          <button type="button" className="text-sm text-blue-600 underline" onClick={onCameraFallback}>
-            Use your camera app instead
-          </button>
-        </div>
+        <Button type="button" variant="outline" onClick={onScan}>
+          Scan QR to review another project
+        </Button>
       )}
       {scannerError === 'scanner-unavailable' && (
         <p className="text-sm text-red-600">
