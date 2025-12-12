@@ -10,19 +10,11 @@ import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
 import ReviewerIdentityForm from '../components/ReviewerIdentityForm';
 import ReviewerFeedbackForm from '../components/ReviewerFeedbackForm';
 import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
+import { generateShortId } from '../../shared/id.js';
 
 const REVIEWEE_ID_PATTERN = /^[A-Z0-9]{6}$/;
 const REVIEWER_ID_PATTERN = /^[A-Z0-9]{6,12}$/;
 const REVIEWER_NAME_MAX_LENGTH = 200;
-
-function generateShortId(length = 6) {
-  const alphabet = 'BCDFGHJKLMNPQRSTVWXYZ23456789';
-  let out = '';
-  for (let i = 0; i < length; i += 1) {
-    out += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
-  }
-  return out;
-}
 
 function GalleryWalkLiveStudentPage({ sessionData }) {
   const sessionId = sessionData?.sessionId || null;
@@ -376,13 +368,17 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
         </p>
       </div>
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1">Your name</label>
+        <label className="block text-sm font-semibold text-gray-700 mb-1" htmlFor="reviewee-name-input">Your name</label>
         <input
+          id="reviewee-name-input"
           type="text"
           className="w-full rounded border border-gray-300 px-3 py-2"
           value={registrationName}
           onChange={(e) => setRegistrationName(e.target.value)}
           placeholder="Student name"
+          aria-required="true"
+          aria-invalid={Boolean(registrationError)}
+          aria-describedby={registrationError ? 'reviewee-name-error' : undefined}
         />
       </div>
       <div>
@@ -395,7 +391,11 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
           placeholder="Project title"
         />
       </div>
-      {registrationError && <p className="text-sm text-red-600">{registrationError}</p>}
+      {registrationError && (
+        <p id="reviewee-name-error" className="text-sm text-red-600" aria-live="polite">
+          {registrationError}
+        </p>
+      )}
       <Button type="submit" disabled={isRegistering}>
         {isRegistering ? 'Registering…' : 'Save and continue'}
       </Button>

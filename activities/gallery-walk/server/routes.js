@@ -2,8 +2,10 @@ import { createSession } from 'activebits-server/core/sessions.js';
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js';
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js';
 import { normalizeNoteStyleId } from '../shared/noteStyles.js';
+import { generateShortId } from '../shared/id.js';
 
 const DEFAULT_STAGE = 'gallery';
+const MAX_ID_ATTEMPTS = 5;
 
 function ensurePlainObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -11,15 +13,6 @@ function ensurePlainObject(value) {
 
 function normalizeStage(stage) {
   return stage === 'review' ? 'review' : DEFAULT_STAGE;
-}
-
-function createId() {
-  const alphabet = 'BCDFGHJKLMNPQRSTVWXYZ23456789';
-  let out = '';
-  for (let i = 0; i < 6; i += 1) {
-    out += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
-  }
-  return out;
 }
 
 function sanitizeName(value, fallback = '', maxLength = 200) {
@@ -110,7 +103,7 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
 
     const providedIdRaw = typeof req.body?.revieweeId === 'string' ? req.body.revieweeId.trim() : '';
     const providedId = /^[A-Z0-9]{6}$/i.test(providedIdRaw) ? providedIdRaw.toUpperCase() : '';
-    let revieweeId = providedId || createId();
+    let revieweeId = providedId || generateShortId();
     const name = sanitizeName(req.body?.name);
     const projectTitle = sanitizeName(req.body?.projectTitle || '', null);
 
@@ -119,8 +112,12 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
     }
 
     if (session.data.reviewees[revieweeId]) {
-      // De-duplicate by generating a fresh ID server-side
-      revieweeId = createId();
+      // De-duplicate by generating a fresh ID server-side with retries
+      let attempts = 0;
+      do {
+        revieweeId = generateShortId();
+        attempts += 1;
+      } while (session.data.reviewees[revieweeId] && attempts < MAX_ID_ATTEMPTS);
       if (session.data.reviewees[revieweeId]) {
         return res.status(409).json({ error: 'revieweeId already exists' });
       }
@@ -163,7 +160,7 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
     const reviewer = session.data.reviewers[reviewerId];
     const styleId = normalizeNoteStyleId(req.body?.styleId);
     const feedbackEntry = {
-      id: createId(),
+      id: generateShortId(),
       to: revieweeId,
       from: reviewerId,
       fromNameSnapshot: reviewer?.name || 'Anonymous Reviewer',
@@ -234,7 +231,7 @@ export default function setupGalleryWalkRoutes(app, sessions, ws) {
     const session = ensureGalleryWalkSession(await sessions.get(req.params.sessionId));
     if (!session) return res.status(404).json({ error: 'invalid session' });
 
-    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    const title = sanitizeName(req.body?.title || '', '', 200);
     session.data.config = ensurePlainObject(session.data.config);
     session.data.config.title = title;
     await sessions.set(session.id, session);

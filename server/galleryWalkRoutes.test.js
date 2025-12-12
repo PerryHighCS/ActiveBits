@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import setupGalleryWalkRoutes from './routes.js';
+import setupGalleryWalkRoutes from '../activities/gallery-walk/server/routes.js';
 import { createSessionStore } from 'activebits-server/core/sessions.js';
-import { DEFAULT_NOTE_STYLE_ID, NOTE_STYLE_OPTIONS } from '../shared/noteStyles.js';
+import { DEFAULT_NOTE_STYLE_ID, NOTE_STYLE_OPTIONS } from '../activities/gallery-walk/shared/noteStyles.js';
 
 function createWsStub() {
   return {
@@ -150,6 +150,7 @@ test('updates session title metadata', async (t) => {
   const bundle = await exportRes.json();
   assert.equal(bundle.config.title, 'Showcase 2024');
 });
+
 test('allows reviewers to set sticky note styles', async (t) => {
   const server = await startTestServer();
   t.after(server.close);
@@ -199,7 +200,7 @@ test('invalid note style falls back to default', async (t) => {
   const feedbackRes = await fetch(`${server.baseUrl}/api/gallery-walk/${sessionId}/feedback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ revieweeId: 'stu-4', reviewerId: 'rev-4', message: 'Invalid style test', styleId: 'unknown' }),
+    body: JSON.stringify({ revieweeId: 'stu-4', reviewerId: 'rev-4', message: 'Great progress', styleId: 'invalid' }),
   });
   const body = await feedbackRes.json();
   assert.equal(body.feedback.styleId, DEFAULT_NOTE_STYLE_ID);
