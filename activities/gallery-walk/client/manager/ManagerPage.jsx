@@ -238,7 +238,7 @@ export default function ManagerPage() {
       <div className="print:hidden">
         <SessionHeader activityName="Gallery Walk" sessionId={sessionId || 'unknown'} />
       </div>
-      {!showNotesView && (
+      {showNotesView && (
         <p className="manager-print-title hidden print:block text-center text-lg font-semibold mb-4">
           {sessionTitle || 'Gallery Walk Feedback'}
         </p>
