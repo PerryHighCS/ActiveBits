@@ -158,6 +158,11 @@
     width: 100% !important;
     max-width: none !important;
     break-inside: avoid;
+    page-break-after: always;
+  }
+
+  .manager-notes-card:last-of-type {
+    page-break-after: auto !important;
   }
 
   .manager-page .rounded-lg:not(.notes-student-card) {
