@@ -79,6 +79,11 @@ export default {
   description: 'Brief description', // Shown in dashboard
   color: 'blue',                // Accent color for activity card
   soloMode: false,              // Allow solo practice without teacher
+  soloModeMeta: {               // Optional: customize Solo Bits/manager labels
+    title: 'Solo Card Title',
+    description: 'Solo mode description',
+    buttonText: 'Copy Solo Link',
+  },
   clientEntry: './client/index.js',  // Component entry (JS/JSX)
   serverEntry: './server/routes.js', // Server routes
 };
@@ -131,6 +136,7 @@ export const myActivity = {
 2. **Session ID Format**: Solo sessions use the format `solo-{activity-id}` (e.g., `solo-java-string-practice`)
 3. **No Teacher Required**: Students can start practicing immediately without a teacher-managed session
 4. **Client-Side State**: Solo activities typically use `localStorage` for progress persistence
+5. **Custom Labels**: Optional `soloModeMeta` lets each activity override the Solo Bits card title/description and the dashboard "Copy Solo…" button text
 
 ### Solo Mode vs. Teacher Mode
 

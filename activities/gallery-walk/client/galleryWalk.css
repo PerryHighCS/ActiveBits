@@ -1,0 +1,186 @@
+/* Gallery Walk specific styles */
+.note-style-lemon {
+  background-color: #fdecc8;
+}
+
+.note-style-peach {
+  background-color: #ffe7f1;
+}
+
+.note-style-sky {
+  background-color: #e7f6fd;
+}
+
+.note-style-mint {
+  background-color: #e8f5c8;
+}
+
+.note-style-lavender {
+  background-color: #f0e6ff;
+}
+
+.note-style-dots {
+  background-color: #f0e6ff;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.8) 15%, transparent 16%),
+    radial-gradient(rgba(255, 255, 255, 0.8) 15%, transparent 16%);
+  background-position: 0 0, 12px 12px;
+  background-size: 24px 24px;
+}
+
+.note-style-stripes {
+  background-color: #e7f6fd;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.7) 0 8px,
+    transparent 8px 16px
+  );
+}
+
+.note-style-grid {
+  background-color: #e8f5c8;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.7) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.7) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.note-style-checker {
+  background-color: #fdecc8;
+  background-image:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.7) 25%, transparent 25%),
+    linear-gradient(225deg, rgba(255, 255, 255, 0.7) 25%, transparent 25%),
+    linear-gradient(315deg, rgba(255, 255, 255, 0.5) 25%, transparent 25%),
+    linear-gradient(45deg, rgba(255, 255, 255, 0.5) 25%, transparent 25%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+}
+
+.note-style-diagonal {
+  background-color: #ffe7f1;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.4) 0 8px,
+    transparent 8px 16px
+  );
+}
+
+.note-style-vertical {
+  background-color: #e7f6fd;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.45) 0 8px,
+    transparent 8px 16px
+  );
+}
+
+.note-style-field {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0.5rem;
+}
+
+.note-style-field textarea,
+.note-style-field input {
+  background: transparent;
+}
+
+.notes-print-title,
+.manager-print-title {
+  display: none;
+}
+
+.manager-notes-card {
+  width: 100%;
+}
+
+.manager-page .feedback-card,
+.solo-feedback-viewer .feedback-card {
+  flex: 0 0 14rem !important;
+  max-width: 18rem !important;
+}
+
+@media print {
+  .notes-print-title,
+  .manager-print-title {
+    display: block !important;
+  }
+
+  .student-header,
+  .student-session,
+  .student-title,
+  .student-page button,
+  .student-page input,
+  .student-page textarea,
+  .student-page select,
+  .student-page .student-actions {
+    display: none !important;
+  }
+
+  .student-name-print {
+    display: block;
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+
+  .student-feedback-print {
+    page-break-inside: avoid;
+  }
+
+  .student-page .notes-student-card:last-of-type {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+
+  .manager-page,
+  .solo-feedback-viewer {
+    padding: 0;
+  }
+
+
+  .manager-page input,
+  .manager-page button,
+  .manager-page select,
+  .manager-page .notes-actions {
+    display: none !important;
+  }
+
+  .manager-page .feedback-cards,
+  .solo-feedback-viewer .feedback-cards {
+    display: flex !important;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 1rem;
+    width: auto;
+  }
+
+  .manager-notes-card {
+    width: 100% !important;
+    max-width: none !important;
+    break-inside: avoid;
+    page-break-after: always;
+  }
+
+  .manager-notes-card:last-of-type {
+    page-break-after: auto !important;
+  }
+
+  .manager-page .rounded-lg:not(.notes-student-card) {
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+
+  .manager-page .notes-student-card .feedback-card,
+  .manager-page .feedback-card,
+  .solo-feedback-viewer .feedback-card,
+  .student-page .feedback-card {
+    border: 1px solid #94a3b8 !important;
+    box-shadow: none !important;
+    background-color: #fff !important;
+  }
+
+  .manager-page .fixed {
+    display: none !important;
+  }
+}

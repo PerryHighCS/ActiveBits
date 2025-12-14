@@ -13,7 +13,12 @@ const isCodespaces = Boolean(process.env.CODESPACES) || Boolean(process.env.CODE
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(),],
+  plugins: [
+    react(), 
+    tailwindcss({
+      base: path.resolve(__dirname, 'src/index.css'),
+    }),
+  ],
   resolve: {
     alias: {
       '@src': path.resolve(__dirname, 'src'),
