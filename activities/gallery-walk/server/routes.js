@@ -15,7 +15,7 @@ function normalizeStage(stage) {
   return stage === 'review' ? 'review' : DEFAULT_STAGE;
 }
 
-function sanitizeName(value, fallback = '', maxLength = 200) {
+export function sanitizeName(value, fallback = '', maxLength = 200) {
   if (!value || typeof value !== 'string') return fallback;
   const trimmed = value.trim();
   if (trimmed.length === 0) return fallback;

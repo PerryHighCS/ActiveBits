@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import setupGalleryWalkRoutes from '../activities/gallery-walk/server/routes.js';
+import setupGalleryWalkRoutes, { sanitizeName } from '../activities/gallery-walk/server/routes.js';
 import { createSessionStore } from 'activebits-server/core/sessions.js';
 import { DEFAULT_NOTE_STYLE_ID, NOTE_STYLE_OPTIONS } from '../activities/gallery-walk/shared/noteStyles.js';
 
@@ -204,4 +204,30 @@ test('invalid note style falls back to default', async (t) => {
   });
   const body = await feedbackRes.json();
   assert.equal(body.feedback.styleId, DEFAULT_NOTE_STYLE_ID);
+});
+
+test('sanitizeName trims whitespace and enforces default max length', () => {
+  const input = `   ${'a'.repeat(250)}   `;
+  const result = sanitizeName(input);
+  assert.equal(result.length, 200);
+  assert.equal(result[0], 'a');
+});
+
+test('sanitizeName respects custom max length', () => {
+  const input = 'b'.repeat(2100);
+  const result = sanitizeName(input, '', 2000);
+  assert.equal(result.length, 2000);
+});
+
+test('sanitizeName falls back for empty or non-string input', () => {
+  assert.equal(sanitizeName('   ', 'fallback'), 'fallback');
+  assert.equal(sanitizeName('', 'fallback'), 'fallback');
+  assert.equal(sanitizeName(null, 'fallback'), 'fallback');
+  assert.equal(sanitizeName(undefined, 'fallback'), 'fallback');
+  assert.equal(sanitizeName({ foo: 'bar' }, 'fallback'), 'fallback');
+});
+
+test('sanitizeName preserves special characters', () => {
+  const input = 'Line1\nLine2 ☺';
+  assert.equal(sanitizeName(input), 'Line1\nLine2 ☺');
 });
