@@ -181,6 +181,11 @@ export default function GalleryWalkSoloViewer() {
     const { reviewee } = fileResult?.data || {};
     return (
       <div className="space-y-4">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold solo-student-title">
+            {fileResult?.data?.config?.title || 'Gallery Walk Feedback'}
+          </h2>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             {reviewee?.name && <p className="text-lg font-semibold text-gray-900">{reviewee.name}</p>}
