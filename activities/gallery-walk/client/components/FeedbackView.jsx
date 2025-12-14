@@ -29,7 +29,7 @@ export default function FeedbackView({
         </div>
       </div>
       {sessionClosed && (
-        <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700 print:hidden">
           This session has ended. You can still view and print your feedback.
         </p>
       )}
