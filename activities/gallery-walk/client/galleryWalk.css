@@ -138,14 +138,6 @@
     padding: 0;
   }
 
-  .solo-feedback-viewer::before {
-    content: attr(data-print-title);
-    display: block;
-    text-align: center;
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin-bottom: 1rem;
-  }
 
   .manager-page input,
   .manager-page button,

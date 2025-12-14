@@ -339,8 +339,15 @@ export default function GalleryWalkSoloViewer() {
   return (
     <div
       className="rounded-lg border border-gray-200 bg-white p-6 shadow space-y-4 solo-feedback-viewer print:border-0 print:p-0 print:shadow-none print:bg-transparent"
-      data-print-title={fileResult?.data?.config?.title || 'Gallery Walk Feedback'}
+      data-print-title=""
     >
+      {fileResult?.type === 'teacher' && (
+        <div className="solo-print-title-container print:block text-center mb-4">
+          <h2 className="solo-print-title text-xl font-semibold print:text-2xl">
+            {fileResult?.data?.config?.title || 'Gallery Walk Feedback'}
+          </h2>
+        </div>
+      )}
       <div
         className={[
           'flex flex-wrap items-start justify-center gap-4 print:hidden',
