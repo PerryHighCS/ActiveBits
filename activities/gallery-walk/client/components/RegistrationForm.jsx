@@ -20,14 +20,13 @@ export default function RegistrationForm({
         </p>
       </div>
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1" htmlFor="reviewee-name-input">Your name</label>
+        <label className="block text-sm font-semibold text-gray-700 mb-1" htmlFor="reviewee-name-input">Your name(s)</label>
         <input
           id="reviewee-name-input"
           type="text"
           className="w-full rounded border border-gray-300 px-3 py-2"
           value={name}
           onChange={(e) => onNameChange(e.target.value)}
-          placeholder="Student name"
           aria-required="true"
           aria-invalid={Boolean(error)}
           aria-describedby={errorId}
@@ -40,7 +39,6 @@ export default function RegistrationForm({
           className="w-full rounded border border-gray-300 px-3 py-2"
           value={projectTitle}
           onChange={(e) => onProjectChange(e.target.value)}
-          placeholder="Project title"
         />
       </div>
       {error && (
