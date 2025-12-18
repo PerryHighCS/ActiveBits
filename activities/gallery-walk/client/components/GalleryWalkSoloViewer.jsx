@@ -327,8 +327,8 @@ export default function GalleryWalkSoloViewer() {
                   selectId="solo-notes-select"
                   gridClassName="grid-cols-1"
                   cardClassName="print:break-after-page"
-                  emptySelectionText="No students found in this export."
-                  noFeedbackText="No feedback for this student in the file."
+                  emptySelectionText="No participants found in this export."
+                  noFeedbackText="No feedback for this participant in the file."
                   printTitle={sessionTitle}
                 />
               )}

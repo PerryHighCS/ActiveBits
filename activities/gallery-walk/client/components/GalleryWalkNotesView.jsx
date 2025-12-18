@@ -16,9 +16,9 @@ export default function GalleryWalkNotesView({
   selectId = 'gallery-walk-notes-select',
   hideFilterOnPrint = true,
   hideCardHeaderOnPrint = false,
-  emptySelectionText = 'No students selected.',
+  emptySelectionText = 'No participants selected.',
   noFeedbackText = 'No feedback yet.',
-  allOptionLabel = 'All students',
+  allOptionLabel = 'All participants',
   printTitle = '',
 }) {
   const revieweeEntries = useMemo(() => Object.entries(reviewees), [reviewees]);

@@ -1,7 +1,7 @@
 export default {
   id: 'gallery-walk',
   name: 'Gallery Walk',
-  description: 'Students showcase projects and leave peer feedback',
+  description: 'Participants showcase projects and leave peer feedback',
   color: 'blue',
   soloMode: true,
   soloModeMeta: {

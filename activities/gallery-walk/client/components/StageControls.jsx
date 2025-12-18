@@ -8,13 +8,13 @@ export default function StageControls({ stage, onChange }) {
     <>
       <strong className="font-semibold text-gray-900">Gallery Walk.</strong>
       {' '}
-      Students provide peer feedback on each other&apos;s work. Feedback is not visible until review mode.
+      Participants provide peer feedback on each other&apos;s work. Participants can only see feedback in review mode.
     </>
   ) : (
     <>
       <strong className="font-semibold text-gray-900">Feedback Review.</strong>
       {' '}
-      Students can see feedback left by their peers.
+      Participants can see feedback left by their peers.
     </>
   );
   const buttonLabel = isGallery ? 'Switch to Feedback review mode' : 'Switch to Gallery Walk mode';

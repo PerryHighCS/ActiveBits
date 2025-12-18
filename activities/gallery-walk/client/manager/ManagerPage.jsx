@@ -222,7 +222,7 @@ export default function ManagerPage() {
         hideFilterOnPrint
         gridClassName="mt-4 grid-cols-1 xl:grid-cols-2"
         cardClassName="manager-notes-card"
-        emptySelectionText="No students selected for notes view."
+        emptySelectionText="No participants selected for notes view."
         noFeedbackText="No feedback yet."
         includeAllRevieweesWhenAllSelected={false}
         printTitle={sessionTitle || 'Gallery Walk Feedback'}
@@ -265,7 +265,7 @@ export default function ManagerPage() {
               </div>
               <div className="md:w-64">
                 <div className="h-full rounded border border-gray-200 bg-gray-50 px-4 py-4 text-right flex flex-col justify-center">
-                  <p className="text-xs text-gray-500 uppercase tracking-wide">Connected students</p>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Connected participants</p>
                   <p className="text-2xl font-semibold text-gray-900">{Object.keys(reviewees).length}</p>
                 </div>
               </div>
@@ -302,7 +302,7 @@ export default function ManagerPage() {
       {hasUnsavedChanges && (
         <div className="fixed bottom-4 left-0 right-0 flex justify-center">
           <div className="rounded border border-yellow-400 bg-yellow-50 px-4 py-2 text-sm text-yellow-800 shadow-lg">
-            Feedback collected since the last download will be lost when the session ends. <b>Download feedback</b> to archive.
+            Feedback collected since the last download will be lost when the session ends. <b>Download feedback</b> to save it.
           </div>
         </div>
       )}
