@@ -302,7 +302,7 @@ export default function ManagerPage() {
       {hasUnsavedChanges && (
         <div className="fixed bottom-4 left-0 right-0 flex justify-center">
           <div className="rounded border border-yellow-400 bg-yellow-50 px-4 py-2 text-sm text-yellow-800 shadow-lg">
-            Feedback collected since the last download will be lost when the session ends. Export the JSON to archive.
+            Feedback collected since the last download will be lost when the session ends. <b>Download feedback</b> to archive.
           </div>
         </div>
       )}
