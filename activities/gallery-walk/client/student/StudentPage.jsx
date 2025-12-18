@@ -120,8 +120,8 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const slugSource = revieweeRecord?.name || revieweeRecord?.projectTitle || revieweeId || 'student';
-    const slug = slugSource.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'student';
+    const slugSource = revieweeRecord?.name || revieweeRecord?.projectTitle || revieweeId || 'participant';
+    const slug = slugSource.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'participant';
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = `gallery-walk-${sessionId}-${slug}-${timestamp}.gw`;
@@ -531,7 +531,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       )}
       {sessionClosed && isReviewerMode && (
         <p className="text-center text-sm text-gray-600">
-          This session has ended. You can still leave notes for yourself, but new feedback will not reach the teacher.
+          This session has ended. New feedback will not be saved.
         </p>
       )}
       <ReviewerScanner
