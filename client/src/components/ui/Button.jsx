@@ -19,7 +19,7 @@ const Button = ({
     variant = 'default',
     className,
     type = 'button',
-    ...rest,
+    ...rest
 }) => {
 
     let style = '';
