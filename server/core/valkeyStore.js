@@ -258,7 +258,8 @@ export class ValkeySessionStore {
 export class ValkeyPersistentStore {
     constructor(valkeyClient) {
         this.client = valkeyClient;
-        this.ttlMs = 10 * 60 * 1000; // 10 minutes for persistent metadata
+        // Keep persistent session metadata around for a full day so links don't expire mid-class
+        this.ttlMs = 24 * 60 * 60 * 1000; // 24 hours
     }
 
     async _scanKeys(pattern) {
