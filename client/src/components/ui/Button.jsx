@@ -10,9 +10,11 @@ import { twMerge } from 'tailwind-merge'
  * @param {boolean} props.disabled - Whether the button is disabled.
  * @param {string} props.variant - The variant of the button (default, outline, text).
  * @param {string} props.className - Additional classes to apply to the button.
+ * @param {("button"|"submit"|"reset")} [props.type] - Type attribute forwarded to the native button.
+ * @param {Object} [props.rest] - Any other props are spread onto the native button element.
  * @returns {React.Component} - A button component with different styles based on the variant prop.
  */
-const Button = ({
+const Button = React.forwardRef(({
     onClick,
     children,
     disabled,
@@ -20,7 +22,7 @@ const Button = ({
     className,
     type = 'button',
     ...rest
-}) => {
+}, ref) => {
 
     let style = '';
 
@@ -40,6 +42,7 @@ const Button = ({
 
     return (        
         <button
+            ref={ref}
             type={type}
             onClick={onClick}
             disabled={disabled}
@@ -49,6 +52,8 @@ const Button = ({
             {children}
         </button>
     );
-}
+});
+
+Button.displayName = 'Button';
 
 export default Button;
