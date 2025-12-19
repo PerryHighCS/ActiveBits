@@ -12,8 +12,15 @@ import { twMerge } from 'tailwind-merge'
  * @param {string} props.className - Additional classes to apply to the button.
  * @returns {React.Component} - A button component with different styles based on the variant prop.
  */
-const Button = ({ onClick, children, disabled, variant, className }) => {
-    variant = variant || 'default';
+const Button = ({
+    onClick,
+    children,
+    disabled,
+    variant = 'default',
+    className,
+    type = 'button',
+    ...rest,
+}) => {
 
     let style = '';
 
@@ -33,9 +40,11 @@ const Button = ({ onClick, children, disabled, variant, className }) => {
 
     return (        
         <button
+            type={type}
             onClick={onClick}
             disabled={disabled}
-            className={twMerge(className, `px-4 py-2 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`, style)}
+            className={twMerge(`px-4 py-2 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`, style, className)}
+            {...rest}
         >
             {children}
         </button>
