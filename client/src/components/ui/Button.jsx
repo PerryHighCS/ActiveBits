@@ -11,8 +11,9 @@ import { twMerge } from 'tailwind-merge'
  * @param {string} props.variant - The variant of the button (default, outline, text).
  * @param {string} props.className - Additional classes to apply to the button.
  * @param {("button"|"submit"|"reset")} [props.type] - Type attribute forwarded to the native button.
+ * @param {React.Ref<HTMLButtonElement>} ref - Ref forwarded to the underlying button element.
  * Any additional props are spread onto the native button element via the rest operator.
- * @returns {React.Component} - A button component with different styles based on the variant prop.
+ * @returns {React.ForwardRefExoticComponent} - A button component with different styles based on the variant prop.
  */
 const Button = React.forwardRef(({
     onClick,
