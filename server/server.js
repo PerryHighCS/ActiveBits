@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
 import { createSessionStore, setupSessionRoutes } from "./core/sessions.js";
 import { createWsRouter } from "./core/wsRouter.js";
-import { generatePersistentHash, getOrCreateActivePersistentSession, getPersistentSession, verifyTeacherCodeWithHash, initializePersistentStorage } from "./core/persistentSessions.js";
+import { generatePersistentHash, getOrCreateActivePersistentSession, getPersistentSession, verifyTeacherCodeWithHash, initializePersistentStorage, resetPersistentSession } from "./core/persistentSessions.js";
 import { setupPersistentSessionWs } from "./core/persistentSessionWs.js";
 import { getAllowedActivities, isValidActivity, registerActivityRoutes, initializeActivityRegistry } from "./activities/activityRegistry.js";
 import { registerStatusRoute } from "./routes/statusRoute.js";
@@ -304,7 +304,16 @@ app.get("/api/persistent-session/:hash", async (req, res) => {
     }
     
     // Get or create the active session (this creates it in memory when first accessed)
-    const session = await getOrCreateActivePersistentSession(activityName, hash);
+    let session = await getOrCreateActivePersistentSession(activityName, hash);
+
+    // If we think a session is running, make sure the backing session still exists.
+    if (session.sessionId) {
+        const existing = await sessions.get(session.sessionId);
+        if (!existing) {
+            await resetPersistentSession(hash);
+            session = await getOrCreateActivePersistentSession(activityName, hash);
+        }
+    }
 
     // Check if user has the teacher code in their cookies
     const { sessions: sessionEntries, corrupted: cookieCorrupted } = parsePersistentSessionsCookie(
