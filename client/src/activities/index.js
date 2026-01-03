@@ -26,18 +26,17 @@ const resolveClientModule = async (loader) => {
   return mod.default ?? mod.activity ?? mod;
 };
 
-const createLazyComponent = (loader, selector, fallbackComponent = null, activityId = 'unknown', componentType = 'component') => {
+const createLazyComponent = (loader, selector, fallbackComponent = undefined, activityId = 'unknown', componentType = 'component') => {
   if (!loader) return null;
 
   return React.lazy(async () => {
     const resolved = await resolveClientModule(loader);
     const selected = selector(resolved);
 
-    if (!selected && fallbackComponent) {
-      return { default: fallbackComponent };
-    }
-
     if (!selected) {
+      if (fallbackComponent !== undefined) {
+        return { default: fallbackComponent };
+      }
       throw new Error(`${componentType} not found in activity "${activityId}" client module. Expected export: { ${componentType}: Component }`);
     }
 
@@ -68,8 +67,8 @@ export const activities = Object.entries(configModules)
       return null;
     }
 
-    const ManagerComponent = createLazyComponent(clientLoader, (resolved) => resolved.ManagerComponent, null, activityId, 'ManagerComponent');
-    const StudentComponent = createLazyComponent(clientLoader, (resolved) => resolved.StudentComponent, null, activityId, 'StudentComponent');
+    const ManagerComponent = createLazyComponent(clientLoader, (resolved) => resolved.ManagerComponent, undefined, activityId, 'ManagerComponent');
+    const StudentComponent = createLazyComponent(clientLoader, (resolved) => resolved.StudentComponent, undefined, activityId, 'StudentComponent');
     const FooterComponent = createLazyComponent(
       clientLoader,
       (resolved) => {
@@ -86,8 +85,6 @@ export const activities = Object.entries(configModules)
       ManagerComponent,
       StudentComponent,
       FooterComponent,
-      // Expose loader in case callers want to preload
-      preload: () => resolveClientModule(clientLoader).then(() => {}),
     };
   })
   .filter(Boolean);
