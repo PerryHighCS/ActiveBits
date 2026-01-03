@@ -26,7 +26,7 @@ const resolveClientModule = async (loader) => {
   return mod.default ?? mod.activity ?? mod;
 };
 
-const createLazyComponent = (loader, selector, fallbackComponent = null) => {
+const createLazyComponent = (loader, selector, fallbackComponent = null, activityId = 'unknown', componentType = 'component') => {
   if (!loader) return null;
 
   return React.lazy(async () => {
@@ -38,7 +38,7 @@ const createLazyComponent = (loader, selector, fallbackComponent = null) => {
     }
 
     if (!selected) {
-      throw new Error('Expected component not found in activity client module');
+      throw new Error(`${componentType} not found in activity "${activityId}" client module. Expected export: { ${componentType}: Component }`);
     }
 
     return { default: selected };
@@ -68,8 +68,8 @@ export const activities = Object.entries(configModules)
       return null;
     }
 
-    const ManagerComponent = createLazyComponent(clientLoader, (resolved) => resolved.ManagerComponent);
-    const StudentComponent = createLazyComponent(clientLoader, (resolved) => resolved.StudentComponent);
+    const ManagerComponent = createLazyComponent(clientLoader, (resolved) => resolved.ManagerComponent, null, activityId, 'ManagerComponent');
+    const StudentComponent = createLazyComponent(clientLoader, (resolved) => resolved.StudentComponent, null, activityId, 'StudentComponent');
     const FooterComponent = createLazyComponent(
       clientLoader,
       (resolved) => {
@@ -77,6 +77,8 @@ export const activities = Object.entries(configModules)
         return content ? () => content : null;
       },
       () => null,
+      activityId,
+      'footerContent',
     );
 
     return {
