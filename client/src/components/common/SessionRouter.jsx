@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 import WaitingRoom from './WaitingRoom';
 import { getActivity, activities } from '@src/activities';
 
 const CACHE_TTL = 1000 * 60 * 60 * 12; // 12 hours in milliseconds
+const activityFallback = <div className="text-center">Loading activity...</div>;
 
 function cleanExpiredSessions() {
   const now = Date.now();
@@ -329,7 +330,11 @@ const SessionRouter = () => {
     // Solo mode - practice without a session
     if (soloActivity) {
         const StudentComponent = soloActivity.StudentComponent;
-        return <StudentComponent sessionData={{ sessionId: `solo-${soloActivity.id}`, studentName: 'Solo Student' }} />;
+        return (
+            <Suspense fallback={activityFallback}>
+                <StudentComponent sessionData={{ sessionId: `solo-${soloActivity.id}`, studentName: 'Solo Student' }} />
+            </Suspense>
+        );
     }
     
     if (!sessionId) {
@@ -405,7 +410,11 @@ const SessionRouter = () => {
 
     // Render the appropriate student component for this activity
     const StudentComponent = activity.StudentComponent;
-    return <StudentComponent sessionData={sessionData} />;
+    return (
+        <Suspense fallback={activityFallback}>
+            <StudentComponent sessionData={sessionData} />
+        </Suspense>
+    );
 };
 
 export default SessionRouter;

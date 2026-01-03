@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import SessionRouter from "./components/common/SessionRouter";
 import SessionEnded from "./components/common/SessionEnded";
@@ -7,6 +7,7 @@ import StatusDashboard from './components/common/StatusDashboard';
 import { activities } from './activities';
 
 const footerClass = "text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto";
+const activityFallback = <div className="text-center">Loading activity...</div>;
 
 function Footer() {
     const location = useLocation();
@@ -14,16 +15,15 @@ function Footer() {
     // Check if we're on an activity manage page and get custom footer content
     for (const activity of activities) {
         if (location.pathname.startsWith(`/manage/${activity.id}`)) {
-            // Only show footer if there's actual content
-            if (activity.footerContent) {
-                return (
-                    <div className={footerClass}>
-                        {activity.footerContent}
-                    </div>
-                );
-            }
-            // Activity has no footer content, show nothing
-            return null;
+            const FooterComponent = activity.FooterComponent;
+            if (!FooterComponent) return null;
+            return (
+                <div className={footerClass}>
+                    <Suspense fallback={null}>
+                        <FooterComponent />
+                    </Suspense>
+                </div>
+            );
         }
     }
 
@@ -56,8 +56,22 @@ export default function App() {
                             const ManagerComponent = activity.ManagerComponent;
                             return (
                                 <React.Fragment key={activity.id}>
-                                    <Route path={`/manage/${activity.id}`} element={<ManagerComponent />} />
-                                    <Route path={`/manage/${activity.id}/:sessionId`} element={<ManagerComponent />} />
+                                    <Route
+                                        path={`/manage/${activity.id}`}
+                                        element={
+                                            <Suspense fallback={activityFallback}>
+                                                <ManagerComponent />
+                                            </Suspense>
+                                        }
+                                    />
+                                    <Route
+                                        path={`/manage/${activity.id}/:sessionId`}
+                                        element={
+                                            <Suspense fallback={activityFallback}>
+                                                <ManagerComponent />
+                                            </Suspense>
+                                        }
+                                    />
                                 </React.Fragment>
                             );
                         })}

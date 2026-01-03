@@ -8,6 +8,7 @@
         "activities"
     ],
     "scripts": {
+        "build": "npm run build --workspace client",
         "deploy": "npm_config_production=false npm install --workspaces --include-workspace-root && npm run build --workspace client",
         "start": "npm start --prefix server",
         "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\"",
