@@ -4,10 +4,10 @@ import SessionRouter from "./components/common/SessionRouter";
 import SessionEnded from "./components/common/SessionEnded";
 import ManageDashboard from './components/common/ManageDashboard';
 import StatusDashboard from './components/common/StatusDashboard';
+import LoadingFallback from './components/common/LoadingFallback';
 import { activities } from './activities';
 
 const footerClass = "text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto";
-const activityFallback = <div className="text-center">Loading activity...</div>;
 
 function Footer() {
     const location = useLocation();
@@ -59,7 +59,7 @@ export default function App() {
                                     <Route
                                         path={`/manage/${activity.id}`}
                                         element={
-                                            <Suspense fallback={activityFallback}>
+                                            <Suspense fallback={<LoadingFallback />}>
                                                 <ManagerComponent />
                                             </Suspense>
                                         }
@@ -67,7 +67,7 @@ export default function App() {
                                     <Route
                                         path={`/manage/${activity.id}/:sessionId`}
                                         element={
-                                            <Suspense fallback={activityFallback}>
+                                            <Suspense fallback={<LoadingFallback />}>
                                                 <ManagerComponent />
                                             </Suspense>
                                         }

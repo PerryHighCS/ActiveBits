@@ -8,7 +8,7 @@
         "activities"
     ],
     "scripts": {
-        "build": "npm run build --workspace client",
+        "build": "echo 'Quick build (assumes dependencies installed). Use npm run deploy for full install+build.' && npm run build --workspace client",
         "deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
         "start": "npm start --prefix server",
         "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\"",

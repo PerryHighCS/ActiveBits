@@ -2,10 +2,10 @@ import React, { Suspense, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '@src/components/ui/Button';
 import WaitingRoom from './WaitingRoom';
+import LoadingFallback from './LoadingFallback';
 import { getActivity, activities } from '@src/activities';
 
 const CACHE_TTL = 1000 * 60 * 60 * 12; // 12 hours in milliseconds
-const activityFallback = <div className="text-center">Loading activity...</div>;
 
 function cleanExpiredSessions() {
   const now = Date.now();
@@ -331,7 +331,7 @@ const SessionRouter = () => {
     if (soloActivity) {
         const StudentComponent = soloActivity.StudentComponent;
         return (
-            <Suspense fallback={activityFallback}>
+            <Suspense fallback={<LoadingFallback />}>
                 <StudentComponent sessionData={{ sessionId: `solo-${soloActivity.id}`, studentName: 'Solo Student' }} />
             </Suspense>
         );
@@ -411,7 +411,7 @@ const SessionRouter = () => {
     // Render the appropriate student component for this activity
     const StudentComponent = activity.StudentComponent;
     return (
-        <Suspense fallback={activityFallback}>
+        <Suspense fallback={<LoadingFallback />}>
             <StudentComponent sessionData={sessionData} />
         </Suspense>
     );
