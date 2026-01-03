@@ -37,7 +37,7 @@ const createLazyComponent = (loader, selector, fallbackComponent = undefined, ac
       if (fallbackComponent !== undefined) {
         return { default: fallbackComponent };
       }
-      throw new Error(`${componentType} not found in activity "${activityId}" client module. Expected export: { ${componentType}: Component }`);
+      throw new Error(`${componentType} not found in activity "${activityId}" client module. Expected on the client module's default export object: { ${componentType}: Component }`);
     }
 
     return { default: selected };
@@ -73,7 +73,9 @@ export const activities = Object.entries(configModules)
       clientLoader,
       (resolved) => {
         const content = resolved.footerContent;
-        return content ? () => content : null;
+        if (!content) return null;
+        // If content is already a function/component, use it directly; otherwise wrap JSX in a component
+        return typeof content === 'function' ? content : () => content;
       },
       () => null,
       activityId,
