@@ -89,7 +89,7 @@ export default {
 };
 ```
 
-`client/index.js` (components/footer only):
+`client/index.js` (components/footer only, lazy-loaded chunk):
 ```javascript
 import ManagerComp from './manager/ManagerComp';
 import StudentComp from './student/StudentComp';
@@ -102,6 +102,8 @@ export default {
 ```
 
 The loader merges `{...config, ...clientEntry}`; keeping metadata in `activity.config.js` avoids dueling sources of truth.
+
+Client entries are lazy-loaded with `React.lazy` so each activity ships in its own Vite chunk, named `activity-<id>-<hash>.js` via `manualChunks` in `client/vite.config.js`.
 
 ### Automatic Route Generation
 

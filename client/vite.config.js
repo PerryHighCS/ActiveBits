@@ -63,4 +63,23 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Name per-activity chunks for clearer artifacts
+        manualChunks: (id) => {
+          const match = id.match(/\/activities\/([^/]+)\/client\//);
+          if (match) return `activity-${match[1]}`;
+          return undefined;
+        },
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: (assetInfo) => {
+          const name = assetInfo.name;
+          const ext = name?.includes('.') ? name.split('.').pop() : null;
+          return ext ? `assets/[name]-[hash].${ext}` : 'assets/[name]-[hash]';
+        },
+      },
+    },
+  },
 })
