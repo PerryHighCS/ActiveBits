@@ -132,7 +132,7 @@ export default function QuizManager() {
 }
 ```
 
-### Step 4: Create the Client Entry (components/footer only)
+### Step 4: Create the Client Entry (components/footer only, lazy-loaded)
 
 **File: `activities/quiz/client/index.js`** (or `.jsx` if using JSX in `footerContent`)
 
@@ -147,7 +147,7 @@ export default {
 };
 ```
 
-Keep metadata (id/name/description/color/soloMode + optional soloModeMeta overrides) in `activity.config.js` to avoid dueling sources of truth. The loader merges `{...config, ...clientEntry}` at runtime.
+Keep metadata (id/name/description/color/soloMode + optional soloModeMeta overrides) in `activity.config.js` to avoid dueling sources of truth. The client entry is lazy-loaded via `React.lazy`, so keep it side-effect free and focused on exporting the components/footer. The loader merges `{...config, ...clientEntry}` at runtime, and each activity builds into its own chunk (`activity-<id>-<hash>.js`).
 
 ### Step 5: Create Server Routes
 
