@@ -69,8 +69,7 @@ export default defineConfig({
         // Name per-activity chunks for clearer artifacts
         manualChunks: (id) => {
           const match = id.match(/\/activities\/([^/]+)\/client\//);
-          if (match) return `activity-${match[1]}`;
-          return undefined;
+          return match ? `activity-${match[1]}` : undefined;
         },
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',
