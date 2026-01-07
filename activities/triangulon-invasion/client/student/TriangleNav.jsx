@@ -24,7 +24,8 @@ export default function TriangleNav({ onNavigate, disabled = true, disabledButto
 
   const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const normalize = (v) => {
-    const len = Math.hypot(v.x, v.y) || 1;
+    const len = Math.hypot(v.x, v.y);
+    if (len === 0) return { x: 0, y: 0 };
     return { x: v.x / len, y: v.y / len };
   };
   
@@ -47,33 +48,37 @@ export default function TriangleNav({ onNavigate, disabled = true, disabledButto
     y: center.y + (point.y - center.y) * factor
   });
   
+  // Geometry notes:
+  // - Treat the main triangle as equilateral-ish and derive all nav triangles from its edges.
+  // - guideLineLength is the extension distance used to project lines outward from edges/vertices.
+  // - Outer nav buttons use guide endpoints as bases, with outwardPoint nudging a third vertex along a normal.
   const baseLength = distance(centerLeft, centerRight);
   const halfSide = baseLength / 2;
-  const extLen = baseLength / 4; // half of midpoint span
+  const guideLineLength = baseLength / 4; // half of midpoint span
   const dirLeftEdge = normalize({ x: centerLeft.x - centerTop.x, y: centerLeft.y - centerTop.y });
   const dirRightEdge = normalize({ x: centerRight.x - centerTop.x, y: centerRight.y - centerTop.y });
   const dirBase = normalize({ x: centerRight.x - centerLeft.x, y: centerRight.y - centerLeft.y });
 
-  // Guide endpoints (length = extLen)
+  // Guide endpoints (length = guideLineLength)
   // Top: one leg along triangle edge, one horizontal through the tip
-  const topUpExtend = { x: centerTop.x, y: centerTop.y - extLen };
-  const topLeftExtend = { x: centerTop.x - dirLeftEdge.x * extLen, y: centerTop.y - dirLeftEdge.y * extLen };
-  const topRightExtend = { x: centerTop.x - dirRightEdge.x * extLen, y: centerTop.y - dirRightEdge.y * extLen };
-  const topHorizLeft = { x: centerTop.x - extLen, y: centerTop.y };
-  const topHorizRight = { x: centerTop.x + extLen, y: centerTop.y };
+  const topUpExtend = { x: centerTop.x, y: centerTop.y - guideLineLength };
+  const topLeftExtend = { x: centerTop.x - dirLeftEdge.x * guideLineLength, y: centerTop.y - dirLeftEdge.y * guideLineLength };
+  const topRightExtend = { x: centerTop.x - dirRightEdge.x * guideLineLength, y: centerTop.y - dirRightEdge.y * guideLineLength };
+  const topHorizLeft = { x: centerTop.x - guideLineLength, y: centerTop.y };
+  const topHorizRight = { x: centerTop.x + guideLineLength, y: centerTop.y };
 
   // Bottom: horizontal base extension and angled extensions continuing the sides
-  const leftBaseExtend = { x: centerLeft.x - dirBase.x * extLen, y: centerLeft.y - dirBase.y * extLen };
-  const rightBaseExtend = { x: centerRight.x + dirBase.x * extLen, y: centerRight.y + dirBase.y * extLen };
-  const leftDownExtend = { x: centerLeft.x + dirLeftEdge.x * extLen, y: centerLeft.y + dirLeftEdge.y * extLen };
-  const rightDownExtend = { x: centerRight.x + dirRightEdge.x * extLen, y: centerRight.y + dirRightEdge.y * extLen };
+  const leftBaseExtend = { x: centerLeft.x - dirBase.x * guideLineLength, y: centerLeft.y - dirBase.y * guideLineLength };
+  const rightBaseExtend = { x: centerRight.x + dirBase.x * guideLineLength, y: centerRight.y + dirBase.y * guideLineLength };
+  const leftDownExtend = { x: centerLeft.x + dirLeftEdge.x * guideLineLength, y: centerLeft.y + dirLeftEdge.y * guideLineLength };
+  const rightDownExtend = { x: centerRight.x + dirRightEdge.x * guideLineLength, y: centerRight.y + dirRightEdge.y * guideLineLength };
 
   // Larger outer navigation triangles constructed from guide endpoints
   const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
   const outwardPoint = (a, b, outwardDir, factor = 0.6) => {
     const mid = midpoint(a, b);
     const n = normalize(outwardDir);
-    return { x: mid.x + n.x * extLen * factor, y: mid.y + n.y * extLen * factor };
+    return { x: mid.x + n.x * guideLineLength * factor, y: mid.y + n.y * guideLineLength * factor };
   };
 
   // Up-left: edge-aligned point and horizontal-left point; outward normal goes up-left

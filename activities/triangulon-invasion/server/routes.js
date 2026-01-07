@@ -9,6 +9,19 @@ registerSessionNormalizer('triangulon-invasion', (session) => {
   session.data = data;
 });
 
+const MAX_EVENTS = 500; // cap in-memory event history per session
+
+function appendEvent(session, evt) {
+  session.data.events.push(evt);
+  if (session.data.events.length > MAX_EVENTS) {
+    const excess = session.data.events.length - MAX_EVENTS;
+    session.data.events.splice(0, excess);
+  }
+}
+
+// TODO: Once fractalStore diffs are broadcast, keep only non-triangle events here
+// and rely on the fractal state for triangle history to avoid duplication.
+
 export default function setupTriangulonRoutes(app, sessions, ws = null) {
   app.post('/api/triangulon-invasion/create', async (req, res) => {
     const session = await createSession(sessions, { data: {} });
@@ -113,16 +126,17 @@ export default function setupTriangulonRoutes(app, sessions, ws = null) {
             const stage = typeof parsed.stage === 'string' ? parsed.stage : null;
             if (!stage) return;
             session.data.stage = stage;
-            session.data.events.push({ t: Date.now(), type: 'stage', stage });
+            appendEvent(session, { t: Date.now(), type: 'stage', stage });
             await sessions.set(session.id, session);
             broadcast(sessionId, { type: 'state', stage: session.data.stage, events: session.data.events, map: session.data.map });
             break;
           }
           case 'subdivide': {
             // Minimal stub: record the path and timestamp; real implementation can mutate map tree
-            const path = Array.isArray(parsed.path) ? parsed.path.slice(0, 12) : [];
+            const rawPath = Array.isArray(parsed.path) ? parsed.path.slice(0, 12) : [];
+            const path = rawPath.filter((step) => Number.isInteger(step) && step >= 0);
             const evt = { t: Date.now(), type: 'subdivide', path };
-            session.data.events.push(evt);
+            appendEvent(session, evt);
             await sessions.set(session.id, session);
             broadcast(sessionId, { type: 'events', events: [evt] });
             break;
@@ -132,15 +146,16 @@ export default function setupTriangulonRoutes(app, sessions, ws = null) {
             const action = typeof parsed.action === 'string' ? parsed.action : null;
             if (!action) return;
             const evt = { t: Date.now(), type: 'manager', action, payload: parsed.payload || null };
-            session.data.events.push(evt);
+            appendEvent(session, evt);
             await sessions.set(session.id, session);
             broadcast(sessionId, { type: 'events', events: [evt] });
             break;
           }
           case 'event': {
             // Generic event envelope for now
-            const evt = { t: Date.now(), ...parsed.event };
-            session.data.events.push(evt);
+            const safeEvent = typeof parsed.event === 'object' && parsed.event !== null ? parsed.event : {};
+            const evt = { ...safeEvent, t: Date.now() }; // ensure server timestamp wins
+            appendEvent(session, evt);
             await sessions.set(session.id, session);
             broadcast(sessionId, { type: 'events', events: [evt] });
             break;

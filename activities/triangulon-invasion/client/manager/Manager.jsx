@@ -78,18 +78,26 @@ export default function TriangulonManager() {
 
   const recentEvents = useMemo(() => events.slice(-5).reverse(), [events]);
 
-  // Aggregate leaderboard by triangles made
-  const leaderboard = useMemo(() => {
+  // Aggregate leaderboard by triangles made and memoize totals
+  const { leaderboard, totalTriangles } = useMemo(() => {
     const counts = new Map();
+    let total = 0;
+
     for (const evt of events) {
-      // Expect evt.type === 'triangle-made' and evt.player
-      if (evt && evt.type === 'triangle-made' && evt.player) {
+      if (!evt) continue;
+      // Accept both planned and current stub event shapes
+      const isTriangleEvent = evt.type === 'triangle-made' || evt.type === 'triangle_made' || evt.type === 'subdivide';
+      if (!isTriangleEvent) continue;
+
+      total += 1;
+      if (evt.player) {
         counts.set(evt.player, (counts.get(evt.player) || 0) + 1);
       }
     }
+
     const rows = Array.from(counts.entries()).map(([player, triangles]) => ({ player, triangles }));
     rows.sort((a, b) => b.triangles - a.triangles);
-    return rows;
+    return { leaderboard: rows, totalTriangles: total };
   }, [events]);
 
   return (
@@ -145,7 +153,7 @@ export default function TriangulonManager() {
                 </div>
                 <div>
                   <p className="label">Triangles</p>
-                  <p className="value">{leaderboard.reduce((a, r) => a + r.triangles, 0)}</p>
+                  <p className="value">{totalTriangles}</p>
                 </div>
               </div>
               <div className="triangulon-actions" style={{ marginTop: 8 }}>

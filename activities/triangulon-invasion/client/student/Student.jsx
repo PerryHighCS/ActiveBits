@@ -96,8 +96,8 @@ export default function TriangulonStudent({ sessionData }) {
                 <div className="mini-spark" />
               </div>
               <div className="mini-controls">
-                <TriangleNav 
-                  disabled={true}
+                <TriangleNav
+                  // Navigation stays disabled until traversal wiring is implemented
                   onNavigate={(direction) => {
                     console.log('Navigate:', direction);
                     // TODO: Implement navigation logic
