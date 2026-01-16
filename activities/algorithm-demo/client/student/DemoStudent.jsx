@@ -1,0 +1,157 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
+import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
+import AlgorithmPicker from '../components/AlgorithmPicker';
+import { getAllAlgorithms, getAlgorithm } from '../algorithms';
+import { MESSAGE_TYPES } from '../utils';
+import './DemoStudent.css';
+
+export default function DemoStudent({ sessionData }) {
+  const { sessionId } = sessionData;
+  const attachSessionEndedHandler = useSessionEndedHandler();
+
+  const [algorithms] = useState(getAllAlgorithms());
+  const [selectedAlgoId, setSelectedAlgoId] = useState(null);
+  const [algorithmState, setAlgorithmState] = useState(null);
+  const [isSoloMode, setIsSoloMode] = useState(sessionId.startsWith('solo-'));
+
+  // Sync initial session state
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const fetchSession = async () => {
+      try {
+        const res = await fetch(`/api/algorithm-demo/${sessionId}/session`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.data.algorithmId) {
+            setSelectedAlgoId(data.data.algorithmId);
+            setAlgorithmState(data.data.algorithmState || null);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch session:', err);
+      }
+    };
+
+    fetchSession();
+  }, [sessionId]);
+
+  // WebSocket for shared mode
+  const buildWsUrl = useCallback(() => {
+    if (!sessionId || isSoloMode) return null;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws/algorithm-demo?sessionId=${sessionId}`;
+  }, [sessionId, isSoloMode]);
+
+  const { connect, disconnect } = useResilientWebSocket({
+    buildUrl: buildWsUrl,
+    shouldReconnect: !isSoloMode,
+    attachSessionEndedHandler,
+    onMessage: (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === MESSAGE_TYPES.ALGORITHM_SELECTED) {
+          setSelectedAlgoId(msg.algorithmId);
+          setAlgorithmState(msg.payload);
+        } else if (msg.type === MESSAGE_TYPES.STATE_SYNC) {
+          setAlgorithmState(msg.payload);
+        }
+      } catch (err) {
+        console.error('Error parsing message:', err);
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (isSoloMode) return;
+    connect();
+    return () => disconnect();
+  }, [sessionId, isSoloMode, connect, disconnect]);
+
+  // Solo mode: handle local algorithm selection
+  const handleSelectAlgorithm = (algoId) => {
+    if (!isSoloMode) return; // In shared mode, manager controls selection
+
+    setSelectedAlgoId(algoId);
+    const algo = getAlgorithm(algoId);
+    if (algo && algo.initState) {
+      setAlgorithmState(algo.initState());
+    }
+  };
+
+  // Solo mode: handle local state changes
+  const handleStateChange = (newState) => {
+    if (!isSoloMode) return; // In shared mode, students don't change state
+
+    setAlgorithmState(newState);
+
+    // Optionally persist solo progress to localStorage
+    if (sessionId && sessionId.startsWith('solo-')) {
+      localStorage.setItem(
+        `algorithm-demo-solo-${sessionId}`,
+        JSON.stringify({
+          algorithmId: selectedAlgoId,
+          algorithmState: newState,
+          timestamp: Date.now(),
+        })
+      );
+    }
+  };
+
+  const currentAlgo = getAlgorithm(selectedAlgoId);
+
+  if (isSoloMode && !selectedAlgoId) {
+    // Solo mode: show algorithm picker
+    return (
+      <div className="demo-student solo-mode">
+        <h1>Algorithm Practice</h1>
+        <p>Choose an algorithm to explore</p>
+        <AlgorithmPicker
+          algorithms={algorithms}
+          selectedId={selectedAlgoId}
+          onSelect={handleSelectAlgorithm}
+          title="Select Algorithm"
+        />
+      </div>
+    );
+  }
+
+  if (!currentAlgo) {
+    return <div className="error">Waiting for instructor to select an algorithm...</div>;
+  }
+
+  const CurrentStudentView = currentAlgo.StudentView;
+
+  return (
+    <div className="demo-student">
+      {isSoloMode ? (
+        <div className="solo-header">
+          <h2>{currentAlgo.name}</h2>
+          <button
+            onClick={() => setSelectedAlgoId(null)}
+            className="btn-switch"
+          >
+            Switch Algorithm
+          </button>
+        </div>
+      ) : (
+        <div className="shared-header">
+          <h2>Now Demonstrating: {currentAlgo.name}</h2>
+        </div>
+      )}
+
+      {algorithmState && (
+        <div className="student-view">
+          <CurrentStudentView
+            session={{
+              id: sessionId,
+              data: { algorithmState, algorithmId: selectedAlgoId },
+            }}
+            onStateChange={isSoloMode ? handleStateChange : undefined}
+          />
+        </div>
+      )}
+    </div>
+  );
+}

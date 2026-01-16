@@ -16,6 +16,7 @@ let testImportCounter = 0;
  * Dev activities (with isDev: true) are automatically excluded from these tests
  */
 const EXPECTED_ACTIVITIES = [
+  "algorithm-demo",
   "java-string-practice",
   "java-format-practice",
   "python-list-practice",
