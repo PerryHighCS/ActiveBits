@@ -8,6 +8,7 @@ import InsertionSort from './sorting/InsertionSort.jsx';
 import BinarySearch from './search/BinarySearch.jsx';
 import LinearSearch from './search/LinearSearch.jsx';
 import Factorial from './recursion/Factorial.jsx';
+import Fibonacci from './recursion/Fibonacci.jsx';
 import BinarySearchGame from './guessing/BinarySearchGame.jsx';
 
 /**
@@ -19,6 +20,7 @@ const ALGORITHMS = [
   BinarySearch,
   LinearSearch,
   Factorial,
+  Fibonacci,
   BinarySearchGame,
 ];
 
