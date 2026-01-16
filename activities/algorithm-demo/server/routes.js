@@ -27,10 +27,11 @@ export default function setupAlgorithmDemoRoutes(app, sessions, ws) {
   /**
    * Broadcast helper
    */
-  async function broadcast(type, payload, sessionId) {
-    const msg = JSON.stringify({ type, payload });
+  async function broadcast(type, payload, sessionId, metadata = {}) {
+    const msgObj = { type, payload, timestamp: Date.now(), ...metadata };
+    const msg = JSON.stringify(msgObj);
     if (sessions.publishBroadcast) {
-      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload });
+      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, msgObj);
     }
     // Local WS broadcast
     for (const s of ws.wss.clients) {
@@ -102,8 +103,10 @@ export default function setupAlgorithmDemoRoutes(app, sessions, ws) {
 
       await sessions.set(session.id, session);
 
-      // Broadcast to all students
-      await broadcast('algorithm-selected', algorithmState, session.id);
+      // Broadcast to all students with algorithmId
+      await broadcast('algorithm-selected', algorithmState, session.id, {
+        algorithmId,
+      });
 
       res.json({ success: true });
     } catch (err) {

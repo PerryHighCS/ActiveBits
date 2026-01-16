@@ -3,7 +3,7 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import AlgorithmPicker from '../components/AlgorithmPicker';
 import { getAllAlgorithms, getAlgorithm } from '../algorithms';
-import { MESSAGE_TYPES } from '../utils';
+import { MESSAGE_TYPES, normalizeAlgorithmState } from '../utils';
 import './DemoStudent.css';
 
 export default function DemoStudent({ sessionData }) {
@@ -15,9 +15,9 @@ export default function DemoStudent({ sessionData }) {
   const [algorithmState, setAlgorithmState] = useState(null);
   const [isSoloMode, setIsSoloMode] = useState(sessionId.startsWith('solo-'));
 
-  // Sync initial session state
+  // Sync initial session state and poll for updates
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || isSoloMode) return;
 
     const fetchSession = async () => {
       try {
@@ -26,7 +26,7 @@ export default function DemoStudent({ sessionData }) {
           const data = await res.json();
           if (data.data.algorithmId) {
             setSelectedAlgoId(data.data.algorithmId);
-            setAlgorithmState(data.data.algorithmState || null);
+            setAlgorithmState(normalizeAlgorithmState(data.data.algorithmState) || null);
           }
         }
       } catch (err) {
@@ -34,8 +34,14 @@ export default function DemoStudent({ sessionData }) {
       }
     };
 
+    // Fetch immediately on mount
     fetchSession();
-  }, [sessionId]);
+
+    // Poll periodically to catch updates in case of WebSocket delays
+    const pollInterval = setInterval(fetchSession, 3000);
+
+    return () => clearInterval(pollInterval);
+  }, [sessionId, isSoloMode]);
 
   // WebSocket for shared mode
   const buildWsUrl = useCallback(() => {
@@ -44,7 +50,7 @@ export default function DemoStudent({ sessionData }) {
     return `${protocol}//${window.location.host}/ws/algorithm-demo?sessionId=${sessionId}`;
   }, [sessionId, isSoloMode]);
 
-  const { connect, disconnect } = useResilientWebSocket({
+  const { connect, disconnect, socketRef } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: !isSoloMode,
     attachSessionEndedHandler,
@@ -53,9 +59,9 @@ export default function DemoStudent({ sessionData }) {
         const msg = JSON.parse(event.data);
         if (msg.type === MESSAGE_TYPES.ALGORITHM_SELECTED) {
           setSelectedAlgoId(msg.algorithmId);
-          setAlgorithmState(msg.payload);
+          setAlgorithmState(normalizeAlgorithmState(msg.payload));
         } else if (msg.type === MESSAGE_TYPES.STATE_SYNC) {
-          setAlgorithmState(msg.payload);
+          setAlgorithmState(normalizeAlgorithmState(msg.payload));
         }
       } catch (err) {
         console.error('Error parsing message:', err);

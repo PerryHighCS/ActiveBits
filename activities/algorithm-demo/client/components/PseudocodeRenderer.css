@@ -29,3 +29,42 @@
   font-weight: 600;
   box-shadow: inset 0 0 0 2px #ffd700;
 }
+
+.pseudocode-span.has-overlay {
+  position: relative;
+  padding-right: 10px;
+}
+
+.overlay-badge {
+  position: absolute;
+  right: -8px;
+  top: -6px;
+  background: rgba(76, 175, 80, 0.15);
+  border: 1px solid rgba(76, 175, 80, 0.6);
+  color: #2e7d32;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  pointer-events: none;
+  backdrop-filter: blur(1px);
+}
+
+.overlay-inline {
+  margin-left: 8px;
+  font-size: 12px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.overlay-value {
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(76, 175, 80, 0.12);
+  border: 1px solid rgba(76, 175, 80, 0.4);
+}
+
+/* Strike-through removed per updated design; retain class for future use if needed */

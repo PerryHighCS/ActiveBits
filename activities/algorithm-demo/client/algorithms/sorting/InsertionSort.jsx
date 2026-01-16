@@ -28,6 +28,7 @@ const InsertionSort = {
       i: 1,
       j: 0,
       tmp: null,
+      substep: 0,
       sorted: false,
       currentStep: null,
       highlightedLines: new Set(),
@@ -51,7 +52,8 @@ const InsertionSort = {
     const state = session.data.algorithmState || InsertionSort.initState();
 
     const handleNextStep = () => {
-      onStateChange(performNextStep(state));
+      const newState = performNextStep(state);
+      onStateChange(newState);
     };
 
     const handleReset = () => {
@@ -121,36 +123,60 @@ function ArrayVisualization({ state }) {
 
 function performNextStep(state) {
   const arr = [...state.array];
-  let { i, j, tmp } = state;
+  let { i, j, tmp, substep } = state;
   let highlightedLines = new Set();
   let currentStep = null;
 
   if (state.sorted) return state;
 
   if (i >= arr.length) {
-    return { ...state, sorted: true, currentStep: 'Algorithm complete', highlightedLines: new Set(['line-0']) };
+    return { ...state, sorted: true, currentStep: 'Algorithm complete', highlightedLines: new Set() };
   }
 
-  if (tmp === null) {
-    tmp = arr[i];
-    j = i - 1;
+  // Control flow by substep number
+  if (substep === 0) {
+    // Start new iteration: highlight for loop
     highlightedLines.add('line-1');
+    currentStep = `Outer loop: i=${i}`;
+    substep = 1;
+  } else if (substep === 1) {
+    // Get tmp value
+    tmp = arr[i];
     highlightedLines.add('line-2');
+    currentStep = `Set tmp = A[${i}] = ${tmp}`;
+    substep = 2;
+  } else if (substep === 2) {
+    // Initialize j
+    j = i - 1;
     highlightedLines.add('line-3');
-    currentStep = `Starting iteration i=${i}, tmp=${tmp}`;
-  } else if (j >= 0 && arr[j] > tmp) {
-    arr[j + 1] = arr[j];
-    j--;
+    currentStep = `Set j = ${i} - 1 = ${j}`;
+    substep = 3;
+  } else if (substep === 3) {
+    // Check while condition
+    const conditionMet = j >= 0 && arr[j] > tmp;
     highlightedLines.add('line-4');
+    currentStep = `Check while: j=${j} >= 0 and A[${j}]=${arr[j]} > ${tmp}? ${conditionMet ? 'Yes' : 'No'}`;
+    substep = conditionMet ? 4 : 5; // 4 = enter loop body, 5 = skip to insert
+  } else if (substep === 4) {
+    // Inside while: shift element
+    arr[j + 1] = arr[j];
     highlightedLines.add('line-5');
+    currentStep = `Shift: A[${j + 1}] = A[${j}] = ${arr[j + 1]}`;
+    substep = 4.5;
+  } else if (substep === 4.5) {
+    // Inside while: decrement j
+    j--;
     highlightedLines.add('line-6');
-    currentStep = `Shifted A[${j + 2}] = A[${j + 1}]`;
-  } else {
+    currentStep = `Decrement: j = ${j}`;
+    substep = 3; // Loop back to check condition again
+  } else if (substep === 5) {
+    // After loop: insert tmp
     arr[j + 1] = tmp;
     i++;
     tmp = null;
+    substep = 0;
     highlightedLines.add('line-7');
-    currentStep = `Inserted ${arr[j + 1]} at position ${j + 1}`;
+    currentStep = `Insert: A[${j + 1}] = ${arr[j + 1]}`;
   }
 
   return {
@@ -159,6 +185,7 @@ function performNextStep(state) {
     i,
     j,
     tmp,
+    substep,
     highlightedLines,
     currentStep,
   };

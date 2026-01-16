@@ -4,7 +4,7 @@ import SessionHeader from '@src/components/common/SessionHeader';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import AlgorithmPicker from '../components/AlgorithmPicker';
 import { getAllAlgorithms, getAlgorithm } from '../algorithms';
-import { MESSAGE_TYPES, createMessage } from '../utils';
+import { MESSAGE_TYPES, createMessage, normalizeAlgorithmState, messageReplacer } from '../utils';
 import './DemoManager.css';
 
 export default function DemoManager() {
@@ -15,7 +15,6 @@ export default function DemoManager() {
   const [session, setSession] = useState(null);
   const [selectedAlgoId, setSelectedAlgoId] = useState(algorithms[0]?.id);
   const [algorithmState, setAlgorithmState] = useState(null);
-  const socketRef = React.useRef(null);
 
   // Sync session state from server
   useEffect(() => {
@@ -29,7 +28,7 @@ export default function DemoManager() {
           setSession(data);
           if (data.data.algorithmId) {
             setSelectedAlgoId(data.data.algorithmId);
-            setAlgorithmState(data.data.algorithmState || null);
+            setAlgorithmState(normalizeAlgorithmState(data.data.algorithmState) || null);
           }
         }
       } catch (err) {
@@ -47,14 +46,14 @@ export default function DemoManager() {
     return `${protocol}//${window.location.host}/ws/algorithm-demo?sessionId=${sessionId}`;
   }, [sessionId]);
 
-  const { connect, disconnect } = useResilientWebSocket({
+  const { connect, disconnect, socketRef } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: true,
     onMessage: (event) => {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === MESSAGE_TYPES.STATE_SYNC) {
-          setAlgorithmState(msg.payload);
+          setAlgorithmState(normalizeAlgorithmState(msg.payload));
         }
       } catch (err) {
         console.error('Error parsing message:', err);
@@ -83,7 +82,8 @@ export default function DemoManager() {
           createMessage(MESSAGE_TYPES.ALGORITHM_SELECTED, newState, {
             algorithmId: algoId,
             sessionId,
-          })
+          }),
+          messageReplacer
         )
       );
     }
@@ -92,7 +92,7 @@ export default function DemoManager() {
     await fetch(`/api/algorithm-demo/${sessionId}/select`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ algorithmId: algoId, algorithmState: newState }),
+      body: JSON.stringify({ algorithmId: algoId, algorithmState: newState }, messageReplacer),
     });
   };
 
@@ -101,21 +101,21 @@ export default function DemoManager() {
 
     // Broadcast state-sync
     if (socketRef.current?.readyState === 1) {
-      socketRef.current.send(
-        JSON.stringify(
-          createMessage(MESSAGE_TYPES.STATE_SYNC, newState, {
-            algorithmId: selectedAlgoId,
-            sessionId,
-          })
-        )
+      const msg = JSON.stringify(
+        createMessage(MESSAGE_TYPES.STATE_SYNC, newState, {
+          algorithmId: selectedAlgoId,
+          sessionId,
+        }),
+        messageReplacer
       );
+      socketRef.current.send(msg);
     }
 
     // Persist to server
     await fetch(`/api/algorithm-demo/${sessionId}/state`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ algorithmState: newState }),
+      body: JSON.stringify({ algorithmState: newState }, messageReplacer),
     });
   };
 

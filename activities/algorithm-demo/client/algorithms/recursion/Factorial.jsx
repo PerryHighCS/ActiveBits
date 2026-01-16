@@ -22,7 +22,9 @@ const Factorial = {
       callStack: [],
       complete: false,
       result: null,
+      substep: 0,
       highlightedLines: new Set(),
+      overlays: {},
       currentStep: null,
     };
   },
@@ -62,7 +64,7 @@ const Factorial = {
           </label>
         </div>
         <CallStackVisualization state={state} />
-        <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} />
+        <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} overlays={state.overlays} />
         {state.currentStep && <div className="step-info">{state.currentStep}</div>}
       </div>
     );
@@ -73,7 +75,7 @@ const Factorial = {
     return (
       <div className="algorithm-student">
         <CallStackVisualization state={state} />
-        <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} />
+        <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} overlays={state.overlays} />
         {state.currentStep && <div className="step-info">{state.currentStep}</div>}
       </div>
     );
@@ -81,18 +83,25 @@ const Factorial = {
 };
 
 function CallStackVisualization({ state }) {
+  // Defensive: ensure callStack is an array
+  const callStack = Array.isArray(state.callStack) ? state.callStack : [];
   return (
     <div className="recursion-viz">
       <div className="call-stack">
-        <h3>Call Stack:</h3>
+        <h3>Call Stack (Activation Records):</h3>
         <div className="stack-frames">
-          {state.callStack.length === 0 ? (
+          {callStack.length === 0 ? (
             <div className="empty-stack">Empty</div>
           ) : (
-            state.callStack.map((frame, idx) => (
+            callStack.map((frame, idx) => (
               <div key={idx} className={`stack-frame ${frame.state}`}>
-                <div className="frame-label">Factorial({frame.n})</div>
-                {frame.result !== null && <div className="frame-result">= {frame.result}</div>}
+                <div className="frame-header">Factorial(n: {frame.n})</div>
+                <div className="frame-locals">
+                  <div className="local-var">n = {frame.n}</div>
+                </div>
+                <div className="frame-return">
+                  {frame.result !== null ? `return: ${frame.result}` : 'return: ?'}
+                </div>
               </div>
             ))
           )}
@@ -108,61 +117,121 @@ function CallStackVisualization({ state }) {
 }
 
 function performNextStep(state) {
-  let { n, callStack, complete, result } = state;
+  let { n, callStack, complete, result, substep } = state;
   let highlightedLines = new Set();
+  let overlays = state.overlays || {};
   let currentStep = null;
 
   if (complete) return state;
 
   if (callStack.length === 0) {
-    // Start: push first call
-    callStack = [{ n, state: 'active', result: null }];
+    // Start: push first call with substep 0
+    callStack = [{ n, state: 'active', result: null, pendingReturn: null, substep: 0, returnStage: null, returnLine: null }];
     highlightedLines.add('line-0');
     currentStep = `Start: Factorial(${n})`;
+    substep = 1;
   } else {
     const topFrame = callStack[callStack.length - 1];
 
     if (topFrame.state === 'active') {
-      if (topFrame.n <= 1) {
-        // Base case
+      // Substep 0: Check base case condition (line 1)
+      if (topFrame.substep === 0) {
+        highlightedLines.add('line-1');
+        if (topFrame.n <= 1) {
+          currentStep = `Check: ${topFrame.n} ≤ 1? Yes`;
+          topFrame.substep = 1;
+        } else {
+          currentStep = `Check: ${topFrame.n} ≤ 1? No`;
+          topFrame.substep = 3;
+        }
+      }
+      // Substep 1: Base case return (line 2)
+      else if (topFrame.substep === 1) {
+        highlightedLines.add('line-2');
         topFrame.result = 1;
         topFrame.state = 'returning';
-        highlightedLines.add('line-1');
-        highlightedLines.add('line-2');
-        currentStep = `Base case: Factorial(${topFrame.n}) = 1`;
-      } else {
-        // Recursive case: push new call
+        topFrame.returnStage = 2;
+        topFrame.returnLine = 'line-2';
+        currentStep = `return 1`;
+        topFrame.substep = 2;
+      }
+      // Substep 3: Else (line 3)
+      else if (topFrame.substep === 3) {
+        highlightedLines.add('line-3');
+        currentStep = `else`;
+        topFrame.substep = 4;
+      }
+      // Substep 4: Recursive call (line 4)
+      else if (topFrame.substep === 4) {
+        highlightedLines.add('line-4');
+        currentStep = `return ${topFrame.n} * Factorial(${topFrame.n - 1})`;
+        topFrame.returnLine = 'line-4';
+        topFrame.substep = 4.5;
+      }
+      // Substep 4.5: Enter recursive call (line 0)
+      else if (topFrame.substep === 4.5) {
+        highlightedLines.add('line-0');
         topFrame.state = 'waiting';
         callStack = [
           ...callStack,
-          { n: topFrame.n - 1, state: 'active', result: null },
+          { n: topFrame.n - 1, state: 'active', result: null, pendingReturn: null, substep: 0, returnStage: null, returnLine: null },
         ];
-        highlightedLines.add('line-3');
-        highlightedLines.add('line-4');
-        currentStep = `Recursive call: Factorial(${topFrame.n - 1})`;
+        currentStep = `Enter: Factorial(${topFrame.n - 1})`;
+        substep = 0; // next call starts at substep 0
       }
     } else if (topFrame.state === 'returning') {
-      // Pop and compute result
-      const poppedFrame = callStack.pop();
-      if (callStack.length > 0) {
-        const parent = callStack[callStack.length - 1];
-        parent.result = parent.n * poppedFrame.result;
-        parent.state = 'returning';
-        currentStep = `Return: ${parent.n} * ${poppedFrame.result} = ${parent.result}`;
+      if (topFrame.returnStage === 1) {
+        const received = topFrame.pendingReturn;
+        if (received !== null && received !== undefined) {
+          const computedResult = topFrame.n * received;
+          topFrame.result = computedResult;
+          topFrame.pendingReturn = null;
+          currentStep = `Compute return: ${topFrame.n} * ${received} = ${computedResult}`;
+        } else {
+          currentStep = `Return ${topFrame.result}`;
+        }
+        highlightedLines.add(topFrame.returnLine || 'line-4');
+        topFrame.returnStage = 2;
       } else {
-        result = poppedFrame.result;
-        complete = true;
-        currentStep = `Algorithm complete! Factorial(${n}) = ${result}`;
+        const poppedFrame = callStack.pop();
+        const returnValue = poppedFrame.result;
+        const lineId = poppedFrame.returnLine || 'line-4';
+
+        if (callStack.length > 0) {
+          const parent = callStack[callStack.length - 1];
+          parent.pendingReturn = returnValue;
+          parent.overlayValue = returnValue;
+          parent.state = 'returning';
+          parent.returnStage = 1;
+          parent.returnLine = parent.returnLine || 'line-4';
+          highlightedLines.add(parent.returnLine);
+          currentStep = `Return ${returnValue} to Factorial(${parent.n})`;
+        } else {
+          result = returnValue;
+          complete = true;
+          highlightedLines.add(lineId);
+          currentStep = `Algorithm complete! Factorial(${n}) = ${result}`;
+        }
       }
     }
   }
+
+  overlays = {};
+  callStack.forEach((frame) => {
+    if (frame.overlayValue !== null && frame.overlayValue !== undefined) {
+      const lineId = frame.returnLine || 'line-4';
+      overlays[lineId] = { value: frame.overlayValue };
+    }
+  });
 
   return {
     ...state,
     callStack,
     complete,
     result,
+    substep,
     highlightedLines,
+    overlays,
     currentStep,
   };
 }

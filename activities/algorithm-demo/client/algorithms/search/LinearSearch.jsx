@@ -25,6 +25,7 @@ const LinearSearch = {
       i: 0,
       found: false,
       foundIndex: -1,
+      substep: 0,
       currentStep: null,
       highlightedLines: new Set(),
     };
@@ -96,29 +97,58 @@ function ArrayVisualization({ state }) {
 }
 
 function performNextStep(state) {
-  let { array, target, i, found, foundIndex } = state;
-  let highlightedLines = new Set(['line-0']);
+  let { array, target, i, found, foundIndex, substep } = state;
+  let highlightedLines = new Set();
   let currentStep = null;
 
   if (found) return state;
 
-  if (i >= array.length) {
+  // Substep 0: Check for condition (line 1: for i ← 0 to n − 1)
+  if (substep === 0) {
+    const canContinue = i < array.length;
+    highlightedLines.add('line-1');
+    if (!canContinue) {
+      substep = 99; // jump to return not found
+      currentStep = `Loop complete: i=${i} >= array.length=${array.length}`;
+    } else {
+      substep = 1;
+      currentStep = `Check loop: i=${i} < array.length=${array.length}? Yes`;
+    }
+  }
+  // Substep 1: Check if condition (line 2: if A[i] == target then)
+  else if (substep === 1) {
+    const matches = array[i] === target;
+    highlightedLines.add('line-2');
+    if (matches) {
+      substep = 2;
+      currentStep = `Check: A[${i}] == ${target}? Yes`;
+    } else {
+      substep = 3;
+      currentStep = `Check: A[${i}] == ${target}? No (A[${i}]=${array[i]})`;
+    }
+  }
+  // Substep 2: Return if found (line 3: return i)
+  else if (substep === 2) {
+    found = true;
+    foundIndex = i;
+    highlightedLines.add('line-3');
+    currentStep = `return ${i}`;
+    substep = 100;
+  }
+  // Substep 3: Increment i (back to line 1 for next iteration)
+  else if (substep === 3) {
+    i++;
+    highlightedLines.add('line-1');
+    substep = 0;
+    currentStep = `Increment: i ← ${i}`;
+  }
+  // Substep 99: Return not found (line 4: return −1)
+  else if (substep === 99) {
     found = true;
     foundIndex = -1;
     highlightedLines.add('line-4');
-    currentStep = `Target ${target} not found`;
-  } else {
-    highlightedLines.add('line-1');
-    highlightedLines.add('line-2');
-    if (array[i] === target) {
-      found = true;
-      foundIndex = i;
-      highlightedLines.add('line-3');
-      currentStep = `Found ${target} at index ${i}!`;
-    } else {
-      currentStep = `Checked i=${i}: A[${i}]=${array[i]} ≠ ${target}`;
-    }
-    i++;
+    currentStep = `return −1`;
+    substep = 100;
   }
 
   return {
@@ -126,6 +156,7 @@ function performNextStep(state) {
     i,
     found,
     foundIndex,
+    substep,
     highlightedLines,
     currentStep,
   };

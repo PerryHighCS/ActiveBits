@@ -23,6 +23,16 @@ export function createMessage(type, payload, { algorithmId = null, sessionId = n
 }
 
 /**
+ * Custom JSON replacer to handle Sets and other non-serializable types
+ */
+export function messageReplacer(key, value) {
+  if (value instanceof Set) {
+    return Array.from(value);
+  }
+  return value;
+}
+
+/**
  * Reducer for algorithm state updates
  * @param {object} state - Current state
  * @param {object} event - Event with { type, payload }
@@ -50,4 +60,30 @@ export function validateLineIds(pseudocodeLines, lineIds) {
     pseudocodeLines.map((_, i) => `line-${i}`)
   );
   return lineIds.filter(id => !validIds.has(id));
+}
+
+/**
+ * Normalize algorithm state received from network
+ * Converts plain objects to Sets where needed (Sets don't serialize over JSON)
+ * @param {object} state - Algorithm state from network
+ * @returns {object} Normalized state
+ */
+export function normalizeAlgorithmState(state) {
+  if (!state || typeof state !== 'object') {
+    return state;
+  }
+
+  const normalized = { ...state };
+
+  // Convert highlightedLines array back to Set if present
+  if (Array.isArray(normalized.highlightedLines)) {
+    normalized.highlightedLines = new Set(normalized.highlightedLines);
+  }
+
+  // Convert callStack frames (for recursion demos)
+  if (Array.isArray(normalized.callStack)) {
+    normalized.callStack = normalized.callStack.map(frame => ({ ...frame }));
+  }
+
+  return normalized;
 }
