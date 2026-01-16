@@ -161,30 +161,22 @@ function GuessHistory({ state }) {
 }
 
 function handleGuess(state, guess) {
-  let { secret, guesses, won, hint, highlightedLines } = state;
+  let { secret, guesses, won, hint } = state;
+  const highlightedLines = new Set();
   let currentStep = null;
 
   const newGuess = { guess, timestamp: Date.now() };
   guesses = [...guesses, newGuess];
 
-  highlightedLines.add('line-2');
-  highlightedLines.add('line-3');
-
   if (guess === secret) {
     won = true;
     hint = { type: 'success', message: `🎉 Correct! The secret was ${secret}!` };
-    highlightedLines.add('line-4');
-    highlightedLines.add('line-5');
     currentStep = `Won in ${guesses.length} guesses!`;
   } else if (guess < secret) {
     hint = { type: 'higher', message: '📈 Guess higher!' };
-    highlightedLines.add('line-6');
-    highlightedLines.add('line-7');
     currentStep = `${guess} is too low`;
   } else {
     hint = { type: 'lower', message: '📉 Guess lower!' };
-    highlightedLines.add('line-8');
-    highlightedLines.add('line-9');
     currentStep = `${guess} is too high`;
   }
 
