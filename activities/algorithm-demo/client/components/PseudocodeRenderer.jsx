@@ -1,5 +1,6 @@
 import React from 'react';
 import './PseudocodeRenderer.css';
+import { renderPseudocodeWithBold } from '../utils/pseudocodeUtils.jsx';
 
 /**
  * Renders pseudocode with span IDs and highlighting
@@ -24,15 +25,7 @@ export default function PseudocodeRenderer(props) {
   }
 
   // Parse pseudocode line to render bold text marked with **
-  const renderLineContent = (text) => {
-    const parts = text.split(/(\*\*[^*]+\*\*)/);
-    return parts.map((part, idx) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={idx}>{part.slice(2, -2)}</strong>;
-      }
-      return part;
-    });
-  };
+  const renderLineContent = (text) => renderPseudocodeWithBold(text);
 
   return (
     <pre className={`pseudocode-renderer ${className}`}>
