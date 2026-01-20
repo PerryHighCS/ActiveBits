@@ -331,10 +331,6 @@ function ArrayVisualization({ state }) {
           const isWrittenToScratch = Array.isArray(state.scratchWritten) && state.scratchWritten.includes(idx);
           const shouldBeBlue = hasValue && isWrittenToScratch && !isCopiedBack;
           
-          if (idx === 0 && hasValue) {
-            console.log(`Scratch[0]: val=${val}, hasValue=${hasValue}, isWrittenToScratch=${isWrittenToScratch}, isCopiedBack=${isCopiedBack}, shouldBeBlue=${shouldBeBlue}, scratchWritten=`, state.scratchWritten);
-          }
-
           return (
             <div key={idx} style={{ position: "relative" }} ref={registerScratchRef(idx)}>
               {isK && <div className="index-badge badge-k-centered">k</div>}
@@ -655,7 +651,6 @@ function performNextStep(state) {
         if (!scratchWritten.includes(topFrame.k)) {
           scratchWritten.push(topFrame.k);
         }
-        console.log(`Writing to scratch[${topFrame.k}], scratchWritten now:`, scratchWritten);
         currentStep = `Copy to scratch: S[${topFrame.k}] = A[${topFrame.i}] = ${value}`;
         topFrame.substep = 6;
         return {
