@@ -610,22 +610,22 @@
 
 @keyframes tmp-from-array {
   0% {
-    transform: translate(var(--tmp-offset-x, 0), var(--tmp-offset-y, 0));
+    transform: translateX(var(--tmp-offset-x, 0)) translateY(var(--tmp-offset-y, 0));
     opacity: 0.85;
   }
   100% {
-    transform: translate(0, 0);
+    transform: translateX(0) translateY(0);
     opacity: 1;
   }
 }
 
 @keyframes tmp-to-array {
   0% {
-    transform: translate(0, 0);
+    transform: translateX(0) translateY(0);
     opacity: 1;
   }
   100% {
-    transform: translate(var(--tmp-target-x, 0), var(--tmp-target-y, 0));
+    transform: translateX(var(--tmp-target-x, 0)) translateY(var(--tmp-target-y, 0));
     opacity: 0;
   }
 }
