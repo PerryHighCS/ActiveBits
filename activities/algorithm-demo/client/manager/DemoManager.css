@@ -46,7 +46,7 @@
 }
 
 .array-viz {
-  margin: 30px 0;
+  margin: 0;
   padding: 20px;
   background: #fff;
   border: 1px solid #ddd;
@@ -57,8 +57,10 @@
   display: flex;
   gap: 8px;
   margin: 20px 0;
+  padding-top: 40px;
   flex-wrap: wrap;
   justify-content: center;
+  position: relative;
 }
 
 .array-item {
@@ -121,11 +123,177 @@
   border-color: #4caf50;
 }
 
+/* Highlight the current element being considered */
+.array-item.current {
+  background: #fff3cd;
+  border-color: #ff9800;
+  color: #000;
+  box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.3);
+}
+
+.array-item.shifted {
+  background: #e0e0e0;
+  border-color: #999;
+  color: #666;
+  opacity: 0.7;
+}
+
+.array-item.transition {
+  background: #e3f2fd;
+  border-color: #2196f3;
+  color: #1565c0;
+}
+
+.array-item.tmp-placed {
+  background: #c8e6c9;
+  border-color: #4caf50;
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+/* Badge showing the index i */
+.index-badge {
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ff9800;
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 14px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Badge color variants for binary search */
+.index-badge.badge-left {
+  background: #2196f3;
+  top: -28px;
+  left: -12px;
+  transform: none;
+}
+
+.index-badge.badge-right {
+  background: #f44336;
+  top: -28px;
+  right: -12px;
+  left: auto;
+  transform: none;
+}
+
+.index-badge.badge-mid {
+  background: #9c27b0;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Badge variants for selection sort */
+.index-badge.badge-i {
+  background: #ffc107;
+  top: -28px;
+  left: -12px;
+  transform: none;
+  color: #000;
+}
+
+.index-badge.badge-j {
+  background: #00bcd4;
+  top: -28px;
+  right: -12px;
+  transform: none;
+}
+
+.index-badge.badge-min {
+  background: #e91e63;
+  top: -28px;
+  right: 50%;
+  transform: translateX(-50%);
+}
+
+/* Centered badge variants for insertion sort (i and j never overlap) */
+.index-badge.badge-i-centered {
+  background: #ffc107;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #000;
+}
+
+.index-badge.badge-j-centered {
+  background: #00bcd4;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+/* Swap animation for selection sort */
+@keyframes swap-animation {
+  0% {
+    transform: scale(1) translateY(0);
+  }
+  50% {
+    transform: scale(1.1) translateY(-20px);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+  }
+}
+
+.array-item.swapping {
+  animation: swap-animation 1s ease-in-out;
+}
+
+/* Horizontal translate when swapping positions (one-shot) */
+.array-item.swap-anim {
+  position: relative;
+  animation: swap-slide 1s ease forwards;
+}
+
+@keyframes swap-slide {
+  0% {
+    transform: translateX(var(--swap-offset, 0)) translateY(0);
+  }
+  30% {
+    transform: translateX(var(--swap-offset, 0)) translateY(-18px); /* hop in place */
+  }
+  100% {
+    transform: translateX(0) translateY(0); /* slide to destination while landing */
+  }
+}
+
+.array-item.move-anim {
+  position: relative;
+  animation: move-slide 0.4s ease forwards;
+}
+
+@keyframes move-slide {
+  0% {
+    transform: translateX(var(--move-offset, 0));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
 .status {
   text-align: center;
   font-size: 14px;
   color: #666;
   margin-top: 10px;
+}
+
+/* Array index display below elements */
+.array-index {
+  text-align: center;
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+  font-weight: normal;
 }
 
 .completed {
@@ -141,15 +309,54 @@
   border-radius: 4px;
   font-size: 15px;
   color: #1565c0;
+  text-align: left;
+}
+
+.step-info.complete {
+  background: #c8e6c9;
+  border-left-color: #4caf50;
+  color: #2e7d32;
+}
+
+.target-display button {
+  padding: 10px 20px;
+  background-color: #4a90e2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.target-display button:hover:not(:disabled) {
+  background-color: #357abd;
+}
+
+.target-display button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.target-display input[type='number'] {
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  width: 60px;
 }
 
 .target-display {
-  text-align: center;
-  font-size: 16px;
-  margin: 15px 0;
-  padding: 10px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: nowrap;
+  padding: 15px;
   background: #f5f5f5;
-  border-radius: 4px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin: 15px 0;
+  text-align: left;
 }
 
 .target-display strong {
@@ -167,7 +374,7 @@
 
 /* Recursion styles */
 .recursion-viz {
-  margin: 30px 0;
+  margin: 0 0 30px 0;
 }
 
 .call-stack {
@@ -361,4 +568,93 @@
 
 .btn-primary:hover {
   background-color: #357abd;
+}
+
+/* Temporary value box for insertion sort */
+.tmp-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.tmp-label {
+  font-size: 12px;
+  font-weight: bold;
+  color: #666;
+  letter-spacing: 0.5px;
+}
+
+.tmp-value {
+  min-width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 16px;
+  color: #000;
+  box-shadow: 0 2px 4px rgba(255, 193, 7, 0.2);
+}
+
+.tmp-value.tmp-from-array {
+  animation: tmp-from-array 0.4s ease;
+}
+
+.tmp-value.tmp-to-array {
+  animation: tmp-to-array 0.5s ease;
+}
+
+@keyframes tmp-from-array {
+  0% {
+    transform: translate(var(--tmp-offset-x, 0), var(--tmp-offset-y, 0));
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes tmp-to-array {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--tmp-target-x, 0), var(--tmp-target-y, 0));
+    opacity: 0;
+  }
+}
+
+.var-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.var-label {
+  font-size: 12px;
+  font-weight: bold;
+  color: #666;
+  letter-spacing: 0.5px;
+}
+
+.var-value {
+  min-width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e3f2fd;
+  border: 2px solid #2196f3;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 16px;
+  color: #1565c0;
+  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.2);
 }

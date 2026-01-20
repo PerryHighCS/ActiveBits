@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
@@ -21,6 +21,7 @@ const LinearSearch = {
     const t = target !== null ? target : array[Math.floor(Math.random() * arraySize)];
     return {
       array,
+      initialArray: [...array],
       target: t,
       i: 0,
       found: false,
@@ -36,26 +37,75 @@ const LinearSearch = {
       return performNextStep(state);
     }
     if (event.type === 'reset') {
-      return LinearSearch.initState(state.array.length);
+      const t = state.target !== null ? state.target : state.initialArray[Math.floor(Math.random() * state.initialArray.length)];
+      return {
+        array: [...state.initialArray],
+        initialArray: state.initialArray,
+        target: t,
+        i: 0,
+        found: false,
+        foundIndex: -1,
+        substep: 0,
+        currentStep: null,
+        highlightedLines: new Set(),
+      };
     }
     return state;
   },
 
   ManagerView({ session, onStateChange }) {
     const state = session.data.algorithmState || LinearSearch.initState();
+    const [inputTarget, setInputTarget] = useState(state.target);
+
+    useEffect(() => {
+      setInputTarget(state.target);
+    }, [state.target]);
 
     return (
       <div className="algorithm-manager">
-        <div className="controls">
-          <button onClick={() => onStateChange(performNextStep(state))} disabled={state.found}>
+        <div className="target-display">
+          <button onClick={() => {
+            if (inputTarget !== state.target && inputTarget !== '') {
+              onStateChange(LinearSearch.initState(state.array.length, inputTarget));
+            } else {
+              onStateChange(performNextStep(state));
+            }
+          }} disabled={state.found}>
             Next Step
           </button>
-          <button onClick={() => onStateChange(LinearSearch.initState())}>Reset</button>
+          <button onClick={() => onStateChange(LinearSearch.reduceEvent(state, { type: 'reset' }))}>Reset</button>
+          <button onClick={() => onStateChange(LinearSearch.initState(state.array.length, null))}>
+            Generate New Array
+          </button>
+          <div style={{ whiteSpace: 'nowrap' }}>
+            Searching for:&nbsp;
+            {state.found || state.i > 0 || state.substep > 0 ? (
+              <strong>{state.target}</strong>
+            ) : (
+              <input
+                type="number"
+                value={inputTarget}
+                onChange={(e) => setInputTarget(parseInt(e.target.value) || '')}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter' && inputTarget !== '') {
+                    onStateChange(LinearSearch.initState(state.array.length, inputTarget));
+                  }
+                }}
+              />
+            )}
+          </div>
+          {state.currentStep && (
+            <div className="step-info" style={{ margin: 0, flex: '1 1 auto' }}>{state.currentStep}</div>
+          )}
         </div>
-        <div className="target-display">Searching for: <strong>{state.target}</strong></div>
-        <ArrayVisualization state={state} />
-        <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} />
-        {state.currentStep && <div className="step-info">{state.currentStep}</div>}
+        <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 320px', minWidth: '280px' }}>
+            <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} />
+          </div>
+          <div style={{ flex: '1 1 380px', minWidth: '320px' }}>
+            <ArrayVisualization state={state} />
+          </div>
+        </div>
       </div>
     );
   },
@@ -64,10 +114,20 @@ const LinearSearch = {
     const state = session.data.algorithmState || LinearSearch.initState();
     return (
       <div className="algorithm-student">
-        <div className="target-display">Searching for: <strong>{state.target}</strong></div>
-        <ArrayVisualization state={state} />
-        <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} />
-        {state.currentStep && <div className="step-info">{state.currentStep}</div>}
+        <div className="target-display" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ whiteSpace: 'nowrap' }}>Searching for: <strong>{state.target}</strong></div>
+          {state.currentStep && (
+            <div className="step-info" style={{ margin: 0, flex: '1 1 auto' }}>{state.currentStep}</div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 320px', minWidth: '280px' }}>
+            <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} />
+          </div>
+          <div style={{ flex: '1 1 380px', minWidth: '320px' }}>
+            <ArrayVisualization state={state} />
+          </div>
+        </div>
       </div>
     );
   },
@@ -78,18 +138,28 @@ function ArrayVisualization({ state }) {
     <div className="array-viz">
       <div className="array-container">
         {state.array.map((val, idx) => (
-          <div
-            key={idx}
-            className={`array-item ${idx < state.i ? 'checked' : ''} ${
-              idx === state.foundIndex ? 'found' : ''
-            }`}
-          >
-            {val}
+          <div key={idx} style={{ position: 'relative' }}>
+            {idx === state.i && (
+              <div className="index-badge">i</div>
+            )}
+            <div
+              className={`array-item ${idx < state.i ? 'checked' : ''} ${
+                idx === state.i ? 'current' : ''
+              } ${idx === state.foundIndex ? 'found' : ''}`}
+            >
+              {val}
+            </div>
+            <div className="array-index">{idx}</div>
           </div>
         ))}
       </div>
+      <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '8px' }}>
+        <div className="var-box">
+          <div className="var-label">i</div>
+          <div className="var-value">{state.i}</div>
+        </div>
+      </div>
       <div className="status">
-        i={state.i}/{state.array.length}
         {state.found && <span className="completed"> ✓ Found at index {state.foundIndex}!</span>}
       </div>
     </div>

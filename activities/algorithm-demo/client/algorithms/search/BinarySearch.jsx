@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
@@ -24,10 +24,13 @@ const BinarySearch = {
   pseudocode: PSEUDOCODE,
 
   initState(arraySize = 16, target = null) {
-    const array = Array.from({ length: arraySize }, (_, i) => (i + 1) * 5);
+    // Generate a random sorted array
+    const baseValue = Math.floor(Math.random() * 20) + 1;
+    const array = Array.from({ length: arraySize }, (_, i) => baseValue + i * (Math.floor(Math.random() * 5) + 3));
     const t = target !== null ? target : array[Math.floor(Math.random() * arraySize)];
     return {
       array,
+      initialArray: [...array],
       target: t,
       left: 0,
       right: arraySize - 1,
@@ -46,7 +49,21 @@ const BinarySearch = {
       return performNextStep(state);
     }
     if (event.type === 'reset') {
-      return BinarySearch.initState(state.array.length);
+      const t = state.target !== null ? state.target : state.initialArray[Math.floor(Math.random() * state.initialArray.length)];
+      return {
+        array: [...state.initialArray],
+        initialArray: state.initialArray,
+        target: t,
+        left: 0,
+        right: state.initialArray.length - 1,
+        mid: null,
+        substep: 0,
+        found: false,
+        foundIndex: -1,
+        currentStep: null,
+        highlightedLines: new Set(),
+        history: [],
+      };
     }
     if (event.type === 'setTarget') {
       return BinarySearch.initState(state.array.length, event.payload);
@@ -56,32 +73,66 @@ const BinarySearch = {
 
   ManagerView({ session, onStateChange }) {
     const state = session.data.algorithmState || BinarySearch.initState();
+    const [inputTarget, setInputTarget] = useState(state.target);
+
+    useEffect(() => {
+      setInputTarget(state.target);
+    }, [state.target]);
 
     const handleNextStep = () => {
-      onStateChange(performNextStep(state));
+      if (inputTarget !== state.target && inputTarget !== '') {
+        onStateChange(BinarySearch.initState(state.array.length, inputTarget));
+      } else {
+        onStateChange(performNextStep(state));
+      }
     };
 
     const handleReset = () => {
-      onStateChange(BinarySearch.initState());
+      onStateChange(BinarySearch.reduceEvent(state, { type: 'reset' }));
     };
 
     return (
       <div className="algorithm-manager">
-        <div className="controls">
+        <div className="target-display">
           <button onClick={handleNextStep} disabled={state.found}>
             Next Step
           </button>
           <button onClick={handleReset}>Reset</button>
+          <button onClick={() => onStateChange(BinarySearch.initState(state.array.length, null))}>
+            Generate New Array
+          </button>
+          <div style={{ whiteSpace: 'nowrap' }}>
+            Searching for:&nbsp;
+            {state.found || state.substep > 0 ? (
+              <strong>{state.target}</strong>
+            ) : (
+              <input
+                type="number"
+                value={inputTarget}
+                onChange={(e) => setInputTarget(parseInt(e.target.value) || '')}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter' && inputTarget !== '') {
+                    onStateChange(BinarySearch.initState(state.array.length, inputTarget));
+                  }
+                }}
+              />
+            )}
+          </div>
+          {state.currentStep && (
+            <div className="step-info" style={{ margin: 0, flex: '1 1 auto' }}>{state.currentStep}</div>
+          )}
         </div>
-        <div className="target-display">
-          Searching for: <strong>{state.target}</strong>
+        <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: '0 0 auto', width: 'fit-content', minWidth: '240px' }}>
+            <PseudocodeRenderer
+              lines={PSEUDOCODE}
+              highlightedLines={state.highlightedLines}
+            />
+          </div>
+          <div style={{ flex: '1 1 380px', minWidth: '320px' }}>
+            <ArrayVisualization state={state} />
+          </div>
         </div>
-        <ArrayVisualization state={state} />
-        <PseudocodeRenderer
-          lines={PSEUDOCODE}
-          highlightedLines={state.highlightedLines}
-        />
-        {state.currentStep && <div className="step-info">{state.currentStep}</div>}
       </div>
     );
   },
@@ -90,15 +141,23 @@ const BinarySearch = {
     const state = session.data.algorithmState || BinarySearch.initState();
     return (
       <div className="algorithm-student">
-        <div className="target-display">
-          Searching for: <strong>{state.target}</strong>
+        <div className="target-display" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ whiteSpace: 'nowrap' }}>Searching for: <strong>{state.target}</strong></div>
+          {state.currentStep && (
+            <div className="step-info" style={{ margin: 0, flex: '1 1 auto' }}>{state.currentStep}</div>
+          )}
         </div>
-        <ArrayVisualization state={state} />
-        <PseudocodeRenderer
-          lines={PSEUDOCODE}
-          highlightedLines={state.highlightedLines}
-        />
-        {state.currentStep && <div className="step-info">{state.currentStep}</div>}
+        <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: '0 0 auto', width: 'fit-content', minWidth: '240px' }}>
+            <PseudocodeRenderer
+              lines={PSEUDOCODE}
+              highlightedLines={state.highlightedLines}
+            />
+          </div>
+          <div style={{ flex: '1 1 380px', minWidth: '320px' }}>
+            <ArrayVisualization state={state} />
+          </div>
+        </div>
       </div>
     );
   },
@@ -109,23 +168,46 @@ function ArrayVisualization({ state }) {
     <div className="array-viz">
       <div className="array-container">
         {state.array.map((val, idx) => (
-          <div
-            key={idx}
-            className={`array-item ${
-              idx < state.left || idx > state.right ? 'eliminated' : ''
-            } ${idx === state.mid ? 'current-mid' : ''} ${
-              idx === state.foundIndex ? 'found' : ''
-            }`}
-          >
-            {val}
+          <div key={idx} style={{ position: 'relative' }}>
+            {idx === state.left && (
+              <div className="index-badge badge-left">L</div>
+            )}
+            {idx === state.right && (
+              <div className="index-badge badge-right">R</div>
+            )}
+            {idx === state.mid && (
+              <div className="index-badge badge-mid">M</div>
+            )}
+            <div
+              className={`array-item ${
+                idx < state.left || idx > state.right ? 'eliminated' : ''
+              } ${idx === state.mid ? 'current-mid' : ''} ${
+                idx === state.foundIndex ? 'found' : ''
+              }`}
+            >
+              {val}
+            </div>
+            <div className="array-index">{idx}</div>
           </div>
         ))}
       </div>
+      <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '8px', flexWrap: 'wrap' }}>
+        <div className="var-box">
+          <div className="var-label">left</div>
+          <div className="var-value">{state.left}</div>
+        </div>
+        <div className="var-box">
+          <div className="var-label">mid</div>
+          <div className="var-value">{state.mid ?? '—'}</div>
+        </div>
+        <div className="var-box">
+          <div className="var-label">right</div>
+          <div className="var-value">{state.right}</div>
+        </div>
+      </div>
       <div className="status">
-        left={state.left}, right={state.right}, mid={state.mid}
         {state.found && (
           <span className="completed">
-            {' '}
             ✓ Found at index {state.foundIndex}!
           </span>
         )}

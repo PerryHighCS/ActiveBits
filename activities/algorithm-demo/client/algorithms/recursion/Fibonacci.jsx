@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
@@ -44,39 +44,79 @@ const Fibonacci = {
 
   ManagerView({ session, onStateChange }) {
     const state = session.data.algorithmState || Fibonacci.initState();
+    const pseudoColumnStyle = {
+      position: 'sticky',
+      bottom: 0,
+      alignSelf: 'flex-end',
+      flex: '0 0 auto',
+      width: 'fit-content',
+      minWidth: '260px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '12px',
+      padding: '8px 0',
+      background: '#fff',
+      zIndex: 1,
+    };
 
     return (
       <div className="algorithm-manager">
-        <div className="controls">
-          <button onClick={() => onStateChange(performNextStep(state))} disabled={state.complete}>
-            Next Step
-          </button>
-          <button onClick={() => onStateChange(Fibonacci.initState())}>Reset</button>
-          <label>
-            Input n:
-            <input
-              type="number"
-              min="1"
-              max="10"
-              value={state.n}
-              onChange={(e) => onStateChange(Fibonacci.initState(parseInt(e.target.value)))}
-            />
-          </label>
+        <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={pseudoColumnStyle}>
+            <div className="controls">
+              <button onClick={() => onStateChange(performNextStep(state))} disabled={state.complete}>
+                Next Step
+              </button>
+              <button onClick={() => onStateChange(Fibonacci.initState())}>Reset</button>
+              <label>
+                Input n:
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={state.n}
+                  onChange={(e) => onStateChange(Fibonacci.initState(parseInt(e.target.value)))}
+                />
+              </label>
+            </div>
+            <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} overlays={state.overlays} />
+            {state.currentStep && <div className={`step-info ${state.complete ? 'complete' : ''}`}>{state.currentStep}</div>}
+          </div>
+          <div style={{ flex: '1 1 320px', minWidth: '300px' }}>
+            <CallStackVisualization state={state} />
+          </div>
         </div>
-        <CallStackVisualization state={state} />
-        <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} overlays={state.overlays} />
-        {state.currentStep && <div className="step-info">{state.currentStep}</div>}
       </div>
     );
   },
 
   StudentView({ session }) {
     const state = session.data.algorithmState || Fibonacci.initState();
+    const pseudoColumnStyle = {
+      position: 'sticky',
+      bottom: 0,
+      alignSelf: 'flex-end',
+      flex: '0 0 auto',
+      width: 'fit-content',
+      minWidth: '260px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '12px',
+      padding: '8px 0',
+      background: '#fff',
+      zIndex: 1,
+    };
     return (
       <div className="algorithm-student">
-        <CallStackVisualization state={state} />
-        <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} overlays={state.overlays} />
-        {state.currentStep && <div className="step-info">{state.currentStep}</div>}
+        <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={pseudoColumnStyle}>
+            <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} overlays={state.overlays} />
+            {state.currentStep && <div className={`step-info ${state.complete ? 'complete' : ''}`}>{state.currentStep}</div>}
+          </div>
+          <div style={{ flex: '1 1 320px', minWidth: '300px' }}>
+            <CallStackVisualization state={state} />
+          </div>
+        </div>
       </div>
     );
   },
@@ -84,6 +124,14 @@ const Fibonacci = {
 
 function CallStackVisualization({ state }) {
   const callStack = Array.isArray(state.callStack) ? state.callStack : [];
+  const stackEndRef = useRef(null);
+
+  useEffect(() => {
+    if (stackEndRef.current) {
+      stackEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [callStack.length]);
+
   return (
     <div className="recursion-viz">
       <div className="call-stack">
@@ -114,13 +162,9 @@ function CallStackVisualization({ state }) {
               </div>
             ))
           )}
+          <div ref={stackEndRef} />
         </div>
       </div>
-      {state.complete && (
-        <div className="result-display">
-          Result: <strong>Fibonacci({state.n}) = {state.result}</strong>
-        </div>
-      )}
     </div>
   );
 }

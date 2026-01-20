@@ -26,8 +26,10 @@ const SelectionSort = {
    * Initialize algorithm state with random array
    */
   initState(arraySize = 8) {
+    const array = Array.from({ length: arraySize }, () => Math.floor(Math.random() * 100) + 1);
     return {
-      array: Array.from({ length: arraySize }, () => Math.floor(Math.random() * 100) + 1),
+      array,
+      initialArray: [...array],
       i: 0,
       minIndex: 0,
       j: 0,
@@ -35,6 +37,8 @@ const SelectionSort = {
       sorted: false,
       currentStep: null,
       highlightedLines: new Set(),
+      swappingIndices: [],
+      swapAnimation: {},
     };
   },
 
@@ -46,7 +50,19 @@ const SelectionSort = {
       return performNextStep(state);
     }
     if (event.type === 'reset') {
-      return SelectionSort.initState(state.array.length);
+      return {
+        array: [...state.initialArray],
+        initialArray: state.initialArray,
+        i: 0,
+        minIndex: 0,
+        j: 0,
+        substep: 0,
+        sorted: false,
+        currentStep: null,
+        highlightedLines: new Set(),
+        swappingIndices: [],
+        swapAnimation: {},
+      };
     }
     if (event.type === 'setArraySize') {
       return SelectionSort.initState(event.payload);
@@ -66,7 +82,7 @@ const SelectionSort = {
     };
 
     const handleReset = () => {
-      onStateChange(SelectionSort.initState());
+      onStateChange(SelectionSort.reduceEvent(state, { type: 'reset' }));
     };
 
     const handleRegenerate = () => {
@@ -81,12 +97,21 @@ const SelectionSort = {
           </button>
           <button onClick={handleReset}>Reset</button>
           <button onClick={handleRegenerate}>Generate New Array</button>
+          {state.currentStep && (
+            <div className="step-info" style={{ margin: 0, flex: '1 1 auto' }}>{state.currentStep}</div>
+          )}
         </div>
-        <ArrayVisualization state={state} />
-        <PseudocodeRenderer
-          lines={PSEUDOCODE}
-          highlightedIds={state.highlightedLines}
-        />
+        <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 320px', minWidth: '280px' }}>
+            <PseudocodeRenderer
+              lines={PSEUDOCODE}
+              highlightedIds={state.highlightedLines}
+            />
+          </div>
+          <div style={{ flex: '1 1 380px', minWidth: '320px' }}>
+            <ArrayVisualization state={state} />
+          </div>
+        </div>
       </div>
     );
   },
@@ -98,11 +123,20 @@ const SelectionSort = {
     const state = session.data.algorithmState || SelectionSort.initState();
     return (
       <div className="algorithm-student">
-        <ArrayVisualization state={state} />
-        <PseudocodeRenderer
-          lines={PSEUDOCODE}
-          highlightedIds={state.highlightedLines}
-        />
+        {state.currentStep && (
+          <div className="step-info" style={{ margin: '0 0 16px 0' }}>{state.currentStep}</div>
+        )}
+        <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 320px', minWidth: '280px' }}>
+            <PseudocodeRenderer
+              lines={PSEUDOCODE}
+              highlightedIds={state.highlightedLines}
+            />
+          </div>
+          <div style={{ flex: '1 1 380px', minWidth: '320px' }}>
+            <ArrayVisualization state={state} />
+          </div>
+        </div>
       </div>
     );
   },
@@ -112,27 +146,59 @@ const SelectionSort = {
  * Array visualization component
  */
 function ArrayVisualization({ state }) {
+  const swappingSet = new Set(Array.isArray(state.swappingIndices) ? state.swappingIndices : []);
+
   return (
     <div className="array-viz">
       <div className="array-container">
-        {state.array.map((val, idx) => (
-          <div
-            key={idx}
-            className={`array-item ${
-              idx === state.i ? 'current-i' : ''
-            } ${idx === state.minIndex ? 'current-min' : ''} ${
-              idx < state.i ? 'sorted' : ''
-            } ${
-              // Highlight j during inner loop steps
-              state.substep >= 3 && idx === state.j ? 'current-j' : ''
-            }`}
-          >
-            {val}
-          </div>
-        ))}
+        {state.array.map((val, idx) => {
+          const offset = state.swapAnimation?.[idx] || 0;
+          const swapStyle = offset ? { '--swap-offset': `${offset * 52}px` } : undefined;
+
+          return (
+            <div key={idx} style={{ position: 'relative' }}>
+              {idx === state.i && (
+                <div className="index-badge badge-i">i</div>
+
+              )}
+              {idx === state.j && state.substep >= 3 && (
+                <div className="index-badge badge-j">j</div>
+              )}
+              {idx === state.minIndex && (
+                <div className="index-badge badge-min">m</div>
+              )}
+              <div
+                className={`array-item ${
+                  idx === state.i ? 'current-i' : ''
+                } ${idx === state.minIndex ? 'current-min' : ''} ${
+                  idx < state.i ? 'sorted' : ''
+                } ${
+                  state.substep >= 3 && idx === state.j ? 'current-j' : ''
+                } ${offset ? 'swap-anim' : ''}`}
+                style={swapStyle}
+              >
+                {val}
+              </div>
+              <div className="array-index">{idx}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '20px' }}>
+        <div className="var-box">
+          <div className="var-label">i</div>
+          <div className="var-value">{state.i}</div>
+        </div>
+        <div className="var-box">
+          <div className="var-label">minIndex</div>
+          <div className="var-value">{state.minIndex}</div>
+        </div>
+        <div className="var-box">
+          <div className="var-label">j</div>
+          <div className="var-value">{state.j}</div>
+        </div>
       </div>
       <div className="status">
-        i={state.i}, minIndex={state.minIndex}, j={state.j}
         {state.sorted && <span className="completed"> ✓ Sorted!</span>}
       </div>
     </div>
@@ -144,9 +210,14 @@ function ArrayVisualization({ state }) {
  */
 function performNextStep(state) {
   const arr = [...state.array];
-  let { i, j, minIndex, substep } = state;
+  let { i, j, minIndex, substep, swapAnimation } = state;
   let highlightedLines = new Set();
   let currentStep = null;
+
+  // If we have an active swap animation from the previous step, clear it now
+  if (substep !== 6 && swapAnimation && Object.keys(swapAnimation).length) {
+    swapAnimation = {};
+  }
 
   // Already sorted
   if (state.sorted) return state;
@@ -191,7 +262,7 @@ function performNextStep(state) {
       highlightedLines.add('line-6');
       const needSwap = minIndex !== i;
       currentStep = `Check swap: minIndex (${minIndex}) ${needSwap ? '≠' : '='} i (${i})`;
-      substep = needSwap ? 6.5 : 7; // swap or increment i
+      substep = needSwap ? 6 : 7; // animate swap or increment i
     }
   } else if (substep === 4) {
     // Assign new minIndex ← j
@@ -211,14 +282,24 @@ function performNextStep(state) {
     highlightedLines.add('line-3');
     currentStep = `Advance j to ${j}`;
     substep = 3;
-  } else if (substep === 6.5) {
-    // Perform swap
+  } else if (substep === 6) {
+    // Single-step swap: swap data now and animate elements moving to their new spots
+    highlightedLines.add('line-7');
+    // Compute offsets based on where values came from
+    const offsets = {
+      [i]: minIndex - i,
+      [minIndex]: i - minIndex,
+    };
     [arr[i], arr[minIndex]] = [arr[minIndex], arr[i]];
-    i++;
-    // Emphasize entering next iteration by highlighting for-loop line
+    swapAnimation = offsets;
+    currentStep = `Swap A[${i}] with A[${minIndex}]`;
+    substep = 6.5; // highlight loop and advance i next
+  } else if (substep === 6.5) {
+    // Advance i after swap, highlighting the for loop line
     highlightedLines.add('line-1');
-    currentStep = `Swap done; advance i to ${i}`;
-    substep = 1; // next step will set minIndex ← i
+    i++;
+    currentStep = `Advance i to ${i}`;
+    substep = 1; // move to next outer iteration
   } else if (substep === 7) {
     // No swap needed, move to next i
     i++;
@@ -226,6 +307,10 @@ function performNextStep(state) {
     currentStep = `No swap; advance i to ${i}`;
     substep = 1; // next step will set minIndex ← i
   }
+
+  const swappingIndices = swapAnimation && Object.keys(swapAnimation).length
+    ? Object.keys(swapAnimation).map((k) => parseInt(k, 10))
+    : [];
 
   return {
     ...state,
@@ -236,6 +321,8 @@ function performNextStep(state) {
     substep,
     highlightedLines,
     currentStep,
+    swappingIndices,
+    swapAnimation,
   };
 }
 
