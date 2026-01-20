@@ -106,22 +106,41 @@ const BinarySearchGame = {
     );
   },
 
-  StudentView({ session }) {
+  StudentView({ session, onStateChange }) {
     const state = session.data.algorithmState || BinarySearchGame.initState();
     const [inputValue, setInputValue] = useState('');
 
-    const handleSubmitGuess = (onStateChange) => {
-      // In shared mode, students see state updates from manager
-      // but can't actually interact
-      return;
+    const handleSubmitGuess = () => {
+      if (!onStateChange) return;
+      const guess = parseInt(inputValue);
+      if (!isNaN(guess) && guess >= 1 && guess <= state.maxN) {
+        onStateChange(handleGuess(state, guess));
+        setInputValue('');
+      }
     };
 
-    return (
-      <div className="algorithm-student">
-        <div className="game-display">
-          <h2>Guessing Game (Max: {state.maxN})</h2>
-          <p>Watching instructor play...</p>
-        </div>
+    const handleNewGame = () => {
+      if (!onStateChange) return;
+      onStateChange(BinarySearchGame.initState(state.maxN));
+      setInputValue('');
+    };
+
+    const soloControls = onStateChange ? (
+      <>
+        {!state.won ? (
+          <div className="guess-controls">
+            <input
+              type="number"
+              min="1"
+              max={state.maxN}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSubmitGuess()}
+              placeholder="Enter your guess"
+            />
+            <button onClick={handleSubmitGuess}>Guess</button>
+          </div>
+        ) : null}
 
         {state.hint && <div className={`hint ${state.hint.type}`}>{state.hint.message}</div>}
 
@@ -129,9 +148,40 @@ const BinarySearchGame = {
 
         {state.won && (
           <div className="won-display">
+            🎉 You won in {state.guesses.length} guesses!
+            <button onClick={handleNewGame} className="btn-primary">
+              Play Again
+            </button>
+          </div>
+        )}
+      </>
+    ) : (
+      <>
+        {state.hint && <div className={`hint ${state.hint.type}`}>{state.hint.message}</div>}
+        <GuessHistory state={state} />
+        {state.won && (
+          <div className="won-display">
             🎉 Instructor won in {state.guesses.length} guesses!
           </div>
         )}
+      </>
+    );
+
+    return (
+      <div className="algorithm-student">
+        <div className="game-display">
+          <h2>Guessing Game (Max: {state.maxN})</h2>
+          {onStateChange ? (
+            <>
+              <p className="hint">I'm thinking of a number between 1 and {state.maxN}.</p>
+              <p>You should be able to guess it in {state.maxGuessesNeeded} or fewer guesses!</p>
+            </>
+          ) : (
+            <p>Watching instructor play...</p>
+          )}
+        </div>
+
+        {soloControls}
 
         <PseudocodeRenderer
           lines={PSEUDOCODE}

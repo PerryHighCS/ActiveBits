@@ -90,7 +90,7 @@ const Fibonacci = {
     );
   },
 
-  StudentView({ session }) {
+  StudentView({ session, onStateChange }) {
     const state = session.data.algorithmState || Fibonacci.initState();
     const pseudoColumnStyle = {
       position: 'sticky',
@@ -106,10 +106,31 @@ const Fibonacci = {
       background: '#fff',
       zIndex: 1,
     };
+
+    const controls = onStateChange ? (
+      <div className="controls">
+        <button onClick={() => onStateChange(performNextStep(state))} disabled={state.complete}>
+          Next Step
+        </button>
+        <button onClick={() => onStateChange(Fibonacci.initState(state.n))}>Reset</button>
+        <label>
+          Input n:
+          <input
+            type="number"
+            min="1"
+            max="10"
+            value={state.n}
+            onChange={(e) => onStateChange(Fibonacci.initState(parseInt(e.target.value)))}
+          />
+        </label>
+      </div>
+    ) : null;
+
     return (
       <div className="algorithm-student">
         <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={pseudoColumnStyle}>
+            {controls}
             <PseudocodeRenderer lines={PSEUDOCODE} highlightedIds={state.highlightedLines} overlays={state.overlays} />
             {state.currentStep && <div className={`step-info ${state.complete ? 'complete' : ''}`}>{state.currentStep}</div>}
           </div>

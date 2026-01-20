@@ -137,16 +137,71 @@ const BinarySearch = {
     );
   },
 
-  StudentView({ session }) {
+  StudentView({ session, onStateChange }) {
     const state = session.data.algorithmState || BinarySearch.initState();
-    return (
-      <div className="algorithm-student">
-        <div className="target-display" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ whiteSpace: 'nowrap' }}>Searching for: <strong>{state.target}</strong></div>
-          {state.currentStep && (
-            <div className="step-info" style={{ margin: 0, flex: '1 1 auto' }}>{state.currentStep}</div>
+    const [inputTarget, setInputTarget] = useState(state.target);
+
+    useEffect(() => {
+      setInputTarget(state.target);
+    }, [state.target]);
+
+    const handleNextStep = () => {
+      if (!onStateChange) return;
+      if (inputTarget !== state.target && inputTarget !== '') {
+        onStateChange(BinarySearch.initState(state.array.length, inputTarget));
+      } else {
+        onStateChange(performNextStep(state));
+      }
+    };
+
+    const handleReset = () => {
+      if (!onStateChange) return;
+      onStateChange(BinarySearch.reduceEvent(state, { type: 'reset' }));
+    };
+
+    const handleGenerate = () => {
+      if (!onStateChange) return;
+      onStateChange(BinarySearch.initState(state.array.length, null));
+    };
+
+    const controls = onStateChange ? (
+      <div className="target-display" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <button onClick={handleNextStep} disabled={state.found}>Next Step</button>
+        <button onClick={handleReset}>Reset</button>
+        <button onClick={handleGenerate}>Generate New Array</button>
+        <div style={{ whiteSpace: 'nowrap' }}>
+          Searching for:&nbsp;
+          {state.found || state.substep > 0 ? (
+            <strong>{state.target}</strong>
+          ) : (
+            <input
+              type="number"
+              value={inputTarget}
+              onChange={(e) => setInputTarget(parseInt(e.target.value) || '')}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && inputTarget !== '') {
+                  onStateChange(BinarySearch.initState(state.array.length, inputTarget));
+                }
+              }}
+            />
           )}
         </div>
+        {state.currentStep && (
+          <div className="step-info" style={{ margin: 0, flex: '1 1 auto' }}>{state.currentStep}</div>
+        )}
+      </div>
+    ) : (
+      <div className="target-display" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ whiteSpace: 'nowrap' }}>Searching for: <strong>{state.target}</strong></div>
+        {state.currentStep && (
+          <div className="step-info" style={{ margin: 0, flex: '1 1 auto' }}>{state.currentStep}</div>
+        )}
+      </div>
+    );
+
+    return (
+      <div className="algorithm-student">
+        {controls}
         <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={{ flex: '0 0 auto', width: 'fit-content', minWidth: '240px' }}>
             <PseudocodeRenderer

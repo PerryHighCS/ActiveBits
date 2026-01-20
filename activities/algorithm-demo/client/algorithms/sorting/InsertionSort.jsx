@@ -115,13 +115,43 @@ const InsertionSort = {
     );
   },
 
-  StudentView({ session }) {
+  StudentView({ session, onStateChange }) {
     const state = session.data.algorithmState || InsertionSort.initState();
+
+    const handleNextStep = () => {
+      if (!onStateChange) return;
+      const newState = performNextStep(state);
+      onStateChange(newState);
+    };
+
+    const handleReset = () => {
+      if (!onStateChange) return;
+      onStateChange(InsertionSort.reduceEvent(state, { type: 'reset' }));
+    };
+
+    const handleRegenerate = () => {
+      if (!onStateChange) return;
+      onStateChange(InsertionSort.initState());
+    };
+
+    const controls = onStateChange ? (
+      <div className="controls">
+        <button onClick={handleNextStep} disabled={state.sorted}>
+          Next Step
+        </button>
+        <button onClick={handleReset}>Reset</button>
+        <button onClick={handleRegenerate}>Generate New Array</button>
+        {state.currentStep && (
+          <div className="step-info" style={{ margin: 0, flex: '1 1 auto' }}>{state.currentStep}</div>
+        )}
+      </div>
+    ) : (
+      state.currentStep && <div className="step-info" style={{ margin: '0 0 16px 0' }}>{state.currentStep}</div>
+    );
+
     return (
       <div className="algorithm-student">
-        {state.currentStep && (
-          <div className="step-info" style={{ margin: '0 0 16px 0' }}>{state.currentStep}</div>
-        )}
+        {controls}
         <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 320px', minWidth: '280px' }}>
             <PseudocodeRenderer
