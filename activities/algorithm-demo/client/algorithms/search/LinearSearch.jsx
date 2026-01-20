@@ -215,7 +215,11 @@ function ArrayVisualization({ state }) {
         </div>
       </div>
       <div className="status">
-        {state.found && <span className="completed"> ✓ Found at index {state.foundIndex}!</span>}
+        {state.found && (
+          <span className="completed">
+            {state.foundIndex >= 0 ? ` ✓ Found at index ${state.foundIndex}!` : ` ✗ Not found`}
+          </span>
+        )}
       </div>
     </div>
   );
