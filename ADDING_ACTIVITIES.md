@@ -247,6 +247,19 @@ export default {
     description: 'Shown instead of description for Solo Bits cards (optional)',
     buttonText: 'Copy Quiz Solo Link',
   },
+  // Optional: Define query parameters for deep linking (e.g., permanent links that pre-configure settings)
+  deepLinkOptions: {
+    difficulty: {
+      label: 'Pre-select Difficulty',
+      type: 'select',
+      options: [
+        { value: '', label: '(None - manual selection)' },
+        { value: 'easy', label: 'Easy' },
+        { value: 'medium', label: 'Medium' },
+        { value: 'hard', label: 'Hard' },
+      ]
+    }
+  },
   clientEntry: './client/index.js',  // or .jsx if using JSX in footerContent
   serverEntry: './server/routes.js',
 };
@@ -387,6 +400,59 @@ export default {
 ```
 
 If omitted, the UI falls back to `name`, `description`, and the default button label.
+
+### Deep Linking in Solo Mode
+
+Solo mode activities support query parameters for creating pre-configured links that students can share. This is useful for creating presentation-ready URLs or shared practice links.
+
+**Using Query Parameters:**
+
+1. **Define deepLinkOptions in activity.config.js:**
+```javascript
+deepLinkOptions: {
+  difficulty: {
+    label: 'Pre-select Difficulty',
+    type: 'select',
+    options: [
+      { value: '', label: '(None)' },
+      { value: 'easy', label: 'Easy' },
+      { value: 'hard', label: 'Hard' },
+    ]
+  }
+}
+```
+
+2. **Read parameters in your Student component:**
+```javascript
+import { useSearchParams } from 'react-router-dom';
+
+export default function QuizStudent({ sessionData }) {
+  const [searchParams] = useSearchParams();
+  const difficulty = searchParams.get('difficulty');
+  
+  // Use difficulty to configure the activity
+  useEffect(() => {
+    if (difficulty) {
+      loadQuiz(difficulty);
+    }
+  }, [difficulty]);
+  
+  return <div>...</div>;
+}
+```
+
+3. **URL Format:**
+- Solo mode: `/solo/quiz?difficulty=hard`
+- Result: Student sees the quiz automatically configured for hard difficulty
+- Instructor can share this link directly with students
+
+**Dashboard Integration:**
+- Instructors see "Create [Activity] Practice Link" button on dashboard
+- Modal lets them select options (difficulty, algorithm, etc.)
+- Generated link includes query parameters
+- Instructor's permanent links list shows which options were selected
+
+**Example:** An instructor creates a link for `/solo/algorithm-demo?algorithm=merge-sort` - when students click it, merge sort is automatically selected without showing the algorithm picker.
 
 ### Solo Mode Best Practices
 
