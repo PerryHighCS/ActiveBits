@@ -2,11 +2,11 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
-  'MergeSort(A[0..n−1])',
+  '**MergeSort(A[0..n−1])**',
   '    Create S[0..n−1]',
   '    MergeSortHelper(A, S, 0, n − 1)',
   '',
-  'MergeSortHelper(A, S, left, right)',
+  '**MergeSortHelper(A, S, left, right)**',
   '    if left ≥ right then',
   '        return',
   '    mid ← floor((left + right) / 2)',
@@ -14,7 +14,7 @@ const PSEUDOCODE = [
   '    MergeSortHelper(A, S, mid + 1, right)',
   '    Merge(A, S, left, mid, right)',
   '',
-  'Merge(A, S, left, mid, right)',
+  '**Merge(A, S, left, mid, right)**',
   '    i ← left',
   '    j ← mid + 1',
   '    k ← left',
@@ -61,6 +61,7 @@ const MergeSort = {
       animTo: null,
       animValue: null,
       copiedBackIndices: [],
+      scratchWritten: [],
     };
   },
 
@@ -82,6 +83,7 @@ const MergeSort = {
         animTo: null,
         animValue: null,
         copiedBackIndices: [],
+        scratchWritten: [],
       };
     }
     if (event.type === 'setArraySize') {
@@ -316,25 +318,33 @@ function ArrayVisualization({ state }) {
       </div>
 
       <div className="array-label" style={{ fontWeight: 'bold', marginTop: '20px', marginBottom: '8px' }}>Scratch S:</div>
-      <div className="array-container">
-        {state.scratch.map((val, idx) => {
+      {(state.substep >= 2 || state.callStack.length > 0) && (
+        <div className="array-container">
+          {state.scratch.map((val, idx) => {
           const isInRange = left !== null && right !== null && idx >= left && idx <= right;
           const isK = idx === k;
           const isM = idx === m;
           const isAnimSource = state.animFrom === `scratch-${idx}`;
           const isAnimTarget = state.animTo === `scratch-${idx}`;
           const isCopiedBack = Array.isArray(state.copiedBackIndices) && state.copiedBackIndices.includes(idx);
+          const hasValue = val !== null;
+          const isWrittenToScratch = Array.isArray(state.scratchWritten) && state.scratchWritten.includes(idx);
+          const shouldBeBlue = hasValue && isWrittenToScratch && !isCopiedBack;
+          
+          if (idx === 0 && hasValue) {
+            console.log(`Scratch[0]: val=${val}, hasValue=${hasValue}, isWrittenToScratch=${isWrittenToScratch}, isCopiedBack=${isCopiedBack}, shouldBeBlue=${shouldBeBlue}, scratchWritten=`, state.scratchWritten);
+          }
 
           return (
             <div key={idx} style={{ position: "relative" }} ref={registerScratchRef(idx)}>
               {isK && <div className="index-badge badge-k-centered">k</div>}
               {isM && <div className="index-badge badge-m-centered">m</div>}
               <div
-                className={`array-item scratch-item ${isInRange ? "in-range" : ""} ${isAnimSource ? "anim-fade" : ""} ${isAnimTarget ? "anim-arrive" : ""} ${isCopiedBack ? "copied-back" : ""}`}
+                className={`array-item scratch-item ${shouldBeBlue ? "in-range" : ""} ${isAnimSource ? "anim-fade" : ""} ${isAnimTarget ? "anim-arrive" : ""} ${isCopiedBack ? "copied-back" : ""}`}
                 style={{
                   opacity: isInRange || left === null ? 1 : 0.3,
-                  backgroundColor: isCopiedBack ? undefined : ((isAnimTarget && state.animValue !== null) || val !== null ? '#3498db' : '#e0e0e0'),
-                  color: isCopiedBack ? undefined : ((isAnimTarget && state.animValue !== null) || val !== null ? '#fff' : '#999'),
+                  backgroundColor: isCopiedBack ? undefined : (shouldBeBlue ? '#3498db' : '#e0e0e0'),
+                  color: isCopiedBack ? undefined : (shouldBeBlue ? '#fff' : '#999'),
                   '--anim-offset-x': `${animOffsets.offsetX}px`,
                   '--anim-offset-y': `${animOffsets.offsetY}px`,
                 }}
@@ -345,7 +355,8 @@ function ArrayVisualization({ state }) {
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: "16px", justifyContent: "center", marginTop: "20px", flexWrap: "wrap" }}>
         {topFrame && (
@@ -444,11 +455,12 @@ function CallStackVisualization({ state }) {
 }
 
 function performNextStep(state) {
-  let { array, scratch, callStack, complete, substep, highlightedLines, currentStep, copiedBackIndices } = state;
+  let { array, scratch, callStack, complete, substep, highlightedLines, currentStep, copiedBackIndices, scratchWritten } = state;
   array = [...array];
   scratch = [...scratch];
   callStack = [...callStack];
   copiedBackIndices = [...(copiedBackIndices || [])];
+  scratchWritten = [...(scratchWritten || [])];
   highlightedLines = new Set();
 
   if (complete) return state;
@@ -494,6 +506,7 @@ function performNextStep(state) {
       mid: null,
       state: 'active',
       substep: 0,
+      callSite: 'line-2',
     });
     substep = 0;
   } else if (callStack.length > 0) {
@@ -528,6 +541,7 @@ function performNextStep(state) {
           mid: null,
           state: 'active',
           substep: 0,
+          callSite: 'line-8',
         });
         substep = 0;
       } else if (topFrame.substep === 3) {
@@ -542,6 +556,7 @@ function performNextStep(state) {
           mid: null,
           state: 'active',
           substep: 0,
+          callSite: 'line-9',
         });
         substep = 0;
       } else if (topFrame.substep === 4) {
@@ -560,11 +575,15 @@ function performNextStep(state) {
           m: null,
           state: 'active',
           substep: 0,
+          callSite: 'line-10',
         });
         substep = 0;
       } else if (topFrame.substep === 99) {
         // Return from MergeSortHelper - mark for return
         topFrame.state = 'returning';
+        if (topFrame.callSite) {
+          highlightedLines.add(topFrame.callSite);
+        }
         if (callStack.length > 1) {
           const parent = callStack[callStack.length - 2];
           topFrame.returnTo = `${parent.function}(${parent.left}, ${parent.right})`;
@@ -590,7 +609,7 @@ function performNextStep(state) {
       }
     } else if (topFrame.function === 'Merge') {
       if (topFrame.substep === 0) {
-        // Initialize i - clear copied back indices for new merge
+        // Initialize i - clear copied back indices
         copiedBackIndices = [];
         highlightedLines.add('line-13');
         topFrame.i = topFrame.left;
@@ -633,6 +652,10 @@ function performNextStep(state) {
         highlightedLines.add('line-18');
         const value = array[topFrame.i];
         scratch[topFrame.k] = value;
+        if (!scratchWritten.includes(topFrame.k)) {
+          scratchWritten.push(topFrame.k);
+        }
+        console.log(`Writing to scratch[${topFrame.k}], scratchWritten now:`, scratchWritten);
         currentStep = `Copy to scratch: S[${topFrame.k}] = A[${topFrame.i}] = ${value}`;
         topFrame.substep = 6;
         return {
@@ -647,6 +670,7 @@ function performNextStep(state) {
           animFrom: `array-${topFrame.i}`,
           animTo: `scratch-${topFrame.k}`,
           animValue: value,
+          scratchWritten,
         };
       } else if (topFrame.substep === 6) {
         // i++
@@ -659,6 +683,9 @@ function performNextStep(state) {
         highlightedLines.add('line-21');
         const value = array[topFrame.j];
         scratch[topFrame.k] = value;
+        if (!scratchWritten.includes(topFrame.k)) {
+          scratchWritten.push(topFrame.k);
+        }
         currentStep = `Copy to scratch: S[${topFrame.k}] = A[${topFrame.j}] = ${value}`;
         topFrame.substep = 8;
         return {
@@ -673,6 +700,7 @@ function performNextStep(state) {
           animFrom: `array-${topFrame.j}`,
           animTo: `scratch-${topFrame.k}`,
           animValue: value,
+          scratchWritten,
         };
       } else if (topFrame.substep === 8) {
         // j++
@@ -701,6 +729,9 @@ function performNextStep(state) {
         highlightedLines.add('line-25');
         const value = array[topFrame.i];
         scratch[topFrame.k] = value;
+        if (!scratchWritten.includes(topFrame.k)) {
+          scratchWritten.push(topFrame.k);
+        }
         currentStep = `Copy remaining left: S[${topFrame.k}] = A[${topFrame.i}] = ${value}`;
         topFrame.substep = 12;
         return {
@@ -715,6 +746,7 @@ function performNextStep(state) {
           animFrom: `array-${topFrame.i}`,
           animTo: `scratch-${topFrame.k}`,
           animValue: value,
+          scratchWritten,
         };
       } else if (topFrame.substep === 12) {
         // i++
@@ -743,6 +775,9 @@ function performNextStep(state) {
         highlightedLines.add('line-29');
         const value = array[topFrame.j];
         scratch[topFrame.k] = value;
+        if (!scratchWritten.includes(topFrame.k)) {
+          scratchWritten.push(topFrame.k);
+        }
         currentStep = `Copy remaining right: S[${topFrame.k}] = A[${topFrame.j}] = ${value}`;
         topFrame.substep = 16;
         return {
@@ -757,6 +792,7 @@ function performNextStep(state) {
           animFrom: `array-${topFrame.j}`,
           animTo: `scratch-${topFrame.k}`,
           animValue: value,
+          scratchWritten,
         };
       } else if (topFrame.substep === 16) {
         // j++
@@ -791,6 +827,7 @@ function performNextStep(state) {
         const copyIdx = topFrame.m;
         array[topFrame.m] = value;
         copiedBackIndices.push(copyIdx);
+        scratchWritten = scratchWritten.filter(idx => idx !== copyIdx);
         currentStep = `Copy back: A[${topFrame.m}] = S[${topFrame.m}] = ${value}`;
         topFrame.m++;
         topFrame.substep = 19; // Loop back
@@ -807,10 +844,14 @@ function performNextStep(state) {
           animTo: `array-${copyIdx}`,
           animValue: value,
           copiedBackIndices,
+          scratchWritten,
         };
       } else if (topFrame.substep === 99) {
         // Return from Merge - mark for return
         topFrame.state = 'returning';
+        if (topFrame.callSite) {
+          highlightedLines.add(topFrame.callSite);
+        }
         if (callStack.length > 1) {
           const parent = callStack[callStack.length - 2];
           topFrame.returnTo = `${parent.function}(${parent.left}, ${parent.right})`;
@@ -850,6 +891,7 @@ function performNextStep(state) {
     animTo: null,
     animValue: null,
     copiedBackIndices,
+    scratchWritten,
   };
 }
 

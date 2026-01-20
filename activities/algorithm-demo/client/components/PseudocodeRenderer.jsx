@@ -23,6 +23,17 @@ export default function PseudocodeRenderer(props) {
     highlightSet = new Set();
   }
 
+  // Parse pseudocode line to render bold text marked with **
+  const renderLineContent = (text) => {
+    const parts = text.split(/(\*\*[^*]+\*\*)/);
+    return parts.map((part, idx) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={idx}>{part.slice(2, -2)}</strong>;
+      }
+      return part;
+    });
+  };
+
   return (
     <pre className={`pseudocode-renderer ${className}`}>
       {lines.map((line, idx) => {
@@ -33,7 +44,7 @@ export default function PseudocodeRenderer(props) {
               id={`line-${idx}`}
               className={`pseudocode-span ${highlightSet.has(`line-${idx}`) ? 'highlighted' : ''} ${overlayEntry ? 'has-overlay' : ''}`}
             >
-              {line}
+              {renderLineContent(line)}
               {overlayEntry && renderOverlay(overlayEntry)}
             </span>
           </div>
