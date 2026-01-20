@@ -5,6 +5,7 @@
 
 import SelectionSort from './sorting/SelectionSort.jsx';
 import InsertionSort from './sorting/InsertionSort.jsx';
+import MergeSort from './sorting/MergeSort.jsx';
 import BinarySearch from './search/BinarySearch.jsx';
 import LinearSearch from './search/LinearSearch.jsx';
 import Factorial from './recursion/Factorial.jsx';
@@ -20,6 +21,7 @@ const ALGORITHMS = [
   BinarySearch,
   SelectionSort,
   InsertionSort,
+  MergeSort,
   Factorial,
   Fibonacci,
 ];

@@ -131,3 +131,85 @@
   color: #f57f17;
   font-weight: 500;
 }
+/* Merge sort specific styles */
+.array-label {
+  font-weight: 600;
+  color: #333;
+  margin: 12px 0 8px 0;
+}
+
+.array-item.in-range {
+  border-width: 2px;
+}
+
+.array-item.mid-marker {
+  border-color: #9c27b0;
+  box-shadow: 0 0 0 2px rgba(156, 39, 176, 0.2);
+}
+
+.scratch-item {
+  background: #f5f5f5;
+  border-color: #bbb;
+  color: #999;
+}
+
+.scratch-item.in-range {
+  background: #e3f2fd;
+  border-color: #2196f3;
+  color: #1565c0;
+}
+
+.scratch-item.copied-back {
+  background: #e0e0e0;
+  border-color: #999;
+  color: #999;
+  opacity: 1 !important;
+}
+
+.stack-frame.waiting {
+  background: #fff9c4;
+  border-left-color: #fbc02d;
+}
+
+/* Animations for merge sort value movement */
+.array-item.anim-fade {
+  animation: fade-out 0.5s ease forwards;
+}
+
+.array-item.anim-arrive {
+  animation: arrive-from 0.5s ease forwards;
+}
+
+@keyframes fade-out {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes arrive-from {
+  0% {
+    transform: translate(var(--anim-offset-x, 0), var(--anim-offset-y, 0));
+    opacity: 0.7;
+  }
+  100% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+}
+
+.index-badge.badge-k-centered {
+  background: #9c27b0;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.index-badge.badge-m-centered {
+  background: #ff5722;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+}
