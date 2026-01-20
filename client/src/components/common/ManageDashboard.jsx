@@ -268,7 +268,7 @@ export default function ManageDashboard() {
                     {session.selectedOptions && Object.keys(session.selectedOptions).length > 0 && (
                       <p className="text-xs text-gray-500 mt-1">
                         Options: {Object.entries(session.selectedOptions)
-                          .filter(([key, value]) => value && value !== '')
+                          .filter(([, value]) => value && value !== '')
                           .map(([key, value]) => {
                             const activity = activities.find(a => a.id === session.activityName);
                             const option = activity?.deepLinkOptions?.[key];
