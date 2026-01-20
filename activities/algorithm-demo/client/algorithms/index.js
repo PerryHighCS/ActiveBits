@@ -15,13 +15,13 @@ import BinarySearchGame from './guessing/BinarySearchGame.jsx';
  * All available algorithms
  */
 const ALGORITHMS = [
+  LinearSearch,
+  BinarySearchGame,
+  BinarySearch,
   SelectionSort,
   InsertionSort,
-  BinarySearch,
-  LinearSearch,
   Factorial,
   Fibonacci,
-  BinarySearchGame,
 ];
 
 /**
