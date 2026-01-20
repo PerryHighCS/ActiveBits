@@ -215,8 +215,9 @@ const SessionRouter = () => {
             if (persistentSessionInfo.isStarted && persistentSessionInfo.sessionId) {
                 // If user has teacher cookie, redirect to manage page
                 if (persistentSessionInfo.hasTeacherCookie) {
-                    // Use replace to avoid back-navigation to waiting room
-                    navigate(`/manage/${activityName}/${persistentSessionInfo.sessionId}`, { replace: true });
+                    // Preserve query params when redirecting
+                    const queryString = window.location.search;
+                    navigate(`/manage/${activityName}/${persistentSessionInfo.sessionId}${queryString}`, { replace: true });
                     return <div className="text-center">Redirecting to session...</div>;
                 } else {
                     const handleTeacherLogin = async (event) => {
@@ -243,7 +244,9 @@ const SessionRouter = () => {
                             }
 
                             const data = await res.json();
-                            navigate(`/manage/${activityName}/${data.sessionId || persistentSessionInfo.sessionId}`, { replace: true });
+                            // Preserve query params when redirecting
+                            const queryString = window.location.search;
+                            navigate(`/manage/${activityName}/${data.sessionId || persistentSessionInfo.sessionId}${queryString}`, { replace: true });
                         } catch (err) {
                             setTeacherAuthError(err.message);
                             setIsAuthenticatingTeacher(false);
@@ -380,7 +383,7 @@ const SessionRouter = () => {
                     <div className="w-full border-t-2 border-gray-300 pt-8">
                         <h2 className="text-2xl font-bold text-center mb-4 text-gray-800">Solo Bits</h2>
                         <p className="text-center text-gray-600 mb-6">Practice on your own</p>
-                        <div className="flex flex-col items-center gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
                             {soloActivities.map(activity => {
                                 const soloTitle = activity.soloModeMeta?.title || activity.name;
                                 const soloDescription = activity.soloModeMeta?.description || activity.description;
@@ -388,7 +391,7 @@ const SessionRouter = () => {
                                     <div 
                                         key={activity.id} 
                                         onClick={() => navigate(`/solo/${activity.id}`)}
-                                        className="rounded-lg shadow-md overflow-hidden w-full max-w-md border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
+                                        className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer"
                                     >
                                         <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>
                                             <h3 className="text-xl font-semibold">{soloTitle}</h3>

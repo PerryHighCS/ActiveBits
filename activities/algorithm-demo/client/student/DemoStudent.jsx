@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import AlgorithmPicker from '../components/AlgorithmPicker';
@@ -8,26 +9,36 @@ import './DemoStudent.css';
 
 export default function DemoStudent({ sessionData, persistentSessionInfo }) {
   const { sessionId } = sessionData;
+  const [searchParams] = useSearchParams();
   const attachSessionEndedHandler = useSessionEndedHandler();
 
   const [algorithms] = useState(getAllAlgorithms());
   const [selectedAlgoId, setSelectedAlgoId] = useState(null);
   const [algorithmState, setAlgorithmState] = useState(null);
   const [isSoloMode, setIsSoloMode] = useState(sessionId.startsWith('solo-'));
+  const [isAutoSelectedFromParam, setIsAutoSelectedFromParam] = useState(false);
 
-  // Auto-select algorithm from persistentSessionInfo query params if available
+  // Auto-select algorithm from query params (persistentSessionInfo for shared, URL params for solo)
   useEffect(() => {
-    const algorithmParam = persistentSessionInfo?.queryParams?.algorithm;
+    // Check persistentSessionInfo first (for shared sessions)
+    const algorithmParam = persistentSessionInfo?.queryParams?.algorithm || searchParams.get('algorithm');
     if (!algorithmParam || selectedAlgoId) return;
     
     const algo = getAlgorithm(algorithmParam);
     if (algo) {
-      console.log(`[algorithm-demo] Auto-detected algorithm from persistent session query params: ${algorithmParam}`);
-      // The algorithm will be set by the manager or WebSocket message
+      console.log(`[algorithm-demo] Auto-detected algorithm from query params: ${algorithmParam}`);
+      // In solo mode, auto-select the algorithm
+      if (isSoloMode) {
+        setSelectedAlgoId(algorithmParam);
+        const newState = algo.initState ? algo.initState() : {};
+        setAlgorithmState(newState);
+        setIsAutoSelectedFromParam(true);
+      }
+      // In shared mode, algorithm will be set by the manager or WebSocket message
     } else {
       console.warn(`[algorithm-demo] Algorithm "${algorithmParam}" specified in URL but not found in available algorithms`);
     }
-  }, [persistentSessionInfo, selectedAlgoId]);
+  }, [persistentSessionInfo, searchParams, selectedAlgoId, isSoloMode]);
 
   // Sync initial session state and poll for updates
   useEffect(() => {
@@ -145,7 +156,7 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
 
   return (
     <div className="demo-student">
-      {isSoloMode ? (
+      {isSoloMode && !isAutoSelectedFromParam ? (
         <div className="solo-header">
           <h2>{currentAlgo.name}</h2>
           <button
@@ -154,6 +165,10 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
           >
             Switch Algorithm
           </button>
+        </div>
+      ) : isSoloMode ? (
+        <div className="solo-header">
+          <h2>{currentAlgo.name}</h2>
         </div>
       ) : (
         <div className="shared-header">

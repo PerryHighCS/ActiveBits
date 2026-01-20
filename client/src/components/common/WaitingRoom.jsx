@@ -91,16 +91,18 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }) {
         setWaiterCount(message.count);
       } else if (message.type === 'session-started') {
         // Session was started by teacher, redirect to session
+        const queryString = window.location.search;
         if (teacherAuthRequestedRef.current) {
-          navigateOnce(`/manage/${activityName}/${message.sessionId}`);
+          navigateOnce(`/manage/${activityName}/${message.sessionId}${queryString}`);
         } else {
-          navigateOnce(`/${message.sessionId}`);
+          navigateOnce(`/${message.sessionId}${queryString}`);
         }
       } else if (message.type === 'session-ended') {
         navigateOnce('/session-ended');
       } else if (message.type === 'teacher-authenticated') {
         // This client is the teacher, redirect to manage page
-        navigateOnce(`/manage/${activityName}/${message.sessionId}`);
+        const queryString = window.location.search;
+        navigateOnce(`/manage/${activityName}/${message.sessionId}${queryString}`);
       } else if (message.type === 'teacher-code-error') {
         setError(message.error);
         setIsSubmitting(false);

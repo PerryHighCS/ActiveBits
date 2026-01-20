@@ -182,7 +182,7 @@ export default function ManageDashboard() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 max-w-7xl mx-auto">
       {sessionError && (
         <div className="mb-4 bg-red-50 border-2 border-red-200 rounded p-3">
           <p className="text-red-700 font-semibold">{sessionError}</p>
@@ -192,7 +192,7 @@ export default function ManageDashboard() {
       <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">Activity Dashboard</h1>
       <p className="text-center text-gray-600 mb-8">Choose an activity to start a new session</p>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {activities.map((activity) => {
           const soloLink = getSoloLink(activity.id);
           
@@ -265,7 +265,20 @@ export default function ManageDashboard() {
                 <div key={idx} className={`flex items-center gap-2 ${bgClass} p-3 rounded border-2 ${borderClass}`}>
                   <div className="flex-1">
                     <p className="font-semibold text-gray-700">{getActivityName(session.activityName)}</p>
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                    {session.selectedOptions && Object.keys(session.selectedOptions).length > 0 && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Options: {Object.entries(session.selectedOptions)
+                          .filter(([key, value]) => value && value !== '')
+                          .map(([key, value]) => {
+                            const activity = activities.find(a => a.id === session.activityName);
+                            const option = activity?.deepLinkOptions?.[key];
+                            const label = option?.options?.find(o => o.value === value)?.label || value;
+                            return `${option?.label || key}: ${label}`;
+                          })
+                          .join(', ')}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2 text-sm text-gray-600 mt-2">
                       <span>Teacher Code:</span>
                       <code className="bg-white px-2 py-1 rounded">
                         {teacherCode ? (isVisible ? teacherCode : '•••••••') : '•••••'}

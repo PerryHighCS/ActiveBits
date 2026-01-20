@@ -17,6 +17,7 @@ export default function DemoManager() {
   const [selectedAlgoId, setSelectedAlgoId] = useState(algorithms[0]?.id);
   const [algorithmState, setAlgorithmState] = useState(null);
   const [hasAutoSelected, setHasAutoSelected] = useState(false);
+  const [invalidAlgorithm, setInvalidAlgorithm] = useState(null);
 
   // Sync session state from server
   useEffect(() => {
@@ -78,7 +79,8 @@ export default function DemoManager() {
     // Check if this algorithm exists
     const algo = getAlgorithm(algorithmParam);
     if (!algo) {
-      console.warn(`[algorithm-demo] Algorithm "${algorithmParam}" not found in available algorithms, ignoring query parameter`);
+      console.warn(`[algorithm-demo] Algorithm "${algorithmParam}" not found in available algorithms`);
+      setInvalidAlgorithm(algorithmParam);
       setHasAutoSelected(true);
       return;
     }
@@ -154,6 +156,7 @@ export default function DemoManager() {
   }
 
   const CurrentManagerView = currentAlgo.ManagerView;
+  const isDeepLink = !!searchParams.get('algorithm');
 
   return (
     <div className="demo-manager">
@@ -163,12 +166,25 @@ export default function DemoManager() {
         onEndSession={handleEndSession}
       />
 
-      <AlgorithmPicker
-        algorithms={algorithms}
-        selectedId={selectedAlgoId}
-        onSelect={handleSelectAlgorithm}
-        title="Select Algorithm to Demonstrate"
-      />
+      {(invalidAlgorithm || !isDeepLink) && (
+        <>
+          {invalidAlgorithm && (
+            <div className="bg-red-50 border-2 border-red-200 rounded p-4 mb-4">
+              <p className="text-red-700 font-semibold">⚠️ Algorithm not found</p>
+              <p className="text-red-600 text-sm">The algorithm "{invalidAlgorithm}" was not found. Please select an algorithm below.</p>
+            </div>
+          )}
+          <AlgorithmPicker
+            algorithms={algorithms}
+            selectedId={selectedAlgoId}
+            onSelect={(algoId) => {
+              setInvalidAlgorithm(null);
+              handleSelectAlgorithm(algoId);
+            }}
+            title="Select Algorithm to Demonstrate"
+          />
+        </>
+      )}
 
       {algorithmState && (
         <div className="manager-view">
