@@ -171,6 +171,10 @@ Permanent sessions use HMAC-SHA256 authentication:
 - **Hash Format**: 20 characters of `salt(8 hex) + hmac(12 hex)` derived from `activityName|hashedTeacherCode|salt`
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
 - **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
+- **Query Parameters**: Activities can use URL query params for deep linking (e.g., `/activity/algorithm-demo/abc123?algorithm=merge-sort`)
+  - Server passes all query params to activities via `queryParams` object
+  - Each activity decides which parameters to handle
+  - Examples: `algorithm` (algorithm-demo), `preset` (gallery-walk), `challenge` (java-practice)
 - **Auto-reset**: Session data resets each time teacher visits
 - **Security**: 
   - httpOnly cookies prevent XSS attacks
@@ -207,6 +211,51 @@ Each activity defines its own endpoints under `/api/{activity-id}/...`
 4. Teacher accesses `/activity/{activityName}/{hash}` → checks cookie → authenticates via WebSocket
 5. Server validates HMAC and teacher code, creates/resets session
 6. Teacher auto-authenticated and redirected to manager view
+
+### Deep Linking with Query Parameters
+Activities can use URL query parameters for direct deep linking to specific content or configurations. This allows instructors to create presentation-ready links that automatically configure the activity.
+
+**How it works:**
+1. URL format: `/activity/{activityName}/{hash}?param1=value1&param2=value2`
+2. Server extracts all query params (except reserved routing params) and returns them as `queryParams` object
+3. Client components receive `queryParams` via props:
+   - Managers: Read from `useSearchParams()` hook
+   - Students: Receive via `persistentSessionInfo.queryParams` prop
+4. Each activity decides which parameters to handle
+
+**Example implementations:**
+- **algorithm-demo**: `?algorithm=merge-sort` - Auto-selects merge sort on session start
+- **gallery-walk**: `?preset=brainstorm` - Loads predefined brainstorming template
+- **java-practice**: `?challenge=intermediate` - Starts with intermediate difficulty
+
+**Implementation pattern (Manager):**
+```javascript
+import { useSearchParams } from 'react-router-dom';
+
+export default function MyActivityManager() {
+  const [searchParams] = useSearchParams();
+  const presetParam = searchParams.get('preset');
+  
+  useEffect(() => {
+    if (presetParam && !hasLoaded) {
+      loadPreset(presetParam);
+    }
+  }, [presetParam, hasLoaded]);
+}
+```
+
+**Implementation pattern (Student):**
+```javascript
+export default function MyActivityStudent({ sessionData, persistentSessionInfo }) {
+  const presetParam = persistentSessionInfo?.queryParams?.preset;
+  
+  useEffect(() => {
+    if (presetParam) {
+      console.log(`Activity configured with preset: ${presetParam}`);
+    }
+  }, [presetParam]);
+}
+```
 
 ## Status & Metrics
 

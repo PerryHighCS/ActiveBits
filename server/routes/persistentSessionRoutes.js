@@ -194,7 +194,7 @@ export function registerPersistentSessionRoutes({ app, sessions }) {
 
   app.get("/api/persistent-session/:hash", async (req, res) => {
     const { hash } = req.params;
-    const { activityName } = req.query;
+    const { activityName, ...queryParams } = req.query;
 
     if (!activityName) {
       return res.status(400).json({ error: 'Missing activityName parameter' });
@@ -223,6 +223,7 @@ export function registerPersistentSessionRoutes({ app, sessions }) {
       cookieCorrupted,
       isStarted: !!session.sessionId,
       sessionId: session.sessionId,
+      queryParams, // Pass through all query params for activity-specific handling
     });
   });
 

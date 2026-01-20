@@ -6,7 +6,7 @@ import { getAllAlgorithms, getAlgorithm } from '../algorithms';
 import { MESSAGE_TYPES, normalizeAlgorithmState } from '../utils';
 import './DemoStudent.css';
 
-export default function DemoStudent({ sessionData }) {
+export default function DemoStudent({ sessionData, persistentSessionInfo }) {
   const { sessionId } = sessionData;
   const attachSessionEndedHandler = useSessionEndedHandler();
 
@@ -14,6 +14,20 @@ export default function DemoStudent({ sessionData }) {
   const [selectedAlgoId, setSelectedAlgoId] = useState(null);
   const [algorithmState, setAlgorithmState] = useState(null);
   const [isSoloMode, setIsSoloMode] = useState(sessionId.startsWith('solo-'));
+
+  // Auto-select algorithm from persistentSessionInfo query params if available
+  useEffect(() => {
+    const algorithmParam = persistentSessionInfo?.queryParams?.algorithm;
+    if (!algorithmParam || selectedAlgoId) return;
+    
+    const algo = getAlgorithm(algorithmParam);
+    if (algo) {
+      console.log(`[algorithm-demo] Auto-detected algorithm from persistent session query params: ${algorithmParam}`);
+      // The algorithm will be set by the manager or WebSocket message
+    } else {
+      console.warn(`[algorithm-demo] Algorithm "${algorithmParam}" specified in URL but not found in available algorithms`);
+    }
+  }, [persistentSessionInfo, selectedAlgoId]);
 
   // Sync initial session state and poll for updates
   useEffect(() => {

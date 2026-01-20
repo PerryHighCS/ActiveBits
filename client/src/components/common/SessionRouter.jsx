@@ -96,7 +96,12 @@ const SessionRouter = () => {
         if (hash && activityName) {
             setIsLoadingPersistent(true);
             setPersistentSessionInfo(null);
-            fetch(`/api/persistent-session/${hash}?activityName=${activityName}`, { credentials: 'include' })
+            
+            // Pass all query params to the server (except reserved routing params)
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryString = urlParams.toString() ? `&${urlParams.toString()}` : '';
+            
+            fetch(`/api/persistent-session/${hash}?activityName=${activityName}${queryString}`, { credentials: 'include' })
                 .then(res => {
                     if (!res.ok) throw new Error('Persistent session not found');
                     return res.json();
@@ -120,7 +125,9 @@ const SessionRouter = () => {
 
         const pollStatus = async () => {
             try {
-                const res = await fetch(`/api/persistent-session/${hash}?activityName=${activityName}`, { credentials: 'include' });
+                const urlParams = new URLSearchParams(window.location.search);
+                const queryString = urlParams.toString() ? `&${urlParams.toString()}` : '';
+                const res = await fetch(`/api/persistent-session/${hash}?activityName=${activityName}${queryString}`, { credentials: 'include' });
                 if (!res.ok) return;
                 const data = await res.json();
                 if (isCancelled) return;
@@ -412,7 +419,7 @@ const SessionRouter = () => {
     const StudentComponent = activity.StudentComponent;
     return (
         <Suspense fallback={<LoadingFallback />}>
-            <StudentComponent sessionData={sessionData} />
+            <StudentComponent sessionData={sessionData} persistentSessionInfo={persistentSessionInfo} />
         </Suspense>
     );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import AlgorithmPicker from '../components/AlgorithmPicker';
@@ -10,11 +10,13 @@ import './DemoManager.css';
 export default function DemoManager() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [algorithms] = useState(getAllAlgorithms());
+  const algorithms = getAllAlgorithms();
   const [session, setSession] = useState(null);
   const [selectedAlgoId, setSelectedAlgoId] = useState(algorithms[0]?.id);
   const [algorithmState, setAlgorithmState] = useState(null);
+  const [hasAutoSelected, setHasAutoSelected] = useState(false);
 
   // Sync session state from server
   useEffect(() => {
@@ -29,6 +31,7 @@ export default function DemoManager() {
           if (data.data.algorithmId) {
             setSelectedAlgoId(data.data.algorithmId);
             setAlgorithmState(normalizeAlgorithmState(data.data.algorithmState) || null);
+            setHasAutoSelected(true); // Already has an algorithm set
           }
         }
       } catch (err) {
@@ -66,6 +69,27 @@ export default function DemoManager() {
     connect();
     return () => disconnect();
   }, [sessionId, connect, disconnect]);
+
+  // Auto-select algorithm from query params if provided and not already selected
+  useEffect(() => {
+    const algorithmParam = searchParams.get('algorithm');
+    if (!algorithmParam || hasAutoSelected || !sessionId || !session) return;
+
+    // Check if this algorithm exists
+    const algo = getAlgorithm(algorithmParam);
+    if (!algo) {
+      console.warn(`[algorithm-demo] Algorithm "${algorithmParam}" not found in available algorithms, ignoring query parameter`);
+      setHasAutoSelected(true);
+      return;
+    }
+
+    // Only auto-select if no algorithm is currently selected
+    if (!session.data.algorithmId) {
+      console.log(`[algorithm-demo] Auto-selecting algorithm from URL: ${algorithmParam}`);
+      handleSelectAlgorithm(algorithmParam);
+    }
+    setHasAutoSelected(true);
+  }, [searchParams, hasAutoSelected, sessionId, session]);
 
   const handleSelectAlgorithm = async (algoId) => {
     setSelectedAlgoId(algoId);
