@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
-  'Factorial(n)',
+  '**Factorial(n)**',
   '    if n ≤ 1 then',
   '        return 1',
   '    else',

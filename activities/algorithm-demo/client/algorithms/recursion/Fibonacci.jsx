@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
-  'Fibonacci(n)',
+  '**Fibonacci(n)**',
   '    if n ≤ 1 then',
   '        return n',
   '    else',

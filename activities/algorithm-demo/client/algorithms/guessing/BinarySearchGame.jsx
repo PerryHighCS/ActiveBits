@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
-  'GuessingGame(maxN)',
+  '**GuessingGame(maxN)**',
   '    secret ← Random(1, maxN)',
   '    while true',
   '        guess ← GetUserGuess()',

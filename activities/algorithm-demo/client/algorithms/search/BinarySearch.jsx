@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
-  'BinarySearch(A[0..n−1], target)',
+  '**BinarySearch(A[0..n−1], target)**',
   '    left ← 0',
   '    right ← n − 1',
   '    while left ≤ right',

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
-  'LinearSearch(A[0..n−1], target)',
+  '**LinearSearch(A[0..n−1], target)**',
   '    for i ← 0 to n − 1',
   '        if A[i] == target then',
   '            return i',

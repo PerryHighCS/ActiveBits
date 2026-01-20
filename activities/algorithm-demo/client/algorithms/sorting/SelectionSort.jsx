@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
-  'SelectionSort(A[0..n−1])',
+  '**SelectionSort(A[0..n−1])**',
   '    for i ← 0 to n − 2',
   '        minIndex ← i',
   '        for j ← i + 1 to n − 1',

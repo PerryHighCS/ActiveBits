@@ -2,7 +2,7 @@ import React, { useLayoutEffect, useRef, useState } from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
-  'InsertionSort(A[0..n−1])',
+  '**InsertionSort(A[0..n−1])**',
   '    for i ← 1 to n − 1',
   '        tmp ← A[i]',
   '        j ← i − 1',
