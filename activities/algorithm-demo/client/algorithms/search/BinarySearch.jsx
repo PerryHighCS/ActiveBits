@@ -81,7 +81,20 @@ const BinarySearch = {
 
     const handleNextStep = () => {
       if (inputTarget !== state.target && inputTarget !== '') {
-        onStateChange(BinarySearch.initState(state.array.length, inputTarget));
+        // Keep the same array, just reset search with new target
+        onStateChange({
+          ...state,
+          target: inputTarget,
+          left: 0,
+          right: state.array.length - 1,
+          mid: null,
+          substep: 0,
+          found: false,
+          foundIndex: -1,
+          currentStep: null,
+          highlightedLines: new Set(),
+          history: [],
+        });
       } else {
         onStateChange(performNextStep(state));
       }
@@ -148,7 +161,20 @@ const BinarySearch = {
     const handleNextStep = () => {
       if (!onStateChange) return;
       if (inputTarget !== state.target && inputTarget !== '') {
-        onStateChange(BinarySearch.initState(state.array.length, inputTarget));
+        // Keep the same array, just reset search with new target
+        onStateChange({
+          ...state,
+          target: inputTarget,
+          left: 0,
+          right: state.array.length - 1,
+          mid: null,
+          substep: 0,
+          found: false,
+          foundIndex: -1,
+          currentStep: null,
+          highlightedLines: new Set(),
+          history: [],
+        });
       } else {
         onStateChange(performNextStep(state));
       }
@@ -263,7 +289,7 @@ function ArrayVisualization({ state }) {
       <div className="status">
         {state.found && (
           <span className="completed">
-            ✓ Found at index {state.foundIndex}!
+            {state.foundIndex >= 0 ? `✓ Found at index ${state.foundIndex}!` : `✗ Not found`}
           </span>
         )}
       </div>
