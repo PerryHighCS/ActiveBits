@@ -135,10 +135,13 @@ export const myActivity = {
 ### How It Works
 
 1. **Display**: Activities with `soloMode: true` appear as clickable cards in the "Solo Bits" section on the join page (`/`)
+   - Cards display in a responsive 3-column grid on medium screens and larger (1 column on mobile)
+   - Each card shows the activity name, description, and clickable area to launch the activity
 2. **Session ID Format**: Solo sessions use the format `solo-{activity-id}` (e.g., `solo-java-string-practice`)
 3. **No Teacher Required**: Students can start practicing immediately without a teacher-managed session
 4. **Client-Side State**: Solo activities typically use `localStorage` for progress persistence
 5. **Custom Labels**: Optional `soloModeMeta` lets each activity override the Solo Bits card title/description and the dashboard "Copy Solo…" button text
+6. **Deep Linking Support**: Solo mode supports query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort` auto-selects the merge sort algorithm
 
 ### Solo Mode vs. Teacher Mode
 
