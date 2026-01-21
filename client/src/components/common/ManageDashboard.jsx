@@ -19,6 +19,10 @@ export default function ManageDashboard() {
   const [visibleCodes, setVisibleCodes] = useState({}); // Track which codes are visible
   const { copyToClipboard, isCopied } = useClipboard();
   const [sessionError, setSessionError] = useState(null);
+  const [showSoloModal, setShowSoloModal] = useState(false);
+  const [soloActivity, setSoloActivity] = useState(null);
+  const [soloOptions, setSoloOptions] = useState({});
+  const [persistentOptions, setPersistentOptions] = useState({});
 
   // Fetch teacher's persistent sessions on mount
   useEffect(() => {
@@ -67,6 +71,7 @@ export default function ManageDashboard() {
     setTeacherCode('');
     setPersistentUrl(null);
     setError(null);
+    setPersistentOptions(initializeDeepLinkOptions(activity));
   };
 
   const closePersistentModal = () => {
@@ -76,6 +81,19 @@ export default function ManageDashboard() {
     setPersistentUrl(null);
     setError(null);
     setIsCreating(false);
+    setPersistentOptions({});
+  };
+
+  const openSoloModal = (activity) => {
+    setSoloActivity(activity);
+    setSoloOptions(initializeDeepLinkOptions(activity));
+    setShowSoloModal(true);
+  };
+
+  const closeSoloModal = () => {
+    setShowSoloModal(false);
+    setSoloActivity(null);
+    setSoloOptions({});
   };
 
   const createPersistentLink = async (e) => {
@@ -84,12 +102,14 @@ export default function ManageDashboard() {
     setIsCreating(true);
 
     try {
+      const selectedOptions = normalizeSelectedOptions(selectedActivity, persistentOptions);
       const res = await fetch('/api/persistent-session/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           activityName: selectedActivity.id,
           teacherCode: teacherCode.trim(),
+          selectedOptions,
         }),
       });
 
@@ -99,7 +119,7 @@ export default function ManageDashboard() {
       }
 
       const data = await res.json();
-      const fullUrl = `${window.location.origin}${data.url}`;
+      const fullUrl = `${window.location.origin}${data.url}${buildQueryString(selectedOptions)}`;
       setPersistentUrl(fullUrl);
       
       // Update savedSessions with the new teacher code
@@ -151,7 +171,38 @@ export default function ManageDashboard() {
     return activity ? activity.color : 'blue';
   };
 
-  const getSoloLink = (activityId) => `${window.location.origin}/solo/${activityId}`;
+  const initializeDeepLinkOptions = (activity) => {
+    const options = activity?.deepLinkOptions || {};
+    return Object.keys(options).reduce((acc, key) => {
+      acc[key] = '';
+      return acc;
+    }, {});
+  };
+
+  const normalizeSelectedOptions = (activity, options) => {
+    const allowedOptions = activity?.deepLinkOptions || {};
+    return Object.entries(options || {}).reduce((acc, [key, value]) => {
+      if (!allowedOptions[key]) return acc;
+      if (value === null || value === undefined || value === '') return acc;
+      acc[key] = value;
+      return acc;
+    }, {});
+  };
+
+  const buildQueryString = (options) => {
+    const params = new URLSearchParams();
+    Object.entries(options || {}).forEach(([key, value]) => {
+      if (value !== null && value !== undefined && value !== '') {
+        params.set(key, value);
+      }
+    });
+    const query = params.toString();
+    return query ? `?${query}` : '';
+  };
+
+  const getSoloLink = (activityId, options = {}) => (
+    `${window.location.origin}/solo/${activityId}${buildQueryString(options)}`
+  );
 
   // Map color names to Tailwind classes (Tailwind requires static class names)
   const colorClasses = {
@@ -195,6 +246,7 @@ export default function ManageDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {activities.map((activity) => {
           const soloLink = getSoloLink(activity.id);
+          const hasDeepLinkOptions = activity.deepLinkOptions && Object.keys(activity.deepLinkOptions).length > 0;
           
           return (
             <div
@@ -222,11 +274,18 @@ export default function ManageDashboard() {
                   </button>
                   {activity.soloMode && (
                     <button
-                      onClick={() => copyToClipboard(soloLink)}
+                      onClick={() => {
+                        if (hasDeepLinkOptions) {
+                          openSoloModal(activity);
+                        } else {
+                          copyToClipboard(soloLink);
+                        }
+                      }}
                       className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded transition-colors"
                     >
                       {(() => {
                         const label = activity.soloModeMeta?.buttonText || 'Copy Solo Practice Link';
+                        if (hasDeepLinkOptions) return label;
                         if (!isCopied(soloLink)) return label;
                         const trimmed = label.replace(/^Copy\s+/i, '');
                         return `✓ Copied ${trimmed || 'Solo Link'}`;
@@ -295,14 +354,14 @@ export default function ManageDashboard() {
                     </div>
                   </div>
                   <Button 
-                    onClick={() => copyToClipboard(session.fullUrl)}
+                    onClick={() => copyToClipboard(`${session.fullUrl}${buildQueryString(session.selectedOptions)}`)}
                     variant="outline"
                     className="whitespace-nowrap"
                   >
-                    {isCopied(session.fullUrl) ? '✓ Copied URL' : 'Copy URL'}
+                    {isCopied(`${session.fullUrl}${buildQueryString(session.selectedOptions)}`) ? '✓ Copied URL' : 'Copy URL'}
                   </Button>
                   <Button 
-                    onClick={() => window.open(session.fullUrl, '_blank')}
+                    onClick={() => window.open(`${session.fullUrl}${buildQueryString(session.selectedOptions)}`, '_blank')}
                     variant="outline"
                   >
                     Open
@@ -351,6 +410,39 @@ export default function ManageDashboard() {
               </p>
             </div>
 
+            {selectedActivity?.deepLinkOptions && (
+              <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
+                <div className="flex flex-col gap-3">
+                  {Object.entries(selectedActivity.deepLinkOptions).map(([key, option]) => (
+                    <label key={key} className="text-sm text-gray-700">
+                      <span className="block font-semibold mb-1">{option.label || key}</span>
+                      {option.type === 'select' ? (
+                        <select
+                          value={persistentOptions[key] ?? ''}
+                          onChange={(e) => setPersistentOptions(prev => ({ ...prev, [key]: e.target.value }))}
+                          className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
+                        >
+                          {(option.options || []).map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={persistentOptions[key] ?? ''}
+                          onChange={(e) => setPersistentOptions(prev => ({ ...prev, [key]: e.target.value }))}
+                          className="w-full border-2 border-gray-300 rounded px-3 py-2"
+                        />
+                      )}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {error && (
               <p className="text-red-600 text-sm bg-red-50 p-2 rounded">
                 {error}
@@ -391,6 +483,74 @@ export default function ManageDashboard() {
             </p>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={showSoloModal}
+        onClose={closeSoloModal}
+        title={`${soloActivity?.soloModeMeta?.title || soloActivity?.name || 'Solo'} Practice Link`}
+      >
+        <div className="flex flex-col gap-4">
+          {soloActivity?.deepLinkOptions && (
+            <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
+              <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
+              <div className="flex flex-col gap-3">
+                {Object.entries(soloActivity.deepLinkOptions).map(([key, option]) => (
+                  <label key={key} className="text-sm text-gray-700">
+                    <span className="block font-semibold mb-1">{option.label || key}</span>
+                    {option.type === 'select' ? (
+                      <select
+                        value={soloOptions[key] ?? ''}
+                        onChange={(e) => setSoloOptions(prev => ({ ...prev, [key]: e.target.value }))}
+                        className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
+                      >
+                        {(option.options || []).map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={soloOptions[key] ?? ''}
+                        onChange={(e) => setSoloOptions(prev => ({ ...prev, [key]: e.target.value }))}
+                        className="w-full border-2 border-gray-300 rounded px-3 py-2"
+                      />
+                    )}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="bg-gray-50 p-4 rounded border-2 border-gray-200">
+            <p className="text-sm text-gray-600 mb-2 font-semibold">Practice URL:</p>
+            <code className="text-sm break-all bg-white p-2 rounded border border-gray-300 block">
+              {soloActivity ? getSoloLink(soloActivity.id, normalizeSelectedOptions(soloActivity, soloOptions)) : ''}
+            </code>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => {
+                if (!soloActivity) return;
+                const link = getSoloLink(soloActivity.id, normalizeSelectedOptions(soloActivity, soloOptions));
+                copyToClipboard(link);
+              }}
+            >
+              {soloActivity && isCopied(getSoloLink(soloActivity.id, normalizeSelectedOptions(soloActivity, soloOptions))) ? '✓ Copied!' : 'Copy Link'}
+            </Button>
+            <button
+              onClick={() => {
+                if (!soloActivity) return;
+                const link = getSoloLink(soloActivity.id, normalizeSelectedOptions(soloActivity, soloOptions));
+                window.open(link, '_blank');
+              }}
+              className="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded transition-colors"
+            >
+              Open in New Tab
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
