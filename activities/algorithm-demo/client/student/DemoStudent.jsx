@@ -15,7 +15,7 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
   const [algorithms] = useState(getAllAlgorithms());
   const [selectedAlgoId, setSelectedAlgoId] = useState(null);
   const [algorithmState, setAlgorithmState] = useState(null);
-  const [isSoloMode, setIsSoloMode] = useState(sessionId.startsWith('solo-'));
+  const [isSoloMode] = useState(sessionId.startsWith('solo-'));
   const [isAutoSelectedFromParam, setIsAutoSelectedFromParam] = useState(false);
 
   // Auto-select algorithm from query params (persistentSessionInfo for shared, URL params for solo)
@@ -75,7 +75,7 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
     return `${protocol}//${window.location.host}/ws/algorithm-demo?sessionId=${sessionId}`;
   }, [sessionId, isSoloMode]);
 
-  const { connect, disconnect, socketRef } = useResilientWebSocket({
+  const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: !isSoloMode,
     attachSessionEndedHandler,

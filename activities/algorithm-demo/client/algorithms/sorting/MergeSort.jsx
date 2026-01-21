@@ -287,8 +287,7 @@ function ArrayVisualization({ state }) {
       <div className="array-container">
         {state.array.map((val, idx) => {
           const isInRange = left !== null && right !== null && idx >= left && idx <= right;
-          const isLeft = idx === left;
-          const isRight = idx === right;
+
           const isMid = idx === mid;
           const isI = idx === i;
           const isJ = idx === j;
@@ -451,8 +450,7 @@ function CallStackVisualization({ state }) {
 }
 
 function performNextStep(state) {
-  let { array, scratch, callStack, complete, substep, highlightedLines, currentStep, copiedBackIndices, scratchWritten } = state;
-  array = [...array];
+  let { array, scratch, callStack, complete, substep, currentStep, copiedBackIndices, scratchWritten } = state;
   scratch = [...scratch];
   callStack = [...callStack];
   copiedBackIndices = [...(copiedBackIndices || [])];

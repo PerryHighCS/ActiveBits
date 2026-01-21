@@ -12,7 +12,6 @@ const PSEUDOCODE = [
   '        A[j + 1] ← tmp',
 ];
 
-const ITEM_PX = 52; // used for shift animation offset only
 
 /**
  * Algorithm module for Insertion Sort

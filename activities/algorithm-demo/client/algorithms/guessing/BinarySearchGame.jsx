@@ -445,7 +445,8 @@ function handleComputerFeedback(state, feedback) {
 }
 
 function handleGuess(state, guess) {
-  let { secret, guesses, won, hint } = state;
+  let { secret, guesses, won } = state;
+  let hint;
   const highlightedLines = new Set();
   let currentStep = null;
 

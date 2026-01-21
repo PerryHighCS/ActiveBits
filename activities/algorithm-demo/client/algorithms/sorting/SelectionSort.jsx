@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
 const PSEUDOCODE = [
@@ -176,7 +176,6 @@ const SelectionSort = {
  * Array visualization component
  */
 function ArrayVisualization({ state }) {
-  const swappingSet = new Set(Array.isArray(state.swappingIndices) ? state.swappingIndices : []);
 
   return (
     <div className="array-viz">
