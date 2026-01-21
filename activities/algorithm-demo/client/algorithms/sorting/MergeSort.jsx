@@ -455,7 +455,7 @@ function performNextStep(state) {
   callStack = [...callStack];
   copiedBackIndices = [...(copiedBackIndices || [])];
   scratchWritten = [...(scratchWritten || [])];
-  highlightedLines = new Set();
+  let highlightedLines = new Set();
 
   if (complete) return state;
 
