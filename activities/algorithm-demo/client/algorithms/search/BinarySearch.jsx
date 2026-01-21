@@ -25,12 +25,11 @@ const BinarySearch = {
 
   initState(arraySize = 16, target = null) {
     // Generate a random sorted array
-    const baseValue = Math.floor(Math.random() * 20) + 1;
-    let currentValue = baseValue;
-    const array = Array.from({ length: arraySize }, (_, i) => {
-      if (i === 0) return currentValue;
-      currentValue += Math.floor(Math.random() * 5) + 3;
-      return currentValue;
+    let nextValue = Math.floor(Math.random() * 20);
+    const array = Array.from({ length: arraySize }, () => {
+      const value = nextValue;
+      nextValue += Math.floor(Math.random() * 5) + 1;
+      return value;
     });
     const t = target !== null ? target : array[Math.floor(Math.random() * arraySize)];
     return {
