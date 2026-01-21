@@ -11,7 +11,7 @@ test('algorithm registry - validate structure', () => {
   const result = validateAlgorithmRegistry();
   
   assert.ok(result.valid, `Registry valid: ${result.errors.join(', ')}`);
-  assert.equal(result.count, 6, 'Expected 6 algorithms registered');
+  assert.equal(result.count, 8, 'Expected 8 algorithms registered');
   assert.deepEqual(result.errors, [], 'No validation errors');
 });
 

@@ -2,7 +2,7 @@ export default {
   id: 'algorithm-demo',
   name: 'Algorithm Demonstrations',
   description: 'Instructor-driven algorithm demonstrations with synchronized visualization',
-  color: 'orange',
+  color: 'indigo',
   soloMode: true,
   soloModeMeta: {
     title: 'Algorithm Practice',

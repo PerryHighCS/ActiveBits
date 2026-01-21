@@ -9,7 +9,7 @@ import {
   createMessage,
   reduceAlgorithmEvent,
   validateLineIds,
-} from '../utils.js';
+} from './utils.js';
 
 test('MESSAGE_TYPES enum', () => {
   assert.equal(MESSAGE_TYPES.ALGORITHM_SELECTED, 'algorithm-selected');

@@ -14,7 +14,7 @@
         "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\"",
         "verify:deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
         "verify:server": "node scripts/verify-server.js",
-        "test": "npm --workspace client test && npm --workspace server test && npm run verify:deploy && npm run verify:server"
+        "test": "npm --workspace client test && npm --workspace server test && npm --workspace activities test && npm run verify:deploy && npm run verify:server"
     },
     "keywords": [],
     "author": "",
