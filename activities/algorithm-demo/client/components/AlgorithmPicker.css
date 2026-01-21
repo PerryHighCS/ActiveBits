@@ -1,0 +1,52 @@
+.algorithm-picker {
+  margin: 20px 0;
+}
+
+.algorithm-picker-label {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #333;
+}
+
+.algorithm-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.algorithm-card {
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  padding: 16px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.algorithm-card:hover {
+  border-color: #4a90e2;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.algorithm-card.selected {
+  border-color: #4a90e2;
+  background: #e8f0fe;
+  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+}
+
+.algorithm-card-title {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 6px;
+  color: #333;
+}
+
+.algorithm-card-description {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.4;
+}

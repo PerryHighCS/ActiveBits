@@ -2,6 +2,9 @@
   "name": "activebits-activities",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "test": "sh -c 'set -e; files=$(find . -path \"./node_modules\" -prune -o -name \"*.test.js\" -print); if [ -z \"$files\" ]; then echo \"No activities tests found\"; exit 0; fi; node --test --import ../scripts/jsx-loader-register.mjs $files'"
+  },
   "dependencies": {
     "activebits-server": "file:../server",
     "qrcode.react": "^4.2.0",

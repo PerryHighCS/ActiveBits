@@ -1,11 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-
-const feedbackUtilsUrl = new URL('../../../../../activities/gallery-walk/client/manager/feedbackUtils.js', import.meta.url);
-const { sortFeedbackEntries, insertFeedbackEntry } = await import(feedbackUtilsUrl.href);
-
-const managerUtilsUrl = new URL('../../../../../activities/gallery-walk/client/manager/managerUtils.js', import.meta.url);
-const { getTimestampMeta } = await import(managerUtilsUrl.href);
+import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils.js';
+import { getTimestampMeta } from './managerUtils.js';
 
 test('sortFeedbackEntries sorts by createdAt descending by default', () => {
   const entries = [

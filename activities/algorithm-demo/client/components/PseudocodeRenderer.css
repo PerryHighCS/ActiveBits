@@ -1,0 +1,79 @@
+.pseudocode-renderer {
+  font-family: 'Roboto Mono', 'Courier New', Courier, monospace;
+  font-size: 14px;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pseudocode-renderer.compact {
+  line-height: 1.3;
+}
+
+.pseudocode-renderer.compact .pseudocode-line {
+  margin: 1px 0;
+}
+
+.pseudocode-line {
+  display: block;
+  margin: 4px 0;
+}
+
+.pseudocode-span {
+  display: inline-block;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.pseudocode-span.highlighted {
+  background-color: #fffacd;
+  color: #000;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 2px #ffd700;
+}
+
+.pseudocode-span.has-overlay {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.overlay-badge {
+  position: static;
+  margin-top: 4px;
+  background: rgba(76, 175, 80, 0.15);
+  border: 1px solid rgba(76, 175, 80, 0.6);
+  color: #2e7d32;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  pointer-events: none;
+  backdrop-filter: blur(1px);
+}
+
+.overlay-inline {
+  margin-top: 4px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.overlay-value {
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(76, 175, 80, 0.12);
+  border: 1px solid rgba(76, 175, 80, 0.4);
+}
+

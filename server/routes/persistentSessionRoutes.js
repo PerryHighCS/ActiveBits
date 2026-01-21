@@ -71,6 +71,7 @@ export function registerPersistentSessionRoutes({ app, sessions }) {
             activityName,
             hash,
             teacherCode: entry.teacherCode,
+            selectedOptions: entry.selectedOptions || {},
             url: `/activity/${activityName}/${hash}`,
             fullUrl: `${protocol}://${host}/activity/${activityName}/${hash}`,
           };
@@ -85,7 +86,7 @@ export function registerPersistentSessionRoutes({ app, sessions }) {
   });
 
   app.post("/api/persistent-session/create", (req, res) => {
-    const { activityName, teacherCode } = req.body || {};
+    const { activityName, teacherCode, selectedOptions } = req.body || {};
 
     if (!activityName || !teacherCode) {
       return res.status(400).json({ error: 'Missing activityName or teacherCode' });
@@ -119,7 +120,7 @@ export function registerPersistentSessionRoutes({ app, sessions }) {
     if (existingIndex !== -1) {
       sessionEntries.splice(existingIndex, 1);
     }
-    sessionEntries.push({ key: cookieKey, teacherCode });
+    sessionEntries.push({ key: cookieKey, teacherCode, selectedOptions: selectedOptions || {} });
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE);
     }
@@ -168,10 +169,16 @@ export function registerPersistentSessionRoutes({ app, sessions }) {
     );
     const cookieKey = `${activityName}:${hash}`;
     const existingIndex = sessionEntries.findIndex(entry => entry.key === cookieKey);
+    const existingEntry = sessionEntries[existingIndex] || {};
+    
     if (existingIndex !== -1) {
       sessionEntries.splice(existingIndex, 1);
     }
-    sessionEntries.push({ key: cookieKey, teacherCode });
+    sessionEntries.push({ 
+      key: cookieKey, 
+      teacherCode, 
+      selectedOptions: existingEntry.selectedOptions || {} 
+    });
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE);
     }
@@ -194,7 +201,7 @@ export function registerPersistentSessionRoutes({ app, sessions }) {
 
   app.get("/api/persistent-session/:hash", async (req, res) => {
     const { hash } = req.params;
-    const { activityName } = req.query;
+    const { activityName, ...queryParams } = req.query;
 
     if (!activityName) {
       return res.status(400).json({ error: 'Missing activityName parameter' });
@@ -223,6 +230,7 @@ export function registerPersistentSessionRoutes({ app, sessions }) {
       cookieCorrupted,
       isStarted: !!session.sessionId,
       sessionId: session.sessionId,
+      queryParams, // Pass through all query params for activity-specific handling
     });
   });
 

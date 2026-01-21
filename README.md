@@ -10,6 +10,14 @@ It currently supports:
 
 - 🌐 **Network Scavenger Hunts** – Simulate IP-based discovery and HTTP interactions.
 
+- 🧮 **Algorithm Demonstrations** – Interactive step-by-step algorithm visualizations.
+  * Live demonstrations of sorting and search algorithms with visual execution
+  * Includes merge sort, insertion sort, selection sort, binary search
+  * Call stack visualization for recursive algorithms
+  * Dual array display for merge sort showing scratch workspace
+  * Solo mode for self-paced algorithm exploration
+  * Deep linking support: share URLs that auto-load specific algorithms
+
 - ☕ **Java String Practice** – Interactive practice for Java String methods including `substring()`, `indexOf()`, `equals()`, `length()`, and `compareTo()`.
   * Real-time teacher control of which methods students practice
   * Live student progress tracking with sortable statistics

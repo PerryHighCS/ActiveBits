@@ -135,10 +135,13 @@ export const myActivity = {
 ### How It Works
 
 1. **Display**: Activities with `soloMode: true` appear as clickable cards in the "Solo Bits" section on the join page (`/`)
+   - Cards display in a responsive 3-column grid on medium screens and larger (1 column on mobile)
+   - Each card shows the activity name, description, and clickable area to launch the activity
 2. **Session ID Format**: Solo sessions use the format `solo-{activity-id}` (e.g., `solo-java-string-practice`)
 3. **No Teacher Required**: Students can start practicing immediately without a teacher-managed session
 4. **Client-Side State**: Solo activities typically use `localStorage` for progress persistence
 5. **Custom Labels**: Optional `soloModeMeta` lets each activity override the Solo Bits card title/description and the dashboard "Copy Solo…" button text
+6. **Deep Linking Support**: Solo mode supports query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort` auto-selects the merge sort algorithm
 
 ### Solo Mode vs. Teacher Mode
 
@@ -171,6 +174,10 @@ Permanent sessions use HMAC-SHA256 authentication:
 - **Hash Format**: 20 characters of `salt(8 hex) + hmac(12 hex)` derived from `activityName|hashedTeacherCode|salt`
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
 - **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
+- **Query Parameters**: Activities can use URL query params for deep linking (e.g., `/activity/algorithm-demo/abc123?algorithm=merge-sort`)
+  - Server passes all query params to activities via `queryParams` object
+  - Each activity decides which parameters to handle
+  - Examples: `algorithm` (algorithm-demo), `preset` (gallery-walk), `challenge` (java-practice)
 - **Auto-reset**: Session data resets each time teacher visits
 - **Security**: 
   - httpOnly cookies prevent XSS attacks
@@ -207,6 +214,51 @@ Each activity defines its own endpoints under `/api/{activity-id}/...`
 4. Teacher accesses `/activity/{activityName}/{hash}` → checks cookie → authenticates via WebSocket
 5. Server validates HMAC and teacher code, creates/resets session
 6. Teacher auto-authenticated and redirected to manager view
+
+### Deep Linking with Query Parameters
+Activities can use URL query parameters for direct deep linking to specific content or configurations. This allows instructors to create presentation-ready links that automatically configure the activity.
+
+**How it works:**
+1. URL format: `/activity/{activityName}/{hash}?param1=value1&param2=value2`
+2. Server extracts all query params (except reserved routing params) and returns them as `queryParams` object
+3. Client components receive `queryParams` via props:
+   - Managers: Read from `useSearchParams()` hook
+   - Students: Receive via `persistentSessionInfo.queryParams` prop
+4. Each activity decides which parameters to handle
+
+**Example implementations:**
+- **algorithm-demo**: `?algorithm=merge-sort` - Auto-selects merge sort on session start
+- **gallery-walk**: `?preset=brainstorm` - Loads predefined brainstorming template
+- **java-practice**: `?challenge=intermediate` - Starts with intermediate difficulty
+
+**Implementation pattern (Manager):**
+```javascript
+import { useSearchParams } from 'react-router-dom';
+
+export default function MyActivityManager() {
+  const [searchParams] = useSearchParams();
+  const presetParam = searchParams.get('preset');
+  
+  useEffect(() => {
+    if (presetParam && !hasLoaded) {
+      loadPreset(presetParam);
+    }
+  }, [presetParam, hasLoaded]);
+}
+```
+
+**Implementation pattern (Student):**
+```javascript
+export default function MyActivityStudent({ sessionData, persistentSessionInfo }) {
+  const presetParam = persistentSessionInfo?.queryParams?.preset;
+  
+  useEffect(() => {
+    if (presetParam) {
+      console.log(`Activity configured with preset: ${presetParam}`);
+    }
+  }, [presetParam]);
+}
+```
 
 ## Status & Metrics
 
