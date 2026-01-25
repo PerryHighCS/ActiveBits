@@ -4,15 +4,17 @@ import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
 import { useTspSession } from '../hooks/useTspSession.js';
 import { useRouteBuilder } from '../hooks/useRouteBuilder.js';
+import { useBroadcastToggles } from '../hooks/useBroadcastToggles.js';
 import CityMap from '../components/CityMap.jsx';
 import Leaderboard from '../components/Leaderboard.jsx';
 import RouteLegend from '../components/RouteLegend.jsx';
 import { buildLegendItems, dedupeLegendItems } from '../utils/routeLegend.js';
+import { buildManagerLeaderboardEntries } from '../utils/leaderboardBuilders.js';
 import { generateCities } from '../utils/cityGenerator.js';
 import { buildDistanceMatrix } from '../utils/distanceCalculator.js';
 import { formatDistance } from '../utils/formatters.js';
-import { solveTSPBruteForce } from '../utils/bruteForce.js';
-import { solveTSPNearestNeighbor } from '../utils/nearestNeighbor.js';
+import { runBruteForce, runHeuristic } from '../utils/algorithmRunner.js';
+import { buildMapRenderProps } from '../utils/mapRenderConfig.js';
 import './TSPManager.css';
 
 /**
@@ -29,14 +31,11 @@ export default function TSPManager() {
   const [bruteForceProgress, setBruteForceProgress] = useState(null);
   const [bruteForceStatus, setBruteForceStatus] = useState('idle');
   const [hoveredCityId, setHoveredCityId] = useState(null);
-  const [broadcastIds, setBroadcastIds] = useState([]);
-  const [broadcastSnapshot, setBroadcastSnapshot] = useState([]);
   const cancelBruteForceRef = useRef(false);
   const progressSentRef = useRef(0);
   const progressLocalRef = useRef(0);
   const mapTokenRef = useRef(0);
   const mapSeedRef = useRef(null);
-  const pendingBroadcastRef = useRef(null);
 
   const handleSessionUpdate = useCallback((data) => {
     if (data?.problem?.seed && data.problem.seed !== mapSeedRef.current) {
@@ -52,17 +51,13 @@ export default function TSPManager() {
     return `${protocol}//${host}/ws/traveling-salesman?sessionId=${sessionId}`;
   }, [sessionId]);
 
-  const handleWsMessage = useCallback((message) => {
-    if (message.type === 'broadcastUpdate') {
-      setBroadcastSnapshot(message.payload?.routes || []);
-    }
-    if (message.type === 'clearBroadcast') {
-      setBroadcastSnapshot([]);
-    }
-    if (message.type === 'problemUpdate') {
-      setBroadcastSnapshot([]);
-    }
-  }, []);
+  const {
+    broadcastIds,
+    broadcastSnapshot,
+    setBroadcasts,
+    initializeBroadcasts,
+    handleBroadcastMessage
+  } = useBroadcastToggles({ sessionId });
 
   const {
     session,
@@ -83,9 +78,14 @@ export default function TSPManager() {
       'clearBroadcast',
       'algorithmsComputed'
     ],
-    onMessage: handleWsMessage,
+    onMessage: handleBroadcastMessage,
     onSession: handleSessionUpdate
   });
+
+  useEffect(() => {
+    if (!session?.broadcasts) return;
+    initializeBroadcasts(session.broadcasts);
+  }, [session?.broadcasts, initializeBroadcasts]);
 
   useEffect(() => {
     if (!sessionId) return undefined;
@@ -131,27 +131,6 @@ export default function TSPManager() {
       setNumCities(session.problem.numCities);
     }
   }, [session?.problem?.numCities]);
-
-  useEffect(() => {
-    if (session?.broadcasts) {
-      const next = session.broadcasts;
-      const pending = pendingBroadcastRef.current;
-      if (pending) {
-        const isSame = pending.next.length === next.length
-          && pending.next.every((id, idx) => id === next[idx]);
-        if (isSame) {
-          pendingBroadcastRef.current = null;
-          setBroadcastIds(next);
-          return;
-        }
-        if (Date.now() - pending.at < 1000) {
-          return;
-        }
-        pendingBroadcastRef.current = null;
-      }
-      setBroadcastIds(next);
-    }
-  }, [session?.broadcasts]);
 
   useEffect(() => {
     if (!highlightedSolution?.id) return;
@@ -226,7 +205,7 @@ export default function TSPManager() {
       setBruteForceProgress(null);
       setBruteForceStatus('idle');
       resetRoute();
-      setBroadcastIds([]);
+      await setBroadcasts([]);
       setHighlightedSolution(null);
 
       // Refresh session
@@ -245,10 +224,7 @@ export default function TSPManager() {
       const startIndex = instructorRoute.length > 0
         ? parseInt(instructorRoute[0].split('-')[1], 10)
         : 0;
-      const heuristicStart = performance.now();
-      const heuristicResult = solveTSPNearestNeighbor(cities, distanceMatrix, { startIndex });
-      const heuristicEnd = performance.now();
-      const heuristicTime = Number(((heuristicEnd - heuristicStart) / 1000).toFixed(3));
+      const heuristicResult = runHeuristic({ cities, distanceMatrix, startIndex });
 
       if (mapTokenRef.current !== mapTokenAtStart) {
         return;
@@ -260,7 +236,7 @@ export default function TSPManager() {
         body: JSON.stringify({
           heuristic: {
             ...heuristicResult,
-            computeTime: heuristicTime
+            computeTime: heuristicResult.computeTime
           }
         })
       });
@@ -281,8 +257,13 @@ export default function TSPManager() {
     const mapTokenAtStart = mapTokenRef.current;
     try {
       const { cities, distanceMatrix } = session.problem;
-      const bruteForceStart = performance.now();
-      const bruteForceResult = await solveTSPBruteForce(cities, distanceMatrix, {
+      const startIndex = instructorRoute.length > 0
+        ? parseInt(instructorRoute[0].split('-')[1], 10)
+        : 0;
+      const bruteForceResult = await runBruteForce({
+        cities,
+        distanceMatrix,
+        startIndex,
         onProgress: async (checked, total) => {
           const now = performance.now();
           if (now - progressLocalRef.current > 150) {
@@ -307,10 +288,7 @@ export default function TSPManager() {
         },
         shouldCancel: () => cancelBruteForceRef.current || mapTokenRef.current !== mapTokenAtStart
       });
-      const bruteForceEnd = performance.now();
-      const bruteForceTime = bruteForceResult.cancelled
-        ? null
-        : Number(((bruteForceEnd - bruteForceStart) / 1000).toFixed(3));
+      const bruteForceTime = bruteForceResult.computeTime;
 
       if (mapTokenRef.current !== mapTokenAtStart) {
         setBruteForceStatus('cancelled');
@@ -563,13 +541,7 @@ export default function TSPManager() {
         ? broadcastIds.filter(id => id !== broadcastId)
         : [...broadcastIds, broadcastId];
 
-      setBroadcastIds(next);
-      pendingBroadcastRef.current = { next, at: Date.now() };
-      await fetch(`/api/traveling-salesman/${sessionId}/set-broadcasts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ broadcasts: next })
-      });
+      await setBroadcasts(next);
 
       if (!isOn && entry.type === 'heuristic' && !session?.algorithms?.heuristic?.computed) {
         await computeHeuristic();
@@ -596,12 +568,7 @@ export default function TSPManager() {
     }
     if (broadcastIds.includes('instructor')) {
       const next = broadcastIds.filter(id => id !== 'instructor');
-      setBroadcastIds(next);
-      fetch(`/api/traveling-salesman/${sessionId}/set-broadcasts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ broadcasts: next })
-      }).catch(err => console.error('Failed to update broadcasts:', err));
+      setBroadcasts(next).catch(err => console.error('Failed to update broadcasts:', err));
     }
     fetch(`/api/traveling-salesman/${sessionId}/reset-instructor-route`, {
       method: 'POST',
@@ -694,80 +661,26 @@ export default function TSPManager() {
   };
 
   const displayLeaderboard = useMemo(() => {
-    const entries = [...leaderboard];
-    if (instructorRoute.length > 0) {
-      const existingIndex = entries.findIndex(entry => entry.id === 'instructor');
-      const entry = {
-        id: 'instructor-local',
-        name: 'Instructor',
-        distance: instructorRoute.length > 0 ? instructorDistance : null,
-        timeToComplete: instructorComplete
-          ? instructorTimeToComplete
-          : null,
-        progressCurrent: instructorRoute.length,
-        progressTotal: session?.problem?.cities?.length ?? null,
-        type: 'instructor',
-        complete: instructorComplete
-      };
-      if (existingIndex >= 0) {
-        entries[existingIndex] = { ...entries[existingIndex], ...entry };
-      } else {
-        entries.push(entry);
-      }
-    }
-    if (!entries.find(entry => entry.id === 'bruteforce')) {
-      entries.push({
-        id: 'bruteforce',
-        name: 'Brute Force (Optimal)',
-        distance: null,
-        timeToComplete: null,
-        progressCurrent: null,
-        progressTotal: null,
-        type: 'bruteforce',
-        complete: false
-      });
-    }
-    if (!entries.find(entry => entry.id === 'heuristic')) {
-      entries.push({
-        id: 'heuristic',
-        name: 'Nearest Neighbor',
-        distance: null,
-        timeToComplete: null,
-        progressCurrent: null,
-        progressTotal: null,
-        type: 'heuristic',
-        complete: false
-      });
-    }
-    if (bruteForceStatus === 'running' || bruteForceStatus === 'cancelled') {
-      const existingIndex = entries.findIndex(entry => entry.id === 'bruteforce');
-      const entry = {
-        id: 'bruteforce',
-        name: 'Brute Force (Optimal)',
-        distance: null,
-        timeToComplete: null,
-        progressCurrent: bruteForceProgress?.checked ?? null,
-        progressTotal: bruteForceProgress?.total ?? null,
-        type: 'bruteforce',
-        complete: false
-      };
-      if (existingIndex >= 0) {
-        entries[existingIndex] = { ...entries[existingIndex], ...entry };
-      } else {
-        entries.push(entry);
-      }
-    }
-    entries.sort((a, b) => {
-      const aComplete = a.complete === true;
-      const bComplete = b.complete === true;
-      if (aComplete && !bComplete) return -1;
-      if (!aComplete && bComplete) return 1;
-      const aDistance = a.distance ?? Infinity;
-      const bDistance = b.distance ?? Infinity;
-      return aDistance - bDistance;
+    return buildManagerLeaderboardEntries({
+      leaderboard,
+      instructorRoute,
+      instructorDistance,
+      instructorComplete,
+      instructorTimeToComplete,
+      bruteForceStatus,
+      bruteForceProgress,
+      cityCount: session?.problem?.cities?.length ?? null
     });
-    return entries;
-  }, [leaderboard, bruteForceStatus, bruteForceProgress, instructorRoute.length, instructorDistance, instructorComplete, session?.problem?.cities?.length]);
+  }, [
+    leaderboard,
+    instructorRoute,
+    instructorDistance,
+    instructorComplete,
+    instructorTimeToComplete,
+    bruteForceStatus,
+    bruteForceProgress,
+    session?.problem?.cities?.length
+  ]);
 
   const legendItems = useMemo(() => {
     const primary = instructorRoute.length > 0
@@ -842,6 +755,13 @@ export default function TSPManager() {
     return broadcastIds.map(id => (id === 'instructor' ? 'instructor-local' : id));
   }, [broadcastIds]);
 
+  const mapRenderProps = buildMapRenderProps({
+    activeRoute: instructorRoute,
+    hoverRoute: instructorRoute,
+    hoveredCityId,
+    terrainSeed: session?.problem?.seed
+  });
+
   return (
     <div className="tsp-manager">
       <SessionHeader
@@ -901,10 +821,7 @@ export default function TSPManager() {
                   onCityHover={(city) => setHoveredCityId(city.id)}
                   onCityLeave={() => setHoveredCityId(null)}
                   distanceMatrix={session.problem.distanceMatrix}
-                  activeRoute={instructorRoute}
-                  hoverRoute={instructorRoute}
-                  hoveredCityId={hoveredCityId}
-                  terrainSeed={session.problem.seed}
+                  {...mapRenderProps}
                 />
               ) : (
                 <div className="no-map">

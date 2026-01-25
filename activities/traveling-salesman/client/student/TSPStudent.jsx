@@ -8,12 +8,13 @@ import CityMap from '../components/CityMap.jsx';
 import Leaderboard from '../components/Leaderboard.jsx';
 import RouteLegend from '../components/RouteLegend.jsx';
 import { buildLegendItems } from '../utils/routeLegend.js';
+import { buildSoloLeaderboardEntries } from '../utils/leaderboardBuilders.js';
 import { buildDistanceMatrix, getRouteDistance } from '../utils/distanceCalculator.js';
 import { formatDistance } from '../utils/formatters.js';
 import { generateCities } from '../utils/cityGenerator.js';
 import { factorial } from '../utils/mathHelpers.js';
-import { solveTSPBruteForce } from '../utils/bruteForce.js';
-import { solveTSPNearestNeighbor } from '../utils/nearestNeighbor.js';
+import { runBruteForce, runHeuristic } from '../utils/algorithmRunner.js';
+import { buildMapRenderProps } from '../utils/mapRenderConfig.js';
 import './TSPStudent.css';
 
 /**
@@ -43,6 +44,7 @@ export default function TSPStudent({ sessionData }) {
   const [soloActiveViewId, setSoloActiveViewId] = useState(null);
   const [soloBruteForceStarted, setSoloBruteForceStarted] = useState(false);
   const [soloStartCityId, setSoloStartCityId] = useState(null);
+  const soloCancelRef = useRef(false);
   const [soloProgress, setSoloProgress] = useState({
     bruteForce: { current: 0, total: 0, running: false },
     heuristic: { current: 0, total: 0, running: false }
@@ -259,6 +261,7 @@ export default function TSPStudent({ sessionData }) {
     setSoloAlgorithms({ bruteForce: null, heuristic: null });
     setSoloComputing(false);
     setSoloBruteForceStarted(false);
+    soloCancelRef.current = true;
     setSoloProgress({
       bruteForce: { current: 0, total: factorial(numCities - 1), running: false },
       heuristic: { current: 0, total: numCities, running: false }
@@ -269,14 +272,14 @@ export default function TSPStudent({ sessionData }) {
 
   const computeSoloAlgorithms = async (startCityOverride = null, options = {}) => {
     if (!cities.length || !distanceMatrix.length) return;
-    const { runHeuristic = true, runBruteForce = true } = options;
+    const { runHeuristic: shouldRunHeuristic = true, runBruteForce: shouldRunBruteForceOption = true } = options;
     const startId = startCityOverride || soloStartCityId;
     const startIndex = startId ? parseInt(startId.split('-')[1], 10) : 0;
-    const shouldRunBruteForce = runBruteForce && !soloBruteForceStarted;
+    const shouldRunBruteForce = shouldRunBruteForceOption && !soloBruteForceStarted;
 
-    if (!runHeuristic && !shouldRunBruteForce) return;
+    if (!shouldRunHeuristic && !shouldRunBruteForce) return;
 
-    if (runHeuristic) {
+    if (shouldRunHeuristic) {
       setSoloProgress(prev => ({
         ...prev,
         heuristic: { current: 0, total: cities.length, running: true }
@@ -286,6 +289,7 @@ export default function TSPStudent({ sessionData }) {
     if (shouldRunBruteForce) {
       setSoloBruteForceStarted(true);
       setSoloComputing(true);
+      soloCancelRef.current = false;
       setSoloProgress(prev => ({
         ...prev,
         bruteForce: { current: 0, total: factorial(cities.length - 1), running: true }
@@ -293,11 +297,8 @@ export default function TSPStudent({ sessionData }) {
     }
 
     try {
-      if (runHeuristic) {
-        const heuristicStart = performance.now();
-        const heuristicResult = solveTSPNearestNeighbor(cities, distanceMatrix, { startIndex });
-        const heuristicEnd = performance.now();
-        const heuristicTime = ((heuristicEnd - heuristicStart) / 1000).toFixed(3);
+      if (shouldRunHeuristic) {
+        const heuristicResult = runHeuristic({ cities, distanceMatrix, startIndex });
         setSoloProgress(prev => ({
           ...prev,
           heuristic: { current: prev.heuristic.total || cities.length, total: prev.heuristic.total || cities.length, running: false }
@@ -306,27 +307,26 @@ export default function TSPStudent({ sessionData }) {
           ...prev,
           heuristic: {
             ...heuristicResult,
-            computeTime: heuristicTime,
+            computeTime: heuristicResult.computeTime,
             name: 'Nearest Neighbor'
           }
         }));
       }
 
       if (shouldRunBruteForce) {
-        const bruteForceStart = performance.now();
-        const bruteForceResult = await solveTSPBruteForce(cities, distanceMatrix, {
+        const bruteForceResult = await runBruteForce({
+          cities,
+          distanceMatrix,
           startIndex,
           onProgress: (checked, total) => {
             setSoloProgress(prev => ({
               ...prev,
               bruteForce: { current: checked, total, running: true }
             }));
-          }
+          },
+          shouldCancel: () => soloCancelRef.current
         });
-        const bruteForceEnd = performance.now();
-        const bruteForceTime = bruteForceResult.cancelled
-          ? null
-          : ((bruteForceEnd - bruteForceStart) / 1000).toFixed(3);
+        const bruteForceTime = bruteForceResult.computeTime;
         setSoloProgress(prev => ({
           ...prev,
           bruteForce: {
@@ -427,54 +427,29 @@ export default function TSPStudent({ sessionData }) {
     }))
   });
 
-  const showSoloAlgorithms = isSoloSession && cities.length > 0
-    && (currentRoute.length > 0
-      || soloBruteForceStarted
-      || soloComputing
-      || soloProgress.bruteForce.running
-      || soloProgress.heuristic.running
-      || soloAlgorithms.bruteForce
-      || soloAlgorithms.heuristic);
-  const soloLeaderboardEntries = isSoloSession ? [
-    ...(currentRoute.length > 0 ? [{
-      id: 'solo-student',
-      name: 'My Route',
-      distance: isComplete ? routeDistance : currentDistance,
-      timeToComplete: isComplete ? timeToComplete : null,
-      type: 'student'
-    }] : []),
-    ...(showSoloAlgorithms ? [{
-      id: 'bruteforce',
-      name: 'Brute Force (Optimal)',
-      distance: soloAlgorithms.bruteForce?.distance ?? null,
-      timeToComplete: soloAlgorithms.bruteForce?.computeTime ?? null,
-      progressCurrent: soloProgress.bruteForce.running ? soloProgress.bruteForce.current : null,
-      progressTotal: soloProgress.bruteForce.running ? soloProgress.bruteForce.total : null,
-      type: 'bruteforce'
-    }, {
-      id: 'heuristic',
-      name: 'Nearest Neighbor',
-      distance: soloAlgorithms.heuristic?.distance ?? null,
-      timeToComplete: soloAlgorithms.heuristic?.computeTime ?? null,
-      progressCurrent: soloProgress.heuristic.running ? soloProgress.heuristic.current : null,
-      progressTotal: soloProgress.heuristic.running ? soloProgress.heuristic.total : null,
-      type: 'heuristic'
-    }] : [])
-  ] : [];
-  const sortedSoloLeaderboardEntries = isSoloSession
-    ? [...soloLeaderboardEntries].sort((a, b) => {
-      const isInProgress = (entry) => {
-        if (entry.type === 'student') return !isComplete;
-        return entry.progressCurrent !== null && entry.progressCurrent !== undefined;
-      };
-      const aInProgress = isInProgress(a);
-      const bInProgress = isInProgress(b);
-      if (aInProgress !== bInProgress) return aInProgress ? 1 : -1;
-      const aDistance = a.distance ?? Infinity;
-      const bDistance = b.distance ?? Infinity;
-      return aDistance - bDistance;
-    })
-    : [];
+  const {
+    entries: soloLeaderboardEntries,
+    sortedEntries: sortedSoloLeaderboardEntries
+  } = buildSoloLeaderboardEntries({
+    isSoloSession,
+    currentRoute,
+    isComplete,
+    routeDistance,
+    currentDistance,
+    timeToComplete,
+    soloAlgorithms,
+    soloProgress,
+    soloBruteForceStarted,
+    soloComputing,
+    citiesLength: cities.length
+  });
+
+  const mapRenderProps = buildMapRenderProps({
+    activeRoute: currentRoute,
+    hoverRoute: currentRoute,
+    hoveredCityId,
+    terrainSeed
+  });
 
   return (
     <div className="tsp-student">
@@ -543,10 +518,7 @@ export default function TSPStudent({ sessionData }) {
               onCityHover={(city) => setHoveredCityId(city.id)}
               onCityLeave={() => setHoveredCityId(null)}
               distanceMatrix={distanceMatrix}
-              activeRoute={currentRoute}
-              hoverRoute={currentRoute}
-              hoveredCityId={hoveredCityId}
-              terrainSeed={terrainSeed}
+              {...mapRenderProps}
             />
           )}
           {legendItems.length > 0 && (
