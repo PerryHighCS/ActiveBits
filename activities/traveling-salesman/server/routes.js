@@ -154,6 +154,18 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     }
   };
 
+  const updateStudentStatus = async (sessionOrId, updater) => {
+    const session = typeof sessionOrId === 'string'
+      ? await sessions.get(sessionOrId)
+      : sessionOrId;
+    if (!session || session.type !== 'traveling-salesman') return null;
+    const updated = await updater(session);
+    if (!updated) return session;
+    await sessions.set(session.id, session);
+    await broadcast('studentsUpdate', { students: session.data.students }, session.id);
+    return session;
+  };
+
   // WebSocket namespace
   ws.register('/ws/traveling-salesman', (socket, qp) => {
     socket.sessionId = qp.get('sessionId') || null;
@@ -239,14 +251,13 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     const handleDisconnect = async () => {
       if (!socket.sessionId || !socket.studentId) return;
       try {
-        const session = await sessions.get(socket.sessionId);
-        if (!session || session.type !== 'traveling-salesman') return;
-        const student = session.data.students.find(s => s.id === socket.studentId);
-        if (!student) return;
-        student.connected = false;
-        student.lastSeen = Date.now();
-        await sessions.set(session.id, session);
-        await broadcast('studentsUpdate', { students: session.data.students }, session.id);
+        await updateStudentStatus(socket.sessionId, (session) => {
+          const student = session.data.students.find(s => s.id === socket.studentId);
+          if (!student) return false;
+          student.connected = false;
+          student.lastSeen = Date.now();
+          return true;
+        });
       } catch (err) {
         console.error('Failed to handle traveling salesman disconnect', err);
       }
@@ -366,8 +377,7 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
       student.timeToComplete = null;
     }
 
-    await sessions.set(session.id, session);
-    await broadcast('studentsUpdate', { students: session.data.students }, session.id);
+    await updateStudentStatus(session, () => true);
 
     res.json({ success: true });
   });
