@@ -43,8 +43,8 @@ export function calculateRouteDistance(route, distanceMatrix) {
 
   let total = 0;
   for (let i = 0; i < route.length; i++) {
-    const from = parseInt(route[i].split('-')[1]);
-    const to = parseInt(route[(i + 1) % route.length].split('-')[1]);
+    const from = parseInt(route[i].split('-')[1], 10);
+    const to = parseInt(route[(i + 1) % route.length].split('-')[1], 10);
     total += distanceMatrix[from][to] || 0;
   }
 

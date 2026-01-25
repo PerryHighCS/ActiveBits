@@ -11,7 +11,7 @@ const CITY_NAMES = [
 
 /**
  * Seeded pseudorandom number generator
- * Uses Linear Congruential Generator algorithm
+ * Uses Mulberry32 algorithm
  * @param {number} seed - Initial seed value
  * @returns {function} Function that returns random numbers between 0 and 1
  */
@@ -44,13 +44,16 @@ function shuffleArray(array, random) {
 
 /**
  * Generate cities with fantasy names at random positions
- * @param {number} count - Number of cities to generate (4-10)
+ * @param {number} count - Number of cities to generate (4-12)
  * @param {number} width - Canvas width
  * @param {number} height - Canvas height
  * @param {number} seed - Seed for random generation (ensures consistency)
  * @returns {Array} Array of city objects with id, x, y, name
  */
 export function generateCities(count, width = 700, height = 500, seed = Date.now()) {
+  if (count > CITY_NAMES.length) {
+    throw new Error(`Cannot generate ${count} cities: only ${CITY_NAMES.length} names available.`);
+  }
   // Use seeded random for consistency across clients
   const random = seededRandom(seed);
 

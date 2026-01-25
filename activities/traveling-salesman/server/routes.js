@@ -238,6 +238,25 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
         }
       });
     }
+
+    const handleDisconnect = async () => {
+      if (!socket.sessionId || !socket.studentId) return;
+      try {
+        const session = await sessions.get(socket.sessionId);
+        if (!session || session.type !== 'traveling-salesman') return;
+        const student = session.data.students.find(s => s.id === socket.studentId);
+        if (!student) return;
+        student.connected = false;
+        student.lastSeen = Date.now();
+        await sessions.set(session.id, session);
+        await broadcast('studentsUpdate', { students: session.data.students }, session.id);
+      } catch (err) {
+        console.error('Failed to handle traveling salesman disconnect', err);
+      }
+    };
+
+    socket.on('close', handleDisconnect);
+    socket.on('error', handleDisconnect);
   });
 
   // Create session
@@ -247,10 +266,6 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     session.data.problem = {};
     session.data.students = [];
     session.data.algorithms = { bruteForce: {}, heuristic: {} };
-    if (session.data.instructor) {
-      session.data.instructor.routeStartTime = null;
-      session.data.instructor.timeToComplete = null;
-    }
     session.data.instructor = null;
     session.data.broadcasts = [];
     session.data.sharedState = { phase: 'setup' };

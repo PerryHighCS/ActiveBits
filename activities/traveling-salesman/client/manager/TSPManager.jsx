@@ -574,9 +574,9 @@ export default function TSPManager() {
         const totalDistance = instructorRoute.length === session.problem.cities.length
           ? calculateTotalDistance(instructorRoute, session.problem.distanceMatrix)
           : instructorDistance;
-          const timeToComplete = instructorComplete
-            ? instructorTimeToComplete
-            : null;
+        const timeToComplete = instructorComplete
+          ? instructorTimeToComplete
+          : null;
         await broadcastInstructorRoute(instructorRoute, totalDistance, timeToComplete);
       }
 
@@ -771,7 +771,7 @@ export default function TSPManager() {
       return aDistance - bDistance;
     });
     return entries;
-  }, [leaderboard, bruteForceStatus, bruteForceProgress, instructorRoute.length, instructorDistance, instructorComplete, instructorStartTime, session?.problem?.cities?.length]);
+  }, [leaderboard, bruteForceStatus, bruteForceProgress, instructorRoute.length, instructorDistance, instructorComplete, session?.problem?.cities?.length]);
 
   const legendItems = useMemo(() => {
     const items = [];
@@ -780,7 +780,7 @@ export default function TSPManager() {
         id: 'instructor-local',
         type: 'instructor',
         label: 'Instructor Route',
-        distance: instructorComplete ? instructorDistance : instructorDistance
+        distance: instructorDistance
       });
     }
     if (highlightedSolution) {

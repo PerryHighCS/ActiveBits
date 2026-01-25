@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { generateTerrainPattern } from '../utils/terrainGenerator.js';
 import './CityMap.css';
 
@@ -31,6 +31,22 @@ export default function CityMap({
 }) {
   const width = 700;
   const height = 500;
+  const [focusedCityId, setFocusedCityId] = useState(null);
+  const cityRefs = useMemo(() => new Map(), []);
+
+  useEffect(() => {
+    if (!focusedCityId && cities.length > 0) {
+      setFocusedCityId(cities[0].id);
+    }
+  }, [cities, focusedCityId]);
+
+  const focusCityById = (cityId) => {
+    const node = cityRefs.get(cityId);
+    if (node && typeof node.focus === 'function') {
+      node.focus();
+      setFocusedCityId(cityId);
+    }
+  };
 
   // Generate terrain elements using seeded random
   const terrainElements = useMemo(() => {
@@ -391,14 +407,82 @@ export default function CityMap({
       })()}
 
       {/* Cities as circles with labels */}
-      {cities.map((city) => (
+      {cities.map((city) => {
+        const activeId = activeRoute?.[activeRoute.length - 1] || null;
+        const distanceToActive = activeId ? getDistance(activeId, city.id) : null;
+        const ariaLabel = distanceToActive !== null
+          ? `City ${city.name}. Distance from current city: ${distanceToActive.toFixed(1)}.`
+          : `City ${city.name}.`;
+        return (
         <g
           key={city.id}
           onClick={() => onCityClick?.(city)}
           onMouseEnter={() => onCityHover?.(city)}
           onMouseLeave={() => onCityLeave?.(city)}
+          onFocus={() => {
+            onCityHover?.(city);
+            setFocusedCityId(city.id);
+          }}
+          onBlur={() => onCityLeave?.(city)}
+          onKeyDown={(event) => {
+            if (!onCityClick) return;
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onCityClick(city);
+            }
+            if (event.key === 'Tab') {
+              event.preventDefault();
+              const currentIndex = cities.findIndex(c => c.id === city.id);
+              const delta = event.shiftKey ? -1 : 1;
+              const nextIndex = (currentIndex + delta + cities.length) % cities.length;
+              const nextCity = cities[nextIndex];
+              if (nextCity) focusCityById(nextCity.id);
+            }
+            const current = findCity(city.id);
+            if (!current) return;
+            const findDirectional = (dir) => {
+              const candidates = cities.filter((c) => c.id !== city.id);
+              let best = null;
+              let bestScore = Infinity;
+              for (const candidate of candidates) {
+                const dx = candidate.x - current.x;
+                const dy = candidate.y - current.y;
+                if (dir === 'ArrowLeft' && dx >= 0) continue;
+                if (dir === 'ArrowRight' && dx <= 0) continue;
+                if (dir === 'ArrowUp' && dy >= 0) continue;
+                if (dir === 'ArrowDown' && dy <= 0) continue;
+                const primary = dir === 'ArrowLeft' || dir === 'ArrowRight'
+                  ? Math.abs(dx)
+                  : Math.abs(dy);
+                const secondary = dir === 'ArrowLeft' || dir === 'ArrowRight'
+                  ? Math.abs(dy)
+                  : Math.abs(dx);
+                const score = primary * 3 + secondary;
+                if (score < bestScore) {
+                  bestScore = score;
+                  best = candidate;
+                }
+              }
+              return best;
+            };
+            if (event.key.startsWith('Arrow')) {
+              event.preventDefault();
+              const next = findDirectional(event.key);
+              if (next) focusCityById(next.id);
+            }
+          }}
+          tabIndex={focusedCityId === city.id ? 0 : -1}
+          role="button"
+          aria-label={ariaLabel}
           style={{ cursor: onCityClick ? 'pointer' : 'default' }}
           className="city-group"
+          ref={(node) => {
+            if (node) {
+              cityRefs.set(city.id, node);
+            } else {
+              cityRefs.delete(city.id);
+            }
+          }}
         >
           {/* City marker (pin style) */}
           <circle
@@ -441,7 +525,7 @@ export default function CityMap({
             {city.name}
           </text>
         </g>
-      ))}
+      )})}
     </svg>
   );
 }
