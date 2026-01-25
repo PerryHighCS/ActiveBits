@@ -1,6 +1,6 @@
-import { createSession } from '../../../server/core/sessions.js';
-import { createBroadcastSubscriptionHelper } from '../../../server/core/broadcastUtils.js';
-import { registerSessionNormalizer } from '../../../server/core/sessionNormalization.js';
+import { createSession } from 'activebits-server/core/sessions.js';
+import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js';
+import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js';
 
 // Register session normalizer to ensure data integrity
 registerSessionNormalizer('traveling-salesman', (session) => {
@@ -65,6 +65,24 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
         }
       }
     }
+  };
+
+  const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+  const isRouteArray = (route) => Array.isArray(route) && route.every(id => typeof id === 'string');
+  const isCitiesArray = (cities) => Array.isArray(cities) && cities.every(city => (
+    city
+    && typeof city.id === 'string'
+    && typeof city.name === 'string'
+    && isFiniteNumber(city.x)
+    && isFiniteNumber(city.y)
+  ));
+  const isDistanceMatrix = (matrix, size) => {
+    if (!Array.isArray(matrix) || (typeof size === 'number' && matrix.length !== size)) return false;
+    return matrix.every(row =>
+      Array.isArray(row)
+      && (typeof size !== 'number' || row.length === size)
+      && row.every(value => isFiniteNumber(value))
+    );
   };
 
   const buildBroadcastPayload = (session) => {
@@ -204,7 +222,9 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
 
           await broadcast('studentsUpdate', { students: session.data.students }, session.id);
         }
-      })();
+      })().catch((err) => {
+        console.error('Failed to initialize traveling salesman session', err);
+      });
     }
   });
 
@@ -239,6 +259,15 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     }
 
     const { cities, distanceMatrix, seed } = req.body;
+    if (!isCitiesArray(cities)) {
+      return res.status(400).json({ error: 'Invalid cities payload' });
+    }
+    if (!isDistanceMatrix(distanceMatrix, cities.length)) {
+      return res.status(400).json({ error: 'Invalid distance matrix' });
+    }
+    if (!isFiniteNumber(seed)) {
+      return res.status(400).json({ error: 'Invalid seed' });
+    }
     session.data.problem = {
       numCities: cities.length,
       cities,
@@ -280,6 +309,18 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     }
 
     const { studentId, route, distance, timeToComplete } = req.body;
+    if (typeof studentId !== 'string' || !studentId.trim()) {
+      return res.status(400).json({ error: 'Invalid studentId' });
+    }
+    if (!isRouteArray(route)) {
+      return res.status(400).json({ error: 'Invalid route' });
+    }
+    if (!isFiniteNumber(distance)) {
+      return res.status(400).json({ error: 'Invalid distance' });
+    }
+    if (timeToComplete !== null && timeToComplete !== undefined && !Number.isFinite(timeToComplete)) {
+      return res.status(400).json({ error: 'Invalid timeToComplete' });
+    }
     const student = session.data.students.find(s => s.id === studentId);
 
     if (student) {
@@ -296,6 +337,7 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
       }
 
       await sessions.set(session.id, session);
+      await broadcast('studentsUpdate', { students: session.data.students }, session.id);
     }
 
     res.json({ success: true });
@@ -309,8 +351,14 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     }
 
     const { route, distance, complete } = req.body;
-    if (!Array.isArray(route)) {
+    if (!isRouteArray(route)) {
       return res.status(400).json({ error: 'Route required' });
+    }
+    if (distance !== undefined && distance !== null && !isFiniteNumber(distance)) {
+      return res.status(400).json({ error: 'Invalid distance' });
+    }
+    if (complete !== undefined && complete !== null && typeof complete !== 'boolean') {
+      return res.status(400).json({ error: 'Invalid complete flag' });
     }
 
     if (route.length === 0) {
@@ -380,6 +428,37 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     }
 
     const { bruteForce, heuristic } = req.body;
+    if (bruteForce) {
+      if (bruteForce.route && !isRouteArray(bruteForce.route)) {
+        return res.status(400).json({ error: 'Invalid bruteForce route' });
+      }
+      if (bruteForce.distance !== undefined && bruteForce.distance !== null && !isFiniteNumber(bruteForce.distance)) {
+        return res.status(400).json({ error: 'Invalid bruteForce distance' });
+      }
+      if (bruteForce.computeTime !== undefined && bruteForce.computeTime !== null && !isFiniteNumber(bruteForce.computeTime)) {
+        return res.status(400).json({ error: 'Invalid bruteForce computeTime' });
+      }
+      if (bruteForce.checked !== undefined && bruteForce.checked !== null && !isFiniteNumber(bruteForce.checked)) {
+        return res.status(400).json({ error: 'Invalid bruteForce checked' });
+      }
+      if (bruteForce.totalChecks !== undefined && bruteForce.totalChecks !== null && !isFiniteNumber(bruteForce.totalChecks)) {
+        return res.status(400).json({ error: 'Invalid bruteForce totalChecks' });
+      }
+      if (bruteForce.cancelled !== undefined && bruteForce.cancelled !== null && typeof bruteForce.cancelled !== 'boolean') {
+        return res.status(400).json({ error: 'Invalid bruteForce cancelled flag' });
+      }
+    }
+    if (heuristic) {
+      if (heuristic.route && !isRouteArray(heuristic.route)) {
+        return res.status(400).json({ error: 'Invalid heuristic route' });
+      }
+      if (heuristic.distance !== undefined && heuristic.distance !== null && !isFiniteNumber(heuristic.distance)) {
+        return res.status(400).json({ error: 'Invalid heuristic distance' });
+      }
+      if (heuristic.computeTime !== undefined && heuristic.computeTime !== null && !isFiniteNumber(heuristic.computeTime)) {
+        return res.status(400).json({ error: 'Invalid heuristic computeTime' });
+      }
+    }
 
     if (bruteForce) {
       session.data.algorithms.bruteForce = {
@@ -427,6 +506,28 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     }
 
     const { bruteForce, heuristic } = req.body;
+    if (bruteForce) {
+      if (bruteForce.checked !== undefined && bruteForce.checked !== null && !isFiniteNumber(bruteForce.checked)) {
+        return res.status(400).json({ error: 'Invalid bruteForce checked' });
+      }
+      if (bruteForce.totalChecks !== undefined && bruteForce.totalChecks !== null && !isFiniteNumber(bruteForce.totalChecks)) {
+        return res.status(400).json({ error: 'Invalid bruteForce totalChecks' });
+      }
+      if (bruteForce.status !== undefined && bruteForce.status !== null && typeof bruteForce.status !== 'string') {
+        return res.status(400).json({ error: 'Invalid bruteForce status' });
+      }
+    }
+    if (heuristic) {
+      if (heuristic.checked !== undefined && heuristic.checked !== null && !isFiniteNumber(heuristic.checked)) {
+        return res.status(400).json({ error: 'Invalid heuristic checked' });
+      }
+      if (heuristic.totalChecks !== undefined && heuristic.totalChecks !== null && !isFiniteNumber(heuristic.totalChecks)) {
+        return res.status(400).json({ error: 'Invalid heuristic totalChecks' });
+      }
+      if (heuristic.status !== undefined && heuristic.status !== null && typeof heuristic.status !== 'string') {
+        return res.status(400).json({ error: 'Invalid heuristic status' });
+      }
+    }
 
     if (bruteForce) {
       session.data.algorithms.bruteForce = {
@@ -581,6 +682,9 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     }
 
     const { broadcasts } = req.body;
+    if (!Array.isArray(broadcasts) || !broadcasts.every(id => typeof id === 'string')) {
+      return res.status(400).json({ error: 'Invalid broadcasts payload' });
+    }
     session.data.broadcasts = Array.isArray(broadcasts) ? broadcasts : [];
     await sessions.set(session.id, session);
 
@@ -600,7 +704,26 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     }
 
     const { id, name, route, distance, type, timeToComplete } = req.body;
-    if (!route || route.length === 0) {
+    if (!isRouteArray(route)) {
+      return res.status(400).json({ error: 'Route required' });
+    }
+    if (distance !== undefined && distance !== null && !isFiniteNumber(distance)) {
+      return res.status(400).json({ error: 'Invalid distance' });
+    }
+    if (timeToComplete !== null && timeToComplete !== undefined && !Number.isFinite(timeToComplete)) {
+      return res.status(400).json({ error: 'Invalid timeToComplete' });
+    }
+    if (id !== undefined && id !== null && typeof id !== 'string') {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    if (name !== undefined && name !== null && typeof name !== 'string') {
+      return res.status(400).json({ error: 'Invalid name' });
+    }
+    if (type !== undefined && type !== null && typeof type !== 'string') {
+      return res.status(400).json({ error: 'Invalid type' });
+    }
+
+    if (route.length === 0) {
       return res.status(400).json({ error: 'Route required' });
     }
 
@@ -673,6 +796,9 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     }
 
     const { solutionId } = req.body;
+    if (typeof solutionId !== 'string' || !solutionId.trim()) {
+      return res.status(400).json({ error: 'Invalid solutionId' });
+    }
 
     let solution = null;
 

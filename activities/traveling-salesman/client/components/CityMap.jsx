@@ -272,7 +272,6 @@ export default function CityMap({
       {routes.map((route, idx) => {
         if (!route.path || route.path.length === 0) return null;
 
-        const isHighlighted = highlightedRoute?.id === route.id;
         const color = getRouteColor(route);
 
         const totalRoutes = routes.length;

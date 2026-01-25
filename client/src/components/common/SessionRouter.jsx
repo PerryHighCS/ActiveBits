@@ -357,6 +357,14 @@ const SessionRouter = () => {
             red: 'bg-red-600',
             yellow: 'bg-yellow-600',
             indigo: 'bg-indigo-600',
+            orange: 'bg-orange-600',
+            emerald: 'bg-emerald-600',
+            sky: 'bg-sky-600',
+            fuchsia: 'bg-fuchsia-600',
+            pink: 'bg-pink-600',
+            rose: 'bg-rose-600',
+            lime: 'bg-lime-600',
+            teal: 'bg-teal-600',
         };
         const bgColorClasses = {
             blue: 'bg-blue-50',
@@ -365,6 +373,14 @@ const SessionRouter = () => {
             red: 'bg-red-50',
             yellow: 'bg-yellow-50',
             indigo: 'bg-indigo-50',
+            orange: 'bg-orange-50',
+            emerald: 'bg-emerald-50',
+            sky: 'bg-sky-50',
+            fuchsia: 'bg-fuchsia-50',
+            pink: 'bg-pink-50',
+            rose: 'bg-rose-50',
+            lime: 'bg-lime-50',
+            teal: 'bg-teal-50',
         };
         
         return (

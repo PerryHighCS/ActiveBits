@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import CityMap from '../components/CityMap.jsx';
 import Leaderboard from '../components/Leaderboard.jsx';
-import ProgressBar from '../components/ProgressBar.jsx';
 import RouteLegend from '../components/RouteLegend.jsx';
 import { generateCities } from '../utils/cityGenerator.js';
 import { buildDistanceMatrix } from '../utils/distanceCalculator.js';
@@ -36,6 +36,10 @@ export default function TSPManager() {
   const cancelBruteForceRef = useRef(false);
   const progressSentRef = useRef(0);
   const progressLocalRef = useRef(0);
+  const refreshTimeoutRef = useRef(null);
+  const mapTokenRef = useRef(0);
+  const mapSeedRef = useRef(null);
+  const pendingBroadcastRef = useRef(null);
 
   const calculateCurrentDistance = (route, distanceMatrix) => {
     if (!route || route.length <= 1) return 0;
@@ -67,10 +71,19 @@ export default function TSPManager() {
       if (!res.ok) throw new Error('Failed to fetch session');
       const data = await res.json();
       setSession(data);
+      if (data?.problem?.seed && data.problem.seed !== mapSeedRef.current) {
+        mapSeedRef.current = data.problem.seed;
+        mapTokenRef.current += 1;
+      }
       if (data.instructor?.route?.length) {
         setInstructorRoute(data.instructor.route);
         setInstructorDistance(data.instructor.distance ?? 0);
         setInstructorComplete(Boolean(data.instructor.complete));
+      } else {
+        setInstructorRoute([]);
+        setInstructorDistance(0);
+        setInstructorComplete(false);
+        setInstructorStartTime(null);
       }
     } catch (err) {
       console.error('Failed to fetch session:', err);
@@ -90,20 +103,62 @@ export default function TSPManager() {
     }
   }, [sessionId]);
 
-  // Poll for updates
-  useEffect(() => {
-    if (!sessionId) return undefined;
-
-    fetchSession();
-    fetchLeaderboard();
-
-    const interval = setInterval(() => {
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimeoutRef.current) return;
+    refreshTimeoutRef.current = setTimeout(() => {
+      refreshTimeoutRef.current = null;
       fetchSession();
       fetchLeaderboard();
-    }, 2000);
+    }, 100);
+  }, [fetchSession, fetchLeaderboard]);
 
-    return () => clearInterval(interval);
-  }, [sessionId, fetchSession, fetchLeaderboard]);
+  const handleWsMessage = useCallback((event) => {
+    try {
+      const message = JSON.parse(event.data);
+      if ([
+        'problemUpdate',
+        'studentsUpdate',
+        'broadcastUpdate',
+        'clearBroadcast',
+        'algorithmsComputed'
+      ].includes(message.type)) {
+        scheduleRefresh();
+      }
+    } catch (err) {
+      console.error('Failed to parse WebSocket message:', err);
+    }
+  }, [scheduleRefresh]);
+
+  const buildWsUrl = useCallback(() => {
+    if (!sessionId) return null;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    return `${protocol}//${host}/ws/traveling-salesman?sessionId=${sessionId}`;
+  }, [sessionId]);
+
+  const { connect, disconnect } = useResilientWebSocket({
+    buildUrl: buildWsUrl,
+    shouldReconnect: Boolean(sessionId),
+    onOpen: () => {
+      fetchSession();
+      fetchLeaderboard();
+    },
+    onMessage: handleWsMessage
+  });
+
+  useEffect(() => {
+    if (!sessionId) return undefined;
+    connect();
+    return () => disconnect();
+  }, [sessionId, connect, disconnect]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (session?.problem?.numCities) {
@@ -113,7 +168,22 @@ export default function TSPManager() {
 
   useEffect(() => {
     if (session?.broadcasts) {
-      setBroadcastIds(session.broadcasts);
+      const next = session.broadcasts;
+      const pending = pendingBroadcastRef.current;
+      if (pending) {
+        const isSame = pending.next.length === next.length
+          && pending.next.every((id, idx) => id === next[idx]);
+        if (isSame) {
+          pendingBroadcastRef.current = null;
+          setBroadcastIds(next);
+          return;
+        }
+        if (Date.now() - pending.at < 1000) {
+          return;
+        }
+        pendingBroadcastRef.current = null;
+      }
+      setBroadcastIds(next);
     }
   }, [session?.broadcasts]);
 
@@ -173,6 +243,8 @@ export default function TSPManager() {
         setBruteForceStatus('cancelled');
         setComputing(false);
       }
+      mapSeedRef.current = seed;
+      mapTokenRef.current += 1;
 
       await fetch(`/api/traveling-salesman/${sessionId}/set-problem`, {
         method: 'POST',
@@ -206,13 +278,18 @@ export default function TSPManager() {
     if (!session?.problem?.cities) return;
     try {
       const { cities, distanceMatrix } = session.problem;
+      const mapTokenAtStart = mapTokenRef.current;
       const startIndex = instructorRoute.length > 0
         ? parseInt(instructorRoute[0].split('-')[1], 10)
         : 0;
       const heuristicStart = performance.now();
       const heuristicResult = solveTSPNearestNeighbor(cities, distanceMatrix, { startIndex });
       const heuristicEnd = performance.now();
-      const heuristicTime = ((heuristicEnd - heuristicStart) / 1000).toFixed(3);
+      const heuristicTime = Number(((heuristicEnd - heuristicStart) / 1000).toFixed(3));
+
+      if (mapTokenRef.current !== mapTokenAtStart) {
+        return;
+      }
 
       await fetch(`/api/traveling-salesman/${sessionId}/compute-algorithms`, {
         method: 'POST',
@@ -238,6 +315,7 @@ export default function TSPManager() {
     cancelBruteForceRef.current = false;
     setBruteForceStatus('running');
     setBruteForceProgress({ checked: 0, total: 0 });
+    const mapTokenAtStart = mapTokenRef.current;
     try {
       const { cities, distanceMatrix } = session.problem;
       const bruteForceStart = performance.now();
@@ -264,15 +342,24 @@ export default function TSPManager() {
             }
           }
         },
-        shouldCancel: () => cancelBruteForceRef.current
+        shouldCancel: () => cancelBruteForceRef.current || mapTokenRef.current !== mapTokenAtStart
       });
       const bruteForceEnd = performance.now();
       const bruteForceTime = bruteForceResult.cancelled
         ? null
-        : ((bruteForceEnd - bruteForceStart) / 1000).toFixed(3);
+        : Number(((bruteForceEnd - bruteForceStart) / 1000).toFixed(3));
+
+      if (mapTokenRef.current !== mapTokenAtStart) {
+        setBruteForceStatus('cancelled');
+        return;
+      }
 
       setBruteForceStatus(bruteForceResult.cancelled ? 'cancelled' : 'complete');
       setBruteForceProgress({ checked: bruteForceResult.checked, total: bruteForceResult.totalChecks });
+
+      if (bruteForceResult.cancelled) {
+        return;
+      }
 
       const bruteForcePayload = {
         ...bruteForceResult,
@@ -503,6 +590,7 @@ export default function TSPManager() {
         : [...broadcastIds, broadcastId];
 
       setBroadcastIds(next);
+      pendingBroadcastRef.current = { next, at: Date.now() };
       await fetch(`/api/traveling-salesman/${sessionId}/set-broadcasts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -518,7 +606,7 @@ export default function TSPManager() {
     setInstructorDistance(0);
     setInstructorComplete(false);
     setInstructorStartTime(null);
-    if (highlightedSolution?.id === 'heuristic') {
+    if (highlightedSolution?.id === 'instructor' || highlightedSolution?.id === 'instructor-local') {
       setHighlightedSolution(null);
     }
     if (broadcastIds.includes('instructor')) {
