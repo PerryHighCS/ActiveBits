@@ -1,0 +1,197 @@
+.tsp-student {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.tsp-student-setup {
+  max-width: 400px;
+  margin: 100px auto;
+  padding: 40px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.tsp-student-setup h2 {
+  margin-bottom: 24px;
+  color: #333;
+}
+
+.name-input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 16px;
+  border: 2px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.name-input:focus {
+  outline: none;
+  border-color: #2196F3;
+}
+
+.student-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.student-header h2 {
+  margin: 0 0 8px 0;
+  color: #333;
+}
+
+.instructions {
+  color: #666;
+  font-size: 1.1rem;
+  margin: 8px 0;
+}
+
+.student-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+
+.student-info-panel {
+  flex: 0 0 320px;
+  max-width: 320px;
+  background: #f7f7f7;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.student-info-panel .info-line {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.student-info-panel .info-line.complete {
+  color: #fff;
+  background: #2E7D32;
+  padding: 6px 10px;
+  border-radius: 8px;
+  display: inline-block;
+}
+
+@media (max-width: 1100px) {
+  .student-layout {
+    flex-wrap: wrap;
+  }
+
+  .student-info-panel {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+}
+
+.student-map-panel {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+}
+
+.broadcast-panel {
+  margin-left: 16px;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.broadcast-title {
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.broadcast-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #444;
+  font-size: 0.95rem;
+}
+
+.broadcast-item .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #999;
+}
+
+.broadcast-item.student .swatch {
+  background: #1E88E5;
+}
+
+.broadcast-item.bruteforce .swatch {
+  background: #43A047;
+}
+
+.broadcast-item.heuristic .swatch {
+  background: #F9A825;
+}
+
+.broadcast-item.instructor .swatch {
+  background: #8E24AA;
+}
+
+@media (max-width: 1100px) {
+  .student-map-panel {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .broadcast-panel {
+    margin-left: 0;
+    margin-top: 12px;
+    width: 100%;
+  }
+}
+
+.dismiss-broadcast {
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid white;
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.dismiss-broadcast:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
