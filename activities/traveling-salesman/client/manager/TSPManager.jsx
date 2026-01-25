@@ -482,6 +482,27 @@ export default function TSPManager() {
       }
       return null;
     }
+    if (entry.type === 'instructor') {
+      if (entry.id === 'instructor-broadcast' && session?.instructor?.route?.length) {
+        return {
+          id: 'instructor-broadcast',
+          name: 'Instructor Broadcast',
+          path: session.instructor.route,
+          type: 'instructor',
+          distance: session.instructor.distance
+        };
+      }
+      if (instructorRoute.length > 0) {
+        return {
+          id: 'instructor-local',
+          name: 'Instructor Route',
+          path: instructorRoute,
+          type: 'instructor',
+          distance: instructorDistance
+        };
+      }
+      return null;
+    }
     if (entry.type === 'bruteforce' && session?.algorithms?.bruteForce?.route) {
       return {
         id: 'bruteforce',
@@ -783,17 +804,6 @@ export default function TSPManager() {
         distance: instructorDistance
       });
     }
-    if (highlightedSolution) {
-      const resolved = resolveRouteForEntry(highlightedSolution);
-      if (resolved) {
-        items.push({
-          id: resolved.id,
-          type: resolved.type || 'student',
-          label: resolved.name || 'Selected Route',
-          distance: resolved.distance ?? null
-        });
-      }
-    }
     if (broadcastIds.includes('bruteforce') && session?.algorithms?.bruteForce?.route) {
       items.push({
         id: 'bruteforce',
@@ -832,8 +842,29 @@ export default function TSPManager() {
         }
       });
     }
-    return items;
-  }, [instructorRoute.length, instructorDistance, instructorComplete, highlightedSolution, broadcastIds, session?.algorithms, session?.instructor, session?.students]);
+    if (highlightedSolution) {
+      const resolved = resolveRouteForEntry(highlightedSolution);
+      if (resolved) {
+        items.push({
+          id: resolved.id,
+          type: 'highlight',
+          label: resolved.name || 'Selected Route',
+          distance: resolved.distance ?? null,
+          progressCurrent: resolved.progressCurrent ?? null,
+          progressTotal: resolved.progressTotal ?? null
+        });
+      }
+    }
+    const hasInstructorLocal = items.some(item => item.id === 'instructor-local');
+    const filtered = hasInstructorLocal
+      ? items.filter(item => item.id !== 'instructor-broadcast')
+      : items;
+    const byId = new Map();
+    filtered.forEach((item) => {
+      byId.set(item.id, item);
+    });
+    return Array.from(byId.values());
+  }, [instructorRoute.length, instructorDistance, highlightedSolution, broadcastIds, session?.algorithms, session?.instructor, session?.students]);
 
   const uiBroadcastIds = useMemo(() => {
     return broadcastIds.map(id => (id === 'instructor' ? 'instructor-local' : id));

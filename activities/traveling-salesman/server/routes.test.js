@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import setupTravelingSalesmanRoutes from './routes.js';
+import { isCitiesArray, isDistanceMatrix, isRouteArray } from './validation.js';
 
 const createMockApp = () => {
   const handlers = { post: {}, get: {} };
@@ -121,4 +122,16 @@ test('update-instructor-route rejects invalid timeToComplete', async () => {
   const res = createRes();
   await handler(req, res);
   assert.equal(res.statusCode, 400);
+});
+
+test('validation helpers accept valid inputs', () => {
+  assert.equal(isRouteArray(['city-0', 'city-1']), true);
+  assert.equal(isCitiesArray([{ id: 'city-0', name: 'A', x: 1, y: 2 }]), true);
+  assert.equal(isDistanceMatrix([[0, 1], [1, 0]], 2), true);
+});
+
+test('validation helpers reject invalid inputs', () => {
+  assert.equal(isRouteArray(['city-0', 2]), false);
+  assert.equal(isCitiesArray([{ id: 'city-0', name: 'A', x: 'bad', y: 2 }]), false);
+  assert.equal(isDistanceMatrix([[0, 1]], 2), false);
 });

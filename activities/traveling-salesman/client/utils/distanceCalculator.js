@@ -45,7 +45,7 @@ export function calculateRouteDistance(route, distanceMatrix) {
   for (let i = 0; i < route.length; i++) {
     const from = parseInt(route[i].split('-')[1], 10);
     const to = parseInt(route[(i + 1) % route.length].split('-')[1], 10);
-    total += distanceMatrix[from][to] || 0;
+    total += distanceMatrix?.[from]?.[to] || 0;
   }
 
   return total;
@@ -84,7 +84,7 @@ export function calculateTotalDistance(route, distanceMatrix) {
     const toRaw = route[(i + 1) % route.length];
     const from = typeof fromRaw === 'string' ? parseInt(fromRaw.split('-')[1], 10) : fromRaw;
     const to = typeof toRaw === 'string' ? parseInt(toRaw.split('-')[1], 10) : toRaw;
-    total += distanceMatrix[from][to];
+    total += distanceMatrix?.[from]?.[to] || 0;
   }
   return total;
 }
