@@ -206,8 +206,11 @@ export default function TSPManager() {
     if (!session?.problem?.cities) return;
     try {
       const { cities, distanceMatrix } = session.problem;
+      const startIndex = instructorRoute.length > 0
+        ? parseInt(instructorRoute[0].split('-')[1], 10)
+        : 0;
       const heuristicStart = performance.now();
-      const heuristicResult = solveTSPNearestNeighbor(cities, distanceMatrix);
+      const heuristicResult = solveTSPNearestNeighbor(cities, distanceMatrix, { startIndex });
       const heuristicEnd = performance.now();
       const heuristicTime = ((heuristicEnd - heuristicStart) / 1000).toFixed(3);
 
@@ -515,6 +518,9 @@ export default function TSPManager() {
     setInstructorDistance(0);
     setInstructorComplete(false);
     setInstructorStartTime(null);
+    if (highlightedSolution?.id === 'heuristic') {
+      setHighlightedSolution(null);
+    }
     if (broadcastIds.includes('instructor')) {
       const next = broadcastIds.filter(id => id !== 'instructor');
       setBroadcastIds(next);
@@ -528,6 +534,12 @@ export default function TSPManager() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     }).catch(err => console.error('Failed to reset instructor route:', err));
+    fetch(`/api/traveling-salesman/${sessionId}/reset-heuristic`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+      .then(() => Promise.all([fetchSession(), fetchLeaderboard()]))
+      .catch(err => console.error('Failed to reset heuristic route:', err));
   };
 
   // End session

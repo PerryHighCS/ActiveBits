@@ -26,7 +26,7 @@ function factorial(n) {
  * Solve TSP using brute force (exhaustive search)
  * @param {Array} cities - Array of city objects
  * @param {Array} distanceMatrix - Pre-computed distance matrix
- * @param {object} options - { onProgress, shouldCancel, progressEvery, yieldEvery }
+ * @param {object} options - { onProgress, shouldCancel, progressEvery, yieldEvery, startIndex }
  * @returns {object} { route: ['city-0', ...], distance: number, checked: number, totalChecks: number, cancelled: boolean }
  */
 export async function solveTSPBruteForce(cities, distanceMatrix, options = {}) {
@@ -35,7 +35,8 @@ export async function solveTSPBruteForce(cities, distanceMatrix, options = {}) {
     onProgress,
     shouldCancel,
     progressEvery = 5000,
-    yieldEvery = 5000
+    yieldEvery = 5000,
+    startIndex = 0
   } = options;
 
   if (n <= 1) {
@@ -48,7 +49,7 @@ export async function solveTSPBruteForce(cities, distanceMatrix, options = {}) {
     };
   }
 
-  const indices = Array.from({ length: n - 1 }, (_, i) => i + 1);
+  const normalizedStart = Math.max(0, Math.min(n - 1, startIndex));
   const totalChecks = factorial(n - 1);
 
   let bestRoute = null;
@@ -70,6 +71,7 @@ export async function solveTSPBruteForce(cities, distanceMatrix, options = {}) {
 
   const used = Array(n).fill(false);
   const current = [];
+  used[normalizedStart] = true;
 
   const backtrack = async () => {
     if (shouldCancel && shouldCancel()) {
@@ -77,8 +79,8 @@ export async function solveTSPBruteForce(cities, distanceMatrix, options = {}) {
       return;
     }
 
-    if (current.length === indices.length) {
-      const route = [0, ...current];
+    if (current.length === n - 1) {
+      const route = [normalizedStart, ...current];
       const distance = calculateTotalDistance(route, distanceMatrix);
       checked += 1;
 
@@ -92,7 +94,8 @@ export async function solveTSPBruteForce(cities, distanceMatrix, options = {}) {
       return;
     }
 
-    for (let i = 1; i < n; i++) {
+    for (let i = 0; i < n; i++) {
+      if (i === normalizedStart) continue;
       if (cancelled) return;
       if (used[i]) continue;
       used[i] = true;

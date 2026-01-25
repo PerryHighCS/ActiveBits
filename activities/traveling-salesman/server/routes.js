@@ -646,6 +646,25 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     res.json({ success: true });
   });
 
+  // Reset heuristic route
+  app.post('/api/traveling-salesman/:sessionId/reset-heuristic', async (req, res) => {
+    const session = await sessions.get(req.params.sessionId);
+    if (!session || session.type !== 'traveling-salesman') {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    session.data.algorithms.heuristic = {};
+    await sessions.set(session.id, session);
+
+    const routes = buildBroadcastPayload(session);
+    await broadcast('broadcastUpdate', { routes }, session.id);
+    if (routes.length === 0) {
+      await broadcast('clearBroadcast', { cleared: true }, session.id);
+    }
+
+    res.json({ success: true });
+  });
+
   // Broadcast solution (legacy single-route)
   app.post('/api/traveling-salesman/:sessionId/broadcast-solution', async (req, res) => {
     const session = await sessions.get(req.params.sessionId);

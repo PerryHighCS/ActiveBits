@@ -18,6 +18,7 @@ import './Leaderboard.css';
  * @param {Array} broadcastIds - Array of ids currently broadcast
  * @param {function} onNameClick - Callback when name is clicked
  * @param {string|null} activeViewId - Id currently highlighted on map
+ * @param {Array|null} viewableTypes - Limit view button to specific entry types
  */
 export default function Leaderboard({
   entries = [],
@@ -26,7 +27,8 @@ export default function Leaderboard({
   onToggleBroadcast,
   broadcastIds = [],
   onNameClick,
-  activeViewId = null
+  activeViewId = null,
+  viewableTypes = null
 }) {
   if (entries.length === 0) {
     return (
@@ -76,8 +78,7 @@ export default function Leaderboard({
               <td className="time">
                 {entry.timeToComplete !== null && entry.timeToComplete !== undefined
                   ? `${entry.timeToComplete}s`
-                  : (entry.type === 'bruteforce'
-                    && entry.progressCurrent !== null && entry.progressCurrent !== undefined
+                  : (entry.progressCurrent !== null && entry.progressCurrent !== undefined
                     && entry.progressTotal !== null && entry.progressTotal !== undefined
                     ? (
                       <ProgressBar
@@ -86,10 +87,7 @@ export default function Leaderboard({
                         label={`${entry.progressCurrent}/${entry.progressTotal}`}
                       />
                     )
-                    : (entry.progressCurrent !== null && entry.progressCurrent !== undefined
-                      && entry.progressTotal !== null && entry.progressTotal !== undefined
-                      ? `${entry.progressCurrent}/${entry.progressTotal}`
-                      : (entry.type === 'student' ? 'In progress' : '')))}
+                    : (entry.type === 'student' ? 'In progress' : ''))}
               </td>
               <td className="type">
                 {entry.type === 'bruteforce' && <span className="badge optimal">🤖 Optimal</span>}
@@ -98,13 +96,15 @@ export default function Leaderboard({
                 {entry.type === 'instructor' && <span className="badge instructor">🧑‍🏫 Instructor</span>}
               </td>
               <td className="actions">
-                <button
-                  onClick={() => onHighlight(entry)}
-                  className={`btn-view ${activeViewId === entry.id ? 'active' : ''}`}
-                  title="Highlight this route on the map"
-                >
-                  View
-                </button>
+                {onHighlight && (!viewableTypes || viewableTypes.includes(entry.type)) && (
+                  <button
+                    onClick={() => onHighlight(entry)}
+                    className={`btn-view ${activeViewId === entry.id ? 'active' : ''}`}
+                    title="Highlight this route on the map"
+                  >
+                    View
+                  </button>
+                )}
                 {onToggleBroadcast ? (
                   <button
                     onClick={() => onToggleBroadcast(entry)}
@@ -114,13 +114,15 @@ export default function Leaderboard({
                     Broadcast
                   </button>
                 ) : (
-                  <button
-                    onClick={() => onBroadcast(entry.id)}
-                    className="btn-broadcast"
-                    title="Show this route on all student screens"
-                  >
-                    Broadcast
-                  </button>
+                  onBroadcast && (
+                    <button
+                      onClick={() => onBroadcast(entry.id)}
+                      className="btn-broadcast"
+                      title="Show this route on all student screens"
+                    >
+                      Broadcast
+                    </button>
+                  )
                 )}
               </td>
             </tr>

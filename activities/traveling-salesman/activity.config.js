@@ -3,7 +3,7 @@ export default {
   name: 'Traveling Salesman',
   description: 'Explore optimal routes: compete against brute force and heuristic algorithms',
   color: 'orange',
-  soloMode: false,
+  soloMode: true,
   clientEntry: './client/index.js',
   serverEntry: './server/routes.js',
 };

@@ -19,10 +19,12 @@ function calculateTotalDistance(route, distanceMatrix) {
  * Greedy algorithm: always visit nearest unvisited city
  * @param {Array} cities - Array of city objects
  * @param {Array} distanceMatrix - Pre-computed distance matrix
+ * @param {object} options - { startIndex }
  * @returns {object} { route: ['city-0', 'city-2', ...], distance: number }
  */
-export function solveTSPNearestNeighbor(cities, distanceMatrix) {
+export function solveTSPNearestNeighbor(cities, distanceMatrix, options = {}) {
   const n = cities.length;
+  const { startIndex = 0 } = options;
 
   if (n <= 1) {
     return {
@@ -34,7 +36,7 @@ export function solveTSPNearestNeighbor(cities, distanceMatrix) {
   const unvisited = new Set(Array.from({ length: n }, (_, i) => i));
   const route = [];
 
-  let current = 0;  // Start from city 0
+  let current = Math.max(0, Math.min(n - 1, startIndex));  // Start from selected city
   route.push(current);
   unvisited.delete(current);
 
