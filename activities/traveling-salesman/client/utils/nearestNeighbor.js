@@ -1,18 +1,4 @@
-/**
- * Calculate total distance for a route (including return to start)
- * @param {Array} route - Array of city indices
- * @param {Array} distanceMatrix - Distance matrix
- * @returns {number} Total route distance
- */
-function calculateTotalDistance(route, distanceMatrix) {
-  let total = 0;
-  for (let i = 0; i < route.length; i++) {
-    const from = route[i];
-    const to = route[(i + 1) % route.length];
-    total += distanceMatrix[from][to];
-  }
-  return total;
-}
+import { calculateTotalDistance } from './distanceCalculator.js';
 
 /**
  * Solve TSP using nearest neighbor heuristic

@@ -1,6 +1,7 @@
 import { createSession } from 'activebits-server/core/sessions.js';
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js';
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js';
+import crypto from 'crypto';
 
 // Register session normalizer to ensure data integrity
 registerSessionNormalizer('traveling-salesman', (session) => {
@@ -17,9 +18,12 @@ registerSessionNormalizer('traveling-salesman', (session) => {
  * Generate unique student ID
  */
 function generateStudentId(name, sessionId) {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
   const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 6);
-  return `${name}-${timestamp}-${random}`;
+  const random = crypto.randomBytes(8).toString('hex');
+  return `${timestamp}-${random}`;
 }
 
 /**
@@ -166,7 +170,7 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
         if (session && session.type === 'traveling-salesman') {
           let student = studentId
             ? session.data.students.find(s => s.id === studentId)
-            : session.data.students.find(s => s.name === studentName && !s.id);
+            : session.data.students.find(s => s.name === studentName);
 
           if (!student) {
             // New student
@@ -224,6 +228,14 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
         }
       })().catch((err) => {
         console.error('Failed to initialize traveling salesman session', err);
+        try {
+          socket.send(JSON.stringify({
+            type: 'error',
+            payload: { message: 'Failed to initialize session. Please refresh the page.' }
+          }));
+        } catch (sendErr) {
+          console.error('Failed to notify socket about initialization error', sendErr);
+        }
       });
     }
   });
@@ -235,6 +247,10 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     session.data.problem = {};
     session.data.students = [];
     session.data.algorithms = { bruteForce: {}, heuristic: {} };
+    if (session.data.instructor) {
+      session.data.instructor.routeStartTime = null;
+      session.data.instructor.timeToComplete = null;
+    }
     session.data.instructor = null;
     session.data.broadcasts = [];
     session.data.sharedState = { phase: 'setup' };
@@ -318,27 +334,29 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     if (!isFiniteNumber(distance)) {
       return res.status(400).json({ error: 'Invalid distance' });
     }
-    if (timeToComplete !== null && timeToComplete !== undefined && !Number.isFinite(timeToComplete)) {
+    if (timeToComplete != null && !Number.isFinite(timeToComplete)) {
       return res.status(400).json({ error: 'Invalid timeToComplete' });
     }
     const student = session.data.students.find(s => s.id === studentId);
 
-    if (student) {
-      student.currentRoute = route;
-      student.routeDistance = distance;
-      student.complete = route.length === session.data.problem.numCities;
-      if (student.complete) {
-        student.routeCompleteTime = Date.now();
-        student.timeToComplete = timeToComplete;
-        student.attempts = (student.attempts || 0) + 1;
-      } else {
-        student.routeCompleteTime = null;
-        student.timeToComplete = null;
-      }
-
-      await sessions.set(session.id, session);
-      await broadcast('studentsUpdate', { students: session.data.students }, session.id);
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
     }
+
+    student.currentRoute = route;
+    student.routeDistance = distance;
+    student.complete = route.length === session.data.problem.numCities;
+    if (student.complete) {
+      student.routeCompleteTime = Date.now();
+      student.timeToComplete = timeToComplete;
+      student.attempts = (student.attempts || 0) + 1;
+    } else {
+      student.routeCompleteTime = null;
+      student.timeToComplete = null;
+    }
+
+    await sessions.set(session.id, session);
+    await broadcast('studentsUpdate', { students: session.data.students }, session.id);
 
     res.json({ success: true });
   });
@@ -350,7 +368,7 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    const { route, distance, complete } = req.body;
+    const { route, distance, complete, timeToComplete } = req.body;
     if (!isRouteArray(route)) {
       return res.status(400).json({ error: 'Route required' });
     }
@@ -360,12 +378,20 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     if (complete !== undefined && complete !== null && typeof complete !== 'boolean') {
       return res.status(400).json({ error: 'Invalid complete flag' });
     }
+    if (timeToComplete != null && !Number.isFinite(timeToComplete)) {
+      return res.status(400).json({ error: 'Invalid timeToComplete' });
+    }
 
     if (route.length === 0) {
       session.data.instructor = null;
     } else {
       const progressTotal = session.data.problem?.numCities ?? route.length;
       const progressCurrent = route.length;
+      const existingStartTime = session.data.instructor?.routeStartTime;
+      const routeStartTime = existingStartTime ?? Date.now();
+      const computedTimeToComplete = complete && timeToComplete == null
+        ? Math.floor((Date.now() - routeStartTime) / 1000)
+        : timeToComplete;
 
       session.data.instructor = {
         id: 'instructor',
@@ -373,10 +399,11 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
         route,
         distance: distance ?? 0,
         type: 'instructor',
-        timeToComplete: session.data.instructor?.timeToComplete ?? null,
+        timeToComplete: computedTimeToComplete ?? session.data.instructor?.timeToComplete ?? null,
         progressCurrent,
         progressTotal,
-        complete: Boolean(complete)
+        complete: Boolean(complete),
+        routeStartTime
       };
     }
 
@@ -710,7 +737,7 @@ export default function setupTravelingSalesmanRoutes(app, sessions, ws) {
     if (distance !== undefined && distance !== null && !isFiniteNumber(distance)) {
       return res.status(400).json({ error: 'Invalid distance' });
     }
-    if (timeToComplete !== null && timeToComplete !== undefined && !Number.isFinite(timeToComplete)) {
+    if (timeToComplete != null && !Number.isFinite(timeToComplete)) {
       return res.status(400).json({ error: 'Invalid timeToComplete' });
     }
     if (id !== undefined && id !== null && typeof id !== 'string') {

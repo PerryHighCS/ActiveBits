@@ -1,28 +1,5 @@
-/**
- * Calculate total distance for a route (including return to start)
- * @param {Array} route - Array of city indices
- * @param {Array} distanceMatrix - Distance matrix
- * @returns {number} Total route distance
- */
-function calculateTotalDistance(route, distanceMatrix) {
-  let total = 0;
-  for (let i = 0; i < route.length; i++) {
-    const from = route[i];
-    const to = route[(i + 1) % route.length];
-    total += distanceMatrix[from][to];
-  }
-  return total;
-}
-
-function factorial(n) {
-  // Note: factorial grows fast and will exceed Number.MAX_SAFE_INTEGER for n >= 18.
-  // Current max city count keeps (n - 1)! within safe integer range.
-  let result = 1;
-  for (let i = 2; i <= n; i++) {
-    result *= i;
-  }
-  return result;
-}
+import { factorial } from './mathHelpers.js';
+import { calculateTotalDistance } from './distanceCalculator.js';
 
 /**
  * Solve TSP using brute force (exhaustive search)

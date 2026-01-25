@@ -77,11 +77,16 @@ export default function CityMap({
   };
 
   const getStarStroke = (fill) => {
-    if (fill === '#FFC107') return '#8A6D1A';
-    if (fill === '#4CAF50') return '#2E7D32';
-    if (fill === '#009688') return '#00695C';
-    if (fill === '#FF5722') return '#BF360C';
-    return '#0D47A1';
+    if (!fill || typeof fill !== 'string' || !fill.startsWith('#')) return '#0D47A1';
+    const hex = fill.replace('#', '');
+    if (hex.length !== 6) return '#0D47A1';
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    if ([r, g, b].some(Number.isNaN)) return '#0D47A1';
+    const darken = (value) => Math.max(0, Math.min(255, Math.round(value * 0.6)));
+    const toHex = (value) => value.toString(16).padStart(2, '0');
+    return `#${toHex(darken(r))}${toHex(darken(g))}${toHex(darken(b))}`;
   };
 
   const markerOffsets = [
@@ -159,7 +164,14 @@ export default function CityMap({
   };
 
   return (
-    <svg width={width} height={height} className="city-map">
+    <svg
+      width={width}
+      height={height}
+      className="city-map"
+      role="img"
+      aria-label="Traveling Salesman map"
+    >
+      <title>Traveling Salesman map</title>
       {/* Terrain background */}
       <defs />
 
@@ -397,6 +409,8 @@ export default function CityMap({
             stroke="#333"
             strokeWidth="2"
             className="city-marker"
+            role="img"
+            aria-label={city.name}
           />
           {activeRoute && activeRoute[0] === city.id ? (
             <polygon

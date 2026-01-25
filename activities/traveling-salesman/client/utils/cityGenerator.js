@@ -16,10 +16,14 @@ const CITY_NAMES = [
  * @returns {function} Function that returns random numbers between 0 and 1
  */
 export function seededRandom(seed) {
-  let state = seed;
+  // Mulberry32: fast, deterministic PRNG for visual use.
+  let state = (seed || 0) >>> 0;
   return function() {
-    state = (state * 9301 + 49297) % 233280;
-    return state / 233280;
+    state += 0x6D2B79F5;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
@@ -55,13 +59,14 @@ export function generateCities(count, width = 700, height = 500, seed = Date.now
 
   const cities = [];
   const padding = 60;
-  const minDistance = 80; // Minimum distance between cities
+  const baseMinDistance = 80; // Minimum distance between cities
 
   // Generate positions with minimum spacing
   for (let i = 0; i < count; i++) {
     let x, y, valid;
     let attempts = 0;
     const maxAttempts = 100;
+    let minDistance = baseMinDistance;
 
     do {
       x = padding + random() * (width - 2 * padding);
@@ -75,7 +80,22 @@ export function generateCities(count, width = 700, height = 500, seed = Date.now
       });
 
       attempts++;
+      if (attempts === Math.floor(maxAttempts / 2)) {
+        minDistance = Math.max(30, Math.round(baseMinDistance * 0.7));
+      }
+      if (attempts === Math.floor((maxAttempts * 3) / 4)) {
+        minDistance = Math.max(20, Math.round(baseMinDistance * 0.5));
+      }
     } while (!valid && attempts < maxAttempts);
+
+    if (!valid) {
+      console.warn('City placement relaxed: minimum distance constraint could not be met.', {
+        seed,
+        cityIndex: i,
+        attempts,
+        minDistance
+      });
+    }
 
     cities.push({
       id: `city-${i}`,

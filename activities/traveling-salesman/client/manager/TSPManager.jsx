@@ -7,7 +7,7 @@ import CityMap from '../components/CityMap.jsx';
 import Leaderboard from '../components/Leaderboard.jsx';
 import RouteLegend from '../components/RouteLegend.jsx';
 import { generateCities } from '../utils/cityGenerator.js';
-import { buildDistanceMatrix } from '../utils/distanceCalculator.js';
+import { buildDistanceMatrix, calculateCurrentDistance, calculateTotalDistance } from '../utils/distanceCalculator.js';
 import { solveTSPBruteForce } from '../utils/bruteForce.js';
 import { solveTSPNearestNeighbor } from '../utils/nearestNeighbor.js';
 import './TSPManager.css';
@@ -31,6 +31,7 @@ export default function TSPManager() {
   const [instructorDistance, setInstructorDistance] = useState(0);
   const [instructorComplete, setInstructorComplete] = useState(false);
   const [instructorStartTime, setInstructorStartTime] = useState(null);
+  const [instructorTimeToComplete, setInstructorTimeToComplete] = useState(null);
   const [hoveredCityId, setHoveredCityId] = useState(null);
   const [broadcastIds, setBroadcastIds] = useState([]);
   const cancelBruteForceRef = useRef(false);
@@ -40,28 +41,6 @@ export default function TSPManager() {
   const mapTokenRef = useRef(0);
   const mapSeedRef = useRef(null);
   const pendingBroadcastRef = useRef(null);
-
-  const calculateCurrentDistance = (route, distanceMatrix) => {
-    if (!route || route.length <= 1) return 0;
-    let total = 0;
-    for (let i = 0; i < route.length - 1; i++) {
-      const from = parseInt(route[i].split('-')[1], 10);
-      const to = parseInt(route[i + 1].split('-')[1], 10);
-      total += distanceMatrix?.[from]?.[to] || 0;
-    }
-    return total;
-  };
-
-  const calculateTotalDistance = (route, distanceMatrix) => {
-    if (!route || route.length === 0) return 0;
-    let total = 0;
-    for (let i = 0; i < route.length; i++) {
-      const from = parseInt(route[i].split('-')[1], 10);
-      const to = parseInt(route[(i + 1) % route.length].split('-')[1], 10);
-      total += distanceMatrix?.[from]?.[to] || 0;
-    }
-    return total;
-  };
 
   // Fetch session state
   const fetchSession = useCallback(async () => {
@@ -79,11 +58,13 @@ export default function TSPManager() {
         setInstructorRoute(data.instructor.route);
         setInstructorDistance(data.instructor.distance ?? 0);
         setInstructorComplete(Boolean(data.instructor.complete));
+        setInstructorTimeToComplete(data.instructor.timeToComplete ?? null);
       } else {
         setInstructorRoute([]);
         setInstructorDistance(0);
         setInstructorComplete(false);
         setInstructorStartTime(null);
+        setInstructorTimeToComplete(null);
       }
     } catch (err) {
       console.error('Failed to fetch session:', err);
@@ -238,7 +219,7 @@ export default function TSPManager() {
     const distanceMatrix = buildDistanceMatrix(cities);
 
     try {
-      if (computing) {
+      if (computing && bruteForceStatus === 'running') {
         cancelBruteForceRef.current = true;
         setBruteForceStatus('cancelled');
         setComputing(false);
@@ -263,6 +244,7 @@ export default function TSPManager() {
       setInstructorDistance(0);
       setInstructorComplete(false);
       setInstructorStartTime(null);
+      setInstructorTimeToComplete(null);
       setBroadcastIds([]);
       setHighlightedSolution(null);
 
@@ -361,6 +343,22 @@ export default function TSPManager() {
         return;
       }
 
+      try {
+        await fetch(`/api/traveling-salesman/${sessionId}/algorithm-progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bruteForce: {
+              checked: bruteForceResult.checked,
+              totalChecks: bruteForceResult.totalChecks,
+              status: 'complete'
+            }
+          })
+        });
+      } catch (err) {
+        console.warn('Failed to send final algorithm progress:', err);
+      }
+
       const bruteForcePayload = {
         ...bruteForceResult,
         distance: Number.isFinite(bruteForceResult.distance) ? bruteForceResult.distance : null,
@@ -431,24 +429,25 @@ export default function TSPManager() {
       const completionTime = Math.floor((Date.now() - startTime) / 1000);
       setInstructorComplete(true);
       setInstructorDistance(totalDistance);
+      setInstructorTimeToComplete(completionTime);
       if (broadcastIds.includes('instructor')) {
         broadcastInstructorRoute(newRoute, totalDistance, completionTime);
       }
-      saveInstructorRoute(newRoute, totalDistance, true);
+      saveInstructorRoute(newRoute, totalDistance, true, completionTime);
     } else if (broadcastIds.includes('instructor')) {
       broadcastInstructorRoute(newRoute, currentDistance, null);
     }
     if (!isComplete) {
-      saveInstructorRoute(newRoute, currentDistance, false);
+      saveInstructorRoute(newRoute, currentDistance, false, null);
     }
   };
 
-  const saveInstructorRoute = async (route, distance, complete) => {
+  const saveInstructorRoute = async (route, distance, complete, timeToComplete = null) => {
     try {
       await fetch(`/api/traveling-salesman/${sessionId}/update-instructor-route`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ route, distance, complete })
+        body: JSON.stringify({ route, distance, complete, timeToComplete })
       });
     } catch (err) {
       console.error('Failed to persist instructor route:', err);
@@ -575,9 +574,9 @@ export default function TSPManager() {
         const totalDistance = instructorRoute.length === session.problem.cities.length
           ? calculateTotalDistance(instructorRoute, session.problem.distanceMatrix)
           : instructorDistance;
-        const timeToComplete = instructorComplete && instructorStartTime
-          ? Math.floor((Date.now() - instructorStartTime) / 1000)
-          : null;
+          const timeToComplete = instructorComplete
+            ? instructorTimeToComplete
+            : null;
         await broadcastInstructorRoute(instructorRoute, totalDistance, timeToComplete);
       }
 
@@ -606,6 +605,7 @@ export default function TSPManager() {
     setInstructorDistance(0);
     setInstructorComplete(false);
     setInstructorStartTime(null);
+    setInstructorTimeToComplete(null);
     if (highlightedSolution?.id === 'instructor' || highlightedSolution?.id === 'instructor-local') {
       setHighlightedSolution(null);
     }
@@ -705,8 +705,8 @@ export default function TSPManager() {
         id: 'instructor-local',
         name: 'Instructor',
         distance: instructorRoute.length > 0 ? instructorDistance : null,
-        timeToComplete: instructorComplete && instructorStartTime
-          ? Math.floor((Date.now() - instructorStartTime) / 1000)
+        timeToComplete: instructorComplete
+          ? instructorTimeToComplete
           : null,
         progressCurrent: instructorRoute.length,
         progressTotal: session?.problem?.cities?.length ?? null,

@@ -6,30 +6,12 @@ import Button from '@src/components/ui/Button';
 import CityMap from '../components/CityMap.jsx';
 import Leaderboard from '../components/Leaderboard.jsx';
 import RouteLegend from '../components/RouteLegend.jsx';
-import { calculateRouteDistance, buildDistanceMatrix } from '../utils/distanceCalculator.js';
+import { calculateRouteDistance, buildDistanceMatrix, calculateCurrentDistance } from '../utils/distanceCalculator.js';
 import { generateCities } from '../utils/cityGenerator.js';
+import { factorial } from '../utils/mathHelpers.js';
 import { solveTSPBruteForce } from '../utils/bruteForce.js';
 import { solveTSPNearestNeighbor } from '../utils/nearestNeighbor.js';
 import './TSPStudent.css';
-
-const calculateCurrentDistance = (route, distanceMatrix) => {
-  if (!route || route.length <= 1) return 0;
-  let total = 0;
-  for (let i = 0; i < route.length - 1; i++) {
-    const from = parseInt(route[i].split('-')[1], 10);
-    const to = parseInt(route[i + 1].split('-')[1], 10);
-    total += distanceMatrix?.[from]?.[to] || 0;
-  }
-  return total;
-};
-
-const factorial = (n) => {
-  let result = 1;
-  for (let i = 2; i <= n; i++) {
-    result *= i;
-  }
-  return result;
-};
 
 /**
  * TSPStudent - Student view for building TSP routes
@@ -306,6 +288,9 @@ export default function TSPStudent({ sessionData }) {
         ...prev,
         heuristic: { current: 0, total: (cities.length || numCities), running: false }
       }));
+      if (soloAlgorithms?.bruteForce?.cancelled) {
+        setSoloBruteForceStarted(false);
+      }
     }
   };
 
@@ -525,12 +510,12 @@ export default function TSPStudent({ sessionData }) {
   ] : [];
   const sortedSoloLeaderboardEntries = isSoloSession
     ? [...soloLeaderboardEntries].sort((a, b) => {
-      const aInProgress = a.type === 'student'
-        ? !isComplete
-        : (a.progressCurrent !== null && a.progressCurrent !== undefined);
-      const bInProgress = b.type === 'student'
-        ? !isComplete
-        : (b.progressCurrent !== null && b.progressCurrent !== undefined);
+      const isInProgress = (entry) => {
+        if (entry.type === 'student') return !isComplete;
+        return entry.progressCurrent !== null && entry.progressCurrent !== undefined;
+      };
+      const aInProgress = isInProgress(a);
+      const bInProgress = isInProgress(b);
       if (aInProgress !== bInProgress) return aInProgress ? 1 : -1;
       const aDistance = a.distance ?? Infinity;
       const bDistance = b.distance ?? Infinity;

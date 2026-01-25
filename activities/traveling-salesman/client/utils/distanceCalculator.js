@@ -50,3 +50,41 @@ export function calculateRouteDistance(route, distanceMatrix) {
 
   return total;
 }
+
+/**
+ * Calculate distance for the current (non-complete) route
+ * Does not include return to start city
+ * @param {Array} route - Array of city IDs in visit order
+ * @param {Array} distanceMatrix - Distance matrix
+ * @returns {number} Current route distance
+ */
+export function calculateCurrentDistance(route, distanceMatrix) {
+  if (!route || route.length <= 1) return 0;
+  let total = 0;
+  for (let i = 0; i < route.length - 1; i++) {
+    const from = parseInt(route[i].split('-')[1], 10);
+    const to = parseInt(route[i + 1].split('-')[1], 10);
+    total += distanceMatrix?.[from]?.[to] || 0;
+  }
+  return total;
+}
+
+/**
+ * Calculate total distance for a route of city indices
+ * Includes return to starting city
+ * @param {Array} route - Array of city indices
+ * @param {Array} distanceMatrix - Distance matrix
+ * @returns {number} Total route distance
+ */
+export function calculateTotalDistance(route, distanceMatrix) {
+  if (!route || route.length === 0) return 0;
+  let total = 0;
+  for (let i = 0; i < route.length; i++) {
+    const fromRaw = route[i];
+    const toRaw = route[(i + 1) % route.length];
+    const from = typeof fromRaw === 'string' ? parseInt(fromRaw.split('-')[1], 10) : fromRaw;
+    const to = typeof toRaw === 'string' ? parseInt(toRaw.split('-')[1], 10) : toRaw;
+    total += distanceMatrix[from][to];
+  }
+  return total;
+}

@@ -4,6 +4,13 @@ import './RouteLegend.css';
 
 export default function RouteLegend({ title = 'Viewing', items = [] }) {
   if (!items || items.length === 0) return null;
+  const bruteForceItem = items.find(item => item.type === 'bruteforce');
+  const showBruteForceProgress = bruteForceItem
+    && bruteForceItem.progressCurrent !== null
+    && bruteForceItem.progressCurrent !== undefined
+    && bruteForceItem.progressTotal !== null
+    && bruteForceItem.progressTotal !== undefined
+    && bruteForceItem.progressTotal !== bruteForceItem.progressCurrent;
 
   return (
     <div className="route-legend">
@@ -22,14 +29,11 @@ export default function RouteLegend({ title = 'Viewing', items = [] }) {
           </span>
         </div>
       ))}
-      {items.some(item => item.type === 'bruteforce'
-        && item.progressCurrent !== null && item.progressCurrent !== undefined
-        && item.progressTotal !== null && item.progressTotal !== undefined
-        && item.progressTotal !== item.progressCurrent ) && (
+      {showBruteForceProgress && (
         <ProgressBar
-          value={items.find(item => item.type === 'bruteforce')?.progressCurrent || 0}
-          max={items.find(item => item.type === 'bruteforce')?.progressTotal || 0}
-          label={`Brute force checks: ${items.find(item => item.type === 'bruteforce')?.progressCurrent || 0}/${items.find(item => item.type === 'bruteforce')?.progressTotal || 0}`}
+          value={bruteForceItem?.progressCurrent || 0}
+          max={bruteForceItem?.progressTotal || 0}
+          label={`Brute force checks: ${bruteForceItem?.progressCurrent || 0}/${bruteForceItem?.progressTotal || 0}`}
         />
       )}
     </div>
