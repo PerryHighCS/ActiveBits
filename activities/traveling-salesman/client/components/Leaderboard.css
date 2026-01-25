@@ -1,0 +1,217 @@
+.leaderboard {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.leaderboard h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.5rem;
+  color: #333;
+}
+
+.leaderboard-note {
+  margin: 0 0 16px 0;
+  font-size: 0.9rem;
+  color: #666;
+  font-style: italic;
+}
+
+.leaderboard-empty {
+  color: #666;
+  font-style: italic;
+  padding: 20px;
+  text-align: center;
+}
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.leaderboard-table thead {
+  background: #f5f5f5;
+}
+
+.leaderboard-table th {
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #555;
+  border-bottom: 2px solid #ddd;
+}
+
+.leaderboard-table td {
+  padding: 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.leaderboard-row {
+  transition: background 0.2s ease;
+}
+
+.leaderboard-row:hover {
+  background: #f9f9f9;
+}
+
+.leaderboard-row.bruteforce {
+  background: #e8f5e9;
+}
+
+.leaderboard-row.heuristic {
+  background: #fff8e1;
+}
+
+.leaderboard-row.instructor {
+  background: #e0f2f1;
+}
+.rank {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #666;
+  width: 60px;
+}
+
+.name {
+  font-weight: 600;
+  color: #333;
+}
+
+.name-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #1976D2;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.name-button:hover {
+  color: #0D47A1;
+}
+
+.distance {
+  font-family: monospace;
+  font-size: 1.05rem;
+  color: #2196F3;
+}
+
+.time {
+  font-family: monospace;
+  color: #666;
+}
+
+.leaderboard-table th:nth-child(1),
+.leaderboard-table td:nth-child(1) {
+  width: 60px;
+}
+
+.leaderboard-table th:nth-child(3),
+.leaderboard-table td:nth-child(3) {
+  width: 120px;
+}
+
+.leaderboard-table th:nth-child(4),
+.leaderboard-table td:nth-child(4) {
+  width: 220px;
+}
+
+.leaderboard-table th:nth-child(5),
+.leaderboard-table td:nth-child(5) {
+  width: 140px;
+}
+
+.leaderboard-table th:nth-child(6),
+.leaderboard-table td:nth-child(6) {
+  width: 180px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.badge.optimal {
+  background: #4CAF50;
+  color: white;
+}
+
+.badge.heuristic {
+  background: #FFC107;
+  color: #333;
+}
+
+.badge.student {
+  background: #2196F3;
+  color: white;
+}
+
+.badge.instructor {
+  background: #009688;
+  color: white;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-view,
+.btn-broadcast {
+  padding: 6px 12px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: transparent;
+}
+
+.btn-view {
+  color: #2196F3;
+}
+
+.btn-view:hover {
+  color: #1976D2;
+}
+
+.btn-broadcast {
+  color: #FF5722;
+}
+
+.btn-broadcast:hover {
+  color: #E64A19;
+}
+
+.btn-broadcast.active {
+  background: #FF5722;
+  color: #fff;
+  border-color: #FF5722;
+}
+
+.btn-broadcast.active:hover {
+  background: #E64A19;
+  border-color: #E64A19;
+}
+
+.btn-view.active {
+  background: #2196F3;
+  color: #fff;
+  border-color: #2196F3;
+}
+
+.btn-view.active:hover {
+  background: #1976D2;
+  border-color: #1976D2;
+}
+
+.btn-view:active,
+.btn-broadcast:active {
+  transform: scale(0.95);
+}

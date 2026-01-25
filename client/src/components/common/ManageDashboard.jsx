@@ -212,6 +212,14 @@ export default function ManageDashboard() {
     red: 'bg-red-600',
     yellow: 'bg-yellow-600',
     indigo: 'bg-indigo-600',
+    orange: 'bg-orange-600',
+    emerald: 'bg-emerald-600',
+    sky: 'bg-sky-600',
+    fuchsia: 'bg-fuchsia-600',
+    pink: 'bg-pink-600',
+    rose: 'bg-rose-600',
+    lime: 'bg-lime-600',
+    teal: 'bg-teal-600',
   };
 
   const borderColorClasses = {
@@ -221,6 +229,14 @@ export default function ManageDashboard() {
     red: 'border-red-200',
     yellow: 'border-yellow-200',
     indigo: 'border-indigo-200',
+    orange: 'border-orange-200',
+    emerald: 'border-emerald-200',
+    sky: 'border-sky-200',
+    fuchsia: 'border-fuchsia-200',
+    pink: 'border-pink-200',
+    rose: 'border-rose-200',
+    lime: 'border-lime-200',
+    teal: 'border-teal-200',
   };
 
   const bgColorClasses = {
@@ -230,6 +246,14 @@ export default function ManageDashboard() {
     red: 'bg-red-50',
     yellow: 'bg-yellow-50',
     indigo: 'bg-indigo-50',
+    orange: 'bg-orange-50',
+    emerald: 'bg-emerald-50',
+    sky: 'bg-sky-50',
+    fuchsia: 'bg-fuchsia-50',
+    pink: 'bg-pink-50',
+    rose: 'bg-rose-50',
+    lime: 'bg-lime-50',
+    teal: 'bg-teal-50',
   };
 
   return (

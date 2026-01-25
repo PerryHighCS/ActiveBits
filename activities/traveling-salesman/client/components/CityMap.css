@@ -1,0 +1,46 @@
+.city-map {
+  border: 2px solid #333;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  background: #fff;
+  display: block;
+  margin: 0 auto;
+}
+
+.city-marker {
+  transition: filter 0.2s ease;
+}
+
+.city-group:hover .city-marker {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  cursor: pointer;
+}
+
+.city-label {
+  pointer-events: none;
+  text-shadow:
+    1px 1px 2px white,
+    -1px -1px 2px white,
+    1px -1px 2px white,
+    -1px 1px 2px white;
+}
+
+.city-group:focus-visible .city-marker {
+  outline: 3px solid #1E88E5;
+  outline-offset: 4px;
+}
+
+.route-edge {
+  transition: stroke-width 0.3s ease, opacity 0.3s ease;
+}
+
+.route-group {
+  pointer-events: none;
+}
+
+.distance-label {
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  pointer-events: none;
+}

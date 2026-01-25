@@ -1,0 +1,33 @@
+.route-legend {
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.route-legend-title {
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.route-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #444;
+  font-size: 0.95rem;
+}
+
+.route-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--route-color, #999);
+}
