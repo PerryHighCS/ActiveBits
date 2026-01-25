@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { generateTerrainPattern } from '../utils/terrainGenerator.js';
 import './CityMap.css';
+import { ROUTE_TYPES } from '../utils/routeTypes.js';
+import { formatDistance } from '../utils/formatters.js';
 
 /**
  * CityMap component - Displays TSP map with cities, routes, and terrain background
@@ -84,12 +86,9 @@ export default function CityMap({
   };
 
   const getRouteColor = (route) => {
-    let color = '#1E88E5'; // Student: blue
-    if (route.type === 'bruteforce') color = '#43A047'; // Green
-    else if (route.type === 'heuristic') color = '#F9A825'; // Amber
-    else if (route.type === 'instructor') color = '#8E24AA'; // Purple
-    if (highlightedRoute?.id === route.id) color = '#E53935'; // Red
-    return color;
+    const baseColor = ROUTE_TYPES[route.type]?.color || ROUTE_TYPES.student.color;
+    if (highlightedRoute?.id === route.id) return ROUTE_TYPES.highlight.color;
+    return baseColor;
   };
 
   const getStarStroke = (fill) => {
@@ -148,7 +147,7 @@ export default function CityMap({
               fill={color}
               className="distance-label"
             >
-              {distance !== null ? distance.toFixed(1) : ''}
+              {distance !== null ? formatDistance(distance) : ''}
             </text>
           );
         })}
@@ -171,7 +170,7 @@ export default function CityMap({
               fill={color}
               className="distance-label"
             >
-              {distance !== null ? distance.toFixed(1) : ''}
+              {distance !== null ? formatDistance(distance) : ''}
             </text>
           );
         })()}
@@ -400,7 +399,7 @@ export default function CityMap({
               fill="#FF5722"
               className="distance-label"
             >
-              {distance !== null ? distance.toFixed(1) : ''}
+              {distance !== null ? formatDistance(distance) : ''}
             </text>
           </g>
         );
@@ -411,7 +410,7 @@ export default function CityMap({
         const activeId = activeRoute?.[activeRoute.length - 1] || null;
         const distanceToActive = activeId ? getDistance(activeId, city.id) : null;
         const ariaLabel = distanceToActive !== null
-          ? `City ${city.name}. Distance from current city: ${distanceToActive.toFixed(1)}.`
+          ? `City ${city.name}. Distance from current city: ${formatDistance(distanceToActive)}.`
           : `City ${city.name}.`;
         return (
         <g

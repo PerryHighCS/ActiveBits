@@ -29,25 +29,5 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #999;
-}
-
-.route-legend-item.student .route-legend-swatch {
-  background: #1E88E5;
-}
-
-.route-legend-item.bruteforce .route-legend-swatch {
-  background: #43A047;
-}
-
-.route-legend-item.heuristic .route-legend-swatch {
-  background: #F9A825;
-}
-
-.route-legend-item.instructor .route-legend-swatch {
-  background: #8E24AA;
-}
-
-.route-legend-item.highlight .route-legend-swatch {
-  background: #E53935;
+  background: var(--route-color, #999);
 }

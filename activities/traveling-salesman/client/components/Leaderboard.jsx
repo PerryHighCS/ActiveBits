@@ -1,5 +1,7 @@
 import React from 'react';
 import ProgressBar from './ProgressBar.jsx';
+import { formatDistance, formatTime } from '../utils/formatters.js';
+import { getProgressLabel } from '../utils/progressHelpers.js';
 import './Leaderboard.css';
 
 /**
@@ -72,19 +74,19 @@ export default function Leaderboard({
               </td>
               <td className="distance">
                 {entry.distance !== null && entry.distance !== undefined
-                  ? entry.distance.toFixed(1)
+                  ? formatDistance(entry.distance)
                   : '—'}
               </td>
               <td className="time">
                 {entry.timeToComplete !== null && entry.timeToComplete !== undefined
-                  ? `${entry.timeToComplete}s`
+                  ? formatTime(entry.timeToComplete)
                   : (entry.progressCurrent !== null && entry.progressCurrent !== undefined
                     && entry.progressTotal !== null && entry.progressTotal !== undefined
                     ? (
                       <ProgressBar
                         value={entry.progressCurrent}
                         max={entry.progressTotal}
-                        label={`${entry.progressCurrent}/${entry.progressTotal}`}
+                        label={getProgressLabel(entry.progressCurrent, entry.progressTotal)}
                       />
                     )
                     : (entry.type === 'student' ? 'In progress' : ''))}

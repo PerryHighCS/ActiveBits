@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
-import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
+import { useTspSession } from '../hooks/useTspSession.js';
+import { useRouteBuilder } from '../hooks/useRouteBuilder.js';
 import Button from '@src/components/ui/Button';
 import CityMap from '../components/CityMap.jsx';
 import Leaderboard from '../components/Leaderboard.jsx';
 import RouteLegend from '../components/RouteLegend.jsx';
-import { calculateRouteDistance, buildDistanceMatrix, calculateCurrentDistance } from '../utils/distanceCalculator.js';
+import { buildLegendItems } from '../utils/routeLegend.js';
+import { buildDistanceMatrix, getRouteDistance } from '../utils/distanceCalculator.js';
+import { formatDistance } from '../utils/formatters.js';
 import { generateCities } from '../utils/cityGenerator.js';
 import { factorial } from '../utils/mathHelpers.js';
 import { solveTSPBruteForce } from '../utils/bruteForce.js';
@@ -32,17 +35,11 @@ export default function TSPStudent({ sessionData }) {
   const [cities, setCities] = useState([]);
   const [distanceMatrix, setDistanceMatrix] = useState([]);
   const [terrainSeed, setTerrainSeed] = useState(Date.now());
-  const [currentRoute, setCurrentRoute] = useState([]);
-  const [isComplete, setIsComplete] = useState(false);
-  const [routeStartTime, setRouteStartTime] = useState(null);
-  const [routeDistance, setRouteDistance] = useState(0);
   const [broadcastedRoutes, setBroadcastedRoutes] = useState([]);
   const [hoveredCityId, setHoveredCityId] = useState(null);
-  const [currentDistance, setCurrentDistance] = useState(0);
   const [numCities, setNumCities] = useState(6);
   const [soloAlgorithms, setSoloAlgorithms] = useState({ bruteForce: null, heuristic: null });
   const [soloComputing, setSoloComputing] = useState(false);
-  const [soloTimeToComplete, setSoloTimeToComplete] = useState(null);
   const [soloActiveViewId, setSoloActiveViewId] = useState(null);
   const [soloBruteForceStarted, setSoloBruteForceStarted] = useState(false);
   const [soloStartCityId, setSoloStartCityId] = useState(null);
@@ -50,6 +47,16 @@ export default function TSPStudent({ sessionData }) {
     bruteForce: { current: 0, total: 0, running: false },
     heuristic: { current: 0, total: 0, running: false }
   });
+  const routeBuilder = useRouteBuilder({
+    cityCount: cities.length,
+    distanceMatrix
+  });
+  const currentRoute = routeBuilder.route;
+  const isComplete = routeBuilder.isComplete;
+  const routeDistance = routeBuilder.totalDistance;
+  const currentDistance = routeBuilder.currentDistance;
+  const timeToComplete = routeBuilder.timeToComplete;
+  const { addCity, hydrateRoute, resetRoute: resetBuiltRoute } = routeBuilder;
 
   // Load saved student info
   useEffect(() => {
@@ -69,24 +76,6 @@ export default function TSPStudent({ sessionData }) {
     }
   }, [sessionId, isSoloSession]);
 
-  // Fetch initial problem state
-  const fetchProblem = useCallback(async () => {
-    if (!sessionId) return;
-    try {
-      const res = await fetch(`/api/traveling-salesman/${sessionId}/session`);
-      if (!res.ok) throw new Error('Failed to fetch session');
-      const data = await res.json();
-
-      if (data.problem && data.problem.cities) {
-        setCities(data.problem.cities);
-        setDistanceMatrix(data.problem.distanceMatrix);
-        setTerrainSeed(data.problem.seed || Date.now());
-      }
-    } catch (err) {
-      console.error('Failed to fetch problem:', err);
-    }
-  }, [sessionId]);
-
   const restoreStudentRoute = useCallback(async (idToRestore) => {
     if (!sessionId || !idToRestore) return;
     try {
@@ -95,22 +84,19 @@ export default function TSPStudent({ sessionData }) {
       const data = await res.json();
       const student = data.students?.find(s => s.id === idToRestore);
       if (student && Array.isArray(student.currentRoute)) {
-        setCurrentRoute(student.currentRoute);
-        setIsComplete(Boolean(student.complete));
         const matrix = data.problem?.distanceMatrix || distanceMatrix;
-        const totalDistance = student.routeDistance ?? calculateRouteDistance(student.currentRoute, matrix);
-        if (student.complete) {
-          setRouteDistance(totalDistance || 0);
-          setCurrentDistance(totalDistance || 0);
-        } else {
-          setRouteDistance(0);
-          setCurrentDistance(calculateCurrentDistance(student.currentRoute, matrix));
-        }
+        const totalDistance = student.routeDistance ?? getRouteDistance(student.currentRoute, matrix, true);
+        hydrateRoute({
+          route: student.currentRoute,
+          complete: Boolean(student.complete),
+          distance: student.complete ? totalDistance : null,
+          timeToComplete: student.timeToComplete ?? null
+        });
       }
     } catch (err) {
       console.error('Failed to restore student route:', err);
     }
-  }, [sessionId, distanceMatrix]);
+  }, [sessionId, distanceMatrix, hydrateRoute]);
 
   useEffect(() => {
     studentIdRef.current = studentId;
@@ -122,61 +108,54 @@ export default function TSPStudent({ sessionData }) {
   }, [studentId, isSoloSession, restoreStudentRoute]);
 
   // WebSocket handlers
-  const handleWsMessage = useCallback((event) => {
+  const handleWsMessage = useCallback((message) => {
     try {
-      const message = JSON.parse(event.data);
+      const payload = typeof message === 'string' ? JSON.parse(message) : message;
+      if (!payload?.type) return;
 
-      if (message.type === 'session-ended') {
+      if (payload.type === 'session-ended') {
         navigate('/session-ended');
         return;
       }
-      if (message.type === 'clearBroadcast') {
+      if (payload.type === 'clearBroadcast') {
         setBroadcastedRoutes([]);
         return;
       }
-      if (message.type === 'broadcastUpdate' && (!message.payload?.routes || message.payload.routes.length === 0)) {
+      if (payload.type === 'broadcastUpdate' && (!payload.payload?.routes || payload.payload.routes.length === 0)) {
         setBroadcastedRoutes([]);
         return;
       }
-      if (message.type === 'studentId') {
-        const newStudentId = message.payload.studentId;
+      if (payload.type === 'studentId') {
+        const newStudentId = payload.payload.studentId;
         setStudentId(newStudentId);
         localStorage.setItem(`student-id-${sessionId}`, newStudentId);
-      } else if (message.type === 'problemUpdate') {
-        setCities(message.payload.cities);
-        setDistanceMatrix(message.payload.distanceMatrix);
-        setTerrainSeed(message.payload.seed || Date.now());
+      } else if (payload.type === 'problemUpdate') {
+        setCities(payload.payload.cities);
+        setDistanceMatrix(payload.payload.distanceMatrix);
+        setTerrainSeed(payload.payload.seed || Date.now());
         // Reset route when new problem is generated
-        setCurrentRoute([]);
-        setIsComplete(false);
-        setRouteStartTime(null);
-        setRouteDistance(0);
-        setCurrentDistance(0);
+        resetBuiltRoute();
         setHoveredCityId(null);
-      } else if (message.type === 'broadcastUpdate') {
-        const routes = (message.payload?.routes || []).map((route) => ({
-          ...route,
-          path: route.path || route.route
-        }));
-        setBroadcastedRoutes(routes);
-      } else if (message.type === 'highlightSolution') {
-        if (!message.payload) {
+      } else if (payload.type === 'broadcastUpdate') {
+        setBroadcastedRoutes(payload.payload?.routes || []);
+      } else if (payload.type === 'highlightSolution') {
+        if (!payload.payload) {
           setBroadcastedRoutes([]);
           return;
         }
         setBroadcastedRoutes([{
-          id: message.payload.id,
-          path: message.payload.route,
-          type: message.payload.type,
-          name: message.payload.name,
-          distance: message.payload.distance,
-          timeToComplete: message.payload.timeToComplete
+          id: payload.payload.id,
+          path: payload.payload.path,
+          type: payload.payload.type,
+          name: payload.payload.name,
+          distance: payload.payload.distance,
+          timeToComplete: payload.payload.timeToComplete
         }]);
       }
     } catch (err) {
       console.error('Failed to parse WebSocket message:', err);
     }
-  }, [navigate, sessionId]);
+  }, [navigate, sessionId, resetBuiltRoute]);
 
   const buildWsUrl = useCallback(() => {
     if (!nameSubmitted || isSoloSession) return null;
@@ -187,12 +166,21 @@ export default function TSPStudent({ sessionData }) {
     return `${protocol}//${host}/ws/traveling-salesman?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}${studentIdParam}`;
   }, [nameSubmitted, sessionId, studentName, isSoloSession]);
 
-  const { connect, disconnect } = useResilientWebSocket({
-    buildUrl: buildWsUrl,
+  const handleSessionUpdate = useCallback((data) => {
+    if (data.problem && data.problem.cities) {
+      setCities(data.problem.cities);
+      setDistanceMatrix(data.problem.distanceMatrix);
+      setTerrainSeed(data.problem.seed || Date.now());
+    }
+  }, []);
+
+  const { connect, disconnect } = useTspSession({
+    sessionId,
+    buildWsUrl,
     shouldReconnect: Boolean(nameSubmitted && !isSoloSession),
-    onOpen: () => fetchProblem(),
     onMessage: handleWsMessage,
-    attachSessionEndedHandler,
+    onSession: handleSessionUpdate,
+    attachSessionEndedHandler
   });
 
   useEffect(() => {
@@ -204,13 +192,6 @@ export default function TSPStudent({ sessionData }) {
     return () => disconnect();
   }, [nameSubmitted, isSoloSession, connect, disconnect]);
 
-  // Load problem on mount for solo mode
-  useEffect(() => {
-    if (isSoloSession && nameSubmitted) {
-      fetchProblem();
-    }
-  }, [isSoloSession, nameSubmitted, fetchProblem]);
-
   // Handle city click
   const handleCityClick = (city) => {
     if (isComplete) return;
@@ -220,37 +201,16 @@ export default function TSPStudent({ sessionData }) {
       return;
     }
 
-    // Track start time on first click
-    const now = Date.now();
-    const startTime = routeStartTime ?? now;
-    if (routeStartTime === null) {
-      setRouteStartTime(startTime);
-    }
-
-    const newRoute = [...currentRoute, city.id];
-    setCurrentRoute(newRoute);
+    const result = addCity(city.id);
+    if (!result) return;
     if (isSoloSession && currentRoute.length === 0) {
       setSoloStartCityId(city.id);
       computeSoloAlgorithms(city.id, { runHeuristic: true, runBruteForce: !soloBruteForceStarted });
     }
-
-    const newCurrentDistance = calculateCurrentDistance(newRoute, distanceMatrix);
-    setCurrentDistance(newCurrentDistance);
-
-    // Check if complete
-    if (newRoute.length === cities.length) {
-      const distance = calculateRouteDistance(newRoute, distanceMatrix);
-      const completionTime = Date.now();
-      const timeToComplete = Math.floor((completionTime - startTime) / 1000);
-
-      setIsComplete(true);
-      setRouteDistance(distance);
-      if (isSoloSession) {
-        setSoloTimeToComplete(timeToComplete);
-      }
-      submitRoute(newRoute, distance, timeToComplete);
+    if (result.isComplete) {
+      submitRoute(result.route, result.totalDistance, result.timeToComplete);
     } else {
-      submitRoute(newRoute, newCurrentDistance, null);
+      submitRoute(result.route, result.currentDistance, null);
     }
   };
 
@@ -274,12 +234,7 @@ export default function TSPStudent({ sessionData }) {
   };
 
   const resetRoute = () => {
-    setCurrentRoute([]);
-    setIsComplete(false);
-    setRouteStartTime(null);
-    setRouteDistance(0);
-    setCurrentDistance(0);
-    setSoloTimeToComplete(null);
+    resetBuiltRoute();
     setSoloActiveViewId(null);
     setSoloStartCityId(null);
     if (isSoloSession) {
@@ -457,22 +412,20 @@ export default function TSPStudent({ sessionData }) {
     }] : [])
   ] : [];
   const displayedRoutes = isSoloSession ? soloDisplayedRoutes : sortedBroadcastedRoutes;
-  const legendItems = [
-    ...(currentRoute.length > 0 ? [{
-      id: 'student',
-      type: 'student',
-      label: 'My Route',
-      distance: isComplete ? routeDistance : currentDistance
-    }] : []),
-    ...displayedRoutes.map(route => ({
-      id: route.id,
-      type: route.type,
-      label: route.name,
-      distance: route.distance ?? null,
-      progressCurrent: route.progressCurrent ?? null,
-      progressTotal: route.progressTotal ?? null
+  const legendItems = buildLegendItems({
+    primary: currentRoute.length > 0
+      ? {
+        id: 'student',
+        type: 'student',
+        label: 'My Route',
+        distance: isComplete ? routeDistance : currentDistance
+      }
+      : null,
+    routes: displayedRoutes.map(route => ({
+      ...route,
+      label: route.name
     }))
-  ];
+  });
 
   const showSoloAlgorithms = isSoloSession && cities.length > 0
     && (currentRoute.length > 0
@@ -487,7 +440,7 @@ export default function TSPStudent({ sessionData }) {
       id: 'solo-student',
       name: 'My Route',
       distance: isComplete ? routeDistance : currentDistance,
-      timeToComplete: isComplete ? soloTimeToComplete : null,
+      timeToComplete: isComplete ? timeToComplete : null,
       type: 'student'
     }] : []),
     ...(showSoloAlgorithms ? [{
@@ -560,7 +513,7 @@ export default function TSPStudent({ sessionData }) {
             Cities visited: {currentRoute.length} / {cities.length}
           </div>
           <div className={`info-line ${isComplete ? 'complete' : ''}`}>
-            {isComplete ? 'Total distance' : 'Current distance'}: {isComplete ? routeDistance.toFixed(1) : currentDistance.toFixed(1)}
+            {isComplete ? 'Total distance' : 'Current distance'}: {formatDistance(isComplete ? routeDistance : currentDistance)}
           </div>
           <Button onClick={resetRoute} disabled={currentRoute.length === 0}>
             Reset Route

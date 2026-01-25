@@ -2,12 +2,15 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import Button from '@src/components/ui/Button';
-import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
+import { useTspSession } from '../hooks/useTspSession.js';
+import { useRouteBuilder } from '../hooks/useRouteBuilder.js';
 import CityMap from '../components/CityMap.jsx';
 import Leaderboard from '../components/Leaderboard.jsx';
 import RouteLegend from '../components/RouteLegend.jsx';
+import { buildLegendItems, dedupeLegendItems } from '../utils/routeLegend.js';
 import { generateCities } from '../utils/cityGenerator.js';
-import { buildDistanceMatrix, calculateCurrentDistance, calculateTotalDistance } from '../utils/distanceCalculator.js';
+import { buildDistanceMatrix } from '../utils/distanceCalculator.js';
+import { formatDistance } from '../utils/formatters.js';
 import { solveTSPBruteForce } from '../utils/bruteForce.js';
 import { solveTSPNearestNeighbor } from '../utils/nearestNeighbor.js';
 import './TSPManager.css';
@@ -20,95 +23,27 @@ export default function TSPManager() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
 
-  const [session, setSession] = useState(null);
   const [numCities, setNumCities] = useState(6);
   const [highlightedSolution, setHighlightedSolution] = useState(null);
   const [computing, setComputing] = useState(false);
-  const [leaderboard, setLeaderboard] = useState([]);
   const [bruteForceProgress, setBruteForceProgress] = useState(null);
   const [bruteForceStatus, setBruteForceStatus] = useState('idle');
-  const [instructorRoute, setInstructorRoute] = useState([]);
-  const [instructorDistance, setInstructorDistance] = useState(0);
-  const [instructorComplete, setInstructorComplete] = useState(false);
-  const [instructorStartTime, setInstructorStartTime] = useState(null);
-  const [instructorTimeToComplete, setInstructorTimeToComplete] = useState(null);
   const [hoveredCityId, setHoveredCityId] = useState(null);
   const [broadcastIds, setBroadcastIds] = useState([]);
+  const [broadcastSnapshot, setBroadcastSnapshot] = useState([]);
   const cancelBruteForceRef = useRef(false);
   const progressSentRef = useRef(0);
   const progressLocalRef = useRef(0);
-  const refreshTimeoutRef = useRef(null);
   const mapTokenRef = useRef(0);
   const mapSeedRef = useRef(null);
   const pendingBroadcastRef = useRef(null);
 
-  // Fetch session state
-  const fetchSession = useCallback(async () => {
-    if (!sessionId) return;
-    try {
-      const res = await fetch(`/api/traveling-salesman/${sessionId}/session`);
-      if (!res.ok) throw new Error('Failed to fetch session');
-      const data = await res.json();
-      setSession(data);
-      if (data?.problem?.seed && data.problem.seed !== mapSeedRef.current) {
-        mapSeedRef.current = data.problem.seed;
-        mapTokenRef.current += 1;
-      }
-      if (data.instructor?.route?.length) {
-        setInstructorRoute(data.instructor.route);
-        setInstructorDistance(data.instructor.distance ?? 0);
-        setInstructorComplete(Boolean(data.instructor.complete));
-        setInstructorTimeToComplete(data.instructor.timeToComplete ?? null);
-      } else {
-        setInstructorRoute([]);
-        setInstructorDistance(0);
-        setInstructorComplete(false);
-        setInstructorStartTime(null);
-        setInstructorTimeToComplete(null);
-      }
-    } catch (err) {
-      console.error('Failed to fetch session:', err);
+  const handleSessionUpdate = useCallback((data) => {
+    if (data?.problem?.seed && data.problem.seed !== mapSeedRef.current) {
+      mapSeedRef.current = data.problem.seed;
+      mapTokenRef.current += 1;
     }
-  }, [sessionId]);
-
-  // Fetch leaderboard
-  const fetchLeaderboard = useCallback(async () => {
-    if (!sessionId) return;
-    try {
-      const res = await fetch(`/api/traveling-salesman/${sessionId}/leaderboard`);
-      if (!res.ok) throw new Error('Failed to fetch leaderboard');
-      const data = await res.json();
-      setLeaderboard(data.leaderboard || []);
-    } catch (err) {
-      console.error('Failed to fetch leaderboard:', err);
-    }
-  }, [sessionId]);
-
-  const scheduleRefresh = useCallback(() => {
-    if (refreshTimeoutRef.current) return;
-    refreshTimeoutRef.current = setTimeout(() => {
-      refreshTimeoutRef.current = null;
-      fetchSession();
-      fetchLeaderboard();
-    }, 100);
-  }, [fetchSession, fetchLeaderboard]);
-
-  const handleWsMessage = useCallback((event) => {
-    try {
-      const message = JSON.parse(event.data);
-      if ([
-        'problemUpdate',
-        'studentsUpdate',
-        'broadcastUpdate',
-        'clearBroadcast',
-        'algorithmsComputed'
-      ].includes(message.type)) {
-        scheduleRefresh();
-      }
-    } catch (err) {
-      console.error('Failed to parse WebSocket message:', err);
-    }
-  }, [scheduleRefresh]);
+  }, []);
 
   const buildWsUrl = useCallback(() => {
     if (!sessionId) return null;
@@ -117,14 +52,39 @@ export default function TSPManager() {
     return `${protocol}//${host}/ws/traveling-salesman?sessionId=${sessionId}`;
   }, [sessionId]);
 
-  const { connect, disconnect } = useResilientWebSocket({
-    buildUrl: buildWsUrl,
+  const handleWsMessage = useCallback((message) => {
+    if (message.type === 'broadcastUpdate') {
+      setBroadcastSnapshot(message.payload?.routes || []);
+    }
+    if (message.type === 'clearBroadcast') {
+      setBroadcastSnapshot([]);
+    }
+    if (message.type === 'problemUpdate') {
+      setBroadcastSnapshot([]);
+    }
+  }, []);
+
+  const {
+    session,
+    leaderboard,
+    fetchSession,
+    fetchLeaderboard,
+    connect,
+    disconnect
+  } = useTspSession({
+    sessionId,
+    buildWsUrl,
     shouldReconnect: Boolean(sessionId),
-    onOpen: () => {
-      fetchSession();
-      fetchLeaderboard();
-    },
-    onMessage: handleWsMessage
+    includeLeaderboard: true,
+    refreshTypes: [
+      'problemUpdate',
+      'studentsUpdate',
+      'broadcastUpdate',
+      'clearBroadcast',
+      'algorithmsComputed'
+    ],
+    onMessage: handleWsMessage,
+    onSession: handleSessionUpdate
   });
 
   useEffect(() => {
@@ -133,13 +93,38 @@ export default function TSPManager() {
     return () => disconnect();
   }, [sessionId, connect, disconnect]);
 
+  const instructorRouteBuilder = useRouteBuilder({
+    cityCount: session?.problem?.cities?.length || 0,
+    distanceMatrix: session?.problem?.distanceMatrix || null
+  });
+  const { hydrateRoute, resetRoute } = instructorRouteBuilder;
+
   useEffect(() => {
-    return () => {
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
-      }
-    };
-  }, []);
+    if (session?.instructor?.route?.length) {
+      hydrateRoute({
+        route: session.instructor.route,
+        complete: Boolean(session.instructor.complete),
+        distance: session.instructor.distance ?? null,
+        timeToComplete: session.instructor.timeToComplete ?? null
+      });
+    } else {
+      resetRoute();
+    }
+  }, [
+    session?.instructor?.route,
+    session?.instructor?.complete,
+    session?.instructor?.distance,
+    session?.instructor?.timeToComplete,
+    hydrateRoute,
+    resetRoute
+  ]);
+
+  const instructorRoute = instructorRouteBuilder.route;
+  const instructorComplete = instructorRouteBuilder.isComplete;
+  const instructorCurrentDistance = instructorRouteBuilder.currentDistance;
+  const instructorTotalDistance = instructorRouteBuilder.totalDistance;
+  const instructorTimeToComplete = instructorRouteBuilder.timeToComplete;
+  const instructorDistance = instructorComplete ? instructorTotalDistance : instructorCurrentDistance;
 
   useEffect(() => {
     if (session?.problem?.numCities) {
@@ -240,11 +225,7 @@ export default function TSPManager() {
 
       setBruteForceProgress(null);
       setBruteForceStatus('idle');
-      setInstructorRoute([]);
-      setInstructorDistance(0);
-      setInstructorComplete(false);
-      setInstructorStartTime(null);
-      setInstructorTimeToComplete(null);
+      resetRoute();
       setBroadcastIds([]);
       setHighlightedSolution(null);
 
@@ -411,34 +392,19 @@ export default function TSPManager() {
     if (instructorComplete) return;
     if (instructorRoute.includes(city.id)) return;
 
-    const now = Date.now();
-    const startTime = instructorStartTime ?? now;
-    if (instructorStartTime === null) {
-      setInstructorStartTime(startTime);
-    }
+    const result = instructorRouteBuilder.addCity(city.id);
+    if (!result) return;
 
-    const newRoute = [...instructorRoute, city.id];
-    const isComplete = newRoute.length === session.problem.cities.length;
-    const currentDistance = calculateCurrentDistance(newRoute, session.problem.distanceMatrix);
-
-    setInstructorRoute(newRoute);
-    setInstructorDistance(currentDistance);
-
-    if (isComplete) {
-      const totalDistance = calculateTotalDistance(newRoute, session.problem.distanceMatrix);
-      const completionTime = Math.floor((Date.now() - startTime) / 1000);
-      setInstructorComplete(true);
-      setInstructorDistance(totalDistance);
-      setInstructorTimeToComplete(completionTime);
+    if (result.isComplete) {
       if (broadcastIds.includes('instructor')) {
-        broadcastInstructorRoute(newRoute, totalDistance, completionTime);
+        broadcastInstructorRoute(result.route, result.totalDistance, result.timeToComplete);
       }
-      saveInstructorRoute(newRoute, totalDistance, true, completionTime);
-    } else if (broadcastIds.includes('instructor')) {
-      broadcastInstructorRoute(newRoute, currentDistance, null);
-    }
-    if (!isComplete) {
-      saveInstructorRoute(newRoute, currentDistance, false, null);
+      saveInstructorRoute(result.route, result.totalDistance, true, result.timeToComplete);
+    } else {
+      if (broadcastIds.includes('instructor')) {
+        broadcastInstructorRoute(result.route, result.currentDistance, null);
+      }
+      saveInstructorRoute(result.route, result.currentDistance, false, null);
     }
   };
 
@@ -584,25 +550,13 @@ export default function TSPManager() {
       const broadcastId = entry.id === 'instructor-local' ? 'instructor' : entry.id;
       const isOn = broadcastIds.includes(broadcastId);
 
-      if (!isOn && entry.type === 'heuristic' && !session?.algorithms?.heuristic?.computed) {
-        await computeHeuristic();
-      }
-      if (!isOn && entry.type === 'bruteforce' && !session?.algorithms?.bruteForce?.computed && bruteForceStatus !== 'running') {
-        await computeBruteForce();
-      }
-      if (!isOn && entry.id === 'instructor') {
-        if (!session?.problem?.distanceMatrix || instructorRoute.length === 0) return;
-        const totalDistance = instructorRoute.length === session.problem.cities.length
-          ? calculateTotalDistance(instructorRoute, session.problem.distanceMatrix)
-          : instructorDistance;
-        const timeToComplete = instructorComplete
-          ? instructorTimeToComplete
-          : null;
-        await broadcastInstructorRoute(instructorRoute, totalDistance, timeToComplete);
-      }
-
-      if (!isOn && entry.type === 'student' && (!session?.students?.find(s => s.id === entry.id)?.currentRoute?.length)) {
-        return;
+      if (!isOn) {
+        if (entry.type === 'student' && (!session?.students?.find(s => s.id === entry.id)?.currentRoute?.length)) {
+          return;
+        }
+        if (entry.id === 'instructor' && (!session?.problem?.distanceMatrix || instructorRoute.length === 0)) {
+          return;
+        }
       }
 
       const next = isOn
@@ -616,17 +570,27 @@ export default function TSPManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ broadcasts: next })
       });
+
+      if (!isOn && entry.type === 'heuristic' && !session?.algorithms?.heuristic?.computed) {
+        await computeHeuristic();
+      }
+      if (!isOn && entry.type === 'bruteforce' && !session?.algorithms?.bruteForce?.computed && bruteForceStatus !== 'running') {
+        await computeBruteForce();
+      }
+      if (!isOn && entry.id === 'instructor') {
+        const totalDistance = instructorComplete
+          ? instructorTotalDistance
+          : instructorCurrentDistance;
+        const timeToComplete = instructorComplete ? instructorTimeToComplete : null;
+        await broadcastInstructorRoute(instructorRoute, totalDistance, timeToComplete);
+      }
     } catch (err) {
       console.error('Failed to toggle broadcast:', err);
     }
   };
 
   const handleResetInstructorRoute = () => {
-    setInstructorRoute([]);
-    setInstructorDistance(0);
-    setInstructorComplete(false);
-    setInstructorStartTime(null);
-    setInstructorTimeToComplete(null);
+    resetRoute();
     if (highlightedSolution?.id === 'instructor' || highlightedSolution?.id === 'instructor-local') {
       setHighlightedSolution(null);
     }
@@ -665,40 +629,51 @@ export default function TSPManager() {
   const getAllRoutes = () => {
     const routes = [];
 
-    if (broadcastIds.includes('bruteforce') && session?.algorithms?.bruteForce?.route) {
-      routes.push({
-        id: 'bruteforce',
-        path: session.algorithms.bruteForce.route,
-        type: 'bruteforce'
+    if (broadcastSnapshot.length > 0) {
+      broadcastSnapshot.forEach(route => {
+        if (!route?.path?.length) return;
+        routes.push({
+          id: route.id,
+          path: route.path,
+          type: route.type
+        });
       });
-    }
+    } else {
+      if (broadcastIds.includes('bruteforce') && session?.algorithms?.bruteForce?.route) {
+        routes.push({
+          id: 'bruteforce',
+          path: session.algorithms.bruteForce.route,
+          type: 'bruteforce'
+        });
+      }
 
-    if (broadcastIds.includes('heuristic') && session?.algorithms?.heuristic?.route) {
-      routes.push({
-        id: 'heuristic',
-        path: session.algorithms.heuristic.route,
-        type: 'heuristic'
-      });
-    }
+      if (broadcastIds.includes('heuristic') && session?.algorithms?.heuristic?.route) {
+        routes.push({
+          id: 'heuristic',
+          path: session.algorithms.heuristic.route,
+          type: 'heuristic'
+        });
+      }
 
-    if (broadcastIds.includes('instructor') && session?.instructor?.route?.length) {
-      routes.push({
-        id: 'instructor-broadcast',
-        path: session.instructor.route,
-        type: 'instructor'
-      });
-    }
+      if (broadcastIds.includes('instructor') && session?.instructor?.route?.length) {
+        routes.push({
+          id: 'instructor-broadcast',
+          path: session.instructor.route,
+          type: 'instructor'
+        });
+      }
 
-    if (session?.students?.length) {
-      session.students.forEach(student => {
-        if (broadcastIds.includes(student.id) && student.currentRoute?.length) {
-          routes.push({
-            id: student.id,
-            path: student.currentRoute,
-            type: 'student'
-          });
-        }
-      });
+      if (session?.students?.length) {
+        session.students.forEach(student => {
+          if (broadcastIds.includes(student.id) && student.currentRoute?.length) {
+            routes.push({
+              id: student.id,
+              path: student.currentRoute,
+              type: 'student'
+            });
+          }
+        });
+      }
     }
 
     if (instructorRoute.length > 0) {
@@ -795,17 +770,17 @@ export default function TSPManager() {
   }, [leaderboard, bruteForceStatus, bruteForceProgress, instructorRoute.length, instructorDistance, instructorComplete, session?.problem?.cities?.length]);
 
   const legendItems = useMemo(() => {
-    const items = [];
-    if (instructorRoute.length > 0) {
-      items.push({
+    const primary = instructorRoute.length > 0
+      ? {
         id: 'instructor-local',
         type: 'instructor',
         label: 'Instructor Route',
         distance: instructorDistance
-      });
-    }
+      }
+      : null;
+    const routes = [];
     if (broadcastIds.includes('bruteforce') && session?.algorithms?.bruteForce?.route) {
-      items.push({
+      routes.push({
         id: 'bruteforce',
         type: 'bruteforce',
         label: 'Brute Force (Optimal)',
@@ -815,7 +790,7 @@ export default function TSPManager() {
       });
     }
     if (broadcastIds.includes('heuristic') && session?.algorithms?.heuristic?.route) {
-      items.push({
+      routes.push({
         id: 'heuristic',
         type: 'heuristic',
         label: 'Nearest Neighbor',
@@ -823,7 +798,7 @@ export default function TSPManager() {
       });
     }
     if (broadcastIds.includes('instructor') && session?.instructor?.route?.length) {
-      items.push({
+      routes.push({
         id: 'instructor-broadcast',
         type: 'instructor',
         label: 'Instructor Broadcast',
@@ -833,7 +808,7 @@ export default function TSPManager() {
     if (session?.students?.length) {
       session.students.forEach(student => {
         if (broadcastIds.includes(student.id) && student.currentRoute?.length) {
-          items.push({
+          routes.push({
             id: student.id,
             type: 'student',
             label: student.name,
@@ -845,7 +820,7 @@ export default function TSPManager() {
     if (highlightedSolution) {
       const resolved = resolveRouteForEntry(highlightedSolution);
       if (resolved) {
-        items.push({
+        routes.push({
           id: resolved.id,
           type: 'highlight',
           label: resolved.name || 'Selected Route',
@@ -855,15 +830,12 @@ export default function TSPManager() {
         });
       }
     }
+    const items = buildLegendItems({ primary, routes });
     const hasInstructorLocal = items.some(item => item.id === 'instructor-local');
     const filtered = hasInstructorLocal
       ? items.filter(item => item.id !== 'instructor-broadcast')
       : items;
-    const byId = new Map();
-    filtered.forEach((item) => {
-      byId.set(item.id, item);
-    });
-    return Array.from(byId.values());
+    return dedupeLegendItems(filtered);
   }, [instructorRoute.length, instructorDistance, highlightedSolution, broadcastIds, session?.algorithms, session?.instructor, session?.students]);
 
   const uiBroadcastIds = useMemo(() => {
@@ -912,7 +884,7 @@ export default function TSPManager() {
                       Instructor route progress: {instructorRoute.length}/{session?.problem?.cities?.length || 0}
                     </div>
                     <div className="info-line">
-                      {instructorComplete ? 'Total distance' : 'Current distance'}: {instructorDistance.toFixed(1)}
+                      {instructorComplete ? 'Total distance' : 'Current distance'}: {formatDistance(instructorDistance)}
                     </div>
                     <Button onClick={handleResetInstructorRoute}>
                       Reset Route

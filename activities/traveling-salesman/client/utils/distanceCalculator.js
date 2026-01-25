@@ -70,6 +70,31 @@ export function calculateCurrentDistance(route, distanceMatrix) {
 }
 
 /**
+ * Check if a route includes all cities.
+ * @param {Array} route - Array of city IDs or indices
+ * @param {number} cityCount - Total number of cities
+ * @returns {boolean} True when the route length matches the city count
+ */
+export function isRouteComplete(route, cityCount) {
+  if (!Array.isArray(route) || !Number.isFinite(cityCount)) return false;
+  return route.length === cityCount && cityCount > 0;
+}
+
+/**
+ * Wrapper to compute either current or total route distance.
+ * @param {Array} route - Array of city IDs or indices
+ * @param {Array} distanceMatrix - Distance matrix
+ * @param {boolean} closeLoop - Whether to include the return to the start
+ * @returns {number} Route distance
+ */
+export function getRouteDistance(route, distanceMatrix, closeLoop = false) {
+  if (closeLoop) {
+    return calculateTotalDistance(route, distanceMatrix);
+  }
+  return calculateCurrentDistance(route, distanceMatrix);
+}
+
+/**
  * Calculate total distance for a route of city indices
  * Includes return to starting city
  * @param {Array} route - Array of city indices
