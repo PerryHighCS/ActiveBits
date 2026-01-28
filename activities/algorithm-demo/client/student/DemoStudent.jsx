@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
@@ -17,6 +17,11 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
   const [algorithmState, setAlgorithmState] = useState(null);
   const [isSoloMode] = useState(sessionId.startsWith('solo-'));
   const [isAutoSelectedFromParam, setIsAutoSelectedFromParam] = useState(false);
+  const selectedAlgoIdRef = useRef(selectedAlgoId);
+
+  useEffect(() => {
+    selectedAlgoIdRef.current = selectedAlgoId;
+  }, [selectedAlgoId]);
 
   // Auto-select algorithm from query params (persistentSessionInfo for shared, URL params for solo)
   useEffect(() => {
@@ -90,7 +95,7 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
           const normalized = normalizeAlgorithmState(msg.payload);
           setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
         } else if (msg.type === MESSAGE_TYPES.STATE_SYNC) {
-          const algo = getAlgorithm(msg.algorithmId || selectedAlgoId);
+          const algo = getAlgorithm(msg.algorithmId || selectedAlgoIdRef.current);
           const normalized = normalizeAlgorithmState(msg.payload);
           setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
         }
@@ -137,7 +142,6 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
   };
 
   const currentAlgo = getAlgorithm(selectedAlgoId);
-  const hydratedState = currentAlgo ? hydrateAlgorithmState(currentAlgo, algorithmState) : algorithmState;
 
   if (isSoloMode && !selectedAlgoId) {
     // Solo mode: show algorithm picker
@@ -183,12 +187,12 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
         </div>
       )}
 
-      {hydratedState && (
+      {algorithmState && (
         <div className="student-view">
           <CurrentStudentView
             session={{
               id: sessionId,
-              data: { algorithmState: hydratedState, algorithmId: selectedAlgoId },
+              data: { algorithmState, algorithmId: selectedAlgoId },
             }}
             onStateChange={isSoloMode ? handleStateChange : undefined}
           />

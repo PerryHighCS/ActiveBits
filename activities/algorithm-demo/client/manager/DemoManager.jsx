@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
@@ -18,6 +18,11 @@ export default function DemoManager() {
   const [algorithmState, setAlgorithmState] = useState(null);
   const [hasAutoSelected, setHasAutoSelected] = useState(false);
   const [invalidAlgorithm, setInvalidAlgorithm] = useState(null);
+  const selectedAlgoIdRef = useRef(selectedAlgoId);
+
+  useEffect(() => {
+    selectedAlgoIdRef.current = selectedAlgoId;
+  }, [selectedAlgoId]);
 
   // Sync session state from server
   useEffect(() => {
@@ -64,7 +69,7 @@ export default function DemoManager() {
           const normalized = normalizeAlgorithmState(msg.payload);
           setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
         } else if (msg.type === MESSAGE_TYPES.STATE_SYNC) {
-          const algo = getAlgorithm(msg.algorithmId || selectedAlgoId);
+          const algo = getAlgorithm(msg.algorithmId || selectedAlgoIdRef.current);
           const normalized = normalizeAlgorithmState(msg.payload);
           setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
         }
@@ -160,7 +165,6 @@ export default function DemoManager() {
   };
 
   const currentAlgo = getAlgorithm(selectedAlgoId);
-  const hydratedState = currentAlgo ? hydrateAlgorithmState(currentAlgo, algorithmState) : algorithmState;
   if (!currentAlgo) {
     return <div className="error">Algorithm not found</div>;
   }
@@ -196,12 +200,12 @@ export default function DemoManager() {
         </>
       )}
 
-      {hydratedState && (
+      {algorithmState && (
         <div className="manager-view">
           <CurrentManagerView
             session={{
               id: sessionId,
-              data: { algorithmState: hydratedState, algorithmId: selectedAlgoId },
+              data: { algorithmState, algorithmId: selectedAlgoId },
             }}
             onStateChange={handleStateChange}
           />

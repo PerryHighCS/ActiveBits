@@ -105,10 +105,10 @@ export function hydrateAlgorithmState(algorithm, state) {
     return baseState;
   }
 
-  const hydrated = { ...baseState, ...state };
-  for (const key of Object.keys(baseState)) {
-    if (hydrated[key] === null || typeof hydrated[key] === 'undefined') {
-      hydrated[key] = baseState[key];
+  const hydrated = { ...baseState };
+  for (const [key, value] of Object.entries(state)) {
+    if (value !== null && typeof value !== 'undefined') {
+      hydrated[key] = value;
     }
   }
   return hydrated;
