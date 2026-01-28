@@ -87,3 +87,29 @@ export function normalizeAlgorithmState(state) {
 
   return normalized;
 }
+
+/**
+ * Hydrate an algorithm state with defaults from its initState
+ * Ensures required fields exist to avoid undefined access in views
+ * @param {object} algorithm - Algorithm module
+ * @param {object} state - Algorithm state (normalized)
+ * @returns {object} Hydrated state
+ */
+export function hydrateAlgorithmState(algorithm, state) {
+  if (!algorithm || typeof algorithm.initState !== 'function') {
+    return state;
+  }
+
+  const baseState = algorithm.initState();
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    return baseState;
+  }
+
+  const hydrated = { ...baseState, ...state };
+  for (const key of Object.keys(baseState)) {
+    if (hydrated[key] === null || typeof hydrated[key] === 'undefined') {
+      hydrated[key] = baseState[key];
+    }
+  }
+  return hydrated;
+}

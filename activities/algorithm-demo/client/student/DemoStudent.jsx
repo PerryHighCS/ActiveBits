@@ -4,7 +4,7 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import AlgorithmPicker from '../components/AlgorithmPicker';
 import { getAllAlgorithms, getAlgorithm } from '../algorithms';
-import { MESSAGE_TYPES, normalizeAlgorithmState } from '../utils';
+import { MESSAGE_TYPES, normalizeAlgorithmState, hydrateAlgorithmState } from '../utils';
 import './DemoStudent.css';
 
 export default function DemoStudent({ sessionData, persistentSessionInfo }) {
@@ -51,7 +51,9 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
           const data = await res.json();
           if (data.data.algorithmId) {
             setSelectedAlgoId(data.data.algorithmId);
-            setAlgorithmState(normalizeAlgorithmState(data.data.algorithmState) || null);
+            const algo = getAlgorithm(data.data.algorithmId);
+            const normalized = normalizeAlgorithmState(data.data.algorithmState) || null;
+            setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
           }
         }
       } catch (err) {
@@ -84,9 +86,13 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
         const msg = JSON.parse(event.data);
         if (msg.type === MESSAGE_TYPES.ALGORITHM_SELECTED) {
           setSelectedAlgoId(msg.algorithmId);
-          setAlgorithmState(normalizeAlgorithmState(msg.payload));
+          const algo = getAlgorithm(msg.algorithmId);
+          const normalized = normalizeAlgorithmState(msg.payload);
+          setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
         } else if (msg.type === MESSAGE_TYPES.STATE_SYNC) {
-          setAlgorithmState(normalizeAlgorithmState(msg.payload));
+          const algo = getAlgorithm(msg.algorithmId || selectedAlgoId);
+          const normalized = normalizeAlgorithmState(msg.payload);
+          setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
         }
       } catch (err) {
         console.error('Error parsing message:', err);
@@ -131,6 +137,7 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
   };
 
   const currentAlgo = getAlgorithm(selectedAlgoId);
+  const hydratedState = currentAlgo ? hydrateAlgorithmState(currentAlgo, algorithmState) : algorithmState;
 
   if (isSoloMode && !selectedAlgoId) {
     // Solo mode: show algorithm picker
@@ -176,12 +183,12 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
         </div>
       )}
 
-      {algorithmState && (
+      {hydratedState && (
         <div className="student-view">
           <CurrentStudentView
             session={{
               id: sessionId,
-              data: { algorithmState, algorithmId: selectedAlgoId },
+              data: { algorithmState: hydratedState, algorithmId: selectedAlgoId },
             }}
             onStateChange={isSoloMode ? handleStateChange : undefined}
           />
