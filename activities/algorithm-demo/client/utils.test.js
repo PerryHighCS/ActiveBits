@@ -9,6 +9,7 @@ import {
   createMessage,
   reduceAlgorithmEvent,
   validateLineIds,
+  hydrateAlgorithmState,
 } from './utils.js';
 
 test('MESSAGE_TYPES enum', () => {
@@ -84,4 +85,44 @@ test('reduceAlgorithmEvent - returns unchanged state if no reducer', () => {
   const state = { value: 10 };
   const result = reduceAlgorithmEvent(state, {});
   assert.deepEqual(result, state);
+});
+
+test('hydrateAlgorithmState - returns state when algorithm is null/undefined', () => {
+  const state = { foo: 'bar' };
+  assert.deepEqual(hydrateAlgorithmState(null, state), state);
+  assert.deepEqual(hydrateAlgorithmState(undefined, state), state);
+});
+
+test('hydrateAlgorithmState - returns state when initState is not a function', () => {
+  const state = { foo: 'bar' };
+  const algorithm = { initState: 'nope' };
+  assert.deepEqual(hydrateAlgorithmState(algorithm, state), state);
+});
+
+test('hydrateAlgorithmState - handles null/undefined/array state', () => {
+  const algorithm = { initState: () => ({ a: 1, b: 2 }) };
+  assert.deepEqual(hydrateAlgorithmState(algorithm, null), { a: 1, b: 2 });
+  assert.deepEqual(hydrateAlgorithmState(algorithm, undefined), { a: 1, b: 2 });
+  assert.deepEqual(hydrateAlgorithmState(algorithm, [1, 2, 3]), { a: 1, b: 2 });
+});
+
+test('hydrateAlgorithmState - merges baseState and state', () => {
+  const algorithm = { initState: () => ({ a: 1, b: 2, c: 3 }) };
+  const state = { b: 20, d: 4 };
+  assert.deepEqual(hydrateAlgorithmState(algorithm, state), {
+    a: 1,
+    b: 20,
+    c: 3,
+    d: 4,
+  });
+});
+
+test('hydrateAlgorithmState - ignores null/undefined in state', () => {
+  const algorithm = { initState: () => ({ a: 1, b: 2, c: 3 }) };
+  const state = { a: null, b: undefined, c: 30 };
+  assert.deepEqual(hydrateAlgorithmState(algorithm, state), {
+    a: 1,
+    b: 2,
+    c: 30,
+  });
 });

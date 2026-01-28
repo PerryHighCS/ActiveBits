@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import AlgorithmPicker from '../components/AlgorithmPicker';
 import { getAllAlgorithms, getAlgorithm } from '../algorithms';
-import { MESSAGE_TYPES, createMessage, normalizeAlgorithmState, messageReplacer } from '../utils';
+import { MESSAGE_TYPES, createMessage, normalizeAlgorithmState, hydrateAlgorithmState, messageReplacer } from '../utils';
 import './DemoManager.css';
 
 export default function DemoManager() {
@@ -18,6 +18,11 @@ export default function DemoManager() {
   const [algorithmState, setAlgorithmState] = useState(null);
   const [hasAutoSelected, setHasAutoSelected] = useState(false);
   const [invalidAlgorithm, setInvalidAlgorithm] = useState(null);
+  const selectedAlgoIdRef = useRef(selectedAlgoId);
+
+  useEffect(() => {
+    selectedAlgoIdRef.current = selectedAlgoId;
+  }, [selectedAlgoId]);
 
   // Sync session state from server
   useEffect(() => {
@@ -31,7 +36,9 @@ export default function DemoManager() {
           setSession(data);
           if (data.data.algorithmId) {
             setSelectedAlgoId(data.data.algorithmId);
-            setAlgorithmState(normalizeAlgorithmState(data.data.algorithmState) || null);
+            const algo = getAlgorithm(data.data.algorithmId);
+            const normalized = normalizeAlgorithmState(data.data.algorithmState) || null;
+            setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
             setHasAutoSelected(true); // Already has an algorithm set
           }
         }
@@ -56,8 +63,15 @@ export default function DemoManager() {
     onMessage: (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === MESSAGE_TYPES.STATE_SYNC) {
-          setAlgorithmState(normalizeAlgorithmState(msg.payload));
+        if (msg.type === MESSAGE_TYPES.ALGORITHM_SELECTED) {
+          setSelectedAlgoId(msg.algorithmId);
+          const algo = getAlgorithm(msg.algorithmId);
+          const normalized = normalizeAlgorithmState(msg.payload);
+          setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
+        } else if (msg.type === MESSAGE_TYPES.STATE_SYNC) {
+          const algo = getAlgorithm(msg.algorithmId || selectedAlgoIdRef.current);
+          const normalized = normalizeAlgorithmState(msg.payload);
+          setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
         }
       } catch (err) {
         console.error('Error parsing message:', err);

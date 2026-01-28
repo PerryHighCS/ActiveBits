@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
 import AlgorithmPicker from '../components/AlgorithmPicker';
 import { getAllAlgorithms, getAlgorithm } from '../algorithms';
-import { MESSAGE_TYPES, normalizeAlgorithmState } from '../utils';
+import { MESSAGE_TYPES, normalizeAlgorithmState, hydrateAlgorithmState } from '../utils';
 import './DemoStudent.css';
 
 export default function DemoStudent({ sessionData, persistentSessionInfo }) {
@@ -17,6 +17,11 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
   const [algorithmState, setAlgorithmState] = useState(null);
   const [isSoloMode] = useState(sessionId.startsWith('solo-'));
   const [isAutoSelectedFromParam, setIsAutoSelectedFromParam] = useState(false);
+  const selectedAlgoIdRef = useRef(selectedAlgoId);
+
+  useEffect(() => {
+    selectedAlgoIdRef.current = selectedAlgoId;
+  }, [selectedAlgoId]);
 
   // Auto-select algorithm from query params (persistentSessionInfo for shared, URL params for solo)
   useEffect(() => {
@@ -51,7 +56,9 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
           const data = await res.json();
           if (data.data.algorithmId) {
             setSelectedAlgoId(data.data.algorithmId);
-            setAlgorithmState(normalizeAlgorithmState(data.data.algorithmState) || null);
+            const algo = getAlgorithm(data.data.algorithmId);
+            const normalized = normalizeAlgorithmState(data.data.algorithmState) || null;
+            setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
           }
         }
       } catch (err) {
@@ -84,9 +91,13 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }) {
         const msg = JSON.parse(event.data);
         if (msg.type === MESSAGE_TYPES.ALGORITHM_SELECTED) {
           setSelectedAlgoId(msg.algorithmId);
-          setAlgorithmState(normalizeAlgorithmState(msg.payload));
+          const algo = getAlgorithm(msg.algorithmId);
+          const normalized = normalizeAlgorithmState(msg.payload);
+          setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
         } else if (msg.type === MESSAGE_TYPES.STATE_SYNC) {
-          setAlgorithmState(normalizeAlgorithmState(msg.payload));
+          const algo = getAlgorithm(msg.algorithmId || selectedAlgoIdRef.current);
+          const normalized = normalizeAlgorithmState(msg.payload);
+          setAlgorithmState(algo ? hydrateAlgorithmState(algo, normalized) : normalized);
         }
       } catch (err) {
         console.error('Error parsing message:', err);
