@@ -90,6 +90,22 @@ export function createWsRouter(server, sessions) {
             const url = new URL(req.url, "http://x");
             const onConn = namespaces.get(url.pathname);
             if (!onConn) return socket.destroy();
+
+            // CSRF protection: require and validate Origin header
+            const origin = req.headers.origin;
+            if (!origin) {
+                console.warn('[wsRouter] Rejected WS with missing Origin header');
+                return socket.destroy();
+            }
+            const allowedOrigins = [
+                `http://${req.headers.host}`,
+                `https://${req.headers.host}`,
+            ];
+            if (!allowedOrigins.includes(origin)) {
+                console.warn(`[wsRouter] Rejected WS from untrusted origin: ${origin}`);
+                return socket.destroy();
+            }
+
             wss.handleUpgrade(req, socket, head, (ws) => {
                 ws.isAlive = true;
                 ws.clientIp = getClientIp(req);

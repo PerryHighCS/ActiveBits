@@ -20,6 +20,7 @@ const EXPECTED_ACTIVITIES = [
   "java-string-practice",
   "java-format-practice",
   "python-list-practice",
+  "triangulon-invasion",
   "raffle",
   "gallery-walk",
   "traveling-salesman",
