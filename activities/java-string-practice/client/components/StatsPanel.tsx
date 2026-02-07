@@ -1,12 +1,11 @@
-import React from 'react';
+import type { JavaStringStats } from '../../javaStringPracticeTypes.js'
 
-/**
- * StatsPanel - Display student statistics
- */
-export default function StatsPanel({ stats }) {
-  const accuracy = stats.total > 0 
-    ? Math.round((stats.correct / stats.total) * 100) 
-    : 0;
+interface StatsPanelProps {
+  stats: JavaStringStats
+}
+
+export default function StatsPanel({ stats }: StatsPanelProps) {
+  const accuracy = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0
 
   return (
     <div className="stats-panel">
@@ -34,5 +33,5 @@ export default function StatsPanel({ stats }) {
         </div>
       </div>
     </div>
-  );
+  )
 }

@@ -783,3 +783,39 @@ Validation:
 - `npm --workspace client test` -> pass
 - `npm --workspace client run build` -> pass
 - `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
+
+### Slice 3: Activity migration (`activities/java-string-practice`)
+
+Completed:
+- Migrated Java String Practice activity config/client/server files to TypeScript:
+  - `activities/java-string-practice/activity.config.js` -> `activities/java-string-practice/activity.config.ts`
+  - `activities/java-string-practice/client/index.js` -> `activities/java-string-practice/client/index.ts`
+  - `activities/java-string-practice/client/student/JavaStringPractice.jsx` -> `activities/java-string-practice/client/student/JavaStringPractice.tsx`
+  - `activities/java-string-practice/client/manager/JavaStringPracticeManager.jsx` -> `activities/java-string-practice/client/manager/JavaStringPracticeManager.tsx`
+  - `activities/java-string-practice/client/components/ChallengeQuestion.jsx` -> `activities/java-string-practice/client/components/ChallengeQuestion.tsx`
+  - `activities/java-string-practice/client/components/AnswerSection.jsx` -> `activities/java-string-practice/client/components/AnswerSection.tsx`
+  - `activities/java-string-practice/client/components/challengeLogic.js` -> `activities/java-string-practice/client/components/challengeLogic.ts`
+  - `activities/java-string-practice/client/components/ChallengeSelector.jsx` -> `activities/java-string-practice/client/components/ChallengeSelector.tsx`
+  - `activities/java-string-practice/client/components/StringDisplay.jsx` -> `activities/java-string-practice/client/components/StringDisplay.tsx`
+  - `activities/java-string-practice/client/components/FeedbackDisplay.jsx` -> `activities/java-string-practice/client/components/FeedbackDisplay.tsx`
+  - `activities/java-string-practice/client/components/StatsPanel.jsx` -> `activities/java-string-practice/client/components/StatsPanel.tsx`
+  - `activities/java-string-practice/server/routes.js` -> `activities/java-string-practice/server/routes.ts`
+- Added activity-local shared type contracts:
+  - `activities/java-string-practice/javaStringPracticeTypes.ts`
+- Added focused tests for migrated challenge/server logic:
+  - `activities/java-string-practice/client/components/challengeLogic.test.ts`
+  - `activities/java-string-practice/client/index.test.tsx`
+  - `activities/java-string-practice/server/routeUtils.ts`
+  - `activities/java-string-practice/server/routeUtils.test.ts`
+
+Implementation notes:
+- Manager/student UI now share typed challenge, stats, method-selection, and roster contracts through `javaStringPracticeTypes.ts`.
+- Server route validation helpers were extracted into `routeUtils.ts` for direct unit coverage while preserving existing API and websocket behavior.
+- `activity.config.ts` now points to TS entry modules (`client/index.ts`, `server/routes.ts`) while retaining solo-mode behavior and existing endpoint semantics.
+
+Validation:
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client test` -> pass
+- `npm --workspace client run build` -> pass
+- `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
