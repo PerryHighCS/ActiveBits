@@ -27,3 +27,6 @@ dist-ssr
 # claude files
 .claude/*
 !.claude/plans/
+!.claude/plans/**
+!.claude/knowledge/
+!.claude/knowledge/**

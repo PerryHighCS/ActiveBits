@@ -83,6 +83,7 @@ Document results in `.claude/plans/typescript_review.md`:
 - Pass/fail
 - Relevant failure snippets
 - Known flaky behavior (if any)
+- Durable repo findings that may matter beyond migration should be logged in `.claude/knowledge/repo_discoveries.md`.
 
 Baseline gate policy:
 - Default is **all green** for baseline commands.
@@ -770,6 +771,60 @@ These chores should be tracked alongside migration phases to reduce regressions 
 10. Contributor tooling updates (Phases 1 and 6)
     - Update editor/workspace settings for TypeScript-first workflows.
     - Ensure onboarding docs match final TS commands and expected IDE behavior.
+
+---
+
+## Agent Execution Contract
+
+This section defines non-negotiable execution rules so migration agents can operate without ambiguity.
+
+1. Canonical command set
+   - Baseline: `npm --workspace client test`, `npm --workspace server test`, `npm --workspace activities test`, `npm run verify:deploy`, `npm run verify:server`
+   - Per-phase gate: `npm run typecheck --workspaces --if-present`, `npm --workspace client test`, `npm --workspace server test`, `npm --workspace activities test`
+   - Final gate: `npm run build`, `npm start`, source file guard checks, source map artifact checks
+
+2. Definition of done per phase
+   - Do not start the next phase until all exit criteria in the current phase are met and recorded in `.claude/plans/typescript_review.md`.
+
+3. No-behavior-change default
+   - Migration PRs are type/extension/config compatibility changes only.
+   - Runtime behavior changes require explicit note in PR description and reviewer signoff.
+
+4. Import and resolution policy
+   - Runtime imports must be Node-resolvable in NodeNext contexts.
+   - Do not rely on `tsconfig` path aliases for backend runtime resolution unless backed by package/runtime support.
+
+5. Dynamic loader sequencing rule
+   - Land mixed-extension compatibility changes before bulk file-extension renames in `activities`, client loader, and server registry paths.
+
+6. Suppression and `any` policy
+   - New `@ts-ignore` requires inline reason plus debt tracker entry.
+   - Prefer `@ts-expect-error` when suppression is required and behavior is intentional.
+   - Temporary `any` usage requires owner and removal milestone.
+
+7. PR and commit protocol
+   - One activity per PR during Phase 5.
+   - Keep commits small, phase-scoped, and reversible.
+   - Required checks must pass before merge (no warn-only bypasses).
+
+8. Rollback protocol
+   - If a phase gate fails, revert the phase commit(s), restore baseline, and re-run canonical baseline commands before retry.
+
+9. File scope boundaries
+   - Migration automation must not edit generated artifacts (`dist`, caches), dependency folders (`node_modules`), or unrelated non-migration files.
+
+10. Progress tracker contract
+   - Maintain `.claude/plans/typescript_review.md` with a machine-scannable checklist/table.
+   - Record durable, reusable repo discoveries in `.claude/knowledge/repo_discoveries.md`.
+   - Minimum columns: `Phase`, `Task`, `Owner`, `Status`, `Evidence/Command`, `Notes`.
+
+Suggested template:
+```md
+| Phase | Task | Owner | Status | Evidence/Command | Notes |
+|---|---|---|---|---|---|
+| 0 | Baseline capture | <name> | Done | npm --workspace server test | All green |
+| 2 | Mixed-extension loader updates | <name> | In Progress | npm --workspace activities test | client loader updated |
+```
 
 ---
 
