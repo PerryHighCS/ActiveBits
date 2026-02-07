@@ -1,7 +1,14 @@
-import React from "react";
+import type { MouseEvent, ReactNode } from 'react'
 
-export default function Modal({ open, onClose, title, children }) {
-  if (!open) return null;
+export interface ModalProps {
+  open: boolean
+  onClose: () => void
+  title?: ReactNode
+  children?: ReactNode
+}
+
+export default function Modal({ open, onClose, title, children }: ModalProps) {
+  if (!open) return null
 
   return (
     <div
@@ -10,7 +17,7 @@ export default function Modal({ open, onClose, title, children }) {
     >
       <div
         className="bg-white max-w-3xl w-full mx-4 rounded shadow-lg max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
+        onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between p-2 border-b">
           {title && <h2 className="text-lg font-semibold">{title}</h2>}
@@ -22,11 +29,8 @@ export default function Modal({ open, onClose, title, children }) {
             &times;
           </button>
         </div>
-        <div className="p-4">
-          {children}
-        </div>
+        <div className="p-4">{children}</div>
       </div>
     </div>
-  );
+  )
 }
-

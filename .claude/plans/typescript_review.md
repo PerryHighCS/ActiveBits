@@ -507,3 +507,110 @@ Validation:
 - `npm --workspace client test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
 - `npm --workspace client run build` -> pass
+
+### Slice 6: UI component migration (`Button`, `Modal`, `RosterPill`)
+
+Completed:
+- Converted shared UI components:
+  - `client/src/components/ui/Button.jsx` -> `client/src/components/ui/Button.tsx`
+  - `client/src/components/ui/Modal.jsx` -> `client/src/components/ui/Modal.tsx`
+  - `client/src/components/ui/RosterPill.jsx` -> `client/src/components/ui/RosterPill.tsx`
+- Added focused component tests:
+  - `client/src/components/ui/Button.test.tsx`
+  - `client/src/components/ui/Modal.test.tsx`
+  - `client/src/components/ui/RosterPill.test.tsx`
+- Added helper module for button variant styling:
+  - `client/src/components/ui/buttonStyles.ts`
+
+Implementation notes:
+- Preserved existing runtime behavior and props semantics for all three components.
+- Added explicit props typing for button HTML attributes, modal open/close contract, and roster rename/remove callbacks.
+- Moved `resolveButtonVariantClass(...)` into `buttonStyles.ts` to avoid `react-refresh/only-export-components` lint warning in `Button.tsx`.
+
+Validation:
+- Baseline preflight: `npm --workspace client test` -> pass
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client run build` -> pass
+
+### Slice 7: Common component migration (`LoadingFallback`, `SessionEnded`)
+
+Completed:
+- Converted common components:
+  - `client/src/components/common/LoadingFallback.jsx` -> `client/src/components/common/LoadingFallback.tsx`
+  - `client/src/components/common/SessionEnded.jsx` -> `client/src/components/common/SessionEnded.tsx`
+- Added focused component tests:
+  - `client/src/components/common/LoadingFallback.test.tsx`
+  - `client/src/components/common/SessionEnded.test.tsx`
+
+Implementation notes:
+- Added explicit prop typing for fallback message and modal-like session-ended content.
+- Preserved existing SessionEnded route behavior (`navigate('/')` on button click) while typing `useNavigate` flow.
+- SessionEnded test uses `MemoryRouter` so `useNavigate` works in a static render test environment.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client run build` -> pass
+
+### Slice 8: Common component migration (`QrScannerPanel`, `ActivityRoster`)
+
+Completed:
+- Converted common components:
+  - `client/src/components/common/QrScannerPanel.jsx` -> `client/src/components/common/QrScannerPanel.tsx`
+  - `client/src/components/common/ActivityRoster.jsx` -> `client/src/components/common/ActivityRoster.tsx`
+- Added scanner utility module + tests:
+  - `client/src/components/common/qrScannerUtils.ts`
+  - `client/src/components/common/qrScannerUtils.test.ts`
+- Added roster component tests:
+  - `client/src/components/common/ActivityRoster.test.tsx`
+
+Implementation notes:
+- Extracted scanner error mapping/message logic to `qrScannerUtils.ts` so camera-error behavior is testable without running camera/web scanner hooks in Node.
+- Added explicit types for roster rows/columns, sort handlers, and accent/sort-direction options.
+- Preserved runtime behavior for focus trap, escape-close handling, and QR scanner fallback message rendering.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client run build` -> pass
+
+### Slice 9: Common component migration (`SessionHeader`)
+
+Completed:
+- Converted common component:
+  - `client/src/components/common/SessionHeader.jsx` -> `client/src/components/common/SessionHeader.tsx`
+- Added component tests:
+  - `client/src/components/common/SessionHeader.test.tsx`
+
+Implementation notes:
+- Added explicit props typing for `activityName`, optional `sessionId`, `simple`, and async/sync `onEndSession`.
+- Kept existing end-session behavior (DELETE request then optional callback then navigate to `/manage`).
+- Added a safe `window` guard for join URL derivation to avoid SSR/test runtime crashes when `window` is unavailable.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client run build` -> pass
+
+### Slice 10: Common component migration (`WaitingRoom`)
+
+Completed:
+- Converted common component:
+  - `client/src/components/common/WaitingRoom.jsx` -> `client/src/components/common/WaitingRoom.tsx`
+- Added waiting-room utility module + tests:
+  - `client/src/components/common/waitingRoomUtils.ts`
+  - `client/src/components/common/waitingRoomUtils.test.ts`
+
+Implementation notes:
+- Added explicit prop typing for persistent-session waiting room inputs.
+- Extracted reusable logic for:
+  - waiter-count copy generation
+  - websocket URL construction
+  - websocket message parsing + shape validation (`isWaitingRoomMessage`)
+- Preserved behavior for teacher auto-auth, one-time navigation flow, and websocket lifecycle handling.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client run build` -> pass
