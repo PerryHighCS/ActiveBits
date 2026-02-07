@@ -62,6 +62,11 @@ ActiveBits supports two session storage modes:
    - **Start Command**: `cd server && npm start`
    - **Plan**: Choose based on expected traffic (Starter plan for testing, Standard+ for production)
 
+   **Post-TypeScript migration update**:
+   - **Build Command**: `npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client && npm run build --workspace server`
+   - **Start Command**: `cd server && npm start`
+   - The server build is expected to emit `server/dist` and run compiled output.
+
 5. **Environment Variables**:
    ```
    NODE_ENV=production
@@ -117,6 +122,22 @@ ActiveBits supports two session storage modes:
 | `PERSISTENT_SESSION_SECRET` | **Yes** | (weak default) | HMAC secret for persistent session links. MUST be set in production! |
 | `SESSION_TTL_MS` | No | `3600000` | Session TTL in milliseconds (default: 1 hour). |
 | `PORT` | No | `3000` | Server port (Render sets this automatically). |
+
+## Source Map Policy (Open-Source Repo)
+
+ActiveBits intentionally ships source maps in production for debugging and teaching transparency.
+
+1. **Client source maps**:
+   - Enable Vite production source maps (`build.sourcemap: true`).
+   - Publish generated `.map` files with client assets.
+
+2. **Server source maps (post-TypeScript migration)**:
+   - Keep `sourceMap: true` in `server/tsconfig.build.json`.
+   - Deploy emitted `.map` files with `server/dist`.
+
+3. **Operational verification**:
+   - Confirm `.map` files are present in deployment artifacts.
+   - Verify stack traces map to original TypeScript source during incident debugging.
 
 ## Scaling Considerations
 
