@@ -80,3 +80,15 @@ Validation results:
 Outcome:
 - Prior `vite.config.ts` plugin type-identity errors are resolved.
 - Production client build still emits source maps as intended.
+
+### Transitional Test Script Alignment
+
+Updated workspace test scripts to use TypeScript-capable runtime while preserving mixed-extension discovery:
+- `client` test unit runner: `node --import tsx --test`
+- `server` test runner: `node --import tsx --test`
+- `activities` test runner: `node --import tsx --test --import ../scripts/jsx-loader-register.mjs`
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm --workspace activities test` -> pass
+- `npm --workspace server test` -> fail in sandbox on known bind-related suites (`galleryWalkRoutes`, `sessionStore`, `statusRoute`), consistent with prior environment limitation.
