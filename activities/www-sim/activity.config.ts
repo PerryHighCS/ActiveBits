@@ -7,7 +7,7 @@ const wwwSimConfig: ActivityConfig = {
   color: 'yellow',
   soloMode: false,
   clientEntry: './client/index.tsx',
-  serverEntry: './server/routes.js',
+  serverEntry: './server/routes.ts',
 }
 
 export default wwwSimConfig

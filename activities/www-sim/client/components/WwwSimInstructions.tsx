@@ -1,5 +1,3 @@
-import React from "react";
-
 /**
  * Instructions content shown in a modal after joining.
  */

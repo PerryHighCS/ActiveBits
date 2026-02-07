@@ -751,3 +751,35 @@ Validation:
 - `npm run typecheck --workspaces --if-present` -> pass
 - `npm --workspace client test` -> pass
 - `npm --workspace client run build` -> pass
+
+### Slice 2: Activity migration completion (`activities/www-sim`)
+
+Completed:
+- Completed `www-sim` activity migration from JS/JSX to TS/TSX:
+  - `activities/www-sim/activity.config.ts` (server entry now points to TS route module)
+  - `activities/www-sim/client/manager/WwwSimManager.jsx` -> `activities/www-sim/client/manager/WwwSimManager.tsx`
+  - `activities/www-sim/client/student/WwwSim.jsx` -> `activities/www-sim/client/student/WwwSim.tsx`
+  - `activities/www-sim/client/components/DNSLookupTable.jsx` -> `activities/www-sim/client/components/DNSLookupTable.tsx`
+  - `activities/www-sim/client/components/StudentBrowserView.jsx` -> `activities/www-sim/client/components/StudentBrowserView.tsx`
+  - `activities/www-sim/client/components/StudentHostPalette.jsx` -> `activities/www-sim/client/components/StudentHostPalette.tsx`
+  - `activities/www-sim/client/components/StudentInfoPanel.jsx` -> `activities/www-sim/client/components/StudentInfoPanel.tsx`
+  - `activities/www-sim/client/components/WwwSimInstructions.jsx` -> `activities/www-sim/client/components/WwwSimInstructions.tsx`
+  - `activities/www-sim/server/presetPassages.js` -> `activities/www-sim/server/presetPassages.ts`
+  - `activities/www-sim/server/routes.js` -> `activities/www-sim/server/routes.ts`
+- Added shared activity-local type contracts:
+  - `activities/www-sim/wwwSimTypes.ts`
+- Added extracted server route helpers + tests:
+  - `activities/www-sim/server/routeUtils.ts`
+  - `activities/www-sim/server/routeUtils.test.ts`
+
+Implementation notes:
+- `www-sim` client manager/student/components now share explicit session/template/fragment contracts via `wwwSimTypes.ts` to reduce shape drift between UI and server payload handling.
+- `www-sim` server route logic now normalizes request/session data with explicit guards in TS before mutating session state, while preserving existing endpoint and websocket behavior.
+- Route helper extraction (`routeUtils.ts`) provides direct test coverage for hostname validation, passage splitting, hosting-map generation, and HTML template URL assignment behavior.
+
+Validation:
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client test` -> pass
+- `npm --workspace client run build` -> pass
+- `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
