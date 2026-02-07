@@ -4,8 +4,8 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js --trace-warnings",
+    "start": "sh -c 'if [ -f dist/server.js ]; then node dist/server.js; else node server.js; fi'",
+    "dev": "sh -c 'if [ -f server.ts ]; then node --trace-warnings --import tsx server.ts; else node --trace-warnings server.js; fi'",
     "build": "tsc -p tsconfig.build.json",
     "test": "sh -c 'set -e; files=$(find . -not -path \"./node_modules/*\" \\( -name \"*.test.js\" -o -name \"*.test.ts\" \\) -print); if [ -z \"$files\" ]; then echo \"No server tests found\"; exit 0; fi; node --import tsx --test $files'",
     "typecheck": "tsc --noEmit",
@@ -22,5 +22,13 @@
     "http-proxy-middleware": "^3.0.5",
     "ioredis": "^5.8.2",
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5.0.3",
+    "@types/node": "^25.2.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   }
 }

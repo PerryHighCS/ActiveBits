@@ -92,3 +92,23 @@ Validation:
 - `npm --workspace client test` -> pass
 - `npm --workspace activities test` -> pass
 - `npm --workspace server test` -> fail in sandbox on known bind-related suites (`galleryWalkRoutes`, `sessionStore`, `statusRoute`), consistent with prior environment limitation.
+
+### Phase 1 Closure Update
+
+Additional Phase 1 completion work:
+- Added workspace-level TypeScript-related dev dependencies:
+  - `client`: `typescript`, `@types/node`, `@typescript-eslint/parser`, `@typescript-eslint/eslint-plugin`
+  - `server`: `typescript`, `tsx`, `@types/node`, `@types/express`, `@types/cookie-parser`, `@types/ws`
+  - `activities`: `typescript`, `@types/node`, `@types/react`, `@types/react-dom`
+- Updated `client/eslint.config.mjs` to include TS/TSX linting with `@typescript-eslint`.
+- Adjusted `server` start/dev scripts to support current JS runtime and future TS runtime transition via fallback logic.
+
+Validation results:
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client test` -> pass
+- `npm --workspace activities test` -> pass
+
+Remaining note:
+- ESLint warns about legacy `/* eslint-env node */` comment in `client/vite.config.ts`; non-blocking now, should be replaced with flat-config-compatible globals comment before ESLint v10.
+
+Phase 1 status: complete (with known sandbox limitation for server bind-dependent runtime tests recorded earlier).

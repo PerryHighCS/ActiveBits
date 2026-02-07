@@ -10,5 +10,11 @@
     "activebits-server": "file:../server",
     "qrcode.react": "^4.2.0",
     "react-zxing": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.1",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "typescript": "^5.9.3"
   }
 }
