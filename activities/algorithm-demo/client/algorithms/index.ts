@@ -3,6 +3,7 @@
  * This allows lazy-loading and makes it easy to add new algorithms
  */
 
+import type { ComponentType } from 'react'
 import SelectionSort from './sorting/SelectionSort.jsx'
 import InsertionSort from './sorting/InsertionSort.jsx'
 import MergeSort from './sorting/MergeSort.jsx'
@@ -11,6 +12,26 @@ import LinearSearch from './search/LinearSearch.jsx'
 import Factorial from './recursion/Factorial.jsx'
 import Fibonacci from './recursion/Fibonacci.jsx'
 import BinarySearchGame from './guessing/BinarySearchGame.jsx'
+
+export type AlgorithmState = Record<string, unknown>
+
+export interface AlgorithmEvent {
+  type: string
+  payload?: unknown
+}
+
+export interface AlgorithmSession {
+  id?: string | null
+  data: {
+    algorithmState?: AlgorithmState | null
+    algorithmId?: string | null
+  }
+}
+
+export interface AlgorithmViewProps {
+  session: AlgorithmSession
+  onStateChange?: (nextState: AlgorithmState) => void
+}
 
 interface AlgorithmStep {
   highlight?: string[]
@@ -24,10 +45,11 @@ export interface AlgorithmModule {
   category?: string
   pseudocode?: string[]
   steps?: AlgorithmStep[]
-  initState?: unknown
-  ManagerView?: unknown
-  StudentView?: unknown
-  DemoView?: unknown
+  initState?: (...args: Array<number | string | null | undefined>) => AlgorithmState
+  reduceEvent?: (state: AlgorithmState, event: AlgorithmEvent) => AlgorithmState
+  ManagerView?: ComponentType<AlgorithmViewProps>
+  StudentView?: ComponentType<AlgorithmViewProps>
+  DemoView?: ComponentType<AlgorithmViewProps>
   [key: string]: unknown
 }
 

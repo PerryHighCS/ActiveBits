@@ -864,6 +864,29 @@ Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
 - `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
+
+### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, manager/student shells)
+
+Completed:
+- Converted manager and student shell components to TypeScript:
+  - `activities/algorithm-demo/client/manager/DemoManager.jsx` -> `activities/algorithm-demo/client/manager/DemoManager.tsx`
+  - `activities/algorithm-demo/client/student/DemoStudent.jsx` -> `activities/algorithm-demo/client/student/DemoStudent.tsx`
+- Tightened shared registry typing used by manager/student:
+  - `activities/algorithm-demo/client/algorithms/index.ts` (typed `AlgorithmState`, `AlgorithmViewProps`, `AlgorithmSession`)
+- Added focused tests for newly typed shell logic:
+  - `activities/algorithm-demo/client/manager/DemoManager.test.tsx`
+  - `activities/algorithm-demo/client/student/DemoStudent.test.tsx`
+
+Implementation notes:
+- Manager/student websocket message handling now uses typed parse helpers and normalized algorithm state guards before updating React state.
+- Manager/student view rendering now checks for missing `ManagerView`/`StudentView` exports and returns explicit fallback errors instead of relying on `unknown` component types.
+- Activity-local imports to shared client hooks/components were switched from `@src/*` aliases to explicit relative paths to ensure activities workspace test runtime resolves modules consistently.
+- Individual algorithm visualizer modules (`search`, `sorting`, `recursion`, `guessing`) remain JavaScript for the next completion slice.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
 - `npm run typecheck --workspaces --if-present` -> pass
 
 ### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, shared client components/utils)
