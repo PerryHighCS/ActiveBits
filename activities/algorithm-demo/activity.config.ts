@@ -29,7 +29,7 @@ const algorithmDemoConfig: ActivityConfig = {
     },
   },
   clientEntry: './client/index.tsx',
-  serverEntry: './server/routes.js',
+  serverEntry: './server/routes.ts',
 }
 
 export default algorithmDemoConfig

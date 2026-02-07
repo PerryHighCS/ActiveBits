@@ -843,4 +843,47 @@ Implementation notes:
 Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
+
+### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, server routes)
+
+Completed:
+- Converted activity server routes to TypeScript:
+  - `activities/algorithm-demo/server/routes.js` -> `activities/algorithm-demo/server/routes.ts`
+- Updated activity config server entry:
+  - `activities/algorithm-demo/activity.config.ts` (`serverEntry` -> `./server/routes.ts`)
+- Added focused route regression tests:
+  - `activities/algorithm-demo/server/routes.test.ts`
+
+Implementation notes:
+- Route registration now uses typed request/session helpers (`readSessionId`, typed request body contracts) while preserving existing HTTP and websocket behavior.
+- Session normalization remains registered for `algorithm-demo`, with typed defaults for `algorithmId`, `algorithmState`, and `history`.
+- Test mocks were tightened to Express/WebSocket-compatible handler shapes so `activities` workspace strict typecheck remains green.
+- Manager/student views and individual algorithm visualizer modules remain JavaScript for the next completion slice.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
 - `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, shared client components/utils)
+
+Completed:
+- Converted shared client component and utility files to TypeScript:
+  - `activities/algorithm-demo/client/components/AlgorithmPicker.jsx` -> `activities/algorithm-demo/client/components/AlgorithmPicker.tsx`
+  - `activities/algorithm-demo/client/components/PseudocodeRenderer.jsx` -> `activities/algorithm-demo/client/components/PseudocodeRenderer.tsx`
+  - `activities/algorithm-demo/client/utils/pseudocodeUtils.jsx` -> `activities/algorithm-demo/client/utils/pseudocodeUtils.tsx`
+- Added focused regression tests for converted modules:
+  - `activities/algorithm-demo/client/components/AlgorithmPicker.test.tsx`
+  - `activities/algorithm-demo/client/components/PseudocodeRenderer.test.tsx`
+  - `activities/algorithm-demo/client/utils/pseudocodeUtils.test.tsx`
+
+Implementation notes:
+- `AlgorithmPicker.tsx` now enforces typed algorithm card props, uses `type="button"`, and safely disables cards with missing ids.
+- `PseudocodeRenderer.tsx` now uses typed highlight/overlay contracts while preserving backward compatibility with both `highlightedLines` and legacy `highlightedIds`.
+- `pseudocodeUtils.tsx` now exports typed token/render helpers used by renderer and tests, with no behavior changes to markdown-style bold parsing.
+- Manager/student views, remaining algorithm visualizer modules, and `server/routes.js` remain JavaScript for the next completion slice.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
