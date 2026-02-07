@@ -1,4 +1,5 @@
 import { WebSocketServer } from 'ws'
+import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../types/websocket.js'
 
 const SESSION_CLEANUP_GRACE_PERIOD_MS = 5_000
 const WS_OPEN_READY_STATE = 1
@@ -10,33 +11,6 @@ interface UpgradeRequest {
     remoteAddress?: string
   }
 }
-
-interface ActiveBitsWebSocket {
-  sessionId?: string | null
-  isAlive?: boolean
-  clientIp?: string
-  readyState: number
-  send(payload: string): void
-  on(event: string, handler: (...args: unknown[]) => void): void
-  once(event: string, handler: (...args: unknown[]) => void): void
-  close(code?: number, reason?: string): void
-  terminate(): void
-  ping(data?: string): void
-}
-
-interface WsRouter {
-  wss: {
-    clients: Set<ActiveBitsWebSocket>
-    close(callback?: () => void): void
-  }
-  register(pathname: string, handler: WsConnectionHandler): void
-}
-
-type WsConnectionHandler = (
-  ws: ActiveBitsWebSocket,
-  query: URLSearchParams,
-  wss: WsRouter['wss'],
-) => void
 
 interface SessionStore {
   get?(id: string): Promise<unknown>

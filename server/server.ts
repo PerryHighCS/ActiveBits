@@ -25,7 +25,7 @@ const server = http.createServer(app)
 const valkeyUrl = process.env.VALKEY_URL || null
 const sessionTtl = Number(process.env.SESSION_TTL_MS) || 60 * 60 * 1000
 const sessions = createSessionStore(valkeyUrl, sessionTtl)
-app.locals.sessions = sessions as unknown as never
+app.locals.sessions = sessions
 
 if (sessions.initializePubSub) {
   sessions.initializePubSub()

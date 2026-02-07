@@ -1,16 +1,12 @@
 import { randomBytes } from 'crypto'
+import type { Session as SharedSession, SessionStore as SharedSessionStore } from '../../types/session.js'
 import { findHashBySessionId, resetPersistentSession } from './persistentSessions.js'
 import { ValkeySessionStore } from './valkeyStore.js'
 import type { SessionLike } from './valkeyStore.js'
 import { SessionCache } from './sessionCache.js'
 import { normalizeSessionData } from './sessionNormalization.js'
 
-export interface SessionRecord {
-  id: string
-  type?: string
-  created: number
-  lastActivity?: number
-  data: Record<string, unknown>
+export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
 }
 
@@ -29,7 +25,7 @@ function toSessionRecord(session: SessionLike): SessionRecord {
   }
 }
 
-export interface SessionStore {
+export interface SessionStore extends SharedSessionStore<Record<string, unknown>> {
   get(id: string): Promise<SessionRecord | null>
   set(id: string, session: SessionRecord, ttl?: number | null): Promise<void>
   delete(id: string): Promise<boolean>

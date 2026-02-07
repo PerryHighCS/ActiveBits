@@ -389,3 +389,31 @@ Implementation notes:
 Validation:
 - `npm --workspace client test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
+
+### Follow-up: WebSocket type canonicalization
+
+Completed:
+- Removed duplicate `ActiveBitsWebSocket`/`WsRouter` declarations from `server/core/wsRouter.ts`.
+- Switched `wsRouter` to import canonical websocket contracts from `types/websocket.ts`.
+- Expanded canonical `types/websocket.ts` to include:
+  - shared `WsConnectionHandler` type
+  - `wss.close(callback?)` support used by graceful shutdown paths
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `npm --workspace server test` -> pass (`38` pass, `0` fail)
+
+### Follow-up: Express locals session-store typing cleanup
+
+Completed:
+- Removed unsafe cast in server bootstrap:
+  - `app.locals.sessions = sessions as unknown as never` -> `app.locals.sessions = sessions`
+- Aligned shared session contracts with server runtime store capabilities:
+  - Expanded `types/session.ts` `SessionStore` signature (ttl-aware `set`, boolean-returning `touch`/`delete`, required `getAll`/`close`, optional broadcast/cache hooks).
+- Made backend store contract explicitly extend shared session contract:
+  - `server/core/sessions.ts` now imports shared `Session`/`SessionStore` types and extends them for server-specific fields.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace server test` -> pass (`38` pass, `0` fail)

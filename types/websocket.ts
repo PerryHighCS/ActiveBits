@@ -11,11 +11,18 @@ export interface ActiveBitsWebSocket {
   ping(data?: string | Buffer | ArrayBuffer | Buffer[], mask?: boolean, cb?: (err: Error) => void): void
 }
 
+export type WsConnectionHandler = (
+  ws: ActiveBitsWebSocket,
+  query: URLSearchParams,
+  wss: WsRouter['wss'],
+) => void
+
 export interface WsRouter {
   wss: {
     clients: Set<ActiveBitsWebSocket>
+    close(callback?: () => void): void
   }
-  register(pathname: string, handler: (ws: ActiveBitsWebSocket, query: URLSearchParams, wss: WsRouter['wss']) => void): void
+  register(pathname: string, handler: WsConnectionHandler): void
 }
 
 export interface WebSocketMessage {
