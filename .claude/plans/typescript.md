@@ -608,6 +608,22 @@ Target final root scripts:
 2. Server: keep `sourceMap: true` in `server/tsconfig.build.json` and deploy `.map` files with `server/dist`.
 3. Documentation: architecture/deployment docs must explicitly state that source maps are intentionally public for debugging.
 
+### 7.6 Root-level alias resolution and import cleanup
+Goal: ensure `@src/*` (and any final approved aliases) resolve consistently from both repo root and workspace-level test/runtime commands.
+
+Required cleanup tasks:
+1. Add root-level resolver support for TypeScript path aliases used in runtime-adjacent test flows (`node --import tsx`, workspace tests, and root scripts).
+2. Verify alias resolution works from both contexts:
+   - `/workspaces/ActiveBits` (root command execution)
+   - `/workspaces/ActiveBits/activities` (workspace command execution)
+3. Replace temporary deep relative cross-workspace imports introduced during migration (for example `../../../../client/src/...`) with final alias or package-boundary imports.
+4. Add/keep a regression check that fails if alias resolution only works in one execution context.
+
+Exit criteria:
+1. No temporary deep relative cross-workspace imports remain in migrated source.
+2. Root and workspace test commands resolve aliases identically.
+3. Import policy in docs reflects final alias/runtime behavior.
+
 ---
 
 ## Critical Files
