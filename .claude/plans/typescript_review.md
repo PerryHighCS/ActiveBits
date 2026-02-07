@@ -614,3 +614,39 @@ Validation:
 - `npm --workspace client test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
 - `npm --workspace client run build` -> pass
+
+### Slice 11: Common component migration (`StatusDashboard`)
+
+Completed:
+- Converted common component:
+  - `client/src/components/common/StatusDashboard.jsx` -> `client/src/components/common/StatusDashboard.tsx`
+- Added extracted utility module + tests:
+  - `client/src/components/common/statusDashboardUtils.ts`
+  - `client/src/components/common/statusDashboardUtils.test.ts`
+
+Implementation notes:
+- Added explicit `StatusPayload` typing for `/api/status` response handling in the dashboard component.
+- Moved formatting/session-row derivation logic to typed pure helpers (`fmtInt`, `fmtBytes`, `buildByTypeEntries`, `buildSessionRows`) for deterministic Node-runner test coverage.
+- Preserved runtime behavior for polling cadence, pause/resume controls, Valkey summary rendering, and sessions table sorting.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 12: Common component migration (`ManageDashboard`)
+
+Completed:
+- Converted common component:
+  - `client/src/components/common/ManageDashboard.jsx` -> `client/src/components/common/ManageDashboard.tsx`
+- Added extracted utility module + tests:
+  - `client/src/components/common/manageDashboardUtils.ts`
+  - `client/src/components/common/manageDashboardUtils.test.ts`
+
+Implementation notes:
+- Added explicit typing for persistent-session API payloads (`list`, `create`, session creation) and dashboard state.
+- Extracted deep-link parsing/normalization/serialization helpers (`parseDeepLinkOptions`, `normalizeSelectedOptions`, `buildQueryString`, `describeSelectedOptions`) to keep the component focused on UI state transitions.
+- Preserved existing behavior for session creation, persistent-link creation, teacher-code visibility toggling, solo-link generation, and CSV export.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
