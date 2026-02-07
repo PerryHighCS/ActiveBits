@@ -703,3 +703,32 @@ Implementation notes:
 Validation:
 - `npm --workspace client test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
+
+## Phase 5 Progress (Activities Migration)
+
+### Slice 1: Activity migration (`activities/raffle`)
+
+Completed:
+- Migrated raffle activity config/client/server files to TypeScript:
+  - `activities/raffle/activity.config.js` -> `activities/raffle/activity.config.ts`
+  - `activities/raffle/client/index.jsx` -> `activities/raffle/client/index.tsx`
+  - `activities/raffle/client/manager/RaffleLink.jsx` -> `activities/raffle/client/manager/RaffleLink.tsx`
+  - `activities/raffle/client/manager/RaffleManager.jsx` -> `activities/raffle/client/manager/RaffleManager.tsx`
+  - `activities/raffle/client/manager/TicketsList.jsx` -> `activities/raffle/client/manager/TicketsList.tsx`
+  - `activities/raffle/client/manager/WinnerMessage.jsx` -> `activities/raffle/client/manager/WinnerMessage.tsx`
+  - `activities/raffle/client/student/TicketPage.jsx` -> `activities/raffle/client/student/TicketPage.tsx`
+  - `activities/raffle/server/routes.js` -> `activities/raffle/server/routes.ts`
+- Added typed raffle selection utilities and tests:
+  - `activities/raffle/client/manager/raffleUtils.ts`
+  - `activities/raffle/client/manager/raffleUtils.test.ts`
+
+Implementation notes:
+- Preserved existing raffle session lifecycle behavior (create session, ticket generation/listing, websocket subscriber updates).
+- Extracted winner-selection logic to `raffleUtils.ts` so group/pair/standard draw rules are tested directly.
+- Added `@src/*` alias in `activities/tsconfig.json` for TS activity files that import shared client hooks/components.
+
+Validation:
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client test` -> pass
+- `npm --workspace client run build` -> pass

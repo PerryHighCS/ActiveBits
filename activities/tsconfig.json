@@ -8,7 +8,8 @@
     "types": ["node", "vite/client"],
     "baseUrl": ".",
     "paths": {
-      "activebits-server/*": ["../server/*"]
+      "activebits-server/*": ["../server/*"],
+      "@src/*": ["../client/src/*"]
     },
     "noEmit": true
   },
