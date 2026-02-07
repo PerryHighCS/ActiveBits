@@ -1,5 +1,7 @@
 /* Smoke test: start the server on a test port and hit the health endpoint. */
 const { spawn } = require('child_process');
+const { existsSync } = require('fs');
+const { resolve } = require('path');
 
 const PORT = process.env.PORT || 4010;
 const READY_TIMEOUT_MS = 15000;
@@ -11,7 +13,10 @@ const env = {
   NODE_ENV: process.env.NODE_ENV || 'production',
 };
 
-const server = spawn('node', ['server/server.js'], {
+const distEntry = resolve(__dirname, '../server/dist/server.js');
+const serverArgs = existsSync(distEntry) ? ['server/dist/server.js'] : ['--import', 'tsx', 'server/server.ts'];
+
+const server = spawn('node', serverArgs, {
   env,
   stdio: ['ignore', 'pipe', 'pipe'],
 });

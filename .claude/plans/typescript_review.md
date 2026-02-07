@@ -338,3 +338,54 @@ Validation:
 
 Notes:
 - Server backend test migration target for Phase 3 (`server/**/*.test.js` -> `.test.ts`) is now complete.
+
+### Slice 8: Runtime cutover + backend JS fallback cleanup
+
+Completed:
+- Removed legacy backend JS source duplicates now covered by TS equivalents:
+  - `server/server.js`
+  - `server/activities/activityRegistry.js`
+  - `server/core/{broadcastUtils,persistentSessionWs,persistentSessions,sessionCache,sessionNormalization,sessions,valkeyStore,wsRouter}.js`
+  - `server/routes/{statusRoute,persistentSessionRoutes}.js`
+  - `server/{test-valkey,monitor-valkey}.js`
+- Updated runtime/start scripts to rely on TS entrypoint fallback instead of `server.js`:
+  - `server/package.json`:
+    - `start`: `dist/server.js` -> fallback `node --import tsx server.ts`
+    - `dev`: direct TS runtime (`node --import tsx server.ts`)
+    - `test:valkey` / `monitor:valkey`: TS-only script targets
+    - `main`: `dist/server.js`
+- Updated root server smoke verification script:
+  - `scripts/verify-server.js` now boots `server/dist/server.js` when present, otherwise `node --import tsx server/server.ts`.
+
+Documentation updates (runtime/deploy impact):
+- `README.md` runtime note added for `npm run start` fallback behavior.
+- `ARCHITECTURE.md` updated to remove `server.js` fallback entrypoint reference and point registry reference to `activityRegistry.ts`.
+- `DEPLOYMENT.md` updated from transitional `server.js` fallback wording to current dist-first + TS fallback policy.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `npm --workspace server test` -> pass (`38` pass, `0` fail)
+- `npm run verify:server` -> pass
+- `npm test` -> pass (root verification chain green)
+
+Notes:
+- This slice supersedes earlier transitional notes that depended on keeping backend `.js` source fallbacks during Phase 3.
+
+## Phase 4 Progress (Frontend Migration)
+
+### Slice 1: CSV utility migration kickoff
+
+Completed:
+- Converted client utility module:
+  - `client/src/utils/csvUtils.js` -> `client/src/utils/csvUtils.ts`
+- Added utility test coverage:
+  - `client/src/utils/csvUtils.test.js`
+
+Implementation notes:
+- Added explicit TS signatures for `escapeCsvCell`, `arrayToCsv`, and `downloadCsv` without changing runtime behavior.
+- Added `downloadCsv` behavior test with lightweight `document`/`URL` mocks under Node test runtime.
+- Kept the new test file as `.js` for this slice because client workspace TypeScript config currently scopes `types` to `vite/client`; converting Node runner tests to `.ts` will need either per-file Node type references or a test-type strategy update in a later frontend test-migration slice.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass

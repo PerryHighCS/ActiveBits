@@ -62,12 +62,12 @@ ActiveBits supports two session storage modes:
    - **Start Command**: `cd server && npm start`
    - **Plan**: Choose based on expected traffic (Starter plan for testing, Standard+ for production)
 
-   **TypeScript migration (current transitional state)**:
+   **TypeScript server runtime policy (current)**:
    - **Build Command**: `npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client && npm run build --workspace server`
    - **Start Command**: `cd server && npm start`
    - `npm run build --workspace server` runs `tsc -p server/tsconfig.build.json` and emits `server/dist/server.js` from `server/server.ts` plus other `server/**/*.ts` modules.
-   - Runtime remains safety-fallback based during transition: `npm start` runs `dist/server.js` if present, otherwise `server.js`.
-   - Production expectation is compiled runtime (`node dist/server.js`) with fallback retained only for migration safety.
+   - `npm start` runs compiled output (`dist/server.js`) when present, and falls back to TS runtime (`node --import tsx server.ts`) when dist output is absent.
+   - Production expectation remains compiled runtime (`node dist/server.js`).
 
 5. **Environment Variables**:
    ```

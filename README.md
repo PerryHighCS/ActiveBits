@@ -142,6 +142,8 @@ Start Command:
 ```bash
 npm run start
 ```
+Runtime note:
+- Server start prefers compiled output (`server/dist/server.js`) and falls back to `node --import tsx server/server.ts` when dist output is not present.
 
 **Required Environment Variables:**
 ```

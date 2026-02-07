@@ -30,8 +30,7 @@ ActiveBits/
 └── server/
     ├── activities/                  # Activity discovery/registry loader
     ├── core/                        # Core server modules
-    ├── server.ts                    # Main TypeScript server entry point
-    └── server.js                    # Transitional JS fallback entry point
+    └── server.ts                    # Main TypeScript server entry point
 ```
 
 ## User Flow
@@ -394,7 +393,7 @@ that contain a hash that allows teachers to use a code to enter the management d
 - **Secret Management**: Production deployments must set `PERSISTENT_SESSION_SECRET` environment variable
 
 ### Input Validation
-- Activity names validated against centralized registry (`activityRegistry.js`)
+- Activity names validated against centralized registry (`activityRegistry.ts`)
 - Teacher code length validated (6-100 characters) to prevent DoS attacks
 - Session IDs sanitized before database/session lookups
 - Cookie size limits prevent abuse (max 20 sessions per browser)
