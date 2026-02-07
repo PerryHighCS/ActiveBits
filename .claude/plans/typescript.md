@@ -491,6 +491,7 @@ Required checks for each activity PR:
 ### 5.4 Activity-specific notes
 - **traveling-salesman**: nested server route files under `server/routes/` need coordinated conversion.
 - **gallery-walk**: shared modules under `shared/` are cross-boundary and should get early typing.
+  During the gallery-walk activity refactor slice, relocate the gallery-walk route integration test from `server/galleryWalkRoutes.test.ts` to a colocated activity server test (`activities/gallery-walk/server/routes.test.ts` or equivalent) so activity server behavior is tested within the activity workspace.
 - **python-list-practice**: highest file count; keep commits smaller than other activities.
 - **algorithm-demo**: preserve existing algorithm registry semantics while typing module maps.
 

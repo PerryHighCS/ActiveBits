@@ -314,3 +314,27 @@ Validation:
 - `npm --workspace server run typecheck` -> pass
 - `npm --workspace server test` -> pass (outside sandbox; `38` pass, `0` fail)
 - `npm test` -> pass (outside sandbox; full root flow green)
+
+### Slice 7: Backend test migration completion
+
+Completed:
+- Converted remaining backend tests from JS to TS:
+  - `server/statusRoute.test.js` -> `server/statusRoute.test.ts`
+  - `server/sessionStore.test.js` -> `server/sessionStore.test.ts`
+  - `server/persistentSessionRoutes.test.js` -> `server/persistentSessionRoutes.test.ts`
+  - `server/galleryWalkRoutes.test.js` -> `server/galleryWalkRoutes.test.ts`
+  - `server/activities/activityRegistry.test.js` -> `server/activities/activityRegistry.test.ts`
+
+Implementation notes:
+- Added typed response-body helpers in migrated HTTP route tests (`statusRoute`, `galleryWalkRoutes`) to satisfy strict `Response.json()` `unknown` behavior without changing assertions.
+- Kept/retained explicit `[TEST]` log markers in expected noisy/error-path tests so intentional warning/error output remains distinguishable.
+- In `activityRegistry.test.ts`, added typed dynamic-import helpers and removed unused test-context parameters to satisfy strict/no-unused TS settings.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `npm --workspace server test` -> pass (`38` pass, `0` fail)
+- `npm run verify:server` -> pass
+- `npm test` -> pass (root verification chain green)
+
+Notes:
+- Server backend test migration target for Phase 3 (`server/**/*.test.js` -> `.test.ts`) is now complete.
