@@ -62,10 +62,13 @@ ActiveBits supports two session storage modes:
    - **Start Command**: `cd server && npm start`
    - **Plan**: Choose based on expected traffic (Starter plan for testing, Standard+ for production)
 
-   **Post-TypeScript migration update**:
+   **TypeScript migration (current transitional state)**:
    - **Build Command**: `npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client && npm run build --workspace server`
    - **Start Command**: `cd server && npm start`
-   - The server build is expected to emit `server/dist` and run compiled output.
+   - `npm run build --workspace server` runs `tsc -p server/tsconfig.build.json` and currently only emits files for `server/**/*.ts`.
+   - Because the server entrypoint is still `server/server.js` (not `server/server.ts` yet), build output may not include `server/dist/server.js`.
+   - Runtime behavior today is fallback-based: `npm start` runs `dist/server.js` if present, otherwise runs `server.js`.
+   - After backend TS entrypoint migration, `server/dist/server.js` becomes the expected production runtime artifact.
 
 5. **Environment Variables**:
    ```
@@ -131,7 +134,7 @@ ActiveBits intentionally ships source maps in production for debugging and teach
    - Enable Vite production source maps (`build.sourcemap: true`).
    - Publish generated `.map` files with client assets.
 
-2. **Server source maps (post-TypeScript migration)**:
+2. **Server source maps (post-TypeScript migration / TS server emit available)**:
    - Keep `sourceMap: true` in `server/tsconfig.build.json`.
    - Deploy emitted `.map` files with `server/dist`.
 

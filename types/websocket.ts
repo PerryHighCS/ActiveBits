@@ -7,8 +7,8 @@ export interface ActiveBitsWebSocket {
   on(event: string, listener: (...args: unknown[]) => void): void
   once(event: string, listener: (...args: unknown[]) => void): void
   close(code?: number, reason?: string): void
-  terminate?: () => void
-  ping?: (data?: string) => void
+  terminate(): void
+  ping(data?: string | Buffer | ArrayBuffer | Buffer[], mask?: boolean, cb?: (err: Error) => void): void
 }
 
 export interface WsRouter {
