@@ -461,3 +461,49 @@ Validation:
 - `npm --workspace client test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
 - `npm test` -> pass (full root verification chain green)
+
+### Slice 4: Hook migration (`client/src/hooks/useSessionEndedHandler`)
+
+Completed:
+- Converted session-ended handler hook:
+  - `client/src/hooks/useSessionEndedHandler.js` -> `client/src/hooks/useSessionEndedHandler.ts`
+- Added focused parsing helper tests:
+  - `client/src/hooks/useSessionEndedHandler.test.ts`
+
+Implementation notes:
+- Added explicit hook/websocket typing:
+  - `WebSocketMessageEventLike`, `WebSocketMessageTargetLike`, `SessionEndedWebSocketRef`
+- Extracted `isSessionEndedMessageData(...)` helper to isolate message parsing behavior for Node-based unit testing.
+- Preserved hook behavior:
+  - attach/remove `message` listeners per socket instance
+  - navigate to `/session-ended` on `{"type":"session-ended"}`
+  - ignore non-JSON messages while retaining dev-only debug logging via `import.meta.env?.DEV`
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 5: Hook migration (`client/src/hooks/useResilientWebSocket`)
+
+Completed:
+- Converted resilient websocket hook:
+  - `client/src/hooks/useResilientWebSocket.js` -> `client/src/hooks/useResilientWebSocket.ts`
+- Added focused helper coverage:
+  - `client/src/hooks/useResilientWebSocket.test.ts`
+
+Implementation notes:
+- Added explicit options/return typing:
+  - `UseResilientWebSocketOptions`, `UseResilientWebSocketResult`
+- Extracted pure helper functions:
+  - `resolveWebSocketUrl(...)`
+  - `getReconnectDelay(...)`
+- Preserved runtime behavior:
+  - optional URL builder callback or static URL
+  - reconnect backoff with max delay cap
+  - manual close suppression of reconnect
+  - callback refs for `onOpen`/`onMessage`/`onClose`/`onError`
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client run build` -> pass
