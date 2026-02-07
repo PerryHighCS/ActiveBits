@@ -31,7 +31,7 @@ npm install --save-dev typescript @types/node
 
 **Client workspace:**
 ```bash
-npm install --save-dev --workspace client typescript @types/node @types/ws typescript-eslint
+npm install --save-dev --workspace client typescript @types/node @typescript-eslint/parser @typescript-eslint/eslint-plugin
 ```
 
 **Server workspace:**
@@ -89,7 +89,7 @@ npm install --save-dev --workspace activities typescript @types/node @types/reac
     },
     "noEmit": true
   },
-  "include": ["src/**/*", "vite.config.ts"],
+  "include": ["src/**/*", "vite.config.ts", "../types/**/*.d.ts"],
   "exclude": ["node_modules", "dist"]
 }
 ```
@@ -100,13 +100,13 @@ npm install --save-dev --workspace activities typescript @types/node @types/reac
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ES2022",
-    "moduleResolution": "bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["**/*.ts", "**/*.js"],
+  "include": ["**/*.ts", "**/*.js", "../types/**/*.d.ts"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.js"]
 }
 ```
@@ -127,7 +127,7 @@ npm install --save-dev --workspace activities typescript @types/node @types/reac
     },
     "noEmit": true
   },
-  "include": ["*/client/**/*", "*/server/**/*", "*/activity.config.*"],
+  "include": ["*/client/**/*", "*/server/**/*", "*/activity.config.*", "../types/**/*.d.ts"],
   "exclude": ["node_modules"]
 }
 ```
@@ -167,10 +167,23 @@ Files to create:
 ```json
 {
   "scripts": {
+    "test": "sh -c 'set -e; files=$(find . -name \"*.test.ts\" -o -name \"*.test.tsx\" -not -path \"./node_modules/*\" -print); if [ -z \"$files\" ]; then echo \"No client tests found\"; exit 0; fi; node --import tsx --test $files'",
     "typecheck": "tsc --noEmit"
   }
 }
 ```
+
+**Update activities package.json scripts:**
+```json
+{
+  "scripts": {
+    "test": "sh -c 'set -e; files=$(find . -name \"*.test.ts\" -o -name \"*.test.tsx\" -not -path \"./node_modules/*\" -print); if [ -z \"$files\" ]; then echo \"No activities tests found\"; exit 0; fi; node --import tsx --test $files'",
+    "typecheck": "tsc --noEmit"
+  }
+}
+```
+
+> **Note:** Once activity tests are converted to `.tsx`, the `jsx-loader-register.mjs` loader can be removed from the activities workspace.
 
 **Update ESLint:** [client/eslint.config.js](client/eslint.config.js) → `client/eslint.config.mjs`
 - Add `typescript-eslint` support
@@ -358,6 +371,40 @@ The following files are most critical for establishing the TypeScript foundation
 3. **[server/core/sessions.ts](server/core/sessions.ts)** - Core session management with SessionStore interface
 4. **[client/src/activities/index.ts](client/src/activities/index.ts)** - Client activity registry with complex `import.meta.glob()` typing
 5. **[server/activities/activityRegistry.ts](server/activities/activityRegistry.ts)** - Server activity registry with dynamic imports
+
+---
+
+## Contract & Invariant Tests
+
+Add these tests during migration to protect cross-boundary shapes and core behavior:
+
+### WebSocket Message Contract Tests
+Create `server/core/wsRouter.contract.test.ts`:
+- Instantiate representative `WebSocketMessage` payloads and validate router behavior
+- Cover error paths (malformed messages, unknown types)
+- Ensures runtime behavior matches the compile-time union type
+
+### Session Store Invariant Tests
+Create `server/core/sessionStore.invariant.test.ts`:
+- Test both InMemory and Valkey `SessionStore` implementations
+- Verify create → read → update → delete lifecycle
+- Verify TTL/expiry handling
+- Verify `sessionNormalization` behavior
+
+### Activity Registry Contract Tests
+Create `server/activities/activityRegistry.contract.test.ts`:
+- Validate that activity config loading returns the expected shape
+- Test failure modes (missing config, invalid shape)
+- Protects the most dynamic part of the system during migration
+
+### Client Activity Loader Contract Tests
+Create `client/src/activities/index.contract.test.ts`:
+- Validate glob results map to `ActivityClientModule`
+- Assert required fields exist on loaded modules
+- Assert unsupported shapes are rejected early
+
+### Root Typecheck in Test Flow
+Ensure `npm run typecheck --workspaces --if-present` runs as part of the root `test` script to enforce TS correctness alongside runtime tests.
 
 ---
 
