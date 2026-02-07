@@ -56,3 +56,13 @@ test('buildSessionRows sorts by lastActivity and maps defaults', () => {
   assert.equal(rows[1]?.expiresAt, '-')
   assert.equal(rows[1]?.ttl, '0s')
 })
+
+test('buildSessionRows treats invalid lastActivity timestamps as zero for deterministic sorting', () => {
+  const rows = buildSessionRows([
+    { id: 'invalid', lastActivity: '2024-01-01T00:00:00.000Z-nope' },
+    { id: 'valid-newer', lastActivity: '2024-01-03T00:00:00.000Z' },
+    { id: 'valid-older', lastActivity: '2024-01-02T00:00:00.000Z' },
+  ])
+
+  assert.deepEqual(rows.map((row) => row.id), ['valid-newer', 'valid-older', 'invalid'])
+})

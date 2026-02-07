@@ -14,6 +14,15 @@ interface RaffleWsMessage {
   error?: string
 }
 
+/**
+ * Intentional manager-facing audit trail:
+ * manager runs can inspect winning ticket numbers in the browser console
+ * without showing them in the projected/student UI.
+ */
+const logWinningTicketsForManager = (winningTickets: number[]): void => {
+  console.log('[raffle:manager] winning tickets', winningTickets)
+}
+
 export default function RaffleManager() {
   const [tickets, setTickets] = useState<number[]>([])
   const [winners, setWinners] = useState<number[]>([])
@@ -97,7 +106,7 @@ export default function RaffleManager() {
     }
 
     const winningTickets = drawWinningTickets(tickets, selectionSize)
-    console.log('raffle winners', winningTickets)
+    logWinningTicketsForManager(winningTickets)
     setWinners(winningTickets)
   }
 

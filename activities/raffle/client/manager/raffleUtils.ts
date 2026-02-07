@@ -29,16 +29,24 @@ export function drawWinningTickets(
     return []
   }
 
+  const winnerCount = Math.min(count, tickets.length)
+  const pool = [...tickets]
   const winners: number[] = []
 
-  for (let index = 0; index < count; index += 1) {
-    let ticket: number
+  // Partial Fisher-Yates: pick unique winners with no retry loop.
+  for (let index = 0; index < winnerCount; index += 1) {
+    const lastUnpickedIndex = pool.length - index - 1
+    const randomIndex = Math.floor(random() * (lastUnpickedIndex + 1))
+    const picked = pool[randomIndex]
+    const tail = pool[lastUnpickedIndex]
 
-    do {
-      ticket = tickets[Math.floor(random() * tickets.length)] as number
-    } while (winners.includes(ticket))
+    if (picked === undefined || tail === undefined) {
+      break
+    }
 
-    winners.push(ticket)
+    pool[randomIndex] = tail
+    pool[lastUnpickedIndex] = picked
+    winners.push(pool[lastUnpickedIndex])
   }
 
   return winners

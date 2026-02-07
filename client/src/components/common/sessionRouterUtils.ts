@@ -89,7 +89,13 @@ export function getPersistentQuerySuffix(search: string): string {
 }
 
 export function isJoinSessionId(input: string): boolean {
-  return Boolean(parseInt(input.trim(), 16))
+  const value = input.trim()
+  if (!/^[a-f0-9]+$/i.test(value)) {
+    return false
+  }
+
+  // Keep prior behavior that treats all-zero IDs as invalid.
+  return !/^0+$/i.test(value)
 }
 
 export function getSoloActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {

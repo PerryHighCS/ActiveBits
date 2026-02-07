@@ -80,9 +80,13 @@ test('getPersistentQuerySuffix preserves query params for persistent-session fet
   assert.equal(getPersistentQuerySuffix(''), '')
 })
 
-test('isJoinSessionId matches legacy hex parsing behavior', () => {
+test('isJoinSessionId requires a full non-zero hex string', () => {
   assert.equal(isJoinSessionId('abc123'), true)
+  assert.equal(isJoinSessionId('  AbC123  '), true)
+  assert.equal(isJoinSessionId('abc123xyz'), false)
+  assert.equal(isJoinSessionId('0xabc123'), false)
   assert.equal(isJoinSessionId('0'), false)
+  assert.equal(isJoinSessionId('0000'), false)
   assert.equal(isJoinSessionId(''), false)
 })
 

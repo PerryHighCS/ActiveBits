@@ -22,5 +22,15 @@ test('drawWinningTickets returns unique winners from ticket pool', () => {
     return value
   })
 
-  assert.deepEqual(winners, [10, 20, 30])
+  assert.equal(winners.length, 3)
+  assert.equal(new Set(winners).size, 3)
+  assert.deepEqual([...winners].sort((left, right) => left - right), [10, 20, 30])
+})
+
+test('drawWinningTickets caps winner count to available tickets', () => {
+  const winners = drawWinningTickets([11, 22, 33], 10, () => 0.5)
+
+  assert.equal(winners.length, 3)
+  assert.equal(new Set(winners).size, 3)
+  assert.deepEqual([...winners].sort((left, right) => left - right), [11, 22, 33])
 })

@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
+import { buildUniqueRosterRowKeys } from './activityRosterKeys'
 
 type AccentMode = 'neutral' | 'emerald'
 type SortDirection = 'asc' | 'desc'
+type AriaSort = 'ascending' | 'descending' | 'none'
 
 export interface ActivityRosterRow {
   id?: string | number
@@ -30,18 +32,27 @@ export interface ActivityRosterProps<TStudent extends ActivityRosterRow = Activi
 
 function SortIcon({
   column,
-  onSort,
   sortBy,
   sortDirection,
 }: {
   column: string
-  onSort?: (columnId: string) => void
   sortBy?: string
   sortDirection: SortDirection
 }) {
-  if (!onSort) return null
   if (sortBy !== column) return <span className="text-gray-400 ml-1">⇅</span>
   return sortDirection === 'asc' ? <span className="ml-1">↓</span> : <span className="ml-1">↑</span>
+}
+
+function getAriaSortValue(
+  columnId: string,
+  sortBy: string | undefined,
+  sortDirection: SortDirection,
+): AriaSort {
+  if (sortBy !== columnId) {
+    return 'none'
+  }
+
+  return sortDirection === 'asc' ? 'ascending' : 'descending'
 }
 
 /**
@@ -63,6 +74,7 @@ export default function ActivityRoster<TStudent extends ActivityRosterRow = Acti
   const containerBorder = isEmerald ? 'border-emerald-200' : 'border-gray-200'
   const headerClass = isEmerald ? 'bg-emerald-50 text-emerald-900 border-emerald-100' : 'bg-gray-50 text-gray-900 border-gray-200'
   const borderClass = isEmerald ? 'border-emerald-100' : 'border-gray-200'
+  const rowKeys = buildUniqueRosterRowKeys(students)
 
   return (
     <div className={`bg-white/95 border ${containerBorder} shadow-lg rounded-xl overflow-x-auto`}>
@@ -72,17 +84,20 @@ export default function ActivityRoster<TStudent extends ActivityRosterRow = Acti
             {columns.map((column) => (
               <th
                 key={column.id}
-                className={`px-4 py-2 ${column.align === 'center' ? 'text-center' : ''} cursor-${onSort ? 'pointer' : 'default'}`}
-                onClick={onSort ? () => onSort(column.id) : undefined}
+                className={`px-4 py-2 ${column.align === 'center' ? 'text-center' : ''}`}
+                aria-sort={onSort ? getAriaSortValue(column.id, sortBy, sortDirection) : undefined}
               >
-                {column.label}
-                {onSort && (
-                  <SortIcon
-                    column={column.id}
-                    onSort={onSort}
-                    sortBy={sortBy}
-                    sortDirection={sortDirection}
-                  />
+                {onSort ? (
+                  <button
+                    type="button"
+                    className={`inline-flex w-full items-center gap-1 ${column.align === 'center' ? 'justify-center' : 'justify-start'} cursor-pointer`}
+                    onClick={() => onSort(column.id)}
+                  >
+                    <span>{column.label}</span>
+                    <SortIcon column={column.id} sortBy={sortBy} sortDirection={sortDirection} />
+                  </button>
+                ) : (
+                  column.label
                 )}
               </th>
             ))}
@@ -110,8 +125,8 @@ export default function ActivityRoster<TStudent extends ActivityRosterRow = Acti
               </td>
             </tr>
           )}
-          {students.map((student) => (
-            <tr key={String(student.id ?? student.name)} className={`${borderClass} border-b`}>
+          {students.map((student, index) => (
+            <tr key={rowKeys[index] ?? `index:${index}`} className={`${borderClass} border-b`}>
               {columns.map((column) => {
                 const renderedCell =
                   typeof column.render === 'function'

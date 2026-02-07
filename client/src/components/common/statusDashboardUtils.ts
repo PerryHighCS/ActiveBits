@@ -39,7 +39,8 @@ export function fmtBytes(value: number | undefined): string {
 }
 
 function parseTimestamp(value: string | undefined): number {
-  return value ? Date.parse(value) : 0
+  const parsed = value ? Date.parse(value) : 0
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 export function buildByTypeEntries(
