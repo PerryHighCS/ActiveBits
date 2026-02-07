@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "npm run lint && npm run test:unit",
-    "test:unit": "sh -c 'set -e; files=$(find src -name \"*.test.js\" -print); if [ -z \"$files\" ]; then echo \"No client tests found\"; exit 0; fi; node --test $files'",
+    "test:unit": "sh -c 'set -e; files=$(find src \\( -name \"*.test.js\" -o -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No client tests found\"; exit 0; fi; node --test $files'",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -25,11 +26,11 @@
     "@eslint/js": "^9.21.0",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^5.1.0",
     "eslint": "^9.21.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.19",
     "globals": "^15.15.0",
-    "vite": "^6.4.1"
+    "vite": "^7.2.2"
   }
 }

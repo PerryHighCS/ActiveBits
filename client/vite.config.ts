@@ -2,29 +2,27 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import process from 'node:process';
-import { fileURLToPath } from 'url';
-import path, { dirname } from 'path';
+import process from 'node:process'
+import { fileURLToPath } from 'node:url'
+import path, { dirname } from 'node:path'
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
-const isCodespaces = Boolean(process.env.CODESPACES) || Boolean(process.env.CODESPACE_NAME) || Boolean(process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN);
+const isCodespaces = Boolean(process.env.CODESPACES) || Boolean(process.env.CODESPACE_NAME) || Boolean(process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN)
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    react(), 
-    tailwindcss({
-      base: path.resolve(__dirname, 'src/index.css'),
-    }),
+    react(),
+    tailwindcss(),
   ],
   resolve: {
     alias: {
       '@src': path.resolve(__dirname, 'src'),
       '@activities': path.resolve(__dirname, '..', 'activities'),
       // Explicitly resolve React deps for files outside client/ (colocated activities)
-      'react': path.resolve(__dirname, '..', 'node_modules/react'),
+      react: path.resolve(__dirname, '..', 'node_modules/react'),
       'react-dom': path.resolve(__dirname, '..', 'node_modules/react-dom'),
       'react-router-dom': path.resolve(__dirname, '..', 'node_modules/react-router-dom'),
     },
@@ -64,20 +62,21 @@ export default defineConfig({
     },
   },
   build: {
+    sourcemap: true,
     rollupOptions: {
       output: {
         // Name per-activity chunks for clearer artifacts
-        manualChunks: (id) => {
-          const match = id.match(/\/activities\/([^/]+)\/client\//);
-          if (match) return `activity-${match[1]}`;
-          return undefined;
+        manualChunks: (id: string) => {
+          const match = id.match(/\/activities\/([^/]+)\/client\//)
+          if (match?.[1]) return `activity-${match[1]}`
+          return undefined
         },
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',
         assetFileNames: (assetInfo) => {
-          const name = assetInfo.name;
-          const ext = name?.includes('.') ? name.split('.').pop() : null;
-          return ext ? `assets/[name]-[hash].${ext}` : 'assets/[name]-[hash]';
+          const name = assetInfo.name ?? ''
+          const ext = name.includes('.') ? name.split('.').pop() : null
+          return ext ? `assets/[name]-[hash].${ext}` : 'assets/[name]-[hash]'
         },
       },
     },
