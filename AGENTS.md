@@ -26,6 +26,7 @@ Before making changes, read these files when relevant:
 6. Do not rely on TypeScript path aliases for backend runtime resolution unless runtime support exists.
 7. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
 8. Add or update tests for the code you change, even if nobody asked.
+9. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
 
 ## Preflight Checklist
 

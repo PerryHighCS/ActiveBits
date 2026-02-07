@@ -108,7 +108,42 @@ Validation results:
 - `npm --workspace client test` -> pass
 - `npm --workspace activities test` -> pass
 
-Remaining note:
-- ESLint warns about legacy `/* eslint-env node */` comment in `client/vite.config.ts`; non-blocking now, should be replaced with flat-config-compatible globals comment before ESLint v10.
-
 Phase 1 status: complete (with known sandbox limitation for server bind-dependent runtime tests recorded earlier).
+
+## Phase 2 Progress (Compatibility Layer)
+
+### Completed
+
+- Updated client activity loader (`client/src/activities/index.js`) to support mixed extension discovery:
+  - configs: `@activities/*/activity.config.{js,ts}`
+  - client entries: `@activities/*/client/index.{js,jsx,ts,tsx}`
+- Added deterministic extension preference during overlap windows:
+  - config preference: `.ts` over `.js`
+  - client entry preference: `.tsx` over `.ts` over `.jsx` over `.js`
+- Updated server registry (`server/activities/activityRegistry.js`) to:
+  - discover both `activity.config.ts` and `activity.config.js` (prefers `.ts` when both exist)
+  - resolve `serverEntry` across `.js`/`.ts` extension transitions when one side has already migrated
+  - preserve existing production/development filtering and startup safety behavior
+- Updated migration-sensitive tests to tolerate mixed extensions:
+  - `client/src/activities/index.test.js`
+  - `server/activities/activityRegistry.test.js`
+- Added targeted server registry test covering TS config + TS route module with `.js` serverEntry fallback resolution.
+
+### Validation
+
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client test` -> pass
+- `npm --workspace client run build` -> pass
+- `npm --workspace activities test` -> pass
+- `node --import tsx --test server/activities/activityRegistry.test.js` -> pass
+- `npm --workspace server test` -> fail in sandbox on known bind-related suites (`galleryWalkRoutes`, `sessionStore`, `statusRoute`), unchanged from baseline limitation.
+
+### Manual/local verification (user run)
+
+- `npm --workspace server test` -> pass (`35` pass, `0` fail, user-reported local run)
+- Added explicit `[TEST]` messages in `server/activities/activityRegistry.test.js` before intentionally noisy/error-path cases so expected output is clearly labeled.
+- Expected noisy logs during tests:
+  - `registerActivityRoutes` compatibility test intentionally uses minimal `app/ws` stubs, so non-target activity route registration logs `TypeError` warnings while still validating extension fallback behavior.
+  - Config-failure tests intentionally create broken temporary configs and verify production/development error handling.
+
+Phase 2 status: complete (sandbox + local canonical verification).

@@ -5,6 +5,57 @@ import { fileURLToPath, pathToFileURL } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const activitiesRoot = path.resolve(__dirname, '..', '..', 'activities');
+const CONFIG_FILE_PRIORITY = ['activity.config.ts', 'activity.config.js'];
+const SERVER_ENTRY_EXTENSION_FALLBACKS = ['.ts', '.js'];
+
+function resolveConfigPath(activityDir) {
+  const configCandidates = CONFIG_FILE_PRIORITY
+    .map((filename) => path.join(activityDir, filename))
+    .filter((candidatePath) => fs.existsSync(candidatePath));
+
+  if (configCandidates.length === 0) {
+    return null;
+  }
+
+  if (configCandidates.length > 1) {
+    console.warn(
+      `[activities] Multiple config files found for "${path.basename(activityDir)}". Preferring "${path.basename(configCandidates[0])}".`,
+    );
+  }
+
+  return configCandidates[0];
+}
+
+function resolveServerEntryUrl(serverEntry, baseUrl) {
+  if (!serverEntry) {
+    return null;
+  }
+
+  const requestedUrl = new URL(serverEntry, baseUrl);
+  if (requestedUrl.protocol !== 'file:') {
+    return requestedUrl.href;
+  }
+
+  const requestedPath = fileURLToPath(requestedUrl);
+  if (fs.existsSync(requestedPath)) {
+    return requestedUrl.href;
+  }
+
+  const requestedExt = path.extname(requestedPath);
+  const baseEntryPath = requestedExt ? requestedPath.slice(0, -requestedExt.length) : requestedPath;
+  const candidateExtensions = requestedExt
+    ? SERVER_ENTRY_EXTENSION_FALLBACKS.filter((ext) => ext !== requestedExt)
+    : SERVER_ENTRY_EXTENSION_FALLBACKS;
+
+  for (const extension of candidateExtensions) {
+    const candidatePath = `${baseEntryPath}${extension}`;
+    if (fs.existsSync(candidatePath)) {
+      return pathToFileURL(candidatePath).href;
+    }
+  }
+
+  return requestedUrl.href;
+}
 
 function discoverConfigPaths() {
   if (!fs.existsSync(activitiesRoot)) return [];
@@ -13,10 +64,10 @@ function discoverConfigPaths() {
   const configs = entries
     .filter(entry => entry.isDirectory())
     .map(entry => {
-      const configPath = path.join(activitiesRoot, entry.name, 'activity.config.js');
+      const configPath = resolveConfigPath(path.join(activitiesRoot, entry.name));
       return { id: entry.name, configPath };
     })
-    .filter(entry => fs.existsSync(entry.configPath));
+    .filter(entry => entry.configPath && fs.existsSync(entry.configPath));
 
   console.info(
     `[activities] Discovered ${configs.length} activity configs (${isDevelopment ? 'development' : 'production'} mode):`,
@@ -33,7 +84,7 @@ async function loadConfig(configPath) {
   return {
     ...cfg,
     baseUrl,
-    serverEntry: cfg.serverEntry ? new URL(cfg.serverEntry, baseUrl).href : null,
+    serverEntry: resolveServerEntryUrl(cfg.serverEntry, baseUrl),
   };
 }
 

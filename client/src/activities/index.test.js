@@ -23,6 +23,21 @@ const EXPECTED_ACTIVITIES = [
   "www-sim",
 ];
 
+const CONFIG_FILE_CANDIDATES = ["activity.config.ts", "activity.config.js"];
+const CLIENT_ENTRY_CANDIDATES = ["index.tsx", "index.ts", "index.jsx", "index.js"];
+
+function firstExistingPath(paths) {
+  return paths.find(path => existsSync(path)) || null;
+}
+
+function resolveActivityConfigPath(activityPath) {
+  return firstExistingPath(CONFIG_FILE_CANDIDATES.map(filename => join(activityPath, filename)));
+}
+
+function resolveActivityClientEntryPath(clientPath) {
+  return firstExistingPath(CLIENT_ENTRY_CANDIDATES.map(filename => join(clientPath, filename)));
+}
+
 /**
  * Test that verifies all expected activities exist and are properly structured
  */
@@ -31,10 +46,9 @@ test("all expected activities exist with required files", () => {
   
   for (const activityId of EXPECTED_ACTIVITIES) {
     const activityPath = join(activitiesDir, activityId);
-    const configPath = join(activityPath, "activity.config.js");
+    const configPath = resolveActivityConfigPath(activityPath);
     const clientDir = join(activityPath, "client");
-    const clientIndexJs = join(clientDir, "index.js");
-    const clientIndexJsx = join(clientDir, "index.jsx");
+    const clientEntryPath = resolveActivityClientEntryPath(clientDir);
     
     assert.ok(
       existsSync(activityPath) && statSync(activityPath).isDirectory(),
@@ -42,8 +56,8 @@ test("all expected activities exist with required files", () => {
     );
     
     assert.ok(
-      existsSync(configPath),
-      `Activity config exists: ${activityId}/activity.config.js`
+      Boolean(configPath),
+      `Activity config exists: ${activityId}/activity.config.{js,ts}`
     );
     
     assert.ok(
@@ -52,8 +66,8 @@ test("all expected activities exist with required files", () => {
     );
     
     assert.ok(
-      existsSync(clientIndexJs) || existsSync(clientIndexJsx),
-      `Client entry point exists: ${activityId}/client/index.{js,jsx}`
+      Boolean(clientEntryPath),
+      `Client entry point exists: ${activityId}/client/index.{js,jsx,ts,tsx}`
     );
   }
 });
@@ -76,8 +90,8 @@ test("no unexpected activities in activities directory", async () => {
   for (const dir of activityDirs) {
     if (EXPECTED_ACTIVITIES.includes(dir)) continue;
     
-    const configPath = join(activitiesDir, dir, "activity.config.js");
-    if (existsSync(configPath)) {
+    const configPath = resolveActivityConfigPath(join(activitiesDir, dir));
+    if (configPath) {
       try {
         const { default: config } = await import(pathToFileURL(configPath).href);
         // Only flag as unexpected if it's NOT a dev activity
@@ -113,13 +127,13 @@ test("activity count matches expected count", async () => {
     const entryPath = join(activitiesDir, entry);
     return statSync(entryPath).isDirectory() && 
            entry !== "node_modules" &&
-           existsSync(join(entryPath, "activity.config.js"));
+           resolveActivityConfigPath(entryPath);
   });
   
   // Filter out dev activities
   let nonDevActivityCount = 0;
   for (const dir of activityDirs) {
-    const configPath = join(activitiesDir, dir, "activity.config.js");
+    const configPath = resolveActivityConfigPath(join(activitiesDir, dir));
     try {
       const { default: config } = await import(pathToFileURL(configPath).href);
       if (!config.isDev) {

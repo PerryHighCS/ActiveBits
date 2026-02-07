@@ -26,6 +26,21 @@ const EXPECTED_ACTIVITIES = [
   "www-sim",
 ];
 
+const CONFIG_FILE_CANDIDATES = ["activity.config.ts", "activity.config.js"];
+const SERVER_ENTRY_CANDIDATES = ["routes.ts", "routes.js"];
+
+function firstExistingPath(paths) {
+  return paths.find(path => existsSync(path)) || null;
+}
+
+function resolveActivityConfigPath(activityPath) {
+  return firstExistingPath(CONFIG_FILE_CANDIDATES.map(filename => join(activityPath, filename)));
+}
+
+function resolveServerEntryPath(serverPath) {
+  return firstExistingPath(SERVER_ENTRY_CANDIDATES.map(filename => join(serverPath, filename)));
+}
+
 /**
  * Test that verifies all expected activities exist with required server structure
  */
@@ -34,9 +49,9 @@ test("all expected activities exist with required server files", () => {
   
   for (const activityId of EXPECTED_ACTIVITIES) {
     const activityPath = join(activitiesDir, activityId);
-    const configPath = join(activityPath, "activity.config.js");
+    const configPath = resolveActivityConfigPath(activityPath);
     const serverDir = join(activityPath, "server");
-    const serverRoutes = join(serverDir, "routes.js");
+    const serverRoutes = resolveServerEntryPath(serverDir);
     
     assert.ok(
       existsSync(activityPath) && statSync(activityPath).isDirectory(),
@@ -44,8 +59,8 @@ test("all expected activities exist with required server files", () => {
     );
     
     assert.ok(
-      existsSync(configPath),
-      `Activity config exists: ${activityId}/activity.config.js`
+      Boolean(configPath),
+      `Activity config exists: ${activityId}/activity.config.{js,ts}`
     );
     
     assert.ok(
@@ -54,8 +69,8 @@ test("all expected activities exist with required server files", () => {
     );
     
     assert.ok(
-      existsSync(serverRoutes),
-      `Server routes exist: ${activityId}/server/routes.js`
+      Boolean(serverRoutes),
+      `Server routes exist: ${activityId}/server/routes.{js,ts}`
     );
   }
 });
@@ -78,8 +93,8 @@ test("no unexpected activities in activities directory", async () => {
   for (const dir of activityDirs) {
     if (EXPECTED_ACTIVITIES.includes(dir)) continue;
     
-    const configPath = join(activitiesDir, dir, "activity.config.js");
-    if (existsSync(configPath)) {
+    const configPath = resolveActivityConfigPath(join(activitiesDir, dir));
+    if (configPath) {
       try {
         const { default: config } = await import(pathToFileURL(configPath).href);
         // Only flag as unexpected if it's NOT a dev activity
@@ -115,13 +130,13 @@ test("activity count matches expected count", async () => {
     const entryPath = join(activitiesDir, entry);
     return statSync(entryPath).isDirectory() && 
            entry !== "node_modules" &&
-           existsSync(join(entryPath, "activity.config.js"));
+           resolveActivityConfigPath(entryPath);
   });
   
   // Filter out dev activities
   let nonDevActivityCount = 0;
   for (const dir of activityDirs) {
-    const configPath = join(activitiesDir, dir, "activity.config.js");
+    const configPath = resolveActivityConfigPath(join(activitiesDir, dir));
     try {
       const { default: config } = await import(pathToFileURL(configPath).href);
       if (!config.isDev) {
@@ -148,7 +163,8 @@ test("all activity configs have required fields", async () => {
   const activitiesDir = join(__dirname, "../../activities");
   
   for (const activityId of EXPECTED_ACTIVITIES) {
-    const configPath = join(activitiesDir, activityId, "activity.config.js");
+    const configPath = resolveActivityConfigPath(join(activitiesDir, activityId));
+    assert.ok(configPath, `${activityId}: config exists at activity.config.{js,ts}`);
     const configUrl = pathToFileURL(configPath).href;
     const { default: config } = await import(configUrl);
     
@@ -181,6 +197,65 @@ test("all activity configs have required fields", async () => {
           assert.equal(typeof buttonText, "string", `${activityId}: soloModeMeta.buttonText must be a string`);
         }
       }
+    }
+  }
+});
+
+test("registerActivityRoutes resolves server entry extension during mixed migration", async () => {
+  const testRoot = join(__dirname, "../../activities/test-activity-ts");
+  const testConfigPath = join(testRoot, "activity.config.ts");
+  const testServerDir = join(testRoot, "server");
+  const testRoutesPath = join(testServerDir, "routes.ts");
+
+  if (existsSync(testRoot)) {
+    rmSync(testRoot, { recursive: true, force: true });
+  }
+
+  try {
+    mkdirSync(testServerDir, { recursive: true });
+    writeFileSync(
+      testConfigPath,
+      `export default {
+  id: 'test-activity-ts',
+  name: 'Test TS Activity',
+  description: 'A test TypeScript activity',
+  color: 'teal',
+  soloMode: true,
+  serverEntry: './server/routes.js',
+};`
+    );
+
+    writeFileSync(
+      testRoutesPath,
+      `export default function register(app) {
+  app.__registeredActivities = [...(app.__registeredActivities ?? []), 'test-activity-ts'];
+}`
+    );
+
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+
+    try {
+      const moduleUrl = pathToFileURL(join(__dirname, "activityRegistry.js")).href;
+      const freshModule = await import(`${moduleUrl}?t=${Date.now()}-${testImportCounter++}`);
+
+      await freshModule.initializeActivityRegistry();
+      const app = {};
+      console.log(
+        "[TEST] registerActivityRoutes mixed-extension coverage uses minimal app/ws stubs; non-target activity route load errors are expected in output."
+      );
+      await freshModule.registerActivityRoutes(app, {}, {});
+
+      assert.ok(
+        app.__registeredActivities?.includes("test-activity-ts"),
+        "TS activity route module should register even when config serverEntry points to .js"
+      );
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+    }
+  } finally {
+    if (existsSync(testRoot)) {
+      rmSync(testRoot, { recursive: true, force: true });
     }
   }
 });
@@ -374,6 +449,8 @@ test("initializeActivityRegistry handles config load failure in production", asy
       const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
       const freshModule = await import(`${moduleUrl}?t=${Date.now()}-${testImportCounter++}`);
       
+      console.log('[TEST] Expected production config-load error output follows for intentionally broken activity config.');
+
       // This should trigger process.exit(1) in production
       await assert.rejects(
         async () => await freshModule.initializeActivityRegistry(),
@@ -426,6 +503,8 @@ test("initializeActivityRegistry handles config load failure in development", as
       const moduleUrl = pathToFileURL(join(__dirname, 'activityRegistry.js')).href;
       const freshModule = await import(`${moduleUrl}?t=${Date.now()}-${testImportCounter++}`);
       
+      console.log('[TEST] Expected development warning output follows for intentionally broken activity config.');
+
       // In development, broken configs should not crash initialization
       // The activity should simply be discovered but the import will fail
       // This is acceptable in development mode
