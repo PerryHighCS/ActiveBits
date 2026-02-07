@@ -819,3 +819,28 @@ Validation:
 - `npm --workspace client test` -> pass
 - `npm --workspace client run build` -> pass
 - `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
+
+### Slice 4: Activity migration kickoff (`activities/algorithm-demo`, partial)
+
+Completed:
+- Converted activity config and client entry module to TypeScript:
+  - `activities/algorithm-demo/activity.config.js` -> `activities/algorithm-demo/activity.config.ts`
+  - `activities/algorithm-demo/client/index.jsx` -> `activities/algorithm-demo/client/index.tsx`
+- Converted shared client utility and algorithm-registry modules with existing test coverage:
+  - `activities/algorithm-demo/client/utils.js` -> `activities/algorithm-demo/client/utils.ts`
+  - `activities/algorithm-demo/client/utils.test.js` -> `activities/algorithm-demo/client/utils.test.ts`
+  - `activities/algorithm-demo/client/algorithms/index.js` -> `activities/algorithm-demo/client/algorithms/index.ts`
+  - `activities/algorithm-demo/client/algorithms/index.test.js` -> `activities/algorithm-demo/client/algorithms/index.test.ts`
+- Added client-module shape regression test:
+  - `activities/algorithm-demo/client/index.test.ts`
+
+Implementation notes:
+- `activity.config.ts` now points `clientEntry` to `./client/index.tsx` while keeping `serverEntry` on `./server/routes.js` during this kickoff slice.
+- `client/index.tsx` now exports typed `ActivityClientModule` with `ComponentType<unknown>` casts for manager/student components to match shared registry contracts.
+- Shared utility/registry conversion keeps runtime behavior unchanged while adding strict TypeScript coverage around message envelope, state normalization/hydration, and algorithm registry validation.
+- Manager/student views, individual algorithm JSX modules, and server routes remain JavaScript for the next `algorithm-demo` completion slice.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass

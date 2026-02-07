@@ -1,4 +1,6 @@
-export default {
+import type { ActivityConfig } from '../../types/activity.js'
+
+const algorithmDemoConfig: ActivityConfig = {
   id: 'algorithm-demo',
   name: 'Algorithm Demonstrations',
   description: 'Instructor-driven algorithm demonstrations with synchronized visualization',
@@ -26,6 +28,8 @@ export default {
       ],
     },
   },
-  clientEntry: './client/index.jsx',
+  clientEntry: './client/index.tsx',
   serverEntry: './server/routes.js',
-};
+}
+
+export default algorithmDemoConfig
