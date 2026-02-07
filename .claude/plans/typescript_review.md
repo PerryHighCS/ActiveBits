@@ -732,3 +732,22 @@ Validation:
 - `npm run typecheck --workspaces --if-present` -> pass
 - `npm --workspace client test` -> pass
 - `npm --workspace client run build` -> pass
+
+### Slice 2: Activity migration kickoff (`activities/www-sim`, partial)
+
+Completed:
+- Migrated activity config and client entry module:
+  - `activities/www-sim/activity.config.js` -> `activities/www-sim/activity.config.ts`
+  - `activities/www-sim/client/index.jsx` -> `activities/www-sim/client/index.tsx`
+- Added module-shape regression test:
+  - `activities/www-sim/client/index.test.tsx`
+
+Implementation notes:
+- `www-sim` entry now exports typed `ActivityClientModule` with explicit component casts (`ComponentType<unknown>`) to align with shared registry contracts.
+- This kickoff intentionally leaves `www-sim` manager/student/server route modules on JS for the next slice; runtime behavior is unchanged.
+
+Validation:
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace client test` -> pass
+- `npm --workspace client run build` -> pass
