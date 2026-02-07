@@ -417,3 +417,47 @@ Validation:
 - `npm --workspace server run typecheck` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
 - `npm --workspace server test` -> pass (`38` pass, `0` fail)
+
+### Slice 2: Activity registry migration (`client/src/activities/index`)
+
+Completed:
+- Converted frontend activity registry module:
+  - `client/src/activities/index.js` -> `client/src/activities/index.ts`
+- Aligned shared activity typing with lazy-loaded registry behavior:
+  - Added `ActivityRenderableComponent` in `types/activity.ts`
+  - Updated `ActivityRegistryEntry` component fields to use canonical renderable component typing
+  - Expanded `ActivityConfig` shape to cover currently used config metadata fields
+
+Implementation notes:
+- Preserved mixed-extension discovery behavior for migration overlap:
+  - configs: `@activities/*/activity.config.{js,ts}` with `.ts` preference
+  - client entries: `@activities/*/client/index.{js,jsx,ts,tsx}` with `.tsx`/`.ts` preference
+- Kept existing runtime semantics for dev-only filtering, missing-module warnings, and lazy component loading.
+- Added explicit `ActivityRegistryEntry | null` map typing before filter narrowing to satisfy strict type inference.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm test` -> pass (full root verification chain green)
+
+### Slice 3: Hook migration kickoff (`client/src/hooks/useClipboard`)
+
+Completed:
+- Converted clipboard hook:
+  - `client/src/hooks/useClipboard.js` -> `client/src/hooks/useClipboard.ts`
+- Added focused hook-logic unit tests:
+  - `client/src/hooks/useClipboard.test.ts`
+
+Implementation notes:
+- Added explicit hook result and dependency typing (`UseClipboardResult`, `ClipboardCopyDependencies`).
+- Extracted clipboard/timer mutation logic into `copyTextWithReset(...)` so behavior is testable under the existing Node test runtime (without adding browser-test tooling).
+- Preserved runtime behavior:
+  - no-op/false on missing text
+  - write to clipboard + copied-state tracking
+  - reset timer replacement when copying repeatedly
+  - graceful error path with console logging
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm test` -> pass (full root verification chain green)
