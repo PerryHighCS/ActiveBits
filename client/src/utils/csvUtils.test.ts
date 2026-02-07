@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { escapeCsvCell, arrayToCsv, downloadCsv } from './csvUtils.ts'
+import { arrayToCsv, downloadCsv, escapeCsvCell } from './csvUtils'
 
 test('escapeCsvCell escapes RFC 4180 special characters', () => {
   assert.equal(escapeCsvCell('plain'), 'plain')
@@ -24,47 +24,51 @@ test('downloadCsv creates and clicks a hidden download link', () => {
   const originalDocument = globalThis.document
   const originalUrl = globalThis.URL
 
-  let appendedNode = null
-  let removedNode = null
+  let appendedNode: HTMLAnchorElement | null = null
+  let removedNode: HTMLAnchorElement | null = null
   let clicked = false
-  let createdBlobUrl = null
-  let revokedBlobUrl = null
+  let createdBlobUrl: string | null = null
+  let revokedBlobUrl: string | null = null
+  const linkAttributes: Record<string, string> = {}
+  const linkStyle: { visibility?: string } = {}
 
   const link = {
-    attributes: {},
-    style: {},
-    setAttribute(name, value) {
-      this.attributes[name] = value
+    style: linkStyle,
+    setAttribute(name: string, value: string) {
+      linkAttributes[name] = value
     },
     click() {
       clicked = true
     },
-  }
+  } as unknown as HTMLAnchorElement
 
-  globalThis.document = {
-    createElement(tag) {
+  const documentMock = {
+    createElement(tag: string) {
       assert.equal(tag, 'a')
       return link
     },
     body: {
-      appendChild(node) {
-        appendedNode = node
+      appendChild(node: Node) {
+        appendedNode = node as HTMLAnchorElement
       },
-      removeChild(node) {
-        removedNode = node
+      removeChild(node: Node) {
+        removedNode = node as HTMLAnchorElement
       },
     },
-  }
+  } as unknown as Document
 
-  globalThis.URL = {
+  const urlMock = {
     createObjectURL() {
       createdBlobUrl = 'blob:test-url'
       return createdBlobUrl
     },
-    revokeObjectURL(url) {
+    revokeObjectURL(url: string) {
       revokedBlobUrl = url
     },
-  }
+  } as unknown as typeof URL
+
+  globalThis.document = documentMock
+  globalThis.URL = urlMock
 
   try {
     downloadCsv('a,b', 'report')
@@ -73,9 +77,9 @@ test('downloadCsv creates and clicks a hidden download link', () => {
     globalThis.URL = originalUrl
   }
 
-  assert.equal(link.attributes.href, 'blob:test-url')
-  assert.equal(link.attributes.download, 'report.csv')
-  assert.equal(link.style.visibility, 'hidden')
+  assert.equal(linkAttributes.href, 'blob:test-url')
+  assert.equal(linkAttributes.download, 'report.csv')
+  assert.equal(linkStyle.visibility, 'hidden')
   assert.equal(appendedNode, link)
   assert.equal(removedNode, link)
   assert.equal(clicked, true)

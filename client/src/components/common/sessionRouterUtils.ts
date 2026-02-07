@@ -1,0 +1,97 @@
+import type { ActivityRegistryEntry } from '../../../../types/activity.js'
+
+export const CACHE_TTL = 1000 * 60 * 60 * 12
+
+export interface SessionCacheStorage {
+  length: number
+  key(index: number): string | null
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+  removeItem(key: string): void
+}
+
+export interface SessionCacheRecord extends Record<string, unknown> {
+  timestamp?: number
+}
+
+function isExpiredTimestamp(timestamp: number, now: number, ttlMs: number): boolean {
+  return now - timestamp >= ttlMs
+}
+
+function parseCacheEntry(value: string | null): SessionCacheRecord | null {
+  if (!value) return null
+
+  try {
+    const parsed = JSON.parse(value)
+    return typeof parsed === 'object' && parsed !== null ? (parsed as SessionCacheRecord) : null
+  } catch {
+    return null
+  }
+}
+
+function getSessionStorageKeys(storage: SessionCacheStorage): string[] {
+  const keys: string[] = []
+
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index)
+    if (key && key.startsWith('session-')) {
+      keys.push(key)
+    }
+  }
+
+  return keys
+}
+
+export function cleanExpiredSessions(
+  storage: SessionCacheStorage,
+  now = Date.now(),
+  ttlMs = CACHE_TTL,
+  onLog: (message: string) => void = console.log,
+): void {
+  const keys = getSessionStorageKeys(storage)
+
+  for (const key of keys) {
+    const parsed = parseCacheEntry(storage.getItem(key))
+    if (!parsed || typeof parsed.timestamp !== 'number' || isExpiredTimestamp(parsed.timestamp, now, ttlMs)) {
+      storage.removeItem(key)
+      onLog(parsed ? `Expiring ${key}` : `Removing invalid entry ${key}`)
+    }
+  }
+}
+
+export function readCachedSession(
+  storage: SessionCacheStorage,
+  storageKey: string,
+  now = Date.now(),
+  ttlMs = CACHE_TTL,
+  onLog: (message: string) => void = console.log,
+): SessionCacheRecord | null {
+  const parsed = parseCacheEntry(storage.getItem(storageKey))
+
+  if (!parsed || typeof parsed.timestamp !== 'number') {
+    storage.removeItem(storageKey)
+    onLog(`removing invalid ${storageKey}`)
+    return null
+  }
+
+  if (isExpiredTimestamp(parsed.timestamp, now, ttlMs)) {
+    storage.removeItem(storageKey)
+    onLog(`removing ${storageKey}`)
+    return null
+  }
+
+  return parsed
+}
+
+export function getPersistentQuerySuffix(search: string): string {
+  const query = new URLSearchParams(search)
+  return query.toString() ? `&${query.toString()}` : ''
+}
+
+export function isJoinSessionId(input: string): boolean {
+  return Boolean(parseInt(input.trim(), 16))
+}
+
+export function getSoloActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {
+  return activityList.filter((activity) => activity.soloMode)
+}

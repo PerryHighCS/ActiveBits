@@ -650,3 +650,56 @@ Implementation notes:
 Validation:
 - `npm --workspace client test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 13: Common component migration (`SessionRouter`)
+
+Completed:
+- Converted common component:
+  - `client/src/components/common/SessionRouter.jsx` -> `client/src/components/common/SessionRouter.tsx`
+- Added extracted utility module + tests:
+  - `client/src/components/common/sessionRouterUtils.ts`
+  - `client/src/components/common/sessionRouterUtils.test.ts`
+
+Implementation notes:
+- Added explicit route/session/persistent payload typing for the mixed route flow (`/:sessionId`, `/activity/:activityName/:hash`, `/solo/:soloActivityId`).
+- Extracted localStorage cache maintenance and persistent-query helpers (`cleanExpiredSessions`, `readCachedSession`, `getPersistentQuerySuffix`, `isJoinSessionId`) to keep component logic focused on navigation/render decisions.
+- Preserved existing behavior for persistent-session waiting-room flow, teacher-auth fallback, session cache reuse, and solo-mode launch cards.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 14: Frontend entrypoint migration (`App`, `main`)
+
+Completed:
+- Converted frontend entrypoints:
+  - `client/src/App.jsx` -> `client/src/App.tsx`
+  - `client/src/main.jsx` -> `client/src/main.tsx`
+- Added route/footer helper module + tests:
+  - `client/src/appUtils.ts`
+  - `client/src/appUtils.test.ts`
+
+Implementation notes:
+- Added typed footer activity selection (`findFooterActivity`) so route/footer rendering logic is validated outside the component shell.
+- Preserved dynamic activity route generation and lazy manager/footer rendering behavior while adding explicit component casts for unknown-prop registry components.
+- Added explicit root-element null guard in `main.tsx` before `createRoot(...)`.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 15: Client test migration completion (`*.test.js` -> `*.test.ts`)
+
+Completed:
+- Converted remaining client JS tests:
+  - `client/src/activities/index.test.js` -> `client/src/activities/index.test.ts`
+  - `client/src/utils/csvUtils.test.js` -> `client/src/utils/csvUtils.test.ts`
+
+Implementation notes:
+- Added explicit typing for activity config dynamic imports and filesystem path helpers in `activities/index.test.ts`.
+- Tightened CSV download test mocks with typed document/URL stubs while preserving existing behavior assertions.
+- Client test discovery script remains mixed-extension-compatible, but client `src` now contains no `.js/.jsx` files.
+
+Validation:
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
