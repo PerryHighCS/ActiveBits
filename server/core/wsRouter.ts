@@ -148,8 +148,12 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
         ws.clientIp = getClientIp(req)
 
         const touch = async (): Promise<void> => {
-          if (sessions?.touch && ws.sessionId) {
+          if (!sessions?.touch || !ws.sessionId) return
+
+          try {
             await sessions.touch(ws.sessionId)
+          } catch (error) {
+            console.error(`Failed to refresh activity for session ${ws.sessionId}:`, error)
           }
         }
 

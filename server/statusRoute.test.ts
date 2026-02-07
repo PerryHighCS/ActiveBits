@@ -20,7 +20,7 @@ interface StatusSessionsMock {
   getAll: () => Promise<Array<{ id: string; type?: string; created?: number; lastActivity?: number; data: Record<string, unknown> }>>
   ttlMs?: number
   valkeyStore?: {
-    ttlMs: number
+    ttlMs?: number
     client: ValkeyClientMock
   }
 }
@@ -37,13 +37,17 @@ interface StatusPayload {
       expiresAt?: string
     }>
   }
-  valkey: {
-    dbsize?: number
-    memory: Record<string, string>
-    error?: string
-  }
+  valkey:
+    | null
+    | {
+        ping?: string
+        dbsize?: number
+        memory?: Record<string, string>
+        error?: string
+      }
   storage: {
     mode: string
+    ttlMs: number
   }
 }
 
@@ -122,6 +126,7 @@ test('status endpoint returns session info in memory mode', async (t) => {
   assert.equal(session.type, 'raffle')
   assert.equal(session.socketCount, 1)
   assert.equal(body.sessions.showSessionIds, true)
+  assert.equal(body.valkey, null)
 })
 
 test('status endpoint masks session ids in production', async (t) => {
@@ -184,9 +189,32 @@ test('status endpoint reports Valkey TTLs and expiry data', async (t) => {
   assert.equal(ttlSession.ttlRemainingMs, 5000)
   assert.ok(typeof ttlSession.expiresAt === 'string')
   assert.ok(Date.parse(ttlSession.expiresAt) > Date.now())
+  assert.ok(body.valkey)
   assert.equal(body.valkey.dbsize, 1)
-  assert.equal(body.valkey.memory.used_memory, '1024')
+  assert.equal(body.valkey.memory?.used_memory, '1024')
   assert.equal(body.storage.mode, 'valkey')
+  assert.equal(body.storage.ttlMs, 90_000)
+})
+
+test('status endpoint falls back to sessionTtl when valkeyStore ttlMs is undefined', async (t) => {
+  const sessions: StatusSessionsMock = {
+    getAll: async () => [],
+    valkeyStore: {
+      client: {
+        pttl: async () => 0,
+        ping: async () => 'PONG',
+        dbsize: async () => 0,
+        call: async () => '',
+      },
+    },
+  }
+  const ws = createWsMock()
+  const baseUrl = await startStatusServer(t, { sessions, ws, sessionTtl: 123_000, valkeyUrl: 'redis://valkey:6379' })
+  const res = await fetch(`${baseUrl}/api/status`)
+  const body = await readJson<StatusPayload>(res)
+
+  assert.equal(body.storage.mode, 'valkey')
+  assert.equal(body.storage.ttlMs, 123_000)
 })
 
 test('status endpoint handles Valkey errors gracefully', async (t) => {
@@ -211,5 +239,6 @@ test('status endpoint handles Valkey errors gracefully', async (t) => {
   const res = await fetch(`${baseUrl}/api/status`)
   const body = await readJson<StatusPayload>(res)
   assert.equal(body.sessions.count, 0)
+  assert.ok(body.valkey)
   assert.equal(body.valkey.error, 'boom')
 })

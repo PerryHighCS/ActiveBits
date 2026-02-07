@@ -183,7 +183,7 @@ export function registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl }
         },
         storage: {
           mode: sessions.valkeyStore ? 'valkey' : 'in-memory',
-          ttlMs: sessions.valkeyStore ? sessions.valkeyStore.ttlMs : sessionTtl,
+          ttlMs: sessions.valkeyStore ? (sessions.valkeyStore.ttlMs ?? sessionTtl) : sessionTtl,
           valkeyUrl: valkeyUrl ? '***masked***' : null,
         },
         process: {
