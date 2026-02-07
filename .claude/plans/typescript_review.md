@@ -147,3 +147,113 @@ Phase 1 status: complete (with known sandbox limitation for server bind-dependen
   - Config-failure tests intentionally create broken temporary configs and verify production/development error handling.
 
 Phase 2 status: complete (sandbox + local canonical verification).
+
+## Phase 3 Progress (Backend Migration)
+
+### Kickoff Slice: Core utilities (transitional)
+
+Completed:
+- Added TypeScript counterparts for first Phase 3 utility targets:
+  - `server/core/sessionNormalization.ts`
+  - `server/core/broadcastUtils.ts`
+- Kept existing JavaScript runtime modules in place:
+  - `server/core/sessionNormalization.js`
+  - `server/core/broadcastUtils.js`
+
+Why transitional dual files were kept:
+- Current runtime fallback path still executes `server/server.js` under plain Node when `server/dist/server.js` is absent.
+- A rename-only move from `.js` to `.ts` for these utility modules breaks that fallback path before the backend entrypoint and runtime policy migration are complete.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `node --import tsx --test server/broadcastUtils.test.js` -> pass
+- `node --import tsx --test server/activities/activityRegistry.test.js` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm --workspace server test` -> pass (run outside sandbox; `35` pass, `0` fail)
+- `npm run verify:server` -> pass (run outside sandbox; health check OK and smoke test passed)
+
+Notes:
+- In sandboxed execution, `verify:server` still requires escalation because binding to `0.0.0.0:4010` is restricted.
+- Next Phase 3 slice should migrate additional backend modules and then remove dual-file compatibility once `server/server.ts` + compiled runtime path are the default.
+
+### Slice 2: Session management core modules (transitional)
+
+Completed:
+- Added TypeScript counterparts for Phase 3 session-management modules:
+  - `server/core/sessionCache.ts`
+  - `server/core/valkeyStore.ts`
+  - `server/core/sessions.ts`
+- Kept existing JavaScript runtime modules in place for now:
+  - `server/core/sessionCache.js`
+  - `server/core/valkeyStore.js`
+  - `server/core/sessions.js`
+
+Implementation notes:
+- `server/core/sessions.ts` now includes explicit session-shape normalization (`toSessionRecord`) when reading from Valkey-backed APIs.
+- `server/core/valkeyStore.ts` uses a typed constructor cast for `ioredis` in this NodeNext setup so strict typecheck remains green.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `npm --workspace server test` -> pass (`35` pass, `0` fail)
+- `npm run verify:server` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm test` -> pass (run outside sandbox; full root flow green including `verify:deploy` and `verify:server`)
+
+Notes:
+- Running root `npm test` inside sandbox still reproduces known bind-limited failures on server suites that open sockets; escalated run is canonical in this environment.
+
+### Slice 3: WebSocket + persistent-session core modules (transitional)
+
+Completed:
+- Added TypeScript counterparts for Phase 3 WebSocket/persistent-session core modules:
+  - `server/core/wsRouter.ts`
+  - `server/core/persistentSessions.ts`
+  - `server/core/persistentSessionWs.ts`
+- Kept existing JavaScript runtime modules in place for now:
+  - `server/core/wsRouter.js`
+  - `server/core/persistentSessions.js`
+  - `server/core/persistentSessionWs.js`
+
+Implementation notes:
+- Exported `SessionRecord` and `SessionStore` types from `server/core/sessions.ts` so new TS modules can reference shared session-store contracts without duplicate-type incompatibilities.
+- Added a typed adapter layer in `persistentSessions.ts` when initializing `ValkeyPersistentStore`, preserving runtime behavior while satisfying strict typing.
+- In `wsRouter.ts`, explicit header nullability checks were added for forwarded-header parsing to satisfy strict null checks without behavior changes.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `npm --workspace server test` -> pass (`35` pass, `0` fail)
+- `npm run verify:server` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm test` -> pass (run outside sandbox; full root flow green)
+
+Notes:
+- Directly running some socket-opening server tests in sandbox still fails intermittently due environment port restrictions; the canonical `npm --workspace server test` and root `npm test` results were captured from successful full-suite runs and escalated root verification.
+
+### Slice 4: Routes + activity registry modules (transitional)
+
+Completed:
+- Added TypeScript counterparts for Phase 3 route/registry modules:
+  - `server/routes/statusRoute.ts`
+  - `server/routes/persistentSessionRoutes.ts`
+  - `server/activities/activityRegistry.ts`
+- Added focused TS migration coverage:
+  - `server/phase3RoutesRegistryTs.test.ts`
+- Kept existing JavaScript runtime modules in place for now:
+  - `server/routes/statusRoute.js`
+  - `server/routes/persistentSessionRoutes.js`
+  - `server/activities/activityRegistry.js`
+
+Implementation notes:
+- Typed cookie parsing and request/query guards were added in `persistentSessionRoutes.ts` to keep behavior stable under strict TypeScript checks.
+- `statusRoute.ts` uses explicit route/store/client interfaces and typed status payload assembly (including Valkey telemetry parsing) without changing endpoint behavior.
+- `activityRegistry.ts` preserves mixed-extension config discovery and server-entry extension fallback (`.ts`/`.js`) with strict-safe module loading.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `node --import tsx --test server/phase3RoutesRegistryTs.test.ts` -> pass
+- `node --import tsx --test server/activities/activityRegistry.test.js` -> pass
+- `npm --workspace server test` -> pass (outside sandbox; `38` pass, `0` fail)
+- `npm run typecheck --workspaces --if-present` -> pass
+
+Notes:
+- Server tests executed with `tsx` now exercise TS counterparts when `.js` specifiers have colocated `.ts` files, which provides migration coverage before runtime entrypoint cutover.
