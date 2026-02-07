@@ -9,8 +9,8 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "sh -c 'set -e; files=$(find . -not -path \"./node_modules/*\" \\( -name \"*.test.js\" -o -name \"*.test.ts\" \\) -print); if [ -z \"$files\" ]; then echo \"No server tests found\"; exit 0; fi; node --import tsx --test $files'",
     "typecheck": "tsc --noEmit",
-    "test:valkey": "node test-valkey.js",
-    "monitor:valkey": "node monitor-valkey.js"
+    "test:valkey": "sh -c 'if [ -f test-valkey.ts ]; then node --import tsx test-valkey.ts; else node test-valkey.js; fi'",
+    "monitor:valkey": "sh -c 'if [ -f monitor-valkey.ts ]; then node --import tsx monitor-valkey.ts; else node monitor-valkey.js; fi'"
   },
   "keywords": [],
   "author": "",

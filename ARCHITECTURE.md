@@ -30,7 +30,8 @@ ActiveBits/
 └── server/
     ├── activities/                  # Activity discovery/registry loader
     ├── core/                        # Core server modules
-    └── server.js                    # Main server entry point
+    ├── server.ts                    # Main TypeScript server entry point
+    └── server.js                    # Transitional JS fallback entry point
 ```
 
 ## User Flow

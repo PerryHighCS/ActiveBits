@@ -48,7 +48,7 @@ export interface SessionStore {
 }
 
 interface WsClient {
-  sessionId?: string
+  sessionId?: string | null
   readyState: number
   send(payload: string): void
 }

@@ -20,7 +20,7 @@ const MAX_TEACHER_CODE_LENGTH = 100
 
 interface PersistentSessionSocket {
   id?: string
-  sessionId?: string
+  sessionId?: string | null
   clientIp?: string
   persistentHash?: string
   readyState: number

@@ -25,7 +25,7 @@ interface SessionsLike {
 }
 
 interface WsClientLike {
-  sessionId?: string
+  sessionId?: string | null
   readyState: number
 }
 

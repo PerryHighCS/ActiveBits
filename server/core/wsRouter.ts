@@ -18,6 +18,8 @@ interface ActiveBitsWebSocket {
   readyState: number
   send(payload: string): void
   on(event: string, handler: (...args: unknown[]) => void): void
+  once(event: string, handler: (...args: unknown[]) => void): void
+  close(code?: number, reason?: string): void
   terminate(): void
   ping(data?: string): void
 }
@@ -25,6 +27,7 @@ interface ActiveBitsWebSocket {
 interface WsRouter {
   wss: {
     clients: Set<ActiveBitsWebSocket>
+    close(callback?: () => void): void
   }
   register(pathname: string, handler: WsConnectionHandler): void
 }
@@ -38,7 +41,7 @@ type WsConnectionHandler = (
 interface SessionStore {
   get?(id: string): Promise<unknown>
   touch?(id: string): Promise<boolean>
-  subscribeToBroadcast?(channel: string, handler: (message: { sessionId?: string }) => void): void
+  subscribeToBroadcast?(channel: string, handler: (message: unknown) => void): void
 }
 
 interface UpgradeCapableServer {
@@ -91,7 +94,11 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
   const sessionCleanupTimers = new Map<string, NodeJS.Timeout>()
 
   if (sessions?.subscribeToBroadcast) {
-    sessions.subscribeToBroadcast('session-ended', ({ sessionId }) => {
+    sessions.subscribeToBroadcast('session-ended', (message: unknown) => {
+      const sessionId =
+        message && typeof message === 'object' && 'sessionId' in message
+          ? (message as { sessionId?: string | null }).sessionId
+          : undefined
       for (const client of wss.clients) {
         if (
           typeof client.sessionId !== 'undefined' &&

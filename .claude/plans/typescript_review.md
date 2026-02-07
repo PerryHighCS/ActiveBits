@@ -257,3 +257,60 @@ Validation:
 
 Notes:
 - Server tests executed with `tsx` now exercise TS counterparts when `.js` specifiers have colocated `.ts` files, which provides migration coverage before runtime entrypoint cutover.
+
+### Slice 5: Server entrypoint migration (transitional runtime fallback retained)
+
+Completed:
+- Added TypeScript server entrypoint:
+  - `server/server.ts`
+- Aligned supporting TS interfaces to match runtime behavior used by shutdown/startup paths:
+  - `server/core/wsRouter.ts` (`wss.close`, websocket `once/close`, broadcast payload narrowing)
+  - `server/core/sessions.ts` (`sessionId` nullable in WebSocket client shape)
+  - `server/core/persistentSessionWs.ts` (`sessionId` nullable socket field)
+  - `server/core/valkeyStore.ts` (`pttl` client method for status route compatibility)
+
+Implementation notes:
+- `server/server.ts` preserves existing startup behavior (session store init, registry bootstrapping, persistent session routes, status route, Vite proxy in dev, graceful shutdown).
+- Runtime remains transitional by design: `server/package.json` start script still prefers compiled `dist/server.js` and falls back to `server.js` when dist output is absent.
+- Deployment/architecture docs were updated to reflect that `server/server.ts` now emits `server/dist/server.js` when server build runs.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `npm --workspace server test` -> pass (outside sandbox; `38` pass, `0` fail)
+- `npm run verify:server` -> pass (outside sandbox; health check OK and smoke test passed)
+
+Notes:
+- Root `scripts/verify-server.js` still intentionally targets `server/server.js` during this migration window; compile-to-dist verification remains covered by server build + start script behavior and root `npm test` flow.
+
+### Slice 6: Server utility scripts migration (transitional)
+
+Completed:
+- Added TypeScript counterparts for Valkey utility scripts:
+  - `server/test-valkey.ts`
+  - `server/monitor-valkey.ts`
+- Updated server script commands to prefer TS versions with JS fallback:
+  - `server/package.json` -> `test:valkey`, `monitor:valkey`
+
+Implementation notes:
+- Both scripts use typed constructor/client shims for `ioredis` in the NodeNext strict setup (matching Phase 3 `ioredis` typing strategy).
+- JS script files remain in place as fallback during migration.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `npm --workspace server test` -> pass (outside sandbox; `38` pass, `0` fail)
+- `npm test` -> pass (outside sandbox; full root flow green including `verify:server`)
+
+### Slice 7: Backend test migration kickoff (partial)
+
+Completed:
+- Converted first backend test file from JS to TS:
+  - `server/broadcastUtils.test.js` -> `server/broadcastUtils.test.ts`
+
+Implementation notes:
+- Preserved existing `[TEST]` noisy-output marker in converted test to keep expected send-error logging clearly labeled.
+- Test discovery remains unchanged (`*.test.js` + `*.test.ts`) while migration proceeds file-by-file.
+
+Validation:
+- `npm --workspace server run typecheck` -> pass
+- `npm --workspace server test` -> pass (outside sandbox; `38` pass, `0` fail)
+- `npm test` -> pass (outside sandbox; full root flow green)

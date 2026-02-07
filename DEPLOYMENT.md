@@ -65,10 +65,9 @@ ActiveBits supports two session storage modes:
    **TypeScript migration (current transitional state)**:
    - **Build Command**: `npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client && npm run build --workspace server`
    - **Start Command**: `cd server && npm start`
-   - `npm run build --workspace server` runs `tsc -p server/tsconfig.build.json` and currently only emits files for `server/**/*.ts`.
-   - Because the server entrypoint is still `server/server.js` (not `server/server.ts` yet), build output may not include `server/dist/server.js`.
-   - Runtime behavior today is fallback-based: `npm start` runs `dist/server.js` if present, otherwise runs `server.js`.
-   - After backend TS entrypoint migration, `server/dist/server.js` becomes the expected production runtime artifact.
+   - `npm run build --workspace server` runs `tsc -p server/tsconfig.build.json` and emits `server/dist/server.js` from `server/server.ts` plus other `server/**/*.ts` modules.
+   - Runtime remains safety-fallback based during transition: `npm start` runs `dist/server.js` if present, otherwise `server.js`.
+   - Production expectation is compiled runtime (`node dist/server.js`) with fallback retained only for migration safety.
 
 5. **Environment Variables**:
    ```

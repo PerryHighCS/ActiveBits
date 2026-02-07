@@ -32,6 +32,7 @@ interface RedisClient {
   quit(): Promise<unknown>
   ping(): Promise<string>
   dbsize(): Promise<number>
+  pttl(key: string): Promise<number>
   call(command: string, ...args: string[]): Promise<string>
 }
 
