@@ -2,7 +2,7 @@
  * Validate that all variable references in expressions are defined.
  * Throws an error if an undefined variable is found.
  */
-export function validateVariableReferences(expressions, valueMap) {
+export function validateVariableReferences(expressions: string[], valueMap: Record<string, unknown>): void {
   const definedVars = Object.keys(valueMap);
   const javaKeywords = ['true', 'false', 'null', 'undefined', 'int', 'long', 'float', 'double', 'boolean', 'byte', 'char', 'short'];
   const allowedMathIdentifiers = ['Math', 'round', 'trunc', 'floor', 'ceil'];
@@ -13,9 +13,10 @@ export function validateVariableReferences(expressions, valueMap) {
     
     // Extract variable names from the expression (simple regex: word characters)
     const varPattern = /\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g;
-    let match;
+    let match: RegExpExecArray | null;
     while ((match = varPattern.exec(exprWithoutStrings)) !== null) {
-      const varName = match[1];
+      const varName = match[1]
+      if (!varName) continue
       // Skip Java keywords, type names, and allowed Math identifiers
       if (javaKeywords.includes(varName)) continue;
       if (allowedMathIdentifiers.includes(varName)) continue;

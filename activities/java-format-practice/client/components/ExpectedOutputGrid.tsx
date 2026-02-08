@@ -1,25 +1,43 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { formatWithMask } from '../challenges';
 import { safeEvaluate } from '../utils/safeEvaluator';
+import type { JavaFormatFormatCall, JavaFormatVariable } from '../../javaFormatPracticeTypes.js'
+
+interface ExpectedOutputGridProps {
+  formatCalls: JavaFormatFormatCall[]
+  width?: number
+  height?: number
+  variables?: JavaFormatVariable[]
+  preComputedOutput?: string | null
+  preComputedMask?: string | null
+}
 
 // ExpectedOutputGrid for String.format problems - shows expected output with variable names as row labels
-export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3, variables = [], preComputedOutput = null, preComputedMask = null }) {
+export default function ExpectedOutputGrid({
+  formatCalls,
+  width = 30,
+  height = 3,
+  variables = [],
+  preComputedOutput = null,
+  preComputedMask = null,
+}: ExpectedOutputGridProps) {
   // Validate and constrain width and height parameters
   const validatedWidth = Math.max(1, Math.min(Number.isInteger(width) ? width : 30, 100));
+  const validatedHeight = Math.max(1, Math.min(Number.isInteger(height) ? height : 3, 100));
   
-  const [hoveredCol, setHoveredCol] = useState(null);
-  const [selectionStart, setSelectionStart] = useState(null);
-  const [selectionEnd, setSelectionEnd] = useState(null);
+  const [hoveredCol, setHoveredCol] = useState<number | null>(null);
+  const [selectionStart, setSelectionStart] = useState<number | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   
-  const handleMouseDown = (colIdx) => {
+  const handleMouseDown = (colIdx: number) => {
     // Always start a new selection on mouse down
     setSelectionStart(colIdx);
     setSelectionEnd(colIdx);
     setIsDragging(true);
   };
   
-  const handleMouseEnter = (colIdx) => {
+  const handleMouseEnter = (colIdx: number) => {
     if (!isDragging) {
       setHoveredCol(colIdx);
     }
@@ -32,14 +50,14 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
     setIsDragging(false);
   };
   
-  const isSelected = (colIdx) => {
+  const isSelected = (colIdx: number): boolean => {
     if (selectionStart === null || selectionEnd === null) return false;
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);
     return colIdx >= start && colIdx <= end;
   };
   
-  const getSelectionInfo = () => {
+  const getSelectionInfo = (): { start: number; end: number; count: number } | null => {
     if (selectionStart === null || selectionEnd === null) return null;
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);
@@ -47,8 +65,8 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
   };
   // Build the expected output for each line by computing the format calls
   // If preComputedOutput is provided, use that instead of re-computing
-  let preCompLines = [];
-  let preCompMasks = [];
+  let preCompLines: string[] = [];
+  let preCompMasks: string[] = [];
   if (preComputedOutput) {
     // Split output by newlines
     const allLines = preComputedOutput.split('\n');
@@ -60,18 +78,18 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
     if (preComputedMask) {
       let maskIdx = 0;
       for (let i = 0; i < formatCalls.length; i++) {
-        const lineLength = preCompLines[i].length;
+        const lineLength = preCompLines[i]?.length ?? 0;
         preCompMasks[i] = preComputedMask.substring(maskIdx, maskIdx + lineLength);
         maskIdx += lineLength + 1; // +1 for the 'S' that represents the newline
       }
     }
   }
   
-  const lines = formatCalls.map((call, callIdx) => {
+  const lines = formatCalls.slice(0, validatedHeight).map((call, callIdx) => {
     let varName = '';
     const skeletonMatch = call.skeleton?.match(/String\s+(\w+)\s*=/);
     if (skeletonMatch) {
-      varName = skeletonMatch[1];
+      varName = skeletonMatch[1] ?? '';
     }
     
     // Use pre-computed output if available
@@ -84,7 +102,7 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
       if (answerStr.trim()) {
         try {
           // Split arguments properly, respecting quoted strings
-          const answerParts = [];
+          const answerParts: string[] = [];
           let current = '';
           let inQuotes = false;
           
@@ -106,18 +124,19 @@ export default function ExpectedOutputGrid({ formatCalls, width = 30, height = 3
             answerParts.push(current.trim());
           }
           
-          if (answerParts[0].startsWith('"') && answerParts[0].endsWith('"')) {
-            const fmt = answerParts[0].slice(1, -1);
+          const formatValue = answerParts[0]
+          if (formatValue?.startsWith('"') && formatValue.endsWith('"')) {
+            const fmt = formatValue.slice(1, -1);
             const argExprs = answerParts.slice(1);
             
             // Build value map from variables
-            const valueMap = {};
+            const valueMap: Record<string, string | number> = {};
             (variables || []).forEach((v) => {
               let val = v.value;
               if (v.type === 'String') {
                 val = val.replace(/^"(.*)"$/, '$1');
               }
-              valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+              valueMap[v.name] = v.type === 'String' ? val : Number.parseFloat(val) || 0;
             });
             
             // Evaluate arguments

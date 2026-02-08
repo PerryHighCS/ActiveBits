@@ -15,7 +15,7 @@
  * Supports common format specifiers: %s, %d, %f, %n, %%
  * Also handles width and precision: %-20s, %3d, %.2f, %6.2f, %03d, etc.
  */
-export function evaluateFormatString(formatStr, args = []) {
+export function evaluateFormatString(formatStr: string, args: unknown[] = []): string {
   if (!formatStr) return '';
   
   let result = '';
@@ -42,14 +42,14 @@ export function evaluateFormatString(formatStr, args = []) {
       } else if (next === 'd') {
         // Simple integer format: %d
         if (argIndex < args.length) {
-          result += String(parseInt(args[argIndex]) || 0);
+          result += String(Number.parseInt(String(args[argIndex]), 10) || 0);
           argIndex++;
         }
         i += 2;
       } else if (next === 'f') {
         // Simple float format: %f (default 6 decimals)
         if (argIndex < args.length) {
-          result += parseFloat(args[argIndex]).toFixed(6);
+          result += Number.parseFloat(String(args[argIndex])).toFixed(6);
           argIndex++;
         }
         i += 2;
@@ -59,9 +59,13 @@ export function evaluateFormatString(formatStr, args = []) {
         let spec = '';
         
         // Collect format spec characters (-, +, 0, #, space, digits, .)
-        while (j < formatStr.length && '0123456789.-+ #'.includes(formatStr[j])) {
-          spec += formatStr[j];
-          j++;
+        while (j < formatStr.length) {
+          const specChar = formatStr[j]
+          if (!specChar || !'0123456789.-+ #'.includes(specChar)) {
+            break
+          }
+          spec += specChar
+          j++
         }
         
         if (j < formatStr.length) {
@@ -73,7 +77,7 @@ export function evaluateFormatString(formatStr, args = []) {
             const match = spec.match(/^(-?)(\d+)?$/);
             if (match) {
               const [, leftAlign, width] = match;
-              const w = parseInt(width) || 0;
+              const w = Number.parseInt(width ?? '0', 10) || 0;
               if (leftAlign) {
                 result += str.padEnd(w);
               } else {
@@ -86,11 +90,11 @@ export function evaluateFormatString(formatStr, args = []) {
             i = j + 1;
           } else if (type === 'd' && argIndex < args.length) {
             // Integer with width: %3d, %03d, %2d, etc.
-            const num = String(parseInt(args[argIndex]) || 0);
+            const num = String(Number.parseInt(String(args[argIndex]), 10) || 0);
             const match = spec.match(/^(0)?(\d+)?$/);
             if (match) {
               const [, padZero, width] = match;
-              const w = parseInt(width) || 0;
+              const w = Number.parseInt(width ?? '0', 10) || 0;
               if (padZero) {
                 result += num.padStart(w, '0');
               } else {
@@ -103,12 +107,12 @@ export function evaluateFormatString(formatStr, args = []) {
             i = j + 1;
           } else if (type === 'f' && argIndex < args.length) {
             // Float with width and precision: %6.2f, %.2f, %10.2f, etc.
-            const num = parseFloat(args[argIndex]) || 0;
+            const num = Number.parseFloat(String(args[argIndex])) || 0;
             const match = spec.match(/^(-?)(\d*)\.(\d+)$/);
             if (match) {
               const [, leftAlign, width, precision] = match;
-              const p = parseInt(precision) || 6;
-              const w = parseInt(width) || 0;
+              const p = Number.parseInt(precision ?? '6', 10) || 6;
+              const w = Number.parseInt(width ?? '0', 10) || 0;
               let formatted = num.toFixed(p);
               if (leftAlign) {
                 formatted = formatted.padEnd(w);
@@ -144,7 +148,7 @@ export function evaluateFormatString(formatStr, args = []) {
  * Converts %n to actual newlines and normalizes line endings to \n.
  * This ensures consistent comparison between expected and actual output.
  */
-export function normalizeOutput(text) {
+export function normalizeOutput(text: string | null | undefined): string {
   return (text || '').replace(/%n/g, '\n').replace(/\r\n/g, '\n');
 }
 
@@ -154,6 +158,6 @@ export function normalizeOutput(text) {
  * Masks should only contain 'S' (static), 'V' (value), or 'D' (dynamic) characters,
  * but this handles any potential line ending inconsistencies.
  */
-export function normalizeMask(mask) {
+export function normalizeMask(mask: string | null | undefined): string {
   return (mask || '').replace(/\r\n/g, '\n');
 }

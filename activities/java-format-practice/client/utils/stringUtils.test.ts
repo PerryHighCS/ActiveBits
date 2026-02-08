@@ -3,7 +3,7 @@
  * Focuses on splitArgumentsRespectingQuotes function with format specifiers
  */
 
-import { splitArgumentsRespectingQuotes, escapeHtml, highlightDiff } from './stringUtils.js';
+import { splitArgumentsRespectingQuotes, escapeHtml, highlightDiff } from './stringUtils';
 
 // Test cases
 const tests = [
@@ -155,7 +155,7 @@ let passed = 0;
 let failed = 0;
 
 // Helper function for robust array equality check
-function arraysEqual(arr1, arr2) {
+function arraysEqual(arr1: unknown[], arr2: unknown[]) {
   // Check if both are arrays
   if (!Array.isArray(arr1) || !Array.isArray(arr2)) {
     return false;

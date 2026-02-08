@@ -7,13 +7,13 @@
 /**
  * Tokenize an expression into meaningful pieces
  */
-function tokenize(expr) {
-  const tokens = [];
+function tokenize(expr: string): string[] {
+  const tokens: string[] = [];
   let current = '';
   let i = 0;
 
   while (i < expr.length) {
-    const char = expr[i];
+    const char = expr[i] ?? ''
 
     // Whitespace - skip
     if (/\s/.test(char)) {
@@ -66,14 +66,14 @@ function tokenize(expr) {
  * Supports: +, -, *, /, %, parentheses, variables, numbers, string literals
  * Supports Java casts: (int), (long), (float), (double)
  */
-export function safeEvaluate(expression, valueMap = {}) {
+export function safeEvaluate(expression: string, valueMap: Record<string, unknown> = {}): unknown {
   const trimmed = expression.trim();
   if (!trimmed) return '';
 
   try {
     // Handle string literals first
     let processedExpr = trimmed;
-    const stringLiterals = [];
+    const stringLiterals: string[] = [];
     let stringIndex = 0;
 
     // Extract string literals and replace with placeholders
@@ -85,26 +85,30 @@ export function safeEvaluate(expression, valueMap = {}) {
     // If the entire expression was a string literal, return its value
     if (stringIndex > 0 && processedExpr.trim() === `__STRING_0__` && stringLiterals.length === 1) {
       // Remove quotes and return the string value
-      return stringLiterals[0].slice(1, -1).replace(/\\"/g, '"').replace(/\\'/g, "'");
+      const literal = stringLiterals[0]
+      if (!literal) return ''
+      return literal.slice(1, -1).replace(/\\"/g, '"').replace(/\\'/g, "'")
     }
 
     // Handle Java type casts by preprocessing the expression
     // Replace Java casts - we'll handle them after tokenization
     const castRegex = /\((int|long|float|double)\)\s*/g;
-    const casts = [];
+    const casts: string[] = [];
     let castIndex = 0;
 
     processedExpr = processedExpr.replace(castRegex, () => {
-      casts.push(`__CAST_${castIndex}__`);
-      return casts[castIndex++];
-    });
+      const placeholder = `__CAST_${castIndex}__`
+      casts.push(placeholder)
+      castIndex += 1
+      return placeholder
+    })
 
     // Tokenize
     const tokens = tokenize(processedExpr);
 
     // Validate tokens - ensure all identifiers are either known variables or casts
     for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
+      const token = tokens[i] ?? ''
       if (/^[a-zA-Z_]/.test(token)) {
         // It's an identifier
         const isAllowedMathMethod = token === 'round' || token === 'trunc' || token === 'floor' || token === 'ceil';
@@ -131,7 +135,9 @@ export function safeEvaluate(expression, valueMap = {}) {
 
     // Restore string literals
     for (let i = 0; i < stringLiterals.length; i++) {
-      jsExpr = jsExpr.replace(`__STRING_${i}__`, stringLiterals[i]);
+      const literal = stringLiterals[i]
+      if (!literal) continue
+      jsExpr = jsExpr.replace(`__STRING_${i}__`, literal)
     }
 
     // Add closing parentheses for Math.trunc calls
@@ -149,7 +155,8 @@ export function safeEvaluate(expression, valueMap = {}) {
     const result = fn(Math, ...vals);
     return result;
   } catch (err) {
-    console.error('Failed to evaluate expression:', expression, 'Error:', err.message, 'ValueMap:', valueMap);
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('Failed to evaluate expression:', expression, 'Error:', message, 'ValueMap:', valueMap);
     throw err; // Re-throw to provide better error context
   }
 }
@@ -158,7 +165,7 @@ export function safeEvaluate(expression, valueMap = {}) {
  * Validate expression syntax to prevent code injection
  * Checks for disallowed patterns
  */
-function validateExpressionSyntax(expr) {
+function validateExpressionSyntax(expr: string): void {
   // First, remove string literals so they don't interfere with pattern matching
   let exprToCheck = expr.replace(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/g, '""');
   

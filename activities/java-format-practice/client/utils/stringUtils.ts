@@ -4,8 +4,8 @@
  * Example: '"Hello, World", name, 42' => ['"Hello, World"', 'name', '42']
  * Example: 'Reward: $%,d, {{bounty}}' => ['Reward: $%,d', '{{bounty}}']
  */
-export function splitArgumentsRespectingQuotes(str) {
-  const parts = [];
+export function splitArgumentsRespectingQuotes(str: string): string[] {
+  const parts: string[] = [];
   let current = '';
   let inQuotes = false;
 
@@ -65,7 +65,7 @@ export function splitArgumentsRespectingQuotes(str) {
 /**
  * Join answer parts with commas and spaces.
  */
-export function buildAnswerString(parts = []) {
+export function buildAnswerString(parts: string[] = []): string {
   return parts.map((p) => p.trim()).join(', ');
 }
 
@@ -73,8 +73,7 @@ export function buildAnswerString(parts = []) {
  * Escape HTML special characters to prevent XSS attacks.
  * Converts <, >, &, ", and ' to their HTML entity equivalents.
  */
-export function escapeHtml(str) {
-  if (typeof str !== 'string') return str;
+export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -87,7 +86,7 @@ export function escapeHtml(str) {
  * Highlight the first difference between two strings with HTML spans.
  * Escapes HTML in both strings before adding highlighting to prevent XSS.
  */
-export function highlightDiff(expected, actual) {
+export function highlightDiff(expected: string, actual: string): { expected: string; actual: string } {
   // Escape HTML in both strings first
   const safeExpected = escapeHtml(expected);
   const safeActual = escapeHtml(actual);

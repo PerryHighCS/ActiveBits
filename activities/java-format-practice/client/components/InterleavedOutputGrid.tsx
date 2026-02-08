@@ -1,25 +1,47 @@
 import React, { useState } from 'react';
 
+interface InterleavedLineData {
+  expected?: string
+  actual?: string
+  expectedMask?: string
+  userMask?: string
+  varName?: string
+}
+
+interface InterleavedOutputGridProps {
+  expected?: string | null
+  actual?: string | null
+  width?: number
+  height?: number
+  lineData?: InterleavedLineData[] | null
+}
+
 // InterleavedOutputGrid: shows expected and actual output side-by-side or interleaved
 // For String.format: shows expected (static/dynamic coloring) and actual (correct/incorrect coloring) on alternating rows with variable names
 // For printf: shows combined output with static/dynamic and correct/incorrect coloring
-export default function InterleavedOutputGrid({ expected, actual, width = 30, height = 3, lineData = null }) {
+export default function InterleavedOutputGrid({
+  expected,
+  actual,
+  width = 30,
+  height = 3,
+  lineData = null,
+}: InterleavedOutputGridProps) {
   // Validate and constrain width and height parameters
   const validatedWidth = Math.max(1, Math.min(Number.isInteger(width) ? width : 30, 100));
 
-  const [hoveredCol, setHoveredCol] = useState(null);
-  const [selectionStart, setSelectionStart] = useState(null);
-  const [selectionEnd, setSelectionEnd] = useState(null);
+  const [hoveredCol, setHoveredCol] = useState<number | null>(null);
+  const [selectionStart, setSelectionStart] = useState<number | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  const handleMouseDown = (colIdx) => {
+  const handleMouseDown = (colIdx: number) => {
     // Always start a new selection on mouse down
     setSelectionStart(colIdx);
     setSelectionEnd(colIdx);
     setIsDragging(true);
   };
 
-  const handleMouseEnter = (colIdx) => {
+  const handleMouseEnter = (colIdx: number) => {
     if (!isDragging) {
       setHoveredCol(colIdx);
     }
@@ -32,14 +54,14 @@ export default function InterleavedOutputGrid({ expected, actual, width = 30, he
     setIsDragging(false);
   };
 
-  const isSelected = (colIdx) => {
+  const isSelected = (colIdx: number): boolean => {
     if (selectionStart === null || selectionEnd === null) return false;
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);
     return colIdx >= start && colIdx <= end;
   };
 
-  const getSelectionInfo = () => {
+  const getSelectionInfo = (): { start: number; end: number; count: number } | null => {
     if (selectionStart === null || selectionEnd === null) return null;
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);

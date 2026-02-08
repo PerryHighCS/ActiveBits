@@ -2,6 +2,7 @@
  * Reference data for the Format Reference Modal
  * Organized by sections for easy maintenance and reuse
  */
+import type { JavaFormatReferenceData } from '../../javaFormatPracticeTypes.js'
 
 export const formatReferenceData = {
   title: '📚 Format Specifier Reference',
@@ -161,5 +162,5 @@ export const formatReferenceData = {
         }
       ]
     }
-  ]
-};
+  ],
+} satisfies JavaFormatReferenceData

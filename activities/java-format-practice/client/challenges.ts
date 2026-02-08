@@ -1,76 +1,85 @@
 // Dynamic challenge generator for Java format practice
 // Provides variable name options, value variability, and per-character masks
 
-import { safeEvaluate } from './utils/safeEvaluator.js';
+import { safeEvaluate } from './utils/safeEvaluator'
+import type {
+  JavaFormatChallenge,
+  JavaFormatChallengeDefinition,
+  JavaFormatDifficulty,
+  JavaFormatFormatCall,
+  JavaFormatTheme,
+} from '../javaFormatPracticeTypes.js'
 
-function randomChoice(list) {
-  return list[Math.floor(Math.random() * list.length)];
+function randomChoice<T>(list: readonly T[]): T {
+  return list[Math.floor(Math.random() * list.length)] as T
 }
 
-function randomInt(min, max, step = 1) {
-  const range = Math.floor((max - min) / step);
-  return min + Math.floor(Math.random() * (range + 1)) * step;
+function randomInt(min: number, max: number, step = 1): number {
+  const range = Math.floor((max - min) / step)
+  return min + Math.floor(Math.random() * (range + 1)) * step
 }
 
-function randomFloat(min, max, precision = 2) {
-  const value = Math.random() * (max - min) + min;
-  return parseFloat(value.toFixed(precision));
+function randomFloat(min: number, max: number, precision = 2): number {
+  const value = Math.random() * (max - min) + min
+  return Number.parseFloat(value.toFixed(precision))
 }
 
-function replacePlaceholders(text, replacements) {
-  if (typeof text !== 'string') return text;
-  return text.replace(/\{\{(.*?)\}\}/g, (_, key) => replacements[key] ?? `{{${key}}}`);
+function replacePlaceholders(text: string, replacements: Record<string, string>): string {
+  return text.replace(/\{\{(.*?)\}\}/g, (_match, key: string) => replacements[key] ?? `{{${key}}}`)
 }
 
-function padValue(str, width, leftAlign = false, padChar = ' ') {
-  if (!width || width <= str.length) return str;
-  return leftAlign ? str.padEnd(width, padChar) : str.padStart(width, padChar);
+function padValue(str: string, width: number | undefined, leftAlign = false, padChar = ' '): string {
+  if (!width || width <= str.length) return str
+  return leftAlign ? str.padEnd(width, padChar) : str.padStart(width, padChar)
 }
 
-function formatNumber(num, precision) {
-  if (precision === undefined || precision === null) return String(num);
-  return Number(num).toFixed(precision);
+function formatNumber(num: number, precision: number | undefined): string {
+  if (precision === undefined) return String(num)
+  return Number(num).toFixed(precision)
 }
 
 // Format with a parallel mask: 'S' = static literal, 'V' = value/width-driven
-function formatWithMask(formatStr, args = []) {
-  if (!formatStr) return { text: '', mask: '' };
-  let result = '';
-  let mask = '';
-  let argIndex = 0;
-  let i = 0;
+function formatWithMask(formatStr: string, args: unknown[] = []): { text: string; mask: string } {
+  if (!formatStr) return { text: '', mask: '' }
+  let result = ''
+  let mask = ''
+  let argIndex = 0
+  let i = 0
 
   while (i < formatStr.length) {
     if (formatStr[i] === '%' && i + 1 < formatStr.length) {
-      const next = formatStr[i + 1];
+      const next = formatStr[i + 1]
+      if (!next) break
 
       if (next === '%') {
-        result += '%';
-        mask += 'S';
-        i += 2;
-        continue;
+        result += '%'
+        mask += 'S'
+        i += 2
+        continue
       }
 
       if (next === 'n') {
-        result += '\n';
-        mask += 'S';
-        i += 2;
-        continue;
+        result += '\n'
+        mask += 'S'
+        i += 2
+        continue
       }
 
-      let j = i + 1;
-      let spec = '';
-      while (j < formatStr.length && !'sdfxX'.includes(formatStr[j])) {
-        spec += formatStr[j];
-        j++;
+      let j = i + 1
+      let spec = ''
+      while (j < formatStr.length) {
+        const current = formatStr[j]
+        if (!current || 'sdfxX'.includes(current)) break
+        spec += current
+        j++
       }
 
-      const type = formatStr[j];
+      const type = formatStr[j]
       if (!type) {
-        result += formatStr[i];
-        mask += 'S';
-        i++;
-        continue;
+        result += formatStr[i] ?? ''
+        mask += 'S'
+        i++
+        continue
       }
 
       // Parse flags more carefully - zero-pad flag is '0' at the START of spec, not in the width
@@ -78,64 +87,64 @@ function formatWithMask(formatStr, args = []) {
         leftAlign: spec.includes('-'),
         zeroPad: /^0/.test(spec) && !/^-/.test(spec),  // Zero-pad only if 0 is first (not after -)
         grouping: spec.includes(','),
-      };
-
-      const widthMatch = spec.match(/(-|0|,)?(\d+)/);
-      const width = widthMatch ? parseInt(widthMatch[2], 10) : undefined;
-      const precisionMatch = spec.match(/\.(\d+)/);
-      const precision = precisionMatch ? parseInt(precisionMatch[1], 10) : undefined;
-
-      const value = args[argIndex++];
-      let formatted = '';
-
-      if (type === 's') {
-        formatted = String(value ?? '');
-        formatted = padValue(formatted, width, flags.leftAlign, flags.zeroPad ? '0' : ' ');
-      } else if (type === 'd') {
-        let num = parseInt(value ?? 0, 10) || 0;
-        if (flags.grouping) {
-          formatted = num.toLocaleString('en-US');
-        } else {
-          formatted = String(num);
-        }
-        formatted = padValue(formatted, width, flags.leftAlign, flags.zeroPad ? '0' : ' ');
-      } else if (type === 'f') {
-        const num = parseFloat(value ?? 0) || 0;
-        formatted = formatNumber(num, precision ?? 6);
-        formatted = padValue(formatted, width, flags.leftAlign, flags.zeroPad ? '0' : ' ');
-      } else if (type === 'x' || type === 'X') {
-        const num = parseInt(value ?? 0, 10) || 0;
-        formatted = num.toString(16);
-        if (type === 'X') formatted = formatted.toUpperCase();
-        formatted = padValue(formatted, width, flags.leftAlign, flags.zeroPad ? '0' : ' ');
-      } else {
-        formatted = String(value ?? '');
       }
 
-      result += formatted;
-      mask += 'V'.repeat(formatted.length);
-      i = j + 1;
+      const widthMatch = spec.match(/(-|0|,)?(\d+)/)
+      const width = widthMatch?.[2] ? Number.parseInt(widthMatch[2], 10) : undefined
+      const precisionMatch = spec.match(/\.(\d+)/)
+      const precision = precisionMatch?.[1] ? Number.parseInt(precisionMatch[1], 10) : undefined
+
+      const value = args[argIndex++]
+      let formatted = ''
+
+      if (type === 's') {
+        formatted = String(value ?? '')
+        formatted = padValue(formatted, width, flags.leftAlign, flags.zeroPad ? '0' : ' ')
+      } else if (type === 'd') {
+        const num = Number.parseInt(String(value ?? 0), 10) || 0
+        if (flags.grouping) {
+          formatted = num.toLocaleString('en-US')
+        } else {
+          formatted = String(num)
+        }
+        formatted = padValue(formatted, width, flags.leftAlign, flags.zeroPad ? '0' : ' ')
+      } else if (type === 'f') {
+        const num = Number.parseFloat(String(value ?? 0)) || 0
+        formatted = formatNumber(num, precision ?? 6)
+        formatted = padValue(formatted, width, flags.leftAlign, flags.zeroPad ? '0' : ' ')
+      } else if (type === 'x' || type === 'X') {
+        const num = Number.parseInt(String(value ?? 0), 10) || 0
+        formatted = num.toString(16)
+        if (type === 'X') formatted = formatted.toUpperCase()
+        formatted = padValue(formatted, width, flags.leftAlign, flags.zeroPad ? '0' : ' ')
+      } else {
+        formatted = String(value ?? '')
+      }
+
+      result += formatted
+      mask += 'V'.repeat(formatted.length)
+      i = j + 1
     } else {
-      result += formatStr[i];
-      mask += 'S';
-      i++;
+      result += formatStr[i] ?? ''
+      mask += 'S'
+      i++
     }
   }
 
-  return { text: result, mask };
+  return { text: result, mask }
 }
 
 // Split arguments while respecting quotes and parentheses
-function splitArguments(argStr) {
-  const args = [];
-  let current = '';
-  let inQuotes = false;
-  let quoteChar = '';
-  let parenDepth = 0;
+function splitArguments(argStr: string): string[] {
+  const args: string[] = []
+  let current = ''
+  let inQuotes = false
+  let quoteChar = ''
+  let parenDepth = 0
   
   for (let i = 0; i < argStr.length; i++) {
-    const char = argStr[i];
-    const prevChar = i > 0 ? argStr[i - 1] : '';
+    const char = argStr[i] ?? ''
+    const prevChar = i > 0 ? (argStr[i - 1] ?? '') : ''
     
     // Handle quotes
     if ((char === '"' || char === "'") && prevChar !== '\\') {
@@ -159,66 +168,66 @@ function splitArguments(argStr) {
     // Handle comma separator
     else if (!inQuotes && parenDepth === 0 && char === ',') {
       if (current.trim()) {
-        args.push(current.trim());
+        args.push(current.trim())
       }
-      current = '';
+      current = ''
     } else {
-      current += char;
+      current += char
     }
   }
   
   if (current.trim()) {
-    args.push(current.trim());
+    args.push(current.trim())
   }
   
-  return args;
+  return args
 }
 
-function evaluateArgs(expressions, valueMap) {
+function evaluateArgs(expressions: string[], valueMap: Record<string, string | number>): unknown[] {
   return expressions.map((expr) => {
-    return safeEvaluate(expr, valueMap);
-  });
+    return safeEvaluate(expr, valueMap)
+  })
 }
 
-function instantiate(definition) {
-  const replacements = {};
-  const valueMap = {};
-  const usedNames = new Set();
+function instantiate(definition: JavaFormatChallengeDefinition): JavaFormatChallenge {
+  const replacements: Record<string, string> = {}
+  const valueMap: Record<string, string | number> = {}
+  const usedNames = new Set<string>()
 
   const variables = definition.variableTemplates.map((vt) => {
-    const nameOptions = vt.names.filter((n) => !usedNames.has(n));
-    const chosenName = randomChoice(nameOptions.length ? nameOptions : vt.names);
-    usedNames.add(chosenName);
-    let chosenValue;
+    const nameOptions = vt.names.filter((n) => !usedNames.has(n))
+    const chosenName = randomChoice(nameOptions.length ? nameOptions : vt.names)
+    usedNames.add(chosenName)
+    let chosenValue: string | number
     if (Array.isArray(vt.values)) {
-      chosenValue = randomChoice(vt.values);
+      chosenValue = randomChoice(vt.values)
     } else if (vt.range) {
-      const { min, max, step = 1, precision } = vt.range;
+      const { min, max, step = 1, precision } = vt.range
       if (vt.type === 'double') {
-        chosenValue = randomFloat(min, max, precision ?? 2);
+        chosenValue = randomFloat(min, max, precision ?? 2)
       } else {
-        chosenValue = randomInt(min, max, step);
+        chosenValue = randomInt(min, max, step)
       }
     } else {
-      chosenValue = vt.defaultValue ?? '';
+      chosenValue = vt.defaultValue ?? ''
     }
 
-    replacements[vt.key] = chosenName;
-    const literal = vt.type === 'String' ? `"${chosenValue}"` : String(chosenValue);
-    valueMap[chosenName] = vt.type === 'String' ? String(chosenValue) : Number(chosenValue);
+    replacements[vt.key] = chosenName
+    const literal = vt.type === 'String' ? `"${chosenValue}"` : String(chosenValue)
+    valueMap[chosenName] = vt.type === 'String' ? String(chosenValue) : Number(chosenValue)
 
     return {
       name: chosenName,
       type: vt.type,
       value: literal,
-    };
-  });
+    }
+  })
 
-  const formatCalls = definition.formatCalls.map((call) => {
+  const formatCalls: JavaFormatFormatCall[] = definition.formatCalls.map((call) => {
     const mappedInputs = (call.inputs || []).map((input) => ({
       ...input,
       expected: replacePlaceholders(input.expected, replacements),
-    }));
+    }))
 
     return {
       ...call,
@@ -226,19 +235,19 @@ function instantiate(definition) {
       skeleton: replacePlaceholders(call.skeleton, replacements),
       answer: replacePlaceholders(call.answer, replacements),
       inputs: mappedInputs,
-    };
-  });
+    }
+  })
 
-  let expectedOutput = '';
-  let expectedOutputMask = '';
+  let expectedOutput = ''
+  let expectedOutputMask = ''
 
   formatCalls.forEach((call) => {
-    const answerStr = call.answer || '';
-    if (!answerStr.trim()) return;
+    const answerStr = call.answer || ''
+    if (!answerStr.trim()) return
     
     // Parse answer more carefully to handle format specifiers with commas (e.g., %,d)
-    let formatString = '';
-    let argExprs = [];
+    let formatString = ''
+    let argExprs: string[] = []
     
     // Check if format string is quoted (advanced mode)
     if (answerStr.trim().startsWith('"')) {
@@ -258,7 +267,7 @@ function instantiate(definition) {
         if (rest.startsWith(',')) {
           // Parse arguments, respecting quotes and parentheses
           const argStr = rest.slice(1);
-          argExprs = splitArguments(argStr);
+          argExprs = splitArguments(argStr)
         }
       }
     } else {
@@ -269,22 +278,22 @@ function instantiate(definition) {
       if (separatorIdx !== -1) {
         formatString = answerStr.slice(0, separatorIdx).trim();
         const rest = answerStr.slice(separatorIdx + 1).trim();
-        argExprs = splitArguments(rest);
+        argExprs = splitArguments(rest)
       } else {
         // No arguments, just format string
-        formatString = answerStr.trim();
+        formatString = answerStr.trim()
       }
     }
     
-    const argValues = evaluateArgs(argExprs, valueMap);
-    const { text, mask } = formatWithMask(formatString, argValues);
-    expectedOutput += text;
-    expectedOutputMask += mask;
+    const argValues = evaluateArgs(argExprs, valueMap)
+    const { text, mask } = formatWithMask(formatString, argValues)
+    expectedOutput += text
+    expectedOutputMask += mask
     if (!text.endsWith('\n')) {
-      expectedOutput += '\n';
-      expectedOutputMask += 'S';
+      expectedOutput += '\n'
+      expectedOutputMask += 'S'
     }
-  });
+  })
 
   return {
     ...definition,
@@ -292,7 +301,7 @@ function instantiate(definition) {
     formatCalls,
     expectedOutput,
     expectedOutputMask,
-  };
+  }
 }
 
 const CHALLENGE_DEFINITIONS = [
@@ -966,16 +975,19 @@ const CHALLENGE_DEFINITIONS = [
       },
     ],
   },
-];
+] satisfies JavaFormatChallengeDefinition[]
 
-export function getRandomChallenge(theme = null, difficulty = null) {
-  let pool = CHALLENGE_DEFINITIONS;
-  if (theme) pool = pool.filter((c) => c.theme === theme);
-  if (difficulty) pool = pool.filter((c) => c.difficulty === difficulty);
-  if (pool.length === 0) pool = CHALLENGE_DEFINITIONS;
-  const def = randomChoice(pool);
-  return instantiate(def);
+export function getRandomChallenge(
+  theme: JavaFormatTheme | null = null,
+  difficulty: JavaFormatDifficulty | null = null,
+): JavaFormatChallenge {
+  let pool = CHALLENGE_DEFINITIONS
+  if (theme) pool = pool.filter((challenge) => challenge.theme === theme)
+  if (difficulty) pool = pool.filter((challenge) => challenge.difficulty === difficulty)
+  if (pool.length === 0) pool = CHALLENGE_DEFINITIONS
+  const definition = randomChoice(pool)
+  return instantiate(definition)
 }
 
-export { CHALLENGE_DEFINITIONS, formatWithMask, evaluateArgs };
-export default CHALLENGE_DEFINITIONS;
+export { CHALLENGE_DEFINITIONS, formatWithMask, evaluateArgs }
+export default CHALLENGE_DEFINITIONS

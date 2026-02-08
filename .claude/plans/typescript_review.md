@@ -730,6 +730,72 @@ Implementation notes:
 Validation:
 - `npm --workspace activities test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 5: Activity migration follow-up (`activities/java-format-practice`, client utility modules)
+
+Completed:
+- Migrated Java Format Practice client utility modules to TypeScript:
+  - `activities/java-format-practice/client/utils/safeEvaluator.js` -> `activities/java-format-practice/client/utils/safeEvaluator.ts`
+  - `activities/java-format-practice/client/utils/validationUtils.js` -> `activities/java-format-practice/client/utils/validationUtils.ts`
+  - `activities/java-format-practice/client/utils/stringUtils.js` -> `activities/java-format-practice/client/utils/stringUtils.ts`
+  - `activities/java-format-practice/client/utils/formatUtils.js` -> `activities/java-format-practice/client/utils/formatUtils.ts`
+- Updated dependent imports to extensionless paths where needed during mixed JS/TS migration:
+  - `activities/java-format-practice/client/challenges.js`
+  - `activities/java-format-practice/client/utils/formatUtils.test.js`
+  - `activities/java-format-practice/client/utils/stringUtils.test.js`
+
+Implementation notes:
+- Utility conversions kept runtime behavior intact while adding strict-safe parameter/return typing and `noUncheckedIndexedAccess` handling for tokenizer/format-parser loops.
+- Existing JS tests for format/string utility behavior were intentionally retained and continue running through the mixed-extension activities test command.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 5: Activity migration follow-up (`activities/java-format-practice`, small client components)
+
+Completed:
+- Migrated small reusable client components to TSX:
+  - `activities/java-format-practice/client/components/ChallengeQuestion.jsx` -> `activities/java-format-practice/client/components/ChallengeQuestion.tsx`
+  - `activities/java-format-practice/client/components/ChallengeSelector.jsx` -> `activities/java-format-practice/client/components/ChallengeSelector.tsx`
+  - `activities/java-format-practice/client/components/StatsPanel.jsx` -> `activities/java-format-practice/client/components/StatsPanel.tsx`
+  - `activities/java-format-practice/client/components/ReferenceModal.jsx` -> `activities/java-format-practice/client/components/ReferenceModal.tsx`
+- Added focused component regression coverage:
+  - `activities/java-format-practice/client/components/basicComponents.test.tsx`
+
+Implementation notes:
+- Components now consume shared activity type contracts (`JavaFormatDifficulty`, `JavaFormatTheme`, `JavaFormatStats`) and keep behavior unchanged.
+- `ReferenceModal.tsx` now uses explicit section/item typing for table/list reference content and includes typed click handling for modal propagation.
+- Under current activities test runtime (`node --import tsx --import ../scripts/jsx-loader-register.mjs`), converted TSX files still require `React` in scope; explicit `React` imports were retained in converted components for runtime compatibility.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 5: Activity migration follow-up (`activities/java-format-practice`, server routes + shared types)
+
+Completed:
+- Migrated Java Format Practice server route modules to TypeScript:
+  - `activities/java-format-practice/server/routes.js` -> `activities/java-format-practice/server/routes.ts`
+  - `activities/java-format-practice/server/presetChallenges.js` -> `activities/java-format-practice/server/presetChallenges.ts`
+- Added activity-local shared type contracts:
+  - `activities/java-format-practice/javaFormatPracticeTypes.ts`
+- Extracted typed route validation helpers and tests:
+  - `activities/java-format-practice/server/routeUtils.ts`
+  - `activities/java-format-practice/server/routeUtils.test.ts`
+- Updated activity config server entry to TypeScript route module:
+  - `activities/java-format-practice/activity.config.ts` (`serverEntry` -> `./server/routes.ts`)
+
+Implementation notes:
+- `routes.ts` now uses typed session normalization (`registerSessionNormalizer`) so existing persisted session payloads are safely coerced to expected defaults (`students`, `selectedDifficulty`, `selectedTheme`) without changing endpoint behavior.
+- Student join/reconnect/disconnect websocket logic was kept behavior-equivalent while adding explicit socket/session typings and safe request-body guards.
+- `presetChallenges.ts` remains behavior-equivalent to the former JS module; only strict-TS parameter typing was added for exported filter helpers.
+
+Validation:
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
 - `npm --workspace client test` -> pass
 - `npm --workspace client run build` -> pass
 
@@ -843,6 +909,24 @@ Implementation notes:
 Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
+
+### Slice 5: Activity migration kickoff (`activities/java-format-practice`, partial)
+
+Completed:
+- Migrated activity config and client entry module to TypeScript:
+  - `activities/java-format-practice/activity.config.js` -> `activities/java-format-practice/activity.config.ts`
+  - `activities/java-format-practice/client/index.js` -> `activities/java-format-practice/client/index.ts`
+- Added client-module shape regression test:
+  - `activities/java-format-practice/client/index.test.ts`
+
+Implementation notes:
+- `activity.config.ts` now points `clientEntry` to `./client/index.ts` while leaving `serverEntry` on `./server/routes.js` for this kickoff slice.
+- `client/index.ts` now exports a typed `ActivityClientModule` with explicit `ComponentType<unknown>` casts for manager/student components, matching shared activity registry contracts.
+- Remaining Java Format Practice client/server files stay on JS/JSX for the next completion slice.
+
+Validation:
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
 
 ### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, merge sort)
 
@@ -997,3 +1081,34 @@ Implementation notes:
 Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
+
+### Slice 5: Activity migration completion (`activities/java-format-practice`, remaining client surface)
+
+Completed:
+- Converted remaining Java Format Practice client files to TypeScript:
+  - `activities/java-format-practice/client/challenges.js` -> `activities/java-format-practice/client/challenges.ts`
+  - `activities/java-format-practice/client/student/JavaFormatPractice.jsx` -> `activities/java-format-practice/client/student/JavaFormatPractice.tsx`
+  - `activities/java-format-practice/client/manager/JavaFormatPracticeManager.jsx` -> `activities/java-format-practice/client/manager/JavaFormatPracticeManager.tsx`
+  - `activities/java-format-practice/client/components/AnswerSection.jsx` -> `activities/java-format-practice/client/components/AnswerSection.tsx`
+  - `activities/java-format-practice/client/components/CharacterGrid.jsx` -> `activities/java-format-practice/client/components/CharacterGrid.tsx`
+  - `activities/java-format-practice/client/components/ExpectedOutputGrid.jsx` -> `activities/java-format-practice/client/components/ExpectedOutputGrid.tsx`
+  - `activities/java-format-practice/client/components/InterleavedOutputGrid.jsx` -> `activities/java-format-practice/client/components/InterleavedOutputGrid.tsx`
+  - `activities/java-format-practice/client/components/FeedbackDisplay.jsx` -> `activities/java-format-practice/client/components/FeedbackDisplay.tsx`
+  - `activities/java-format-practice/client/data/referenceData.js` -> `activities/java-format-practice/client/data/referenceData.ts`
+- Converted Java Format Practice script-style tests to `.ts`:
+  - `activities/java-format-practice/client/evaluateFormatString.test.ts`
+  - `activities/java-format-practice/client/integration.test.ts`
+  - `activities/java-format-practice/client/utils/formatUtils.test.ts`
+  - `activities/java-format-practice/client/utils/stringUtils.test.ts`
+- Expanded shared activity types to cover challenge definitions, feedback payloads, output rows, and reference-modal sections:
+  - `activities/java-format-practice/javaFormatPracticeTypes.ts`
+
+Implementation notes:
+- `JavaFormatPractice.tsx` now uses explicit state/feedback/output typing to avoid `never` inference under strict TS + `noUncheckedIndexedAccess` while preserving existing classroom behavior.
+- `referenceData.ts` now uses `satisfies JavaFormatReferenceData` so table/list section literals remain type-safe and compatible with `ReferenceModal` rendering.
+- Script-style tests were kept as script runners and temporarily annotated with `@ts-nocheck` plus owner/cleanup notes to avoid blocking migration on a full `node:test` rewrite in this slice.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)

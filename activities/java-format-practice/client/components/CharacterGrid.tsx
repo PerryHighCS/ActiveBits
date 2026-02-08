@@ -1,30 +1,39 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 /**
  * CharacterGrid Component
  * Displays a character grid overlay for visual reference in format challenges
  * Numbers columns by default, with option to include row numbers
  */
-export default function CharacterGrid({ text, mask, width = 20, height = 4, showRows = false }) {
+interface CharacterGridProps {
+  text?: string | null
+  mask?: string | null
+  width?: number
+  height?: number
+  showRows?: boolean
+}
+
+export default function CharacterGrid({ text, mask, width = 20, height = 4, showRows = false }: CharacterGridProps) {
   // Validate and constrain width and height parameters
   const validatedWidth = Math.max(1, Math.min(Number.isInteger(width) ? width : 20, 100));
   const validatedHeight = Math.max(1, Math.min(Number.isInteger(height) ? height : 4, 100));
+  const normalizedMask = mask || ''
   
-  const [hoveredCol, setHoveredCol] = useState(null);
-  const [selectionStart, setSelectionStart] = useState(null);
-  const [selectionEnd, setSelectionEnd] = useState(null);
+  const [hoveredCol, setHoveredCol] = useState<number | null>(null);
+  const [selectionStart, setSelectionStart] = useState<number | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   
   if (!text) return null;
   
-  const handleMouseDown = (colIdx) => {
+  const handleMouseDown = (colIdx: number) => {
     // Always start a new selection on mouse down
     setSelectionStart(colIdx);
     setSelectionEnd(colIdx);
     setIsDragging(true);
   };
   
-  const handleMouseEnter = (colIdx) => {
+  const handleMouseEnter = (colIdx: number) => {
     if (!isDragging) {
       setHoveredCol(colIdx);
     }
@@ -37,14 +46,14 @@ export default function CharacterGrid({ text, mask, width = 20, height = 4, show
     setIsDragging(false);
   };
   
-  const isSelected = (colIdx) => {
+  const isSelected = (colIdx: number): boolean => {
     if (selectionStart === null || selectionEnd === null) return false;
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);
     return colIdx >= start && colIdx <= end;
   };
   
-  const getSelectionInfo = () => {
+  const getSelectionInfo = (): { start: number; end: number; count: number } | null => {
     if (selectionStart === null || selectionEnd === null) return null;
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);
@@ -57,16 +66,16 @@ export default function CharacterGrid({ text, mask, width = 20, height = 4, show
 
   // Build mask lines by parsing the mask string character-by-character
   // The mask string should have the same length as text (including \n characters)
-  const maskLines = [];
+  const maskLines: string[] = [];
   let maskIdx = 0;
   
   for (let i = 0; i < lines.length && i < validatedHeight; i++) {
-    const line = lines[i];
-    const maskLine = [];
+    const line = lines[i] ?? '';
+    const maskLine: string[] = [];
     
     for (let j = 0; j < line.length; j++) {
-      if (maskIdx < (mask || '').length) {
-        maskLine.push(mask[maskIdx]);
+      if (maskIdx < normalizedMask.length) {
+        maskLine.push(normalizedMask[maskIdx] ?? '');
         maskIdx++;
       } else {
         maskLine.push('');
@@ -76,7 +85,7 @@ export default function CharacterGrid({ text, mask, width = 20, height = 4, show
     maskLines.push(maskLine.join(''));
     
     // Skip the newline character in the mask
-    if (maskIdx < (mask || '').length && mask[maskIdx] === 'S') {
+    if (maskIdx < normalizedMask.length && normalizedMask[maskIdx] === 'S') {
       // This corresponds to the \n character
       maskIdx++;
     }

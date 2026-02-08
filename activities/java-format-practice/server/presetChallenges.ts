@@ -443,7 +443,7 @@ export const formatChallenges = [
  * @param {string} theme - Theme name ('Wanted Poster', 'Fantasy Menu', 'Spy Badge')
  * @returns {Array} - Challenges for that theme
  */
-export function getChallengesByTheme(theme) {
+export function getChallengesByTheme(theme: string) {
   return formatChallenges.filter((c) => c.theme === theme);
 }
 
@@ -452,7 +452,7 @@ export function getChallengesByTheme(theme) {
  * @param {string} difficulty - 'beginner', 'intermediate', 'advanced'
  * @returns {Array} - Challenges at that difficulty
  */
-export function getChallengesByDifficulty(difficulty) {
+export function getChallengesByDifficulty(difficulty: string) {
   return formatChallenges.filter((c) => c.difficulty === difficulty);
 }
 
@@ -470,7 +470,7 @@ export function getThemes() {
  * @param {string} difficulty - Optional difficulty filter
  * @returns {object} - Random challenge matching filters
  */
-export function getRandomChallenge(theme = null, difficulty = null) {
+export function getRandomChallenge(theme: string | null = null, difficulty: string | null = null) {
   let challenges = formatChallenges;
 
   if (theme) {

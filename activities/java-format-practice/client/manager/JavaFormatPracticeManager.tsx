@@ -1,39 +1,58 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router-dom';
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
 import SessionHeader from '@src/components/common/SessionHeader';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
+import type {
+  JavaFormatDifficulty,
+  JavaFormatStudentRecord,
+  JavaFormatTheme,
+} from '../../javaFormatPracticeTypes.js'
+
+type SortBy = 'name' | 'total' | 'correct' | 'accuracy' | 'streak'
+type SortDirection = 'asc' | 'desc'
+
+interface StudentsResponse {
+  students?: JavaFormatStudentRecord[]
+}
+
+interface ManagerWsMessage {
+  type: string
+  payload?: {
+    students?: JavaFormatStudentRecord[]
+  }
+}
 
 /**
  * JavaFormatPracticeManager - Teacher view for managing the Java Format Practice activity
  * Displays student roster and their progress statistics
  */
 export default function JavaFormatPracticeManager() {
-  const { sessionId } = useParams();
+  const { sessionId } = useParams<{ sessionId: string }>();
 
-  const [students, setStudents] = useState([]);
-  const [selectedDifficulty, setSelectedDifficulty] = useState('beginner');
-  const [selectedTheme, setSelectedTheme] = useState('all');
-  const [sortBy, setSortBy] = useState('name'); // 'name', 'total', 'correct', 'accuracy', 'streak'
-  const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
+  const [students, setStudents] = useState<JavaFormatStudentRecord[]>([])
+  const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner')
+  const [selectedTheme, setSelectedTheme] = useState<JavaFormatTheme>('all')
+  const [sortBy, setSortBy] = useState<SortBy>('name') // 'name', 'total', 'correct', 'accuracy', 'streak'
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc') // 'asc' or 'desc'
 
   // Available difficulty levels
-  const difficultyLevels = [
+  const difficultyLevels: Array<{ id: JavaFormatDifficulty; label: string }> = [
     { id: 'beginner', label: 'Beginner' },
     { id: 'intermediate', label: 'Intermediate' },
     { id: 'advanced', label: 'Advanced' },
   ];
 
   // Available themes
-  const themes = [
+  const themes: Array<{ id: JavaFormatTheme; label: string }> = [
     { id: 'all', label: 'All Themes' },
     { id: 'wanted-poster', label: 'Wanted Poster' },
     { id: 'fantasy-menu', label: 'Fantasy Menu' },
     { id: 'spy-badge', label: 'Spy Badge' },
   ];
 
-  const handleDifficultyChange = (difficulty) => {
+  const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
     setSelectedDifficulty(difficulty);
 
     // Send selected difficulty to server
@@ -46,7 +65,7 @@ export default function JavaFormatPracticeManager() {
     });
   };
 
-  const handleThemeChange = (theme) => {
+  const handleThemeChange = (theme: JavaFormatTheme) => {
     setSelectedTheme(theme);
 
     // Send selected theme to server
@@ -64,7 +83,7 @@ export default function JavaFormatPracticeManager() {
     try {
       const res = await fetch(`/api/java-format-practice/${sessionId}/students`);
       if (!res.ok) throw new Error('Failed to fetch students');
-      const data = await res.json();
+      const data = (await res.json()) as StudentsResponse
       const list = Array.isArray(data.students) ? data.students : [];
       setStudents(list);
     } catch (err) {
@@ -72,12 +91,12 @@ export default function JavaFormatPracticeManager() {
     }
   }, [sessionId]);
 
-  const handleWsMessage = useCallback((event) => {
+  const handleWsMessage = useCallback((event: MessageEvent<string>) => {
     try {
-      const message = JSON.parse(event.data);
+      const message = JSON.parse(event.data) as ManagerWsMessage
       console.log('Manager received message:', message);
       if (message.type === 'studentsUpdate') {
-        console.log('Updating students:', message.payload.students);
+        console.log('Updating students:', message.payload?.students);
         const list = Array.isArray(message.payload?.students) ? message.payload.students : [];
         setStudents(list);
       }
@@ -91,7 +110,7 @@ export default function JavaFormatPracticeManager() {
     fetchStudents();
   }, [fetchStudents]);
 
-  const handleWsError = useCallback((error) => {
+  const handleWsError = useCallback((error: unknown) => {
     console.error('WebSocket error:', error);
   }, []);
 
@@ -146,7 +165,7 @@ export default function JavaFormatPracticeManager() {
     downloadCsv(csv, 'java-format-practice-results.csv');
   }, [students]);
 
-  const handleSort = (column) => {
+  const handleSort = (column: SortBy) => {
     if (sortBy === column) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
     } else {
@@ -156,7 +175,8 @@ export default function JavaFormatPracticeManager() {
   };
 
   const sortedStudents = [...students].sort((a, b) => {
-    let aValue, bValue;
+    let aValue: number | string
+    let bValue: number | string
 
     switch (sortBy) {
       case 'total':
@@ -190,8 +210,7 @@ export default function JavaFormatPracticeManager() {
   return (
     <div style={styles.container}>
       <SessionHeader
-        title="Java Format Practice"
-        subtitle="Teacher Controls"
+        activityName="Java Format Practice"
         sessionId={sessionId}
       />
 
@@ -319,7 +338,7 @@ export default function JavaFormatPracticeManager() {
   );
 }
 
-const styles = {
+const styles: Record<string, CSSProperties> = {
   container: {
     maxWidth: '1200px',
     margin: '0 auto',

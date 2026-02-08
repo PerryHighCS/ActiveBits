@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type KeyboardEvent, type MouseEvent, type SetStateAction } from 'react';
 import InterleavedOutputGrid from '../components/InterleavedOutputGrid';
 import ExpectedOutputGrid from '../components/ExpectedOutputGrid';
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +15,40 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { splitArgumentsRespectingQuotes, buildAnswerString, highlightDiff, escapeHtml } from '../utils/stringUtils';
 import { validateVariableReferences } from '../utils/validationUtils';
 import { normalizeOutput, normalizeMask } from '../utils/formatUtils';
+import type {
+  JavaFormatChallenge,
+  JavaFormatCycleMismatch,
+  JavaFormatDifficulty,
+  JavaFormatFeedback,
+  JavaFormatFormatCall,
+  JavaFormatLineOutput,
+  JavaFormatStats,
+  JavaFormatTheme,
+  JavaFormatVariable,
+  JavaFormatVariableTemplate,
+} from '../../javaFormatPracticeTypes.js'
+
+interface JavaFormatPracticeSessionData {
+  sessionId?: string
+}
+
+interface JavaFormatPracticeProps {
+  sessionData?: JavaFormatPracticeSessionData | null
+}
+
+interface OutputLineState extends JavaFormatLineOutput {
+  expectedMask: string
+  userMask: string
+}
+
+interface StudentsUpdateMessage {
+  type: 'session-ended' | 'studentId' | 'difficultyUpdate' | 'themeUpdate' | string
+  payload: {
+    studentId?: string
+    difficulty?: JavaFormatDifficulty
+    theme?: JavaFormatTheme
+  }
+}
 
 /**
  * JavaFormatPractice - Student view for practicing Java printf and String.format
@@ -33,63 +67,67 @@ import { normalizeOutput, normalizeMask } from '../utils/formatUtils';
 
 // Generate multiple cycles of alternative variable values for testing format robustness
 // Cycle 0 is the original values, cycles 1-2 use alternative theme-appropriate values
-function generateVariableCycles(variables, variableTemplates, numCycles = 3) {
+function generateVariableCycles(
+  variables: JavaFormatVariable[] = [],
+  variableTemplates: JavaFormatVariableTemplate[] = [],
+  numCycles = 3,
+): Array<Record<string, string | number>> {
   if (!variables || variables.length === 0) return [];
   
-  const cycles = [];
+  const cycles: Array<Record<string, string | number>> = [];
   
   // Cycle 0: Original values
-  const originalCycle = {};
-  variables.forEach(v => {
+  const originalCycle: Record<string, string | number> = {};
+  variables.forEach((v) => {
     let val = v.value;
     // Remove quotes from string literals for the value map
     if (v.type === 'String' && val.startsWith('"') && val.endsWith('"')) {
       val = val.slice(1, -1);
     }
-    originalCycle[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+    originalCycle[v.name] = v.type === 'String' ? val : Number.parseFloat(val) || 0;
   });
   cycles.push(originalCycle);
   
   // Cycles 1+: Alternative values from variableTemplates
   for (let c = 1; c < numCycles; c++) {
-    const cycleVarMap = {};
+    const cycleVarMap: Record<string, string | number> = {};
     
-    variables.forEach(v => {
+    variables.forEach((v) => {
       // Find the corresponding template for this variable
-      const template = variableTemplates?.find(vt => vt.names?.includes(v.name));
+      const template = variableTemplates?.find((variableTemplate) => variableTemplate.names?.includes(v.name));
       
-      let newValue;
+      let newValue: string | number;
       if (template?.values && Array.isArray(template.values)) {
         // Use theme-specific values from the template
         const valueIndex = c % template.values.length;
-        newValue = template.values[valueIndex];
+        newValue = template.values[valueIndex] ?? template.values[0] ?? 0;
       } else if (template?.range) {
         // Generate from range
         const { min, max, step = 1, precision } = template.range;
         if (v.type === 'double') {
-          const options = [];
+          const options: number[] = [];
           for (let val = min; val <= max && options.length < 5; val += (max - min) / 4) {
             options.push(parseFloat(val.toFixed(precision ?? 2)));
           }
-          newValue = options[c % options.length];
+          newValue = options[c % options.length] ?? options[0] ?? 0;
         } else {
-          const options = [];
+          const options: number[] = [];
           for (let val = min; val <= max && options.length < 5; val += Math.max(step, (max - min) / 4)) {
             options.push(Math.round(val));
           }
-          newValue = options[c % options.length];
+          newValue = options[c % options.length] ?? options[0] ?? 0;
         }
       } else {
         // Fallback to generic values if no template found
         if (v.type === 'String') {
           const stringOptions = ['test', 'sample', 'data'];
-          newValue = stringOptions[c % stringOptions.length];
+          newValue = stringOptions[c % stringOptions.length] ?? stringOptions[0] ?? 'test';
         } else if (v.type === 'double') {
           const doubleOptions = [1.5, 2.75, 3.333];
-          newValue = doubleOptions[c % doubleOptions.length];
+          newValue = doubleOptions[c % doubleOptions.length] ?? doubleOptions[0] ?? 1.5;
         } else {
           const intOptions = [10, 25, 50];
-          newValue = intOptions[c % intOptions.length];
+          newValue = intOptions[c % intOptions.length] ?? intOptions[0] ?? 10;
         }
       }
       
@@ -102,31 +140,31 @@ function generateVariableCycles(variables, variableTemplates, numCycles = 3) {
   return cycles;
 }
 
-export default function JavaFormatPractice({ sessionData }) {
+export default function JavaFormatPractice({ sessionData }: JavaFormatPracticeProps) {
   const sessionId = sessionData?.sessionId;
   const isSoloSession = sessionId ? sessionId.startsWith('solo-') : false;
-  const studentIdRef = useRef(null);
-  const cycleTimerRef = useRef(null);
+  const studentIdRef = useRef<string | null>(null);
+  const cycleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
 
   // Get session-ended handler
   const attachSessionEndedHandler = useSessionEndedHandler();
 
   const [studentName, setStudentName] = useState('');
-  const [studentId, setStudentId] = useState(null);
+  const [studentId, setStudentId] = useState<string | null>(null);
   const [nameSubmitted, setNameSubmitted] = useState(false);
-  const [currentChallenge, setCurrentChallenge] = useState(null);
+  const [currentChallenge, setCurrentChallenge] = useState<JavaFormatChallenge | null>(null);
   const [currentFormatCallIndex, setCurrentFormatCallIndex] = useState(0);
-  const [selectedDifficulty, setSelectedDifficulty] = useState('beginner');
-  const [selectedTheme, setSelectedTheme] = useState('all');
-  const [userAnswers, setUserAnswers] = useState([]);
-  const [solvedAnswers, setSolvedAnswers] = useState([]);
-  const [feedback, setFeedback] = useState(null);
-  const [lineErrors, setLineErrors] = useState({});
-  const [lineOutputs, setLineOutputs] = useState({});
+  const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner');
+  const [selectedTheme, setSelectedTheme] = useState<JavaFormatTheme>('all');
+  const [userAnswers, setUserAnswers] = useState<string[][]>([]);
+  const [solvedAnswers, setSolvedAnswers] = useState<string[]>([]);
+  const [feedback, setFeedback] = useState<JavaFormatFeedback | null>(null);
+  const [lineErrors, setLineErrors] = useState<Record<number, string>>({});
+  const [lineOutputs, setLineOutputs] = useState<Record<number, OutputLineState>>({});
   const [showReference, setShowReference] = useState(false);
 
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<JavaFormatStats>({
     total: 0,
     correct: 0,
     streak: 0,
@@ -138,14 +176,14 @@ export default function JavaFormatPractice({ sessionData }) {
   // Cycling feature: for advanced mode after correct answer
   const [isCyclingMode, setIsCyclingMode] = useState(false);
   const [cycleIndex, setCycleIndex] = useState(0);
-  const [variableCycles, setVariableCycles] = useState([]);
-  const [cycleOutputs, setCycleOutputs] = useState({});
-  const [cycleMismatchLine, setCycleMismatchLine] = useState(null);
+  const [variableCycles, setVariableCycles] = useState<Array<Record<string, string | number>>>([]);
+  const [cycleOutputs, setCycleOutputs] = useState<Record<number, OutputLineState>>({});
+  const [cycleMismatchLine, setCycleMismatchLine] = useState<JavaFormatCycleMismatch | null>(null);
 
   const splitAnswerParts = useCallback((answer = '') => splitArgumentsRespectingQuotes(answer), []);
 
   const createEmptyAnswers = useCallback(
-    (formatCalls = [], difficulty) =>
+    (formatCalls: JavaFormatFormatCall[] = [], difficulty: JavaFormatDifficulty) =>
       formatCalls.map((call) =>
         difficulty === 'advanced'
           ? ['']
@@ -156,7 +194,7 @@ export default function JavaFormatPractice({ sessionData }) {
 
   // Helper to reset challenge state
   const resetChallengeState = useCallback(
-    (formatCalls = [], difficulty) => {
+    (formatCalls: JavaFormatFormatCall[] = [], difficulty: JavaFormatDifficulty) => {
       setUserAnswers(createEmptyAnswers(formatCalls, difficulty));
       setSolvedAnswers(Array.from({ length: formatCalls.length }, () => ''));
       setFeedback(null);
@@ -201,7 +239,7 @@ export default function JavaFormatPractice({ sessionData }) {
     const savedStats = localStorage.getItem(key);
     if (savedStats) {
       try {
-        setStats(JSON.parse(savedStats));
+        setStats(JSON.parse(savedStats) as JavaFormatStats);
       } catch (err) {
         console.error('Failed to parse saved stats:', err);
       }
@@ -225,17 +263,19 @@ export default function JavaFormatPractice({ sessionData }) {
   }, [nameSubmitted, selectedDifficulty, selectedTheme]);
 
   const handleWsMessage = useCallback(
-    (event) => {
+    (event: MessageEvent<string>) => {
       try {
-        const message = JSON.parse(event.data);
+        const message = JSON.parse(event.data) as StudentsUpdateMessage
         if (message.type === 'session-ended') {
           navigate('/session-ended');
           return;
         }
         if (message.type === 'studentId') {
           const newStudentId = message.payload.studentId;
-          setStudentId(newStudentId);
-          localStorage.setItem(`student-id-${sessionId}`, newStudentId);
+          if (newStudentId) {
+            setStudentId(newStudentId);
+            localStorage.setItem(`student-id-${sessionId}`, newStudentId);
+          }
         } else if (message.type === 'difficultyUpdate') {
           const difficulty = message.payload.difficulty || 'beginner';
           setSelectedDifficulty(difficulty);
@@ -261,7 +301,7 @@ export default function JavaFormatPractice({ sessionData }) {
   );
 
   const handleWsOpen = useCallback(() => {
-  }, [sessionId]);
+  }, []);
 
   const buildWsUrl = useCallback(() => {
     if (!nameSubmitted || isSoloSession) return null;
@@ -279,8 +319,8 @@ export default function JavaFormatPractice({ sessionData }) {
     shouldReconnect: Boolean(nameSubmitted && !isSoloSession),
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
-    onError: null,
-    onClose: null,
+    onError: undefined,
+    onClose: undefined,
     attachSessionEndedHandler,
   });
 
@@ -315,12 +355,12 @@ export default function JavaFormatPractice({ sessionData }) {
     }
   }, [stats, sessionId, studentId, isSoloSession]);
 
-  const getCurrentFormatCall = () => {
+  const getCurrentFormatCall = (): JavaFormatFormatCall | null => {
     if (!currentChallenge || !currentChallenge.formatCalls) return null;
-    return currentChallenge.formatCalls[currentFormatCallIndex];
+    return currentChallenge.formatCalls[currentFormatCallIndex] ?? null;
   };
 
-  const handleNameSubmit = (name) => {
+  const handleNameSubmit = (name: string) => {
     if (!name.trim()) {
       alert('Please enter your name');
       return;
@@ -346,6 +386,7 @@ export default function JavaFormatPractice({ sessionData }) {
       setHasSubmitted(true);
       if (typeof window !== 'undefined') window.hasSubmitted = true;
       const formatCall = calls[currentFormatCallIndex];
+      if (!formatCall) return
       const userParts = userAnswers[currentFormatCallIndex] || [];
       const expectedParts = splitAnswerParts(formatCall.answer);
       
@@ -371,9 +412,9 @@ export default function JavaFormatPractice({ sessionData }) {
       const isCorrect = submitted === expected;
 
       let detailedMessage = '';
-      let wrongParts = [];
+      let wrongParts: string[] = [];
       if (!isCorrect && userParts.length === expectedParts.length) {
-        userParts.forEach((part, idx) => {
+        userParts.forEach((_part, idx) => {
           const meta = inputsMeta[idx];
           const partName = meta?.type === 'format-string' 
             ? 'format specifier'
@@ -383,7 +424,7 @@ export default function JavaFormatPractice({ sessionData }) {
             ? 'argument'
             : 'entry';
           if (adjustedUserParts[idx] !== adjustedExpectedParts[idx]) {
-            const { expected: expDiff, actual: actDiff } = highlightDiff(adjustedExpectedParts[idx], adjustedUserParts[idx] || '');
+            const { expected: expDiff, actual: actDiff } = highlightDiff(adjustedExpectedParts[idx] ?? '', adjustedUserParts[idx] || '');
             wrongParts.push(`${partName} (expected: <code>${expDiff}</code>, got: <code>${actDiff}</code>)`);
           }
         });
@@ -423,7 +464,7 @@ export default function JavaFormatPractice({ sessionData }) {
       if (isCorrect) {
         explanation = formatCall.explanation;
       } else if (wrongParts.length > 0) {
-        const wrongTypes = userParts.map((part, idx) => adjustedUserParts[idx] !== adjustedExpectedParts[idx] ? (inputsMeta[idx]?.type) : null).filter(Boolean);
+        const wrongTypes = userParts.map((_part, idx) => adjustedUserParts[idx] !== adjustedExpectedParts[idx] ? (inputsMeta[idx]?.type) : null).filter(Boolean);
         if (wrongTypes.includes('format-string') || wrongTypes.includes('string-literal')) {
           explanation = formatCall.explanation;
         }
@@ -449,10 +490,9 @@ export default function JavaFormatPractice({ sessionData }) {
     } else {
       // Intermediate/Advanced mode: validate all lines and collect valid outputs
       setHasSubmitted(true);
-      let validOutputs = [];
-      const outputsByLine = {};
-      const newLineErrors = {}; // Track errors locally during this check
-      const lineErrorsMeta = {}; // Track which part (partIdx) has the error for each line
+      const outputsByLine: Record<number, OutputLineState> = {};
+      const newLineErrors: Record<number, string> = {}; // Track errors locally during this check
+      const lineErrorsMeta: Record<number, number> = {}; // Track which part (partIdx) has the error for each line
       
       calls.forEach((call, idx) => {
         const userSubmitted = buildAnswerString(userAnswers[idx] || []);
@@ -464,22 +504,22 @@ export default function JavaFormatPractice({ sessionData }) {
         
         try {
           const userParts = splitArgumentsRespectingQuotes(userSubmitted);
-          if (!userParts[0].startsWith('"') || !userParts[0].endsWith('"')) {
+          if (!userParts[0]?.startsWith('"') || !userParts[0]?.endsWith('"')) {
             syntaxError = 'Format string must be enclosed in double quotes.';
             // This is a format string error (partIdx 0)
             lineErrorsMeta[idx] = 0;
           } else {
             const userFmt = userParts[0].slice(1, -1);
-            const valueMap = {};
+            const valueMap: Record<string, string | number> = {};
             (currentChallenge.variables || []).forEach((v) => {
               let val = v.value;
               if (v.type === 'String') {
                 val = val.replace(/^"(.*)"$/, '$1');
               }
-              valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+              valueMap[v.name] = v.type === 'String' ? val : Number.parseFloat(val) || 0;
             });
             const userArgExprs = userParts.slice(1);
-            let userArgValues = [];
+            let userArgValues: unknown[] = [];
             try {
               // Validate that all variable references are defined
               validateVariableReferences(userArgExprs, valueMap);
@@ -488,18 +528,19 @@ export default function JavaFormatPractice({ sessionData }) {
               userOutputText = userOutput.text;
               userMask = userOutput.mask;
             } catch (err) {
+              const errorMessage = err instanceof Error ? err.message : String(err)
               const availableVars = Object.keys(valueMap).join(', ');
-              syntaxError = `${err.message}. Check your variable names and expressions. Available variables: ${availableVars}`;
+              syntaxError = `${errorMessage}. Check your variable names and expressions. Available variables: ${availableVars}`;
               
               // Try to determine which argument has the error
               let errorArgIdx = 0;
-              if (err.message && err.message.includes('not defined')) {
+              if (errorMessage.includes('not defined')) {
                 // Extract the variable name from error message
-                const varMatch = err.message.match(/Variable '(\w+)' is not defined/);
+                const varMatch = errorMessage.match(/Variable '(\w+)' is not defined/);
                 if (varMatch) {
-                  const undefinedVar = varMatch[1];
+                  const undefinedVar = varMatch[1] ?? '';
                   // Find which argument expression contains this variable
-                  errorArgIdx = userArgExprs.findIndex(expr => expr.includes(undefinedVar));
+                  errorArgIdx = userArgExprs.findIndex((expr) => expr.includes(undefinedVar));
                   if (errorArgIdx === -1) errorArgIdx = 0;
                   // partIdx is 1-indexed for arguments (0 is format string)
                   errorArgIdx = errorArgIdx + 1;
@@ -528,10 +569,6 @@ export default function JavaFormatPractice({ sessionData }) {
         }
         
         // Store valid outputs if no syntax errors
-        if (!syntaxError && userOutputText) {
-          validOutputs.push(userOutputText);
-        }
-        
         // Always calculate expected output for this line from the call's answer
         // (even if there are syntax errors, so the grid shows what was expected)
         let expectedOutputText = '';
@@ -542,15 +579,15 @@ export default function JavaFormatPractice({ sessionData }) {
             const answerParts = splitArgumentsRespectingQuotes(answerStr);
             if (answerParts.length > 0) {
               // Support both quoted (advanced) and unquoted (beginner/intermediate) format strings
-              const expectedFmt = answerParts[0].replace(/^"(.*)"$/, '$1');
+              const expectedFmt = (answerParts[0] ?? '').replace(/^"(.*)"$/, '$1');
               const expectedArgExprs = answerParts.slice(1);
-              const valueMap = {};
+              const valueMap: Record<string, string | number> = {};
               (currentChallenge.variables || []).forEach((v) => {
                 let val = v.value;
                 if (v.type === 'String') {
                   val = val.replace(/^"(.*)"$/, '$1');
                 }
-                valueMap[v.name] = v.type === 'String' ? val : parseFloat(val) || 0;
+                valueMap[v.name] = v.type === 'String' ? val : Number.parseFloat(val) || 0;
               });
               const expectedArgValues = evaluateArgs(expectedArgExprs, valueMap);
               const expectedOutput = formatWithMask(expectedFmt, expectedArgValues);
@@ -566,7 +603,7 @@ export default function JavaFormatPractice({ sessionData }) {
         let varName = '';
         const skeletonMatch = call.skeleton?.match(/String\s+(\w+)\s*=/);
         if (skeletonMatch) {
-          varName = skeletonMatch[1];
+          varName = skeletonMatch[1] ?? '';
         }
         
         // Store per-line output comparison
@@ -587,7 +624,7 @@ export default function JavaFormatPractice({ sessionData }) {
       const hasAnyLineErrors = Object.keys(newLineErrors).length > 0;
 
       // Check if all lines match (normalized for grid comparison)
-      const allLinesMatch = Object.values(outputsByLine).length > 0 && Object.values(outputsByLine).every(line => {
+      const allLinesMatch = Object.values(outputsByLine).length > 0 && Object.values(outputsByLine).every((line) => {
         return (
           normalizeOutput(line.expectedOutput) === normalizeOutput(line.userOutput) &&
           normalizeMask(line.expectedMask) === normalizeMask(line.userMask)
@@ -597,15 +634,16 @@ export default function JavaFormatPractice({ sessionData }) {
       if (hasAnyLineErrors) {
         // Don't enter cycling mode if there are syntax errors
         // Show error modal with mapped line numbers
-        const errorMessages = [];
+        const errorMessages: Array<{ text: string; emphasis: string; textAfter: string }> = []
         // Use the lineErrorsMeta that was already populated during error detection
         // (it contains the correct partIdx for each error)
         Object.entries(newLineErrors).forEach(([idx, msg]) => {
+          const numericIndex = Number.parseInt(idx, 10)
           // Map idx to gutter line number
-          const lineNum = (currentChallenge.startingLine || 1) + (currentChallenge.variables?.length || 0) + (parseInt(idx) * 2) + 1;
+          const lineNum = (currentChallenge.startingLine || 1) + (currentChallenge.variables?.length || 0) + (numericIndex * 2) + 1;
           // If lineErrorsMeta doesn't have this index, default to 0 (format string)
-          if (lineErrorsMeta[idx] === undefined) {
-            lineErrorsMeta[idx] = 0;
+          if (lineErrorsMeta[numericIndex] === undefined) {
+            lineErrorsMeta[numericIndex] = 0;
           }
           errorMessages.push({
             text: 'Format error on line ',
@@ -642,14 +680,12 @@ export default function JavaFormatPractice({ sessionData }) {
       } else {
         // Some lines have incorrect output (but no syntax errors)
         // Determine which lines are wrong and try to identify which part
-        const mismatchedLines = [];
         Object.entries(outputsByLine).forEach(([idx, line]) => {
           const outputMatches = normalizeOutput(line.expectedOutput) === normalizeOutput(line.userOutput);
           const maskMatches = normalizeMask(line.expectedMask) === normalizeMask(line.userMask);
           
           if (!outputMatches || !maskMatches) {
-            const lineIdx = parseInt(idx);
-            mismatchedLines.push(lineIdx);
+            const lineIdx = Number.parseInt(idx, 10);
             
             // If lineErrorsMeta wasn't already set (e.g., by variable error detection),
             // default to 0 (format string) since that's most likely the issue
@@ -681,6 +717,7 @@ export default function JavaFormatPractice({ sessionData }) {
     
     const nextIndex = cycleIndex + 1;
     const nextVariables = variableCycles[nextIndex];
+    if (!nextVariables) return false
     
     // Re-evaluate with new variables and check for mismatches
     const result = validateCycleOutputs(nextVariables);
@@ -689,9 +726,10 @@ export default function JavaFormatPractice({ sessionData }) {
     
     if (result.hasMismatch) {
       setCycleMismatchLine(result.mismatchInfo);
+      if (!currentChallenge || !result.mismatchInfo) return false
       // Map mismatch line number to gutter line number
       const gutterLineNum = (currentChallenge.startingLine || 1) + (currentChallenge.variables?.length || 0) + ((result.mismatchInfo.lineNumber - 1) * 2) + 1;
-      const rawVarName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [, `variable ${result.mismatchInfo.lineNumber}`])[1];
+      const rawVarName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [, `variable ${result.mismatchInfo.lineNumber}`])[1] ?? `variable ${result.mismatchInfo.lineNumber}`;
       const varName = escapeHtml(rawVarName);
       setFeedback({
         isCorrect: false,
@@ -716,6 +754,7 @@ export default function JavaFormatPractice({ sessionData }) {
     
     const prevIndex = cycleIndex - 1;
     const prevVariables = variableCycles[prevIndex];
+    if (!prevVariables) return
     
     // Re-evaluate with previous variables
     const result = validateCycleOutputs(prevVariables);
@@ -748,14 +787,18 @@ export default function JavaFormatPractice({ sessionData }) {
     };
   }, [isCyclingMode, cycleIndex, cycleMismatchLine]);
 
-  const validateCycleOutputs = (cycleVariables) => {
-    const outputs = {};
+  const validateCycleOutputs = (
+    cycleVariables: Record<string, string | number>,
+  ): { outputs: Record<number, OutputLineState>; hasMismatch: boolean; mismatchInfo: JavaFormatCycleMismatch | null } => {
+    const outputs: Record<number, OutputLineState> = {};
     let hasMismatch = false;
-    let mismatchInfo = null;
+    let mismatchInfo: JavaFormatCycleMismatch | null = null;
 
     // Re-evaluate all format calls with new variable values
-    for (let i = 0; i < currentChallenge.formatCalls.length; i++) {
-      const formatCall = currentChallenge.formatCalls[i];
+    const formatCalls = currentChallenge?.formatCalls ?? []
+    for (let i = 0; i < formatCalls.length; i++) {
+      const formatCall = formatCalls[i];
+      if (!formatCall) continue
       const userSubmitted = buildAnswerString(userAnswers[i] || []);
       
       try {
@@ -802,7 +845,7 @@ export default function JavaFormatPractice({ sessionData }) {
         let varName = '';
         const skeletonMatch = formatCall.skeleton?.match(/String\s+(\w+)\s*=/);
         if (skeletonMatch) {
-          varName = skeletonMatch[1];
+          varName = skeletonMatch[1] ?? '';
         }
 
         outputs[i] = {
@@ -813,15 +856,19 @@ export default function JavaFormatPractice({ sessionData }) {
           varName: varName,
         };
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
         hasMismatch = true;
         mismatchInfo = {
           lineNumber: i + 1,
-          error: error.message
+          error: errorMessage
         };
         outputs[i] = {
           expectedOutput: '(error)',
           userOutput: '(error)',
-          error: error.message
+          expectedMask: '',
+          userMask: '',
+          varName: '',
+          error: errorMessage,
         };
       }
     }
@@ -830,13 +877,14 @@ export default function JavaFormatPractice({ sessionData }) {
   };
 
   // Get display variables - use cycling values if in cycling mode, otherwise original
-  const getDisplayVariables = () => {
+  const getDisplayVariables = (): JavaFormatVariable[] => {
     if (!isCyclingMode || !variableCycles || !variableCycles[cycleIndex]) {
       return currentChallenge?.variables || [];
     }
     
-    const cycleVars = variableCycles[cycleIndex];
-    return (currentChallenge?.variables || []).map(v => {
+    const cycleVars = variableCycles[cycleIndex]
+    if (!cycleVars) return currentChallenge?.variables || []
+    return (currentChallenge?.variables || []).map((v) => {
       const cycleValue = cycleVars[v.name];
       if (cycleValue !== undefined) {
         return {
@@ -860,7 +908,7 @@ export default function JavaFormatPractice({ sessionData }) {
       // Fill the just-answered line with the expected answer so it shows as solved
       setSolvedAnswers((prev) => {
         const next = [...prev];
-        next[currentFormatCallIndex] = currentChallenge.formatCalls[currentFormatCallIndex].answer;
+        next[currentFormatCallIndex] = currentChallenge.formatCalls[currentFormatCallIndex]?.answer ?? '';
         return next;
       });
 
@@ -881,7 +929,7 @@ export default function JavaFormatPractice({ sessionData }) {
     if (selectedDifficulty === 'beginner' && currentFormatCallIndex >= currentChallenge.formatCalls.length - 1 && feedback?.isCorrect) {
       setSolvedAnswers((prev) => {
         const next = [...prev];
-        next[currentFormatCallIndex] = currentChallenge.formatCalls[currentFormatCallIndex].answer;
+        next[currentFormatCallIndex] = currentChallenge.formatCalls[currentFormatCallIndex]?.answer ?? '';
         return next;
       });
     }
@@ -893,7 +941,7 @@ export default function JavaFormatPractice({ sessionData }) {
     setCycleOutputs({});
     setCycleMismatchLine(null);
 
-    const pickChallenge = () => {
+    const pickChallenge = (): JavaFormatChallenge => {
       const theme = selectedTheme === 'all' ? null : selectedTheme;
       let next = getRandomChallenge(theme, selectedDifficulty);
       let attempts = 0;
@@ -912,7 +960,7 @@ export default function JavaFormatPractice({ sessionData }) {
     setFeedback(null);
   };
 
-  const handleDifficultyChange = (difficulty) => {
+  const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
     setSelectedDifficulty(difficulty);
     if (!isSoloSession) {
       fetch(`/api/java-format-practice/${sessionId}/difficulty`, {
@@ -932,7 +980,7 @@ export default function JavaFormatPractice({ sessionData }) {
     setFocusToken((t) => t + 1);
   };
 
-  const handleThemeChange = (theme) => {
+  const handleThemeChange = (theme: JavaFormatTheme) => {
     setSelectedTheme(theme);
     if (!isSoloSession) {
       fetch(`/api/java-format-practice/${sessionId}/theme`, {
@@ -963,18 +1011,18 @@ export default function JavaFormatPractice({ sessionData }) {
             type="text"
             className="name-input"
             placeholder="Your name"
-            onKeyPress={(e) => {
+            onKeyPress={(e: KeyboardEvent<HTMLInputElement>) => {
               if (e.key === 'Enter') {
-                handleNameSubmit(e.target.value);
+                handleNameSubmit(e.currentTarget.value);
               }
             }}
             autoFocus
           />
           <button
             className="name-submit-btn"
-            onClick={(e) => {
-              const input = e.target.parentElement.querySelector('.name-input');
-              handleNameSubmit(input.value);
+            onClick={(e: MouseEvent<HTMLButtonElement>) => {
+              const input = e.currentTarget.parentElement?.querySelector<HTMLInputElement>('.name-input');
+              handleNameSubmit(input?.value || '');
             }}
           >
             Start
@@ -989,6 +1037,9 @@ export default function JavaFormatPractice({ sessionData }) {
   }
 
   const formatCall = getCurrentFormatCall();
+  if (!formatCall) {
+    return <div>Loading challenge...</div>;
+  }
   const hasInput = (() => {
     if (selectedDifficulty === 'beginner') {
       const parts = userAnswers[currentFormatCallIndex] || [];
@@ -1000,15 +1051,15 @@ export default function JavaFormatPractice({ sessionData }) {
       // After first submission, allow checking partial lines
       if (hasSubmitted) {
         // Allow checking if at least one line has input
-        return calls.some((call, idx) => {
+        return calls.some((_call, idx) => {
           const parts = userAnswers[idx] || [];
-          return parts.length === 1 && parts[0].trim();
+          return parts.length === 1 && Boolean(parts[0]?.trim());
         });
       }
       // Before first submission, require all lines to be filled
-      return calls.every((call, idx) => {
+      return calls.every((_call, idx) => {
         const parts = userAnswers[idx] || [];
-        return parts.length === 1 && parts[0].trim();
+        return parts.length === 1 && Boolean(parts[0]?.trim());
       });
     }
     // Intermediate: after first submission, allow checking partial lines; otherwise require all
@@ -1016,13 +1067,13 @@ export default function JavaFormatPractice({ sessionData }) {
       return calls.some((call, idx) => {
         const parts = userAnswers[idx] || [];
         const expected = splitAnswerParts(call.answer).length;
-        return parts.length === expected && parts.every((p) => p.trim());
+        return parts.length === expected && parts.every((part) => Boolean(part.trim()));
       });
     }
     return calls.every((call, idx) => {
       const parts = userAnswers[idx] || [];
       const expected = splitAnswerParts(call.answer).length;
-      return parts.length === expected && parts.every((p) => p.trim());
+      return parts.length === expected && parts.every((part) => Boolean(part.trim()));
     });
   })();
   const submitDisabled = !hasInput;
@@ -1088,12 +1139,14 @@ export default function JavaFormatPractice({ sessionData }) {
               {currentChallenge.formatCalls?.[0]?.method === 'format' ? (
                 // String.format: pass lineData with variable names, keep %n to display as ↵
                 <InterleavedOutputGrid
-                  lineData={Object.entries(isCyclingMode && cycleOutputs && Object.keys(cycleOutputs).length > 0 ? cycleOutputs : lineOutputs).map(([idx, lo]) => ({
+                  lineData={Object.entries(
+                    (isCyclingMode && Object.keys(cycleOutputs).length > 0 ? cycleOutputs : lineOutputs) as Record<string, OutputLineState>,
+                  ).map(([idx, lo]) => ({
                     expected: lo.expectedOutput || '',
                     actual: lo.userOutput || '',
                     expectedMask: lo.expectedMask || '',
                     userMask: lo.userMask || '',
-                    varName: lo.varName || `Line ${parseInt(idx) + 1}`,
+                    varName: lo.varName || `Line ${Number.parseInt(idx, 10) + 1}`,
                   }))}
                   width={currentChallenge.gridWidth || 30}
                   height={currentChallenge.gridHeight || 3}
@@ -1101,8 +1154,8 @@ export default function JavaFormatPractice({ sessionData }) {
               ) : (
                 // printf: use combined output approach
                 <InterleavedOutputGrid
-                  expected={Object.values(isCyclingMode && cycleOutputs && Object.keys(cycleOutputs).length > 0 ? cycleOutputs : lineOutputs).map(lo => lo.expectedOutput || '').join('')}
-                  actual={Object.values(isCyclingMode && cycleOutputs && Object.keys(cycleOutputs).length > 0 ? cycleOutputs : lineOutputs).map(lo => lo.userOutput || '').join('')}
+                  expected={Object.values(isCyclingMode && Object.keys(cycleOutputs).length > 0 ? cycleOutputs : lineOutputs).map((line) => line.expectedOutput || '').join('')}
+                  actual={Object.values(isCyclingMode && Object.keys(cycleOutputs).length > 0 ? cycleOutputs : lineOutputs).map((line) => line.userOutput || '').join('')}
                   width={currentChallenge.gridWidth || 30}
                   height={currentChallenge.gridHeight || 3}
                 />
@@ -1236,7 +1289,7 @@ export default function JavaFormatPractice({ sessionData }) {
               userAnswers={userAnswers}
               solvedAnswers={solvedAnswers}
               lineErrors={lineErrors}
-              onAnswerChange={(updater) => {
+              onAnswerChange={(updater: SetStateAction<string[][]>) => {
                 setUserAnswers(updater);
                 if (hasSubmitted && !feedback?.isCorrect) {
                   setFeedback(null);
@@ -1247,7 +1300,6 @@ export default function JavaFormatPractice({ sessionData }) {
               onSubmit={checkAnswer}
               isDisabled={feedback?.isCorrect === true}
               submitDisabled={submitDisabled}
-              showReference={showReference}
               onShowReference={handleShowReference}
               focusToken={focusToken}
               fileName={currentChallenge.fileName}

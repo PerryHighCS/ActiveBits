@@ -1,3 +1,8 @@
+// @ts-nocheck
+// Migration workaround (owner: codex): script-style smoke test retained during TS migration.
+// Cleanup: rewrite to typed node:test assertions and remove ts-nocheck in Phase 7.
+export {}
+
 // Test file for evaluateFormatString function
 // This allows testing the format string evaluation logic independently
 

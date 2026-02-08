@@ -1,3 +1,8 @@
+// @ts-nocheck
+// Migration workaround (owner: codex): script-style integration smoke test retained during TS migration.
+// Cleanup: rewrite to typed node:test assertions and remove ts-nocheck in Phase 7.
+export {}
+
 // Integration test for intermediate/advanced validation logic
 
 function evaluateFormatString(formatStr, args = []) {

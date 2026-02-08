@@ -1,6 +1,48 @@
 import React, { useMemo, useCallback } from 'react';
 import FeedbackDisplay from './FeedbackDisplay';
 import { splitArgumentsRespectingQuotes } from '../utils/stringUtils';
+import type {
+  JavaFormatDifficulty,
+  JavaFormatFeedback,
+  JavaFormatFormatCall,
+  JavaFormatVariable,
+} from '../../javaFormatPracticeTypes.js'
+
+declare global {
+  interface Window {
+    hasSubmitted?: boolean
+  }
+}
+
+interface ParsedCall {
+  before: string
+  after: string
+  answer: string
+  parts: string[]
+  inputs: JavaFormatFormatCall['inputs']
+}
+
+interface AnswerSectionProps {
+  formatCalls?: JavaFormatFormatCall[]
+  variables?: JavaFormatVariable[]
+  difficulty: JavaFormatDifficulty
+  currentIndex?: number
+  userAnswers?: string[][]
+  solvedAnswers?: string[]
+  lineErrors?: Record<number, string>
+  onAnswerChange?: (updater: React.SetStateAction<string[][]>) => void
+  onSubmit?: () => void
+  isDisabled: boolean
+  submitDisabled: boolean
+  onShowReference?: () => void
+  focusToken?: number
+  fileName?: string
+  startingLine?: number
+  feedback?: JavaFormatFeedback | null
+  onNewChallenge?: (() => void) | null
+  showNextButton?: boolean
+  onFeedbackDismiss?: (() => void) | null
+}
 
 export default function AnswerSection({
   formatCalls = [],
@@ -14,7 +56,6 @@ export default function AnswerSection({
   onSubmit,
   isDisabled,
   submitDisabled,
-  showReference,
   onShowReference,
   focusToken,
   fileName = 'FormatPractice.java',
@@ -23,10 +64,10 @@ export default function AnswerSection({
   onNewChallenge = null,
   showNextButton = true,
   onFeedbackDismiss = null,
-}) {
-  const firstInputRef = React.useRef(null);
-  const errorInputRef = React.useRef(null);
-  const errorLineToFocusRef = React.useRef(null);
+}: AnswerSectionProps) {
+  const firstInputRef = React.useRef<HTMLInputElement | null>(null);
+  const errorInputRef = React.useRef<HTMLInputElement | null>(null);
+  const errorLineToFocusRef = React.useRef<{ lineNumber: number; partIdx: number } | null>(null);
 
   React.useEffect(() => {
     if (focusToken === undefined) return;
@@ -36,7 +77,7 @@ export default function AnswerSection({
   }, [focusToken]);
 
   // Focus error input after feedback is dismissed
-  const prevFeedbackRef = React.useRef(feedback);
+  const prevFeedbackRef = React.useRef<JavaFormatFeedback | null>(feedback);
   React.useEffect(() => {
     // Check if feedback was just cleared (dismissed)
     if (prevFeedbackRef.current && !feedback && errorInputRef.current) {
@@ -76,7 +117,7 @@ export default function AnswerSection({
     }
   }, [feedback, lineErrors, startingLine, variables, difficulty, currentIndex]);
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     // Don't submit if feedback modal is showing - let the modal handle Enter
     if (feedback) {
       return;
@@ -89,12 +130,12 @@ export default function AnswerSection({
   };
 
   // Use the smarter split function that respects format specifiers like %,d
-  const splitParts = (text = '') => {
+  const splitParts = (text = ''): string[] => {
     if (!text.includes(',')) return [text];
     return splitArgumentsRespectingQuotes(text);
   };
 
-  const parsedCalls = useMemo(() => {
+  const parsedCalls = useMemo<ParsedCall[]>(() => {
     return formatCalls.map((call) => {
       const { skeleton, answer, inputs = [] } = call;
       
@@ -123,9 +164,9 @@ export default function AnswerSection({
       // Extract the argument section from skeleton: System.out.printf("...", ...);
       const argMatch = skeleton.match(/\((.*)\)\s*;?\s*$/);
       if (argMatch) {
-        const argContent = argMatch[1];
+        const argContent = argMatch[1] ?? '';
         // Find where the arguments start in skeleton
-        const argStartIdx = skeleton.indexOf(argMatch[1]);
+        const argStartIdx = skeleton.indexOf(argContent);
         if (argStartIdx !== -1) {
           // Before is everything up to and including the opening paren
           const before = skeleton.slice(0, argStartIdx);
@@ -146,12 +187,12 @@ export default function AnswerSection({
     });
   }, [formatCalls, difficulty]);
 
-  const handleInputChange = (callIdx, partIdx, value) => {
+  const handleInputChange = (callIdx: number, partIdx: number, value: string) => {
     if (!onAnswerChange) return;
     onAnswerChange((prev) => {
-      const base = Array.isArray(prev) ? [...prev] : new Array(formatCalls.length).fill([]);
+      const base = Array.isArray(prev) ? [...prev] : new Array<string[]>(formatCalls.length).fill([]);
       const callAnswers = Array.isArray(base[callIdx])
-        ? [...base[callIdx]]
+        ? [...(base[callIdx] ?? [])]
         : new Array(parsedCalls[callIdx]?.parts?.length || 1).fill('');
       callAnswers[partIdx] = value;
       base[callIdx] = callAnswers;
@@ -159,7 +200,7 @@ export default function AnswerSection({
     });
   };
 
-  const isActive = (idx) => (difficulty === 'beginner' ? idx === currentIndex : true);
+  const isActive = (idx: number): boolean => (difficulty === 'beginner' ? idx === currentIndex : true);
 
   /**
    * Safely convert a value to a string for use in data attributes.
@@ -168,7 +209,7 @@ export default function AnswerSection({
    * @param {string} defaultValue - The default value if conversion fails
    * @returns {string} The safely converted string value
    */
-  const safeDataAttribute = (value, defaultValue = '0') => {
+  const safeDataAttribute = (value: unknown, defaultValue = '0'): string => {
     const converted = String(value);
     // Validate it's not empty and is a valid number (optional leading hyphen followed by digits)
     return converted && /^-?\d+$/.test(converted) ? converted : defaultValue;
@@ -218,7 +259,7 @@ export default function AnswerSection({
           ))}
 
           {formatCalls.map((call, idx) => {
-            const parsed = parsedCalls[idx];
+            const parsed = parsedCalls[idx] ?? { before: '', after: '', answer: '', parts: [''], inputs: [] };
             const solved = solvedAnswers[idx];
             const active = isActive(idx);
             const lineNumberBase = startingLine + variables.length + idx * 2;
@@ -274,14 +315,14 @@ export default function AnswerSection({
                           />
                         ) : (
                           // Beginner/Intermediate mode: separate inputs for each part
-                          parsed.parts.map((part, partIdx) => {
+                          parsed.parts.map((_part, partIdx) => {
                             const val = values[partIdx] || '';
                             const isLast = partIdx === parsed.parts.length - 1;
                             // For beginner: focus first input of current line; for intermediate: focus very first input
-                            const inputMeta = parsed.inputs?.[partIdx] || {};
-                            const isFormatString = inputMeta.type === 'format-string';
-                            const isStringLiteral = inputMeta.type === 'string-literal';
-                            const isConstantString = inputMeta.type === 'constant-string';
+                            const inputMeta = parsed.inputs?.[partIdx];
+                            const isFormatString = inputMeta?.type === 'format-string';
+                            const isStringLiteral = inputMeta?.type === 'string-literal';
+                            const isConstantString = inputMeta?.type === 'constant-string';
                             // In beginner mode, format strings and string literals get quotes, but constant-strings don't
                             const shouldHaveQuotes = difficulty === 'beginner' && (isFormatString || isStringLiteral) && !isConstantString;
                             return (
@@ -332,10 +373,10 @@ export default function AnswerSection({
                         <span className="ide-static" aria-hidden="true">{parsed.before}</span>
                         {solvedAdjustedParts.map((part, partIdx) => {
                           const isLast = partIdx === solvedAdjustedParts.length - 1;
-                          const inputMeta = parsed.inputs?.[partIdx] || {};
-                          const isFormatString = inputMeta.type === 'format-string';
-                          const isStringLiteral = inputMeta.type === 'string-literal';
-                          const isConstantString = inputMeta.type === 'constant-string';
+                          const inputMeta = parsed.inputs?.[partIdx];
+                          const isFormatString = inputMeta?.type === 'format-string';
+                          const isStringLiteral = inputMeta?.type === 'string-literal';
+                          const isConstantString = inputMeta?.type === 'constant-string';
                           const shouldHaveQuotes = difficulty === 'beginner' && (isFormatString || isStringLiteral) && !isConstantString;
                           return (
                             <React.Fragment key={`call-${idx}-solved-${partIdx}`}>

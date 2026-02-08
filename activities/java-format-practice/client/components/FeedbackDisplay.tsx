@@ -1,21 +1,34 @@
 import React from 'react';
+import type { JavaFormatFeedback } from '../../javaFormatPracticeTypes.js'
+
+interface FeedbackDisplayProps {
+  feedback: JavaFormatFeedback | null
+  onNewChallenge?: (() => void) | null
+  showNextButton?: boolean
+  title?: string
+}
 
 /**
  * FeedbackDisplay - Shows correct/incorrect feedback with explanations as a modal dialog
  * Includes accessibility features: ARIA attributes, focus trap, keyboard navigation
  */
-export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButton = true, title = 'Feedback' }) {
-    const dismissHandlerRef = React.useRef();
+export default function FeedbackDisplay({
+  feedback,
+  onNewChallenge,
+  showNextButton = true,
+  title = 'Feedback',
+}: FeedbackDisplayProps) {
+    const dismissHandlerRef = React.useRef<(() => void) | undefined>(undefined);
 
     // Always keep the latest dismiss handler in the ref
     React.useEffect(() => {
       dismissHandlerRef.current = feedback?.onDismiss;
     }, [feedback]);
   const feedbackReadyRef = React.useRef(false);
-  const buttonRef = React.useRef(null);
-  const modalRef = React.useRef(null);
-  const overlayRef = React.useRef(null);
-  const previousActiveElementRef = React.useRef(null);
+  const buttonRef = React.useRef<HTMLButtonElement | null>(null);
+  const modalRef = React.useRef<HTMLDivElement | null>(null);
+  const overlayRef = React.useRef<HTMLDivElement | null>(null);
+  const previousActiveElementRef = React.useRef<Element | null>(null);
 
   const handleDismiss = React.useCallback(() => {
     // For errors, call the dismiss callback which will focus the error input
@@ -38,7 +51,7 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
 
     // For correct answers, focus the button when feedback appears
     // For errors, let the error input get focused via the dismiss callback
-    let focusTimer;
+    let focusTimer: ReturnType<typeof setTimeout> | undefined
     if (feedback.isCorrect) {
       focusTimer = setTimeout(() => {
         if (buttonRef.current) {
@@ -53,7 +66,7 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
       feedbackReadyRef.current = true;
     }, 100);
 
-    const handleKeyPress = (e) => {
+    const handleKeyPress = (e: KeyboardEvent) => {
       // Don't handle keyboard events if the button is focused (let the button's onClick handle it)
       if (e.target === buttonRef.current) {
         return;
@@ -85,13 +98,13 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
           // Shift + Tab
           if (document.activeElement === firstElement) {
             e.preventDefault();
-            lastElement.focus();
+            (lastElement as HTMLElement | undefined)?.focus();
           }
         } else {
           // Tab
           if (document.activeElement === lastElement) {
             e.preventDefault();
-            firstElement.focus();
+            (firstElement as HTMLElement | undefined)?.focus();
           }
         }
       }
@@ -107,7 +120,7 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
 
   // Restore focus ONLY when modal is dismissed (feedback becomes null)
   React.useEffect(() => {
-    if (feedback === null && previousActiveElementRef.current && previousActiveElementRef.current.focus) {
+    if (feedback === null && previousActiveElementRef.current instanceof HTMLElement) {
       previousActiveElementRef.current.focus();
     }
   }, [feedback]);
@@ -158,7 +171,7 @@ export default function FeedbackDisplay({ feedback, onNewChallenge, showNextButt
         </div>
         <div className="feedback-modal-footer">
           {showNextButton ? (
-            <button ref={buttonRef} onClick={onNewChallenge} className="new-challenge-btn">
+            <button ref={buttonRef} onClick={onNewChallenge ?? undefined} className="new-challenge-btn">
               Next Challenge
             </button>
           ) : (
