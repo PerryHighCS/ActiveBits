@@ -751,6 +751,7 @@ Implementation notes:
 Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
+- `npm --workspace client test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
 
 ### Slice 5: Activity migration follow-up (`activities/java-format-practice`, small client components)
@@ -1112,3 +1113,149 @@ Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
 - `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
+
+### Slice 6: Activity migration kickoff (`activities/traveling-salesman`, partial)
+
+Completed:
+- Migrated activity config and client entry module to TypeScript:
+  - `activities/traveling-salesman/activity.config.js` -> `activities/traveling-salesman/activity.config.ts`
+  - `activities/traveling-salesman/client/index.js` -> `activities/traveling-salesman/client/index.ts`
+- Added client-module shape regression test:
+  - `activities/traveling-salesman/client/index.test.ts`
+
+Implementation notes:
+- `activity.config.ts` now points `clientEntry` to `./client/index.ts` while leaving `serverEntry` on `./server/routes.js` for this kickoff slice.
+- `client/index.ts` now exports a typed `ActivityClientModule` with explicit `ComponentType<unknown>` casts for manager/student components, matching shared activity registry contracts.
+- Remaining Traveling Salesman client/server files stay on JS/JSX for the next completion slices.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 6: Activity migration follow-up (`activities/traveling-salesman`, server routes + validation)
+
+Completed:
+- Migrated activity server routing modules to TypeScript:
+  - `activities/traveling-salesman/server/routes.js` -> `activities/traveling-salesman/server/routes.ts`
+  - `activities/traveling-salesman/server/routes/session.js` -> `activities/traveling-salesman/server/routes/session.ts`
+  - `activities/traveling-salesman/server/routes/students.js` -> `activities/traveling-salesman/server/routes/students.ts`
+  - `activities/traveling-salesman/server/routes/instructor.js` -> `activities/traveling-salesman/server/routes/instructor.ts`
+  - `activities/traveling-salesman/server/routes/algorithms.js` -> `activities/traveling-salesman/server/routes/algorithms.ts`
+  - `activities/traveling-salesman/server/routes/shared.js` -> `activities/traveling-salesman/server/routes/shared.ts`
+  - `activities/traveling-salesman/server/validation.js` -> `activities/traveling-salesman/server/validation.ts`
+- Added activity-local shared type contracts for server migration:
+  - `activities/traveling-salesman/travelingSalesmanTypes.ts`
+- Converted server route tests to TypeScript:
+  - `activities/traveling-salesman/server/routes.test.js` -> `activities/traveling-salesman/server/routes.test.ts`
+- Updated activity config server entry to TypeScript route module:
+  - `activities/traveling-salesman/activity.config.ts` (`serverEntry` -> `./server/routes.ts`)
+
+Implementation notes:
+- Shared session normalization and typed session narrowing now flow through `normalizeTravelingSalesmanSessionData(...)` and `asTravelingSalesmanSession(...)` in `travelingSalesmanTypes.ts`, reducing repeated route-level casting while keeping runtime defaults unchanged.
+- `shared.ts` keeps broadcast forwarding/overlay behavior identical, with typed helper outputs for instructor, student, heuristic, and brute-force route payload variants.
+- Route tests keep the same behavior assertions as the prior JS suite (`set-problem` validation, student submit edge case, instructor route validation, and primitive validation helpers) under strict TS mocks.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 6: Activity migration follow-up (`activities/traveling-salesman`, client utilities + tests)
+
+Completed:
+- Migrated client utility modules to TypeScript:
+  - `activities/traveling-salesman/client/utils/algorithmRunner.js` -> `activities/traveling-salesman/client/utils/algorithmRunner.ts`
+  - `activities/traveling-salesman/client/utils/bruteForce.js` -> `activities/traveling-salesman/client/utils/bruteForce.ts`
+  - `activities/traveling-salesman/client/utils/cityGenerator.js` -> `activities/traveling-salesman/client/utils/cityGenerator.ts`
+  - `activities/traveling-salesman/client/utils/distanceCalculator.js` -> `activities/traveling-salesman/client/utils/distanceCalculator.ts`
+  - `activities/traveling-salesman/client/utils/formatters.js` -> `activities/traveling-salesman/client/utils/formatters.ts`
+  - `activities/traveling-salesman/client/utils/leaderboardBuilders.js` -> `activities/traveling-salesman/client/utils/leaderboardBuilders.ts`
+  - `activities/traveling-salesman/client/utils/mapRenderConfig.js` -> `activities/traveling-salesman/client/utils/mapRenderConfig.ts`
+  - `activities/traveling-salesman/client/utils/mathHelpers.js` -> `activities/traveling-salesman/client/utils/mathHelpers.ts`
+  - `activities/traveling-salesman/client/utils/nearestNeighbor.js` -> `activities/traveling-salesman/client/utils/nearestNeighbor.ts`
+  - `activities/traveling-salesman/client/utils/progressHelpers.js` -> `activities/traveling-salesman/client/utils/progressHelpers.ts`
+  - `activities/traveling-salesman/client/utils/routeLegend.js` -> `activities/traveling-salesman/client/utils/routeLegend.ts`
+  - `activities/traveling-salesman/client/utils/routeTypes.js` -> `activities/traveling-salesman/client/utils/routeTypes.ts`
+  - `activities/traveling-salesman/client/utils/terrainGenerator.js` -> `activities/traveling-salesman/client/utils/terrainGenerator.ts`
+- Added shared utility type contracts:
+  - `activities/traveling-salesman/client/utils/tspUtilsTypes.ts`
+- Converted existing utility tests to TypeScript:
+  - `activities/traveling-salesman/client/utils/cityGenerator.test.js` -> `activities/traveling-salesman/client/utils/cityGenerator.test.ts`
+  - `activities/traveling-salesman/client/utils/distanceCalculator.test.js` -> `activities/traveling-salesman/client/utils/distanceCalculator.test.ts`
+- Added focused tests for newly typed helpers:
+  - `activities/traveling-salesman/client/utils/leaderboardBuilders.test.ts`
+  - `activities/traveling-salesman/client/utils/routeLegend.test.ts`
+- Updated client imports that consumed utility modules to extensionless paths for mixed JS/TS compatibility:
+  - `activities/traveling-salesman/client/manager/TSPManager.jsx`
+  - `activities/traveling-salesman/client/student/TSPStudent.jsx`
+  - `activities/traveling-salesman/client/components/CityMap.jsx`
+  - `activities/traveling-salesman/client/components/Leaderboard.jsx`
+  - `activities/traveling-salesman/client/components/RouteLegend.jsx`
+  - `activities/traveling-salesman/client/hooks/useRouteBuilder.js`
+
+Implementation notes:
+- Utility type coverage now includes city/route/distance contracts, algorithm run/result payloads, leaderboard row shapes, and terrain element unions via `tspUtilsTypes.ts`.
+- `distanceCalculator.ts` now uses a typed route-step parser to safely support both `city-*` string routes and numeric index routes under `noUncheckedIndexedAccess`, preserving existing distance behavior.
+- `leaderboardBuilders.ts` and `routeLegend.ts` now use explicit typed array/object defaults to avoid strict-mode `never[]` inference while retaining existing ordering/merge behavior.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm --workspace client test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 6: Activity migration follow-up (`activities/traveling-salesman`, client hooks + shared components)
+
+Completed:
+- Migrated remaining client hooks to TypeScript:
+  - `activities/traveling-salesman/client/hooks/useBroadcastToggles.js` -> `activities/traveling-salesman/client/hooks/useBroadcastToggles.ts`
+  - `activities/traveling-salesman/client/hooks/useRouteBuilder.js` -> `activities/traveling-salesman/client/hooks/useRouteBuilder.ts`
+  - `activities/traveling-salesman/client/hooks/useTspSession.js` -> `activities/traveling-salesman/client/hooks/useTspSession.ts`
+- Migrated shared client components to TSX:
+  - `activities/traveling-salesman/client/components/ProgressBar.jsx` -> `activities/traveling-salesman/client/components/ProgressBar.tsx`
+  - `activities/traveling-salesman/client/components/Leaderboard.jsx` -> `activities/traveling-salesman/client/components/Leaderboard.tsx`
+  - `activities/traveling-salesman/client/components/RouteLegend.jsx` -> `activities/traveling-salesman/client/components/RouteLegend.tsx`
+  - `activities/traveling-salesman/client/components/CityMap.jsx` -> `activities/traveling-salesman/client/components/CityMap.tsx`
+- Added focused hook and component tests:
+  - `activities/traveling-salesman/client/hooks/useBroadcastToggles.test.ts`
+  - `activities/traveling-salesman/client/hooks/useRouteBuilder.test.ts`
+  - `activities/traveling-salesman/client/hooks/useTspSession.test.ts`
+  - `activities/traveling-salesman/client/components/ProgressBar.test.tsx`
+  - `activities/traveling-salesman/client/components/Leaderboard.test.tsx`
+  - `activities/traveling-salesman/client/components/RouteLegend.test.tsx`
+  - `activities/traveling-salesman/client/components/CityMap.test.tsx`
+
+Implementation notes:
+- Hook modules now expose small pure helpers (`nextBroadcastSnapshot`, `resolveHydratedDistances`, `shouldRefreshForMessageType`) to keep behavior testable under the existing Node test runner.
+- Shared route/message/session contracts were centralized in `tspUtilsTypes.ts` and reused across hooks/components to remove `unknown`/`never` inference paths.
+- Manager/student imports were switched to extensionless hook/component paths to keep mixed-extension resolution stable while files moved from JS/JSX to TS/TSX.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 6: Activity migration completion (`activities/traveling-salesman`, manager + student shells)
+
+Completed:
+- Migrated remaining activity client shells to TSX:
+  - `activities/traveling-salesman/client/manager/TSPManager.jsx` -> `activities/traveling-salesman/client/manager/TSPManager.tsx`
+  - `activities/traveling-salesman/client/student/TSPStudent.jsx` -> `activities/traveling-salesman/client/student/TSPStudent.tsx`
+- Updated activity client entry imports for TSX modules:
+  - `activities/traveling-salesman/client/index.ts`
+- Added targeted regression tests for extracted shell helpers:
+  - `activities/traveling-salesman/client/manager/TSPManager.test.ts`
+  - `activities/traveling-salesman/client/student/TSPStudent.test.ts`
+
+Implementation notes:
+- Large shell files now use explicit local state/session types (`SoloAlgorithmsState`, `SoloProgressState`, `TspDisplayRoute`, `TspSessionData`) to avoid strict-mode `never` inference in route, algorithm, and websocket message state.
+- `TSPStudent.tsx` now uses typed websocket payload narrowing and extracted pure helpers (`sortRoutesByDistance`, `buildSoloDisplayedRoutes`) for deterministic test coverage.
+- `mapRenderConfig.ts` now models `terrainSeed` as optional `number` (instead of `number | null`) to match `CityMap` props and avoid nullability mismatches during TSX conversion.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
