@@ -1,29 +1,51 @@
 import React from 'react';
 import Button from '@src/components/ui/Button';
-import ReviewerIdentityForm from './ReviewerIdentityForm.jsx';
-import ReviewerFeedbackForm from './ReviewerFeedbackForm.jsx';
+import ReviewerIdentityForm from './ReviewerIdentityForm';
+import ReviewerFeedbackForm from './ReviewerFeedbackForm';
+
+interface ReviewerPanelProps {
+  reviewerName: string;
+  reviewerNameInput: string;
+  reviewerNameError?: string | null;
+  hasExistingName?: boolean;
+  isSavingReviewerName?: boolean;
+  onNameChange: (value: string) => void;
+  onSaveIdentity: () => void;
+  projectTitle?: string | null;
+  reviewerMessage: string;
+  onMessageChange: (value: string) => void;
+  reviewerNotice?: string | null;
+  isSubmittingFeedback?: boolean;
+  onSubmitFeedback: (event: React.FormEvent<HTMLFormElement>) => void;
+  onCancelFeedback?: (() => void) | null;
+  onOpenScanner: () => void;
+  scannerError?: string | null;
+  canScanNext?: boolean;
+  reviewerStyleId?: string;
+  onStyleChange: (value: string) => void;
+}
 
 export default function ReviewerPanel({
   reviewerName,
   reviewerNameInput,
   reviewerNameError,
-  hasExistingName,
-  isSavingReviewerName,
+  hasExistingName = false,
+  isSavingReviewerName = false,
   onNameChange,
   onSaveIdentity,
   projectTitle,
   reviewerMessage,
   onMessageChange,
   reviewerNotice,
-  isSubmittingFeedback,
+  isSubmittingFeedback = false,
   onSubmitFeedback,
   onCancelFeedback,
   onOpenScanner,
   scannerError,
-  canScanNext,
+  canScanNext = false,
   reviewerStyleId,
   onStyleChange,
-}) {
+}: ReviewerPanelProps): React.JSX.Element {
   return (
     <div className="space-y-6">
       {!reviewerName && (

@@ -6,16 +6,30 @@ import React, {
   useId,
   useCallback,
 } from 'react';
-import { NOTE_STYLE_OPTIONS } from '../../shared/noteStyles.js';
+import { NOTE_STYLE_OPTIONS } from '../../shared/noteStyles';
 
-export default function NoteStyleSelect({ value, onChange, label = 'Note style' }) {
+type NoteStyleOption = (typeof NOTE_STYLE_OPTIONS)[number];
+
+type DropdownPlacement = 'top' | 'bottom';
+
+interface NoteStyleSelectProps {
+  value?: string;
+  onChange: (value: string) => void;
+  label?: string;
+}
+
+export default function NoteStyleSelect({
+  value,
+  onChange,
+  label = 'Note style',
+}: NoteStyleSelectProps): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [dropdownPlacement, setDropdownPlacement] = useState('bottom');
-  const containerRef = useRef(null);
-  const triggerRef = useRef(null);
-  const listboxRef = useRef(null);
-  const optionRefs = useRef([]);
+  const [dropdownPlacement, setDropdownPlacement] = useState<DropdownPlacement>('bottom');
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const listboxRef = useRef<HTMLDivElement | null>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const labelId = useId();
   const listboxId = useId();
 
@@ -23,14 +37,14 @@ export default function NoteStyleSelect({ value, onChange, label = 'Note style' 
     () => Math.max(0, NOTE_STYLE_OPTIONS.findIndex((option) => option.id === value)),
     [value],
   );
-  const selected = NOTE_STYLE_OPTIONS[selectedIndex] || NOTE_STYLE_OPTIONS[0];
+  const selected: NoteStyleOption = NOTE_STYLE_OPTIONS[selectedIndex] ?? NOTE_STYLE_OPTIONS[0]!;
 
   const updatePlacement = useCallback(() => {
     if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
-    const dropdownHeight = 280; // approximate dropdown height (16rem + padding)
+    const dropdownHeight = 280;
     if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
       setDropdownPlacement('top');
     } else {
@@ -40,8 +54,9 @@ export default function NoteStyleSelect({ value, onChange, label = 'Note style' 
 
   useEffect(() => {
     if (!isOpen) return undefined;
-    function handleClick(event) {
-      if (!containerRef.current?.contains(event.target)) {
+    function handleClick(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (!containerRef.current?.contains(target)) {
         setIsOpen(false);
       }
     }
@@ -84,19 +99,19 @@ export default function NoteStyleSelect({ value, onChange, label = 'Note style' 
     triggerRef.current?.focus();
   };
 
-  const selectOption = (optionId) => {
+  const selectOption = (optionId: string) => {
     onChange(optionId);
     closeList();
   };
 
-  const moveHighlight = (delta) => {
+  const moveHighlight = (delta: number) => {
     setHighlightedIndex((prev) => {
       const next = prev + delta;
       return Math.min(Math.max(next, 0), NOTE_STYLE_OPTIONS.length - 1);
     });
   };
 
-  const handleTriggerKeyDown = (event) => {
+  const handleTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       if (!isOpen) {
@@ -113,7 +128,7 @@ export default function NoteStyleSelect({ value, onChange, label = 'Note style' 
     }
   };
 
-  const handleListboxKeyDown = (event) => {
+  const handleListboxKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       moveHighlight(1);
@@ -130,7 +145,6 @@ export default function NoteStyleSelect({ value, onChange, label = 'Note style' 
       event.preventDefault();
       closeList();
     } else if (event.key === 'Tab') {
-      // Close but allow default tab navigation
       setIsOpen(false);
     }
   };

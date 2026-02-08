@@ -1,27 +1,94 @@
-import React, {
+import {
   useCallback,
   useMemo,
   useRef,
   useState,
   useEffect,
 } from 'react';
+import type { ReactNode } from 'react';
 import Button from '@src/components/ui/Button';
-import FeedbackCards from './FeedbackCards.jsx';
-import GalleryWalkFeedbackTable from './GalleryWalkFeedbackTable.jsx';
-import GalleryWalkNotesView from './GalleryWalkNotesView.jsx';
-import FeedbackViewSwitcher from './FeedbackViewSwitcher.jsx';
+import FeedbackCards from './FeedbackCards';
+import GalleryWalkFeedbackTable from './GalleryWalkFeedbackTable';
+import GalleryWalkNotesView from './GalleryWalkNotesView';
+import FeedbackViewSwitcher from './FeedbackViewSwitcher';
 
-function isPlainObject(value) {
+type ViewerMode = 'notes' | 'table';
+type SortField = 'to' | 'from' | 'createdAt';
+type SortDirection = 'asc' | 'desc';
+
+interface FeedbackEntry {
+  id?: string;
+  to?: string;
+  from?: string;
+  fromNameSnapshot?: string;
+  message?: string;
+  createdAt?: number;
+  styleId?: string;
+}
+
+interface RevieweeInfo {
+  name?: string;
+  projectTitle?: string;
+}
+
+interface ReviewerInfo {
+  name?: string;
+}
+
+interface BaseData {
+  sessionId: string;
+  exportedAt: number;
+  feedback: FeedbackEntry[];
+  config: Record<string, unknown> & { title?: string };
+}
+
+interface TeacherFileData extends BaseData {
+  reviewees: Record<string, RevieweeInfo>;
+  reviewers: Record<string, ReviewerInfo>;
+}
+
+interface StudentFileData extends BaseData {
+  revieweeId: string;
+  reviewee: RevieweeInfo | null;
+}
+
+interface TeacherFileResult {
+  type: 'teacher';
+  fileName: string;
+  data: TeacherFileData;
+}
+
+interface StudentFileResult {
+  type: 'student';
+  fileName: string;
+  data: StudentFileData;
+}
+
+type FileResult = TeacherFileResult | StudentFileResult;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function normalizeFeedback(value: unknown): FeedbackEntry[] {
+  return Array.isArray(value) ? (value as FeedbackEntry[]) : [];
+}
+
+function normalizeReviewees(value: unknown): Record<string, RevieweeInfo> {
+  return isPlainObject(value) ? (value as Record<string, RevieweeInfo>) : {};
+}
+
+function normalizeReviewers(value: unknown): Record<string, ReviewerInfo> {
+  return isPlainObject(value) ? (value as Record<string, ReviewerInfo>) : {};
+}
+
 export default function GalleryWalkSoloViewer() {
-  const fileInputRef = useRef(null);
-  const [fileResult, setFileResult] = useState(null);
-  const [error, setError] = useState(null);
-  const [viewMode, setViewMode] = useState('notes');
-  const [tableSortField, setTableSortField] = useState('createdAt');
-  const [tableSortDirection, setTableSortDirection] = useState('desc');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [fileResult, setFileResult] = useState<FileResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewerMode>('notes');
+  const [tableSortField, setTableSortField] = useState<SortField>('createdAt');
+  const [tableSortDirection, setTableSortDirection] = useState<SortDirection>('desc');
   const [notesReviewee, setNotesReviewee] = useState('all');
   const [showFileMeta, setShowFileMeta] = useState(false);
 
@@ -33,38 +100,43 @@ export default function GalleryWalkSoloViewer() {
     setNotesReviewee('all');
   }, [fileResult]);
 
-  const handleFileUpload = async (event) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
-      const feedback = Array.isArray(data.feedback) ? data.feedback : [];
-      const base = {
-        sessionId: data.sessionId || 'unknown',
-        exportedAt: data.exportedAt || Date.now(),
+      const data = JSON.parse(text) as Record<string, unknown>;
+      const feedback = normalizeFeedback(data.feedback);
+      const base: BaseData = {
+        sessionId: typeof data.sessionId === 'string' ? data.sessionId : 'unknown',
+        exportedAt: typeof data.exportedAt === 'number' ? data.exportedAt : Date.now(),
         feedback,
-        config: isPlainObject(data.config) ? data.config : {},
+        config: isPlainObject(data.config) ? (data.config as BaseData['config']) : {},
       };
+
       if (isPlainObject(data.reviewees)) {
         setFileResult({
           type: 'teacher',
           fileName: file.name,
           data: {
             ...base,
-            reviewees: data.reviewees,
-            reviewers: isPlainObject(data.reviewers) ? data.reviewers : {},
+            reviewees: normalizeReviewees(data.reviewees),
+            reviewers: normalizeReviewers(data.reviewers),
           },
         });
         setError(null);
         return;
       }
-      const revieweeId = data.revieweeId
-        || Object.keys(isPlainObject(data.reviewees) ? data.reviewees : {})[0]
+
+      const reviewees = normalizeReviewees(data.reviewees);
+      const revieweeId =
+        (typeof data.revieweeId === 'string' && data.revieweeId)
+        || Object.keys(reviewees)[0]
         || 'student';
-      const revieweeRecord = data.reviewee
-        || (isPlainObject(data.reviewees) ? data.reviewees[revieweeId] : null)
-        || null;
+      const revieweeRecord = isPlainObject(data.reviewee)
+        ? (data.reviewee as RevieweeInfo)
+        : (reviewees[revieweeId] ?? null);
+
       setFileResult({
         type: 'student',
         fileName: file.name,
@@ -80,7 +152,7 @@ export default function GalleryWalkSoloViewer() {
       setFileResult(null);
       setError('Unable to read file. Upload a Gallery Walk export (.gw).');
     } finally {
-      if (event.target) event.target.value = '';
+      event.target.value = '';
     }
   };
 
@@ -92,36 +164,37 @@ export default function GalleryWalkSoloViewer() {
   }, [fileResult]);
 
   const feedbackByReviewee = useMemo(() => {
-    return sortedFeedback.reduce((acc, entry) => {
+    return sortedFeedback.reduce<Record<string, FeedbackEntry[]>>((acc, entry) => {
       if (!entry?.to) return acc;
       acc[entry.to] = acc[entry.to] || [];
-      acc[entry.to].push(entry);
+      acc[entry.to]?.push(entry);
       return acc;
     }, {});
   }, [sortedFeedback]);
 
-  const reviewees = fileResult?.data?.reviewees || {};
-  const reviewers = fileResult?.data?.reviewers || {};
-  const sessionTitle = fileResult?.data?.config?.title || 'Gallery Walk Feedback';
+  const reviewees = fileResult?.type === 'teacher' ? fileResult.data.reviewees : {};
+  const reviewers = fileResult?.type === 'teacher' ? fileResult.data.reviewers : {};
+  const sessionTitle = (fileResult?.data?.config?.title as string | undefined) || 'Gallery Walk Feedback';
 
   const tableFeedback = useMemo(() => {
     const entries = [...sortedFeedback];
     const directionFactor = tableSortDirection === 'asc' ? 1 : -1;
-    const normalizeString = (value) => (value || '').toString().toLowerCase();
-    const getRecipientLabel = (entry) => (
-      reviewees[entry.to]?.name
-      || reviewees[entry.to]?.projectTitle
+    const normalizeString = (value: unknown) => (value || '').toString().toLowerCase();
+    const getRecipientLabel = (entry: FeedbackEntry) => (
+      reviewees[entry.to || '']?.name
+      || reviewees[entry.to || '']?.projectTitle
       || entry.to
       || ''
     );
-    const getAuthorLabel = (entry) => (
+    const getAuthorLabel = (entry: FeedbackEntry) => (
       entry.fromNameSnapshot
-      || reviewers[entry.from]?.name
+      || reviewers[entry.from || '']?.name
       || ''
     );
+
     entries.sort((a, b) => {
-      let aValue;
-      let bValue;
+      let aValue: number | string;
+      let bValue: number | string;
       switch (tableSortField) {
         case 'to':
           aValue = normalizeString(getRecipientLabel(a));
@@ -144,7 +217,7 @@ export default function GalleryWalkSoloViewer() {
     return entries;
   }, [sortedFeedback, tableSortDirection, tableSortField, reviewees, reviewers]);
 
-  const handleTableSortToggle = useCallback((field) => {
+  const handleTableSortToggle = useCallback((field: SortField) => {
     setTableSortDirection((prevDirection) => {
       if (tableSortField === field) {
         return prevDirection === 'asc' ? 'desc' : 'asc';
@@ -162,7 +235,7 @@ export default function GalleryWalkSoloViewer() {
       : null;
   }, [fileResult]);
 
-  const renderFileMetaDetails = (variant = 'card') => {
+  const renderFileMetaDetails = (variant: 'card' | 'inline' = 'card'): ReactNode => {
     if (!fileResult) return null;
     const wrapperClass = variant === 'card'
       ? 'rounded border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700'
@@ -178,12 +251,12 @@ export default function GalleryWalkSoloViewer() {
   };
 
   const renderStudentView = () => {
-    const { reviewee } = fileResult?.data || {};
+    const reviewee = fileResult?.type === 'student' ? fileResult.data.reviewee : null;
     return (
       <div className="space-y-4">
         <div className="text-center">
           <h2 className="text-xl font-semibold solo-student-title">
-            {fileResult?.data?.config?.title || 'Gallery Walk Feedback'}
+            {(fileResult?.data?.config?.title as string | undefined) || 'Gallery Walk Feedback'}
           </h2>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -354,7 +427,7 @@ export default function GalleryWalkSoloViewer() {
               viewMode === 'table' ? 'print:text-2xl' : 'print:hidden',
             ].join(' ')}
           >
-            {fileResult?.data?.config?.title || 'Gallery Walk Feedback'}
+            {(fileResult?.data?.config?.title as string | undefined) || 'Gallery Walk Feedback'}
           </h2>
         </div>
       )}

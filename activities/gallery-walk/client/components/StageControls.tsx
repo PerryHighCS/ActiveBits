@@ -1,7 +1,12 @@
 import React from 'react';
 import Button from '@src/components/ui/Button';
 
-export default function StageControls({ stage, onChange }) {
+interface StageControlsProps {
+  stage: string;
+  onChange: (nextStage: string) => void;
+}
+
+export default function StageControls({ stage, onChange }: StageControlsProps): React.JSX.Element {
   const isGallery = stage === 'gallery';
   const nextStage = isGallery ? 'review' : 'gallery';
   const description = isGallery ? (

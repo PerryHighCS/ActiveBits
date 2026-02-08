@@ -1,4 +1,11 @@
-export const NOTE_STYLE_OPTIONS = [
+interface NoteStyleOption {
+  id: string
+  label: string
+  className: string
+  previewColor: string
+}
+
+export const NOTE_STYLE_OPTIONS: NoteStyleOption[] = [
   { id: 'lemon', label: 'Lemon', className: 'note-style-lemon', previewColor: '#fdecc8' },
   { id: 'peach', label: 'Peach', className: 'note-style-peach', previewColor: '#ffe7f1' },
   { id: 'sky', label: 'Sky', className: 'note-style-sky', previewColor: '#e7f6fd' },
@@ -9,24 +16,24 @@ export const NOTE_STYLE_OPTIONS = [
   { id: 'vertical', label: 'Stripes', className: 'note-style-vertical', previewColor: '#e7f6fd' },
   { id: 'dots', label: 'Dots', className: 'note-style-dots', previewColor: '#f0e6ff' },
   { id: 'grid', label: 'Grid', className: 'note-style-grid', previewColor: '#e8f5c8' },
-];
+]
 
-export const DEFAULT_NOTE_STYLE_ID = NOTE_STYLE_OPTIONS[0].id;
+export const DEFAULT_NOTE_STYLE_ID = NOTE_STYLE_OPTIONS[0]?.id ?? 'lemon'
 
-const STYLE_MAP = NOTE_STYLE_OPTIONS.reduce((acc, style) => {
-  acc[style.id] = style;
-  return acc;
-}, {});
+const STYLE_MAP = NOTE_STYLE_OPTIONS.reduce<Record<string, NoteStyleOption>>((acc, style) => {
+  acc[style.id] = style
+  return acc
+}, {})
 
-export function isNoteStyleId(value) {
-  return Boolean(value && STYLE_MAP[value]);
+export function isNoteStyleId(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(STYLE_MAP[value])
 }
 
-export function normalizeNoteStyleId(value) {
-  return isNoteStyleId(value) ? value : DEFAULT_NOTE_STYLE_ID;
+export function normalizeNoteStyleId(value: unknown): string {
+  return isNoteStyleId(value) ? value : DEFAULT_NOTE_STYLE_ID
 }
 
-export function getNoteStyleClassName(styleId) {
-  const target = STYLE_MAP[styleId] || STYLE_MAP[DEFAULT_NOTE_STYLE_ID];
-  return target.className;
+export function getNoteStyleClassName(styleId: unknown): string {
+  const target = typeof styleId === 'string' ? STYLE_MAP[styleId] : undefined
+  return target?.className ?? STYLE_MAP[DEFAULT_NOTE_STYLE_ID]?.className ?? 'note-style-lemon'
 }

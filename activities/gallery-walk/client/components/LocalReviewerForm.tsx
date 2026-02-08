@@ -1,6 +1,20 @@
 import React from 'react';
-import NoteStyleSelect from './NoteStyleSelect.jsx';
-import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles.js';
+import NoteStyleSelect from './NoteStyleSelect';
+import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles';
+
+interface LocalReviewerFormProps {
+  reviewerName: string;
+  message: string;
+  onNameChange: (value: string) => void;
+  onMessageChange: (value: string) => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onCancel?: (() => void) | null;
+  styleId?: string;
+  onStyleChange: (value: string) => void;
+  disabled?: boolean;
+  notice?: string | null;
+  isSubmitting?: boolean;
+}
 
 export default function LocalReviewerForm({
   reviewerName,
@@ -11,10 +25,10 @@ export default function LocalReviewerForm({
   onCancel,
   styleId,
   onStyleChange,
-  disabled,
+  disabled = false,
   notice,
-  isSubmitting,
-}) {
+  isSubmitting = false,
+}: LocalReviewerFormProps): React.JSX.Element {
   const noteStyleClass = getNoteStyleClassName(normalizeNoteStyleId(styleId));
   const noticeId = notice ? 'local-reviewer-notice' : undefined;
   return (

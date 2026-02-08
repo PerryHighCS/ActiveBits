@@ -1,16 +1,41 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 import Button from '@src/components/ui/Button';
-import GalleryWalkNotesView from './GalleryWalkNotesView.jsx';
+import GalleryWalkNotesView from './GalleryWalkNotesView';
+
+interface RevieweeRecord {
+  name?: string;
+  projectTitle?: string | null;
+}
+
+interface FeedbackEntry {
+  id?: string;
+  to?: string | null;
+  from?: string | null;
+  fromNameSnapshot?: string;
+  message?: string;
+  createdAt?: number;
+  styleId?: string;
+}
+
+interface FeedbackViewProps {
+  revieweeRecord?: RevieweeRecord | null;
+  sessionTitle?: string;
+  sessionClosed?: boolean;
+  onDownload: () => void;
+  studentReviewees: Record<string, RevieweeRecord>;
+  studentFeedbackByReviewee: Record<string, FeedbackEntry[]>;
+  isLoadingFeedback?: boolean;
+}
 
 export default function FeedbackView({
   revieweeRecord,
   sessionTitle,
-  sessionClosed,
+  sessionClosed = false,
   onDownload,
   studentReviewees,
   studentFeedbackByReviewee,
-  isLoadingFeedback,
-}) {
+  isLoadingFeedback = false,
+}: FeedbackViewProps): ReactNode {
   return (
     <div className="rounded-lg border border-indigo-200 bg-white p-6 shadow space-y-4 print:border-0 print:shadow-none print:p-0">
       <div className="flex items-center justify-between">
@@ -45,6 +70,7 @@ export default function FeedbackView({
         reviewees={studentReviewees}
         feedbackByReviewee={studentFeedbackByReviewee}
         selectedReviewee="all"
+        onSelectReviewee={() => {}}
         filterClassName="hidden"
         containerClassName="pt-2 print:pt-0"
         gridClassName="grid-cols-1"

@@ -1259,3 +1259,148 @@ Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 7: Activity migration kickoff (`activities/gallery-walk`, partial)
+
+Completed:
+- Migrated activity config and client entry module to TypeScript:
+  - `activities/gallery-walk/activity.config.js` -> `activities/gallery-walk/activity.config.ts`
+  - `activities/gallery-walk/client/index.js` -> `activities/gallery-walk/client/index.ts`
+- Added client-module shape regression test:
+  - `activities/gallery-walk/client/index.test.ts`
+
+Implementation notes:
+- `activity.config.ts` now points `clientEntry` to `./client/index.ts` while leaving `serverEntry` on `./server/routes.js` for this kickoff slice.
+- `client/index.ts` now exports a typed `ActivityClientModule` with explicit `ComponentType<unknown>` casts for manager/student components, matching current shared activity registry contracts during mixed migration.
+- Remaining gallery-walk client/server internals stay on JS/JSX for follow-up slices.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 7: Activity migration follow-up (`activities/gallery-walk`, shared helpers + server routes)
+
+Completed:
+- Migrated shared and server modules to TypeScript:
+  - `activities/gallery-walk/shared/id.js` -> `activities/gallery-walk/shared/id.ts`
+  - `activities/gallery-walk/shared/noteStyles.js` -> `activities/gallery-walk/shared/noteStyles.ts`
+  - `activities/gallery-walk/server/routes.js` -> `activities/gallery-walk/server/routes.ts`
+- Updated activity config server entry to TypeScript route module:
+  - `activities/gallery-walk/activity.config.ts` (`serverEntry` -> `./server/routes.ts`)
+- Updated gallery-walk client imports to extensionless shared-module paths so JSX files resolve migrated TS modules during mixed mode.
+- Added shared helper regression tests:
+  - `activities/gallery-walk/shared/sharedUtils.test.ts`
+- Updated server route test typing for stricter ws/router contracts:
+  - `server/galleryWalkRoutes.test.ts`
+
+Implementation notes:
+- `routes.ts` now normalizes gallery-walk session state under strict typing and keeps websocket broadcast behavior unchanged.
+- `server/galleryWalkRoutes.test.ts` now uses typed ws stubs (`WsRouter`, `ActiveBitsWebSocket`) so compile-time checks match runtime route-handler expectations.
+- This follow-up completes the kickoff plan item to migrate gallery-walk `shared/*.js` and `server/routes.js` before client component/hooks conversion.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm --workspace server test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm test` -> pass
+
+### Slice 7: Activity migration follow-up (`activities/gallery-walk`, client utilities + session hook)
+
+Completed:
+- Migrated gallery-walk manager utility modules to TypeScript:
+  - `activities/gallery-walk/client/manager/feedbackUtils.js` -> `activities/gallery-walk/client/manager/feedbackUtils.ts`
+  - `activities/gallery-walk/client/manager/managerUtils.js` -> `activities/gallery-walk/client/manager/managerUtils.ts`
+- Migrated gallery-walk session hook to TypeScript:
+  - `activities/gallery-walk/client/hooks/useGalleryWalkSession.js` -> `activities/gallery-walk/client/hooks/useGalleryWalkSession.ts`
+- Added focused helper tests for typed websocket/session hook behavior:
+  - `activities/gallery-walk/client/hooks/useGalleryWalkSession.test.ts`
+- Updated consuming imports to extensionless paths for mixed JS/TS compatibility:
+  - `activities/gallery-walk/client/student/StudentPage.jsx`
+  - `activities/gallery-walk/client/manager/ManagerPage.jsx`
+  - `activities/gallery-walk/client/components/GalleryWalkFeedbackTable.jsx`
+  - `activities/gallery-walk/client/manager/ManagerPage.test.js`
+
+Implementation notes:
+- `useGalleryWalkSession.ts` now exports typed helpers for websocket URL building, message parsing, and feedback entry merging so high-risk state transitions remain directly testable under the existing Node runner.
+- Utility modules now expose typed sort/timestamp contracts while preserving existing runtime behavior and call sites in JSX components.
+- Gallery-walk manager/student shells remain JS/JSX in this slice; this change is limited to utility and hook layers to keep migration scope incremental.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 7: Activity migration follow-up (`activities/gallery-walk`, client shared components)
+
+Completed:
+- Migrated gallery-walk shared client components from JSX to TSX:
+  - `activities/gallery-walk/client/components/FeedbackCards.jsx` -> `activities/gallery-walk/client/components/FeedbackCards.tsx`
+  - `activities/gallery-walk/client/components/FeedbackView.jsx` -> `activities/gallery-walk/client/components/FeedbackView.tsx`
+  - `activities/gallery-walk/client/components/FeedbackViewSwitcher.jsx` -> `activities/gallery-walk/client/components/FeedbackViewSwitcher.tsx`
+  - `activities/gallery-walk/client/components/GalleryWalkFeedbackTable.jsx` -> `activities/gallery-walk/client/components/GalleryWalkFeedbackTable.tsx`
+  - `activities/gallery-walk/client/components/LocalReviewerForm.jsx` -> `activities/gallery-walk/client/components/LocalReviewerForm.tsx`
+  - `activities/gallery-walk/client/components/NoteStyleSelect.jsx` -> `activities/gallery-walk/client/components/NoteStyleSelect.tsx`
+  - `activities/gallery-walk/client/components/ProjectStationCard.jsx` -> `activities/gallery-walk/client/components/ProjectStationCard.tsx`
+  - `activities/gallery-walk/client/components/RegistrationForm.jsx` -> `activities/gallery-walk/client/components/RegistrationForm.tsx`
+  - `activities/gallery-walk/client/components/ReviewerFeedbackForm.jsx` -> `activities/gallery-walk/client/components/ReviewerFeedbackForm.tsx`
+  - `activities/gallery-walk/client/components/ReviewerIdentityForm.jsx` -> `activities/gallery-walk/client/components/ReviewerIdentityForm.tsx`
+  - `activities/gallery-walk/client/components/ReviewerPanel.jsx` -> `activities/gallery-walk/client/components/ReviewerPanel.tsx`
+  - `activities/gallery-walk/client/components/ReviewerScanner.jsx` -> `activities/gallery-walk/client/components/ReviewerScanner.tsx`
+  - `activities/gallery-walk/client/components/StageControls.jsx` -> `activities/gallery-walk/client/components/StageControls.tsx`
+  - `activities/gallery-walk/client/components/TitleEditor.jsx` -> `activities/gallery-walk/client/components/TitleEditor.tsx`
+- Updated gallery-walk imports in remaining JS/JSX files to extensionless paths for converted TSX modules:
+  - `activities/gallery-walk/client/student/StudentPage.jsx`
+  - `activities/gallery-walk/client/manager/ManagerPage.jsx`
+  - `activities/gallery-walk/client/components/GalleryWalkSoloViewer.jsx`
+  - `activities/gallery-walk/client/components/GalleryWalkNotesView.jsx`
+- Added component-module shape regression test:
+  - `activities/gallery-walk/client/components/galleryWalkComponents.test.ts`
+
+Implementation notes:
+- The conversion intentionally keeps large `GalleryWalkSoloViewer.jsx`, `GalleryWalkNotesView.jsx`, `ManagerPage.jsx`, and `StudentPage.jsx` on JS/JSX for the next slice while moving their shared UI dependencies to typed TSX modules.
+- `NoteStyleSelect.tsx` now uses typed refs/keyboard handlers and typed option inference from `NOTE_STYLE_OPTIONS` without changing dropdown behavior.
+- `FeedbackView.tsx` now supplies the existing required `onSelectReviewee` prop to `GalleryWalkNotesView` with a no-op handler, preserving previous all-reviewee rendering behavior.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 7: Activity migration completion (`activities/gallery-walk`, remaining manager/student shells)
+
+Completed:
+- Migrated remaining gallery-walk JSX files to TSX:
+  - `activities/gallery-walk/client/components/GalleryWalkNotesView.jsx` -> `activities/gallery-walk/client/components/GalleryWalkNotesView.tsx`
+  - `activities/gallery-walk/client/components/GalleryWalkSoloViewer.jsx` -> `activities/gallery-walk/client/components/GalleryWalkSoloViewer.tsx`
+  - `activities/gallery-walk/client/manager/ManagerPage.jsx` -> `activities/gallery-walk/client/manager/ManagerPage.tsx`
+  - `activities/gallery-walk/client/student/StudentPage.jsx` -> `activities/gallery-walk/client/student/StudentPage.tsx`
+- Updated cross-component imports to extensionless TS/TSX paths for mixed-extension compatibility.
+- Tightened TS component prop contracts across converted gallery-walk components to align nullability and optional ids with existing runtime payloads (`projectTitle?: string | null`, optional feedback `id`, nullable reviewer/reviewee lookups).
+
+Implementation notes:
+- `StudentPage.tsx` now consumes typed websocket message helpers from `useGalleryWalkSession.ts` (`getMessageReviewees`, `getMessageFeedbackEntry`) to avoid ad-hoc payload narrowing in the largest activity shell.
+- `GalleryWalkSoloViewer.tsx` keeps existing file-upload/view-toggle behavior but now validates JSON shape through typed normalizers before deriving teacher/student render state.
+- With this slice, gallery-walk source migration is functionally complete: the only remaining JS file under `activities/gallery-walk` is the manager utility test file `client/manager/ManagerPage.test.js`.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 7: Activity migration cleanup (`activities/gallery-walk`, final test conversion)
+
+Completed:
+- Converted the remaining gallery-walk JS test file to TypeScript:
+  - `activities/gallery-walk/client/manager/ManagerPage.test.js` -> `activities/gallery-walk/client/manager/ManagerPage.test.ts`
+- Updated strict-null-safe assertion in the converted test (`result[0]?.message`) to satisfy TS checks under strict mode.
+
+Implementation notes:
+- With this cleanup, `activities/gallery-walk` no longer contains `.js`/`.jsx` source files.
+- Existing behavior checks for feedback sorting/insertion and timestamp formatting remain unchanged.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run typecheck --workspaces --if-present` -> pass

@@ -1,14 +1,23 @@
 import React from 'react';
 import Button from '@src/components/ui/Button';
 
+interface ReviewerIdentityFormProps {
+  nameInput: string;
+  onNameChange: (value: string) => void;
+  error?: string | null;
+  hasExistingName?: boolean;
+  isSaving?: boolean;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}
+
 export default function ReviewerIdentityForm({
   nameInput,
   onNameChange,
   error,
-  hasExistingName,
-  isSaving,
+  hasExistingName = false,
+  isSaving = false,
   onSubmit,
-}) {
+}: ReviewerIdentityFormProps): React.JSX.Element {
   const errorId = error ? 'reviewer-identity-error' : undefined;
   return (
     <form onSubmit={onSubmit} className="space-y-3 rounded-lg border border-gray-200 bg-white p-6 shadow">

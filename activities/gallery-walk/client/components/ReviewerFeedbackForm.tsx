@@ -1,22 +1,37 @@
 import React from 'react';
 import Button from '@src/components/ui/Button';
-import NoteStyleSelect from './NoteStyleSelect.jsx';
-import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles.js';
+import NoteStyleSelect from './NoteStyleSelect';
+import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles';
+
+interface ReviewerFeedbackFormProps {
+  projectTitle?: string | null;
+  message: string;
+  onMessageChange: (value: string) => void;
+  notice?: string | null;
+  isSubmitting?: boolean;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onCancel?: (() => void) | null;
+  onScan?: () => void;
+  scannerError?: string | null;
+  canScan?: boolean;
+  styleId?: string;
+  onStyleChange: (value: string) => void;
+}
 
 export default function ReviewerFeedbackForm({
   projectTitle,
   message,
   onMessageChange,
   notice,
-  isSubmitting,
+  isSubmitting = false,
   onSubmit,
   onCancel,
   onScan,
   scannerError,
-  canScan,
+  canScan = false,
   styleId,
   onStyleChange,
-}) {
+}: ReviewerFeedbackFormProps): React.JSX.Element {
   const noteStyleClass = getNoteStyleClassName(normalizeNoteStyleId(styleId));
   return (
     <div className="space-y-4 rounded-none border-0 bg-transparent p-0 sm:rounded-lg sm:border sm:border-gray-200 sm:bg-white sm:p-6 sm:shadow">

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils.js';
-import { getTimestampMeta } from './managerUtils.js';
+import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils';
+import { getTimestampMeta } from './managerUtils';
 
 test('sortFeedbackEntries sorts by createdAt descending by default', () => {
   const entries = [
@@ -39,7 +39,7 @@ test('insertFeedbackEntry replaces duplicate ids and prepends new entry', () => 
   ];
   const next = { id: '1', message: 'Updated' };
   const result = insertFeedbackEntry(existing, next);
-  assert.equal(result[0].message, 'Updated');
+  assert.equal(result[0]?.message, 'Updated');
   assert.equal(result.length, 2);
 });
 

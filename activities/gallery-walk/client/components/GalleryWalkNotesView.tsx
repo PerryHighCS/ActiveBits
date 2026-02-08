@@ -1,5 +1,39 @@
-import React, { useMemo } from 'react';
-import FeedbackCards from './FeedbackCards.jsx';
+import { useMemo } from 'react';
+import FeedbackCards from './FeedbackCards';
+
+interface RevieweeInfo {
+  name?: string;
+  projectTitle?: string | null;
+}
+
+interface FeedbackEntry {
+  id?: string;
+  message?: string;
+  fromNameSnapshot?: string;
+  createdAt?: number;
+  styleId?: string;
+}
+
+interface GalleryWalkNotesViewProps {
+  reviewees?: Record<string, RevieweeInfo>;
+  feedbackByReviewee?: Record<string, FeedbackEntry[]>;
+  selectedReviewee: string;
+  onSelectReviewee: (value: string) => void;
+  allValue?: string;
+  includeAllRevieweesWhenAllSelected?: boolean;
+  containerClassName?: string;
+  filterClassName?: string;
+  gridClassName?: string;
+  layout?: 'grid' | 'row';
+  cardClassName?: string;
+  selectId?: string;
+  hideFilterOnPrint?: boolean;
+  hideCardHeaderOnPrint?: boolean;
+  emptySelectionText?: string;
+  noFeedbackText?: string;
+  allOptionLabel?: string;
+  printTitle?: string;
+}
 
 export default function GalleryWalkNotesView({
   reviewees = {},
@@ -20,7 +54,7 @@ export default function GalleryWalkNotesView({
   noFeedbackText = 'No feedback yet.',
   allOptionLabel = 'All participants',
   printTitle = '',
-}) {
+}: GalleryWalkNotesViewProps) {
   const revieweeEntries = useMemo(() => Object.entries(reviewees), [reviewees]);
   const allIds = useMemo(() => {
     if (includeAllRevieweesWhenAllSelected) {
@@ -28,12 +62,14 @@ export default function GalleryWalkNotesView({
     }
     return Object.keys(feedbackByReviewee);
   }, [includeAllRevieweesWhenAllSelected, revieweeEntries, feedbackByReviewee]);
+
   const selectedIds = useMemo(() => {
     if (selectedReviewee === allValue) return allIds;
     if (!selectedReviewee) return [];
     if (reviewees[selectedReviewee] || feedbackByReviewee[selectedReviewee]) return [selectedReviewee];
     return [];
   }, [selectedReviewee, allValue, allIds, reviewees, feedbackByReviewee]);
+
   const wrapperClassName = ['space-y-4', containerClassName, 'print:space-y-0 print:pt-0'].filter(Boolean).join(' ');
   const filterRowClassName = [
     'flex flex-wrap items-center gap-3',
@@ -55,7 +91,7 @@ export default function GalleryWalkNotesView({
           id={selectId}
           className="rounded border border-gray-300 px-3 py-1 text-sm"
           value={selectedReviewee}
-          onChange={(event) => onSelectReviewee?.(event.target.value)}
+          onChange={(event) => onSelectReviewee(event.target.value)}
         >
           <option value={allValue}>{allOptionLabel}</option>
           {revieweeEntries.map(([id, info]) => (

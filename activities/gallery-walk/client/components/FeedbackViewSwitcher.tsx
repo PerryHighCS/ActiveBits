@@ -1,5 +1,25 @@
 import React from 'react';
+import type { ReactNode } from 'react';
 import Button from '@src/components/ui/Button';
+
+interface ToggleLabels {
+  notes: string;
+  table: string;
+}
+
+interface FeedbackViewSwitcherProps {
+  showNotesView: boolean;
+  onToggleView: () => void;
+  toggleButtonVariant?: 'default' | 'outline' | 'danger';
+  toggleLabels?: ToggleLabels;
+  actionsClassName?: string;
+  actionButtons?: ReactNode[];
+  error?: string | null;
+  isLoading?: boolean;
+  loadingText?: string;
+  tableView: ReactNode;
+  notesView: ReactNode;
+}
 
 export default function FeedbackViewSwitcher({
   showNotesView,
@@ -9,11 +29,11 @@ export default function FeedbackViewSwitcher({
   actionsClassName = '',
   actionButtons = [],
   error,
-  isLoading,
+  isLoading = false,
   loadingText = 'Loading…',
   tableView,
   notesView,
-}) {
+}: FeedbackViewSwitcherProps): React.JSX.Element {
   const actionsClasses = ['flex flex-wrap items-center gap-3', actionsClassName].filter(Boolean).join(' ');
   return (
     <div className="space-y-4">

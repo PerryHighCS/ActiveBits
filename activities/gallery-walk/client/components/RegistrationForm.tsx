@@ -1,6 +1,16 @@
 import React from 'react';
 import Button from '@src/components/ui/Button';
 
+interface RegistrationFormProps {
+  name: string;
+  projectTitle: string;
+  onNameChange: (value: string) => void;
+  onProjectChange: (value: string) => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  error?: string | null;
+  isSubmitting?: boolean;
+}
+
 export default function RegistrationForm({
   name,
   projectTitle,
@@ -8,8 +18,8 @@ export default function RegistrationForm({
   onProjectChange,
   onSubmit,
   error,
-  isSubmitting,
-}) {
+  isSubmitting = false,
+}: RegistrationFormProps): React.JSX.Element {
   const errorId = error ? 'reviewee-name-error' : undefined;
   return (
     <form onSubmit={onSubmit} className="space-y-4 bg-white shadow rounded-lg p-6">

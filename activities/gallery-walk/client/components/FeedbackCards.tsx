@@ -1,22 +1,35 @@
 import React from 'react';
-import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles.js';
+import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles';
 
-export default function FeedbackCards({ entries, isLoading }) {
+interface FeedbackCardEntry {
+  id?: string;
+  message?: string;
+  fromNameSnapshot?: string;
+  createdAt?: number;
+  styleId?: string;
+}
+
+interface FeedbackCardsProps {
+  entries?: FeedbackCardEntry[];
+  isLoading?: boolean;
+}
+
+export default function FeedbackCards({ entries = [], isLoading = false }: FeedbackCardsProps): React.JSX.Element {
   if (isLoading) {
     return <p className="text-center text-gray-600">Loading feedback…</p>;
   }
 
-  if (!entries?.length) {
+  if (!entries.length) {
     return <p className="text-center text-gray-600">No feedback yet.</p>;
   }
 
   return (
     <div className="feedback-cards flex flex-wrap gap-4 justify-start">
-      {entries.map((entry) => {
+      {entries.map((entry, index) => {
         const styleClass = getNoteStyleClassName(normalizeNoteStyleId(entry?.styleId));
         return (
           <div
-            key={entry.id}
+            key={entry.id ?? `feedback-card-${index}`}
             className={`feedback-card min-h-[14rem] flex flex-col rounded-lg border border-black/5 p-4 shadow-md ${styleClass}`}
             style={{ minWidth: '12rem', width: '14rem', maxWidth: '18rem', flex: '0 0 14rem' }}
           >

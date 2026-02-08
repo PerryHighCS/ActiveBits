@@ -1,14 +1,28 @@
 import React, { useCallback } from 'react';
 import QrScannerPanel from '@src/components/common/QrScannerPanel';
 
+interface ScannerSuccessData {
+  pathname: string;
+  hash: string;
+  reviewee: string;
+}
+
+interface ReviewerScannerProps {
+  isOpen: boolean;
+  sessionId?: string | null;
+  onClose: () => void;
+  onSuccess: (data: ScannerSuccessData) => void;
+  onError: (code: string | null) => void;
+}
+
 export default function ReviewerScanner({
   isOpen,
   sessionId,
   onClose,
   onSuccess,
   onError,
-}) {
-  const validateAndHandle = useCallback((content) => {
+}: ReviewerScannerProps): React.JSX.Element | null {
+  const validateAndHandle = useCallback((content: string) => {
     onClose();
     onError(null);
     try {

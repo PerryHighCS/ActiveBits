@@ -4,14 +4,10 @@ import http from 'node:http'
 import express from 'express'
 import setupGalleryWalkRoutes, { sanitizeName } from '../activities/gallery-walk/server/routes.js'
 import { createSessionStore } from 'activebits-server/core/sessions.js'
+import type { ActiveBitsWebSocket, WsRouter } from '../types/websocket.js'
 import { DEFAULT_NOTE_STYLE_ID, NOTE_STYLE_OPTIONS } from '../activities/gallery-walk/shared/noteStyles.js'
 
-interface WsStub {
-  register: () => void
-  wss: {
-    clients: Set<unknown>
-  }
-}
+type WsStub = WsRouter
 
 interface CreateSessionResponse {
   id?: string
@@ -56,9 +52,10 @@ async function readJson<T>(response: Response): Promise<T> {
 
 function createWsStub(): WsStub {
   return {
-    register() {},
+    register(_pathname, _handler) {},
     wss: {
-      clients: new Set(),
+      clients: new Set<ActiveBitsWebSocket>(),
+      close() {},
     },
   }
 }
@@ -269,14 +266,14 @@ test('invalid note style falls back to default', async (t: TestContext) => {
 test('sanitizeName trims whitespace and enforces default max length', () => {
   const input = `   ${'a'.repeat(250)}   `
   const result = sanitizeName(input)
-  assert.equal(result.length, 200)
-  assert.equal(result[0], 'a')
+  assert.equal(result?.length, 200)
+  assert.equal(result?.[0], 'a')
 })
 
 test('sanitizeName respects custom max length', () => {
   const input = 'b'.repeat(2100)
   const result = sanitizeName(input, '', 2000)
-  assert.equal(result.length, 2000)
+  assert.equal(result?.length, 2000)
 })
 
 test('sanitizeName falls back for empty or non-string input', () => {

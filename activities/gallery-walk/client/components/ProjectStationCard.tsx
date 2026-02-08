@@ -1,7 +1,18 @@
 import React from 'react';
+import type { ReactNode } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 
-export default function ProjectStationCard({ projectTitle, joinUrl, fallbackForm }) {
+interface ProjectStationCardProps {
+  projectTitle?: string | null;
+  joinUrl?: string;
+  fallbackForm?: ReactNode;
+}
+
+export default function ProjectStationCard({
+  projectTitle,
+  joinUrl,
+  fallbackForm,
+}: ProjectStationCardProps): React.JSX.Element {
   return (
     <div className="grid gap-6">
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow">

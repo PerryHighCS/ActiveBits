@@ -1,17 +1,29 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
-import { sortFeedbackEntries } from './feedbackUtils';
-import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.jsx';
-import GalleryWalkNotesView from '../components/GalleryWalkNotesView.jsx';
+import { sortFeedbackEntries, type SortDirection, type SortableFeedbackEntry } from './feedbackUtils';
+import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable';
+import GalleryWalkNotesView from '../components/GalleryWalkNotesView';
 import Button from '@src/components/ui/Button';
-import StageControls from '../components/StageControls.jsx';
-import TitleEditor from '../components/TitleEditor.jsx';
-import FeedbackViewSwitcher from '../components/FeedbackViewSwitcher.jsx';
-import useGalleryWalkSession from '../hooks/useGalleryWalkSession.js';
+import StageControls from '../components/StageControls';
+import TitleEditor from '../components/TitleEditor';
+import FeedbackViewSwitcher from '../components/FeedbackViewSwitcher';
+import useGalleryWalkSession, {
+  type GalleryWalkFeedbackEntry,
+  type GalleryWalkReviewees,
+  type GalleryWalkReviewers,
+} from '../hooks/useGalleryWalkSession';
+
+type SortField = 'to' | 'fromNameSnapshot' | 'createdAt';
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
 
 export default function ManagerPage() {
-  const { sessionId } = useParams();
+  const { sessionId } = useParams<{ sessionId: string }>();
 
   const {
     stage,
@@ -26,13 +38,13 @@ export default function ManagerPage() {
     setError,
   } = useGalleryWalkSession(sessionId);
 
-  const [sortField, setSortField] = useState('createdAt');
-  const [sortDirection, setSortDirection] = useState('desc');
-  const [exportSignature, setExportSignature] = useState(null);
+  const [sortField, setSortField] = useState<SortField>('createdAt');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [exportSignature, setExportSignature] = useState<string | null>(null);
   const [showNotesView, setShowNotesView] = useState(false);
   const [notesReviewee, setNotesReviewee] = useState('all');
   const [isSavingTitle, setIsSavingTitle] = useState(false);
-  const [titleSaveError, setTitleSaveError] = useState(null);
+  const [titleSaveError, setTitleSaveError] = useState<string | null>(null);
   const titleInitializedRef = useRef(false);
 
   useEffect(() => {
@@ -45,6 +57,7 @@ export default function ManagerPage() {
       titleInitializedRef.current = true;
       return undefined;
     }
+
     const controller = new AbortController();
     const timeout = setTimeout(async () => {
       setIsSavingTitle(true);
@@ -57,12 +70,12 @@ export default function ManagerPage() {
           signal: controller.signal,
         });
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(data.error || 'Unable to save title');
         }
       } catch (err) {
-        if (err.name !== 'AbortError') {
-          setTitleSaveError(err.message || 'Unable to save title');
+        if (!(err instanceof DOMException && err.name === 'AbortError')) {
+          setTitleSaveError(getErrorMessage(err, 'Unable to save title'));
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -70,13 +83,14 @@ export default function ManagerPage() {
         }
       }
     }, 600);
+
     return () => {
       controller.abort();
       clearTimeout(timeout);
     };
   }, [sessionId, sessionTitle]);
 
-  const handleStageChange = async (nextStage) => {
+  const handleStageChange = async (nextStage: string) => {
     if (!sessionId || stage === nextStage) return;
     try {
       const res = await fetch(`/api/gallery-walk/${sessionId}/stage`, {
@@ -87,14 +101,14 @@ export default function ManagerPage() {
       if (!res.ok) {
         throw new Error('Failed to update stage');
       }
-      const data = await res.json();
+      const data = (await res.json()) as { stage?: string };
       setStage(data.stage || nextStage);
     } catch (err) {
-      setError(err.message);
+      setError(getErrorMessage(err, 'Failed to update stage'));
     }
   };
 
-  const handleSort = (field) => {
+  const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
@@ -104,21 +118,25 @@ export default function ManagerPage() {
   };
 
   const sortedFeedback = useMemo(
-    () => sortFeedbackEntries(feedback, sortField, sortDirection),
+    () => sortFeedbackEntries(feedback as SortableFeedbackEntry[], sortField, sortDirection) as GalleryWalkFeedbackEntry[],
     [feedback, sortField, sortDirection],
   );
+
   const currentSignature = useMemo(
     () => JSON.stringify({ reviewees, reviewers, feedback, title: sessionTitle }),
     [reviewees, reviewers, feedback, sessionTitle],
   );
+
   useEffect(() => {
     if (exportSignature === null) {
       setExportSignature(currentSignature);
     }
   }, [currentSignature, exportSignature]);
+
   const hasUnsavedChanges = Boolean(sessionId && currentSignature !== exportSignature);
+
   useEffect(() => {
-    const handleBeforeUnload = (event) => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (hasUnsavedChanges) {
         event.preventDefault();
         event.returnValue = '';
@@ -132,7 +150,7 @@ export default function ManagerPage() {
     };
   }, [hasUnsavedChanges]);
 
-  const renderTableHeaderCell = (label, field) => (
+  const renderTableHeaderCell = (label: string, field: SortField): ReactNode => (
     <button
       type="button"
       className="flex items-center gap-1 text-left text-sm font-semibold text-gray-700"
@@ -145,11 +163,11 @@ export default function ManagerPage() {
     </button>
   );
 
-  const renderFeedbackTable = () => (
+  const renderFeedbackTable = (): ReactNode => (
     <GalleryWalkFeedbackTable
       feedback={sortedFeedback}
-      reviewees={reviewees}
-      reviewers={reviewers}
+      reviewees={reviewees as GalleryWalkReviewees}
+      reviewers={reviewers as GalleryWalkReviewers}
       containerClassName="mt-6"
       emptyMessage="No feedback yet."
       headerOverrides={{
@@ -174,12 +192,18 @@ export default function ManagerPage() {
       }}
     />
   );
+
   const handleDownloadExport = async () => {
     if (!sessionId) return;
     try {
       const res = await fetch(`/api/gallery-walk/${sessionId}/export`);
       if (!res.ok) throw new Error('Unable to export session data');
-      const data = await res.json();
+      const data = (await res.json()) as {
+        reviewees?: unknown;
+        reviewers?: unknown;
+        feedback?: unknown;
+        config?: { title?: string };
+      };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -195,24 +219,26 @@ export default function ManagerPage() {
         title: data.config?.title || '',
       }));
     } catch (err) {
-      setError(err.message);
+      setError(getErrorMessage(err, 'Unable to export session data'));
     }
   };
 
   const feedbackByReviewee = useMemo(() => {
-    const map = {};
+    const map: Record<string, GalleryWalkFeedbackEntry[]> = {};
     feedback.forEach((entry) => {
-      map[entry.to] = map[entry.to] || [];
-      map[entry.to].push(entry);
+      const targetId = typeof entry.to === 'string' ? entry.to : '';
+      if (!targetId) return;
+      map[targetId] = map[targetId] || [];
+      map[targetId]?.push(entry);
     });
     return map;
   }, [feedback]);
 
-  const renderNotesView = () => {
+  const renderNotesView = (): ReactNode => {
     if (!showNotesView) return null;
     return (
       <GalleryWalkNotesView
-        reviewees={reviewees}
+        reviewees={reviewees as GalleryWalkReviewees}
         feedbackByReviewee={feedbackByReviewee}
         selectedReviewee={notesReviewee}
         onSelectReviewee={setNotesReviewee}

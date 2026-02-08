@@ -1,21 +1,63 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import ReviewerScanner from '../components/ReviewerScanner.jsx';
+import ReviewerScanner from '../components/ReviewerScanner';
 import ProjectStationCard from '../components/ProjectStationCard';
 import LocalReviewerForm from '../components/LocalReviewerForm';
-import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer.jsx';
-import FeedbackView from '../components/FeedbackView.jsx';
-import ReviewerPanel from '../components/ReviewerPanel.jsx';
-import RegistrationForm from '../components/RegistrationForm.jsx';
-import useGalleryWalkSession from '../hooks/useGalleryWalkSession.js';
-import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
-import { generateShortId } from '../../shared/id.js';
+import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer';
+import FeedbackView from '../components/FeedbackView';
+import ReviewerPanel from '../components/ReviewerPanel';
+import RegistrationForm from '../components/RegistrationForm';
+import useGalleryWalkSession, {
+  type GalleryWalkFeedbackEntry,
+  type GalleryWalkRevieweeRecord,
+  getMessageFeedbackEntry,
+  getMessageReviewees,
+} from '../hooks/useGalleryWalkSession';
+import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles';
+import { generateShortId } from '../../shared/id';
 
 const REVIEWEE_ID_PATTERN = /^[A-Z0-9]{6}$/;
 const REVIEWER_ID_PATTERN = /^[A-Z0-9]{6,12}$/;
 const REVIEWER_NAME_MAX_LENGTH = 200;
 
-function GalleryWalkLiveStudentPage({ sessionData }) {
+interface SessionPayload {
+  stage?: string;
+  feedback?: GalleryWalkFeedbackEntry[];
+  reviewees?: Record<string, GalleryWalkRevieweeRecord>;
+  sessionId?: string;
+}
+
+interface SessionDataProp {
+  sessionId?: string | null;
+  data?: SessionPayload;
+}
+
+interface StudentPageProps {
+  sessionData?: SessionDataProp;
+}
+
+interface ReviewerSaveResponse {
+  error?: string;
+}
+
+interface RevieweeFeedbackResponse {
+  feedback?: GalleryWalkFeedbackEntry[];
+  reviewee?: GalleryWalkRevieweeRecord;
+  config?: { title?: string };
+}
+
+interface ScannerSuccessData {
+  pathname: string;
+  reviewee: string;
+  hash: string;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
+function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   const sessionId = sessionData?.sessionId || null;
   const location = useLocation();
   const navigate = useNavigate();
@@ -29,23 +71,23 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
 
   const [sessionClosed, setSessionClosed] = useState(false);
 
-  // Kiosk state
-  const [revieweeId, setRevieweeId] = useState(null);
-  const [revieweeRecord, setRevieweeRecord] = useState(null);
+  const [revieweeId, setRevieweeId] = useState<string | null>(null);
+  const [revieweeRecord, setRevieweeRecord] = useState<GalleryWalkRevieweeRecord | null>(null);
   const [registrationName, setRegistrationName] = useState('');
   const [registrationProject, setRegistrationProject] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
-  const [registrationError, setRegistrationError] = useState(null);
+  const [registrationError, setRegistrationError] = useState<string | null>(null);
 
   const [localReviewerName, setLocalReviewerName] = useState('');
   const [localMessage, setLocalMessage] = useState('');
   const [isSubmittingLocal, setIsSubmittingLocal] = useState(false);
-  const [localFormNotice, setLocalFormNotice] = useState(null);
+  const [localFormNotice, setLocalFormNotice] = useState<string | null>(null);
   const [stageChangePending, setStageChangePending] = useState(false);
   const [showFeedbackView, setShowFeedbackView] = useState(() => (sessionData?.data?.stage || 'gallery') === 'review');
-  const [revieweeFeedback, setRevieweeFeedback] = useState([]);
+  const [revieweeFeedback, setRevieweeFeedback] = useState<GalleryWalkFeedbackEntry[]>([]);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
   const [localStyleId, setLocalStyleId] = useState(DEFAULT_NOTE_STYLE_ID);
+
   const {
     stage,
     reviewees,
@@ -53,6 +95,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     setSessionTitle,
     lastMessage,
   } = useGalleryWalkSession(sessionId, { initialData: sessionData?.data });
+
   useEffect(() => {
     if (!revieweeId) return;
     const record = reviewees[revieweeId];
@@ -66,46 +109,50 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       }
     }
   }, [revieweeId, reviewees, kioskStoragePrefix]);
-  const studentReviewees = useMemo(() => {
+
+  const studentReviewees = useMemo<Record<string, GalleryWalkRevieweeRecord>>(() => {
     if (!revieweeId) return {};
     return { [revieweeId]: revieweeRecord || {} };
   }, [revieweeId, revieweeRecord]);
-  const studentFeedbackByReviewee = useMemo(() => {
+
+  const studentFeedbackByReviewee = useMemo<Record<string, GalleryWalkFeedbackEntry[]>>(() => {
     if (!revieweeId) return {};
     return { [revieweeId]: revieweeFeedback };
   }, [revieweeId, revieweeFeedback]);
 
-  // Reviewer state
-  const [reviewerId, setReviewerId] = useState(null);
+  const [reviewerId, setReviewerId] = useState<string | null>(null);
   const [reviewerName, setReviewerName] = useState('');
   const [reviewerNameInput, setReviewerNameInput] = useState('');
-  const [reviewerNameError, setReviewerNameError] = useState(null);
+  const [reviewerNameError, setReviewerNameError] = useState<string | null>(null);
   const [isSavingReviewerName, setIsSavingReviewerName] = useState(false);
   const [reviewerMessage, setReviewerMessage] = useState('');
-  const [reviewerNotice, setReviewerNotice] = useState(null);
+  const [reviewerNotice, setReviewerNotice] = useState<string | null>(null);
   const [isSubmittingReviewerFeedback, setIsSubmittingReviewerFeedback] = useState(false);
   const [canScanNext, setCanScanNext] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [scannerError, setScannerError] = useState(null);
+  const [scannerError, setScannerError] = useState<string | null>(null);
   const [reviewerStyleId, setReviewerStyleId] = useState(DEFAULT_NOTE_STYLE_ID);
+
   const handleLocalFeedbackCancel = () => {
     setLocalReviewerName('');
     setLocalMessage('');
     setLocalFormNotice(null);
     setLocalStyleId(DEFAULT_NOTE_STYLE_ID);
   };
-  const handleReviewerMessageChange = useCallback((value) => {
+
+  const handleReviewerMessageChange = useCallback((value: string) => {
     if (canScanNext) setCanScanNext(false);
     setReviewerMessage(value);
   }, [canScanNext]);
 
-  const handleReviewerStyleChange = useCallback((value) => {
+  const handleReviewerStyleChange = useCallback((value: string) => {
     if (!isNoteStyleId(value)) return;
     setReviewerStyleId(value);
     if (reviewerStoragePrefix) {
       localStorage.setItem(`${reviewerStoragePrefix}:styleId`, value);
     }
   }, [reviewerStoragePrefix]);
+
   const handleStudentDownload = useCallback(() => {
     if (!sessionId || !revieweeId) return;
     const payload = {
@@ -134,7 +181,6 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     return `${window.location.origin}/${sessionId}?reviewee=${encodeURIComponent(revieweeId)}`;
   }, [sessionId, revieweeId]);
 
-  // Hydrate kiosk/reviewer IDs from storage
   useEffect(() => {
     if (!kioskStoragePrefix) return;
     const storedId = localStorage.getItem(`${kioskStoragePrefix}:revieweeId`);
@@ -178,7 +224,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       setIsLoadingFeedback(true);
       const res = await fetch(`/api/gallery-walk/${sessionId}/feedback/${revieweeId}`);
       if (!res.ok) throw new Error('Failed to fetch feedback');
-      const data = await res.json();
+      const data = (await res.json()) as RevieweeFeedbackResponse;
       setRevieweeFeedback(Array.isArray(data.feedback) ? data.feedback : []);
       if (data.reviewee) setRevieweeRecord(data.reviewee);
       if (data.config?.title) setSessionTitle(data.config.title);
@@ -187,13 +233,15 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     } finally {
       setIsLoadingFeedback(false);
     }
-  }, [sessionId, revieweeId]);
+  }, [sessionId, revieweeId, setSessionTitle]);
 
   useEffect(() => {
-    if (showFeedbackView) fetchRevieweeFeedback();
+    if (showFeedbackView) {
+      void fetchRevieweeFeedback();
+    }
   }, [showFeedbackView, fetchRevieweeFeedback]);
 
-  const handleRevieweeRegistration = async (event) => {
+  const handleRevieweeRegistration = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!sessionId) return;
     const trimmedName = registrationName.trim();
@@ -216,10 +264,13 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
         }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || 'Unable to register');
       }
-      const data = await res.json();
+      const data = (await res.json()) as {
+        revieweeId?: string;
+        reviewees?: Record<string, GalleryWalkRevieweeRecord>;
+      };
       const assignedId = data.revieweeId || newId;
       setRevieweeId(assignedId);
       if (kioskStoragePrefix) {
@@ -228,18 +279,18 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       const latestRecord = data.reviewees?.[assignedId] || { name: trimmedName, projectTitle: trimmedProject };
       setRevieweeRecord(latestRecord);
     } catch (err) {
-      setRegistrationError(err.message);
+      setRegistrationError(getErrorMessage(err, 'Unable to register'));
     } finally {
       setIsRegistering(false);
     }
   };
 
-  const handleLocalFeedbackSubmit = async (event) => {
+  const handleLocalFeedbackSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!sessionId || !revieweeId) return;
-    const reviewerNameInput = localReviewerName.trim();
+    const reviewerNameInputValue = localReviewerName.trim();
     const message = localMessage.trim();
-    if (!reviewerNameInput || !message) {
+    if (!reviewerNameInputValue || !message) {
       setLocalFormNotice('Please provide both a name and feedback message.');
       return;
     }
@@ -250,7 +301,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       await fetch(`/api/gallery-walk/${sessionId}/reviewer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reviewerId: kioskReviewerId, name: reviewerNameInput }),
+        body: JSON.stringify({ reviewerId: kioskReviewerId, name: reviewerNameInputValue }),
       });
       const res = await fetch(`/api/gallery-walk/${sessionId}/feedback`, {
         method: 'POST',
@@ -258,7 +309,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
         body: JSON.stringify({ revieweeId, reviewerId: kioskReviewerId, message, styleId: localStyleId }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || 'Failed to submit feedback');
       }
       setLocalReviewerName('');
@@ -268,16 +319,15 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       if (stage === 'review' && stageChangePending) {
         setStageChangePending(false);
         setShowFeedbackView(true);
-        fetchRevieweeFeedback();
+        void fetchRevieweeFeedback();
       }
     } catch (err) {
-      setLocalFormNotice(err.message);
+      setLocalFormNotice(getErrorMessage(err, 'Failed to submit feedback'));
     } finally {
       setIsSubmittingLocal(false);
     }
   };
 
-  // Stage transitions for kiosk
   useEffect(() => {
     if (stage === 'review') {
       if (localMessage.trim().length > 0 || isSubmittingLocal) {
@@ -309,14 +359,16 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
       }
       return;
     }
+
     if (lastMessage.type === 'reviewees-updated' && revieweeId) {
-      const updated = lastMessage.payload?.reviewees?.[revieweeId];
+      const updated = getMessageReviewees(lastMessage)[revieweeId];
       if (updated) setRevieweeRecord(updated);
     }
+
     if (lastMessage.type === 'feedback-added') {
-      const payload = lastMessage.payload || {};
-      if (payload.feedback?.to === revieweeId && showFeedbackView) {
-        fetchRevieweeFeedback();
+      const entry = getMessageFeedbackEntry(lastMessage);
+      if (entry?.to === revieweeId && showFeedbackView) {
+        void fetchRevieweeFeedback();
       }
     }
   }, [lastMessage, showFeedbackView, isReviewerMode, navigate, revieweeId, fetchRevieweeFeedback]);
@@ -338,7 +390,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
         body: JSON.stringify({ reviewerId: nextId, name: trimmed }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const data = (await res.json().catch(() => ({}))) as ReviewerSaveResponse;
         throw new Error(data.error || 'Unable to save reviewer info');
       }
       setReviewerId(nextId);
@@ -348,13 +400,13 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
         localStorage.setItem(`${reviewerStoragePrefix}:reviewerName`, trimmed);
       }
     } catch (err) {
-      setReviewerNameError(err.message);
+      setReviewerNameError(getErrorMessage(err, 'Unable to save reviewer info'));
     } finally {
       setIsSavingReviewerName(false);
     }
   };
 
-  const handleReviewerFeedbackSubmit = async (event) => {
+  const handleReviewerFeedbackSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!sessionId || !requestedReviewee) {
       setReviewerNotice('Invalid project link. Please rescan the QR code.');
@@ -378,14 +430,14 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
         body: JSON.stringify({ revieweeId: requestedReviewee, reviewerId, message: trimmed, styleId: reviewerStyleId }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || 'Failed to submit feedback');
       }
       setReviewerMessage('');
       setReviewerNotice('Feedback submitted. Thank you!');
       setCanScanNext(true);
     } catch (err) {
-      setReviewerNotice(err.message);
+      setReviewerNotice(getErrorMessage(err, 'Failed to submit feedback'));
     } finally {
       setIsSubmittingReviewerFeedback(false);
     }
@@ -399,7 +451,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     setCanScanNext(true);
   };
 
-  const handleScannerSuccess = useCallback(({ pathname, reviewee, hash }) => {
+  const handleScannerSuccess = useCallback(({ pathname, reviewee, hash }: ScannerSuccessData) => {
     if (!reviewee || !REVIEWEE_ID_PATTERN.test(reviewee)) {
       setScannerError('scanner-invalid');
       return;
@@ -410,7 +462,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
     navigate(`${pathname}?reviewee=${encodeURIComponent(reviewee)}${hash}`);
   }, [navigate]);
 
-  const handleScannerState = useCallback((code) => {
+  const handleScannerState = useCallback((code: string | null) => {
     setScannerError(code);
   }, []);
 
@@ -480,6 +532,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
         />
       );
     }
+
     const fallbackForm =
       stage !== 'review' ? (
         <div className="rounded-lg border border-gray-200 bg-white p-6 shadow">
@@ -502,6 +555,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
           />
         </div>
       ) : null;
+
     return (
       <ProjectStationCard
         projectTitle={revieweeRecord?.projectTitle}
@@ -545,7 +599,7 @@ function GalleryWalkLiveStudentPage({ sessionData }) {
   );
 }
 
-export default function StudentPage({ sessionData }) {
+export default function StudentPage({ sessionData }: StudentPageProps) {
   const sessionId = sessionData?.sessionId || null;
   const isSoloMode = typeof sessionId === 'string' && sessionId.startsWith('solo-gallery-walk');
   if (isSoloMode) {

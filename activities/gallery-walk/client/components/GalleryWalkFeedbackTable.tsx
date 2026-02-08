@@ -1,5 +1,36 @@
 import React from 'react';
-import { getTimestampMeta } from '../manager/managerUtils.js';
+import type { ReactNode } from 'react';
+import { getTimestampMeta } from '../manager/managerUtils';
+
+interface FeedbackEntry {
+  id?: string;
+  to?: string | null;
+  from?: string | null;
+  fromNameSnapshot?: string;
+  createdAt?: number;
+  message?: string;
+}
+
+interface PersonRecord {
+  name?: string;
+  projectTitle?: string | null;
+}
+
+interface HeaderOverrides {
+  to?: ReactNode;
+  from?: ReactNode;
+  posted?: ReactNode;
+  message?: ReactNode;
+}
+
+interface GalleryWalkFeedbackTableProps {
+  feedback?: FeedbackEntry[];
+  reviewees?: Record<string, PersonRecord>;
+  reviewers?: Record<string, PersonRecord>;
+  emptyMessage?: string;
+  containerClassName?: string;
+  headerOverrides?: HeaderOverrides;
+}
 
 export default function GalleryWalkFeedbackTable({
   feedback = [],
@@ -8,7 +39,7 @@ export default function GalleryWalkFeedbackTable({
   emptyMessage = 'No feedback entries in this file.',
   containerClassName = '',
   headerOverrides = {},
-}) {
+}: GalleryWalkFeedbackTableProps): React.JSX.Element {
   const headers = {
     to: headerOverrides.to ?? 'To',
     from: headerOverrides.from ?? 'From',
@@ -40,7 +71,7 @@ export default function GalleryWalkFeedbackTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {feedback.map((entry) => {
+          {feedback.map((entry, index) => {
             const timestamp = getTimestampMeta(entry.createdAt);
             const screenText = timestamp.date
               ? (timestamp.showDateOnScreen
@@ -51,15 +82,15 @@ export default function GalleryWalkFeedbackTable({
               ? `${timestamp.date.toLocaleDateString()} ${timestamp.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
               : '—';
             return (
-              <tr key={entry.id}>
+              <tr key={entry.id ?? `feedback-row-${index}`}>
                 <td className="px-4 py-3">
-                  {reviewees[entry.to]?.name
-                    || reviewees[entry.to]?.projectTitle
+                  {reviewees[entry.to ?? '']?.name
+                    || reviewees[entry.to ?? '']?.projectTitle
                     || entry.to
                     || '—'}
                 </td>
                 <td className="px-4 py-3">
-                  {entry.fromNameSnapshot || reviewers[entry.from]?.name || '—'}
+                  {entry.fromNameSnapshot || reviewers[entry.from ?? '']?.name || '—'}
                 </td>
                 <td className="px-4 py-3 text-gray-600">
                   <span className="print:hidden">{screenText}</span>

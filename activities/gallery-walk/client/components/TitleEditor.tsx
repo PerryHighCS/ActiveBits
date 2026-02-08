@@ -1,6 +1,13 @@
 import React from 'react';
 
-export default function TitleEditor({ value, onChange, isSaving, error }) {
+interface TitleEditorProps {
+  value: string;
+  onChange: (value: string) => void;
+  isSaving?: boolean;
+  error?: string | null;
+}
+
+export default function TitleEditor({ value, onChange, isSaving = false, error }: TitleEditorProps): React.JSX.Element {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">

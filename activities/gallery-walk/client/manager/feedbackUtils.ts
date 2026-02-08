@@ -1,6 +1,16 @@
-export function sortFeedbackEntries(entries = [], field = 'createdAt', direction = 'desc') {
+export type SortDirection = 'asc' | 'desc';
+
+export type SortableFeedbackEntry = Record<string, unknown> & {
+  id?: string;
+};
+
+export function sortFeedbackEntries<T extends SortableFeedbackEntry>(
+  entries: T[] = [],
+  field: string = 'createdAt',
+  direction: SortDirection = 'desc',
+): T[] {
   const safeField = field || 'createdAt';
-  const dir = direction === 'asc' ? 'asc' : 'desc';
+  const dir: SortDirection = direction === 'asc' ? 'asc' : 'desc';
   const multiplier = dir === 'asc' ? 1 : -1;
 
   return [...entries].sort((a, b) => {
@@ -15,7 +25,10 @@ export function sortFeedbackEntries(entries = [], field = 'createdAt', direction
   });
 }
 
-export function insertFeedbackEntry(entries = [], nextEntry) {
+export function insertFeedbackEntry<T extends SortableFeedbackEntry>(
+  entries: T[] = [],
+  nextEntry?: T | null,
+): T[] {
   if (!nextEntry || typeof nextEntry !== 'object') return entries;
   const filtered = entries.filter((entry) => entry?.id !== nextEntry.id);
   return [nextEntry, ...filtered];
