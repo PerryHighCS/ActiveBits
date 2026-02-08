@@ -870,6 +870,27 @@ Validation:
 - `npm --workspace activities test` -> pass
 - `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
 
+### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, insertion sort + sorting tests)
+
+Completed:
+- Converted insertion sort visualizer module to TypeScript:
+  - `activities/algorithm-demo/client/algorithms/sorting/InsertionSort.jsx` -> `activities/algorithm-demo/client/algorithms/sorting/InsertionSort.tsx`
+- Updated algorithm registry imports for insertion module:
+  - `activities/algorithm-demo/client/algorithms/index.ts`
+- Added focused sorting module-state tests:
+  - `activities/algorithm-demo/client/algorithms/sorting/InsertionSort.test.ts`
+  - `activities/algorithm-demo/client/algorithms/sorting/MergeSort.test.ts`
+
+Implementation notes:
+- `InsertionSort.tsx` now uses typed state/event/view contracts and typed CSS custom-property helpers for move/tmp animations while preserving step-by-step behavior.
+- `MergeSort` remains `.jsx` in this slice to avoid bundling a very large strict-typing change; coverage still improved by adding direct `initState`/`reduceEvent` regression tests.
+- Remaining algorithm-demo sorting migration work is now primarily `MergeSort.jsx` -> `MergeSort.tsx`.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
+
 ### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, search visualizers)
 
 Completed:

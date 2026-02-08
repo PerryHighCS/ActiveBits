@@ -5,7 +5,7 @@
 
 import type { ComponentType } from 'react'
 import SelectionSort from './sorting/SelectionSort'
-import InsertionSort from './sorting/InsertionSort.jsx'
+import InsertionSort from './sorting/InsertionSort'
 import MergeSort from './sorting/MergeSort.jsx'
 import BinarySearch from './search/BinarySearch'
 import LinearSearch from './search/LinearSearch'
