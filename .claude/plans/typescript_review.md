@@ -844,6 +844,28 @@ Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
 
+### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, search visualizers)
+
+Completed:
+- Converted search visualizer modules to TypeScript:
+  - `activities/algorithm-demo/client/algorithms/search/LinearSearch.jsx` -> `activities/algorithm-demo/client/algorithms/search/LinearSearch.tsx`
+  - `activities/algorithm-demo/client/algorithms/search/BinarySearch.jsx` -> `activities/algorithm-demo/client/algorithms/search/BinarySearch.tsx`
+- Updated algorithm registry imports for migrated search modules:
+  - `activities/algorithm-demo/client/algorithms/index.ts`
+- Added focused regression tests for migrated search modules:
+  - `activities/algorithm-demo/client/algorithms/search/LinearSearch.test.ts`
+  - `activities/algorithm-demo/client/algorithms/search/BinarySearch.test.ts`
+
+Implementation notes:
+- Both search modules now use typed state/event/view contracts while preserving existing step progression, pseudocode highlighting, and manager/student interactions.
+- Input parsing was normalized to explicit numeric parsing helpers to keep TS state updates predictable without changing runtime behavior.
+- `initState` exports are cast to the shared `AlgorithmModule` contract to keep mixed algorithm signatures compatible during migration.
+- Remaining algorithm visualizer modules (`sorting`, `recursion`, `guessing`) remain JavaScript for the next completion slice.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+
 ### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, server routes)
 
 Completed:
