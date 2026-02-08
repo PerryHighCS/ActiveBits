@@ -4,14 +4,14 @@
  */
 
 import type { ComponentType } from 'react'
-import SelectionSort from './sorting/SelectionSort.jsx'
+import SelectionSort from './sorting/SelectionSort'
 import InsertionSort from './sorting/InsertionSort.jsx'
 import MergeSort from './sorting/MergeSort.jsx'
 import BinarySearch from './search/BinarySearch'
 import LinearSearch from './search/LinearSearch'
-import Factorial from './recursion/Factorial.jsx'
-import Fibonacci from './recursion/Fibonacci.jsx'
-import BinarySearchGame from './guessing/BinarySearchGame.jsx'
+import Factorial from './recursion/Factorial'
+import Fibonacci from './recursion/Fibonacci'
+import BinarySearchGame from './guessing/BinarySearchGame'
 
 export type AlgorithmState = Record<string, unknown>
 

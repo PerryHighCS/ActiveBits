@@ -844,6 +844,32 @@ Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
 
+### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, recursion/guessing + selection sort)
+
+Completed:
+- Converted recursion and guessing visualizer modules to TypeScript:
+  - `activities/algorithm-demo/client/algorithms/recursion/Factorial.jsx` -> `activities/algorithm-demo/client/algorithms/recursion/Factorial.tsx`
+  - `activities/algorithm-demo/client/algorithms/recursion/Fibonacci.jsx` -> `activities/algorithm-demo/client/algorithms/recursion/Fibonacci.tsx`
+  - `activities/algorithm-demo/client/algorithms/guessing/BinarySearchGame.jsx` -> `activities/algorithm-demo/client/algorithms/guessing/BinarySearchGame.tsx`
+- Converted selection sort visualizer module to TypeScript:
+  - `activities/algorithm-demo/client/algorithms/sorting/SelectionSort.jsx` -> `activities/algorithm-demo/client/algorithms/sorting/SelectionSort.tsx`
+- Updated algorithm registry imports for migrated modules:
+  - `activities/algorithm-demo/client/algorithms/index.ts`
+- Added focused regression tests for recursion/guessing modules:
+  - `activities/algorithm-demo/client/algorithms/recursion/Factorial.test.ts`
+  - `activities/algorithm-demo/client/algorithms/recursion/Fibonacci.test.ts`
+  - `activities/algorithm-demo/client/algorithms/guessing/BinarySearchGame.test.ts`
+
+Implementation notes:
+- Recursion and guessing modules now use explicit state/event contracts while preserving existing step sequencing, pseudocode highlighting, and manager/student interaction behavior.
+- `SelectionSort.tsx` now has strict-safe state and view typings (including CSS custom property typing for swap animation offsets) without behavior changes.
+- The algorithm registry now resolves migrated selection/recursion/guessing modules through TS extensionless imports during the mixed-extension window.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
+
 ### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, search visualizers)
 
 Completed:
