@@ -95,7 +95,7 @@ test('intermediate-style answers evaluate to expected output', () => {
 })
 
 test('intermediate-style validation detects width mismatch', () => {
-  const [result] = validateIntermediate('%-10s | Attempting access%n", user', hackerChallenge)
+  const [result] = validateIntermediate('"%-10s | Attempting access%n", user', hackerChallenge)
   assert.ok(result)
   assert.equal(result.pass, false)
   assert.notEqual(result.expected, result.actual)

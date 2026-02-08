@@ -1,8 +1,87 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import PseudocodeRenderer from '../../components/PseudocodeRenderer'
-import type { AlgorithmEvent, AlgorithmModule, AlgorithmViewProps } from '../index'
+import type { AlgorithmEvent, AlgorithmModule, AlgorithmState, AlgorithmViewProps } from '../index'
 
-type MergeSortState = any
+type FrameState = 'active' | 'waiting' | 'returning'
+type AnimationTarget = string | null
+
+interface MergeCallFrame {
+  function: 'MergeSortHelper' | 'Merge'
+  left: number
+  right: number
+  mid: number
+  i: number
+  j: number
+  k: number
+  m: number
+  state: FrameState
+  substep: number
+  callSite: string
+  returnTo: string
+  shouldPop: boolean
+}
+
+function initMergeSortState(arraySize = 8) {
+  const array = Array.from({ length: arraySize }, () => Math.floor(Math.random() * 100) + 1)
+  const scratch = new Array<number | null>(arraySize).fill(null)
+  return {
+    array,
+    initialArray: [...array],
+    scratch,
+    callStack: [] as MergeCallFrame[],
+    complete: false,
+    substep: 0,
+    highlightedLines: new Set<string>(),
+    currentStep: null as string | null,
+    animFrom: null as AnimationTarget,
+    animTo: null as AnimationTarget,
+    animValue: null as number | null,
+    copiedBackIndices: [] as number[],
+    scratchWritten: [] as number[],
+  }
+}
+
+type MergeSortState = ReturnType<typeof initMergeSortState>
+
+function getMergeSortState(state: unknown): MergeSortState {
+  if (!state || typeof state !== 'object') {
+    return initMergeSortState()
+  }
+
+  return state as MergeSortState
+}
+
+function reduceMergeSortEvent(state: MergeSortState, event: AlgorithmEvent): MergeSortState {
+  if (event.type === 'nextStep') {
+    return performNextStep(state)
+  }
+
+  if (event.type === 'reset') {
+    return {
+      array: [...state.initialArray],
+      initialArray: state.initialArray,
+      scratch: new Array(state.initialArray.length).fill(null),
+      callStack: [],
+      complete: false,
+      substep: 0,
+      highlightedLines: new Set<string>(),
+      currentStep: null,
+      animFrom: null,
+      animTo: null,
+      animValue: null,
+      copiedBackIndices: [],
+      scratchWritten: [],
+    }
+  }
+
+  if (event.type === 'setArraySize') {
+    return typeof event.payload === 'number'
+      ? initMergeSortState(event.payload)
+      : state
+  }
+
+  return state
+}
 
 const PSEUDOCODE = [
   '**MergeSort(A[0..n−1])**',
@@ -41,63 +120,23 @@ const PSEUDOCODE = [
   '        A[m] ← S[m]',
 ];
 
-const MergeSort = {
+const MergeSort: AlgorithmModule = {
   id: 'merge-sort',
   name: 'Merge Sort',
   description: 'Divide and conquer sorting using recursion and merge',
   category: 'sorting',
   pseudocode: PSEUDOCODE,
-
-  initState(arraySize = 8) {
-    const array = Array.from({ length: arraySize }, () => Math.floor(Math.random() * 100) + 1);
-    const scratch = new Array(arraySize).fill(null);
-    return {
-      array,
-      initialArray: [...array],
-      scratch,
-      callStack: [],
-      complete: false,
-      substep: 0,
-      highlightedLines: new Set<string>(),
-      currentStep: null,
-      animFrom: null,
-      animTo: null,
-      animValue: null,
-      copiedBackIndices: [],
-      scratchWritten: [],
-    };
+  initState(...args: Array<number | string | null | undefined>) {
+    const arraySize = args[0]
+    return typeof arraySize === 'number' ? initMergeSortState(arraySize) : initMergeSortState()
   },
-
-  reduceEvent(state: MergeSortState, event: AlgorithmEvent) {
-    if (event.type === 'nextStep') {
-      return performNextStep(state);
-    }
-    if (event.type === 'reset') {
-      return {
-        array: [...state.initialArray],
-        initialArray: state.initialArray,
-        scratch: new Array(state.initialArray.length).fill(null),
-        callStack: [],
-        complete: false,
-        substep: 0,
-        highlightedLines: new Set<string>(),
-        currentStep: null,
-        animFrom: null,
-        animTo: null,
-        animValue: null,
-        copiedBackIndices: [],
-        scratchWritten: [],
-      };
-    }
-    if (event.type === 'setArraySize') {
-      return MergeSort.initState(event.payload as number);
-    }
-    return state;
+  reduceEvent(state: AlgorithmState, event: AlgorithmEvent) {
+    return reduceMergeSortEvent(getMergeSortState(state), event)
   },
 
   ManagerView({ session, onStateChange }: AlgorithmViewProps) {
-    const state = (session.data.algorithmState as MergeSortState) || MergeSort.initState()
-    const pseudocodeRef = useRef<any>(null)
+    const state = getMergeSortState(session.data.algorithmState)
+    const pseudocodeRef = useRef<HTMLDivElement | null>(null)
 
     useEffect(() => {
       if (pseudocodeRef.current && state.highlightedLines.size > 0) {
@@ -120,11 +159,11 @@ const MergeSort = {
     };
 
     const handleReset = () => {
-      onStateChange?.(MergeSort.reduceEvent?.(state, { type: 'reset' } as AlgorithmEvent) as MergeSortState);
+      onStateChange?.(reduceMergeSortEvent(state, { type: 'reset' }));
     };
 
     const handleRegenerate = () => {
-      onStateChange?.(MergeSort.initState?.() as MergeSortState);
+      onStateChange?.(initMergeSortState());
     };
 
     return (
@@ -161,8 +200,8 @@ const MergeSort = {
   },
 
   StudentView({ session, onStateChange }: AlgorithmViewProps) {
-    const state = (session.data.algorithmState as MergeSortState) || MergeSort.initState()
-    const pseudocodeRef = useRef<any>(null)
+    const state = getMergeSortState(session.data.algorithmState)
+    const pseudocodeRef = useRef<HTMLDivElement | null>(null)
 
     useEffect(() => {
       if (pseudocodeRef.current && state.highlightedLines.size > 0) {
@@ -187,12 +226,12 @@ const MergeSort = {
 
     const handleReset = () => {
       if (!onStateChange) return;
-      onStateChange(MergeSort.reduceEvent?.(state, { type: 'reset' } as AlgorithmEvent) as MergeSortState);
+      onStateChange(reduceMergeSortEvent(state, { type: 'reset' }));
     };
 
     const handleRegenerate = () => {
       if (!onStateChange) return;
-      onStateChange(MergeSort.initState?.() as MergeSortState);
+      onStateChange(initMergeSortState());
     };
 
     const controls = onStateChange ? (
@@ -237,11 +276,11 @@ function ArrayVisualization({ state }: { state: MergeSortState }) {
   const topFrame = state.callStack.length > 0 ? state.callStack[state.callStack.length - 1] : null;
   const left = topFrame?.left ?? null;
   const right = topFrame?.right ?? null;
-  const mid = topFrame?.mid ?? null;
-  const i = topFrame?.i ?? null;
-  const j = topFrame?.j ?? null;
-  const k = topFrame?.k ?? null;
-  const m = topFrame?.m ?? null;
+  const mid = topFrame && topFrame.mid >= 0 ? topFrame.mid : null;
+  const i = topFrame && topFrame.i >= 0 ? topFrame.i : null;
+  const j = topFrame && topFrame.j >= 0 ? topFrame.j : null;
+  const k = topFrame && topFrame.k >= 0 ? topFrame.k : null;
+  const m = topFrame && topFrame.m >= 0 ? topFrame.m : null;
 
   const arrayRefs = useRef<Record<number, HTMLElement | null>>({})
   const scratchRefs = useRef<Record<number, HTMLElement | null>>({})
@@ -426,14 +465,14 @@ function CallStackVisualization({ state }: { state: MergeSortState }) {
                   <>
                     <div className="local-var">left = {frame.left !== null && frame.left !== undefined ? frame.left : '--'}</div>
                     <div className="local-var">right = {frame.right !== null && frame.right !== undefined ? frame.right : '--'}</div>
-                    <div className="local-var">mid = {frame.mid !== null && frame.mid !== undefined ? frame.mid : '--'}</div>
+                    <div className="local-var">mid = {frame.mid >= 0 ? frame.mid : '--'}</div>
                   </>
                 )}
                 {frame.function === 'Merge' && (
                   <>
                     <div className="local-var">left = {frame.left !== null && frame.left !== undefined ? frame.left : '--'}, mid = {frame.mid !== null && frame.mid !== undefined ? frame.mid : '--'}, right = {frame.right !== null && frame.right !== undefined ? frame.right : '--'}</div>
-                    <div className="local-var">i = {frame.i !== null && frame.i !== undefined ? frame.i : '--'}, j = {frame.j !== null && frame.j !== undefined ? frame.j : '--'}, k = {frame.k !== null && frame.k !== undefined ? frame.k : '--'}</div>
-                    <div className="local-var">m = {frame.m !== null && frame.m !== undefined ? frame.m : '--'}</div>
+                    <div className="local-var">i = {frame.i >= 0 ? frame.i : '--'}, j = {frame.j >= 0 ? frame.j : '--'}, k = {frame.k >= 0 ? frame.k : '--'}</div>
+                    <div className="local-var">m = {frame.m >= 0 ? frame.m : '--'}</div>
                   </>
                 )}
               </div>
@@ -459,14 +498,19 @@ function performNextStep(state: MergeSortState) {
   copiedBackIndices = [...(copiedBackIndices || [])];
   scratchWritten = [...(scratchWritten || [])];
   let highlightedLines = new Set<string>();
+  const readArrayValue = (index: number): number | null => {
+    const value = array[index]
+    return typeof value === 'number' ? value : null
+  }
 
   if (complete) return state;
 
   // Handle popping returning frames
-  if (callStack.length > 0 && callStack[callStack.length - 1].shouldPop) {
+  const lastFrame = callStack.length > 0 ? callStack[callStack.length - 1] : null
+  if (lastFrame?.shouldPop) {
     callStack.pop();
     if (callStack.length > 0) {
-      const parent = callStack[callStack.length - 1];
+      const parent = callStack[callStack.length - 1]!;
       parent.state = 'active';
       if (parent.function === 'MergeSortHelper') {
         if (parent.substep === 2) {
@@ -500,14 +544,20 @@ function performNextStep(state: MergeSortState) {
       function: 'MergeSortHelper',
       left: 0,
       right: array.length - 1,
-      mid: null,
+      mid: -1,
+      i: -1,
+      j: -1,
+      k: -1,
+      m: -1,
       state: 'active',
       substep: 0,
       callSite: 'line-2',
+      returnTo: '',
+      shouldPop: false,
     });
     substep = 0;
   } else if (callStack.length > 0) {
-    const topFrame = callStack[callStack.length - 1];
+    const topFrame = callStack[callStack.length - 1]!;
 
     if (topFrame.function === 'MergeSortHelper') {
       if (topFrame.substep === 0) {
@@ -528,6 +578,9 @@ function performNextStep(state: MergeSortState) {
         topFrame.substep = 2;
       } else if (topFrame.substep === 2) {
         // Call MergeSortHelper for left half
+        if (topFrame.mid < 0) {
+          topFrame.mid = Math.floor((topFrame.left + topFrame.right) / 2);
+        }
         highlightedLines.add('line-8');
         currentStep = `Call MergeSortHelper(A, S, ${topFrame.left}, ${topFrame.mid})`;
         topFrame.state = 'waiting';
@@ -535,14 +588,23 @@ function performNextStep(state: MergeSortState) {
           function: 'MergeSortHelper',
           left: topFrame.left,
           right: topFrame.mid,
-          mid: null,
+          mid: -1,
+          i: -1,
+          j: -1,
+          k: -1,
+          m: -1,
           state: 'active',
           substep: 0,
           callSite: 'line-8',
+          returnTo: '',
+          shouldPop: false,
         });
         substep = 0;
       } else if (topFrame.substep === 3) {
         // Call MergeSortHelper for right half
+        if (topFrame.mid < 0) {
+          topFrame.mid = Math.floor((topFrame.left + topFrame.right) / 2);
+        }
         highlightedLines.add('line-9');
         currentStep = `Call MergeSortHelper(A, S, ${topFrame.mid + 1}, ${topFrame.right})`;
         topFrame.state = 'waiting';
@@ -550,14 +612,23 @@ function performNextStep(state: MergeSortState) {
           function: 'MergeSortHelper',
           left: topFrame.mid + 1,
           right: topFrame.right,
-          mid: null,
+          mid: -1,
+          i: -1,
+          j: -1,
+          k: -1,
+          m: -1,
           state: 'active',
           substep: 0,
           callSite: 'line-9',
+          returnTo: '',
+          shouldPop: false,
         });
         substep = 0;
       } else if (topFrame.substep === 4) {
         // Call Merge
+        if (topFrame.mid < 0) {
+          topFrame.mid = Math.floor((topFrame.left + topFrame.right) / 2);
+        }
         highlightedLines.add('line-10');
         currentStep = `Call Merge(A, S, ${topFrame.left}, ${topFrame.mid}, ${topFrame.right})`;
         topFrame.state = 'waiting';
@@ -566,13 +637,15 @@ function performNextStep(state: MergeSortState) {
           left: topFrame.left,
           mid: topFrame.mid,
           right: topFrame.right,
-          i: null,
-          j: null,
-          k: null,
-          m: null,
+          i: -1,
+          j: -1,
+          k: -1,
+          m: -1,
           state: 'active',
           substep: 0,
           callSite: 'line-10',
+          returnTo: '',
+          shouldPop: false,
         });
         substep = 0;
       } else if (topFrame.substep === 99) {
@@ -583,7 +656,9 @@ function performNextStep(state: MergeSortState) {
         }
         if (callStack.length > 1) {
           const parent = callStack[callStack.length - 2];
-          topFrame.returnTo = `${parent.function}(${parent.left}, ${parent.right})`;
+          if (parent) {
+            topFrame.returnTo = `${parent.function}(${parent.left}, ${parent.right})`;
+          }
         } else if (callStack.length === 1) {
           topFrame.returnTo = 'MergeSort';
         }
@@ -615,7 +690,7 @@ function performNextStep(state: MergeSortState) {
       } else if (topFrame.substep === 1) {
         // Initialize j
         highlightedLines.add('line-14');
-        topFrame.j = topFrame.mid + 1;
+        topFrame.j = Math.max(topFrame.mid, topFrame.left) + 1;
         currentStep = `Initialize j = ${topFrame.j}`;
         topFrame.substep = 2;
       } else if (topFrame.substep === 2) {
@@ -637,17 +712,41 @@ function performNextStep(state: MergeSortState) {
       } else if (topFrame.substep === 4) {
         // Compare A[i] and A[j]
         highlightedLines.add('line-17');
-        if (array[topFrame.i] <= array[topFrame.j]) {
-          currentStep = `Compare: A[${topFrame.i}] (${array[topFrame.i]}) ≤ A[${topFrame.j}] (${array[topFrame.j]})? Yes`;
+        const leftValue = readArrayValue(topFrame.i)
+        const rightValue = readArrayValue(topFrame.j)
+        if (leftValue === null || rightValue === null) {
+          currentStep = 'Merge indices out of bounds, returning';
+          topFrame.substep = 99;
+        } else if (leftValue <= rightValue) {
+          currentStep = `Compare: A[${topFrame.i}] (${leftValue}) ≤ A[${topFrame.j}] (${rightValue})? Yes`;
           topFrame.substep = 5;
         } else {
-          currentStep = `Compare: A[${topFrame.i}] (${array[topFrame.i]}) ≤ A[${topFrame.j}] (${array[topFrame.j]})? No`;
+          currentStep = `Compare: A[${topFrame.i}] (${leftValue}) ≤ A[${topFrame.j}] (${rightValue})? No`;
           topFrame.substep = 7;
         }
       } else if (topFrame.substep === 5) {
         // S[k] = A[i]
         highlightedLines.add('line-18');
-        const value = array[topFrame.i];
+        const value = readArrayValue(topFrame.i);
+        if (value === null) {
+          currentStep = `Copy skipped: A[${topFrame.i}] is unavailable`;
+          topFrame.substep = 10;
+          return {
+            ...state,
+            array,
+            scratch,
+            callStack,
+            complete,
+            substep,
+            highlightedLines,
+            currentStep,
+            animFrom: null,
+            animTo: null,
+            animValue: null,
+            copiedBackIndices,
+            scratchWritten,
+          };
+        }
         scratch[topFrame.k] = value;
         if (!scratchWritten.includes(topFrame.k)) {
           scratchWritten.push(topFrame.k);
@@ -677,7 +776,26 @@ function performNextStep(state: MergeSortState) {
       } else if (topFrame.substep === 7) {
         // S[k] = A[j]
         highlightedLines.add('line-21');
-        const value = array[topFrame.j];
+        const value = readArrayValue(topFrame.j);
+        if (value === null) {
+          currentStep = `Copy skipped: A[${topFrame.j}] is unavailable`;
+          topFrame.substep = 14;
+          return {
+            ...state,
+            array,
+            scratch,
+            callStack,
+            complete,
+            substep,
+            highlightedLines,
+            currentStep,
+            animFrom: null,
+            animTo: null,
+            animValue: null,
+            copiedBackIndices,
+            scratchWritten,
+          };
+        }
         scratch[topFrame.k] = value;
         if (!scratchWritten.includes(topFrame.k)) {
           scratchWritten.push(topFrame.k);
@@ -723,7 +841,26 @@ function performNextStep(state: MergeSortState) {
       } else if (topFrame.substep === 11) {
         // S[k] = A[i]
         highlightedLines.add('line-25');
-        const value = array[topFrame.i];
+        const value = readArrayValue(topFrame.i);
+        if (value === null) {
+          currentStep = `Copy skipped: A[${topFrame.i}] is unavailable`;
+          topFrame.substep = 14;
+          return {
+            ...state,
+            array,
+            scratch,
+            callStack,
+            complete,
+            substep,
+            highlightedLines,
+            currentStep,
+            animFrom: null,
+            animTo: null,
+            animValue: null,
+            copiedBackIndices,
+            scratchWritten,
+          };
+        }
         scratch[topFrame.k] = value;
         if (!scratchWritten.includes(topFrame.k)) {
           scratchWritten.push(topFrame.k);
@@ -769,7 +906,26 @@ function performNextStep(state: MergeSortState) {
       } else if (topFrame.substep === 15) {
         // S[k] = A[j]
         highlightedLines.add('line-29');
-        const value = array[topFrame.j];
+        const value = readArrayValue(topFrame.j);
+        if (value === null) {
+          currentStep = `Copy skipped: A[${topFrame.j}] is unavailable`;
+          topFrame.substep = 18;
+          return {
+            ...state,
+            array,
+            scratch,
+            callStack,
+            complete,
+            substep,
+            highlightedLines,
+            currentStep,
+            animFrom: null,
+            animTo: null,
+            animValue: null,
+            copiedBackIndices,
+            scratchWritten,
+          };
+        }
         scratch[topFrame.k] = value;
         if (!scratchWritten.includes(topFrame.k)) {
           scratchWritten.push(topFrame.k);
@@ -820,6 +976,25 @@ function performNextStep(state: MergeSortState) {
         // A[m] = S[m]
         highlightedLines.add('line-33');
         const value = scratch[topFrame.m];
+        if (value == null) {
+          currentStep = `Copy back skipped: S[${topFrame.m}] is empty`;
+          topFrame.substep = 99;
+          return {
+            ...state,
+            array,
+            scratch,
+            callStack,
+            complete,
+            substep,
+            highlightedLines,
+            currentStep,
+            animFrom: null,
+            animTo: null,
+            animValue: null,
+            copiedBackIndices,
+            scratchWritten,
+          };
+        }
         const copyIdx = topFrame.m;
         array[topFrame.m] = value;
         copiedBackIndices.push(copyIdx);
@@ -850,7 +1025,9 @@ function performNextStep(state: MergeSortState) {
         }
         if (callStack.length > 1) {
           const parent = callStack[callStack.length - 2];
-          topFrame.returnTo = `${parent.function}(${parent.left}, ${parent.right})`;
+          if (parent) {
+            topFrame.returnTo = `${parent.function}(${parent.left}, ${parent.right})`;
+          }
         } else if (callStack.length === 1) {
           topFrame.returnTo = 'MergeSortHelper';
         }
@@ -891,4 +1068,4 @@ function performNextStep(state: MergeSortState) {
   };
 }
 
-export default MergeSort as AlgorithmModule
+export default MergeSort

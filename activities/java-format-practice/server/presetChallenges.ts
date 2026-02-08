@@ -1,3 +1,5 @@
+import type { JavaFormatDifficulty, JavaFormatTheme } from '../javaFormatPracticeTypes.js'
+
 /**
  * Enhanced Format Challenges with Creative Themes
  * 
@@ -438,39 +440,49 @@ export const formatChallenges = [
   },
 ];
 
+type PresetFormatChallenge = (typeof formatChallenges)[number]
+
 /**
  * Get challenges by theme
- * @param {string} theme - Theme name ('Wanted Poster', 'Fantasy Menu', 'Spy Badge')
- * @returns {Array} - Challenges for that theme
+ * @param {JavaFormatTheme} theme - Theme key
+ * @returns {PresetFormatChallenge[]} Challenges for the selected theme
  */
-export function getChallengesByTheme(theme: string) {
+export function getChallengesByTheme(theme: JavaFormatTheme): PresetFormatChallenge[] {
   return formatChallenges.filter((c) => c.theme === theme);
 }
 
 /**
  * Get challenges by difficulty
- * @param {string} difficulty - 'beginner', 'intermediate', 'advanced'
- * @returns {Array} - Challenges at that difficulty
+ * @param {JavaFormatDifficulty} difficulty - Difficulty key
+ * @returns {PresetFormatChallenge[]} Challenges at the selected difficulty
  */
-export function getChallengesByDifficulty(difficulty: string) {
+export function getChallengesByDifficulty(difficulty: JavaFormatDifficulty): PresetFormatChallenge[] {
   return formatChallenges.filter((c) => c.difficulty === difficulty);
 }
 
 /**
  * Get available themes
- * @returns {Array} - List of unique themes
+ * @returns {Array<PresetFormatChallenge['theme']>} List of unique challenge theme keys
  */
-export function getThemes() {
+export function getThemes(): Array<PresetFormatChallenge['theme']> {
   return [...new Set(formatChallenges.map((c) => c.theme))];
 }
 
 /**
  * Get random challenge
- * @param {string} theme - Optional theme filter
- * @param {string} difficulty - Optional difficulty filter
- * @returns {object} - Random challenge matching filters
+ * @param {JavaFormatTheme | null} theme - Optional theme filter
+ * @param {JavaFormatDifficulty | null} difficulty - Optional difficulty filter
+ * @returns {PresetFormatChallenge} Random challenge matching filters
  */
-export function getRandomChallenge(theme: string | null = null, difficulty: string | null = null) {
+export function getRandomChallenge(
+  theme: JavaFormatTheme | null = null,
+  difficulty: JavaFormatDifficulty | null = null,
+): PresetFormatChallenge {
+  const fallbackChallenge = formatChallenges[0];
+  if (!fallbackChallenge) {
+    throw new Error('formatChallenges is empty')
+  }
+
   let challenges = formatChallenges;
 
   if (theme) {
@@ -482,10 +494,11 @@ export function getRandomChallenge(theme: string | null = null, difficulty: stri
   }
 
   if (challenges.length === 0) {
-    return formatChallenges[0];
+    return fallbackChallenge;
   }
 
-  return challenges[Math.floor(Math.random() * challenges.length)];
+  const randomChallenge = challenges[Math.floor(Math.random() * challenges.length)];
+  return randomChallenge ?? fallbackChallenge;
 }
 
 export default formatChallenges;
