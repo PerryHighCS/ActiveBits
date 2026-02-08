@@ -177,7 +177,8 @@ function validateExpressionSyntax(expr: string): void {
   }
 
   // Disallow array/object access
-  if (/[\[\{]/.test(expr)) {
+  // eslint-disable-next-line no-useless-escape
+  if (/[\[{]/.test(expr)) {
     throw new Error('Array and object literals are not allowed');
   }
 

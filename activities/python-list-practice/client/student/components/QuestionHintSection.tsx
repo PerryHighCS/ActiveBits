@@ -26,7 +26,7 @@ export default function QuestionHintSection({
   onShowAnswer,
   hintDefinition,
   // @ts-expect-error - answerDetails kept for API stability
-  answerDetails,
+  _answerDetails,
   showHintBody = true,
 }: QuestionHintSectionProps): ReactNode {
   if (!challenge) return null;

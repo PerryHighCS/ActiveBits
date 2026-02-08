@@ -114,7 +114,7 @@ export function registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl }
             }
           }
 
-          let ttlRemainingMs = 0
+          let ttlRemainingMs: number
           let expiresAt: string | null = null
 
           if (sessions.valkeyStore) {

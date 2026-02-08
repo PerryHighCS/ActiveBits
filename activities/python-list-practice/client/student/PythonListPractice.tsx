@@ -173,7 +173,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   }, [studentId, sessionId])
 
   const submitName = useCallback(
-    (e: React.FormEvent<HTMLFormElement>) => {
+    (e: React.SyntheticEvent<HTMLFormElement>) => {
       e.preventDefault()
       const sanitized = sanitizeName(studentName)
       if (!sanitized) {

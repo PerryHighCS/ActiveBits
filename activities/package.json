@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "sh -c 'set -e; files=$(find . -path \"./node_modules\" -prune -o \\( -name \"*.test.js\" -o -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No activities tests found\"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files'",
+    "lint": "eslint .",
+    "test": "npm run lint && sh -c 'set -e; files=$(find . -path \"./node_modules\" -prune -o \\( -name \"*.test.js\" -o -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No activities tests found\"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -12,9 +13,15 @@
     "react-zxing": "^2.1.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.2.1",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "eslint": "^10.0.0",
+    "eslint-plugin-jsdoc": "^62.5.4",
+    "globals": "^17.3.0",
     "typescript": "^5.9.3"
   }
 }

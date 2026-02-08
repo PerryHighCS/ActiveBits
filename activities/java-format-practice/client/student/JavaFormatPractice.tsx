@@ -556,7 +556,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
               console.error('Format evaluation error:', err, 'User expressions:', userArgExprs, 'Available vars:', valueMap);
             }
           }
-        } catch (err) {
+        } catch {
           syntaxError = 'Syntax error in format string.';
           // This is a format string error (partIdx 0)
           if (lineErrorsMeta[idx] === undefined) {
@@ -594,7 +594,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
               expectedOutputText = expectedOutput.text;
               expectedMask = expectedOutput.mask;
             }
-          } catch (err) {
+          } catch {
             // If we can't compute expected, just leave it empty
           }
         }

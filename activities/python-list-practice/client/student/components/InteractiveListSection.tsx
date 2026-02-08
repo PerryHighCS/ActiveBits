@@ -25,7 +25,7 @@ export default function InteractiveListSection({
   interactiveList,
   isListBuildVariant,
   // @ts-expect-error - supportsSequenceSelection kept for API stability
-  supportsSequenceSelection,
+  _supportsSequenceSelection,
   selectedRange,
   selectedSequence,
   selectedIndex,
