@@ -1,6 +1,6 @@
 export interface Challenge {
-  type: 'list' | 'other'
-  expected: string | number
+  type?: 'list' | 'other' | string
+  expected?: string | number
 }
 
 export function normalizeListAnswer(text: string): string {
@@ -17,9 +17,9 @@ export function normalizeListAnswer(text: string): string {
 }
 
 export function normalizeExpected(challenge: Challenge | null | undefined): string {
-  if (!challenge) return ''
+  if (!challenge || challenge.expected === undefined) return ''
   if (challenge.type === 'list') {
     return normalizeListAnswer(String(challenge.expected))
   }
-  return String(challenge.expected || '').trim()
+  return String(challenge.expected).trim()
 }

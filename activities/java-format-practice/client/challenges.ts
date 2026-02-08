@@ -95,7 +95,7 @@ function formatWithMask(formatStr: string, args: unknown[] = []): { text: string
       const precision = precisionMatch?.[1] ? Number.parseInt(precisionMatch[1], 10) : undefined
 
       const value = args[argIndex++]
-      let formatted = ''
+      let formatted: string
 
       if (type === 's') {
         formatted = String(value ?? '')

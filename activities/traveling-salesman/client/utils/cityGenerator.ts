@@ -83,7 +83,7 @@ export function generateCities(count: number, width = 700, height = 500, seed = 
   for (let i = 0; i < count; i++) {
     let x = 0
     let y = 0
-    let valid = false
+    let valid: boolean
     let attempts = 0
     const maxAttempts = 100
     let minDistance = baseMinDistance

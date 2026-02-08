@@ -492,12 +492,13 @@ function CallStackVisualization({ state }: { state: MergeSortState }) {
 }
 
 function performNextStep(state: MergeSortState) {
-  let { array, scratch, callStack, complete, substep, currentStep, copiedBackIndices, scratchWritten } = state;
+  const { array } = state;
+  let { scratch, callStack, complete, substep, currentStep, copiedBackIndices, scratchWritten } = state;
   scratch = [...scratch];
   callStack = [...callStack];
   copiedBackIndices = [...(copiedBackIndices || [])];
   scratchWritten = [...(scratchWritten || [])];
-  let highlightedLines = new Set<string>();
+  const highlightedLines = new Set<string>();
   const readArrayValue = (index: number): number | null => {
     const value = array[index]
     return typeof value === 'number' ? value : null

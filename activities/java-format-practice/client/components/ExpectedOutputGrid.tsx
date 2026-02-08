@@ -66,7 +66,7 @@ export default function ExpectedOutputGrid({
   // Build the expected output for each line by computing the format calls
   // If preComputedOutput is provided, use that instead of re-computing
   let preCompLines: string[] = [];
-  let preCompMasks: string[] = [];
+  const preCompMasks: string[] = [];
   if (preComputedOutput) {
     // Split output by newlines
     const allLines = preComputedOutput.split('\n');

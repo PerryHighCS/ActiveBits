@@ -77,7 +77,8 @@ function getLinearSearchState(rawState: unknown): LinearSearchState {
 }
 
 function performNextStep(state: LinearSearchState): LinearSearchState {
-  let { array, target, i, found, foundIndex, substep } = state
+  const { array, target } = state
+  let { i, found, foundIndex, substep } = state
   const highlightedLines = new Set<string>()
   let currentStep: string | null = null
 

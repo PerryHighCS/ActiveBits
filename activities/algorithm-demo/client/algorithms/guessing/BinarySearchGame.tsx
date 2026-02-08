@@ -95,7 +95,8 @@ function parseGuessInput(inputValue: string): number | null {
 }
 
 function handleGuess(state: BinarySearchGameState, guess: number): BinarySearchGameState {
-  let { secret, guesses, won } = state
+  const { secret } = state
+  let { guesses, won } = state
   let hint: GameHint
   const highlightedLines = new Set<string>()
   let currentStep: string

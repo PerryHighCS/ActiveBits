@@ -148,7 +148,7 @@ export default function AnswerSection({
       }
 
       // Try direct match first (for intermediate/advanced where quotes are in answer)
-      let idx = skeleton.indexOf(answer);
+      const idx = skeleton.indexOf(answer);
       if (idx !== -1) {
         const rawAfter = skeleton.slice(idx + answer.length);
         return {

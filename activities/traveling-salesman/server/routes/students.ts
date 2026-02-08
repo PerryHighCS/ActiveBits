@@ -30,7 +30,7 @@ export default function registerStudentRoutes(
       ;(async () => {
         const session = asTravelingSalesmanSession(await sessions.get(client.sessionId || ''))
         if (session) {
-          let student = studentId
+          const student = studentId
             ? session.data.students.find((entry) => entry.id === studentId)
             : session.data.students.find((entry) => entry.name === studentName)
 

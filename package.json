@@ -12,10 +12,11 @@
         "deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
         "start": "npm start --prefix server",
         "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\"",
+        "lint": "npm --workspace client run lint && npm --workspace server run lint && npm --workspace activities run lint",
         "verify:deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
         "verify:server": "node scripts/verify-server.js",
         "typecheck": "npm run typecheck --workspaces --if-present",
-        "test": "npm run typecheck && npm --workspace client test && npm --workspace server test && npm --workspace activities test && npm run verify:deploy && npm run verify:server"
+        "test": "npm run typecheck && npm run lint && npm --workspace client test && npm --workspace server test && npm --workspace activities test && npm run verify:deploy && npm run verify:server"
     },
     "keywords": [],
     "author": "",

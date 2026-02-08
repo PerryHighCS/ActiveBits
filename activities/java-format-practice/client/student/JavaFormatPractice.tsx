@@ -412,7 +412,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       const isCorrect = submitted === expected;
 
       let detailedMessage = '';
-      let wrongParts: string[] = [];
+      const wrongParts: string[] = [];
       if (!isCorrect && userParts.length === expectedParts.length) {
         userParts.forEach((_part, idx) => {
           const meta = inputsMeta[idx];
@@ -729,7 +729,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       if (!currentChallenge || !result.mismatchInfo) return false
       // Map mismatch line number to gutter line number
       const gutterLineNum = (currentChallenge.startingLine || 1) + (currentChallenge.variables?.length || 0) + ((result.mismatchInfo.lineNumber - 1) * 2) + 1;
-      const rawVarName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [, `variable ${result.mismatchInfo.lineNumber}`])[1] ?? `variable ${result.mismatchInfo.lineNumber}`;
+      const rawVarName = (currentChallenge?.formatCalls?.[result.mismatchInfo.lineNumber - 1]?.skeleton?.match(/String\s+(\w+)\s*=/) || [undefined, `variable ${result.mismatchInfo.lineNumber}`])[1] ?? `variable ${result.mismatchInfo.lineNumber}`;
       const varName = escapeHtml(rawVarName);
       setFeedback({
         isCorrect: false,

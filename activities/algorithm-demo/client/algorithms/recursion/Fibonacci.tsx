@@ -115,7 +115,9 @@ function buildOverlays(callStack: FibonacciFrame[]): Record<string, { value: unk
 }
 
 function performNextStep(state: FibonacciState): FibonacciState {
-  let { n, callStack, complete, result, substep } = state
+  const { n } = state
+  let { complete, result } = state
+  let { callStack, substep } = state
   const highlightedLines = new Set<string>()
   let currentStep: string | null = null
 

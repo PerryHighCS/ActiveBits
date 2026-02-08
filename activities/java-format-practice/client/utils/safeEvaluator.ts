@@ -167,7 +167,7 @@ export function safeEvaluate(expression: string, valueMap: Record<string, unknow
  */
 function validateExpressionSyntax(expr: string): void {
   // First, remove string literals so they don't interfere with pattern matching
-  let exprToCheck = expr.replace(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/g, '""');
+  const exprToCheck = expr.replace(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'/g, '""');
   
   // Disallow any function calls except allowed Math functions
   const allowedMathFunctions = /Math\.(trunc|round|floor|ceil)\(/g;

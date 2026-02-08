@@ -119,7 +119,8 @@ function getBinarySearchState(rawState: unknown): BinarySearchState {
 }
 
 function performNextStep(state: BinarySearchState): BinarySearchState {
-  let { array, target, left, right, mid, found, foundIndex, history, substep } = state
+  const { array, target, history } = state
+  let { left, right, mid, found, foundIndex, substep } = state
   const highlightedLines = new Set<string>()
   let currentStep: string | null = null
 

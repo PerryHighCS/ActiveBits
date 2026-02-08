@@ -50,13 +50,41 @@ export const QUESTION_LABELS: Record<QuestionOperation | 'all', string> = {
   all: 'All question types',
 }
 
-interface Challenge extends Record<string, unknown> {
+export interface RangeLoopInfo {
+  type: 'range-len' | 'for-range' | string
+  start?: number
+  stop?: number
+  step?: number
+  prints?: 'value' | 'index' | 'variable' | string
+}
+
+export interface DoubleLoopInfo {
+  loops: RangeLoopInfo[]
+}
+
+export interface RangeLenInfo {
+  start: number
+  stop: number
+  step: number
+}
+
+export interface Challenge extends Record<string, unknown> {
   op: QuestionOperation
   prompt: string
   question: string
-  expected: string
-  type?: string
+  expected: string | number
+  type?: 'list' | 'value' | 'index' | 'other' | string
   list?: unknown[]
+  choices?: unknown[]
+  mutated?: unknown[]
+  variant?: string
+  start?: number
+  stop?: number
+  step?: number
+  rangeLenInfo?: RangeLenInfo
+  doubleLoopInfo?: DoubleLoopInfo
+  filterDescription?: string
+  needsDuplicate?: boolean
 }
 
 const HINT_DEFINITIONS: Record<QuestionOperation, string> = {
@@ -86,21 +114,34 @@ export function getHintDefinition(challenge?: Challenge | null): string {
   )
 }
 
+const hasRangeInfo = (loop: RangeLoopInfo): loop is RangeLoopInfo & {
+  start: number
+  stop: number
+  step: number
+} =>
+  typeof loop.start === 'number' &&
+  typeof loop.stop === 'number' &&
+  typeof loop.step === 'number'
+
 export function buildAnswerDetails(challenge?: Challenge | null): string[] {
   if (!challenge) return []
   const details: string[] = []
-  if ((challenge as any).filterDescription) {
-    details.push((challenge as any).filterDescription)
+  if (challenge.filterDescription) {
+    details.push(challenge.filterDescription)
   }
-  if ((challenge as any).doubleLoopInfo) {
-    ;(challenge as any).doubleLoopInfo.loops.forEach((loop: any, idx: number) => {
-      const label =
-        (challenge as any).doubleLoopInfo.loops.length > 1
-          ? `Loop ${idx + 1}`
-          : 'This loop'
+  if (challenge.doubleLoopInfo?.loops?.length) {
+    challenge.doubleLoopInfo.loops.forEach((loop, idx) => {
+      const label = challenge.doubleLoopInfo && challenge.doubleLoopInfo.loops.length > 1
+        ? `Loop ${idx + 1}`
+        : 'This loop'
+      if (!hasRangeInfo(loop)) return
       const detail =
         loop.type === 'range-len'
-          ? formatRangeLenDetail(label, loop)
+          ? formatRangeLenDetail(label, {
+              start: loop.start,
+              stop: loop.stop,
+              step: loop.step,
+            })
           : formatForRangeDetail(label, loop.start, loop.stop, loop.step)
       const printer =
         loop.prints === 'value'
@@ -112,28 +153,30 @@ export function buildAnswerDetails(challenge?: Challenge | null): string[] {
     })
   } else if (
     challenge.op === 'for-range' &&
-    typeof (challenge as any).start === 'number'
+    typeof challenge.start === 'number' &&
+    typeof challenge.stop === 'number' &&
+    typeof challenge.step === 'number'
   ) {
     details.push(
       formatForRangeDetail(
         'This loop',
-        (challenge as any).start,
-        (challenge as any).stop,
-        (challenge as any).step,
+        challenge.start,
+        challenge.stop,
+        challenge.step,
       ),
     )
-  } else if ((challenge as any).rangeLenInfo) {
-    details.push(
-      formatRangeLenDetail('This loop', (challenge as any).rangeLenInfo),
-    )
+  } else if (challenge.rangeLenInfo) {
+    details.push(formatRangeLenDetail('This loop', challenge.rangeLenInfo))
   }
-  if ((challenge as any).needsDuplicate) {
+  if (challenge.needsDuplicate) {
     details.push(
       'remove(value) only deletes the first matching value, so later duplicates stay in the list.',
     )
   }
   return details
 }
+
+type ChallengeGenerator = (baseList: unknown[], listName: string, useWords: boolean) => Challenge
 
 function generateChallenge(
   allowedTypesSet: Set<string> = new Set(['all']),
@@ -145,23 +188,23 @@ function generateChallenge(
   const availableOps = typeSet.has('all')
     ? OPERATIONS
     : OPERATIONS.filter((operation) => typeSet.has(operation))
-  const opPool: string[] = availableOps.length > 0 ? [...availableOps] : [...OPERATIONS]
+  const opPool: QuestionOperation[] = availableOps.length > 0 ? [...availableOps] : [...OPERATIONS]
   const op = randomItem(opPool)
 
-  const opMap: Record<QuestionOperation, (baseList: unknown[], listName: string, useWords: boolean) => Challenge> = {
-    'index-get': indexGet as any,
-    'index-set': indexSet as any,
-    len: lenOp as any,
-    append: appendOp as any,
-    remove: removeOp as any,
-    insert: insertOp as any,
-    pop: popOp as any,
-    'for-range': forRangeOp as any,
-    'range-len': rangeLenOp as any,
-    'for-each': forEachOp as any,
+  const opMap: Record<QuestionOperation, ChallengeGenerator> = {
+    'index-get': indexGet as ChallengeGenerator,
+    'index-set': indexSet as ChallengeGenerator,
+    len: lenOp as ChallengeGenerator,
+    append: appendOp as ChallengeGenerator,
+    remove: removeOp as ChallengeGenerator,
+    insert: insertOp as ChallengeGenerator,
+    pop: popOp as ChallengeGenerator,
+    'for-range': forRangeOp as ChallengeGenerator,
+    'range-len': rangeLenOp as ChallengeGenerator,
+    'for-each': forEachOp as ChallengeGenerator,
   }
 
-  const generator = opMap[op as QuestionOperation] || (forEachOp as any)
+  const generator = opMap[op] ?? opMap['for-each']
   return generator(baseList, listName, useWords)
 }
 

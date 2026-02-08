@@ -14,6 +14,8 @@ import {
   getHintDefinition,
   buildAnswerDetails,
   sanitizeName,
+  type Challenge,
+  type QuestionOperation,
 } from './challengeGenerator.js'
 import { normalizeListAnswer, normalizeExpected } from './utils/componentUtils.js'
 import usePersistentStats from './hooks/usePersistentStats.js'
@@ -33,6 +35,33 @@ interface StudentProps {
   sessionData: SessionData
 }
 
+type AllowedType = QuestionOperation | 'all'
+
+const isAllowedType = (value: string): value is AllowedType =>
+  value === 'all' || (OPERATIONS as readonly string[]).includes(value)
+
+const toAllowedTypeSet = (types: string[]): Set<AllowedType> => {
+  if (types.includes('all')) {
+    return new Set<AllowedType>(['all'])
+  }
+  const nextSet = new Set<AllowedType>()
+  types.forEach((type) => {
+    if (isAllowedType(type) && type !== 'all') {
+      nextSet.add(type)
+    }
+  })
+  if (nextSet.size === 0) {
+    nextSet.add('all')
+  }
+  return nextSet
+}
+
+const isListValue = (value: unknown): value is string | number =>
+  typeof value === 'string' || typeof value === 'number'
+
+const toListValues = (values: unknown[] | undefined): (string | number)[] =>
+  Array.isArray(values) ? values.filter(isListValue) : []
+
 const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   const [studentName, setStudentName] = useState('')
   const [submittedName, setSubmittedName] = useState<string | undefined>(undefined)
@@ -40,8 +69,8 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   const attachSessionEndedHandler = useSessionEndedHandler()
   const sessionId = sessionData?.sessionId
   const isSolo = !sessionId || sessionId.startsWith('solo-')
-  const [allowedTypes, setAllowedTypes] = useState(() => new Set(['all']))
-  const [challenge, setChallenge] = useState<Record<string, unknown> | null>(null)
+  const [allowedTypes, setAllowedTypes] = useState<Set<AllowedType>>(() => new Set(['all']))
+  const [challenge, setChallenge] = useState<Challenge | null>(null)
   const [answer, setAnswer] = useState('')
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; message: string } | null>(null)
   const [showNext, setShowNext] = useState(false)
@@ -55,7 +84,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   const [error, setError] = useState<string | null>(null)
   const nameRef = useRef<HTMLInputElement | null>(null)
   const answerInputRef = useRef<HTMLInputElement | null>(null)
-  const [insertSelections, setInsertSelections] = useState<unknown[]>([])
+  const [insertSelections, setInsertSelections] = useState<string[]>([])
   const [hintStage, setHintStage] = useState<'none' | 'definition' | 'answer'>('none')
 
   const allowedTypeList = useMemo(() => {
@@ -78,9 +107,9 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
 
   const applySelectedTypes = useCallback((types: string[]) => {
     const normalized = Array.isArray(types) && types.length > 0 ? types : ['all']
-    const nextSet = new Set(normalized)
+    const nextSet = toAllowedTypeSet(normalized)
     setAllowedTypes(nextSet)
-    setChallenge(createChallengeForTypes(nextSet) as Record<string, unknown>)
+    setChallenge(createChallengeForTypes(nextSet))
     setAnswer('')
     setFeedback(null)
     setShowNext(false)
@@ -88,6 +117,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
 
   const handleSoloToggleType = useCallback(
     (typeId: string) => {
+      if (!isAllowedType(typeId)) return
       const next = new Set(allowedTypes)
       if (typeId === 'all') {
         next.clear()
@@ -196,10 +226,11 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
       try {
         const msg = JSON.parse(evt.data) as WebSocketMessage
         if (msg.type === 'questionTypesUpdate') {
-          const types = Array.isArray((msg.payload as Record<string, unknown>)?.selectedQuestionTypes)
-            ? ((msg.payload as Record<string, unknown>)?.selectedQuestionTypes as string[])
+          const payload = msg.payload as { selectedQuestionTypes?: unknown } | undefined
+          const types = Array.isArray(payload?.selectedQuestionTypes)
+            ? payload.selectedQuestionTypes
             : ['all']
-          applySelectedTypes(types)
+          applySelectedTypes(types as string[])
         }
       } catch (err) {
         console.error('WS message error', err)
@@ -245,10 +276,10 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
 
   const isListBuildVariant = challenge?.variant === 'insert-final' || challenge?.variant === 'list-final'
 
-  const normalizedExpected = useMemo(() => normalizeExpected(challenge as any), [challenge])
+  const normalizedExpected = useMemo(() => normalizeExpected(challenge), [challenge])
 
-  const hintDefinition = useMemo(() => getHintDefinition(challenge as any), [challenge])
-  const answerDetails = useMemo(() => buildAnswerDetails(challenge as any), [challenge])
+  const hintDefinition = useMemo(() => getHintDefinition(challenge), [challenge])
+  const answerDetails = useMemo(() => buildAnswerDetails(challenge), [challenge])
 
   const handleShowDefinitionHint = useCallback(() => {
     if (hintStage === 'none') {
@@ -299,29 +330,31 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
     setShowNext(false)
   }, [allowedTypes])
 
-  const interactiveList = useMemo(() => {
-    if ((challenge as any)?.choices) return (challenge as any).choices
+  const interactiveList = useMemo<(string | number)[]>(() => {
+    if (challenge?.choices) return toListValues(challenge.choices)
     if (!challenge) return []
-    if ((challenge as any)?.op === 'index-set' && Array.isArray((challenge as any)?.mutated)) {
-      return (challenge as any).mutated
+    if (challenge.op === 'index-set' && Array.isArray(challenge.mutated)) {
+      return toListValues(challenge.mutated)
     }
-    if (Array.isArray((challenge as any)?.list)) {
-      return (challenge as any).list
+    if (Array.isArray(challenge.list)) {
+      return toListValues(challenge.list)
     }
-    if ((challenge as any)?.op === 'for-range') {
-      const total = Math.max(0, (((challenge as any)?.stop as number) ?? 0) - (((challenge as any)?.start as number) ?? 0))
-      return Array.from({ length: total }, (_, i) => (((challenge as any)?.start as number) ?? 0) + i)
+    if (challenge.op === 'for-range') {
+      const start = typeof challenge.start === 'number' ? challenge.start : 0
+      const stop = typeof challenge.stop === 'number' ? challenge.stop : 0
+      const total = Math.max(0, stop - start)
+      return Array.from({ length: total }, (_, i) => start + i)
     }
     return []
   }, [challenge])
 
   useEffect(() => {
     if (isListBuildVariant) {
-      setAnswer(insertSelections.length ? `[${(insertSelections as string[]).join(', ')}]` : '')
+      setAnswer(insertSelections.length ? `[${insertSelections.join(', ')}]` : '')
     }
   }, [insertSelections, isListBuildVariant])
 
-  const supportsSequenceSelection = !!(challenge && ['range-len', 'for-each'].includes(challenge.op as string))
+  const supportsSequenceSelection = !!(challenge && ['range-len', 'for-each'].includes(challenge.op))
 
   const getValueForIndex = useCallback(
     (idx: number) => {
@@ -329,13 +362,13 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
       if (
         Array.isArray(challenge.choices) &&
         (challenge.op === 'insert' ||
-          ['list-final', 'value-selection', 'index-value', 'number-choice'].includes(challenge.variant as string) ||
+          ['list-final', 'value-selection', 'index-value', 'number-choice'].includes(challenge.variant ?? '') ||
           challenge.op === 'for-range')
       ) {
-        return (challenge.choices as unknown[])[idx]
+        return challenge.choices[idx]
       }
       if (challenge.op === 'index-set' && Array.isArray(challenge.mutated)) {
-        return (challenge.mutated as unknown[])[idx]
+        return challenge.mutated[idx]
       }
       if (!Array.isArray(interactiveList) || idx < 0 || idx >= interactiveList.length) {
         return undefined
@@ -356,8 +389,8 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
     setAnswer,
     setInsertSelections,
     getValueForIndex,
-    challengeOp: ((challenge as any)?.op as any) || null,
-  } as any)
+    challengeOp: challenge?.op ?? null,
+  })
 
   const {
     selectedIndex,
@@ -409,7 +442,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
           />
 
           <QuestionPanel
-            challenge={challenge as any}
+            challenge={challenge}
             hintStage={hintStage}
             feedback={feedback}
             hintDefinition={hintDefinition}

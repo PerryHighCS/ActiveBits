@@ -232,8 +232,8 @@ function generateIndexOfChallenge(): IndexOfChallenge {
   }
 
   if (Math.random() < 0.6) {
-    let searchTerm = ''
-    let expectedAnswer = -1
+    let searchTerm: string
+    let expectedAnswer: number
 
     if (Math.random() < 0.7) {
       const words = text.split(' ').filter((word) => word.length > 0)
@@ -258,13 +258,14 @@ function generateIndexOfChallenge(): IndexOfChallenge {
     }
   }
 
-  let searchTerm = ''
-  let startIndex = 0
-  let expectedAnswer = -1
+  let searchTerm: string
+  let startIndex: number
+  let expectedAnswer: number
 
   if (Math.random() < 0.7) {
     const chars = [...new Set(text.split(''))].filter((char) => char !== ' ')
     searchTerm = chars.length ? pickRandom(chars) : text.charAt(0)
+    startIndex = 0
 
     const occurrences: number[] = []
     for (let index = 0; index < text.length; index += 1) {
@@ -279,6 +280,8 @@ function generateIndexOfChallenge(): IndexOfChallenge {
       expectedAnswer = text.indexOf(searchTerm, startIndex)
     } else if (occurrences.length > 0) {
       startIndex = (occurrences[occurrences.length - 1] ?? 0) + 1
+      expectedAnswer = text.indexOf(searchTerm, startIndex)
+    } else {
       expectedAnswer = text.indexOf(searchTerm, startIndex)
     }
   } else {
