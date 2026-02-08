@@ -3,7 +3,7 @@
  * Focuses on splitArgumentsRespectingQuotes function with format specifiers
  */
 
-import { splitArgumentsRespectingQuotes, escapeHtml, highlightDiff } from './stringUtils';
+import { splitArgumentsRespectingQuotes, escapeHtml, highlightDiff } from './stringUtils.js';
 
 // Test cases
 const tests = [

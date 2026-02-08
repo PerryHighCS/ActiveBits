@@ -2,7 +2,7 @@
  * Test file for formatUtils.js normalization functions
  */
 
-import { normalizeOutput, normalizeMask } from './formatUtils';
+import { normalizeOutput, normalizeMask } from './formatUtils.js';
 
 console.log('=== Testing normalizeOutput ===');
 const outputTests = [
