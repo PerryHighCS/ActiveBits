@@ -1,6 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cleanExpiredSessions, getPersistentQuerySuffix, getSoloActivities, isJoinSessionId, readCachedSession } from './sessionRouterUtils'
+import {
+  buildPersistentSessionApiUrl,
+  cleanExpiredSessions,
+  getPersistentQuerySuffix,
+  getSoloActivities,
+  isJoinSessionId,
+  readCachedSession,
+} from './sessionRouterUtils'
 
 interface MockStorage {
   length: number
@@ -78,6 +85,19 @@ test('readCachedSession returns valid entries and clears invalid/expired values'
 test('getPersistentQuerySuffix preserves query params for persistent-session fetches', () => {
   assert.equal(getPersistentQuerySuffix('?algorithm=merge-sort'), '&algorithm=merge-sort')
   assert.equal(getPersistentQuerySuffix(''), '')
+})
+
+test('buildPersistentSessionApiUrl encodes hash and activityName and preserves search params', () => {
+  const url = buildPersistentSessionApiUrl('abc/123?x y', 'merge&sort', '?algorithm=quick sort&debug=true')
+  assert.equal(
+    url,
+    '/api/persistent-session/abc%2F123%3Fx%20y?algorithm=quick+sort&debug=true&activityName=merge%26sort',
+  )
+})
+
+test('buildPersistentSessionApiUrl replaces existing activityName in search', () => {
+  const url = buildPersistentSessionApiUrl('abc123', 'new-name', '?activityName=old&mode=solo')
+  assert.equal(url, '/api/persistent-session/abc123?activityName=new-name&mode=solo')
 })
 
 test('isJoinSessionId requires a full non-zero hex string', () => {

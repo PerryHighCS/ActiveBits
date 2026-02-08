@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildPersistentTeacherCodeApiUrl,
   buildPersistentSessionWsUrl,
   getWaiterMessage,
   isWaitingRoomMessage,
@@ -33,6 +34,28 @@ test('buildPersistentSessionWsUrl switches protocol and includes params', () => 
   assert.equal(
     secureUrl,
     'wss://bits.example/ws/persistent-session?hash=xyz&activityName=raffle',
+  )
+})
+
+test('buildPersistentSessionWsUrl encodes query params safely', () => {
+  const wsUrl = buildPersistentSessionWsUrl(
+    { protocol: 'https:', host: 'bits.example', search: '', href: 'https://bits.example' },
+    'abc&123?x y',
+    'gallery walk/qa',
+  )
+
+  assert.equal(
+    wsUrl,
+    'wss://bits.example/ws/persistent-session?hash=abc%26123%3Fx+y&activityName=gallery+walk%2Fqa',
+  )
+})
+
+test('buildPersistentTeacherCodeApiUrl encodes hash path segment and query params', () => {
+  const apiUrl = buildPersistentTeacherCodeApiUrl('abc/123?x y', 'gallery walk/qa&v2')
+
+  assert.equal(
+    apiUrl,
+    '/api/persistent-session/abc%2F123%3Fx%20y/teacher-code?activityName=gallery+walk%2Fqa%26v2',
   )
 })
 

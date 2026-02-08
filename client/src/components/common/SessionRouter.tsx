@@ -5,9 +5,9 @@ import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
 import { getActivity, activities } from '@src/activities'
 import {
+  buildPersistentSessionApiUrl,
   CACHE_TTL,
   cleanExpiredSessions,
-  getPersistentQuerySuffix,
   getSoloActivities,
   isJoinSessionId,
   readCachedSession,
@@ -145,10 +145,8 @@ const SessionRouter = () => {
     setIsLoadingPersistent(true)
     setPersistentSessionInfo(null)
 
-    const search = getWindowSearch()
-    const querySuffix = getPersistentQuerySuffix(search)
-
-    fetch(`/api/persistent-session/${hash}?activityName=${activityName}${querySuffix}`, { credentials: 'include' })
+    const url = buildPersistentSessionApiUrl(hash, activityName, getWindowSearch())
+    fetch(url, { credentials: 'include' })
       .then((response) => {
         if (!response.ok) throw new Error('Persistent session not found')
         return response.json() as Promise<PersistentSessionInfo>
@@ -171,8 +169,8 @@ const SessionRouter = () => {
 
     const pollStatus = async () => {
       try {
-        const querySuffix = getPersistentQuerySuffix(getWindowSearch())
-        const response = await fetch(`/api/persistent-session/${hash}?activityName=${activityName}${querySuffix}`, {
+        const url = buildPersistentSessionApiUrl(hash, activityName, getWindowSearch())
+        const response = await fetch(url, {
           credentials: 'include',
         })
 

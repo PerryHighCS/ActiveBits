@@ -1,8 +1,6 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { twMerge } from 'tailwind-merge'
-import { resolveButtonVariantClass } from './buttonStyles'
-
-type ButtonVariant = 'default' | 'outline' | 'text'
+import { resolveButtonVariantClass, type ButtonVariant } from './buttonStyles'
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children?: ReactNode

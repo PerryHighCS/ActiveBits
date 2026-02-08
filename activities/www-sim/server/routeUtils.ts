@@ -15,6 +15,12 @@ function pickRandom<T>(values: T[], random: RandomFn): T {
   return values[Math.floor(random() * values.length)] as T
 }
 
+function resolveNamePools(passage: PassageDefinition | undefined): { adjectives: string[]; nouns: string[] } {
+  const adjectives = passage?.adjectives?.length ? passage.adjectives : defaultAdjectives
+  const nouns = passage?.nouns?.length ? passage.nouns : defaultNouns
+  return { adjectives, nouns }
+}
+
 export function verifyHostname(hostname: string): boolean {
   const hostnameRegex = /^(?=.{1,63}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
   return hostnameRegex.test(hostname.trim().toLowerCase())
@@ -31,8 +37,7 @@ export function dividePassage(passage: string, parts = 5): string[] {
 }
 
 export function getRandomName(passage: PassageDefinition | undefined, random: RandomFn = Math.random): string {
-  const adjectives = passage?.adjectives?.length ? passage.adjectives : defaultAdjectives
-  const nouns = passage?.nouns?.length ? passage.nouns : defaultNouns
+  const { adjectives, nouns } = resolveNamePools(passage)
   return `${pickRandom(adjectives, random)}-${pickRandom(nouns, random)}`
 }
 
@@ -41,11 +46,30 @@ export function getRandomUnusedName(
   passage: PassageDefinition | undefined,
   random: RandomFn = Math.random,
 ): string {
-  let generated = getRandomName(passage, random)
-  while (used.includes(generated)) {
-    generated = getRandomName(passage, random)
+  const usedSet = new Set(used)
+  const { adjectives, nouns } = resolveNamePools(passage)
+  const collisionThreshold = Math.max(adjectives.length * nouns.length * 2, 16)
+
+  for (let attempt = 0; attempt < collisionThreshold; attempt += 1) {
+    const generated = `${pickRandom(adjectives, random)}-${pickRandom(nouns, random)}`
+    if (!usedSet.has(generated)) {
+      return generated
+    }
   }
-  return generated
+
+  const fallbackRoot = `${adjectives[0] ?? defaultAdjectives[0]}-${nouns[0] ?? defaultNouns[0]}`
+  if (!usedSet.has(fallbackRoot)) {
+    return fallbackRoot
+  }
+
+  let suffix = 1
+  let fallback = `${fallbackRoot}-${suffix}`
+  while (usedSet.has(fallback)) {
+    suffix += 1
+    fallback = `${fallbackRoot}-${suffix}`
+  }
+
+  return fallback
 }
 
 export function createHash(fragment: string): string {

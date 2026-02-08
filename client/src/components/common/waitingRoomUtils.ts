@@ -26,7 +26,18 @@ export function getWaiterMessage(waiterCount: number): string {
 
 export function buildPersistentSessionWsUrl(location: LocationLike, hash: string, activityName: string): string {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${location.host}/ws/persistent-session?hash=${hash}&activityName=${activityName}`
+  const query = new URLSearchParams({
+    hash,
+    activityName,
+  })
+  return `${protocol}//${location.host}/ws/persistent-session?${query.toString()}`
+}
+
+export function buildPersistentTeacherCodeApiUrl(hash: string, activityName: string): string {
+  const query = new URLSearchParams({
+    activityName,
+  })
+  return `/api/persistent-session/${encodeURIComponent(hash)}/teacher-code?${query.toString()}`
 }
 
 export function parseWaitingRoomMessage(data: string): WaitingRoomRawMessage | null {

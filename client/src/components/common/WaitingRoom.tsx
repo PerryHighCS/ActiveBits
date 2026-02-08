@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Button from '../ui/Button'
 import { getActivity } from '@src/activities'
 import {
+  buildPersistentTeacherCodeApiUrl,
   buildPersistentSessionWsUrl,
   getWaiterMessage,
   isWaitingRoomMessage,
@@ -60,7 +61,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
       setError(null)
 
       if (shouldAutoAuthRef.current) {
-        fetch(`/api/persistent-session/${hash}/teacher-code?activityName=${activityName}`, {
+        fetch(buildPersistentTeacherCodeApiUrl(hash, activityName), {
           credentials: 'include',
         })
           .then((response) => response.json())

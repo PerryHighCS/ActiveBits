@@ -88,6 +88,12 @@ export function getPersistentQuerySuffix(search: string): string {
   return query.toString() ? `&${query.toString()}` : ''
 }
 
+export function buildPersistentSessionApiUrl(hash: string, activityName: string, search: string): string {
+  const query = new URLSearchParams(search)
+  query.set('activityName', activityName)
+  return `/api/persistent-session/${encodeURIComponent(hash)}?${query.toString()}`
+}
+
 export function isJoinSessionId(input: string): boolean {
   const value = input.trim()
   if (!/^[a-f0-9]+$/i.test(value)) {

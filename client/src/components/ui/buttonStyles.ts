@@ -1,4 +1,4 @@
-type ButtonVariant = 'default' | 'outline' | 'text'
+export type ButtonVariant = 'default' | 'outline' | 'text'
 
 export function resolveButtonVariantClass(
   variant: ButtonVariant | string,

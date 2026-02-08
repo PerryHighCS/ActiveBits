@@ -6,6 +6,7 @@ import {
   createHostingMap,
   dividePassage,
   generateHtmlTemplate,
+  getRandomUnusedName,
   verifyHostname,
 } from './routeUtils.js'
 
@@ -36,6 +37,20 @@ test('createHash returns deterministic sha256 output', () => {
   assert.equal(hash, 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9')
 })
 
+test('getRandomUnusedName falls back to deterministic suffixes after repeated collisions', () => {
+  const name = getRandomUnusedName(
+    ['only-name', 'only-name-1', 'only-name-2'],
+    {
+      value: 'ignored',
+      adjectives: ['only'],
+      nouns: ['name'],
+    },
+    () => 0,
+  )
+
+  assert.equal(name, 'only-name-3')
+})
+
 test('createHostingMap assigns all fragments and ensures each student hosts at least three files', () => {
   const hostingMap = createHostingMap(
     [
@@ -64,6 +79,26 @@ test('createHostingMap assigns all fragments and ensures each student hosts at l
 
   assert.ok((assignmentCount.get('alpha') ?? 0) >= 3)
   assert.ok((assignmentCount.get('beta') ?? 0) >= 3)
+})
+
+test('createHostingMap remains finite and produces unique names when adjective/noun space is exhausted', () => {
+  const hostingMap = createHostingMap(
+    [{ hostname: 'alpha', joined: 1 }],
+    {
+      value: 'one two three four five six seven eight nine ten',
+      adjectives: ['tiny'],
+      nouns: ['pool'],
+    },
+    () => 0,
+  )
+
+  const alphaNames = hostingMap
+    .map((record) => record.assignedTo.find((assignment) => assignment.hostname === 'alpha')?.fileName)
+    .filter((fileName): fileName is string => Boolean(fileName))
+
+  assert.equal(alphaNames.length, 5)
+  assert.equal(new Set(alphaNames).size, 5)
+  assert.deepEqual(alphaNames, ['tiny-pool', 'tiny-pool-1', 'tiny-pool-2', 'tiny-pool-3', 'tiny-pool-4'])
 })
 
 test('generateHtmlTemplate prefers non-self sources when alternatives exist', () => {
