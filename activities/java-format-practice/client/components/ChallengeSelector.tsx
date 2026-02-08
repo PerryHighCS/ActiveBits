@@ -18,18 +18,18 @@ export default function ChallengeSelector({
   onThemeChange: (theme: JavaFormatTheme) => void
   isDisabled: boolean
 }) {
-  const difficulties = [
+  const difficulties: Array<{ id: JavaFormatDifficulty; label: string }> = [
     { id: 'beginner', label: 'Beginner' },
     { id: 'intermediate', label: 'Intermediate' },
     { id: 'advanced', label: 'Advanced' },
-  ];
+  ]
 
-  const themes = [
+  const themes: Array<{ id: JavaFormatTheme; label: string }> = [
     { id: 'all', label: 'All Themes' },
     { id: 'wanted-poster', label: 'Wanted Poster' },
     { id: 'spy-badge', label: 'Spy Badge' },
     { id: 'fantasy-menu', label: 'Fantasy Menu' },
-  ];
+  ]
 
   return (
     <React.Fragment>
@@ -42,7 +42,7 @@ export default function ChallengeSelector({
                 key={d.id}
                 className={`selector-btn ${currentDifficulty === d.id ? 'selected' : ''}`}
                 type="button"
-                onClick={() => onDifficultyChange(d.id as JavaFormatDifficulty)}
+                onClick={() => onDifficultyChange(d.id)}
                 disabled={isDisabled}
               >
                 {d.label}
@@ -59,7 +59,7 @@ export default function ChallengeSelector({
                 key={t.id}
                 className={`selector-btn ${currentTheme === t.id ? 'selected' : ''}`}
                 type="button"
-                onClick={() => onThemeChange(t.id as JavaFormatTheme)}
+                onClick={() => onThemeChange(t.id)}
                 disabled={isDisabled}
               >
                 {t.label}

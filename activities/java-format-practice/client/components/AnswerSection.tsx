@@ -190,7 +190,9 @@ export default function AnswerSection({
   const handleInputChange = (callIdx: number, partIdx: number, value: string) => {
     if (!onAnswerChange) return;
     onAnswerChange((prev) => {
-      const base = Array.isArray(prev) ? [...prev] : new Array<string[]>(formatCalls.length).fill([]);
+      const base = Array.isArray(prev)
+        ? [...prev]
+        : Array.from({ length: formatCalls.length }, () => []);
       const callAnswers = Array.isArray(base[callIdx])
         ? [...(base[callIdx] ?? [])]
         : new Array(parsedCalls[callIdx]?.parts?.length || 1).fill('');

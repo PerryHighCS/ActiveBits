@@ -73,7 +73,10 @@ export function buildAnswerString(parts: string[] = []): string {
  * Escape HTML special characters to prevent XSS attacks.
  * Converts <, >, &, ", and ' to their HTML entity equivalents.
  */
-export function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string;
+export function escapeHtml<T>(str: T): T;
+export function escapeHtml(str: unknown): unknown {
+  if (typeof str !== 'string') return str;
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

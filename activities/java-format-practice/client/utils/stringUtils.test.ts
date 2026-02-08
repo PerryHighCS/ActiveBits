@@ -197,12 +197,17 @@ console.log(`\n${passed} passed, ${failed} failed out of ${tests.length} tests`)
 
 // Test escapeHtml function
 console.log('\n=== Testing escapeHtml ===');
+const passthroughObj = { sample: true };
 const escapeTests = [
   { input: 'normal text', expected: 'normal text', name: 'Normal text unchanged' },
   { input: '<script>alert("XSS")</script>', expected: '&lt;script&gt;alert(&quot;XSS&quot;)&lt;/script&gt;', name: 'Script tags escaped' },
   { input: 'Hello & goodbye', expected: 'Hello &amp; goodbye', name: 'Ampersand escaped' },
   { input: "It's a test", expected: 'It&#039;s a test', name: 'Single quote escaped' },
   { input: '<img src="x" onerror="alert(1)">', expected: '&lt;img src=&quot;x&quot; onerror=&quot;alert(1)&quot;&gt;', name: 'Image tag with attributes escaped' },
+  { input: null, expected: null, name: 'Null input passthrough' },
+  { input: undefined, expected: undefined, name: 'Undefined input passthrough' },
+  { input: 42, expected: 42, name: 'Number input passthrough' },
+  { input: passthroughObj, expected: passthroughObj, name: 'Object input passthrough' },
 ];
 
 let escapePassed = 0;
