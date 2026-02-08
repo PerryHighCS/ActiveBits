@@ -1,5 +1,8 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import PseudocodeRenderer from '../../components/PseudocodeRenderer';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import PseudocodeRenderer from '../../components/PseudocodeRenderer'
+import type { AlgorithmEvent, AlgorithmModule, AlgorithmViewProps } from '../index'
+
+type MergeSortState = any
 
 const PSEUDOCODE = [
   '**MergeSort(A[0..n−1])**',
@@ -55,7 +58,7 @@ const MergeSort = {
       callStack: [],
       complete: false,
       substep: 0,
-      highlightedLines: new Set(),
+      highlightedLines: new Set<string>(),
       currentStep: null,
       animFrom: null,
       animTo: null,
@@ -65,7 +68,7 @@ const MergeSort = {
     };
   },
 
-  reduceEvent(state, event) {
+  reduceEvent(state: MergeSortState, event: AlgorithmEvent) {
     if (event.type === 'nextStep') {
       return performNextStep(state);
     }
@@ -77,7 +80,7 @@ const MergeSort = {
         callStack: [],
         complete: false,
         substep: 0,
-        highlightedLines: new Set(),
+        highlightedLines: new Set<string>(),
         currentStep: null,
         animFrom: null,
         animTo: null,
@@ -87,14 +90,14 @@ const MergeSort = {
       };
     }
     if (event.type === 'setArraySize') {
-      return MergeSort.initState(event.payload);
+      return MergeSort.initState(event.payload as number);
     }
     return state;
   },
 
-  ManagerView({ session, onStateChange }) {
-    const state = session.data.algorithmState || MergeSort.initState();
-    const pseudocodeRef = useRef(null);
+  ManagerView({ session, onStateChange }: AlgorithmViewProps) {
+    const state = (session.data.algorithmState as MergeSortState) || MergeSort.initState()
+    const pseudocodeRef = useRef<any>(null)
 
     useEffect(() => {
       if (pseudocodeRef.current && state.highlightedLines.size > 0) {
@@ -113,15 +116,15 @@ const MergeSort = {
 
     const handleNextStep = () => {
       const newState = performNextStep(state);
-      onStateChange(newState);
+      onStateChange?.(newState);
     };
 
     const handleReset = () => {
-      onStateChange(MergeSort.reduceEvent(state, { type: 'reset' }));
+      onStateChange?.(MergeSort.reduceEvent?.(state, { type: 'reset' } as AlgorithmEvent) as MergeSortState);
     };
 
     const handleRegenerate = () => {
-      onStateChange(MergeSort.initState());
+      onStateChange?.(MergeSort.initState?.() as MergeSortState);
     };
 
     return (
@@ -157,9 +160,9 @@ const MergeSort = {
     );
   },
 
-  StudentView({ session, onStateChange }) {
-    const state = session.data.algorithmState || MergeSort.initState();
-    const pseudocodeRef = useRef(null);
+  StudentView({ session, onStateChange }: AlgorithmViewProps) {
+    const state = (session.data.algorithmState as MergeSortState) || MergeSort.initState()
+    const pseudocodeRef = useRef<any>(null)
 
     useEffect(() => {
       if (pseudocodeRef.current && state.highlightedLines.size > 0) {
@@ -184,12 +187,12 @@ const MergeSort = {
 
     const handleReset = () => {
       if (!onStateChange) return;
-      onStateChange(MergeSort.reduceEvent(state, { type: 'reset' }));
+      onStateChange(MergeSort.reduceEvent?.(state, { type: 'reset' } as AlgorithmEvent) as MergeSortState);
     };
 
     const handleRegenerate = () => {
       if (!onStateChange) return;
-      onStateChange(MergeSort.initState());
+      onStateChange(MergeSort.initState?.() as MergeSortState);
     };
 
     const controls = onStateChange ? (
@@ -230,7 +233,7 @@ const MergeSort = {
   },
 };
 
-function ArrayVisualization({ state }) {
+function ArrayVisualization({ state }: { state: MergeSortState }) {
   const topFrame = state.callStack.length > 0 ? state.callStack[state.callStack.length - 1] : null;
   const left = topFrame?.left ?? null;
   const right = topFrame?.right ?? null;
@@ -240,28 +243,28 @@ function ArrayVisualization({ state }) {
   const k = topFrame?.k ?? null;
   const m = topFrame?.m ?? null;
 
-  const arrayRefs = useRef({});
-  const scratchRefs = useRef({});
-  const [animOffsets, setAnimOffsets] = useState({ offsetX: 0, offsetY: 0 });
+  const arrayRefs = useRef<Record<number, HTMLElement | null>>({})
+  const scratchRefs = useRef<Record<number, HTMLElement | null>>({})
+  const [animOffsets, setAnimOffsets] = useState({ offsetX: 0, offsetY: 0 })
 
-  const registerArrayRef = (idx) => (el) => {
-    if (el) arrayRefs.current[idx] = el;
-  };
+  const registerArrayRef = (idx: number) => (el: HTMLElement | null) => {
+    if (el) arrayRefs.current[idx] = el
+  }
 
-  const registerScratchRef = (idx) => (el) => {
-    if (el) scratchRefs.current[idx] = el;
-  };
+  const registerScratchRef = (idx: number) => (el: HTMLElement | null) => {
+    if (el) scratchRefs.current[idx] = el
+  }
 
   useLayoutEffect(() => {
     if (state.animFrom && state.animTo) {
-      const [fromType, fromIdx] = state.animFrom.split('-');
-      const [toType, toIdx] = state.animTo.split('-');
+      const [fromType, fromIdx = '0'] = String(state.animFrom).split('-')
+      const [toType, toIdx = '0'] = String(state.animTo).split('-')
       
       const fromRefs = fromType === 'array' ? arrayRefs.current : scratchRefs.current;
       const toRefs = toType === 'array' ? arrayRefs.current : scratchRefs.current;
       
-      const fromEl = fromRefs[parseInt(fromIdx)];
-      const toEl = toRefs[parseInt(toIdx)];
+      const fromEl = fromRefs[Number.parseInt(fromIdx, 10)]
+      const toEl = toRefs[Number.parseInt(toIdx, 10)]
       
       if (fromEl && toEl) {
         const fromRect = fromEl.getBoundingClientRect();
@@ -274,18 +277,18 @@ function ArrayVisualization({ state }) {
         setAnimOffsets({
           offsetX: fromCenterX - toCenterX,
           offsetY: fromCenterY - toCenterY
-        });
+        })
       }
     } else {
-      setAnimOffsets({ offsetX: 0, offsetY: 0 });
+      setAnimOffsets({ offsetX: 0, offsetY: 0 })
     }
-  }, [state.animFrom, state.animTo]);
+  }, [state.animFrom, state.animTo])
 
   return (
     <div className="array-viz">
       <div className="array-label" style={{ fontWeight: 'bold', marginBottom: '8px' }}>Array A:</div>
       <div className="array-container">
-        {state.array.map((val, idx) => {
+        {state.array.map((val: number, idx: number) => {
           const isInRange = left !== null && right !== null && idx >= left && idx <= right;
 
           const isMid = idx === mid;
@@ -306,7 +309,7 @@ function ArrayVisualization({ state }) {
                   opacity: isInRange || left === null ? 1 : 0.3,
                   '--anim-offset-x': `${animOffsets.offsetX}px`,
                   '--anim-offset-y': `${animOffsets.offsetY}px`,
-                }}
+                } as CSSProperties}
               >
                 {isAnimTarget && state.animValue !== null ? state.animValue : val}
               </div>
@@ -319,7 +322,7 @@ function ArrayVisualization({ state }) {
       <div className="array-label" style={{ fontWeight: 'bold', marginTop: '20px', marginBottom: '8px' }}>Scratch S:</div>
       {(state.substep >= 2 || state.callStack.length > 0) && (
         <div className="array-container">
-          {state.scratch.map((val, idx) => {
+          {state.scratch.map((val: number | null, idx: number) => {
           const isInRange = left !== null && right !== null && idx >= left && idx <= right;
           const isK = idx === k;
           const isM = idx === m;
@@ -342,7 +345,7 @@ function ArrayVisualization({ state }) {
                   color: isCopiedBack ? undefined : (shouldBeBlue ? '#fff' : '#999'),
                   '--anim-offset-x': `${animOffsets.offsetX}px`,
                   '--anim-offset-y': `${animOffsets.offsetY}px`,
-                }}
+                } as CSSProperties}
               >
                 {isAnimTarget && state.animValue !== null ? state.animValue : (val !== null ? val : '−')}
               </div>
@@ -399,7 +402,7 @@ function ArrayVisualization({ state }) {
   );
 }
 
-function CallStackVisualization({ state }) {
+function CallStackVisualization({ state }: { state: MergeSortState }) {
   const callStack = Array.isArray(state.callStack) ? state.callStack : [];
 
   if (callStack.length === 0) return null;
@@ -449,13 +452,13 @@ function CallStackVisualization({ state }) {
   );
 }
 
-function performNextStep(state) {
+function performNextStep(state: MergeSortState) {
   let { array, scratch, callStack, complete, substep, currentStep, copiedBackIndices, scratchWritten } = state;
   scratch = [...scratch];
   callStack = [...callStack];
   copiedBackIndices = [...(copiedBackIndices || [])];
   scratchWritten = [...(scratchWritten || [])];
-  let highlightedLines = new Set();
+  let highlightedLines = new Set<string>();
 
   if (complete) return state;
 
@@ -820,7 +823,7 @@ function performNextStep(state) {
         const copyIdx = topFrame.m;
         array[topFrame.m] = value;
         copiedBackIndices.push(copyIdx);
-        scratchWritten = scratchWritten.filter(idx => idx !== copyIdx);
+        scratchWritten = scratchWritten.filter((idx: number) => idx !== copyIdx);
         currentStep = `Copy back: A[${topFrame.m}] = S[${topFrame.m}] = ${value}`;
         topFrame.m++;
         topFrame.substep = 19; // Loop back
@@ -888,4 +891,4 @@ function performNextStep(state) {
   };
 }
 
-export default MergeSort;
+export default MergeSort as AlgorithmModule

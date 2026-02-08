@@ -844,6 +844,24 @@ Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
 
+### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, merge sort)
+
+Completed:
+- Converted merge sort visualizer module to TypeScript:
+  - `activities/algorithm-demo/client/algorithms/sorting/MergeSort.jsx` -> `activities/algorithm-demo/client/algorithms/sorting/MergeSort.tsx`
+- Updated algorithm registry import for merge sort module:
+  - `activities/algorithm-demo/client/algorithms/index.ts`
+
+Implementation notes:
+- Merge sort conversion used incremental boundary typing (`AlgorithmViewProps` typing, typed event signature, typed refs, typed map/filter callbacks, CSS custom-property casts) while preserving the existing step machine and rendering behavior.
+- Existing direct merge sort module-state regression tests remained green and continue to validate `initState` and `reduceEvent` behavior after conversion.
+- With this slice, all algorithm-demo sorting/search/recursion/guessing visualizer modules are now on TS/TSX.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm test` -> pass (full root verification chain green, including `verify:deploy` and `verify:server`)
+
 ### Slice 4: Activity migration follow-up (`activities/algorithm-demo`, recursion/guessing + selection sort)
 
 Completed:
