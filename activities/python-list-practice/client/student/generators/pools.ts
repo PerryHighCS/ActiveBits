@@ -9,7 +9,25 @@ export const WORD_LISTS = [
   ['violin', 'piano', 'trumpet', 'drum', 'flute'],
   ['python', 'javascript', 'ruby', 'go', 'swift'],
   ['spring', 'summer', 'autumn', 'winter', 'monsoon'],
-];
+]
 
-export const NUMBER_LIST_NAMES = ['nums', 'values', 'totals', 'scores', 'readings', 'levels', 'counts', 'digits'];
-export const WORD_LIST_NAMES = ['words', 'names', 'labels', 'terms', 'entries', 'titles', 'things', 'items'];
+export const NUMBER_LIST_NAMES = [
+  'nums',
+  'values',
+  'totals',
+  'scores',
+  'readings',
+  'levels',
+  'counts',
+  'digits',
+]
+export const WORD_LIST_NAMES = [
+  'words',
+  'names',
+  'labels',
+  'terms',
+  'entries',
+  'titles',
+  'things',
+  'items',
+]

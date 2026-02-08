@@ -3,10 +3,10 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import '../styles.css'
-import NameForm from './components/NameForm'
-import ControlsPanel from './components/ControlsPanel'
-import QuestionPanel from './components/QuestionPanel'
-import SessionHeader from './components/SessionHeader'
+import NameForm from './components/NameForm.js'
+import ControlsPanel from './components/ControlsPanel.js'
+import QuestionPanel from './components/QuestionPanel.js'
+import SessionHeader from './components/SessionHeader.js'
 import {
   createChallengeForTypes,
   OPERATIONS,
@@ -35,15 +35,13 @@ interface StudentProps {
 
 const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   const [studentName, setStudentName] = useState('')
-  const [submittedName, setSubmittedName] = useState<string | null>(null)
-  const [studentId, setStudentId] = useState<string | null>(null)
+  const [submittedName, setSubmittedName] = useState<string | undefined>(undefined)
+  const [studentId, setStudentId] = useState<string | undefined>(undefined)
   const attachSessionEndedHandler = useSessionEndedHandler()
   const sessionId = sessionData?.sessionId
   const isSolo = !sessionId || sessionId.startsWith('solo-')
   const [allowedTypes, setAllowedTypes] = useState(() => new Set(['all']))
-  const [challenge, setChallenge] = useState<Record<string, unknown> | null>(() =>
-    createChallengeForTypes(new Set(['all'])),
-  )
+  const [challenge, setChallenge] = useState<Record<string, unknown> | null>(null)
   const [answer, setAnswer] = useState('')
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; message: string } | null>(null)
   const [showNext, setShowNext] = useState(false)
@@ -55,8 +53,8 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   })
   const [_loading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const nameRef = useRef<HTMLInputElement>(null)
-  const answerInputRef = useRef<HTMLInputElement>(null)
+  const nameRef = useRef<HTMLInputElement | null>(null)
+  const answerInputRef = useRef<HTMLInputElement | null>(null)
   const [insertSelections, setInsertSelections] = useState<unknown[]>([])
   const [hintStage, setHintStage] = useState<'none' | 'definition' | 'answer'>('none')
 
@@ -82,7 +80,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
     const normalized = Array.isArray(types) && types.length > 0 ? types : ['all']
     const nextSet = new Set(normalized)
     setAllowedTypes(nextSet)
-    setChallenge(createChallengeForTypes(nextSet))
+    setChallenge(createChallengeForTypes(nextSet) as Record<string, unknown>)
     setAnswer('')
     setFeedback(null)
     setShowNext(false)
@@ -249,8 +247,8 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
 
   const normalizedExpected = useMemo(() => normalizeExpected(challenge as any), [challenge])
 
-  const hintDefinition = useMemo(() => getHintDefinition(challenge), [challenge])
-  const answerDetails = useMemo(() => buildAnswerDetails(challenge), [challenge])
+  const hintDefinition = useMemo(() => getHintDefinition(challenge as any), [challenge])
+  const answerDetails = useMemo(() => buildAnswerDetails(challenge as any), [challenge])
 
   const handleShowDefinitionHint = useCallback(() => {
     if (hintStage === 'none') {
@@ -411,7 +409,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
           />
 
           <QuestionPanel
-            challenge={challenge}
+            challenge={challenge as any}
             hintStage={hintStage}
             feedback={feedback}
             hintDefinition={hintDefinition}

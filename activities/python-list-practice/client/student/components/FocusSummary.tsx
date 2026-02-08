@@ -1,6 +1,12 @@
-import React from 'react';
+import { ReactNode } from 'react';
 
-export default function FocusSummary({ allowedTypeList, allowedTypes, labels }) {
+interface FocusSummaryProps {
+  allowedTypeList: string[];
+  allowedTypes: Set<string>;
+  labels: Record<string, string>;
+}
+
+export default function FocusSummary({ allowedTypeList, allowedTypes, labels }: FocusSummaryProps): ReactNode {
   return (
     <div className="mb-3">
       <p className="text-xs uppercase tracking-wide text-emerald-700 font-semibold mb-2">Current focus</p>

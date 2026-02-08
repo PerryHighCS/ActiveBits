@@ -1,7 +1,15 @@
-import React from 'react';
-import Button from '@src/components/ui/Button';
+import { ReactNode, FormEvent, RefObject } from 'react';
+import Button from '@src/components/ui/Button.js';
 
-export default function NameForm({ studentName, setStudentName, nameRef, submitName, error }) {
+interface NameFormProps {
+  studentName: string;
+  setStudentName: (name: string) => void;
+  nameRef: RefObject<HTMLInputElement | null>;
+  submitName: (e: FormEvent<HTMLFormElement>) => void;
+  error: string | null;
+}
+
+export default function NameForm({ studentName, setStudentName, nameRef, submitName, error }: NameFormProps): ReactNode {
   return (
     <div className="python-list-bg flex items-center justify-center px-4">
       <div className="python-list-join">

@@ -1,9 +1,30 @@
-import React from 'react';
+import { ReactNode, MouseEvent } from 'react';
+
+interface Challenge {
+  op?: string;
+  variant?: string;
+  [key: string]: unknown;
+}
+
+interface InteractiveListSectionProps {
+  challenge: Challenge;
+  interactiveList: (string | number)[];
+  isListBuildVariant: boolean;
+  supportsSequenceSelection: boolean;  // Kept for API stability
+  selectedRange: [number, number] | null;
+  selectedSequence: number[];
+  selectedIndex: number | null;
+  selectedValueIndex: number | null;
+  onIndexClick: (index: number, event: MouseEvent) => void;
+  onValueClick: (index: number, event: MouseEvent) => void;
+  allowDuplicateValues?: boolean;
+}
 
 export default function InteractiveListSection({
   challenge,
   interactiveList,
   isListBuildVariant,
+  // @ts-expect-error - supportsSequenceSelection kept for API stability
   supportsSequenceSelection,
   selectedRange,
   selectedSequence,
@@ -12,14 +33,14 @@ export default function InteractiveListSection({
   onIndexClick,
   onValueClick,
   allowDuplicateValues = false,
-}) {
+}: InteractiveListSectionProps): ReactNode {
   if (!interactiveList.length) return null;
 
   const instructionText = isListBuildVariant
     ? 'Tap values to build the final list in order.'
     : challenge?.op === 'for-range'
       ? 'Tap values in order to build the output sequence.'
-      : ['value-selection', 'number-choice', 'index-value'].includes(challenge?.variant)
+      : ['value-selection', 'number-choice', 'index-value'].includes(challenge?.variant as string)
         ? 'Tap values to answer the question.'
         : 'Tap indexes (to answer with the index) or values (to answer with the value).';
 
@@ -30,7 +51,7 @@ export default function InteractiveListSection({
       </div>
       <div className="python-list-grid">
         {(() => {
-          const seen = new Set();
+          const seen = new Set<string>();
           return interactiveList.map((item, idx) => {
             const key = typeof item === 'string' ? `s:${item}` : `n:${item}`;
             const isDuplicate = !allowDuplicateValues && seen.has(key);
@@ -40,7 +61,7 @@ export default function InteractiveListSection({
             const isSequenceSelected = selectedSequence.includes(idx);
             const isSelectedValue = selectedValueIndex === idx || isSequenceSelected;
             const showIndexButton = !isListBuildVariant
-              && !['value-selection', 'number-choice', 'index-value'].includes(challenge?.variant);
+              && !['value-selection', 'number-choice', 'index-value'].includes(challenge?.variant as string);
             return (
               <div className="python-list-slot" key={`slot-${idx}`}>
                 {showIndexButton && (

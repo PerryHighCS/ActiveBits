@@ -1,5 +1,28 @@
-import React from 'react';
-import Button from '@src/components/ui/Button';
+import { ReactNode } from 'react';
+import Button from '@src/components/ui/Button.js';
+
+interface Feedback {
+  isCorrect: boolean;
+  message: string | ReactNode;
+}
+
+interface Challenge {
+  type?: string;
+  [key: string]: unknown;
+}
+
+interface AnswerPanelProps {
+  answer: string;
+  onAnswerChange: (value: string) => void;
+  challenge: Challenge;
+  answerRef: React.RefObject<HTMLInputElement | null>;
+  disabled: boolean;
+  loading: boolean;
+  onSubmit: () => void;
+  onClear: () => void;
+  feedback: Feedback | null;
+  onNext: () => void;
+}
 
 export default function AnswerPanel({
   answer,
@@ -12,7 +35,7 @@ export default function AnswerPanel({
   onClear,
   feedback,
   onNext,
-}) {
+}: AnswerPanelProps): ReactNode {
   return (
     <div className="python-list-card python-list-answer-panel">
       <label className="python-list-label">

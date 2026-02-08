@@ -1,8 +1,51 @@
-import React from 'react';
-import QuestionHintSection from './QuestionHintSection';
-import InteractiveListSection from './InteractiveListSection';
-import HintDisplay from './HintDisplay';
-import AnswerPanel from './AnswerPanel';
+import { ReactNode, RefObject, MouseEvent } from 'react'
+import QuestionHintSection from './QuestionHintSection.js'
+import InteractiveListSection from './InteractiveListSection.js'
+import HintDisplay from './HintDisplay.js'
+import AnswerPanel from './AnswerPanel.js'
+
+interface Feedback {
+  isCorrect: boolean
+  message: string | ReactNode
+}
+
+interface Challenge {
+  prompt: string
+  question?: string
+  type?: string
+  op?: string
+  variant?: string
+  expected?: unknown
+  [key: string]: unknown
+}
+
+interface QuestionPanelProps {
+  challenge: Challenge | null;
+  hintStage: 'none' | 'definition' | 'answer';
+  feedback: Feedback | null;
+  hintDefinition: string | ReactNode;
+  answerDetails?: string[] | ReactNode[];
+  interactiveList: (string | number)[];
+  isListBuildVariant: boolean;
+  supportsSequenceSelection: boolean;
+  selectedRange: [number, number] | null;
+  selectedSequence: number[];
+  selectedIndex: number | null;
+  selectedValueIndex: number | null;
+  onIndexClick: (index: number, event: MouseEvent) => void;
+  onValueClick: (index: number, event: MouseEvent) => void;
+  allowDuplicateValues: boolean;
+  answer: string;
+  onAnswerChange: (value: string) => void;
+  answerRef: RefObject<HTMLInputElement | null>;
+  disabled: boolean;
+  loading: boolean;
+  onSubmit: () => void;
+  onClear: () => void;
+  onShowHint: () => void;
+  onShowAnswer: () => void;
+  onNext: () => void;
+}
 
 export default function QuestionPanel({
   challenge,
@@ -30,11 +73,11 @@ export default function QuestionPanel({
   onShowHint,
   onShowAnswer,
   onNext,
-}) {
+}: QuestionPanelProps): ReactNode {
   return (
     <div className="python-list-card">
       <QuestionHintSection
-        challenge={challenge}
+        challenge={(challenge || {}) as Challenge}
         hintStage={hintStage}
         showHintButtons={!feedback}
         onShowHint={onShowHint}
@@ -44,7 +87,7 @@ export default function QuestionPanel({
         showHintBody={false}
       />
       <InteractiveListSection
-        challenge={challenge}
+        challenge={(challenge || {}) as Challenge}
         interactiveList={interactiveList}
         isListBuildVariant={isListBuildVariant}
         supportsSequenceSelection={supportsSequenceSelection}
@@ -60,12 +103,12 @@ export default function QuestionPanel({
         hintStage={hintStage}
         hintDefinition={hintDefinition}
         answerDetails={answerDetails}
-        expected={challenge?.expected}
+        expected={(challenge || {}).expected}
       />
       <AnswerPanel
         answer={answer}
         onAnswerChange={onAnswerChange}
-        challenge={challenge}
+        challenge={(challenge || {}) as Challenge}
         answerRef={answerRef}
         disabled={disabled}
         loading={loading}

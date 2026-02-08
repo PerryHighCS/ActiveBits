@@ -1,6 +1,17 @@
-import React from 'react';
+import { ReactNode } from 'react';
 
-export default function StatsPanel({ stats }) {
+interface Stats {
+  total?: number;
+  correct?: number;
+  streak?: number;
+  longestStreak?: number;
+}
+
+interface StatsPanelProps {
+  stats: Stats;
+}
+
+export default function StatsPanel({ stats }: StatsPanelProps): ReactNode {
   const total = stats?.total || 0;
   const correct = stats?.correct || 0;
   const streak = stats?.streak || 0;

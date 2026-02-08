@@ -1,5 +1,19 @@
-import React from 'react';
-import FocusSummary from './FocusSummary';
+import { ReactNode } from 'react';
+import FocusSummary from './FocusSummary.js';
+
+interface QuestionType {
+  id: string;
+  label: string;
+}
+
+interface ControlsPanelProps {
+  isSolo: boolean;
+  soloQuestionTypes: QuestionType[];
+  allowedTypes: Set<string>;
+  handleSoloToggleType: (typeId: string) => void;
+  allowedTypeList: string[];
+  QUESTION_LABELS: Record<string, string>;
+}
 
 export default function ControlsPanel({
   isSolo,
@@ -8,7 +22,7 @@ export default function ControlsPanel({
   handleSoloToggleType,
   allowedTypeList,
   QUESTION_LABELS,
-}) {
+}: ControlsPanelProps): ReactNode {
   return (
     <>
       {isSolo && (

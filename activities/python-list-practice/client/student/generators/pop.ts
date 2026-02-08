@@ -1,16 +1,49 @@
-import { formatList } from './formatters';
-import { buildListFinalChoices, buildChoicePool, buildLengthChoices } from './choices';
-import { randomItem } from './utils';
+import { formatList } from './formatters.js'
+import { buildListFinalChoices, buildChoicePool, buildLengthChoices } from './choices.js'
 
-export default function popOp(baseList, listName, useWords) {
-  const workingList = baseList.length > 0 ? [...baseList] : [useWords ? 'x' : 0];
-  const hasIndexVersion = Math.random() < 0.5 && workingList.length > 1;
+export default function popOp(
+  baseList: unknown[],
+  listName: string,
+  useWords: boolean,
+):
+  | {
+      prompt: string
+      question: string
+      expected: string
+      type: 'value'
+      list: unknown[]
+      op: string
+      variant: string
+      choices: unknown[]
+    }
+  | {
+      prompt: string
+      question: string
+      expected: string
+      type: 'number'
+      list: unknown[]
+      op: string
+      variant: string
+      choices: unknown[]
+    }
+  | {
+      prompt: string
+      question: string
+      expected: string
+      type: 'list'
+      list: unknown[]
+      op: string
+      variant: string
+      choices: unknown[]
+    } {
+  const workingList = baseList.length > 0 ? [...baseList] : [useWords ? 'x' : 0]
+  const hasIndexVersion = Math.random() < 0.5 && workingList.length > 1
   if (hasIndexVersion) {
-    const idx = Math.floor(Math.random() * workingList.length);
-    const removed = workingList[idx];
-    const mutated = [...workingList];
-    mutated.splice(idx, 1);
-    const mode = Math.random();
+    const idx = Math.floor(Math.random() * workingList.length)
+    const removed = workingList[idx]
+    const mutated = [...workingList]
+    mutated.splice(idx, 1)
+    const mode = Math.random()
     if (mode < 0.4) {
       return {
         prompt: `${listName} = ${formatList(workingList)}\nresult = ${listName}.pop(${idx})`,
@@ -21,8 +54,9 @@ export default function popOp(baseList, listName, useWords) {
         op: 'pop',
         variant: 'value-selection',
         choices: buildChoicePool(workingList, [], useWords),
-      };
-    } if (mode < 0.65) {
+      }
+    }
+    if (mode < 0.65) {
       return {
         prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop(${idx})`,
         question: `After this pop, what is len(${listName})?`,
@@ -32,8 +66,9 @@ export default function popOp(baseList, listName, useWords) {
         op: 'pop',
         variant: 'number-choice',
         choices: buildLengthChoices(mutated.length, mutated[mutated.length - 1]),
-      };
-    } if (mode < 0.85) {
+      }
+    }
+    if (mode < 0.85) {
       return {
         prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop(${idx})`,
         question: `After this pop, what is the full ${listName} list?`,
@@ -43,9 +78,9 @@ export default function popOp(baseList, listName, useWords) {
         op: 'pop',
         variant: 'list-final',
         choices: buildListFinalChoices(mutated, useWords, workingList.length, mutated.length, 8, workingList),
-      };
+      }
     }
-    const queryIdx = Math.floor(Math.random() * mutated.length);
+    const queryIdx = Math.floor(Math.random() * mutated.length)
     return {
       prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop(${idx})`,
       question: `After pop(${idx}), what is ${listName}[${queryIdx}]?`,
@@ -55,12 +90,12 @@ export default function popOp(baseList, listName, useWords) {
       op: 'pop',
       variant: 'value-selection',
       choices: buildChoicePool(mutated, [], useWords),
-    };
+    }
   }
-  const fallback = workingList[workingList.length - 1];
-  const mutated = [...workingList];
-  mutated.pop();
-  const mode = Math.random();
+  const fallback = workingList[workingList.length - 1]
+  const mutated = [...workingList]
+  mutated.pop()
+  const mode = Math.random()
   if (mode < 0.4) {
     return {
       prompt: `${listName} = ${formatList(workingList)}\nresult = ${listName}.pop()`,
@@ -71,8 +106,9 @@ export default function popOp(baseList, listName, useWords) {
       op: 'pop',
       variant: 'value-selection',
       choices: buildChoicePool(workingList, [], useWords),
-    };
-  } if (mode < 0.65) {
+    }
+  }
+  if (mode < 0.65) {
     return {
       prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop()`,
       question: `After this pop, what is len(${listName})?`,
@@ -82,8 +118,9 @@ export default function popOp(baseList, listName, useWords) {
       op: 'pop',
       variant: 'number-choice',
       choices: buildLengthChoices(mutated.length, mutated[mutated.length - 1]),
-    };
-  } if (mode < 0.85) {
+    }
+  }
+  if (mode < 0.85) {
     return {
       prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop()`,
       question: `After this pop, what is the full ${listName} list?`,
@@ -93,7 +130,7 @@ export default function popOp(baseList, listName, useWords) {
       op: 'pop',
       variant: 'list-final',
       choices: buildListFinalChoices(mutated, useWords, workingList.length, mutated.length, 8, workingList),
-    };
+    }
   }
   if (!mutated.length) {
     return {
@@ -105,9 +142,9 @@ export default function popOp(baseList, listName, useWords) {
       op: 'pop',
       variant: 'value-selection',
       choices: buildChoicePool(workingList, [], useWords),
-    };
+    }
   }
-  const queryIdx = Math.floor(Math.random() * mutated.length);
+  const queryIdx = Math.floor(Math.random() * mutated.length)
   return {
     prompt: `${listName} = ${formatList(workingList)}\n${listName}.pop()`,
     question: `After the pop, what is ${listName}[${queryIdx}]?`,
@@ -117,5 +154,5 @@ export default function popOp(baseList, listName, useWords) {
     op: 'pop',
     variant: 'value-selection',
     choices: buildChoicePool(mutated, [], useWords),
-  };
+  }
 }

@@ -1,5 +1,22 @@
-import React from 'react';
-import Button from '@src/components/ui/Button';
+import { ReactNode } from 'react';
+import Button from '@src/components/ui/Button.js';
+
+interface Challenge {
+  prompt: string;
+  question?: string;
+  [key: string]: unknown;
+}
+
+interface QuestionHintSectionProps {
+  challenge: Challenge | null;
+  hintStage: 'none' | 'definition' | 'answer';
+  showHintButtons: boolean;
+  onShowHint: () => void;
+  onShowAnswer: () => void;
+  hintDefinition: string | ReactNode;
+  answerDetails?: string[] | ReactNode[];  // Kept for API stability
+  showHintBody?: boolean;
+}
 
 export default function QuestionHintSection({
   challenge,
@@ -8,9 +25,10 @@ export default function QuestionHintSection({
   onShowHint,
   onShowAnswer,
   hintDefinition,
+  // @ts-expect-error - answerDetails kept for API stability
   answerDetails,
   showHintBody = true,
-}) {
+}: QuestionHintSectionProps): ReactNode {
   if (!challenge) return null;
 
   return (

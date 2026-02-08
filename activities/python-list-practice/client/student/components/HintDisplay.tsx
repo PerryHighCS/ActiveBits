@@ -1,6 +1,13 @@
-import React from 'react';
+import { ReactNode } from 'react';
 
-export default function HintDisplay({ hintStage, hintDefinition, answerDetails, expected }) {
+interface HintDisplayProps {
+  hintStage: 'none' | 'definition' | 'answer';
+  hintDefinition: string | ReactNode;
+  answerDetails?: string[] | ReactNode[];
+  expected: unknown;
+}
+
+export default function HintDisplay({ hintStage, hintDefinition, answerDetails, expected }: HintDisplayProps): ReactNode {
   if (hintStage === 'none') return null;
 
   return (
@@ -8,7 +15,7 @@ export default function HintDisplay({ hintStage, hintDefinition, answerDetails, 
       <div>{hintDefinition}</div>
       {hintStage === 'answer' && (
         <div className="python-list-hint-answer">
-          <div>Answer: {expected}</div>
+          <div>Answer: {String(expected)}</div>
           {(answerDetails || []).map((detail, idx) => (
             <div key={`answer-detail-${idx}`} className="python-list-hint-detail">
               {detail}
