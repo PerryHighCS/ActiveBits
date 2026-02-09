@@ -33,7 +33,7 @@ export default function FeedbackDisplay({
   const handleDismiss = React.useCallback(() => {
     // For errors, call the dismiss callback which will focus the error input
     // For correct answers, call onNewChallenge via the button click
-    if (dismissHandlerRef.current) {
+    if (dismissHandlerRef.current != null) {
       dismissHandlerRef.current();
     }
   }, []);
@@ -77,17 +77,17 @@ export default function FeedbackDisplay({
       // Enter: advance for correct, dismiss for incorrect
       if (e.key === 'Enter' && feedbackReadyRef.current) {
         if (feedback.isCorrect) {
-          if (showNextButton && onNewChallenge) {
+          if (showNextButton && onNewChallenge != null) {
             onNewChallenge();
           }
         } else {
           // Dismiss modal and focus error input
-          if (dismissHandlerRef.current) dismissHandlerRef.current();
+          if (dismissHandlerRef.current != null) dismissHandlerRef.current();
         }
       }
       // Escape always dismisses modal and clears feedback
       if (e.key === 'Escape' && feedbackReadyRef.current) {
-        if (dismissHandlerRef.current) dismissHandlerRef.current();
+        if (dismissHandlerRef.current != null) dismissHandlerRef.current();
       }
       // Handle Tab key for focus trap
       if (e.key === 'Tab' && modalRef.current) {
@@ -173,8 +173,8 @@ export default function FeedbackDisplay({
           )}
         </div>
         <div className="feedback-modal-footer">
-          {showNextButton ? (
-            <button ref={buttonRef} onClick={onNewChallenge ?? undefined} className="new-challenge-btn">
+            {showNextButton && onNewChallenge != null ? (
+            <button ref={buttonRef} onClick={onNewChallenge} className="new-challenge-btn">
               Next Challenge
             </button>
           ) : (
