@@ -42,7 +42,7 @@ export default function RaffleManager() {
     setWinners([])
     setTickets([])
 
-    if (!raffleId) {
+    if (raffleId == null) {
       setMessage('Raffle not found. Please create a new raffle.', '/manage')
     }
   }, [raffleId])
@@ -67,7 +67,7 @@ export default function RaffleManager() {
   }, [])
 
   const buildWsUrl = useCallback((): string | null => {
-    if (!raffleId || typeof window === 'undefined') return null
+    if (raffleId == null || typeof window === 'undefined') return null
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${protocol}//${window.location.host}/ws/raffle?raffleId=${raffleId}`
@@ -81,7 +81,7 @@ export default function RaffleManager() {
   })
 
   useEffect(() => {
-    if (!raffleId) {
+    if (raffleId == null) {
       disconnect()
       return undefined
     }

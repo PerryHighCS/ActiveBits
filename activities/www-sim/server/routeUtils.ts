@@ -16,8 +16,10 @@ function pickRandom<T>(values: T[], random: RandomFn): T {
 }
 
 function resolveNamePools(passage: PassageDefinition | undefined): { adjectives: string[]; nouns: string[] } {
-  const adjectives = passage?.adjectives?.length ? passage.adjectives : defaultAdjectives
-  const nouns = passage?.nouns?.length ? passage.nouns : defaultNouns
+  const candidateAdjectives = passage?.adjectives
+  const candidateNouns = passage?.nouns
+  const adjectives = Array.isArray(candidateAdjectives) && candidateAdjectives.length > 0 ? candidateAdjectives : defaultAdjectives
+  const nouns = Array.isArray(candidateNouns) && candidateNouns.length > 0 ? candidateNouns : defaultNouns
   return { adjectives, nouns }
 }
 

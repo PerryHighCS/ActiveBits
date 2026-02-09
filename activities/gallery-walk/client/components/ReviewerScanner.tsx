@@ -27,7 +27,7 @@ export default function ReviewerScanner({
     onError(null);
     try {
       const target = new URL(content);
-      if (!sessionId || target.origin !== window.location.origin) {
+      if (sessionId == null || target.origin !== window.location.origin) {
         onError('scanner-invalid');
         return;
       }
@@ -38,7 +38,7 @@ export default function ReviewerScanner({
         return;
       }
       const reviewee = target.searchParams.get('reviewee');
-      if (!reviewee) {
+      if (reviewee == null || reviewee === '') {
         onError('scanner-invalid');
         return;
       }
@@ -57,7 +57,7 @@ export default function ReviewerScanner({
     onError('scanner-unavailable');
   }, [onClose, onError]);
 
-  if (!isOpen) return null;
+  if (isOpen !== true) return null;
 
   return (
     <QrScannerPanel

@@ -148,8 +148,8 @@ export default function setupPythonListPracticeRoutes(
 
     const response = res as unknown as JsonResponse
     response.json({
-      students: session.data.students || [],
-      selectedQuestionTypes: session.data.selectedQuestionTypes || ['all'],
+      students: session.data.students,
+      selectedQuestionTypes: session.data.selectedQuestionTypes,
     })
   })
 
@@ -170,7 +170,7 @@ export default function setupPythonListPracticeRoutes(
     }
 
     const response = res as unknown as JsonResponse
-    response.json({ students: session.data.students || [] })
+    response.json({ students: session.data.students })
   })
 
   app.post('/api/python-list-practice/:sessionId/stats', async (req, res) => {
@@ -194,14 +194,16 @@ export default function setupPythonListPracticeRoutes(
     const studentId = validateStudentId(reqBody.studentId)
     const stats = validateStats(reqBody.stats)
 
-    if ((!studentName && !studentId) || !stats) {
+    if ((studentName == null && studentId == null) || stats == null) {
       const response = res as unknown as JsonResponse
       response.status(400).json({ error: 'invalid payload' })
       return
     }
 
     const student = session.data.students.find(
-      (s) => (studentId && s.id === studentId) || (studentName && s.name === studentName && !s.id),
+      (s) =>
+        (studentId != null && s.id === studentId) ||
+        (studentName != null && s.name === studentName && (s.id == null || s.id === '')),
     )
 
     if (student) {
@@ -265,7 +267,7 @@ export default function setupPythonListPracticeRoutes(
       const session = asPythonListPracticeSession(await sessions.get(client.sessionId))
       if (session) {
         const payload = {
-          selectedQuestionTypes: session.data.selectedQuestionTypes || ['all'],
+          selectedQuestionTypes: session.data.selectedQuestionTypes,
         }
         try {
           client.send(JSON.stringify({ type: 'questionTypesUpdate', payload }))
@@ -289,8 +291,8 @@ export default function setupPythonListPracticeRoutes(
         if (session) {
           const existing = session.data.students.find(
             (s) =>
-              (client.studentId && s.id === client.studentId) ||
-              (client.studentName && s.name === client.studentName && !s.id),
+              (client.studentId != null && s.id === client.studentId) ||
+              (client.studentName != null && s.name === client.studentName && (s.id == null || s.id === '')),
           )
 
           if (existing) {

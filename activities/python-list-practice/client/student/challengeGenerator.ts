@@ -129,9 +129,10 @@ export function buildAnswerDetails(challenge?: Challenge | null): string[] {
   if (challenge.filterDescription) {
     details.push(challenge.filterDescription)
   }
-  if (challenge.doubleLoopInfo?.loops?.length) {
-    challenge.doubleLoopInfo.loops.forEach((loop, idx) => {
-      const label = challenge.doubleLoopInfo && challenge.doubleLoopInfo.loops.length > 1
+  const loops = challenge.doubleLoopInfo?.loops ?? []
+  if (loops.length > 0) {
+    loops.forEach((loop, idx) => {
+      const label = loops.length > 1
         ? `Loop ${idx + 1}`
         : 'This loop'
       if (!hasRangeInfo(loop)) return

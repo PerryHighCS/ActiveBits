@@ -101,7 +101,7 @@ function findClientLoader(activityId: string): ActivityClientLoader | null {
 async function resolveClientModule(loader: ActivityClientLoader): Promise<ActivityClientResolved> {
   const mod = await loader()
   const resolved = mod.default ?? mod.activity ?? mod
-  return (resolved !== null && resolved !== undefined && typeof resolved === 'object') ? (resolved as ActivityClientResolved) : {}
+  return (resolved != null && typeof resolved === 'object') ? (resolved as ActivityClientResolved) : {}
 }
 
 function createLazyComponent(

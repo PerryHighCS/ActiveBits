@@ -40,7 +40,7 @@ export default function NoteStyleSelect({
   const selected: NoteStyleOption = NOTE_STYLE_OPTIONS[selectedIndex] ?? NOTE_STYLE_OPTIONS[0]!;
 
   const updatePlacement = useCallback(() => {
-    if (!triggerRef.current) return;
+    if (triggerRef.current == null) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
@@ -53,10 +53,10 @@ export default function NoteStyleSelect({
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (isOpen !== true) return undefined;
     function handleClick(event: MouseEvent) {
       const target = event.target as Node | null;
-      if (!containerRef.current?.contains(target)) {
+      if (containerRef.current?.contains(target) !== true) {
         setIsOpen(false);
       }
     }
@@ -65,7 +65,7 @@ export default function NoteStyleSelect({
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (isOpen !== true) return undefined;
     updatePlacement();
     const scrollOptions = { capture: true };
     window.addEventListener('resize', updatePlacement);
@@ -89,7 +89,7 @@ export default function NoteStyleSelect({
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (isOpen !== true) return;
     const node = optionRefs.current[highlightedIndex];
     node?.scrollIntoView({ block: 'nearest' });
   }, [highlightedIndex, isOpen]);
@@ -114,7 +114,7 @@ export default function NoteStyleSelect({
   const handleTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      if (!isOpen) {
+      if (isOpen !== true) {
         setIsOpen(true);
       } else {
         moveHighlight(event.key === 'ArrowDown' ? 1 : -1);

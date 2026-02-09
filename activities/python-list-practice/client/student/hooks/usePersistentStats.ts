@@ -66,7 +66,7 @@ export default function usePersistentStats({
         setStats(parsed)
         statsRef.current = parsed
         if (submittedName) {
-          sendStats(parsed)
+          void sendStats(parsed)
         }
       }
     } catch (err) {

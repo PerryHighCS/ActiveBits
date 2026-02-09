@@ -9,7 +9,7 @@ interface MutableSession {
 const sessionNormalizers = new Map<string, SessionNormalizer>()
 
 function ensurePlainObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
 }
@@ -39,7 +39,7 @@ export function getRegisteredSessionNormalizers(): Map<string, SessionNormalizer
 }
 
 export function normalizeSessionData<TSession>(session: TSession): TSession {
-  if (!session || typeof session !== 'object') {
+  if (session == null || typeof session !== 'object') {
     return session
   }
 

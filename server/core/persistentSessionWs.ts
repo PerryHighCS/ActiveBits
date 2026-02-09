@@ -48,10 +48,10 @@ interface IncomingPersistentMessage {
  */
 export function setupPersistentSessionWs(ws: WsRouter, sessions: SessionStore): void {
   ws.register('/ws/persistent-session', (socket, queryParams) => {
-    const hash = queryParams.get('hash') || null
-    const activityName = queryParams.get('activityName') || null
+    const hash = queryParams.get('hash') ?? null
+    const activityName = queryParams.get('activityName') ?? null
 
-    if (!hash || !activityName) {
+    if (hash == null || activityName == null) {
       socket.close(1008, 'Missing hash or activityName')
       return
     }
@@ -82,7 +82,7 @@ export function setupPersistentSessionWs(ws: WsRouter, sessions: SessionStore): 
 
     socket.on('message', (data) => {
       try {
-        const raw = typeof data === 'string' ? data : Buffer.isBuffer(data) ? data.toString() : String(data || '')
+        const raw = typeof data === 'string' ? data : Buffer.isBuffer(data) ? data.toString() : String(data ?? '')
         const message = JSON.parse(raw) as IncomingPersistentMessage
 
         if (message.type === 'verify-teacher-code') {
@@ -115,7 +115,7 @@ async function handleTeacherCodeVerification(
   teacherCode: string,
   sessions: SessionStore,
 ): Promise<void> {
-  if (!teacherCode || typeof teacherCode !== 'string') {
+  if (teacherCode == null || typeof teacherCode !== 'string') {
     socket.send(
       JSON.stringify({
         type: 'teacher-code-error',
@@ -135,10 +135,11 @@ async function handleTeacherCodeVerification(
     return
   }
 
-  const clientIp = socket.clientIp || 'unknown'
+  const clientIp = socket.clientIp ?? 'unknown'
   const rateLimitKey = `${clientIp}:${hash}`
 
-  if (!(await canAttemptTeacherCode(rateLimitKey))) {
+  const canAttempt = await canAttemptTeacherCode(rateLimitKey)
+  if (!canAttempt) {
     socket.send(
       JSON.stringify({
         type: 'teacher-code-error',

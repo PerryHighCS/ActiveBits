@@ -19,7 +19,7 @@ export default function FeedbackCards({ entries = [], isLoading = false }: Feedb
     return <p className="text-center text-gray-600">Loading feedback…</p>;
   }
 
-  if (!entries.length) {
+  if (entries.length === 0) {
     return <p className="text-center text-gray-600">No feedback yet.</p>;
   }
 

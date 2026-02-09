@@ -52,8 +52,8 @@ export default function ManagerPage() {
   }, [sessionId]);
 
   useEffect(() => {
-    if (!sessionId) return undefined;
-    if (!titleInitializedRef.current) {
+    if (sessionId == null) return undefined;
+    if (titleInitializedRef.current !== true) {
       titleInitializedRef.current = true;
       return undefined;
     }
@@ -69,7 +69,7 @@ export default function ManagerPage() {
           body: JSON.stringify({ title: sessionTitle }),
           signal: controller.signal,
         });
-        if (!res.ok) {
+        if (res.ok !== true) {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(data.error || 'Unable to save title');
         }
@@ -78,7 +78,7 @@ export default function ManagerPage() {
           setTitleSaveError(getErrorMessage(err, 'Unable to save title'));
         }
       } finally {
-        if (!controller.signal.aborted) {
+        if (controller.signal.aborted !== true) {
           setIsSavingTitle(false);
         }
       }
@@ -91,14 +91,14 @@ export default function ManagerPage() {
   }, [sessionId, sessionTitle]);
 
   const handleStageChange = async (nextStage: string) => {
-    if (!sessionId || stage === nextStage) return;
+    if (sessionId == null || stage === nextStage) return;
     try {
       const res = await fetch(`/api/gallery-walk/${sessionId}/stage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stage: nextStage }),
       });
-      if (!res.ok) {
+      if (res.ok !== true) {
         throw new Error('Failed to update stage');
       }
       const data = (await res.json()) as { stage?: string };
@@ -194,10 +194,10 @@ export default function ManagerPage() {
   );
 
   const handleDownloadExport = async () => {
-    if (!sessionId) return;
+    if (sessionId == null) return;
     try {
       const res = await fetch(`/api/gallery-walk/${sessionId}/export`);
-      if (!res.ok) throw new Error('Unable to export session data');
+      if (res.ok !== true) throw new Error('Unable to export session data');
       const data = (await res.json()) as {
         reviewees?: unknown;
         reviewers?: unknown;
@@ -227,7 +227,7 @@ export default function ManagerPage() {
     const map: Record<string, GalleryWalkFeedbackEntry[]> = {};
     feedback.forEach((entry) => {
       const targetId = typeof entry.to === 'string' ? entry.to : '';
-      if (!targetId) return;
+      if (targetId == null || targetId === '') return;
       map[targetId] = map[targetId] || [];
       map[targetId]?.push(entry);
     });
@@ -235,7 +235,7 @@ export default function ManagerPage() {
   }, [feedback]);
 
   const renderNotesView = (): ReactNode => {
-    if (!showNotesView) return null;
+    if (showNotesView !== true) return null;
     return (
       <GalleryWalkNotesView
         reviewees={reviewees as GalleryWalkReviewees}

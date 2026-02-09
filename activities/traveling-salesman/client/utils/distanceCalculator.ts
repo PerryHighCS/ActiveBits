@@ -48,7 +48,7 @@ export function buildDistanceMatrix(cities: City[]): DistanceMatrix {
  * Includes return to starting city
  */
 export function calculateRouteDistance(route: MixedRoute, distanceMatrix: DistanceMatrix): number {
-  if (!route || route.length === 0) return 0
+  if (route.length === 0) return 0
 
   let total = 0
   for (let i = 0; i < route.length; i++) {
@@ -67,7 +67,7 @@ export function calculateRouteDistance(route: MixedRoute, distanceMatrix: Distan
  * Does not include return to start city
  */
 export function calculateCurrentDistance(route: MixedRoute, distanceMatrix: DistanceMatrix): number {
-  if (!route || route.length <= 1) return 0
+  if (route.length <= 1) return 0
   let total = 0
   for (let i = 0; i < route.length - 1; i++) {
     const from = routeStepToIndex(route[i] as RouteStep)
@@ -102,7 +102,7 @@ export function getRouteDistance(route: MixedRoute, distanceMatrix: DistanceMatr
  * Includes return to starting city
  */
 export function calculateTotalDistance(route: MixedRoute, distanceMatrix: DistanceMatrix): number {
-  if (!route || route.length === 0) return 0
+  if (route.length === 0) return 0
   let total = 0
   for (let i = 0; i < route.length; i++) {
     const from = routeStepToIndex(route[i] as RouteStep)

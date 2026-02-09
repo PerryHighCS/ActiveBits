@@ -45,9 +45,9 @@ export function toUiBroadcastIds(broadcastIds: string[]): string[] {
 
 function getRouteStartIndex(route: string[]): number {
   const first = route[0]
-  if (!first) return 0
+  if (first == null || first === '') return 0
   const raw = first.split('-')[1]
-  if (!raw) return 0
+  if (raw == null || raw === '') return 0
   const parsed = Number.parseInt(raw, 10)
   return Number.isFinite(parsed) ? parsed : 0
 }
@@ -73,14 +73,14 @@ export default function TSPManager() {
   const mapSeedRef = useRef<number | null>(null);
 
   const handleSessionUpdate = useCallback((data: TspSessionData) => {
-    if (data.problem?.seed && data.problem.seed !== mapSeedRef.current) {
+    if (typeof data.problem?.seed === 'number' && data.problem.seed !== mapSeedRef.current) {
       mapSeedRef.current = data.problem.seed;
       mapTokenRef.current += 1;
     }
   }, []);
 
   const buildWsUrl = useCallback(() => {
-    if (!sessionId) return null;
+    if (sessionId == null) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     return `${protocol}//${host}/ws/traveling-salesman?sessionId=${sessionId}`;
@@ -118,29 +118,31 @@ export default function TSPManager() {
   });
 
   useEffect(() => {
-    if (!session?.broadcasts) return;
+    if (session?.broadcasts == null) return;
     initializeBroadcasts(session.broadcasts);
   }, [session?.broadcasts, initializeBroadcasts]);
 
   useEffect(() => {
-    if (!sessionId) return undefined;
+    if (sessionId == null) return undefined;
     connect();
     return () => disconnect();
   }, [sessionId, connect, disconnect]);
 
   const instructorRouteBuilder = useRouteBuilder({
-    cityCount: session?.problem?.cities?.length || 0,
-    distanceMatrix: session?.problem?.distanceMatrix || null
+    cityCount: session?.problem?.cities?.length ?? 0,
+    distanceMatrix: session?.problem?.distanceMatrix ?? null
   });
   const { hydrateRoute, resetRoute } = instructorRouteBuilder;
 
   useEffect(() => {
-    if (session?.instructor?.route?.length) {
+    const instructor = session?.instructor
+    const instructorRouteSnapshot = instructor?.route
+    if (instructor != null && (instructorRouteSnapshot?.length ?? 0) > 0) {
       hydrateRoute({
-        route: session.instructor.route,
-        complete: Boolean(session.instructor.complete),
-        distance: session.instructor.distance ?? null,
-        timeToComplete: session.instructor.timeToComplete ?? null
+        route: instructorRouteSnapshot,
+        complete: Boolean(instructor.complete),
+        distance: instructor.distance ?? null,
+        timeToComplete: instructor.timeToComplete ?? null
       });
     } else {
       resetRoute();
@@ -162,13 +164,13 @@ export default function TSPManager() {
   const instructorDistance = instructorComplete ? instructorTotalDistance : instructorCurrentDistance;
 
   useEffect(() => {
-    if (session?.problem?.numCities) {
+    if (typeof session?.problem?.numCities === 'number') {
       setNumCities(session.problem.numCities);
     }
   }, [session?.problem?.numCities]);
 
   useEffect(() => {
-    if (!highlightedSolution?.id) return;
+    if (highlightedSolution?.id == null) return;
     if (highlightedSolution.id === 'bruteforce' && session?.algorithms?.bruteForce?.route) {
       setHighlightedSolution({
         id: 'bruteforce',
@@ -465,25 +467,28 @@ export default function TSPManager() {
     if (!entry) return null;
     if (entry.type === 'student') {
       const student = session?.students?.find((s) => s.id === entry.id);
-      if (student?.currentRoute?.length) {
+      const studentRoute = student?.currentRoute
+      if (student != null && (studentRoute?.length ?? 0) > 0) {
         return {
           id: entry.id,
           name: entry.name,
-          path: student.currentRoute,
+          path: studentRoute,
           type: 'student',
-          distance: student.routeDistance
+          distance: student?.routeDistance ?? null,
         };
       }
       return null;
     }
     if (entry.type === 'instructor') {
-      if (entry.id === 'instructor-broadcast' && session?.instructor?.route?.length) {
+      const instructor = session?.instructor
+      const instructorRouteSnapshot = instructor?.route
+      if (entry.id === 'instructor-broadcast' && instructor != null && (instructorRouteSnapshot?.length ?? 0) > 0) {
         return {
           id: 'instructor-broadcast',
           name: 'Instructor Broadcast',
-          path: session.instructor.route,
+          path: instructorRouteSnapshot,
           type: 'instructor',
-          distance: session.instructor.distance
+          distance: instructor?.distance ?? null,
         };
       }
       if (instructorRoute.length > 0) {
@@ -526,12 +531,12 @@ export default function TSPManager() {
       if (computing && bruteForceStatus === 'running') {
         handleCancelBruteForce();
       } else {
-        computeBruteForce();
+        void computeBruteForce();
       }
       return;
     }
     if (entry.type === 'heuristic') {
-      computeHeuristic();
+      void computeHeuristic();
     }
   };
 
@@ -582,7 +587,7 @@ export default function TSPManager() {
       const isOn = broadcastIds.includes(broadcastId);
 
       if (!isOn) {
-        if (entry.type === 'student' && (!session?.students?.find((s) => s.id === entry.id)?.currentRoute?.length)) {
+        if (entry.type === 'student' && (session?.students?.find((s) => s.id === entry.id)?.currentRoute?.length ?? 0) === 0) {
           return;
         }
         if (entry.id === 'instructor' && (!session?.problem?.distanceMatrix || instructorRoute.length === 0)) {
@@ -639,7 +644,7 @@ export default function TSPManager() {
   const handleEndSession = async () => {
     try {
       await fetch(`/api/session/${sessionId}`, { method: 'DELETE' });
-      navigate('/manage');
+      void navigate('/manage');
     } catch (err) {
       console.error('Failed to end session:', err);
     }
@@ -651,7 +656,7 @@ export default function TSPManager() {
 
     if (broadcastSnapshot.length > 0) {
       broadcastSnapshot.forEach((route) => {
-        if (!route?.path?.length) return;
+        if ((route?.path?.length ?? 0) === 0) return;
         routes.push({
           id: route.id,
           path: route.path,
@@ -675,17 +680,20 @@ export default function TSPManager() {
         });
       }
 
-      if (broadcastIds.includes('instructor') && session?.instructor?.route?.length) {
+      const instructor = session?.instructor
+      const instructorRouteSnapshot = instructor?.route
+      if (broadcastIds.includes('instructor') && instructor != null && (instructorRouteSnapshot?.length ?? 0) > 0) {
         routes.push({
           id: 'instructor-broadcast',
-          path: session.instructor.route,
+          path: instructorRouteSnapshot,
           type: 'instructor'
         });
       }
 
-      if (session?.students?.length) {
-        session.students.forEach((student) => {
-          if (broadcastIds.includes(student.id) && student.currentRoute?.length) {
+      const students = session?.students ?? []
+      if (students.length > 0) {
+        students.forEach((student) => {
+          if (broadcastIds.includes(student.id) && (student.currentRoute?.length ?? 0) > 0) {
             routes.push({
               id: student.id,
               path: student.currentRoute,
@@ -763,17 +771,19 @@ export default function TSPManager() {
         distance: session.algorithms.heuristic.distance ?? null
       });
     }
-    if (broadcastIds.includes('instructor') && session?.instructor?.route?.length) {
+    const instructor = session?.instructor
+    if (broadcastIds.includes('instructor') && instructor != null && (instructor.route?.length ?? 0) > 0) {
       routes.push({
         id: 'instructor-broadcast',
         type: 'instructor',
         label: 'Instructor Broadcast',
-        distance: session.instructor.distance ?? null
+        distance: instructor.distance ?? null
       });
     }
-    if (session?.students?.length) {
-      session.students.forEach((student) => {
-        if (broadcastIds.includes(student.id) && student.currentRoute?.length) {
+    const students = session?.students ?? []
+    if (students.length > 0) {
+      students.forEach((student) => {
+        if (broadcastIds.includes(student.id) && (student.currentRoute?.length ?? 0) > 0) {
           routes.push({
             id: student.id,
             type: 'student',
@@ -854,7 +864,7 @@ export default function TSPManager() {
                 {instructorRoute.length > 0 && (
                   <div className="instructor-controls">
                     <div className="info-line">
-                      Instructor route progress: {instructorRoute.length}/{session?.problem?.cities?.length || 0}
+                      Instructor route progress: {instructorRoute.length}/{session?.problem?.cities?.length ?? 0}
                     </div>
                     <div className="info-line">
                       {instructorComplete ? 'Total distance' : 'Current distance'}: {formatDistance(instructorDistance)}
@@ -896,7 +906,7 @@ export default function TSPManager() {
                 if (highlightedSolution?.id === entry.id) {
                   setHighlightedSolution(null);
                 } else {
-                  viewAlgorithmWhenReady(entry);
+                  void viewAlgorithmWhenReady(entry);
                 }
                 return;
               }

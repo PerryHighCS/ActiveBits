@@ -32,13 +32,13 @@ const PythonListPracticeManager: FC = () => {
 
   const loadSession = useCallback(
     async (showSpinner = true) => {
-      if (!sessionId) return
+      if (sessionId == null) return
       if (showSpinner) {
         setLoading(true)
       }
       try {
         const res = await fetch(`/api/python-list-practice/${sessionId}`)
-        if (!res.ok) throw new Error('Failed to fetch session')
+        if (res.ok !== true) throw new Error('Failed to fetch session')
         const data = (await res.json()) as Record<string, unknown>
         const list = Array.isArray(data.students) ? (data.students as PythonListPracticeStudent[]) : []
         setStudents(list)
@@ -81,11 +81,11 @@ const PythonListPracticeManager: FC = () => {
 
   const handleWsOpen = useCallback(() => {
     setError(null)
-    loadSession(false)
+    void loadSession(false)
   }, [loadSession])
 
   const buildWsUrl = useCallback(() => {
-    if (!sessionId) return null
+    if (sessionId == null) return null
     const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${proto}//${window.location.host}/ws/python-list-practice?sessionId=${encodeURIComponent(sessionId)}`
   }, [sessionId])
@@ -99,9 +99,9 @@ const PythonListPracticeManager: FC = () => {
   })
 
   useEffect(() => {
-    if (!sessionId) return undefined
-    loadSession()
-    connect()
+    if (sessionId == null) return undefined
+    void loadSession()
+    void connect()
     return () => {
       disconnect()
     }
@@ -109,7 +109,7 @@ const PythonListPracticeManager: FC = () => {
 
   const persistQuestionTypes = useCallback(
     (nextSet: Set<string>) => {
-      if (!sessionId) return
+      if (sessionId == null) return
       fetch(`/api/python-list-practice/${sessionId}/question-types`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -124,7 +124,7 @@ const PythonListPracticeManager: FC = () => {
 
   const handleToggleType = useCallback(
     (typeId: string) => {
-      if (!sessionId) return
+      if (sessionId == null) return
       const next = new Set(selectedTypes)
       if (typeId === 'all') {
         next.clear()
@@ -165,9 +165,9 @@ const PythonListPracticeManager: FC = () => {
   }, [])
 
   const endSession = useCallback(async () => {
-    if (!sessionId) return
+    if (sessionId == null) return
     await fetch(`/api/session/${sessionId}`, { method: 'DELETE' })
-    navigate('/manage')
+    void navigate('/manage')
   }, [sessionId, navigate])
 
   return (

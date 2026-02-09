@@ -34,7 +34,7 @@ export default function registerAlgorithmRoutes(
     const heuristic = isPlainObject(body.heuristic) ? body.heuristic : null
 
     if (bruteForce) {
-      if (bruteForce.route && !isRouteArray(bruteForce.route)) {
+      if (bruteForce.route != null && !isRouteArray(bruteForce.route)) {
         res.status(400).json({ error: 'Invalid bruteForce route' })
         return
       }
@@ -69,7 +69,7 @@ export default function registerAlgorithmRoutes(
     }
 
     if (heuristic) {
-      if (heuristic.route && !isRouteArray(heuristic.route)) {
+      if (heuristic.route != null && !isRouteArray(heuristic.route)) {
         res.status(400).json({ error: 'Invalid heuristic route' })
         return
       }
@@ -92,11 +92,11 @@ export default function registerAlgorithmRoutes(
         route: bruteForce.route as string[] | undefined,
         distance: (bruteForce.distance as number | undefined) ?? null,
         computeTime: (bruteForce.computeTime as number | undefined) ?? null,
-        computed: !bruteForce.cancelled,
+        computed: bruteForce.cancelled !== true,
         cancelled: Boolean(bruteForce.cancelled),
         progressCurrent: (bruteForce.checked as number | undefined) ?? null,
         progressTotal: (bruteForce.totalChecks as number | undefined) ?? null,
-        status: bruteForce.cancelled ? 'cancelled' : 'complete',
+        status: bruteForce.cancelled === true ? 'cancelled' : 'complete',
         computedAt: Date.now(),
       }
     }
@@ -117,7 +117,7 @@ export default function registerAlgorithmRoutes(
     // Broadcast algorithm results
     await broadcast('algorithmsComputed', { bruteForce, heuristic }, session.id)
 
-    if ((session.data.broadcasts || []).length > 0) {
+    if (session.data.broadcasts.length > 0) {
       await broadcastRoutesUpdate(session)
     }
 
@@ -199,7 +199,7 @@ export default function registerAlgorithmRoutes(
     }
 
     await sessions.set(session.id, session)
-    if ((session.data.broadcasts || []).includes('bruteforce')) {
+    if (session.data.broadcasts.includes('bruteforce')) {
       await broadcastRoutesUpdate(session)
     }
     res.json({ success: true })

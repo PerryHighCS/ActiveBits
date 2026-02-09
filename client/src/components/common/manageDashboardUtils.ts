@@ -35,7 +35,7 @@ export function parseDeepLinkOptions(rawDeepLinkOptions: unknown): DeepLinkOptio
     const rawOptions = Array.isArray(rawOption.options) ? rawOption.options : []
 
     parsed[key] = {
-      label: (rawOption.label !== null && rawOption.label !== undefined) ? toStringValue(rawOption.label) : undefined,
+      label: (rawOption.label != null) ? toStringValue(rawOption.label) : undefined,
       type: rawOption.type === 'select' ? 'select' : 'text',
       options: rawOptions
         .filter((option): option is Record<string, unknown> => isObjectRecord(option))
@@ -81,7 +81,7 @@ export function buildQueryString(options: Record<string, unknown> | null | undef
   const params = new URLSearchParams()
 
   for (const [key, value] of Object.entries(options || {})) {
-    if (value !== null && value !== undefined && value !== '') {
+    if (value != null && value !== '') {
       params.set(key, toStringValue(value))
     }
   }

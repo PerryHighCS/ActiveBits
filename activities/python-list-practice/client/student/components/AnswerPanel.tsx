@@ -45,9 +45,9 @@ export default function AnswerPanel({
           value={answer}
           onChange={(e) => onAnswerChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !disabled) {
+            if (e.key === 'Enter' && disabled !== true) {
               e.preventDefault();
-              if (!loading && answer.trim()) {
+              if (loading !== true && answer != null && answer.trim() !== '') {
                 onSubmit();
               }
             }

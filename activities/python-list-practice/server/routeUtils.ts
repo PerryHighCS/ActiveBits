@@ -35,15 +35,15 @@ export function sanitizeQuestionTypes(types: unknown): QuestionType[] {
 }
 
 export function validateName(name: unknown): string | null {
-  if (!name || typeof name !== 'string') return null
+  if (typeof name !== 'string' || name.length === 0) return null
   const trimmed = name.trim().slice(0, 50)
-  if (!trimmed) return null
+  if (trimmed.length === 0) return null
   const ok = /^[a-zA-Z0-9\s\-'.]+$/.test(trimmed)
   return ok ? trimmed : null
 }
 
 export function validateStats(stats: unknown): PythonListPracticeStats | null {
-  if (!stats || typeof stats !== 'object') return null
+  if (stats == null || typeof stats !== 'object') return null
 
   const clampInt = (val: unknown, max = 100000): number => {
     const n = parseInt(String(val), 10)
@@ -66,9 +66,9 @@ export function validateStats(stats: unknown): PythonListPracticeStats | null {
 }
 
 export function validateStudentId(value: unknown): string | null {
-  if (!value || typeof value !== 'string') return null
+  if (typeof value !== 'string' || value.length === 0) return null
   const trimmed = value.trim().slice(0, 80)
-  if (!trimmed) return null
+  if (trimmed.length === 0) return null
   if (!/^[a-zA-Z0-9._:/-]+$/.test(trimmed)) return null
   return trimmed
 }

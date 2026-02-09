@@ -12,7 +12,7 @@ function validateInt(value: unknown, max = 100_000): number {
 }
 
 export function validateStudentName(name: unknown): string | null {
-  if (!name || typeof name !== 'string') {
+  if (typeof name !== 'string' || name.length === 0) {
     return null
   }
 
@@ -30,7 +30,7 @@ export function validateStudentName(name: unknown): string | null {
 }
 
 export function validateStats(stats: unknown): JavaFormatStats | null {
-  if (!stats || typeof stats !== 'object' || Array.isArray(stats)) {
+  if (stats == null || typeof stats !== 'object' || Array.isArray(stats)) {
     return null
   }
 

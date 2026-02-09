@@ -69,7 +69,7 @@ export default function registerStudentRoutes(
           )
 
           // Send current problem if it exists
-          if (session.data.problem && session.data.problem.cities) {
+          if (session.data.problem != null) {
             client.send(
               JSON.stringify({
                 type: 'problemUpdate',
@@ -82,7 +82,7 @@ export default function registerStudentRoutes(
             )
           }
 
-          if ((session.data.broadcasts || []).length > 0) {
+          if (session.data.broadcasts.length > 0) {
             const routes = buildBroadcastPayload(session)
             client.send(
               JSON.stringify({
@@ -178,7 +178,7 @@ export default function registerStudentRoutes(
     if (student.complete) {
       student.routeCompleteTime = Date.now()
       student.timeToComplete = timeToComplete
-      student.attempts = (student.attempts || 0) + 1
+      student.attempts = (student.attempts ?? 0) + 1
     } else {
       student.routeCompleteTime = null
       student.timeToComplete = null

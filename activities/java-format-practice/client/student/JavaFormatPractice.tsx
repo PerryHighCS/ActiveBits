@@ -72,7 +72,7 @@ function generateVariableCycles(
   variableTemplates: JavaFormatVariableTemplate[] = [],
   numCycles = 3,
 ): Array<Record<string, string | number>> {
-  if (!variables || variables.length === 0) return [];
+  if (variables.length === 0) return [];
   
   const cycles: Array<Record<string, string | number>> = [];
   
@@ -226,7 +226,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   }, [studentId]);
 
   useEffect(() => {
-    if (!currentChallenge || !currentChallenge.formatCalls) return;
+    if (!currentChallenge) return;
     resetChallengeState(currentChallenge.formatCalls, selectedDifficulty);
     setCurrentFormatCallIndex(0);
   }, [currentChallenge, resetChallengeState, selectedDifficulty]);
@@ -257,7 +257,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       );
       setCurrentChallenge(challenge);
       setCurrentFormatCallIndex(0);
-      resetChallengeState(challenge.formatCalls || [], selectedDifficulty);
+      resetChallengeState(challenge.formatCalls, selectedDifficulty);
       setFocusToken((t) => t + 1);
     }
   }, [nameSubmitted, selectedDifficulty, selectedTheme]);
@@ -267,7 +267,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       try {
         const message = JSON.parse(event.data) as StudentsUpdateMessage
         if (message.type === 'session-ended') {
-          navigate('/session-ended');
+          void navigate('/session-ended');
           return;
         }
         if (message.type === 'studentId') {
@@ -356,7 +356,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   }, [stats, sessionId, studentId, isSoloSession]);
 
   const getCurrentFormatCall = (): JavaFormatFormatCall | null => {
-    if (!currentChallenge || !currentChallenge.formatCalls) return null;
+    if (!currentChallenge) return null;
     return currentChallenge.formatCalls[currentFormatCallIndex] ?? null;
   };
 
@@ -378,7 +378,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   };
 
   const checkAnswer = () => {
-    if (!currentChallenge || !currentChallenge.formatCalls) return;
+    if (!currentChallenge) return;
 
     const calls = currentChallenge.formatCalls;
 
@@ -511,7 +511,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
           } else {
             const userFmt = userParts[0].slice(1, -1);
             const valueMap: Record<string, string | number> = {};
-            (currentChallenge.variables || []).forEach((v) => {
+            currentChallenge.variables.forEach((v) => {
               let val = v.value;
               if (v.type === 'String') {
                 val = val.replace(/^"(.*)"$/, '$1');
@@ -582,7 +582,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
               const expectedFmt = (answerParts[0] ?? '').replace(/^"(.*)"$/, '$1');
               const expectedArgExprs = answerParts.slice(1);
               const valueMap: Record<string, string | number> = {};
-              (currentChallenge.variables || []).forEach((v) => {
+              currentChallenge.variables.forEach((v) => {
                 let val = v.value;
                 if (v.type === 'String') {
                   val = val.replace(/^"(.*)"$/, '$1');
@@ -705,7 +705,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   };
 
   const handleCycleNext = () => {
-    if (!variableCycles || cycleIndex >= variableCycles.length - 1) {
+    if (cycleIndex >= variableCycles.length - 1) {
       // All cycles completed successfully - advance to next challenge
       setIsCyclingMode(false);
       setCycleIndex(0);
@@ -878,13 +878,13 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
 
   // Get display variables - use cycling values if in cycling mode, otherwise original
   const getDisplayVariables = (): JavaFormatVariable[] => {
-    if (!isCyclingMode || !variableCycles || !variableCycles[cycleIndex]) {
-      return currentChallenge?.variables || [];
+    if (!isCyclingMode) {
+      return currentChallenge?.variables ?? [];
     }
     
     const cycleVars = variableCycles[cycleIndex]
-    if (!cycleVars) return currentChallenge?.variables || []
-    return (currentChallenge?.variables || []).map((v) => {
+    if (cycleVars == null) return currentChallenge?.variables ?? []
+    return (currentChallenge?.variables ?? []).map((v) => {
       const cycleValue = cycleVars[v.name];
       if (cycleValue !== undefined) {
         return {
@@ -901,7 +901,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   };
 
   const handleNextChallenge = () => {
-    if (!currentChallenge || !currentChallenge.formatCalls) return;
+    if (!currentChallenge) return;
 
     // For beginner: move to next line within same challenge if available AND answer was correct
     if (selectedDifficulty === 'beginner' && currentFormatCallIndex < currentChallenge.formatCalls.length - 1 && feedback?.isCorrect) {
@@ -945,7 +945,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       const theme = selectedTheme === 'all' ? null : selectedTheme;
       let next = getRandomChallenge(theme, selectedDifficulty);
       let attempts = 0;
-      while (next && currentChallenge && next.id === currentChallenge.id && attempts < 10) {
+      while (next.id === currentChallenge.id && attempts < 10) {
         next = getRandomChallenge(theme, selectedDifficulty);
         attempts += 1;
       }
@@ -1046,7 +1046,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       const expected = splitAnswerParts(formatCall.answer).length;
       return parts.length === expected && parts.every((p) => p.trim());
     }
-    const calls = currentChallenge.formatCalls || [];
+    const calls = currentChallenge.formatCalls;
     if (selectedDifficulty === 'advanced') {
       // After first submission, allow checking partial lines
       if (hasSubmitted) {

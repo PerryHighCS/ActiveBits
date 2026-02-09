@@ -96,7 +96,7 @@ export default function registerInstructorRoutes(
     }
 
     session.data.instructor = null
-    session.data.broadcasts = (session.data.broadcasts || []).filter((id) => id !== 'instructor')
+    session.data.broadcasts = session.data.broadcasts.filter((id) => id !== 'instructor')
     await sessions.set(session.id, session)
 
     await broadcastRoutesUpdate(session)
@@ -173,7 +173,7 @@ export default function registerInstructorRoutes(
 
     await sessions.set(session.id, session)
 
-    if ((session.data.broadcasts || []).includes('instructor')) {
+    if (session.data.broadcasts.includes('instructor')) {
       await broadcastRoutesUpdate(session)
     }
 

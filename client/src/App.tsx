@@ -36,7 +36,7 @@ export default function App() {
   return (
     <div className="w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white">
       <BrowserRouter>
-        <div className="w-full flex-grow">
+        <div className="w-full grow">
           <Routes>
             <Route path="/status" element={<StatusDashboard />} />
             <Route path="/manage" element={<ManageDashboard />} />

@@ -11,7 +11,7 @@ export interface SessionRecord extends SharedSession<Record<string, unknown>> {
 }
 
 function ensurePlainObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  return value != null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
 function toSessionRecord(session: SessionLike): SessionRecord {

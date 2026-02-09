@@ -28,8 +28,8 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   private readonly flushInterval: NodeJS.Timeout
 
   constructor(options: SessionCacheOptions = {}) {
-    this.maxSize = options.maxSize || 1000
-    this.ttlMs = options.ttlMs || 30_000
+    this.maxSize = options.maxSize ?? 1000
+    this.ttlMs = options.ttlMs ?? 30_000
     this.cache = new Map()
     this.touchQueue = new Set()
     this.touchFn = typeof options.touchFn === 'function' ? options.touchFn : null
@@ -70,7 +70,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   set(id: string, session: TSession, dirty = true): void {
     if (!this.cache.has(id) && this.cache.size >= this.maxSize) {
       const oldestKey = this.cache.keys().next().value
-      if (oldestKey) {
+      if (oldestKey != null) {
         this.cache.delete(oldestKey)
         this.touchQueue.delete(oldestKey)
       }
@@ -133,7 +133,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
    */
   async flushOne(id: string, setFn: (id: string, session: TSession) => Promise<void>): Promise<void> {
     const cached = this.cache.get(id)
-    if (!cached?.session) return
+    if (cached?.session == null) return
 
     await setFn(id, cached.session)
     cached.dirty = false
@@ -175,7 +175,7 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   async shutdown(touchFn: ((id: string) => Promise<void>) | null = null): Promise<void> {
     clearInterval(this.flushInterval)
 
-    if (touchFn) {
+    if (touchFn != null) {
       await this.flushTouches(touchFn)
     }
 

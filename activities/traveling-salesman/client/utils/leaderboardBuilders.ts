@@ -157,13 +157,15 @@ export const buildSoloLeaderboardEntries = ({
 
   const showSoloAlgorithms =
     citiesLength > 0 &&
-    (currentRoute.length > 0 ||
+    Boolean(
+      currentRoute.length > 0 ||
       soloBruteForceStarted ||
       soloComputing ||
-      soloProgress.bruteForce?.running ||
-      soloProgress.heuristic?.running ||
-      soloAlgorithms.bruteForce ||
-      soloAlgorithms.heuristic)
+      soloProgress.bruteForce?.running === true ||
+      soloProgress.heuristic?.running === true ||
+      soloAlgorithms.bruteForce != null ||
+      soloAlgorithms.heuristic != null,
+    )
 
   const entries: SoloLeaderboardEntry[] = [
     ...(currentRoute.length > 0

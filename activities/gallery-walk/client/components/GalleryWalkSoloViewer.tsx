@@ -93,7 +93,7 @@ export default function GalleryWalkSoloViewer() {
   const [showFileMeta, setShowFileMeta] = useState(false);
 
   useEffect(() => {
-    if (!fileResult) return;
+    if (fileResult == null) return;
     setViewMode(fileResult.type === 'teacher' ? 'table' : 'notes');
     setTableSortField('createdAt');
     setTableSortDirection('desc');
@@ -102,7 +102,7 @@ export default function GalleryWalkSoloViewer() {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (file == null) return;
     try {
       const text = await file.text();
       const data = JSON.parse(text) as Record<string, unknown>;
@@ -157,7 +157,7 @@ export default function GalleryWalkSoloViewer() {
   };
 
   const sortedFeedback = useMemo(() => {
-    if (!fileResult) return [];
+    if (fileResult == null) return [];
     return [...fileResult.data.feedback].sort(
       (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0),
     );
@@ -165,7 +165,7 @@ export default function GalleryWalkSoloViewer() {
 
   const feedbackByReviewee = useMemo(() => {
     return sortedFeedback.reduce<Record<string, FeedbackEntry[]>>((acc, entry) => {
-      if (!entry?.to) return acc;
+      if (entry?.to == null || entry.to === '') return acc;
       acc[entry.to] = acc[entry.to] || [];
       acc[entry.to]?.push(entry);
       return acc;
@@ -228,7 +228,7 @@ export default function GalleryWalkSoloViewer() {
   }, [tableSortField]);
 
   const summaryText = useMemo(() => {
-    if (!fileResult) return null;
+    if (fileResult == null) return null;
     const exportedAt = new Date(fileResult.data.exportedAt);
     return exportedAt.toString() !== 'Invalid Date'
       ? exportedAt.toLocaleString()
@@ -236,7 +236,7 @@ export default function GalleryWalkSoloViewer() {
   }, [fileResult]);
 
   const renderFileMetaDetails = (variant: 'card' | 'inline' = 'card'): ReactNode => {
-    if (!fileResult) return null;
+    if (fileResult == null) return null;
     const wrapperClass = variant === 'card'
       ? 'rounded border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700'
       : 'text-xs text-gray-500 space-y-1';
@@ -296,7 +296,7 @@ export default function GalleryWalkSoloViewer() {
   };
 
   const renderLoadedContent = () => {
-    if (!fileResult) return null;
+    if (fileResult == null) return null;
     return (
       <div className="space-y-4 solo-feedback-loaded">
         {showFileMeta && fileResult.type !== 'student' && renderFileMetaDetails('card')}

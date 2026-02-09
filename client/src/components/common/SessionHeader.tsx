@@ -92,7 +92,7 @@ export default function SessionHeader({ activityName, sessionId, onEndSession, s
             <Button
               onClick={() => setShowEndModal(true)}
               variant="outline"
-              className="!border-red-600 !text-red-600 hover:!bg-red-50 hover:!text-red-700"
+              className="border-red-600! text-red-600! hover:bg-red-50! hover:text-red-700!"
             >
               End Session
             </Button>

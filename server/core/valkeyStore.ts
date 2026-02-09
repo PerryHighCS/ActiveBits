@@ -50,7 +50,7 @@ export class ValkeySessionStore {
 
   constructor(valkeyUrl: string, options: { ttlMs?: number } = {}) {
     const RedisCtor = Redis as unknown as RedisConstructor
-    this.ttlMs = options.ttlMs || 60 * 60 * 1000
+    this.ttlMs = options.ttlMs ?? 60 * 60 * 1000
     this.client = new RedisCtor(valkeyUrl, {
       maxRetriesPerRequest: 3,
       enableReadyCheck: true,
@@ -73,15 +73,15 @@ export class ValkeySessionStore {
   subscribeToBroadcast(channel: string, handler: BroadcastHandler): void {
     if (!this.broadcastHandlers.has(channel)) {
       this.broadcastHandlers.set(channel, [])
-      this.subscriber.subscribe(channel, (err: Error | null) => {
-        if (err) {
+      void this.subscriber.subscribe(channel, (err: Error | null) => {
+        if (err != null) {
           console.error(`Failed to subscribe to ${channel}:`, err)
         }
       })
     }
 
     const handlers = this.broadcastHandlers.get(channel)
-    if (handlers) {
+    if (handlers != null) {
       handlers.push(handler)
     }
   }
@@ -121,7 +121,7 @@ export class ValkeySessionStore {
 
   async set(id: string, session: SessionLike, ttlMs: number | null = null): Promise<void> {
     try {
-      const ttl = ttlMs || this.ttlMs
+      const ttl = ttlMs ?? this.ttlMs
       const data = JSON.stringify(session)
       await this.client.set(`session:${id}`, data, 'PX', ttl)
     } catch (err) {
@@ -194,7 +194,7 @@ export class ValkeySessionStore {
       const sessions: SessionLike[] = []
       for (const id of ids) {
         const session = await this.get(id)
-        if (session) {
+        if (session != null) {
           sessions.push(session)
         }
       }
@@ -212,7 +212,7 @@ export class ValkeySessionStore {
       let cleaned = 0
 
       for (const session of sessions) {
-        if (now - (session.lastActivity || 0) > this.ttlMs) {
+        if (now - (session.lastActivity ?? 0) > this.ttlMs) {
           await this.delete(session.id)
           cleaned += 1
         }

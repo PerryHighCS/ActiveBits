@@ -68,33 +68,33 @@ function parseMessage(event: MessageEvent): WwwSimMessageEnvelope | null {
 }
 
 function asStudentJoinedPayload(payload: unknown): StudentJoinedPayload | null {
-  if (!payload || typeof payload !== 'object') return null
+  if (payload == null || typeof payload !== 'object') return null
   const value = payload as StudentJoinedPayload
   if (typeof value.hostname !== 'string' || typeof value.joined !== 'number') return null
   return value
 }
 
 function asStudentRemovedPayload(payload: unknown): StudentRemovedPayload | null {
-  if (!payload || typeof payload !== 'object') return null
+  if (payload == null || typeof payload !== 'object') return null
   const value = payload as StudentRemovedPayload
   if (typeof value.hostname !== 'string') return null
   return value
 }
 
 function asStudentUpdatedPayload(payload: unknown): StudentUpdatedPayload | null {
-  if (!payload || typeof payload !== 'object') return null
+  if (payload == null || typeof payload !== 'object') return null
   const value = payload as StudentUpdatedPayload
   if (typeof value.oldHostname !== 'string' || typeof value.newHostname !== 'string') return null
   return value
 }
 
 function asFragmentsAssignedPayload(payload: unknown): FragmentsAssignedPayload {
-  if (!payload || typeof payload !== 'object') return {}
+  if (payload == null || typeof payload !== 'object') return {}
   return payload as FragmentsAssignedPayload
 }
 
 function asTemplateAssignedPayload(payload: unknown): TemplateAssignedPayload {
-  if (!payload || typeof payload !== 'object') return {}
+  if (payload == null || typeof payload !== 'object') return {}
   return payload as TemplateAssignedPayload
 }
 
@@ -104,7 +104,7 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
     credentials: 'include',
     ...options,
   })
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  if (response.ok !== true) throw new Error(`${response.status} ${response.statusText}`)
   return (await response.json()) as T
 }
 
@@ -138,7 +138,7 @@ export default function WwwSimManager() {
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
+    void (async () => {
       try {
         const data = await api<PresetPassage[]>('/api/www-sim/passages')
         if (cancelled) return
@@ -177,16 +177,16 @@ export default function WwwSimManager() {
       setBusy(true)
       setError(null)
       try {
-        if (sessionId) {
+        if (sessionId != null) {
           const session = await api<WwwSimSessionResponse>(`/api/www-sim/${sessionId}`)
           if (cancelled) return
 
           setStudents(session.students || [])
-          if (session.passage) {
+          if (session.passage != null) {
             setPassage(session.passage)
           }
 
-          if (session.hostingMap?.length && session.studentTemplates && Object.keys(session.studentTemplates).length) {
+          if (session.hostingMap != null && session.hostingMap.length > 0 && session.studentTemplates != null && Object.keys(session.studentTemplates).length > 0) {
             setHostingMap(session.hostingMap)
             setStudentTemplates(session.studentTemplates)
             setFragments(session.hostingMap)
@@ -205,7 +205,7 @@ export default function WwwSimManager() {
           })
           if (cancelled) return
           setDisplayCode(created.id)
-          navigate(`/manage/www-sim/${created.id}`, { replace: true })
+          void navigate(`/manage/www-sim/${created.id}`, { replace: true })
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -225,10 +225,10 @@ export default function WwwSimManager() {
   }, [navigate, sessionId])
 
   useEffect(() => {
-    if (!displayCode) return undefined
+    if (displayCode == null) return undefined
     let cancelled = false
 
-    ;(async () => {
+    void (async () => {
       try {
         const data = await api<WwwSimSessionResponse>(`/api/www-sim/${displayCode}`)
         if (!cancelled) {
@@ -245,11 +245,11 @@ export default function WwwSimManager() {
   }, [displayCode])
 
   const clearWsIntervals = useCallback(() => {
-    if (heartbeatRef.current) {
+    if (heartbeatRef.current != null) {
       clearInterval(heartbeatRef.current)
       heartbeatRef.current = null
     }
-    if (httpKeepAliveRef.current) {
+    if (httpKeepAliveRef.current != null) {
       clearInterval(httpKeepAliveRef.current)
       httpKeepAliveRef.current = null
     }
@@ -257,11 +257,11 @@ export default function WwwSimManager() {
 
   const handleWsMessage = useCallback((event: MessageEvent) => {
     const message = parseMessage(event)
-    if (!message || message.type === 'ping' || message.type === 'pong') return
+    if (message == null || message.type === 'ping' || message.type === 'pong') return
 
     if (message.type === 'student-joined') {
       const payload = asStudentJoinedPayload(message.payload)
-      if (!payload) return
+      if (payload == null) return
 
       setStudents((previous) => {
         const index = previous.findIndex((student) => student.hostname === payload.hostname)
@@ -278,7 +278,7 @@ export default function WwwSimManager() {
 
     if (message.type === 'student-removed') {
       const payload = asStudentRemovedPayload(message.payload)
-      if (!payload) return
+      if (payload == null) return
 
       setStudents((previous) => previous.filter((student) => student.hostname !== payload.hostname))
       if (payload.hostname === selectedStudentRef.current?.hostname) {
@@ -289,7 +289,7 @@ export default function WwwSimManager() {
 
     if (message.type === 'student-updated') {
       const payload = asStudentUpdatedPayload(message.payload)
-      if (!payload) return
+      if (payload == null) return
 
       const { oldHostname: oldName, newHostname: newName } = payload
 
@@ -348,7 +348,7 @@ export default function WwwSimManager() {
 
     if (message.type === 'template-assigned') {
       const payload = asTemplateAssignedPayload(message.payload)
-      if (!payload.hostname || !payload.template) return
+      if (payload?.hostname == null || payload?.template == null) return
 
       setStudentTemplates((previous) => ({
         ...previous,
@@ -381,7 +381,7 @@ export default function WwwSimManager() {
   }, [clearWsIntervals])
 
   const buildWsUrl = useCallback(() => {
-    if (!displayCode || typeof window === 'undefined') return null
+    if (displayCode == null || typeof window === 'undefined') return null
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     return `${protocol}://${window.location.host}/ws/www-sim?sessionId=${encodeURIComponent(displayCode)}`
   }, [displayCode])
@@ -396,7 +396,7 @@ export default function WwwSimManager() {
   })
 
   useEffect(() => {
-    if (!displayCode) {
+    if (displayCode == null) {
       disconnectWs()
       return undefined
     }
@@ -407,7 +407,7 @@ export default function WwwSimManager() {
   }, [connectWs, disconnectWs, displayCode])
 
   async function removeStudent(hostname: string): Promise<void> {
-    if (!displayCode) return
+    if (displayCode == null) return
     try {
       await fetch(`/api/www-sim/${displayCode}/students/${encodeURIComponent(hostname)}`, {
         method: 'DELETE',
@@ -420,7 +420,7 @@ export default function WwwSimManager() {
   }
 
   async function renameStudent(oldHostname: string, nextHostname: string): Promise<void> {
-    if (!displayCode) return
+    if (displayCode == null) return
     const normalized = (nextHostname || '').trim().toLowerCase()
     if (!normalized || normalized === oldHostname) return
 
@@ -438,7 +438,7 @@ export default function WwwSimManager() {
 
   const assignFragments = useCallback(async () => {
     const activeSessionId = sessionId || displayCode
-    if (!activeSessionId) return
+    if (activeSessionId == null) return
 
     try {
       await fetch(`/api/www-sim/${activeSessionId}/assign`, {
@@ -513,7 +513,7 @@ export default function WwwSimManager() {
               className="border border-gray-300 rounded px-2 py-2 w-full max-w-md ml-2"
               onChange={(event) => {
                 const selected = presetPassages.find((preset) => preset.label === event.target.value)
-                if (selected) {
+                if (selected != null) {
                   setPassage(selected)
                 }
               }}

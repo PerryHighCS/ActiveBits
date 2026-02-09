@@ -23,14 +23,14 @@ export default function TicketPage({ sessionData }: TicketPageProps) {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!sessionId || ticket != null || typeof window === 'undefined') return
+    if (sessionId == null || ticket != null || typeof window === 'undefined') return
 
     const timerId = setTimeout(() => {
       setLoading(true)
 
       fetch(`/api/raffle/generateTicket/${sessionId}`)
         .then((response) => {
-          if (!response.ok) {
+          if (response.ok !== true) {
             throw new Error('Failed to generate ticket')
           }
 

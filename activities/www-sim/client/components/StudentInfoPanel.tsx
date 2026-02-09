@@ -16,7 +16,7 @@ export default function StudentInfoPanel({ hostname, template, hostingMap }: Stu
     .filter((fragment) => fragment.assignedTo.some((entry) => entry.hostname === hostname))
     .flatMap((fragment) => {
       const entry = fragment.assignedTo.find((assignment) => assignment.hostname === hostname)
-      if (!entry) return []
+      if (entry == null) return []
 
       return [{ fileName: entry.fileName, content: fragment.fragment }]
     })
@@ -47,7 +47,7 @@ export default function StudentInfoPanel({ hostname, template, hostingMap }: Stu
         <h4 className="font-semibold text-gray-700 mb-1">Files they need to request:</h4>
         {(template?.fragments?.length ?? 0) > 0 ? (
           <ul className="list-disc list-inside text-sm">
-            {template.fragments.map((fragment) => (
+            {template?.fragments?.map((fragment) => (
               <li key={fragment.hash} className="font-mono">
                 {fragment.url}
               </li>

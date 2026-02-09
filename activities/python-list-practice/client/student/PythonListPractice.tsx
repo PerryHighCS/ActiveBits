@@ -117,7 +117,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
 
   const handleSoloToggleType = useCallback(
     (typeId: string) => {
-      if (!isAllowedType(typeId)) return
+      if (isAllowedType(typeId) !== true) return
       const next = new Set(allowedTypes)
       if (typeId === 'all') {
         next.clear()
@@ -147,7 +147,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   }, [])
 
   useEffect(() => {
-    if (!sessionId) return
+    if (sessionId == null) return
     const storedName = localStorage.getItem(`python-list-practice-name-${sessionId}`)
     const storedId = localStorage.getItem(`python-list-practice-id-${sessionId}`)
     if (storedName) {
@@ -162,20 +162,20 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   }, [sessionId])
 
   useEffect(() => {
-    if (!showNext && answerInputRef.current) {
+    if (showNext !== true && answerInputRef.current != null) {
       answerInputRef.current.focus()
     }
   }, [challenge, showNext])
 
   useEffect(() => {
-    if (!sessionId || isSolo) return undefined
+    if (sessionId == null || isSolo === true) return undefined
     let ignore = false
     const fetchConfig = async () => {
       try {
         const res = await fetch(`/api/python-list-practice/${sessionId}`)
-        if (!res.ok) throw new Error('Failed to load session')
+        if (res.ok !== true) throw new Error('Failed to load session')
         const data = (await res.json()) as Record<string, unknown>
-        if (!ignore) {
+        if (ignore !== true) {
           const types = Array.isArray(data.selectedQuestionTypes) ? data.selectedQuestionTypes : ['all']
           applySelectedTypes(types as string[])
         }
@@ -183,7 +183,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
         console.error('Failed to load session config', err)
       }
     }
-    fetchConfig()
+    void fetchConfig()
     return () => {
       ignore = true
     }
@@ -192,7 +192,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   const ensureStudentId = useCallback(() => {
     if (studentId) return studentId
     const generated =
-      typeof crypto !== 'undefined' && crypto.randomUUID
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `stu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     setStudentId(generated)
@@ -206,7 +206,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
     (e: React.SyntheticEvent<HTMLFormElement>) => {
       e.preventDefault()
       const sanitized = sanitizeName(studentName)
-      if (!sanitized) {
+      if (sanitized == null || sanitized === '') {
         setError('Enter a valid name')
         return
       }
@@ -241,12 +241,12 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
 
   const handleStudentOpen = useCallback(() => {
     if (submittedName) {
-      sendStats()
+      void sendStats()
     }
   }, [submittedName, sendStats])
 
   const buildStudentWsUrl = useCallback(() => {
-    if (!sessionId || isSolo) return null
+    if (sessionId == null || isSolo === true) return null
     const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const encodedSession = encodeURIComponent(sessionId)
     const nameParam = submittedName ? `&studentName=${encodeURIComponent(submittedName)}` : ''
@@ -264,7 +264,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   })
 
   useEffect(() => {
-    if (!sessionId || isSolo) {
+    if (sessionId == null || isSolo === true) {
       disconnectStudentWs()
       return undefined
     }
@@ -319,7 +319,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
       isCorrect,
       message: isCorrect ? 'Correct! 🎉' : `Not quite. Expected: ${challenge?.expected}`,
     })
-    sendStats(nextStats)
+    void sendStats(nextStats)
     setShowNext(true)
   }, [challenge, answer, normalizedExpected, stats, hintStage, setStats, sendStats])
 
@@ -332,7 +332,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
 
   const interactiveList = useMemo<(string | number)[]>(() => {
     if (challenge?.choices) return toListValues(challenge.choices)
-    if (!challenge) return []
+    if (challenge == null) return []
     if (challenge.op === 'index-set' && Array.isArray(challenge.mutated)) {
       return toListValues(challenge.mutated)
     }
@@ -358,7 +358,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
 
   const getValueForIndex = useCallback(
     (idx: number) => {
-      if (!challenge) return undefined
+      if (challenge == null) return undefined
       if (
         Array.isArray(challenge.choices) &&
         (challenge.op === 'insert' ||
@@ -408,7 +408,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
     setHintStage('none')
   }, [challenge, clearSelection])
 
-  if (!submittedName && !isSolo) {
+  if ((submittedName == null || submittedName === '') && isSolo !== true) {
     return (
       <NameForm
         studentName={studentName}

@@ -68,7 +68,7 @@ export default function forEachOp(
       filterDescription = `The if statement filters words starting with '${letter}'.`
     }
   }
-  if (!filtered || filtered.length === 0) {
+  if (filtered.length === 0) {
     prompt = `${listName} = ${listLiteral}\nfor item in ${listName}:\n    print(item)`
     filtered = workingList
     filterDescription = 'This loop prints every item because there is no filtering condition.'

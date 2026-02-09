@@ -104,7 +104,7 @@ async function shutdown(signal: string): Promise<void> {
 
   const closeWebSockets = () =>
     new Promise<void>((resolve) => {
-      if (!ws?.wss) {
+      if (ws?.wss == null) {
         resolve()
         return
       }
@@ -146,12 +146,12 @@ async function shutdown(signal: string): Promise<void> {
     console.log('HTTP server closed')
     await webSocketClosePromise
 
-    if (sessions.flushCache) {
+    if (sessions.flushCache != null) {
       console.log('Flushing session cache...')
       await sessions.flushCache()
     }
 
-    if (sessions.close) {
+    if (sessions.close != null) {
       console.log('Closing Valkey connections...')
       await sessions.close()
     }
@@ -173,7 +173,7 @@ process.on('SIGINT', () => {
   void shutdown('SIGINT')
 })
 
-if (sessions.flushCache) {
+if (sessions.flushCache != null) {
   const flushInterval = setInterval(async () => {
     try {
       await sessions.flushCache?.()

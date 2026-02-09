@@ -65,7 +65,7 @@ export default function GalleryWalkNotesView({
 
   const selectedIds = useMemo(() => {
     if (selectedReviewee === allValue) return allIds;
-    if (!selectedReviewee) return [];
+    if (selectedReviewee == null || selectedReviewee === '') return [];
     if (reviewees[selectedReviewee] || feedbackByReviewee[selectedReviewee]) return [selectedReviewee];
     return [];
   }, [selectedReviewee, allValue, allIds, reviewees, feedbackByReviewee]);

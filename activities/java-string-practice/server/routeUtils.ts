@@ -6,7 +6,7 @@ const validMethods = new Set<JavaStringMethodId>(['all', 'substring', 'indexOf',
  * Validate and sanitize a student name.
  */
 export function validateStudentName(name: unknown): string | null {
-  if (!name || typeof name !== 'string') {
+  if (typeof name !== 'string' || name.length === 0) {
     return null
   }
 
@@ -23,7 +23,7 @@ export function validateStudentName(name: unknown): string | null {
  * Validate and sanitize a stats payload.
  */
 export function validateStats(stats: unknown): JavaStringStats | null {
-  if (!stats || typeof stats !== 'object' || Array.isArray(stats)) {
+  if (stats == null || typeof stats !== 'object' || Array.isArray(stats)) {
     return null
   }
 
@@ -58,7 +58,7 @@ export function validateStats(stats: unknown): JavaStringStats | null {
  * Validate method selection payload.
  */
 export function validateMethods(methods: unknown): JavaStringMethodId[] | null {
-  if (!methods || !Array.isArray(methods)) {
+  if (!Array.isArray(methods)) {
     return null
   }
 

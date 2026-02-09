@@ -98,7 +98,7 @@ async function loadConfig(configPath: string): Promise<ActivityConfigLike> {
   const moduleUrl = pathToFileURL(configPath)
   const mod = (await import(moduleUrl.href)) as { default?: unknown }
   const rawConfig = mod.default
-  const config = rawConfig && typeof rawConfig === 'object' ? (rawConfig as ActivityConfigLike) : {}
+  const config = rawConfig != null && typeof rawConfig === 'object' ? (rawConfig as ActivityConfigLike) : {}
   const baseUrl = new URL('.', moduleUrl.href)
   return {
     ...config,

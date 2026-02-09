@@ -102,7 +102,7 @@ export function registerStatusRoute({ app, sessions, ws, sessionTtl, valkeyUrl }
       const sessionList = await Promise.all(
         allSessions.map(async (session, index): Promise<SessionStatusInfo> => {
           const type = typeof session.type === 'string' && session.type ? session.type : 'unknown'
-          byType[type] = (byType[type] || 0) + 1
+          byType[type] = (byType[type] ?? 0) + 1
 
           const approxBytes = JSON.stringify(session).length
           approxTotalBytes += approxBytes

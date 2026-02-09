@@ -92,7 +92,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
       return
     }
 
-    if (!sessionId) return
+    if (sessionId == null) return
     const savedName = localStorage.getItem(`student-name-${sessionId}`)
     const savedId = localStorage.getItem(`student-id-${sessionId}`)
     if (savedName) {
@@ -107,10 +107,10 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
   }, [studentId])
 
   const fetchAllowedMethods = useCallback(async () => {
-    if (!sessionId) return
+    if (sessionId == null) return
     try {
       const response = await fetch(`/api/java-string-practice/${sessionId}`)
-      if (!response.ok) throw new Error('Failed to fetch session')
+      if (response.ok !== true) throw new Error('Failed to fetch session')
       const data = (await response.json()) as SessionResponse
       setSelectedTypes(new Set(normalizeMethods(data.selectedMethods)))
     } catch (error) {
@@ -124,7 +124,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
         const message = JSON.parse(String(event.data)) as IncomingMessage
         const payload = message.payload ?? {}
         if (message.type === 'session-ended') {
-          navigate('/session-ended')
+          void navigate('/session-ended')
           return
         }
         if (message.type === 'studentId') {
@@ -153,7 +153,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
   }, [fetchAllowedMethods])
 
   const buildWsUrl = useCallback((): string | null => {
-    if (!nameSubmitted || isSoloSession || !sessionId || typeof window === 'undefined') return null
+    if (nameSubmitted !== true || isSoloSession === true || sessionId == null || typeof window === 'undefined') return null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const currentStudentId = studentIdRef.current
     const studentIdParam = currentStudentId ? `&studentId=${encodeURIComponent(currentStudentId)}` : ''
@@ -171,7 +171,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
   })
 
   useEffect(() => {
-    if (!nameSubmitted || isSoloSession) {
+    if (nameSubmitted !== true || isSoloSession === true) {
       disconnectStudentWs()
       return undefined
     }
@@ -182,7 +182,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
   }, [connectStudentWs, disconnectStudentWs, isSoloSession, nameSubmitted, sessionId])
 
   useEffect(() => {
-    if (!sessionId) return
+    if (sessionId == null) return
     const saved = localStorage.getItem(`java-string-stats-${sessionId}`)
     if (saved) {
       try {
@@ -200,10 +200,10 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
   }, [sessionId])
 
   useEffect(() => {
-    if (!sessionId || stats.total <= 0) return
+    if (sessionId == null || stats.total <= 0) return
     localStorage.setItem(`java-string-stats-${sessionId}`, JSON.stringify(stats))
 
-    if (!isSoloSession && nameSubmitted) {
+    if (isSoloSession !== true && nameSubmitted === true) {
       fetch(`/api/java-string-practice/${sessionId}/progress`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -244,16 +244,16 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
   )
 
   useEffect(() => {
-    if (!initializedRef.current && !currentChallenge) {
+    if (initializedRef.current !== true && currentChallenge == null) {
       initializedRef.current = true
       handleNewChallenge()
     }
   }, [currentChallenge, handleNewChallenge])
 
   const handleSubmit = (answer: JavaStringAnswer): void => {
-    if (!currentChallenge) return
+    if (currentChallenge == null) return
     const isCorrect = validateAnswer(currentChallenge, answer)
-    const noHintsUsed = !hintShown && !visualHintShown
+    const noHintsUsed = hintShown !== true && visualHintShown !== true
     const newStreak = isCorrect && noHintsUsed ? stats.streak + 1 : 0
     setStats((previous) => ({
       total: previous.total + 1,
@@ -270,7 +270,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
     })
   }
 
-  if (!isSoloSession && !nameSubmitted) {
+  if (isSoloSession !== true && nameSubmitted !== true) {
     return (
       <div className="java-string-container">
         <div className="java-string-header">

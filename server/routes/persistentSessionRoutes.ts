@@ -77,7 +77,7 @@ function toSelectedOptions(value: unknown): Record<string, unknown> {
 }
 
 function parsePersistentSessionsCookie(cookieValue: unknown, context = 'persistent_sessions'): CookieParseResult {
-  if (!cookieValue) {
+  if (cookieValue == null) {
     return { sessions: [], corrupted: false, error: null }
   }
 
@@ -140,8 +140,8 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
           }
 
           const [activityName, hash] = parts
-          const host = req.get('x-forwarded-host') || req.get('host')
-          const protocol = req.get('x-forwarded-proto') || req.protocol
+          const host = req.get('x-forwarded-host') ?? req.get('host')
+          const protocol = req.get('x-forwarded-proto') ?? req.protocol
           return {
             activityName,
             hash,
@@ -300,7 +300,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
 
     if (session.sessionId) {
       const backingSession = await sessions.get(session.sessionId)
-      if (!backingSession) {
+      if (backingSession == null) {
         await resetPersistentSession(hash)
         session = await getOrCreateActivePersistentSession(activityName, hash)
       }

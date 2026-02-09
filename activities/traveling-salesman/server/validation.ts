@@ -9,7 +9,7 @@ export const isCitiesArray = (cities: unknown): cities is TravelingSalesmanCity[
   Array.isArray(cities) &&
   cities.every(
     (city) =>
-      city &&
+      city != null &&
       typeof city.id === 'string' &&
       typeof city.name === 'string' &&
       isFiniteNumber(city.x) &&

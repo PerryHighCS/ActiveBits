@@ -267,7 +267,10 @@ export default function AnswerSection({
             const lineNumberBase = startingLine + variables.length + idx * 2;
             const values = Array.isArray(userAnswers[idx]) ? userAnswers[idx] : [];
             // Only show solved answer if solved and hasSubmitted (for intermediate/advanced)
-            const showSolved = solved && (difficulty === 'beginner' || (typeof window !== 'undefined' && window.hasSubmitted === true));
+            const showSolved =
+              solved != null &&
+              solved !== '' &&
+              (difficulty === 'beginner' || (typeof window !== 'undefined' && window.hasSubmitted === true));
             const solvedAdjustedParts = showSolved ? splitParts(solved) : null;
             const lockedSkeleton = call.skeleton
               ? call.skeleton.replace(/\(.*\)/, '(/* Locked until previous challenge complete */)')
@@ -368,7 +371,7 @@ export default function AnswerSection({
                         )}
                         <span className="ide-static" aria-hidden="true">{parsed.after}</span>
                       </>
-                    ) : active && parsed.inputs.length === 0 ? (
+                    ) : active && parsed.inputs?.length === 0 ? (
                       <span className="ide-static">{call.skeleton}</span>
                     ) : solvedAdjustedParts ? (
                       <>

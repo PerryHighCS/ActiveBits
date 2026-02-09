@@ -28,7 +28,7 @@ export function createBroadcastSubscriptionHelper(sessions: BroadcastSessions, w
   const subscribedSessions = new Set<string>()
 
   return function ensureBroadcastSubscription(sessionId: string | null): void {
-    if (!sessions?.subscribeToBroadcast || !sessionId || subscribedSessions.has(sessionId)) {
+    if (sessions?.subscribeToBroadcast == null || sessionId == null || subscribedSessions.has(sessionId)) {
       return
     }
 

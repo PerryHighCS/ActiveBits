@@ -79,14 +79,14 @@ function isStudentRemovedPayload(payload: unknown): payload is StudentRemovedPay
 }
 
 function asAssignedFragmentsPayload(payload: unknown): AssignedFragmentsPayload {
-  if (!payload || typeof payload !== 'object') {
+  if (payload == null || typeof payload !== 'object') {
     return {}
   }
   return payload as AssignedFragmentsPayload
 }
 
 function asTemplateAssignedPayload(payload: unknown): TemplateAssignedPayload {
-  if (!payload || typeof payload !== 'object') {
+  if (payload == null || typeof payload !== 'object') {
     return {}
   }
   return payload as TemplateAssignedPayload
@@ -135,10 +135,10 @@ export default function WwwSim({ sessionData }: WwwSimProps) {
   const handleWsMessage = useCallback(
     (event: MessageEvent) => {
       const raw = typeof event.data === 'string' ? event.data : ''
-      if (!raw || raw === 'pong' || raw === 'ping') return
+      if (raw == null || raw === 'pong' || raw === 'ping') return
 
       const msg = parseMessage(raw)
-      if (!msg || msg.type === 'ping' || msg.type === 'pong') return
+      if (msg == null || msg.type === 'ping' || msg.type === 'pong') return
 
       switch (msg.type) {
         case 'student-updated': {
@@ -151,11 +151,13 @@ export default function WwwSim({ sessionData }: WwwSimProps) {
             setMessage(`Hostname updated to "${newHostname}"`)
           }
 
-          if (templateRequestsRef.current?.fragments?.length) {
+          const currentRequests = templateRequestsRef.current
+          if (currentRequests == null) break
+          if (currentRequests.fragments.length > 0) {
             const escaped = oldHostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
             const regex = new RegExp(`//${escaped}/`, 'g')
 
-            const nextFragments = templateRequestsRef.current.fragments.map((fragment) => ({
+            const nextFragments = currentRequests.fragments.map((fragment) => ({
               ...fragment,
               url: fragment.url.replace(regex, `//${newHostname}/`),
             }))
@@ -227,7 +229,7 @@ export default function WwwSim({ sessionData }: WwwSimProps) {
   }, [clearWsIntervals])
 
   const buildWsUrl = useCallback((): string | null => {
-    if (!joined || !sessionId || typeof window === 'undefined') return null
+    if (joined == null || sessionId == null || typeof window === 'undefined') return null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${protocol}//${window.location.host}/ws/www-sim?sessionId=${sessionId}&hostname=${hostname}`
   }, [hostname, joined, sessionId])
@@ -243,7 +245,7 @@ export default function WwwSim({ sessionData }: WwwSimProps) {
   })
 
   useEffect(() => {
-    if (!joined || !sessionId) {
+    if (joined == null || sessionId == null) {
       disconnectWs()
       return undefined
     }
@@ -254,9 +256,9 @@ export default function WwwSim({ sessionData }: WwwSimProps) {
   }, [connectWs, disconnectWs, joined, sessionId, hostname])
 
   async function handleConnect(): Promise<void> {
-    if (!sessionId || !hostname || connecting) return
+    if (sessionId == null || hostname == null || connecting) return
     const ok = window.confirm(`Join as "${hostname}"?`)
-    if (!ok) return
+    if (ok == null) return
 
     setConnecting(true)
     setError('')
@@ -270,7 +272,7 @@ export default function WwwSim({ sessionData }: WwwSimProps) {
         credentials: 'include',
       })
 
-      if (!response.ok) {
+      if (response.ok !== true) {
         const body = (await response.json().catch(() => ({}))) as { error?: string }
         throw new Error(body.error || `${response.status} ${response.statusText}`)
       }
@@ -304,7 +306,7 @@ export default function WwwSim({ sessionData }: WwwSimProps) {
     }
   }
 
-  if (!sessionData) {
+  if (sessionData == null) {
     return <div className="p-6">Loading session…</div>
   }
 

@@ -4,6 +4,10 @@
   "type": "module",
   "scripts": {
     "lint": "eslint .",
+    "lint:scope": "sh -c 'target=\"${npm_config_target:-.}\"; target=\"${target#./}\"; target=\"${target#activities/}\"; eslint \"$target\" \"$@\"' --",
+    "lint:activity": "sh -c 'activity=\"${npm_config_activity:?set --activity=<activity-folder>}\"; activity=\"${activity#./}\"; activity=\"${activity#activities/}\"; eslint \"$activity\" \"$@\"' --",
+    "test:scope": "sh -c 'set -e; target=\"${npm_config_target:-.}\"; target=\"${target#./}\"; target=\"${target#activities/}\"; npm_config_target=\"$target\" npm run lint:scope; files=$(find \"$target\" -path \"*/node_modules/*\" -prune -o \\( -name \"*.test.js\" -o -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No tests found under $target\"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files'",
+    "test:activity": "sh -c 'set -e; activity=\"${npm_config_activity:?set --activity=<activity-folder>}\"; activity=\"${activity#./}\"; activity=\"${activity#activities/}\"; npm_config_activity=\"$activity\" npm run lint:activity; files=$(find \"$activity\" -path \"*/node_modules/*\" -prune -o \\( -name \"*.test.js\" -o -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No tests found under $activity\"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files'",
     "test": "npm run lint && sh -c 'set -e; files=$(find . -path \"./node_modules\" -prune -o \\( -name \"*.test.js\" -o -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No activities tests found\"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files'",
     "typecheck": "tsc --noEmit"
   },

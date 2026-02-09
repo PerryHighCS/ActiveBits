@@ -12,10 +12,10 @@ interface StatsPanelProps {
 }
 
 export default function StatsPanel({ stats }: StatsPanelProps): ReactNode {
-  const total = stats?.total || 0;
-  const correct = stats?.correct || 0;
-  const streak = stats?.streak || 0;
-  const longestStreak = stats?.longestStreak || 0;
+  const total = stats?.total ?? 0;
+  const correct = stats?.correct ?? 0;
+  const streak = stats?.streak ?? 0;
+  const longestStreak = stats?.longestStreak ?? 0;
   const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
 
   return (

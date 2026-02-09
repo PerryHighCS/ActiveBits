@@ -78,16 +78,18 @@ export function createBroadcastHelpers(sessions: TravelingSalesmanSessionStore, 
 
   const buildBroadcastPayload = (session: TravelingSalesmanSession): BroadcastRouteRecord[] => {
     const routes: BroadcastRouteRecord[] = []
-    const ids = session.data.broadcasts || []
+    const ids = session.data.broadcasts
 
-    if (ids.includes('instructor') && session.data.instructor?.route?.length) {
+    const instructor = session.data.instructor
+    const instructorRoute = instructor?.route
+    if (ids.includes('instructor') && instructor != null && (instructorRoute?.length ?? 0) > 0) {
       routes.push({
         id: 'instructor',
-        name: session.data.instructor.name || 'Instructor',
-        path: session.data.instructor.route,
-        distance: session.data.instructor.distance,
+        name: instructor.name || 'Instructor',
+        path: instructorRoute,
+        distance: instructor.distance ?? null,
         type: 'instructor',
-        timeToComplete: session.data.instructor.timeToComplete ?? null,
+        timeToComplete: instructor.timeToComplete ?? null,
       })
     }
 

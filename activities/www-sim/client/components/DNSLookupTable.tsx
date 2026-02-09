@@ -9,10 +9,10 @@ interface DNSLookupTableProps {
 
 export default function DNSLookupTable({ template, sessionId, onChange }: DNSLookupTableProps) {
   const hostnames = useMemo(() => {
-    if (!template || !Array.isArray(template.fragments)) return []
+    if (template == null || !Array.isArray(template.fragments)) return []
     const set = new Set<string>()
     template.fragments.forEach((fragment) => {
-      if (!fragment.url) return
+      if (fragment.url == null || fragment.url === '') return
       try {
         const url = fragment.url.startsWith('//') ? new URL('http:' + fragment.url) : new URL(fragment.url)
         if (url.hostname) set.add(url.hostname)
@@ -31,7 +31,7 @@ export default function DNSLookupTable({ template, sessionId, onChange }: DNSLoo
   useEffect(() => {
     loaded.current = false
 
-    if (!storageKey || hostnames.length === 0) {
+    if (storageKey == null || hostnames.length === 0) {
       setDnsMap({})
       return
     }
@@ -56,9 +56,9 @@ export default function DNSLookupTable({ template, sessionId, onChange }: DNSLoo
   }, [storageKey, hostnames])
 
   useEffect(() => {
-    if (!loaded.current) return
+    if (loaded.current !== true) return
 
-    if (storageKey) {
+    if (storageKey != null) {
       try {
         localStorage.setItem(storageKey, JSON.stringify(dnsMap))
       } catch {

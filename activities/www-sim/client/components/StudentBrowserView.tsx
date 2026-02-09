@@ -45,7 +45,7 @@ function FragmentTag({ src, hash, onSubmit, initialContent }: FragmentTagProps) 
     }
   }
 
-  if (wasSubmitted) {
+  if (wasSubmitted === true) {
     return (
       <span className="text-green-600 font-mono">
         &lt;fragment src=&quot;{src}&quot;&gt;{inputValue}&lt;/fragment&gt;
@@ -97,7 +97,7 @@ function FragmentTag({ src, hash, onSubmit, initialContent }: FragmentTagProps) 
 }
 
 function getTemplateFragments(template: StudentTemplate | null): TemplateFragment[] {
-  if (!template || !Array.isArray(template.fragments)) return []
+  if (template == null || !Array.isArray(template.fragments)) return []
   return template.fragments
 }
 
@@ -107,13 +107,13 @@ export default function StudentBrowserView({ template, sessionId }: StudentBrows
   const fragments = getTemplateFragments(template)
 
   useEffect(() => {
-    if (!sessionId) {
+    if (sessionId == null) {
       setRenderedFragments({})
       return
     }
 
     const stored = localStorage.getItem(`${sessionId}-fragments`)
-    if (!stored) {
+    if (stored == null) {
       setRenderedFragments({})
       return
     }
@@ -131,7 +131,7 @@ export default function StudentBrowserView({ template, sessionId }: StudentBrows
   }, [sessionId])
 
   const handleFragmentSubmit = (hash: string, content: string): void => {
-    if (!sessionId) return
+    if (sessionId == null) return
     setRenderedFragments((prev) => {
       const updated = { ...prev, [hash]: content }
       localStorage.setItem(`${sessionId}-fragments`, JSON.stringify(updated))
@@ -139,7 +139,7 @@ export default function StudentBrowserView({ template, sessionId }: StudentBrows
     })
   }
 
-  if (!fragments.length) {
+  if ((fragments?.length ?? 0) === 0) {
     return null
   }
 

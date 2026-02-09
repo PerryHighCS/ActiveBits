@@ -54,9 +54,7 @@ void test('createBroadcastSubscriptionHelper subscribes once and forwards messag
 
   console.log('[TEST] Testing broadcast robustness against individual WebSocket send failures (expected error output follows):')
   assert.doesNotThrow(() => {
-    if (broadcastHandler !== null && broadcastHandler !== undefined) {
-      broadcastHandler({ type: 'foo' })
-    }
+    void broadcastHandler?.({ type: 'foo' })
   })
   assert.equal(sentPayloads.length, 1)
   assert.equal(sentPayloads[0], JSON.stringify({ type: 'foo' }))

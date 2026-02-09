@@ -45,7 +45,7 @@ export async function solveTSPBruteForce(
     }
   }
 
-  const used = Array(n).fill(false)
+  const used: boolean[] = Array(n).fill(false)
   const current: number[] = []
   used[normalizedStart] = true
 

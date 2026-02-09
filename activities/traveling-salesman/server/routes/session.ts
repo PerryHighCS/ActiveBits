@@ -173,7 +173,7 @@ export default function registerSessionRoutes(
 
     // Add student routes (including in-progress)
     session.data.students.forEach((student) => {
-      if (!student.currentRoute || student.currentRoute.length === 0) return
+      if (student.currentRoute.length === 0) return
       leaderboard.push({
         id: student.id,
         name: student.name,
@@ -188,16 +188,18 @@ export default function registerSessionRoutes(
     })
 
     // Add instructor route (including in-progress)
-    if (session.data.instructor?.route?.length) {
+    const instructor = session.data.instructor
+    if (instructor != null && instructor.route.length > 0) {
+      const instructorRouteLength = instructor.route.length
       leaderboard.push({
         id: 'instructor',
-        name: session.data.instructor.name || 'Instructor',
-        distance: session.data.instructor.distance ?? null,
-        timeToComplete: session.data.instructor.timeToComplete ?? null,
-        progressCurrent: session.data.instructor.progressCurrent ?? session.data.instructor.route.length,
-        progressTotal: session.data.instructor.progressTotal ?? session.data.problem.numCities,
+        name: instructor.name || 'Instructor',
+        distance: instructor.distance ?? null,
+        timeToComplete: instructor.timeToComplete ?? null,
+        progressCurrent: instructor.progressCurrent ?? instructorRouteLength,
+        progressTotal: instructor.progressTotal ?? session.data.problem.numCities,
         type: 'instructor',
-        complete: session.data.instructor.complete,
+        complete: instructor.complete,
       })
     }
 
@@ -211,7 +213,10 @@ export default function registerSessionRoutes(
         type: 'bruteforce',
         complete: true,
       })
-    } else if (session.data.algorithms.bruteForce?.status || session.data.algorithms.bruteForce?.progressTotal) {
+    } else if (
+      (session.data.algorithms.bruteForce?.status != null && session.data.algorithms.bruteForce.status !== '') ||
+      (session.data.algorithms.bruteForce?.progressTotal ?? 0) > 0
+    ) {
       leaderboard.push({
         id: 'bruteforce',
         name: 'Brute Force (Optimal)',
@@ -244,7 +249,10 @@ export default function registerSessionRoutes(
         type: 'heuristic',
         complete: true,
       })
-    } else if (session.data.algorithms.heuristic?.status || session.data.algorithms.heuristic?.progressTotal) {
+    } else if (
+      (session.data.algorithms.heuristic?.status != null && session.data.algorithms.heuristic.status !== '') ||
+      (session.data.algorithms.heuristic?.progressTotal ?? 0) > 0
+    ) {
       leaderboard.push({
         id: 'heuristic',
         name: 'Nearest Neighbor',

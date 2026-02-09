@@ -107,7 +107,7 @@ export default function JavaFormatPracticeManager() {
 
   const handleWsOpen = useCallback(() => {
     console.log('Manager WebSocket connected');
-    fetchStudents();
+    void fetchStudents();
   }, [fetchStudents]);
 
   const handleWsError = useCallback((error: unknown) => {
@@ -136,8 +136,8 @@ export default function JavaFormatPracticeManager() {
 
   useEffect(() => {
     if (!sessionId) return undefined;
-    fetchStudents();
-    connect();
+    void fetchStudents();
+    void connect();
     return () => {
       disconnect();
     };

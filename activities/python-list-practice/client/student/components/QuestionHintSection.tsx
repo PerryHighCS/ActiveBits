@@ -29,7 +29,7 @@ export default function QuestionHintSection({
   _answerDetails,
   showHintBody = true,
 }: QuestionHintSectionProps): ReactNode {
-  if (!challenge) return null;
+  if (challenge == null) return null;
 
   return (
     <>

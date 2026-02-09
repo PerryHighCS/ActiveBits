@@ -43,9 +43,9 @@ function isDisplayRoute(value: unknown): value is TspDisplayRoute {
 }
 
 function getRouteStartIndex(cityId: string | null): number {
-  if (!cityId) return 0
+  if (cityId == null || cityId === '') return 0
   const raw = cityId.split('-')[1]
-  if (!raw) return 0
+  if (raw == null || raw === '') return 0
   const parsed = Number.parseInt(raw, 10)
   return Number.isFinite(parsed) ? parsed : 0
 }
@@ -63,7 +63,7 @@ export function buildSoloDisplayedRoutes(
   soloActiveViewId: string | null,
   soloAlgorithms: SoloAlgorithmsState,
 ): TspDisplayRoute[] {
-  if (!isSoloSession) return []
+  if (isSoloSession !== true) return []
   return [
     ...(soloActiveViewId === 'bruteforce' && soloAlgorithms.bruteForce?.route
       ? [
@@ -152,10 +152,10 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
   }, [sessionId, isSoloSession]);
 
   const restoreStudentRoute = useCallback(async (idToRestore: string) => {
-    if (!sessionId || !idToRestore) return;
+    if (sessionId == null || idToRestore == null || idToRestore === '') return;
     try {
       const res = await fetch(`/api/traveling-salesman/${sessionId}/session`);
-      if (!res.ok) throw new Error('Failed to fetch session');
+      if (res.ok !== true) throw new Error('Failed to fetch session');
       const data = (await res.json()) as TspSessionData;
       const student = data.students?.find((s) => s.id === idToRestore);
       if (student && Array.isArray(student.currentRoute)) {
@@ -178,26 +178,26 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
   }, [studentId]);
 
   useEffect(() => {
-    if (!studentId || isSoloSession) return;
-    restoreStudentRoute(studentId);
+    if (studentId == null || isSoloSession === true) return;
+    void restoreStudentRoute(studentId);
   }, [studentId, isSoloSession, restoreStudentRoute]);
 
   // WebSocket handlers
   const handleWsMessage = useCallback((message: TspSessionMessage) => {
     try {
       const payload = typeof message === 'string' ? (JSON.parse(message) as TspSessionMessage) : message;
-      if (!payload?.type) return;
+      if (payload?.type == null) return;
       if (typeof payload.type !== 'string') return;
 
       if (payload.type === 'session-ended') {
-        navigate('/session-ended');
+        void navigate('/session-ended');
         return;
       }
       if (payload.type === 'clearBroadcast') {
         setBroadcastedRoutes([]);
         return;
       }
-      const payloadBody = payload.payload && typeof payload.payload === 'object'
+      const payloadBody = payload.payload != null && typeof payload.payload === 'object'
         ? (payload.payload as Record<string, unknown>)
         : null;
       const payloadRoutes = Array.isArray(payloadBody?.routes)
@@ -210,7 +210,7 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
       }
       if (payload.type === 'studentId') {
         const newStudentId = typeof payloadBody?.studentId === 'string' ? payloadBody.studentId : null;
-        if (!newStudentId) return;
+        if (newStudentId == null || newStudentId === '') return;
         setStudentId(newStudentId);
         localStorage.setItem(`student-id-${sessionId}`, newStudentId);
       } else if (payload.type === 'problemUpdate') {
@@ -223,7 +223,7 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
       } else if (payload.type === 'broadcastUpdate') {
         setBroadcastedRoutes(payloadRoutes);
       } else if (payload.type === 'highlightSolution') {
-        if (!payloadBody) {
+        if (payloadBody == null) {
           setBroadcastedRoutes([]);
           return;
         }
@@ -243,7 +243,7 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
   }, [navigate, sessionId, resetBuiltRoute]);
 
   const buildWsUrl = useCallback(() => {
-    if (!nameSubmitted || isSoloSession) return null;
+    if (nameSubmitted !== true || isSoloSession === true) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const currentId = studentIdRef.current;
@@ -255,7 +255,7 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
     if (data.problem && data.problem.cities) {
       setCities(data.problem.cities);
       setDistanceMatrix(data.problem.distanceMatrix || []);
-      setTerrainSeed(data.problem.seed || Date.now());
+      setTerrainSeed(data.problem.seed ?? Date.now());
     }
   }, []);
 
@@ -269,7 +269,7 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
   });
 
   useEffect(() => {
-    if (!nameSubmitted || isSoloSession) {
+    if (nameSubmitted !== true || isSoloSession === true) {
       disconnect();
       return undefined;
     }
@@ -287,10 +287,10 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
     }
 
     const result = addCity(city.id);
-    if (!result) return;
+    if (result == null) return;
     if (isSoloSession && currentRoute.length === 0) {
       setSoloStartCityId(city.id);
-      computeSoloAlgorithms(city.id, { runHeuristic: true, runBruteForce: !soloBruteForceStarted });
+      void computeSoloAlgorithms(city.id, { runHeuristic: true, runBruteForce: !soloBruteForceStarted });
     }
     if (result.isComplete) {
       void submitRoute(result.route, result.totalDistance, result.timeToComplete);
@@ -354,13 +354,13 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
   };
 
   const computeSoloAlgorithms = async (startCityOverride: string | null = null, options: ComputeSoloOptions = {}) => {
-    if (!cities.length || !distanceMatrix.length) return;
+    if (cities.length === 0 || distanceMatrix.length === 0) return;
     const { runHeuristic: shouldRunHeuristic = true, runBruteForce: shouldRunBruteForceOption = true } = options;
     const startId = startCityOverride || soloStartCityId;
     const startIndex = getRouteStartIndex(startId);
     const shouldRunBruteForce = shouldRunBruteForceOption && !soloBruteForceStarted;
 
-    if (!shouldRunHeuristic && !shouldRunBruteForce) return;
+    if (shouldRunHeuristic !== true && shouldRunBruteForce !== true) return;
 
     if (shouldRunHeuristic) {
       setSoloProgress(prev => ({
@@ -445,7 +445,7 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
     }
   };
 
-  if (!nameSubmitted && !isSoloSession) {
+  if (nameSubmitted !== true && isSoloSession !== true) {
     return (
       <div className="tsp-student-setup">
         <h2>Enter Your Name</h2>

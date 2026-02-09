@@ -42,7 +42,7 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
 
   return {
     async get(hash: string): Promise<PersistentSession | null> {
-      return (memoryStore.get(hash) as PersistentSession) || null
+      return (memoryStore.get(hash) as PersistentSession) ?? null
     },
     async set(hash: string, data: PersistentSession): Promise<void> {
       memoryStore.set(hash, data)
@@ -55,7 +55,7 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
     },
     async incrementAttempts(key: string): Promise<number> {
       const bucket = `rl:${key}`
-      const current = (memoryStore.get(bucket) as number) || 0
+      const current = (memoryStore.get(bucket) as number) ?? 0
       const next = current + 1
       memoryStore.set(bucket, next)
       setTimeout(() => {
@@ -64,7 +64,7 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
       return next
     },
     async getAttempts(key: string): Promise<number> {
-      return (memoryStore.get(`rl:${key}`) as number) || 0
+      return (memoryStore.get(`rl:${key}`) as number) ?? 0
     },
   }
 }
@@ -117,7 +117,7 @@ const weakSecrets = [
 ]
 
 const envSecret = process.env.PERSISTENT_SESSION_SECRET
-if (!envSecret) {
+if (envSecret == null) {
   if (process.env.NODE_ENV === 'production') {
     console.error('⚠️  SECURITY WARNING: PERSISTENT_SESSION_SECRET is not set in production!')
     console.error('⚠️  Using default HMAC secret is a security risk.')
@@ -227,7 +227,7 @@ export async function getPersistentSession(hash: string): Promise<PersistentSess
 
 export function addWaiter(hash: string, ws: PersistentSessionSocket): number {
   let waiters = waitersByHash.get(hash)
-  if (!waiters) {
+  if (waiters == null) {
     waiters = []
     waitersByHash.set(hash, waiters)
   }
@@ -256,7 +256,7 @@ export function getWaiterCount(hash: string): number {
 }
 
 export function getWaiters(hash: string): PersistentSessionSocket[] {
-  return waitersByHash.get(hash) || []
+  return waitersByHash.get(hash) ?? []
 }
 
 function broadcastToWaiters(hash: string, payload: Record<string, unknown>): void {
@@ -296,7 +296,7 @@ export async function startPersistentSession(
   session.teacherSocketId = teacherWs.id || null
   await persistentStore.set(hash, session)
 
-  const waiters = waitersByHash.get(hash) || []
+  const waiters = waitersByHash.get(hash) ?? []
   return [...waiters]
 }
 
@@ -312,7 +312,7 @@ export async function getSessionId(hash: string): Promise<string | null> {
 
 export async function resetPersistentSession(hash: string): Promise<void> {
   const session = await persistentStore.get(hash)
-  if (session) {
+  if (session != null) {
     session.sessionId = null
     session.teacherSocketId = null
     await persistentStore.set(hash, session)
@@ -355,7 +355,7 @@ function ensureCleanupTimer(): void {
 
       for (const hash of hashes) {
         const session = await persistentStore.get(hash)
-        const waiters = waitersByHash.get(hash) || []
+        const waiters = waitersByHash.get(hash) ?? []
 
         if (session && !session.sessionId && waiters.length === 0 && now - session.createdAt > WAITER_TIMEOUT) {
           await persistentStore.delete(hash)

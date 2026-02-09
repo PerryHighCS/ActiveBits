@@ -97,7 +97,7 @@ async function startStatusServer(
   return `http://127.0.0.1:${address.port}`
 }
 
-test('status endpoint returns session info in memory mode', async (t) => {
+void test('status endpoint returns session info in memory mode', async (t) => {
   const now = Date.now()
   const sessions: StatusSessionsMock = {
     getAll: async () => [
@@ -129,7 +129,7 @@ test('status endpoint returns session info in memory mode', async (t) => {
   assert.equal(body.valkey, null)
 })
 
-test('status endpoint masks session ids in production', async (t) => {
+void test('status endpoint masks session ids in production', async (t) => {
   const prevEnv = process.env.NODE_ENV
   process.env.NODE_ENV = 'production'
   t.after(() => {
@@ -158,7 +158,7 @@ test('status endpoint masks session ids in production', async (t) => {
   assert.equal(maskedSession.id, undefined)
 })
 
-test('status endpoint reports Valkey TTLs and expiry data', async (t) => {
+void test('status endpoint reports Valkey TTLs and expiry data', async (t) => {
   const now = Date.now()
   const sessions: StatusSessionsMock = {
     getAll: async () => [
@@ -196,7 +196,7 @@ test('status endpoint reports Valkey TTLs and expiry data', async (t) => {
   assert.equal(body.storage.ttlMs, 90_000)
 })
 
-test('status endpoint falls back to sessionTtl when valkeyStore ttlMs is undefined', async (t) => {
+void test('status endpoint falls back to sessionTtl when valkeyStore ttlMs is undefined', async (t) => {
   const sessions: StatusSessionsMock = {
     getAll: async () => [],
     valkeyStore: {
@@ -217,7 +217,7 @@ test('status endpoint falls back to sessionTtl when valkeyStore ttlMs is undefin
   assert.equal(body.storage.ttlMs, 123_000)
 })
 
-test('status endpoint handles Valkey errors gracefully', async (t) => {
+void test('status endpoint handles Valkey errors gracefully', async (t) => {
   const sessions: StatusSessionsMock = {
     getAll: async () => [],
     valkeyStore: {

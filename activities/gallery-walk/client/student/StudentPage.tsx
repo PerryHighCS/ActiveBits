@@ -97,7 +97,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   } = useGalleryWalkSession(sessionId, { initialData: sessionData?.data });
 
   useEffect(() => {
-    if (!revieweeId) return;
+    if (revieweeId == null) return;
     const record = reviewees[revieweeId];
     if (record) {
       setRevieweeRecord(record);
@@ -111,12 +111,12 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   }, [revieweeId, reviewees, kioskStoragePrefix]);
 
   const studentReviewees = useMemo<Record<string, GalleryWalkRevieweeRecord>>(() => {
-    if (!revieweeId) return {};
+    if (revieweeId == null) return {};
     return { [revieweeId]: revieweeRecord || {} };
   }, [revieweeId, revieweeRecord]);
 
   const studentFeedbackByReviewee = useMemo<Record<string, GalleryWalkFeedbackEntry[]>>(() => {
-    if (!revieweeId) return {};
+    if (revieweeId == null) return {};
     return { [revieweeId]: revieweeFeedback };
   }, [revieweeId, revieweeFeedback]);
 
@@ -154,7 +154,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   }, [reviewerStoragePrefix]);
 
   const handleStudentDownload = useCallback(() => {
-    if (!sessionId || !revieweeId) return;
+    if (sessionId == null || revieweeId == null) return;
     const payload = {
       version: 1,
       exportedAt: Date.now(),
@@ -177,12 +177,12 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   }, [revieweeFeedback, revieweeRecord, revieweeId, sessionId, sessionTitle]);
 
   const kioskJoinUrl = useMemo(() => {
-    if (!sessionId || !revieweeId || typeof window === 'undefined') return '';
+    if (sessionId == null || revieweeId == null || typeof window === 'undefined') return '';
     return `${window.location.origin}/${sessionId}?reviewee=${encodeURIComponent(revieweeId)}`;
   }, [sessionId, revieweeId]);
 
   useEffect(() => {
-    if (!kioskStoragePrefix) return;
+    if (kioskStoragePrefix == null) return;
     const storedId = localStorage.getItem(`${kioskStoragePrefix}:revieweeId`);
     if (storedId) {
       const safeId = storedId.trim();
@@ -195,7 +195,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   }, [kioskStoragePrefix]);
 
   useEffect(() => {
-    if (!isReviewerMode || !reviewerStoragePrefix) return;
+    if (isReviewerMode !== true || reviewerStoragePrefix == null) return;
     const cachedId = localStorage.getItem(`${reviewerStoragePrefix}:reviewerId`);
     const cachedName = localStorage.getItem(`${reviewerStoragePrefix}:reviewerName`);
     const cachedStyle = localStorage.getItem(`${reviewerStoragePrefix}:styleId`);
@@ -219,11 +219,11 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   }, [isReviewerMode, reviewerStoragePrefix]);
 
   const fetchRevieweeFeedback = useCallback(async () => {
-    if (!sessionId || !revieweeId) return;
+    if (sessionId == null || revieweeId == null) return;
     try {
       setIsLoadingFeedback(true);
       const res = await fetch(`/api/gallery-walk/${sessionId}/feedback/${revieweeId}`);
-      if (!res.ok) throw new Error('Failed to fetch feedback');
+      if (res.ok !== true) throw new Error('Failed to fetch feedback');
       const data = (await res.json()) as RevieweeFeedbackResponse;
       setRevieweeFeedback(Array.isArray(data.feedback) ? data.feedback : []);
       if (data.reviewee) setRevieweeRecord(data.reviewee);
@@ -243,9 +243,9 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
 
   const handleRevieweeRegistration = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!sessionId) return;
+    if (sessionId == null) return;
     const trimmedName = registrationName.trim();
-    if (!trimmedName) {
+    if (trimmedName == null || trimmedName === '') {
       setRegistrationError('Please enter your name.');
       return;
     }
@@ -263,7 +263,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
           projectTitle: trimmedProject || undefined,
         }),
       });
-      if (!res.ok) {
+      if (res.ok !== true) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || 'Unable to register');
       }
@@ -287,10 +287,10 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
 
   const handleLocalFeedbackSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!sessionId || !revieweeId) return;
+    if (sessionId == null || revieweeId == null) return;
     const reviewerNameInputValue = localReviewerName.trim();
     const message = localMessage.trim();
-    if (!reviewerNameInputValue || !message) {
+    if (reviewerNameInputValue == null || reviewerNameInputValue === '' || message == null || message === '') {
       setLocalFormNotice('Please provide both a name and feedback message.');
       return;
     }
@@ -308,7 +308,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ revieweeId, reviewerId: kioskReviewerId, message, styleId: localStyleId }),
       });
-      if (!res.ok) {
+      if (res.ok !== true) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || 'Failed to submit feedback');
       }
@@ -350,7 +350,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   }, [stage, stageChangePending, localMessage, isSubmittingLocal]);
 
   useEffect(() => {
-    if (!lastMessage) return;
+    if (lastMessage == null) return;
     if (lastMessage.type === 'session-ended') {
       if (showFeedbackView || isReviewerMode) {
         setSessionClosed(true);
@@ -374,9 +374,9 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   }, [lastMessage, showFeedbackView, isReviewerMode, navigate, revieweeId, fetchRevieweeFeedback]);
 
   const handleReviewerIdentitySave = async () => {
-    if (!sessionId || !requestedReviewee) return;
+    if (sessionId == null || requestedReviewee == null) return;
     const trimmed = reviewerNameInput.trim();
-    if (!trimmed) {
+    if (trimmed == null || trimmed === '') {
       setReviewerNameError('Name is required.');
       return;
     }
@@ -389,7 +389,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reviewerId: nextId, name: trimmed }),
       });
-      if (!res.ok) {
+      if (res.ok !== true) {
         const data = (await res.json().catch(() => ({}))) as ReviewerSaveResponse;
         throw new Error(data.error || 'Unable to save reviewer info');
       }
@@ -408,16 +408,16 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
 
   const handleReviewerFeedbackSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!sessionId || !requestedReviewee) {
+    if (sessionId == null || requestedReviewee == null) {
       setReviewerNotice('Invalid project link. Please rescan the QR code.');
       return;
     }
-    if (!reviewerId || !reviewerName) {
+    if (reviewerId == null || reviewerName == null) {
       setReviewerNotice('Enter your name before leaving feedback.');
       return;
     }
     const trimmed = reviewerMessage.trim();
-    if (!trimmed) {
+    if (trimmed == null || trimmed === '') {
       setReviewerNotice('Please type your feedback first.');
       return;
     }
@@ -429,7 +429,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ revieweeId: requestedReviewee, reviewerId, message: trimmed, styleId: reviewerStyleId }),
       });
-      if (!res.ok) {
+      if (res.ok !== true) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || 'Failed to submit feedback');
       }
@@ -452,7 +452,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   };
 
   const handleScannerSuccess = useCallback(({ pathname, reviewee, hash }: ScannerSuccessData) => {
-    if (!reviewee || !REVIEWEE_ID_PATTERN.test(reviewee)) {
+    if (reviewee == null || !REVIEWEE_ID_PATTERN.test(reviewee)) {
       setScannerError('scanner-invalid');
       return;
     }
@@ -467,7 +467,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   }, []);
 
   const renderReviewerContent = () => {
-    if (!requestedReviewee) {
+    if (requestedReviewee == null) {
       return <p className="text-red-600">Missing project reference. Please scan a valid QR code.</p>;
     }
     const targetRevieweeRecord = reviewees?.[requestedReviewee] || revieweeRecord;
@@ -500,13 +500,13 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
   };
 
   const renderModeContent = () => {
-    if (!sessionId) {
+    if (sessionId == null) {
       return <p className="text-red-600">Missing session information.</p>;
     }
     if (isReviewerMode) {
       return renderReviewerContent();
     }
-    if (!revieweeId) {
+    if (revieweeId == null) {
       return (
         <RegistrationForm
           name={registrationName}

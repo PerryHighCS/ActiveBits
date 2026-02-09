@@ -24,7 +24,7 @@ interface UpgradeCapableServer {
 
 function getClientIp(req: UpgradeRequest): string {
   const forwardedFor = req.headers['x-forwarded-for']
-  if (forwardedFor) {
+  if (forwardedFor != null) {
     const value = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor
     if (!value) {
       return req.socket?.remoteAddress || ''
@@ -37,7 +37,7 @@ function getClientIp(req: UpgradeRequest): string {
   }
 
   const forwarded = req.headers.forwarded
-  if (forwarded) {
+  if (forwarded != null) {
     const value = Array.isArray(forwarded) ? forwarded[0] : forwarded
     if (!value) {
       return req.socket?.remoteAddress || ''
@@ -70,7 +70,7 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
   if (sessions?.subscribeToBroadcast) {
     sessions.subscribeToBroadcast('session-ended', (message: unknown) => {
       const sessionId =
-        message && typeof message === 'object' && 'sessionId' in message
+        message != null && typeof message === 'object' && 'sessionId' in message
           ? (message as { sessionId?: string | null }).sessionId
           : undefined
       for (const client of wss.clients) {
@@ -86,7 +86,7 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
   }
 
   const scheduleSessionCleanup = (sessionId: string): void => {
-    if (!sessionId || !sessions) return
+    if (sessionId == null || sessions == null) return
 
     const existingTimer = sessionCleanupTimers.get(sessionId)
     if (existingTimer) {
@@ -94,7 +94,7 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
     }
 
     const timer = setTimeout(() => {
-      ;(async () => {
+      void (async () => {
         try {
           const hasClients = Array.from(wss.clients).some(
             (client) => client.readyState === WS_OPEN_READY_STATE && client.sessionId === sessionId,
@@ -148,7 +148,7 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
         ws.clientIp = getClientIp(req)
 
         const touch = async (): Promise<void> => {
-          if (!sessions?.touch || !ws.sessionId) return
+          if (sessions?.touch == null || ws.sessionId == null) return
 
           try {
             await sessions.touch(ws.sessionId)

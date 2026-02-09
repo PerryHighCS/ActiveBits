@@ -34,7 +34,7 @@ export default function InteractiveListSection({
   onValueClick,
   allowDuplicateValues = false,
 }: InteractiveListSectionProps): ReactNode {
-  if (!interactiveList.length) return null;
+  if (interactiveList.length === 0) return null;
 
   const instructionText = isListBuildVariant
     ? 'Tap values to build the final list in order.'
