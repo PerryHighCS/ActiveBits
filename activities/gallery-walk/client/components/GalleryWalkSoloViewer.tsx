@@ -308,24 +308,27 @@ export default function GalleryWalkSoloViewer() {
               toggleButtonVariant="outline"
               actionsClassName="print:hidden"
               actionButtons={[
-                (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      aria-label={showFileMeta ? 'Hide file info' : 'Show file info'}
-                      variant="outline"
-                      onClick={() => setShowFileMeta((prev) => !prev)}
-                    >
-                      File info
-                    </Button>
-                    <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
-                      Upload another file
-                    </Button>
-                    <Button type="button" variant="outline" onClick={() => window.print()}>
-                      Print
-                    </Button>
-                  </div>
-                ),
+                {
+                  key: 'file-actions',
+                  content: (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        aria-label={showFileMeta ? 'Hide file info' : 'Show file info'}
+                        variant="outline"
+                        onClick={() => setShowFileMeta((prev) => !prev)}
+                      >
+                        File info
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                        Upload another file
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => window.print()}>
+                        Print
+                      </Button>
+                    </div>
+                  ),
+                },
               ]}
               error={null}
               isLoading={false}

@@ -306,16 +306,22 @@ export default function ManagerPage() {
               showNotesView ? 'print:block' : 'print:hidden',
             ].filter(Boolean).join(' ')}
             actionButtons={[
-              (
-                <Button type="button" onClick={handleDownloadExport} disabled={!feedback.length}>
-                  Download feedback
-                </Button>
-              ),
-              (
-                <Button type="button" variant="outline" onClick={() => window.print()}>
-                  Print
-                </Button>
-              ),
+              {
+                key: 'download',
+                content: (
+                  <Button type="button" onClick={handleDownloadExport} disabled={!feedback.length}>
+                    Download feedback
+                  </Button>
+                ),
+              },
+              {
+                key: 'print',
+                content: (
+                  <Button type="button" variant="outline" onClick={() => window.print()}>
+                    Print
+                  </Button>
+                ),
+              },
             ]}
             error={error}
             isLoading={isLoading}

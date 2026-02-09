@@ -15,6 +15,7 @@ Before making changes, read these files when relevant:
 1. `README.md` (project commands and structure)
 2. `ARCHITECTURE.md` (system boundaries and runtime model)
 3. `DEPLOYMENT.md` (production/deploy constraints)
+4. `.claude/knowledge/react-best-practices.md` (React patterns and optimization guidance)
 
 ## Working Rules
 
@@ -106,6 +107,8 @@ Use these logs to keep work auditable:
 
 1. `.claude/knowledge/repo_discoveries.md`
    - Durable notes/discoveries for future work.
+2. `.claude/knowledge/react-best-practices.md`
+   - React patterns, optimizations, and accessibility guidance.
 
 If a log file is missing, create it when first needed.
 

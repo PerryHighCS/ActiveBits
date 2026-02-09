@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router-dom';
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils';
 import Button from '@src/components/ui/Button';
@@ -53,8 +53,9 @@ export default function JavaFormatPracticeManager() {
   ];
 
   const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
-    if (sessionId == null) return;
     setSelectedDifficulty(difficulty);
+
+    if (sessionId == null) return;
 
     // Send selected difficulty to server
     fetch(`/api/java-format-practice/${sessionId}/difficulty`, {
@@ -67,8 +68,9 @@ export default function JavaFormatPracticeManager() {
   };
 
   const handleThemeChange = (theme: JavaFormatTheme) => {
-    if (sessionId == null) return;
     setSelectedTheme(theme);
+
+    if (sessionId == null) return;
 
     // Send selected theme to server
     fetch(`/api/java-format-practice/${sessionId}/theme`, {
@@ -176,38 +178,40 @@ export default function JavaFormatPracticeManager() {
     }
   };
 
-  const sortedStudents = [...students].sort((a, b) => {
-    let aValue: number | string
-    let bValue: number | string
+  const sortedStudents = useMemo(() => {
+    return [...students].sort((a, b) => {
+      let aValue: number | string
+      let bValue: number | string
 
-    switch (sortBy) {
-      case 'total':
-        aValue = a.stats?.total || 0;
-        bValue = b.stats?.total || 0;
-        break;
-      case 'correct':
-        aValue = a.stats?.correct || 0;
-        bValue = b.stats?.correct || 0;
-        break;
-      case 'accuracy':
-        aValue =
-          (a.stats?.total || 0) > 0 ? a.stats.correct / a.stats.total : 0;
-        bValue =
-          (b.stats?.total || 0) > 0 ? b.stats.correct / b.stats.total : 0;
-        break;
-      case 'streak':
-        aValue = a.stats?.streak || 0;
-        bValue = b.stats?.streak || 0;
-        break;
-      default: // name
-        aValue = (a.name || 'Unknown').toLowerCase();
-        bValue = (b.name || 'Unknown').toLowerCase();
-    }
+      switch (sortBy) {
+        case 'total':
+          aValue = a.stats?.total || 0;
+          bValue = b.stats?.total || 0;
+          break;
+        case 'correct':
+          aValue = a.stats?.correct || 0;
+          bValue = b.stats?.correct || 0;
+          break;
+        case 'accuracy':
+          aValue =
+            (a.stats?.total || 0) > 0 ? a.stats.correct / a.stats.total : 0;
+          bValue =
+            (b.stats?.total || 0) > 0 ? b.stats.correct / b.stats.total : 0;
+          break;
+        case 'streak':
+          aValue = a.stats?.streak || 0;
+          bValue = b.stats?.streak || 0;
+          break;
+        default: // name
+          aValue = (a.name || 'Unknown').toLowerCase();
+          bValue = (b.name || 'Unknown').toLowerCase();
+      }
 
-    if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-    if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-    return 0;
-  });
+      if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [students, sortBy, sortDirection]);
 
   return (
     <div style={styles.container}>

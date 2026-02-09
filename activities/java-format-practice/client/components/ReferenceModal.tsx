@@ -95,9 +95,15 @@ export default function FormatReferenceModal({ isOpen, onClose, referenceData }:
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={handleContentClick}>
+      <div
+        className="modal-content"
+        onClick={handleContentClick}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reference-modal-title"
+      >
         <div className="modal-header">
-          <h2>{referenceData?.title || 'Reference'}</h2>
+          <h2 id="reference-modal-title">{referenceData?.title || 'Reference'}</h2>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close reference">
             ×
           </button>

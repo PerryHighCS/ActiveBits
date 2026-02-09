@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { getTimestampMeta } from '../manager/managerUtils';
+import { normalizeKeyPart, toKeyLabel, hashStringFNV1a } from '../../shared/keyUtils';
 
 interface FeedbackEntry {
   id?: string;
@@ -30,29 +31,6 @@ interface GalleryWalkFeedbackTableProps {
   emptyMessage?: string;
   containerClassName?: string;
   headerOverrides?: HeaderOverrides;
-}
-
-function normalizeKeyPart(value: unknown): string {
-  if (value == null) return '';
-  return String(value);
-}
-
-function toKeyLabel(value: unknown, maxLength = 24): string {
-  const normalized = normalizeKeyPart(value).trim();
-  if (normalized === '') return '-';
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength)}~`;
-}
-
-function hashStringFNV1a(value: string): string {
-  let hash = 0x811c9dc5;
-
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-
-  return (hash >>> 0).toString(36);
 }
 
 export function buildFeedbackRowKeys(feedback: FeedbackEntry[]): string[] {
@@ -96,7 +74,7 @@ export default function GalleryWalkFeedbackTable({
     'overflow-x-auto rounded-lg border border-gray-200 bg-white shadow print:border-0 print:shadow-none',
     containerClassName,
   ].filter(Boolean).join(' ');
-  const rowKeys = buildFeedbackRowKeys(feedback);
+  const rowKeys = useMemo(() => buildFeedbackRowKeys(feedback), [feedback]);
 
   return (
     <div className={wrapperClassName}>
