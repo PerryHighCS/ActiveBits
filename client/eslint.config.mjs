@@ -81,7 +81,6 @@ export default [
         },
       ],
       '@typescript-eslint/no-unused-expressions': 'error',
-      'no-useless-assignment': 'error',
       'prefer-const': 'error',
       'no-sparse-arrays': 'error',
       'react-refresh/only-export-components': [

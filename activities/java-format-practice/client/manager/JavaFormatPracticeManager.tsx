@@ -29,7 +29,7 @@ interface ManagerWsMessage {
  * Displays student roster and their progress statistics
  */
 export default function JavaFormatPracticeManager() {
-  const { sessionId } = useParams<{ sessionId: string }>();
+  const { sessionId } = useParams<{ sessionId?: string }>();
 
   const [students, setStudents] = useState<JavaFormatStudentRecord[]>([])
   const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner')
@@ -53,6 +53,7 @@ export default function JavaFormatPracticeManager() {
   ];
 
   const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
+    if (sessionId == null) return;
     setSelectedDifficulty(difficulty);
 
     // Send selected difficulty to server
@@ -66,6 +67,7 @@ export default function JavaFormatPracticeManager() {
   };
 
   const handleThemeChange = (theme: JavaFormatTheme) => {
+    if (sessionId == null) return;
     setSelectedTheme(theme);
 
     // Send selected theme to server
@@ -79,7 +81,7 @@ export default function JavaFormatPracticeManager() {
   };
 
   const fetchStudents = useCallback(async () => {
-    if (!sessionId) return;
+    if (sessionId == null) return;
     try {
       const res = await fetch(`/api/java-format-practice/${sessionId}/students`);
       if (!res.ok) throw new Error('Failed to fetch students');
@@ -119,7 +121,7 @@ export default function JavaFormatPracticeManager() {
   }, []);
 
   const buildWsUrl = useCallback(() => {
-    if (!sessionId) return null;
+    if (sessionId == null) return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}`;
@@ -127,7 +129,7 @@ export default function JavaFormatPracticeManager() {
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: Boolean(sessionId),
+    shouldReconnect: sessionId != null,
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onError: handleWsError,
@@ -135,7 +137,7 @@ export default function JavaFormatPracticeManager() {
   });
 
   useEffect(() => {
-    if (!sessionId) return undefined;
+    if (sessionId == null) return undefined;
     void fetchStudents();
     void connect();
     return () => {

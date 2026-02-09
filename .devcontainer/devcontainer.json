@@ -4,7 +4,9 @@
   "service": "app",
   "workspaceFolder": "/workspaces/ActiveBits",
   "features": {
-    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    },
     "ghcr.io/devcontainers/features/common-utils:2": {
       "username": "vscode"
     }
