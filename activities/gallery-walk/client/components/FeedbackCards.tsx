@@ -54,11 +54,11 @@ export default function FeedbackCards({ entries = [], isLoading = false }: Feedb
         return (
           <div
             key={cardKeys[index]}
-            className={`feedback-card min-h-[14rem] flex flex-col rounded-lg border border-black/5 p-4 shadow-md ${styleClass}`}
+            className={`feedback-card min-h-56 flex flex-col rounded-lg border border-black/5 p-4 shadow-md ${styleClass}`}
             style={{ minWidth: '12rem', width: '14rem', maxWidth: '18rem', flex: '0 0 14rem' }}
           >
             <p className="text-base font-semibold text-gray-900 whitespace-pre-wrap">{entry.message}</p>
-            <div className="mt-4 flex flex-col items-end gap-1 text-right mt-auto">
+            <div className="flex flex-col items-end gap-1 text-right mt-auto">
               <p className="text-sm font-semibold text-gray-800">
                 {entry.fromNameSnapshot || 'Reviewer'}
               </p>

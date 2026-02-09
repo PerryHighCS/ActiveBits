@@ -67,6 +67,9 @@ export default function FeedbackDisplay({
     }, 100);
 
     const handleKeyPress = (e: KeyboardEvent) => {
+      // Guard against feedback becoming null while handler is still attached
+      if (!feedback) return;
+
       // Don't handle keyboard events if the button is focused (let the button's onClick handle it)
       if (e.target === buttonRef.current) {
         return;
