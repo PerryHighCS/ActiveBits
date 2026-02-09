@@ -8,10 +8,12 @@ import { fileURLToPath } from 'url'
 
 const tsconfigRootDir = dirname(fileURLToPath(import.meta.url))
 const tsFiles = ['**/*.{ts,tsx}']
+const tsEslintFlatRecommendedRules = tseslint.configs['flat/eslint-recommended']?.rules ?? {}
+const tsEslintRecommendedRules = tseslint.configs.recommended?.rules ?? {}
 const tsRules = {
   ...js.configs.recommended.rules,
-  ...tseslint.configs['flat/eslint-recommended'].rules,
-  ...tseslint.configs.recommended.rules,
+  ...tsEslintFlatRecommendedRules,
+  ...tsEslintRecommendedRules,
   'no-unused-vars': 'off',
   '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
   '@typescript-eslint/no-explicit-any': 'error',

@@ -149,7 +149,7 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }: Demo
 
   useEffect(() => {
     if (isSoloMode) return
-    connect()
+    void connect()
     return () => disconnect()
   }, [sessionId, isSoloMode, connect, disconnect])
 

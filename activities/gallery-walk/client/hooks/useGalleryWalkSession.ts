@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import type { SortableFeedbackEntry } from '../manager/feedbackUtils';
 
 const DEFAULT_STAGE = 'gallery';
@@ -249,7 +249,7 @@ export default function useGalleryWalkSession(
 
   useEffect(() => {
     if (!sessionId) return undefined;
-    connectWs();
+    void connectWs();
     return () => disconnectWs();
   }, [sessionId, connectWs, disconnectWs]);
 
