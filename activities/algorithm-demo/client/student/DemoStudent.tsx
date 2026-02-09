@@ -63,15 +63,16 @@ function parseBroadcastMessage(rawData: unknown): BroadcastMessage | null {
   }
 }
 
+const ALGORITHMS = getAllAlgorithms()
+
 export default function DemoStudent({ sessionData, persistentSessionInfo }: DemoStudentProps) {
   const { sessionId } = sessionData
   const [searchParams] = useSearchParams()
   const attachSessionEndedHandler = useSessionEndedHandler()
 
-  const [algorithms] = useState(getAllAlgorithms())
   const [selectedAlgoId, setSelectedAlgoId] = useState<string | null>(null)
   const [algorithmState, setAlgorithmState] = useState<AlgorithmState | null>(null)
-  const [isSoloMode] = useState(sessionId.startsWith('solo-'))
+  const isSoloMode = sessionId.startsWith('solo-')
   const [isAutoSelectedFromParam, setIsAutoSelectedFromParam] = useState(false)
   const selectedAlgoIdRef = useRef<string | null>(selectedAlgoId)
 
@@ -188,7 +189,7 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }: Demo
         <h1>Algorithm Practice</h1>
         <p>Choose an algorithm to explore</p>
         <AlgorithmPicker
-          algorithms={algorithms}
+          algorithms={ALGORITHMS}
           selectedId={selectedAlgoId}
           onSelect={handleSelectAlgorithm}
           title="Select Algorithm"

@@ -2,18 +2,18 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
-import { sortFeedbackEntries, type SortDirection, type SortableFeedbackField } from './feedbackUtils';
-import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable';
-import GalleryWalkNotesView from '../components/GalleryWalkNotesView';
+import { sortFeedbackEntries, type SortDirection, type SortableFeedbackField } from './feedbackUtils.js';
+import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable.js';
+import GalleryWalkNotesView from '../components/GalleryWalkNotesView.js';
 import Button from '@src/components/ui/Button';
-import StageControls from '../components/StageControls';
-import TitleEditor from '../components/TitleEditor';
-import FeedbackViewSwitcher from '../components/FeedbackViewSwitcher';
+import StageControls from '../components/StageControls.js';
+import TitleEditor from '../components/TitleEditor.js';
+import FeedbackViewSwitcher from '../components/FeedbackViewSwitcher.js';
 import useGalleryWalkSession, {
   type GalleryWalkFeedbackEntry,
   type GalleryWalkReviewees,
   type GalleryWalkReviewers,
-} from '../hooks/useGalleryWalkSession';
+} from '../hooks/useGalleryWalkSession.js';
 
 type SortField = SortableFeedbackField;
 

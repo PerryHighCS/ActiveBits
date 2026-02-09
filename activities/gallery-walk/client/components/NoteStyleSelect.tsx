@@ -6,7 +6,7 @@ import React, {
   useId,
   useCallback,
 } from 'react';
-import { NOTE_STYLE_OPTIONS } from '../../shared/noteStyles';
+import { NOTE_STYLE_OPTIONS } from '../../shared/noteStyles.js';
 
 type NoteStyleOption = (typeof NOTE_STYLE_OPTIONS)[number];
 

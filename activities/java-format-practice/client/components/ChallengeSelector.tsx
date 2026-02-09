@@ -34,8 +34,8 @@ export default function ChallengeSelector({
   return (
     <React.Fragment>
       <div className="challenge-selector">
-        <div className="selector-group">
-          <label>Difficulty:</label>
+        <fieldset className="selector-group">
+          <legend>Difficulty:</legend>
           <div className="button-group">
             {difficulties.map((d) => (
               <button
@@ -49,10 +49,10 @@ export default function ChallengeSelector({
               </button>
             ))}
           </div>
-        </div>
+        </fieldset>
 
-        <div className="selector-group">
-          <label>Theme:</label>
+        <fieldset className="selector-group">
+          <legend>Theme:</legend>
           <div className="button-group">
             {themes.map((t) => (
               <button
@@ -66,7 +66,7 @@ export default function ChallengeSelector({
               </button>
             ))}
           </div>
-        </div>
+        </fieldset>
       </div>
     </React.Fragment>
   );

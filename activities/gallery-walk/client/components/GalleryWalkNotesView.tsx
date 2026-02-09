@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import FeedbackCards from './FeedbackCards';
+import FeedbackCards from './FeedbackCards.js';
 
 interface RevieweeInfo {
   name?: string;

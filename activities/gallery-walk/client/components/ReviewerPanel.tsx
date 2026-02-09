@@ -1,7 +1,7 @@
 import React from 'react';
 import Button from '@src/components/ui/Button';
-import ReviewerIdentityForm from './ReviewerIdentityForm';
-import ReviewerFeedbackForm from './ReviewerFeedbackForm';
+import ReviewerIdentityForm from './ReviewerIdentityForm.js';
+import ReviewerFeedbackForm from './ReviewerFeedbackForm.js';
 
 interface ReviewerPanelProps {
   reviewerName: string;

@@ -1,20 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import FeedbackCards, { buildFeedbackCardKeys } from './FeedbackCards';
-import FeedbackView from './FeedbackView';
-import FeedbackViewSwitcher from './FeedbackViewSwitcher';
-import GalleryWalkFeedbackTable, { buildFeedbackRowKeys } from './GalleryWalkFeedbackTable';
-import LocalReviewerForm from './LocalReviewerForm';
-import NoteStyleSelect from './NoteStyleSelect';
-import ProjectStationCard from './ProjectStationCard';
-import RegistrationForm from './RegistrationForm';
-import ReviewerFeedbackForm from './ReviewerFeedbackForm';
-import ReviewerIdentityForm from './ReviewerIdentityForm';
-import ReviewerPanel from './ReviewerPanel';
-import ReviewerScanner from './ReviewerScanner';
-import StageControls from './StageControls';
-import TitleEditor from './TitleEditor';
+import FeedbackCards, { buildFeedbackCardKeys } from './FeedbackCards.js';
+import FeedbackView from './FeedbackView.js';
+import FeedbackViewSwitcher from './FeedbackViewSwitcher.js';
+import GalleryWalkFeedbackTable, { buildFeedbackRowKeys } from './GalleryWalkFeedbackTable.js';
+import LocalReviewerForm from './LocalReviewerForm.js';
+import NoteStyleSelect from './NoteStyleSelect.js';
+import ProjectStationCard from './ProjectStationCard.js';
+import RegistrationForm from './RegistrationForm.js';
+import ReviewerFeedbackForm from './ReviewerFeedbackForm.js';
+import ReviewerIdentityForm from './ReviewerIdentityForm.js';
+import ReviewerPanel from './ReviewerPanel.js';
+import ReviewerScanner from './ReviewerScanner.js';
+import StageControls from './StageControls.js';
+import TitleEditor from './TitleEditor.js';
 
 void test('gallery-walk converted components export callable React components', () => {
   const components = [

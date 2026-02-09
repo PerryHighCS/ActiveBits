@@ -7,10 +7,10 @@ import {
 } from 'react';
 import type { ReactNode } from 'react';
 import Button from '@src/components/ui/Button';
-import FeedbackCards from './FeedbackCards';
-import GalleryWalkFeedbackTable from './GalleryWalkFeedbackTable';
-import GalleryWalkNotesView from './GalleryWalkNotesView';
-import FeedbackViewSwitcher from './FeedbackViewSwitcher';
+import FeedbackCards from './FeedbackCards.js';
+import GalleryWalkFeedbackTable from './GalleryWalkFeedbackTable.js';
+import GalleryWalkNotesView from './GalleryWalkNotesView.js';
+import FeedbackViewSwitcher from './FeedbackViewSwitcher.js';
 
 type ViewerMode = 'notes' | 'table';
 type SortField = 'to' | 'from' | 'createdAt';

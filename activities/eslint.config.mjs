@@ -1,8 +1,8 @@
 import js from '@eslint/js'
 import tseslint from '@typescript-eslint/eslint-plugin'
 import tsParser from '@typescript-eslint/parser'
-import globals from 'globals'
 import jsdoc from 'eslint-plugin-jsdoc'
+import globals from 'globals'
 import { dirname } from 'path'
 import { fileURLToPath } from 'url'
 

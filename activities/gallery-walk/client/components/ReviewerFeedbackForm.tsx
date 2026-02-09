@@ -1,7 +1,7 @@
 import React from 'react';
 import Button from '@src/components/ui/Button';
-import NoteStyleSelect from './NoteStyleSelect';
-import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles';
+import NoteStyleSelect from './NoteStyleSelect.js';
+import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles.js';
 
 interface ReviewerFeedbackFormProps {
   projectTitle?: string | null;

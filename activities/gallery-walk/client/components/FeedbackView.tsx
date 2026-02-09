@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import Button from '@src/components/ui/Button';
-import GalleryWalkNotesView from './GalleryWalkNotesView';
+import GalleryWalkNotesView from './GalleryWalkNotesView.js';
 
 interface RevieweeRecord {
   name?: string;
