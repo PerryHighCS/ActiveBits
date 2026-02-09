@@ -777,6 +777,27 @@ Validation:
 
 ## Phase 7 Progress (Cleanup and Strictness Hardening)
 
+### Slice 4: TS-only compiler/test mode
+
+Completed:
+- Disabled JavaScript source support in base TypeScript config:
+  - `tsconfig.base.json` (`allowJs: false`)
+- Removed `.js` include from server typecheck scope:
+  - `server/tsconfig.json` includes now only `**/*.ts`
+- Tightened workspace test discovery scripts to TS-only patterns:
+  - `client/package.json` (`*.test.ts`, `*.test.tsx`)
+  - `server/package.json` (`*.test.ts`)
+  - `activities/package.json` (`*.test.ts`, `*.test.tsx`)
+
+Implementation notes:
+- This removes the remaining mixed-extension compatibility settings from compiler and test commands.
+- Combined with the source-extension guard, migration scope is now enforced as TypeScript-only source.
+
+Validation:
+- `npm test` -> pass (typecheck, lint, client/server/activities tests, `verify:deploy`, `verify:server`)
+
+## Phase 7 Progress (Cleanup and Strictness Hardening)
+
 ### Slice 3: Remove remaining JS tooling exceptions
 
 Completed:
