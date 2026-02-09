@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils';
-import { getTimestampMeta } from './managerUtils';
+import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils.js';
+import { getTimestampMeta } from './managerUtils.js';
 
 void test('sortFeedbackEntries sorts by createdAt descending by default', () => {
   const entries = [

@@ -36,6 +36,9 @@
     "author": "",
     "license": "MIT",
     "description": "",
+    "engines": {
+        "node": ">=22"
+    },
     "dependencies": {
         "express": "^5.1.0",
         "vite": "^7.2.2",

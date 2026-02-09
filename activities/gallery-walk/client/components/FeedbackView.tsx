@@ -70,7 +70,6 @@ export default function FeedbackView({
         reviewees={studentReviewees}
         feedbackByReviewee={studentFeedbackByReviewee}
         selectedReviewee="all"
-        onSelectReviewee={() => {}}
         filterClassName="hidden"
         containerClassName="pt-2 print:pt-0"
         gridClassName="grid-cols-1"

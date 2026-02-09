@@ -11,6 +11,9 @@
     "test": "sh -c 'set -e; files=$(find . -path \"./node_modules\" -prune -o \\( -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No activities tests found\"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files'",
     "typecheck": "tsc --noEmit"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "activebits-server": "file:../server",
     "qrcode.react": "^4.2.0",

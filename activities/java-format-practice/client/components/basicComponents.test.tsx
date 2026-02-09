@@ -13,6 +13,9 @@ void test('ChallengeQuestion renders prompt and invalid fallback', () => {
 
   const invalidMarkup = renderToStaticMarkup(React.createElement(ChallengeQuestion, { prompt: null }))
   assert.match(invalidMarkup, /Invalid question/)
+
+  const emptyMarkup = renderToStaticMarkup(React.createElement(ChallengeQuestion, { prompt: '   ' }))
+  assert.match(emptyMarkup, /Invalid question/)
 })
 
 void test('ChallengeSelector renders difficulty/theme controls with selected state', () => {

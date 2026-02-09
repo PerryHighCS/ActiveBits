@@ -32,6 +32,32 @@ interface GalleryWalkFeedbackTableProps {
   headerOverrides?: HeaderOverrides;
 }
 
+function normalizeKeyPart(value: unknown): string {
+  if (value == null) return '';
+  return String(value);
+}
+
+export function buildFeedbackRowKeys(feedback: FeedbackEntry[]): string[] {
+  const seenKeys = new Map<string, number>();
+
+  return feedback.map((entry) => {
+    if (typeof entry.id === 'string' && entry.id.trim() !== '') {
+      return `id:${entry.id}`;
+    }
+
+    const baseKey = [
+      normalizeKeyPart(entry.to),
+      normalizeKeyPart(entry.from),
+      normalizeKeyPart(entry.fromNameSnapshot),
+      Number.isFinite(entry.createdAt) ? String(entry.createdAt) : '',
+      normalizeKeyPart(entry.message),
+    ].join('|');
+    const occurrence = seenKeys.get(baseKey) ?? 0;
+    seenKeys.set(baseKey, occurrence + 1);
+    return occurrence === 0 ? `entry:${baseKey}` : `entry:${baseKey}#${occurrence + 1}`;
+  });
+}
+
 export default function GalleryWalkFeedbackTable({
   feedback = [],
   reviewees = {},
@@ -50,6 +76,7 @@ export default function GalleryWalkFeedbackTable({
     'overflow-x-auto rounded-lg border border-gray-200 bg-white shadow print:border-0 print:shadow-none',
     containerClassName,
   ].filter(Boolean).join(' ');
+  const rowKeys = buildFeedbackRowKeys(feedback);
 
   return (
     <div className={wrapperClassName}>
@@ -82,7 +109,7 @@ export default function GalleryWalkFeedbackTable({
               ? `${timestamp.date.toLocaleDateString()} ${timestamp.date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
               : '—';
             return (
-              <tr key={entry.id ?? `feedback-row-${index}`}>
+              <tr key={rowKeys[index]!}>
                 <td className="px-4 py-3">
                   {reviewees[entry.to ?? '']?.name
                     || reviewees[entry.to ?? '']?.projectTitle

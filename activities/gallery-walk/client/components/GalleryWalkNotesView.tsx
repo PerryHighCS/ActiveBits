@@ -18,7 +18,7 @@ interface GalleryWalkNotesViewProps {
   reviewees?: Record<string, RevieweeInfo>;
   feedbackByReviewee?: Record<string, FeedbackEntry[]>;
   selectedReviewee: string;
-  onSelectReviewee: (value: string) => void;
+  onSelectReviewee?: (value: string) => void;
   allValue?: string;
   includeAllRevieweesWhenAllSelected?: boolean;
   containerClassName?: string;
@@ -91,7 +91,7 @@ export default function GalleryWalkNotesView({
           id={selectId}
           className="rounded border border-gray-300 px-3 py-1 text-sm"
           value={selectedReviewee}
-          onChange={(event) => onSelectReviewee(event.target.value)}
+          onChange={onSelectReviewee ? (event) => onSelectReviewee(event.target.value) : undefined}
         >
           <option value={allValue}>{allOptionLabel}</option>
           {revieweeEntries.map(([id, info]) => (

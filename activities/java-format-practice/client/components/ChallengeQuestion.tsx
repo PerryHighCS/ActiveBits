@@ -9,7 +9,7 @@ interface ChallengeQuestionProps {
 }
 
 export default function ChallengeQuestion({ prompt }: ChallengeQuestionProps) {
-  if (prompt == null || typeof prompt !== 'string') {
+  if (prompt == null || typeof prompt !== 'string' || prompt.trim().length === 0) {
     return (
       <React.Fragment>
         <div className="question">Invalid question</div>
