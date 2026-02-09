@@ -20,7 +20,7 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between p-2 border-b">
-          {(title !== null && title !== undefined && title !== '') && <h2 className="text-lg font-semibold">{title}</h2>}
+          {title != null && title !== false && <h2 className="text-lg font-semibold">{title}</h2>}
           <button
             className="text-gray-500 hover:text-gray-700 text-xl leading-none"
             onClick={onClose}
