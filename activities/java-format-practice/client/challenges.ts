@@ -29,7 +29,7 @@ function replacePlaceholders(text: string, replacements: Record<string, string>)
 }
 
 function padValue(str: string, width: number | undefined, leftAlign = false, padChar = ' '): string {
-  if (!width || width <= str.length) return str
+  if (width == null || width <= str.length) return str
   return leftAlign ? str.padEnd(width, padChar) : str.padStart(width, padChar)
 }
 

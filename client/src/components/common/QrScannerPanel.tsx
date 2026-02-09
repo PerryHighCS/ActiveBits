@@ -30,7 +30,7 @@ export default function QrScannerPanel({ onDetected, onError, onClose }: QrScann
     paused: hasDetected,
     constraints,
     onDecodeResult: (result) => {
-      if (!result) return
+      if (result === null || result === undefined) return
       setHasDetected(true)
       onDetected?.(result.getText())
     },

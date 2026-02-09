@@ -99,7 +99,7 @@ function createAlgorithmDemoSession(id: string): SessionRecord {
   }
 }
 
-test('setupAlgorithmDemoRoutes registers algorithm-demo websocket namespace', () => {
+void test('setupAlgorithmDemoRoutes registers algorithm-demo websocket namespace', () => {
   const app = createMockApp()
   const ws = createMockWs()
   const { sessions } = createSessionStore({})
@@ -109,7 +109,7 @@ test('setupAlgorithmDemoRoutes registers algorithm-demo websocket namespace', ()
   assert.equal(typeof ws.registered['/ws/algorithm-demo'], 'function')
 })
 
-test('create route initializes algorithm-demo session state', async () => {
+void test('create route initializes algorithm-demo session state', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({})
@@ -133,7 +133,7 @@ test('create route initializes algorithm-demo session state', async () => {
   assert.deepEqual(data.history, [])
 })
 
-test('select route updates session and publishes broadcast payload', async () => {
+void test('select route updates session and publishes broadcast payload', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({
@@ -165,7 +165,7 @@ test('select route updates session and publishes broadcast payload', async () =>
   assert.equal(storeState.published[0]?.message.type, 'algorithm-selected')
 })
 
-test('select route returns 404 for missing session', async () => {
+void test('select route returns 404 for missing session', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({})

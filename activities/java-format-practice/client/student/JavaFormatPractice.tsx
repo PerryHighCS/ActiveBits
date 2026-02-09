@@ -344,7 +344,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
 
     // Sync to server if in class mode
     if (!isSoloSession) {
-      fetch(`/api/java-format-practice/${sessionId}/stats`, {
+      void fetch(`/api/java-format-practice/${sessionId}/stats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

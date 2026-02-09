@@ -29,7 +29,7 @@ interface RaffleRouteApp {
 
 registerSessionNormalizer('raffle', (session) => {
   const data =
-    session.data && typeof session.data === 'object' && !Array.isArray(session.data)
+    session.data != null && typeof session.data === 'object' && !Array.isArray(session.data)
       ? (session.data as Record<string, unknown>)
       : {}
   session.data = data

@@ -69,7 +69,7 @@ function resetLinearSearchState(state: LinearSearchState): LinearSearchState {
 }
 
 function getLinearSearchState(rawState: unknown): LinearSearchState {
-  if (!rawState || typeof rawState !== 'object') {
+  if (rawState === null || rawState === undefined || typeof rawState !== 'object') {
     return initLinearSearchState()
   }
 

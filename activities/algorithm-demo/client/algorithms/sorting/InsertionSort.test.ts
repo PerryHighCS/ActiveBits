@@ -19,7 +19,7 @@ interface InsertionSortStateLike {
   tmpPos: number | null
 }
 
-test('InsertionSort initState creates expected state shell', () => {
+void test('InsertionSort initState creates expected state shell', () => {
   const state = InsertionSort.initState?.(8) as unknown as InsertionSortStateLike
 
   assert.equal(state.array.length, 8)
@@ -37,7 +37,7 @@ test('InsertionSort initState creates expected state shell', () => {
   assert.equal(state.tmpPos, null)
 })
 
-test('InsertionSort reduceEvent advances first step and supports reset', () => {
+void test('InsertionSort reduceEvent advances first step and supports reset', () => {
   const state = InsertionSort.initState?.(6) as unknown as InsertionSortStateLike
   const next = InsertionSort.reduceEvent?.(
     state as unknown as Record<string, unknown>,

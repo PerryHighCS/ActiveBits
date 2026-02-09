@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { validateMethods, validateStats, validateStudentName } from './routeUtils.js'
 
-test('validateStudentName trims and enforces allowed characters', () => {
+void test('validateStudentName trims and enforces allowed characters', () => {
   assert.equal(validateStudentName('  Alice Smith  '), 'Alice Smith')
   const longName = validateStudentName('A'.repeat(80))
   assert.ok(longName)
@@ -10,7 +10,7 @@ test('validateStudentName trims and enforces allowed characters', () => {
   assert.equal(validateStudentName('Invalid<script>'), null)
 })
 
-test('validateStats clamps invalid fields and preserves invariants', () => {
+void test('validateStats clamps invalid fields and preserves invariants', () => {
   const stats = validateStats({
     total: 10,
     correct: 99,
@@ -26,7 +26,7 @@ test('validateStats clamps invalid fields and preserves invariants', () => {
   })
 })
 
-test('validateMethods returns defaults for empty/invalid lists', () => {
+void test('validateMethods returns defaults for empty/invalid lists', () => {
   assert.equal(validateMethods('invalid'), null)
   assert.deepEqual(validateMethods(['bogus']), ['all'])
   assert.deepEqual(validateMethods(['all', 'equals', 'unknown']), ['all', 'equals'])

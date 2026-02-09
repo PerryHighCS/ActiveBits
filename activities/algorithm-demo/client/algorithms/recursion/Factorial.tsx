@@ -83,7 +83,7 @@ function initFactorialState(n = 5): FactorialState {
 }
 
 function getFactorialState(state: unknown): FactorialState {
-  if (!state || typeof state !== 'object') {
+  if (state === null || state === undefined || typeof state !== 'object') {
     return initFactorialState()
   }
   return state as FactorialState

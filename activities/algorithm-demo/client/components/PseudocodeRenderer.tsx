@@ -49,10 +49,10 @@ export default function PseudocodeRenderer({
           <div key={idx} className="pseudocode-line">
             <span
               id={`line-${idx}`}
-              className={`pseudocode-span ${highlightSet.has(`line-${idx}`) ? 'highlighted' : ''} ${overlayEntry ? 'has-overlay' : ''}`}
+              className={`pseudocode-span ${highlightSet.has(`line-${idx}`) ? 'highlighted' : ''} ${overlayEntry != null ? 'has-overlay' : ''}`}
             >
               {renderPseudocodeWithBold(line)}
-              {overlayEntry && renderOverlay(overlayEntry)}
+              {overlayEntry != null && renderOverlay(overlayEntry)}
             </span>
           </div>
         )
@@ -62,7 +62,7 @@ export default function PseudocodeRenderer({
 }
 
 function renderOverlay(overlay: OverlayValue): ReactNode {
-  if (overlay && typeof overlay === 'object') {
+  if (overlay != null && typeof overlay === 'object') {
     const val = overlay.value !== undefined ? overlay.value : null
     if (val !== null) {
       return (

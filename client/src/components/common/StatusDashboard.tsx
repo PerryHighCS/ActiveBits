@@ -72,10 +72,10 @@ export default function StatusDashboard() {
       }
     }
 
-    load()
+    void load()
 
     const id = setInterval(() => {
-      if (!paused) load()
+      if (!paused) void load()
     }, intervalMs)
 
     return () => {
@@ -200,7 +200,7 @@ export default function StatusDashboard() {
           <h3 style={{ margin: 0, marginBottom: 6, fontSize: 13, color: '#6b7280', fontWeight: 600 }}>Storage</h3>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#111827' }}>{data?.storage?.mode || '-'}</div>
           <div style={{ fontSize: 12, color: '#6b7280' }}>
-            TTL: {data?.storage?.ttlMs ? `${Math.round(data.storage.ttlMs / 1000)}s` : '-'}
+            TTL: {data?.storage?.ttlMs != null && data.storage.ttlMs > 0 ? `${Math.round(data.storage.ttlMs / 1000)}s` : '-'}
           </div>
         </div>
         <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: 12 }}>

@@ -22,8 +22,8 @@ export function nextBroadcastSnapshot(
 ): LegendRouteLike[] {
   const payload = message.payload
   const routes =
-    payload && typeof payload === 'object' && Array.isArray((payload as { routes?: unknown }).routes)
-      ? (((payload as { routes?: unknown }).routes as unknown[]) || []).filter(
+    payload != null && typeof payload === 'object' && Array.isArray((payload as { routes?: unknown }).routes)
+      ? (((payload as { routes?: unknown }).routes as unknown[]) ?? []).filter(
           (route): route is LegendRouteLike => Boolean(route) && typeof route === 'object',
         )
       : []

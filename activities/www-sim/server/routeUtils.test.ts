@@ -19,25 +19,25 @@ function sequenceRandom(values: number[]): () => number {
   }
 }
 
-test('verifyHostname accepts and rejects expected values', () => {
+void test('verifyHostname accepts and rejects expected values', () => {
   assert.equal(verifyHostname('student-1'), true)
   assert.equal(verifyHostname('Student-1'), true)
   assert.equal(verifyHostname('student_1'), false)
   assert.equal(verifyHostname('-invalid'), false)
 })
 
-test('dividePassage splits words into requested segment count', () => {
+void test('dividePassage splits words into requested segment count', () => {
   const fragments = dividePassage('one two three four five six', 3)
   assert.deepEqual(fragments, ['one two', 'three four', 'five six'])
 })
 
-test('createHash returns deterministic sha256 output', () => {
+void test('createHash returns deterministic sha256 output', () => {
   const hash = createHash('hello world')
   assert.equal(hash.length, 64)
   assert.equal(hash, 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9')
 })
 
-test('getRandomUnusedName falls back to deterministic suffixes after repeated collisions', () => {
+void test('getRandomUnusedName falls back to deterministic suffixes after repeated collisions', () => {
   const name = getRandomUnusedName(
     ['only-name', 'only-name-1', 'only-name-2'],
     {
@@ -51,7 +51,7 @@ test('getRandomUnusedName falls back to deterministic suffixes after repeated co
   assert.equal(name, 'only-name-3')
 })
 
-test('createHostingMap assigns all fragments and ensures each student hosts at least three files', () => {
+void test('createHostingMap assigns all fragments and ensures each student hosts at least three files', () => {
   const hostingMap = createHostingMap(
     [
       { hostname: 'alpha', joined: 1 },
@@ -81,7 +81,7 @@ test('createHostingMap assigns all fragments and ensures each student hosts at l
   assert.ok((assignmentCount.get('beta') ?? 0) >= 3)
 })
 
-test('createHostingMap remains finite and produces unique names when adjective/noun space is exhausted', () => {
+void test('createHostingMap remains finite and produces unique names when adjective/noun space is exhausted', () => {
   const hostingMap = createHostingMap(
     [{ hostname: 'alpha', joined: 1 }],
     {
@@ -101,7 +101,7 @@ test('createHostingMap remains finite and produces unique names when adjective/n
   assert.deepEqual(alphaNames, ['tiny-pool', 'tiny-pool-1', 'tiny-pool-2', 'tiny-pool-3', 'tiny-pool-4'])
 })
 
-test('generateHtmlTemplate prefers non-self sources when alternatives exist', () => {
+void test('generateHtmlTemplate prefers non-self sources when alternatives exist', () => {
   const fragmentRecords: HostedFragmentRecord[] = [
     {
       fragment: 'fragment-a',

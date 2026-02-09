@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { nextBroadcastSnapshot } from './useBroadcastToggles'
 
-test('nextBroadcastSnapshot applies broadcastUpdate payload routes', () => {
+void test('nextBroadcastSnapshot applies broadcastUpdate payload routes', () => {
   const next = nextBroadcastSnapshot([], {
     type: 'broadcastUpdate',
     payload: {
@@ -14,13 +14,13 @@ test('nextBroadcastSnapshot applies broadcastUpdate payload routes', () => {
   assert.equal(next[0]?.id, 'r1')
 })
 
-test('nextBroadcastSnapshot keeps snapshot on clearBroadcast when toggles active', () => {
+void test('nextBroadcastSnapshot keeps snapshot on clearBroadcast when toggles active', () => {
   const current = [{ id: 'x', type: 'student', name: 'Keep me' }]
   const next = nextBroadcastSnapshot(current, { type: 'clearBroadcast' }, 1)
   assert.deepEqual(next, current)
 })
 
-test('nextBroadcastSnapshot clears on problemUpdate', () => {
+void test('nextBroadcastSnapshot clears on problemUpdate', () => {
   const next = nextBroadcastSnapshot([{ id: 'x', type: 'student', name: 'Old' }], { type: 'problemUpdate' }, 0)
   assert.deepEqual(next, [])
 })

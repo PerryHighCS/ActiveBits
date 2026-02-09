@@ -77,7 +77,7 @@ const hackerChallenge: IntermediateChallenge = {
   ],
 }
 
-test('intermediate-style answers evaluate to expected output', () => {
+void test('intermediate-style answers evaluate to expected output', () => {
   const answers = [
     '"%-15s | Attempting access%n", user',
     '"Failed: %2d | Level: %2d%n", attempts, accessLevel',
@@ -94,7 +94,7 @@ test('intermediate-style answers evaluate to expected output', () => {
   }
 })
 
-test('intermediate-style validation detects width mismatch', () => {
+void test('intermediate-style validation detects width mismatch', () => {
   const [result] = validateIntermediate('"%-10s | Attempting access%n", user', hackerChallenge)
   assert.ok(result)
   assert.equal(result.pass, false)

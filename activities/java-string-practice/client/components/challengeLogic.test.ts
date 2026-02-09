@@ -3,17 +3,17 @@ import test from 'node:test'
 import type { JavaStringChallenge } from '../../javaStringPracticeTypes.js'
 import { generateChallenge, getExplanation, validateAnswer } from './challengeLogic.js'
 
-test('generateChallenge respects selected method filters', () => {
+void test('generateChallenge respects selected method filters', () => {
   const challenge = generateChallenge(new Set(['substring']))
   assert.equal(challenge.type, 'substring')
 })
 
-test('generateChallenge supports all-mode fallback', () => {
+void test('generateChallenge supports all-mode fallback', () => {
   const challenge = generateChallenge(new Set(['all']))
   assert.ok(['substring', 'indexOf', 'equals', 'length', 'compareTo'].includes(challenge.type))
 })
 
-test('validateAnswer normalizes equals/compareTo answers', () => {
+void test('validateAnswer normalizes equals/compareTo answers', () => {
   const equalsChallenge: JavaStringChallenge = {
     type: 'equals',
     hint: 'hint',
@@ -46,7 +46,7 @@ test('validateAnswer normalizes equals/compareTo answers', () => {
   assert.equal(validateAnswer(compareToChallenge, ' Negative '), true)
 })
 
-test('getExplanation returns challenge-specific guidance', () => {
+void test('getExplanation returns challenge-specific guidance', () => {
   const lengthChallenge: JavaStringChallenge = {
     type: 'length',
     hint: 'hint',

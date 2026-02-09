@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { findFooterActivity } from './appUtils'
 
-test('findFooterActivity returns activity with footer for manage paths', () => {
+void test('findFooterActivity returns activity with footer for manage paths', () => {
   const footerComponent = () => null
   const activities = [
     { id: 'raffle', name: 'Raffle', description: 'R', color: 'blue', soloMode: false },
@@ -20,7 +20,7 @@ test('findFooterActivity returns activity with footer for manage paths', () => {
   assert.equal(result?.id, 'gallery-walk')
 })
 
-test('findFooterActivity returns null when no footer component is available', () => {
+void test('findFooterActivity returns null when no footer component is available', () => {
   const activities = [{ id: 'raffle', name: 'Raffle', description: 'R', color: 'blue', soloMode: false }]
 
   const result = findFooterActivity('/manage/raffle/abc123', activities)

@@ -98,7 +98,7 @@ export function validateLineIds(
  * Converts plain objects to Sets where needed (Sets don't serialize over JSON)
  */
 export function normalizeAlgorithmState(state: unknown): unknown {
-  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+  if (state == null || typeof state !== 'object' || Array.isArray(state)) {
     return state
   }
 
@@ -115,8 +115,8 @@ export function normalizeAlgorithmState(state: unknown): unknown {
   // Convert callStack frames (for recursion demos)
   const callStack = normalized.callStack
   if (Array.isArray(callStack)) {
-    normalized.callStack = callStack.map((frame) =>
-      frame && typeof frame === 'object' ? { ...(frame as Record<string, unknown>) } : {},
+    normalized.callStack = callStack.map((frame: unknown) =>
+      frame != null && typeof frame === 'object' ? { ...(frame as Record<string, unknown>) } : {},
     )
   }
 
@@ -140,7 +140,7 @@ export function hydrateAlgorithmState(
   }
 
   const baseState = algorithm.initState()
-  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+  if (state == null || typeof state !== 'object' || Array.isArray(state)) {
     return baseState
   }
 

@@ -7,7 +7,7 @@
     "start": "sh -c 'if [ -f dist/server.js ]; then node dist/server.js; else node --import tsx server.ts; fi'",
     "dev": "node --trace-warnings --import tsx server.ts",
     "build": "tsc -p tsconfig.build.json",
-    "lint": "eslint .",
+    "lint": "eslint server.ts --cache --cache-location .eslintcache && eslint core routes activities --cache --cache-location .eslintcache",
     "test": "npm run lint && sh -c 'set -e; files=$(find . -not -path \"./node_modules/*\" \\( -name \"*.test.js\" -o -name \"*.test.ts\" \\) -print); if [ -z \"$files\" ]; then echo \"No server tests found\"; exit 0; fi; node --import tsx --test $files'",
     "typecheck": "tsc --noEmit",
     "test:valkey": "node --import tsx test-valkey.ts",
@@ -25,16 +25,16 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.21.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.3",
     "@types/node": "^25.2.1",
     "@types/ws": "^8.18.1",
-    "@typescript-eslint/eslint-plugin": "^8.54.0",
-    "@typescript-eslint/parser": "^8.54.0",
-    "eslint": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.0",
+    "@typescript-eslint/parser": "^8.46.0",
+    "eslint": "^9.21.0",
     "eslint-plugin-jsdoc": "^62.5.4",
-    "globals": "^17.3.0",
+    "globals": "^15.15.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { renderBoldText, renderPseudocodeWithBold } from './pseudocodeUtils'
 
-test('renderBoldText tokenizes markdown-style bold spans', () => {
+void test('renderBoldText tokenizes markdown-style bold spans', () => {
   const tokens = renderBoldText('**function** mergeSort(arr)')
 
   assert.deepEqual(tokens, [
@@ -12,7 +12,7 @@ test('renderBoldText tokenizes markdown-style bold spans', () => {
   ])
 })
 
-test('renderPseudocodeWithBold returns strong tags for bold spans', () => {
+void test('renderPseudocodeWithBold returns strong tags for bold spans', () => {
   const html = renderToStaticMarkup(<>{renderPseudocodeWithBold('if **x** then')}</>)
 
   assert.match(html, /if /)

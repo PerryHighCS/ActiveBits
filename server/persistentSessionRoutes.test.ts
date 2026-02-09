@@ -108,7 +108,7 @@ function getRoute(app: ReturnType<typeof createMockApp>, method: 'GET' | 'POST',
   return handler
 }
 
-test('persistent session route keeps valid backing session', async (t) => {
+void test('persistent session route keeps valid backing session', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
   const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
@@ -137,7 +137,7 @@ test('persistent session route keeps valid backing session', async (t) => {
   assert.equal(res.jsonBody?.sessionId, 'live-session')
 })
 
-test('persistent session route resets when backing session missing', async (t) => {
+void test('persistent session route resets when backing session missing', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
   const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
@@ -168,7 +168,7 @@ test('persistent session route resets when backing session missing', async (t) =
   assert.equal(stored?.sessionId, null)
 })
 
-test('persistent session route allows recreation after reset', async (t) => {
+void test('persistent session route allows recreation after reset', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
   const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
@@ -208,7 +208,7 @@ test('persistent session route allows recreation after reset', async (t) => {
   assert.equal(secondRes.jsonBody?.sessionId, 'new-session')
 })
 
-test('teacher lifecycle clears session on explicit end', async (t) => {
+void test('teacher lifecycle clears session on explicit end', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
   const sessions = {

@@ -101,7 +101,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
     const record = reviewees[revieweeId];
     if (record) {
       setRevieweeRecord(record);
-    } else if (Object.keys(reviewees || {}).length > 0) {
+    } else if (Object.keys(reviewees).length > 0) {
       setRevieweeId(null);
       setRevieweeRecord(null);
       if (kioskStoragePrefix) {
@@ -355,7 +355,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
       if (showFeedbackView || isReviewerMode) {
         setSessionClosed(true);
       } else {
-        navigate('/session-ended');
+        void navigate('/session-ended');
       }
       return;
     }
@@ -459,7 +459,7 @@ function GalleryWalkLiveStudentPage({ sessionData }: StudentPageProps) {
     setCanScanNext(false);
     setReviewerMessage('');
     setReviewerNotice(null);
-    navigate(`${pathname}?reviewee=${encodeURIComponent(reviewee)}${hash}`);
+    void navigate(`${pathname}?reviewee=${encodeURIComponent(reviewee)}${hash}`);
   }, [navigate]);
 
   const handleScannerState = useCallback((code: string | null) => {

@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { getAllAlgorithms, validateAlgorithmRegistry } from '../algorithms/index'
 
-test('algorithm registry - validate structure', () => {
+void test('algorithm registry - validate structure', () => {
   const result = validateAlgorithmRegistry()
 
   assert.ok(result.valid, `Registry valid: ${result.errors.join(', ')}`)
@@ -15,7 +15,7 @@ test('algorithm registry - validate structure', () => {
   assert.deepEqual(result.errors, [], 'No validation errors')
 })
 
-test('algorithm registry - all algorithms have required fields', async (t) => {
+void test('algorithm registry - all algorithms have required fields', async (t) => {
   const algorithms = getAllAlgorithms()
 
   for (const algo of algorithms) {
@@ -33,7 +33,7 @@ test('algorithm registry - all algorithms have required fields', async (t) => {
   }
 })
 
-test('algorithm registry - pseudocode line references are valid', async (t) => {
+void test('algorithm registry - pseudocode line references are valid', async (t) => {
   const algorithms = getAllAlgorithms()
 
   for (const algo of algorithms) {
@@ -59,7 +59,7 @@ test('algorithm registry - pseudocode line references are valid', async (t) => {
   }
 })
 
-test('algorithm registry - no duplicate IDs', () => {
+void test('algorithm registry - no duplicate IDs', () => {
   const algorithms = getAllAlgorithms()
   const ids = new Set<string>()
 

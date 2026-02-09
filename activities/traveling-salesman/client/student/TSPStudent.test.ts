@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildSoloDisplayedRoutes, sortRoutesByDistance } from './TSPStudent'
 
-test('sortRoutesByDistance sorts ascending with nulls last', () => {
+void test('sortRoutesByDistance sorts ascending with nulls last', () => {
   const routes = [
     { id: 'a', type: 'student', distance: 22 },
     { id: 'b', type: 'student', distance: null },
@@ -13,7 +13,7 @@ test('sortRoutesByDistance sorts ascending with nulls last', () => {
   assert.deepEqual(result.map((route) => route.id), ['c', 'a', 'b'])
 })
 
-test('buildSoloDisplayedRoutes returns only active solo algorithm route', () => {
+void test('buildSoloDisplayedRoutes returns only active solo algorithm route', () => {
   const soloAlgorithms = {
     bruteForce: {
       name: 'Brute Force (Optimal)',

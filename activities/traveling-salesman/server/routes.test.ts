@@ -105,7 +105,7 @@ function setup() {
   return { app, sessions, store }
 }
 
-test('set-problem rejects invalid cities payload', async () => {
+void test('set-problem rejects invalid cities payload', async () => {
   const { app } = setup()
   const handler = app.handlers.post['/api/traveling-salesman/:sessionId/set-problem']
   if (!handler) throw new Error('missing set-problem handler')
@@ -119,7 +119,7 @@ test('set-problem rejects invalid cities payload', async () => {
   assert.equal(res.statusCode, 400)
 })
 
-test('submit-route rejects missing student', async () => {
+void test('submit-route rejects missing student', async () => {
   const { app } = setup()
   const handler = app.handlers.post['/api/traveling-salesman/:sessionId/submit-route']
   if (!handler) throw new Error('missing submit-route handler')
@@ -133,7 +133,7 @@ test('submit-route rejects missing student', async () => {
   assert.equal(res.statusCode, 404)
 })
 
-test('submit-route accepts timeToComplete=0', async () => {
+void test('submit-route accepts timeToComplete=0', async () => {
   const { app, store } = setup()
   ;((store.s1?.data as Record<string, unknown>).problem as { numCities: number }).numCities = 1
   ;((store.s1?.data as Record<string, unknown>).students as Array<Record<string, unknown>>).push({
@@ -157,7 +157,7 @@ test('submit-route accepts timeToComplete=0', async () => {
   assert.equal(students[0]?.timeToComplete, 0)
 })
 
-test('update-instructor-route rejects invalid timeToComplete', async () => {
+void test('update-instructor-route rejects invalid timeToComplete', async () => {
   const { app } = setup()
   const handler = app.handlers.post['/api/traveling-salesman/:sessionId/update-instructor-route']
   if (!handler) throw new Error('missing update-instructor-route handler')
@@ -171,7 +171,7 @@ test('update-instructor-route rejects invalid timeToComplete', async () => {
   assert.equal(res.statusCode, 400)
 })
 
-test('validation helpers accept valid inputs', () => {
+void test('validation helpers accept valid inputs', () => {
   assert.equal(isRouteArray(['city-0', 'city-1']), true)
   assert.equal(isCitiesArray([{ id: 'city-0', name: 'A', x: 1, y: 2 }]), true)
   assert.equal(isDistanceMatrix(
@@ -183,7 +183,7 @@ test('validation helpers accept valid inputs', () => {
   ), true)
 })
 
-test('validation helpers reject invalid inputs', () => {
+void test('validation helpers reject invalid inputs', () => {
   assert.equal(isRouteArray(['city-0', 2]), false)
   assert.equal(isCitiesArray([{ id: 'city-0', name: 'A', x: 'bad', y: 2 }]), false)
   assert.equal(isDistanceMatrix([[0, 1]], 2), false)

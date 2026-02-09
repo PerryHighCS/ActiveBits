@@ -40,7 +40,7 @@ function createMockStorage(initial: Record<string, string>): MockStorage {
   }
 }
 
-test('cleanExpiredSessions removes stale and malformed session-* entries only', () => {
+void test('cleanExpiredSessions removes stale and malformed session-* entries only', () => {
   const now = 2_000
   const logs: string[] = []
   const storage = createMockStorage({
@@ -60,7 +60,7 @@ test('cleanExpiredSessions removes stale and malformed session-* entries only', 
   assert.ok(logs.some((entry) => entry.includes('Removing invalid entry session-invalid')))
 })
 
-test('readCachedSession returns valid entries and clears invalid/expired values', () => {
+void test('readCachedSession returns valid entries and clears invalid/expired values', () => {
   const now = 10_000
   const logs: string[] = []
   const storage = createMockStorage({
@@ -82,12 +82,12 @@ test('readCachedSession returns valid entries and clears invalid/expired values'
   assert.ok(logs.some((entry) => entry.includes('removing invalid session-invalid')))
 })
 
-test('getPersistentQuerySuffix preserves query params for persistent-session fetches', () => {
+void test('getPersistentQuerySuffix preserves query params for persistent-session fetches', () => {
   assert.equal(getPersistentQuerySuffix('?algorithm=merge-sort'), '&algorithm=merge-sort')
   assert.equal(getPersistentQuerySuffix(''), '')
 })
 
-test('buildPersistentSessionApiUrl encodes hash and activityName and preserves search params', () => {
+void test('buildPersistentSessionApiUrl encodes hash and activityName and preserves search params', () => {
   const url = buildPersistentSessionApiUrl('abc/123?x y', 'merge&sort', '?algorithm=quick sort&debug=true')
   assert.equal(
     url,
@@ -95,12 +95,12 @@ test('buildPersistentSessionApiUrl encodes hash and activityName and preserves s
   )
 })
 
-test('buildPersistentSessionApiUrl replaces existing activityName in search', () => {
+void test('buildPersistentSessionApiUrl replaces existing activityName in search', () => {
   const url = buildPersistentSessionApiUrl('abc123', 'new-name', '?activityName=old&mode=solo')
   assert.equal(url, '/api/persistent-session/abc123?activityName=new-name&mode=solo')
 })
 
-test('isJoinSessionId requires a full non-zero hex string', () => {
+void test('isJoinSessionId requires a full non-zero hex string', () => {
   assert.equal(isJoinSessionId('abc123'), true)
   assert.equal(isJoinSessionId('  AbC123  '), true)
   assert.equal(isJoinSessionId('abc123xyz'), false)
@@ -110,7 +110,7 @@ test('isJoinSessionId requires a full non-zero hex string', () => {
   assert.equal(isJoinSessionId(''), false)
 })
 
-test('getSoloActivities filters activity list to solo-mode entries', () => {
+void test('getSoloActivities filters activity list to solo-mode entries', () => {
   const result = getSoloActivities([
     { id: 'a', name: 'A', description: 'A', color: 'blue', soloMode: true },
     { id: 'b', name: 'B', description: 'B', color: 'green', soloMode: false },

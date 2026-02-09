@@ -16,7 +16,7 @@ import ReviewerScanner from './ReviewerScanner';
 import StageControls from './StageControls';
 import TitleEditor from './TitleEditor';
 
-test('gallery-walk converted components export callable React components', () => {
+void test('gallery-walk converted components export callable React components', () => {
   const components = [
     FeedbackCards,
     FeedbackView,

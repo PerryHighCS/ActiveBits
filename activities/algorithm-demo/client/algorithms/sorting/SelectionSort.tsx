@@ -49,7 +49,7 @@ function initSelectionSortState(arraySize = 8): SelectionSortState {
 }
 
 function getSelectionSortState(state: unknown): SelectionSortState {
-  if (!state || typeof state !== 'object') {
+  if (state === null || state === undefined || typeof state !== 'object') {
     return initSelectionSortState()
   }
 

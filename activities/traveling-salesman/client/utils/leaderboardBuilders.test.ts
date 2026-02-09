@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildManagerLeaderboardEntries, buildSoloLeaderboardEntries } from './leaderboardBuilders'
 
-test('buildManagerLeaderboardEntries adds algorithm placeholders and sorts complete first', () => {
+void test('buildManagerLeaderboardEntries adds algorithm placeholders and sorts complete first', () => {
   const entries = buildManagerLeaderboardEntries({
     leaderboard: [
       {
@@ -22,7 +22,7 @@ test('buildManagerLeaderboardEntries adds algorithm placeholders and sorts compl
   assert.ok(entries.some((entry) => entry.id === 'heuristic'))
 })
 
-test('buildSoloLeaderboardEntries returns non-empty sorted entries when solo data exists', () => {
+void test('buildSoloLeaderboardEntries returns non-empty sorted entries when solo data exists', () => {
   const { sortedEntries, showSoloAlgorithms } = buildSoloLeaderboardEntries({
     isSoloSession: true,
     currentRoute: ['city-0', 'city-1'],

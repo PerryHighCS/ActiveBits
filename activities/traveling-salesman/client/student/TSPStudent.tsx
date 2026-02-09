@@ -293,9 +293,9 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
       computeSoloAlgorithms(city.id, { runHeuristic: true, runBruteForce: !soloBruteForceStarted });
     }
     if (result.isComplete) {
-      submitRoute(result.route, result.totalDistance, result.timeToComplete);
+      void submitRoute(result.route, result.totalDistance, result.timeToComplete);
     } else {
-      submitRoute(result.route, result.currentDistance, null);
+      void submitRoute(result.route, result.currentDistance, null);
     }
   };
 

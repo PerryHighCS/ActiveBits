@@ -19,7 +19,7 @@ interface BinarySearchGameStateLike {
   } | null
 }
 
-test('BinarySearchGame initState builds expected mode-specific defaults', () => {
+void test('BinarySearchGame initState builds expected mode-specific defaults', () => {
   const human = BinarySearchGame.initState?.(64, 'human') as unknown as BinarySearchGameStateLike
   assert.equal(human.mode, 'human')
   assert.equal(typeof human.secret, 'number')
@@ -34,7 +34,7 @@ test('BinarySearchGame initState builds expected mode-specific defaults', () => 
   assert.equal(computer.computerState?.started, false)
 })
 
-test('BinarySearchGame reduceEvent handles mode switches and computer lifecycle', () => {
+void test('BinarySearchGame reduceEvent handles mode switches and computer lifecycle', () => {
   const initial = BinarySearchGame.initState?.(32, 'computer') as unknown as BinarySearchGameStateLike
 
   const started = BinarySearchGame.reduceEvent?.(

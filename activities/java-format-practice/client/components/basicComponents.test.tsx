@@ -7,7 +7,7 @@ import ChallengeSelector from './ChallengeSelector'
 import StatsPanel from './StatsPanel'
 import FormatReferenceModal from './ReferenceModal'
 
-test('ChallengeQuestion renders prompt and invalid fallback', () => {
+void test('ChallengeQuestion renders prompt and invalid fallback', () => {
   const validMarkup = renderToStaticMarkup(React.createElement(ChallengeQuestion, { prompt: 'Explain %d' }))
   assert.match(validMarkup, /Explain %d/)
 
@@ -15,7 +15,7 @@ test('ChallengeQuestion renders prompt and invalid fallback', () => {
   assert.match(invalidMarkup, /Invalid question/)
 })
 
-test('ChallengeSelector renders difficulty/theme controls with selected state', () => {
+void test('ChallengeSelector renders difficulty/theme controls with selected state', () => {
   const markup = renderToStaticMarkup(
     React.createElement(ChallengeSelector, {
       currentDifficulty: 'advanced',
@@ -32,7 +32,7 @@ test('ChallengeSelector renders difficulty/theme controls with selected state', 
   assert.match(markup, /Spy Badge/)
 })
 
-test('StatsPanel computes and renders accuracy', () => {
+void test('StatsPanel computes and renders accuracy', () => {
   const markup = renderToStaticMarkup(
     React.createElement(StatsPanel, {
       stats: {
@@ -48,7 +48,7 @@ test('StatsPanel computes and renders accuracy', () => {
   assert.match(markup, /75%/)
 })
 
-test('FormatReferenceModal renders sections only when open', () => {
+void test('FormatReferenceModal renders sections only when open', () => {
   const closedMarkup = renderToStaticMarkup(
     React.createElement(FormatReferenceModal, {
       isOpen: false,

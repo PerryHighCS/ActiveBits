@@ -28,7 +28,7 @@ export default function SessionHeader({ activityName, sessionId, onEndSession, s
   const copyLink = () => copyToClipboard(studentJoinUrl)
   const copyCode = () => copyToClipboard(sessionId)
   const handleCopyLinkClick = (event: MouseEvent<HTMLButtonElement>) => {
-    copyLink()
+    void copyLink()
     if ((event.ctrlKey || event.metaKey) && studentJoinUrl) {
       window.open(studentJoinUrl, '_blank')
     }
@@ -57,7 +57,7 @@ export default function SessionHeader({ activityName, sessionId, onEndSession, s
         await onEndSession()
       }
 
-      navigate('/manage')
+      void navigate('/manage')
     } catch (error) {
       console.error('Error ending session:', error)
       setErrorMessage('Failed to end session. Please try again.')

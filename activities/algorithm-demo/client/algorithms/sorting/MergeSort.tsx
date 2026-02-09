@@ -44,7 +44,7 @@ function initMergeSortState(arraySize = 8) {
 type MergeSortState = ReturnType<typeof initMergeSortState>
 
 function getMergeSortState(state: unknown): MergeSortState {
-  if (!state || typeof state !== 'object') {
+  if (state === null || state === undefined || typeof state !== 'object') {
     return initMergeSortState()
   }
 
@@ -496,8 +496,8 @@ function performNextStep(state: MergeSortState) {
   let { scratch, callStack, complete, substep, currentStep, copiedBackIndices, scratchWritten } = state;
   scratch = [...scratch];
   callStack = [...callStack];
-  copiedBackIndices = [...(copiedBackIndices || [])];
-  scratchWritten = [...(scratchWritten || [])];
+  copiedBackIndices = [...copiedBackIndices];
+  scratchWritten = [...scratchWritten];
   const highlightedLines = new Set<string>();
   const readArrayValue = (index: number): number | null => {
     const value = array[index]

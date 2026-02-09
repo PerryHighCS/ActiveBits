@@ -38,7 +38,7 @@ export default function FeedbackCards({ entries = [], isLoading = false }: Feedb
               <p className="text-sm font-semibold text-gray-800">
                 {entry.fromNameSnapshot || 'Reviewer'}
               </p>
-              {entry.createdAt && (
+              {entry.createdAt != null && (
                 <p className="text-xs text-gray-600">{new Date(entry.createdAt).toLocaleString()}</p>
               )}
             </div>

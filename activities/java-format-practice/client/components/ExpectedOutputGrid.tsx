@@ -131,7 +131,7 @@ export default function ExpectedOutputGrid({
             
             // Build value map from variables
             const valueMap: Record<string, string | number> = {};
-            (variables || []).forEach((v) => {
+            variables.forEach((v) => {
               let val = v.value;
               if (v.type === 'String') {
                 val = val.replace(/^"(.*)"$/, '$1');

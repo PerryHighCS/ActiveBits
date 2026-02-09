@@ -38,7 +38,7 @@ const cases: EvaluateCase[] = [
   },
 ]
 
-test('evaluateFormatString handles baseline formatting cases', () => {
+void test('evaluateFormatString handles baseline formatting cases', () => {
   for (const caseItem of cases) {
     const actual = evaluateFormatString(caseItem.format, caseItem.args)
     assert.equal(actual, caseItem.expected, caseItem.name)

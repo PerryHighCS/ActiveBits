@@ -101,7 +101,7 @@ function findClientLoader(activityId: string): ActivityClientLoader | null {
 async function resolveClientModule(loader: ActivityClientLoader): Promise<ActivityClientResolved> {
   const mod = await loader()
   const resolved = mod.default ?? mod.activity ?? mod
-  return resolved && typeof resolved === 'object' ? (resolved as ActivityClientResolved) : {}
+  return (resolved !== null && resolved !== undefined && typeof resolved === 'object') ? (resolved as ActivityClientResolved) : {}
 }
 
 function createLazyComponent(
@@ -168,7 +168,7 @@ export const activities: ActivityRegistryEntry[] = preferredConfigEntries
       clientLoader,
       (resolved) => {
         const content = resolved.footerContent
-        if (!content) return null
+        if (content === null || content === undefined) return null
         // If content is already a function/component, use it directly; otherwise wrap JSX in a component.
         return typeof content === 'function' ? content : (() => content)
       },

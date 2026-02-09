@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { calculateCurrentDistance, calculateTotalDistance } from './distanceCalculator'
 
-test('calculateCurrentDistance sums only consecutive legs', () => {
+void test('calculateCurrentDistance sums only consecutive legs', () => {
   const matrix = [
     [0, 2, 3],
     [2, 0, 4],
@@ -12,7 +12,7 @@ test('calculateCurrentDistance sums only consecutive legs', () => {
   assert.equal(calculateCurrentDistance(route, matrix), 2 + 4)
 })
 
-test('calculateTotalDistance supports id routes and index routes', () => {
+void test('calculateTotalDistance supports id routes and index routes', () => {
   const matrix = [
     [0, 2, 3],
     [2, 0, 4],

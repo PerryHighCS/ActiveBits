@@ -44,7 +44,7 @@ async function loadActivityConfig(configPath: string): Promise<ActivityConfigMod
   return module.default
 }
 
-test('all expected activities exist with required files', () => {
+void test('all expected activities exist with required files', () => {
   const activitiesDir = join(__dirname, '../../../activities')
 
   for (const activityId of EXPECTED_ACTIVITIES) {
@@ -72,7 +72,7 @@ test('all expected activities exist with required files', () => {
   }
 })
 
-test('no unexpected activities in activities directory', async () => {
+void test('no unexpected activities in activities directory', async () => {
   const activitiesDir = join(__dirname, '../../../activities')
   const entries = readdirSync(activitiesDir)
 
@@ -108,7 +108,7 @@ test('no unexpected activities in activities directory', async () => {
   )
 })
 
-test('activity count matches expected count', async () => {
+void test('activity count matches expected count', async () => {
   const activitiesDir = join(__dirname, '../../../activities')
   const entries = readdirSync(activitiesDir)
 

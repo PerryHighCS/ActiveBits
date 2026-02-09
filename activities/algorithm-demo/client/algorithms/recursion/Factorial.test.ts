@@ -13,7 +13,7 @@ interface FactorialStateLike {
   currentStep: string | null
 }
 
-test('Factorial initState creates expected recursion state shell', () => {
+void test('Factorial initState creates expected recursion state shell', () => {
   const state = Factorial.initState?.(5) as unknown as FactorialStateLike
 
   assert.equal(state.n, 5)
@@ -26,7 +26,7 @@ test('Factorial initState creates expected recursion state shell', () => {
   assert.equal(state.currentStep, null)
 })
 
-test('Factorial reduceEvent advances first step and supports reset', () => {
+void test('Factorial reduceEvent advances first step and supports reset', () => {
   const state = Factorial.initState?.(4) as unknown as FactorialStateLike
   const next = Factorial.reduceEvent?.(
     state as unknown as Record<string, unknown>,

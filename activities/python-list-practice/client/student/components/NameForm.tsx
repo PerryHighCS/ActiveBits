@@ -1,4 +1,4 @@
-import { ReactNode, FormEvent, RefObject } from 'react';
+import type { ReactNode, FormEvent, RefObject } from 'react';
 import Button from '@src/components/ui/Button.js';
 
 interface NameFormProps {

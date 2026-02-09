@@ -35,7 +35,7 @@ interface BroadcastMessage {
 }
 
 function toAlgorithmState(value: unknown): AlgorithmState | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !Array.isArray(value)
     ? (value as AlgorithmState)
     : null
 }
@@ -55,7 +55,7 @@ export function parseBroadcastMessage(rawData: unknown): BroadcastMessage | null
   if (typeof rawData !== 'string') return null
   try {
     const parsed = JSON.parse(rawData) as BroadcastMessage
-    return parsed && typeof parsed === 'object' ? parsed : null
+    return parsed != null && typeof parsed === 'object' ? parsed : null
   } catch {
     return null
   }
@@ -99,7 +99,7 @@ export default function DemoManager() {
       }
     }
 
-    fetchSession()
+    void fetchSession()
   }, [sessionId])
 
   const buildWsUrl = useCallback(() => {
@@ -211,7 +211,7 @@ export default function DemoManager() {
   const handleEndSession = async () => {
     if (!sessionId) return
     await fetch(`/api/session/${sessionId}`, { method: 'DELETE' })
-    navigate('/manage')
+    void navigate('/manage')
   }
 
   const currentAlgo = selectedAlgoId ? getAlgorithm(selectedAlgoId) : undefined

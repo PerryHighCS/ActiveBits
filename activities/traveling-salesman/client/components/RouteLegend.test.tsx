@@ -4,7 +4,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import RouteLegend from './RouteLegend'
 
-test('RouteLegend renders labels and brute-force progress', () => {
+void test('RouteLegend renders labels and brute-force progress', () => {
   const html = renderToStaticMarkup(
     React.createElement(RouteLegend, {
       title: 'Legend',

@@ -80,7 +80,7 @@ export function useSessionEndedHandler(wsRef: SessionEndedWebSocketRef = null) {
         })
 
         if (isSessionEnded) {
-          navigate('/session-ended')
+          void navigate('/session-ended')
         }
       }
 

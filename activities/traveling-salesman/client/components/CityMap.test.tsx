@@ -4,7 +4,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import CityMap from './CityMap'
 
-test('CityMap renders city labels and route edges', () => {
+void test('CityMap renders city labels and route edges', () => {
   const html = renderToStaticMarkup(
     React.createElement(CityMap, {
       cities: [

@@ -13,6 +13,6 @@
     },
     "noEmit": true
   },
-  "include": ["*/client/**/*", "*/server/**/*", "*/activity.config.*", "../types/**/*.d.ts"],
+  "include": ["*/client/**/*", "*/server/**/*", "*/shared/**/*", "*/activity.config.*", "../types/**/*.d.ts"],
   "exclude": ["node_modules"]
 }

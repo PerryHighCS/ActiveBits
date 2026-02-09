@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import DemoStudent from './DemoStudent'
 
-test('DemoStudent renders solo-mode picker before algorithm selection', () => {
+void test('DemoStudent renders solo-mode picker before algorithm selection', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>
       <DemoStudent

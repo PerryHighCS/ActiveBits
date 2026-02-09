@@ -8,7 +8,7 @@ import { registerSessionNormalizer, resetSessionNormalizersForTests } from './co
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-test('inactive sessions expire', async () => {
+void test('inactive sessions expire', async () => {
   const sessions = createSessionStore(null, 50)
   const session = await createSession(sessions)
   await wait(60)
@@ -16,7 +16,7 @@ test('inactive sessions expire', async () => {
   assert.strictEqual(await sessions.get(session.id), null)
 })
 
-test('active sessions persist', async () => {
+void test('active sessions persist', async () => {
   const sessions = createSessionStore(null, 50)
   const session = await createSession(sessions)
   await wait(40)
@@ -29,7 +29,7 @@ test('active sessions persist', async () => {
   assert.strictEqual(await sessions.get(session.id), null)
 })
 
-test('keepalive refreshes session activity', async () => {
+void test('keepalive refreshes session activity', async () => {
   const sessions = createSessionStore(null, 50)
   const session = await createSession(sessions)
   const server = http.createServer()
@@ -63,7 +63,7 @@ test('keepalive refreshes session activity', async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()))
 })
 
-test('registered session normalizers populate activity defaults', async (t) => {
+void test('registered session normalizers populate activity defaults', async (t) => {
   resetSessionNormalizersForTests()
   registerSessionNormalizer('test-activity', (session) => {
     const typedSession = session as { data: { items?: unknown } }

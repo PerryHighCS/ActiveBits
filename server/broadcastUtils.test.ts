@@ -12,7 +12,7 @@ interface MockClient {
   send(msg: string): void
 }
 
-test('createBroadcastSubscriptionHelper subscribes once and forwards messages', () => {
+void test('createBroadcastSubscriptionHelper subscribes once and forwards messages', () => {
   let subscribedChannel: string | null = null
   let broadcastHandler: ((message: MockBroadcastMessage) => void) | null = null
 
@@ -53,12 +53,16 @@ test('createBroadcastSubscriptionHelper subscribes once and forwards messages', 
   assert.ok(broadcastHandler, 'handler registered')
 
   console.log('[TEST] Testing broadcast robustness against individual WebSocket send failures (expected error output follows):')
-  assert.doesNotThrow(() => broadcastHandler?.({ type: 'foo' }))
+  assert.doesNotThrow(() => {
+    if (broadcastHandler !== null && broadcastHandler !== undefined) {
+      broadcastHandler({ type: 'foo' })
+    }
+  })
   assert.equal(sentPayloads.length, 1)
   assert.equal(sentPayloads[0], JSON.stringify({ type: 'foo' }))
 })
 
-test('createBroadcastSubscriptionHelper no-ops without subscribe support or session id', () => {
+void test('createBroadcastSubscriptionHelper no-ops without subscribe support or session id', () => {
   const sessions = {}
   const ws = { wss: { clients: new Set<MockClient>() } }
   const ensure = createBroadcastSubscriptionHelper(sessions, ws)

@@ -4,12 +4,12 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import Leaderboard from './Leaderboard'
 
-test('Leaderboard renders empty copy when no entries', () => {
+void test('Leaderboard renders empty copy when no entries', () => {
   const html = renderToStaticMarkup(React.createElement(Leaderboard, { entries: [] }))
   assert.match(html, /No solutions yet/)
 })
 
-test('Leaderboard renders row, badges, and action buttons', () => {
+void test('Leaderboard renders row, badges, and action buttons', () => {
   const html = renderToStaticMarkup(
     React.createElement(Leaderboard, {
       entries: [

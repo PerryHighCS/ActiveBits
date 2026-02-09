@@ -54,7 +54,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close()
       }
-      navigate(path)
+      void navigate(path)
     }
 
     ws.onopen = () => {

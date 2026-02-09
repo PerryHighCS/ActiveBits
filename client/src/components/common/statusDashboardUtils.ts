@@ -62,11 +62,11 @@ export function buildSessionRows(list: readonly StatusSession[] = []): SessionRo
     .map((session) => ({
       id: session.id,
       type: session.type || '-',
-      socketCount: session.socketCount || 0,
+      socketCount: session.socketCount ?? 0,
       lastActivity: session.lastActivity || '-',
       expiresAt: session.expiresAt || '-',
       ttl:
-        typeof session.ttlRemainingMs === 'number'
+        (session.ttlRemainingMs !== null && session.ttlRemainingMs !== undefined)
           ? `${Math.max(0, Math.floor(session.ttlRemainingMs / 1000))}s`
           : '-',
       approxBytes: session.approxBytes,

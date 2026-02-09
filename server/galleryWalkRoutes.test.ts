@@ -104,7 +104,7 @@ async function createSession(baseUrl: string): Promise<string> {
   return sessionId
 }
 
-test('creates gallery-walk sessions with defaults', async (t: TestContext) => {
+void test('creates gallery-walk sessions with defaults', async (t: TestContext) => {
   const server = await startTestServer()
   t.after(server.close)
 
@@ -120,7 +120,7 @@ test('creates gallery-walk sessions with defaults', async (t: TestContext) => {
   assert.deepEqual((session.data as { stats?: { reviewers?: Record<string, unknown> } }).stats?.reviewers, {})
 })
 
-test('submits feedback and tracks stats', async (t: TestContext) => {
+void test('submits feedback and tracks stats', async (t: TestContext) => {
   const server = await startTestServer()
   t.after(server.close)
 
@@ -157,7 +157,7 @@ test('submits feedback and tracks stats', async (t: TestContext) => {
   assert.equal((session.data as { feedback?: unknown[] }).feedback?.length, 1)
 })
 
-test('exports and imports gallery walk data', async (t: TestContext) => {
+void test('exports and imports gallery walk data', async (t: TestContext) => {
   const server = await startTestServer()
   t.after(server.close)
 
@@ -185,7 +185,7 @@ test('exports and imports gallery walk data', async (t: TestContext) => {
   assert.equal(bundle.feedback.length, 1)
 })
 
-test('updates session title metadata', async (t: TestContext) => {
+void test('updates session title metadata', async (t: TestContext) => {
   const server = await startTestServer()
   t.after(server.close)
 
@@ -208,7 +208,7 @@ test('updates session title metadata', async (t: TestContext) => {
   assert.equal(bundle.config.title, 'Showcase 2024')
 })
 
-test('allows reviewers to set sticky note styles', async (t: TestContext) => {
+void test('allows reviewers to set sticky note styles', async (t: TestContext) => {
   const server = await startTestServer()
   t.after(server.close)
 
@@ -236,7 +236,7 @@ test('allows reviewers to set sticky note styles', async (t: TestContext) => {
   assert.equal(body.feedback.styleId, styleId)
 })
 
-test('invalid note style falls back to default', async (t: TestContext) => {
+void test('invalid note style falls back to default', async (t: TestContext) => {
   const server = await startTestServer()
   t.after(server.close)
 
@@ -263,20 +263,20 @@ test('invalid note style falls back to default', async (t: TestContext) => {
   assert.equal(body.feedback.styleId, DEFAULT_NOTE_STYLE_ID)
 })
 
-test('sanitizeName trims whitespace and enforces default max length', () => {
+void test('sanitizeName trims whitespace and enforces default max length', () => {
   const input = `   ${'a'.repeat(250)}   `
   const result = sanitizeName(input)
   assert.equal(result?.length, 200)
   assert.equal(result?.[0], 'a')
 })
 
-test('sanitizeName respects custom max length', () => {
+void test('sanitizeName respects custom max length', () => {
   const input = 'b'.repeat(2100)
   const result = sanitizeName(input, '', 2000)
   assert.equal(result?.length, 2000)
 })
 
-test('sanitizeName falls back for empty or non-string input', () => {
+void test('sanitizeName falls back for empty or non-string input', () => {
   assert.equal(sanitizeName('   ', 'fallback'), 'fallback')
   assert.equal(sanitizeName('', 'fallback'), 'fallback')
   assert.equal(sanitizeName(null, 'fallback'), 'fallback')
@@ -284,7 +284,7 @@ test('sanitizeName falls back for empty or non-string input', () => {
   assert.equal(sanitizeName({ foo: 'bar' }, 'fallback'), 'fallback')
 })
 
-test('sanitizeName preserves special characters', () => {
+void test('sanitizeName preserves special characters', () => {
   const input = 'Line1\nLine2 ☺'
   assert.equal(sanitizeName(input), 'Line1\nLine2 ☺')
 })

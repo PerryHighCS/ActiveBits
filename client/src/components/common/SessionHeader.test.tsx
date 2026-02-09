@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import SessionHeader from './SessionHeader'
 
-test('SessionHeader simple mode renders only the activity title', () => {
+void test('SessionHeader simple mode renders only the activity title', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>
       <SessionHeader activityName="Raffle" simple />
@@ -15,7 +15,7 @@ test('SessionHeader simple mode renders only the activity title', () => {
   assert.doesNotMatch(html, /Join Code:/)
 })
 
-test('SessionHeader full mode renders join controls and action buttons', () => {
+void test('SessionHeader full mode renders join controls and action buttons', () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>
       <SessionHeader activityName="Gallery Walk" sessionId="abc123" />

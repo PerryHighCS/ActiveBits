@@ -37,7 +37,7 @@ interface BroadcastMessage {
 }
 
 function toAlgorithmState(value: unknown): AlgorithmState | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !Array.isArray(value)
     ? (value as AlgorithmState)
     : null
 }
@@ -57,7 +57,7 @@ function parseBroadcastMessage(rawData: unknown): BroadcastMessage | null {
   if (typeof rawData !== 'string') return null
   try {
     const parsed = JSON.parse(rawData) as BroadcastMessage
-    return parsed && typeof parsed === 'object' ? parsed : null
+    return parsed != null && typeof parsed === 'object' ? parsed : null
   } catch {
     return null
   }
@@ -116,8 +116,8 @@ export default function DemoStudent({ sessionData, persistentSessionInfo }: Demo
       }
     }
 
-    fetchSession()
-    const pollInterval = setInterval(fetchSession, 3000)
+    void fetchSession()
+    const pollInterval = setInterval(() => void fetchSession(), 3000)
     return () => clearInterval(pollInterval)
   }, [sessionId, isSoloMode])
 

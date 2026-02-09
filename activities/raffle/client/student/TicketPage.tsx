@@ -23,7 +23,7 @@ export default function TicketPage({ sessionData }: TicketPageProps) {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!sessionId || ticket || typeof window === 'undefined') return
+    if (!sessionId || ticket != null || typeof window === 'undefined') return
 
     const timerId = setTimeout(() => {
       setLoading(true)
@@ -56,7 +56,7 @@ export default function TicketPage({ sessionData }: TicketPageProps) {
   return (
     <div className="flex flex-col items-center w-full text-center md:w-max mx-auto border border-gray-300 p-5 rounded-lg shadow-md">
       <h2 className="text-lg font-semibold mb-4">Session ID: {sessionId}</h2>
-      {ticket ? (
+      {ticket != null ? (
         <div className="text-3xl font-bold text-center">
           Your Ticket Number:{' '}
           {loading ? <>Loading...</> : <span className="text-blue-500 font-extrabold text-6xl">{ticket}</span>}

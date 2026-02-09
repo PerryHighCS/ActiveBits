@@ -54,7 +54,7 @@ function readSessionId(req: Request): string | null {
 }
 
 function getSessionData(session: SessionRecord): AlgorithmDemoSessionData {
-  const rawData = session.data && typeof session.data === 'object' ? session.data : {}
+  const rawData = session.data != null && typeof session.data === 'object' ? session.data : {}
   const data = rawData as Record<string, unknown>
   const history = Array.isArray(data.history)
     ? data.history.filter(
@@ -66,7 +66,7 @@ function getSessionData(session: SessionRecord): AlgorithmDemoSessionData {
     ...data,
     algorithmId: typeof data.algorithmId === 'string' ? data.algorithmId : null,
     algorithmState:
-      data.algorithmState && typeof data.algorithmState === 'object'
+      data.algorithmState != null && typeof data.algorithmState === 'object'
         ? (data.algorithmState as Record<string, unknown>)
         : {},
     history,

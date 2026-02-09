@@ -13,14 +13,14 @@ import {
   type ReducibleAlgorithmState,
 } from './utils'
 
-test('MESSAGE_TYPES enum', () => {
+void test('MESSAGE_TYPES enum', () => {
   assert.equal(MESSAGE_TYPES.ALGORITHM_SELECTED, 'algorithm-selected')
   assert.equal(MESSAGE_TYPES.STATE_SYNC, 'state-sync')
   assert.equal(MESSAGE_TYPES.EVENT, 'event')
   assert.equal(MESSAGE_TYPES.POINTER, 'pointer')
 })
 
-test('createMessage - builds valid envelope', () => {
+void test('createMessage - builds valid envelope', () => {
   const msg = createMessage(MESSAGE_TYPES.STATE_SYNC, { count: 5 }, {
     algorithmId: 'test-algo',
     sessionId: 'session-123',
@@ -33,7 +33,7 @@ test('createMessage - builds valid envelope', () => {
   assert.ok(typeof msg.timestamp === 'number')
 })
 
-test('createMessage - optional fields', () => {
+void test('createMessage - optional fields', () => {
   const msg = createMessage(MESSAGE_TYPES.POINTER, null)
 
   assert.equal(msg.type, MESSAGE_TYPES.POINTER)
@@ -42,21 +42,21 @@ test('createMessage - optional fields', () => {
   assert.ok(!('sessionId' in msg))
 })
 
-test('validateLineIds - detects valid line references', () => {
+void test('validateLineIds - detects valid line references', () => {
   const pseudocode = ['Line 0', 'Line 1', 'Line 2']
 
   const valid = validateLineIds(pseudocode, ['line-0', 'line-2'])
   assert.deepEqual(valid, [])
 })
 
-test('validateLineIds - detects invalid line references', () => {
+void test('validateLineIds - detects invalid line references', () => {
   const pseudocode = ['Line 0', 'Line 1', 'Line 2']
 
   const invalid = validateLineIds(pseudocode, ['line-0', 'line-5', 'line-999'])
   assert.deepEqual(invalid, ['line-5', 'line-999'])
 })
 
-test('reduceAlgorithmEvent - uses custom reducer if available', () => {
+void test('reduceAlgorithmEvent - uses custom reducer if available', () => {
   const state: ReducibleAlgorithmState = {
     value: 10,
     reduceEvent: (currentState, event) => ({
@@ -69,7 +69,7 @@ test('reduceAlgorithmEvent - uses custom reducer if available', () => {
   assert.equal(result.value as number, 15)
 })
 
-test('reduceAlgorithmEvent - uses default reducer if no custom', () => {
+void test('reduceAlgorithmEvent - uses default reducer if no custom', () => {
   const state: ReducibleAlgorithmState = { value: 10 }
   const defaultReducer = (currentState: ReducibleAlgorithmState) => ({
     ...currentState,
@@ -80,32 +80,32 @@ test('reduceAlgorithmEvent - uses default reducer if no custom', () => {
   assert.equal(result.value as number, 20)
 })
 
-test('reduceAlgorithmEvent - returns unchanged state if no reducer', () => {
+void test('reduceAlgorithmEvent - returns unchanged state if no reducer', () => {
   const state = { value: 10 }
   const result = reduceAlgorithmEvent(state, { type: 'noop' })
   assert.deepEqual(result, state)
 })
 
-test('hydrateAlgorithmState - returns state when algorithm is null/undefined', () => {
+void test('hydrateAlgorithmState - returns state when algorithm is null/undefined', () => {
   const state = { foo: 'bar' }
   assert.deepEqual(hydrateAlgorithmState(null, state), state)
   assert.deepEqual(hydrateAlgorithmState(undefined, state), state)
 })
 
-test('hydrateAlgorithmState - returns state when initState is not a function', () => {
+void test('hydrateAlgorithmState - returns state when initState is not a function', () => {
   const state = { foo: 'bar' }
   const algorithm = { initState: 'nope' }
   assert.deepEqual(hydrateAlgorithmState(algorithm, state), state)
 })
 
-test('hydrateAlgorithmState - handles null/undefined/array state', () => {
+void test('hydrateAlgorithmState - handles null/undefined/array state', () => {
   const algorithm = { initState: () => ({ a: 1, b: 2 }) }
   assert.deepEqual(hydrateAlgorithmState(algorithm, null), { a: 1, b: 2 })
   assert.deepEqual(hydrateAlgorithmState(algorithm, undefined), { a: 1, b: 2 })
   assert.deepEqual(hydrateAlgorithmState(algorithm, [1, 2, 3]), { a: 1, b: 2 })
 })
 
-test('hydrateAlgorithmState - merges baseState and state', () => {
+void test('hydrateAlgorithmState - merges baseState and state', () => {
   const algorithm = { initState: () => ({ a: 1, b: 2, c: 3 }) }
   const state = { b: 20, d: 4 }
   assert.deepEqual(hydrateAlgorithmState(algorithm, state), {
@@ -116,7 +116,7 @@ test('hydrateAlgorithmState - merges baseState and state', () => {
   })
 })
 
-test('hydrateAlgorithmState - ignores null/undefined in state', () => {
+void test('hydrateAlgorithmState - ignores null/undefined in state', () => {
   const algorithm = { initState: () => ({ a: 1, b: 2, c: 3 }) }
   const state = { a: null, b: undefined, c: 30 }
   assert.deepEqual(hydrateAlgorithmState(algorithm, state), {

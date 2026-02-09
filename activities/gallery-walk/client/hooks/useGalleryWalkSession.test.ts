@@ -10,7 +10,7 @@ import {
   type GalleryWalkFeedbackEntry,
 } from './useGalleryWalkSession';
 
-test('buildGalleryWalkWsUrl derives protocol from location', () => {
+void test('buildGalleryWalkWsUrl derives protocol from location', () => {
   const secure = buildGalleryWalkWsUrl('abc123', { protocol: 'https:', host: 'example.com' });
   const insecure = buildGalleryWalkWsUrl('abc123', { protocol: 'http:', host: 'localhost:3000' });
 
@@ -19,7 +19,7 @@ test('buildGalleryWalkWsUrl derives protocol from location', () => {
   assert.equal(buildGalleryWalkWsUrl(null, { protocol: 'https:', host: 'example.com' }), null);
 });
 
-test('parseGalleryWalkSocketMessage parses valid JSON objects only', () => {
+void test('parseGalleryWalkSocketMessage parses valid JSON objects only', () => {
   const parsed = parseGalleryWalkSocketMessage('{"type":"stage-changed","payload":{"stage":"review"}}');
 
   assert.equal(parsed?.type, 'stage-changed');
@@ -28,7 +28,7 @@ test('parseGalleryWalkSocketMessage parses valid JSON objects only', () => {
   assert.equal(parseGalleryWalkSocketMessage('"string"'), null);
 });
 
-test('message helpers safely normalize reviewees and feedback entries', () => {
+void test('message helpers safely normalize reviewees and feedback entries', () => {
   const revieweesMessage = parseGalleryWalkSocketMessage(
     '{"type":"reviewees-updated","payload":{"reviewees":{"R1":{"name":"Ada"}}}}',
   );
@@ -48,7 +48,7 @@ test('message helpers safely normalize reviewees and feedback entries', () => {
   assert.equal(getMessageFeedbackEntry({ type: 'feedback-added', payload: { feedback: 'invalid' } }), null);
 });
 
-test('insertOrReplaceFeedbackEntry prepends and deduplicates by id', () => {
+void test('insertOrReplaceFeedbackEntry prepends and deduplicates by id', () => {
   const existing: GalleryWalkFeedbackEntry[] = [
     { id: '1', message: 'old' },
     { id: '2', message: 'two' },

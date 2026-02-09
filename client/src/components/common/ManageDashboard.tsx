@@ -170,7 +170,7 @@ export default function ManageDashboard() {
         throw new Error('Failed to create session')
       }
 
-      navigate(`/manage/${activityId}/${payload.id}`)
+      void navigate(`/manage/${activityId}/${payload.id}`)
     } catch (createError) {
       console.error(createError)
       setSessionError('Could not create session. Please try again.')

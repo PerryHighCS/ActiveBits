@@ -366,7 +366,7 @@ export default function CityMap({
           {routeMarkers.map((marker, idx) => {
             const city = findCity(marker.cityId)
             if (!city) return null
-            const count = markerCounts[marker.cityId] || 0
+            const count = markerCounts[marker.cityId] ?? 0
             markerCounts[marker.cityId] = count + 1
             const offset = markerOffsets[count % markerOffsets.length] ?? { x: 0, y: 0 }
             const fill = marker.color

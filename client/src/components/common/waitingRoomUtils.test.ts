@@ -8,14 +8,14 @@ import {
   parseWaitingRoomMessage,
 } from './waitingRoomUtils'
 
-test('getWaiterMessage formats waiting count copy', () => {
+void test('getWaiterMessage formats waiting count copy', () => {
   assert.equal(getWaiterMessage(0), 'You are the first one here!')
   assert.equal(getWaiterMessage(1), 'You are the first one here!')
   assert.equal(getWaiterMessage(2), 'You and 1 other person waiting')
   assert.equal(getWaiterMessage(5), 'You and 4 others waiting')
 })
 
-test('buildPersistentSessionWsUrl switches protocol and includes params', () => {
+void test('buildPersistentSessionWsUrl switches protocol and includes params', () => {
   const wsUrl = buildPersistentSessionWsUrl(
     { protocol: 'http:', host: 'localhost:3000', search: '', href: 'http://localhost:3000' },
     'abc123',
@@ -37,7 +37,7 @@ test('buildPersistentSessionWsUrl switches protocol and includes params', () => 
   )
 })
 
-test('buildPersistentSessionWsUrl encodes query params safely', () => {
+void test('buildPersistentSessionWsUrl encodes query params safely', () => {
   const wsUrl = buildPersistentSessionWsUrl(
     { protocol: 'https:', host: 'bits.example', search: '', href: 'https://bits.example' },
     'abc&123?x y',
@@ -50,7 +50,7 @@ test('buildPersistentSessionWsUrl encodes query params safely', () => {
   )
 })
 
-test('buildPersistentTeacherCodeApiUrl encodes hash path segment and query params', () => {
+void test('buildPersistentTeacherCodeApiUrl encodes hash path segment and query params', () => {
   const apiUrl = buildPersistentTeacherCodeApiUrl('abc/123?x y', 'gallery walk/qa&v2')
 
   assert.equal(
@@ -59,7 +59,7 @@ test('buildPersistentTeacherCodeApiUrl encodes hash path segment and query param
   )
 })
 
-test('parseWaitingRoomMessage parses valid JSON and returns null for malformed payloads', () => {
+void test('parseWaitingRoomMessage parses valid JSON and returns null for malformed payloads', () => {
   assert.deepEqual(parseWaitingRoomMessage('{"type":"waiter-count","count":3}'), {
     type: 'waiter-count',
     count: 3,
@@ -67,7 +67,7 @@ test('parseWaitingRoomMessage parses valid JSON and returns null for malformed p
   assert.equal(parseWaitingRoomMessage('not-json'), null)
 })
 
-test('isWaitingRoomMessage validates supported message shapes', () => {
+void test('isWaitingRoomMessage validates supported message shapes', () => {
   assert.equal(isWaitingRoomMessage({ type: 'waiter-count', count: 3 }), true)
   assert.equal(isWaitingRoomMessage({ type: 'teacher-authenticated', sessionId: 's1' }), true)
   assert.equal(isWaitingRoomMessage({ type: 'teacher-code-error', error: 'bad code' }), true)

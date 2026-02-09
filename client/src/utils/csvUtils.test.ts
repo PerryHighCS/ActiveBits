@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { arrayToCsv, downloadCsv, escapeCsvCell } from './csvUtils'
 
-test('escapeCsvCell escapes RFC 4180 special characters', () => {
+void test('escapeCsvCell escapes RFC 4180 special characters', () => {
   assert.equal(escapeCsvCell('plain'), 'plain')
   assert.equal(escapeCsvCell('hello,world'), '"hello,world"')
   assert.equal(escapeCsvCell('a"b'), '"a""b"')
@@ -10,7 +10,7 @@ test('escapeCsvCell escapes RFC 4180 special characters', () => {
   assert.equal(escapeCsvCell(null), '')
 })
 
-test('arrayToCsv serializes rows with escaping', () => {
+void test('arrayToCsv serializes rows with escaping', () => {
   const csv = arrayToCsv([
     ['name', 'note'],
     ['Ada', 'contains,comma'],
@@ -20,7 +20,7 @@ test('arrayToCsv serializes rows with escaping', () => {
   assert.equal(csv, 'name,note\nAda,"contains,comma"\nLin,"says ""hi"""')
 })
 
-test('downloadCsv creates and clicks a hidden download link', () => {
+void test('downloadCsv creates and clicks a hidden download link', () => {
   const originalDocument = globalThis.document
   const originalUrl = globalThis.URL
 

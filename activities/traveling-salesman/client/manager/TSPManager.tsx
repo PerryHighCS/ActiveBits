@@ -192,7 +192,7 @@ export default function TSPManager() {
   useEffect(() => {
     if (!broadcastIds.includes('bruteforce')) return;
     if (session?.algorithms?.bruteForce?.computed && session?.algorithms?.bruteForce?.route) {
-      fetch(`/api/traveling-salesman/${sessionId}/set-broadcasts`, {
+      void fetch(`/api/traveling-salesman/${sessionId}/set-broadcasts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ broadcasts: broadcastIds })
@@ -203,7 +203,7 @@ export default function TSPManager() {
   useEffect(() => {
     if (!broadcastIds.includes('heuristic')) return;
     if (session?.algorithms?.heuristic?.computed && session?.algorithms?.heuristic?.route) {
-      fetch(`/api/traveling-salesman/${sessionId}/set-broadcasts`, {
+      void fetch(`/api/traveling-salesman/${sessionId}/set-broadcasts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ broadcasts: broadcastIds })
@@ -410,9 +410,9 @@ export default function TSPManager() {
 
     if (result.isComplete) {
       if (broadcastIds.includes('instructor')) {
-        broadcastInstructorRoute(result.route, result.totalDistance, result.timeToComplete);
+        void broadcastInstructorRoute(result.route, result.totalDistance, result.timeToComplete);
       }
-      saveInstructorRoute({
+      void saveInstructorRoute({
         route: result.route,
         distance: result.totalDistance,
         complete: true,
@@ -420,9 +420,9 @@ export default function TSPManager() {
       });
     } else {
       if (broadcastIds.includes('instructor')) {
-        broadcastInstructorRoute(result.route, result.currentDistance, null);
+        void broadcastInstructorRoute(result.route, result.currentDistance, null);
       }
-      saveInstructorRoute({
+      void saveInstructorRoute({
         route: result.route,
         distance: result.currentDistance,
         complete: false,

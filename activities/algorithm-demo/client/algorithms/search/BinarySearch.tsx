@@ -111,7 +111,7 @@ function resetSearchWindow(state: BinarySearchState, target: number): BinarySear
 }
 
 function getBinarySearchState(rawState: unknown): BinarySearchState {
-  if (!rawState || typeof rawState !== 'object') {
+  if (rawState === null || rawState === undefined || typeof rawState !== 'object') {
     return initBinarySearchState()
   }
 

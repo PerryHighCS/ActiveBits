@@ -68,7 +68,7 @@ function initInsertionSortState(arraySize = 8): InsertionSortState {
 }
 
 function getInsertionSortState(state: unknown): InsertionSortState {
-  if (!state || typeof state !== 'object') {
+  if (state === null || state === undefined || typeof state !== 'object') {
     return initInsertionSortState()
   }
 
@@ -270,7 +270,7 @@ function ArrayVisualization({ state }: { state: InsertionSortState }) {
       <div className="array-container">
         {state.array.map((value, index) => {
           const moveOffset = state.moveAnimations[index]
-          const moveStyle: InsertionSortCssVars | undefined = moveOffset
+          const moveStyle: InsertionSortCssVars | undefined = (moveOffset !== null && moveOffset !== undefined)
             ? { '--move-offset': `${moveOffset}px` }
             : undefined
 
@@ -279,7 +279,7 @@ function ArrayVisualization({ state }: { state: InsertionSortState }) {
               {index === state.i && <div className="index-badge badge-i-centered">i</div>}
               {index === state.j && state.substep >= 3 && <div className="index-badge badge-j-centered">j</div>}
               <div
-                className={`array-item ${index < state.i ? 'sorted' : ''} ${index === state.i ? 'current-i' : ''} ${shiftedSet.has(index) ? 'shifted' : ''} ${transitionSet.has(index) ? 'transition' : ''} ${state.tmpPos === index ? 'tmp-placed' : ''} ${moveOffset ? 'move-anim' : ''}`}
+                className={`array-item ${index < state.i ? 'sorted' : ''} ${index === state.i ? 'current-i' : ''} ${shiftedSet.has(index) ? 'shifted' : ''} ${transitionSet.has(index) ? 'transition' : ''} ${state.tmpPos === index ? 'tmp-placed' : ''} ${(moveOffset !== null && moveOffset !== undefined) ? 'move-anim' : ''}`}
                 style={moveStyle}
               >
                 {value}

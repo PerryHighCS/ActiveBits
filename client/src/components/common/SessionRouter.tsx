@@ -181,7 +181,7 @@ const SessionRouter = () => {
 
         setPersistentSessionInfo(data)
         if (!data.isStarted) {
-          navigate('/session-ended')
+          void navigate('/session-ended')
         }
       } catch (pollError) {
         if (!isCancelled) {
@@ -190,7 +190,7 @@ const SessionRouter = () => {
       }
     }
 
-    const intervalId = setInterval(pollStatus, 5000)
+    const intervalId = setInterval(() => void pollStatus(), 5000)
     void pollStatus()
 
     return () => {
@@ -234,7 +234,7 @@ const SessionRouter = () => {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (isJoinSessionId(sessionIdInput)) {
-      navigate(`/${sessionIdInput.trim()}`)
+      void navigate(`/${sessionIdInput.trim()}`)
     }
   }
 
@@ -248,7 +248,7 @@ const SessionRouter = () => {
     if (persistentSessionInfo?.isStarted && persistentSessionInfo.sessionId) {
       if (persistentSessionInfo.hasTeacherCookie) {
         const queryString = getWindowSearch()
-        navigate(`/manage/${activityName}/${persistentSessionInfo.sessionId}${queryString}`, { replace: true })
+        void navigate(`/manage/${activityName}/${persistentSessionInfo.sessionId}${queryString}`, { replace: true })
         return <div className="text-center">Redirecting to session...</div>
       }
 
@@ -278,7 +278,7 @@ const SessionRouter = () => {
 
           const payload = (await response.json()) as TeacherAuthResponse
           const queryString = getWindowSearch()
-          navigate(
+          void navigate(
             `/manage/${activityName}/${payload.sessionId || persistentSessionInfo.sessionId}${queryString}`,
             { replace: true },
           )
@@ -289,7 +289,7 @@ const SessionRouter = () => {
       }
 
       const handleStudentJoin = () => {
-        navigate(`/${persistentSessionInfo.sessionId}`, { replace: true })
+        void navigate(`/${persistentSessionInfo.sessionId}`, { replace: true })
       }
 
       return (

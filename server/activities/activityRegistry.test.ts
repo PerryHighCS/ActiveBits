@@ -65,7 +65,7 @@ function resolveServerEntryPath(serverPath: string): string | null {
 async function importActivityConfig(configPath: string): Promise<ActivityConfigLike> {
   const mod = (await import(pathToFileURL(configPath).href)) as { default?: unknown }
   const config = mod.default
-  if (config && typeof config === 'object') {
+  if (config !== null && config !== undefined && typeof config === 'object') {
     return config as ActivityConfigLike
   }
   return {}
@@ -79,7 +79,7 @@ async function importRegistryModule(): Promise<ActivityRegistryModule> {
 /**
  * Test that verifies all expected activities exist with required server structure
  */
-test('all expected activities exist with required server files', () => {
+void test('all expected activities exist with required server files', () => {
   const activitiesDir = join(__dirname, '../../activities')
 
   for (const activityId of EXPECTED_ACTIVITIES) {
@@ -114,7 +114,7 @@ test('all expected activities exist with required server files', () => {
  * Test that verifies no unexpected activities exist
  * Dev activities (with isDev: true) are allowed and ignored
  */
-test('no unexpected activities in activities directory', async () => {
+void test('no unexpected activities in activities directory', async () => {
   const activitiesDir = join(__dirname, '../../activities')
   const entries = readdirSync(activitiesDir)
 
@@ -153,7 +153,7 @@ test('no unexpected activities in activities directory', async () => {
  * Test that verifies the activity count matches expectations
  * Excludes dev activities from the count
  */
-test('activity count matches expected count', async () => {
+void test('activity count matches expected count', async () => {
   const activitiesDir = join(__dirname, '../../activities')
   const entries = readdirSync(activitiesDir)
 
@@ -191,7 +191,7 @@ test('activity count matches expected count', async () => {
 /**
  * Test that verifies each activity config has required fields
  */
-test('all activity configs have required fields', async () => {
+void test('all activity configs have required fields', async () => {
   const activitiesDir = join(__dirname, '../../activities')
 
   for (const activityId of EXPECTED_ACTIVITIES) {
@@ -228,7 +228,7 @@ test('all activity configs have required fields', async () => {
   }
 })
 
-test('registerActivityRoutes resolves server entry extension during mixed migration', async () => {
+void test('registerActivityRoutes resolves server entry extension during mixed migration', async () => {
   const testRoot = join(__dirname, '../../activities/test-activity-ts')
   const testConfigPath = join(testRoot, 'activity.config.ts')
   const testServerDir = join(testRoot, 'server')
@@ -298,7 +298,7 @@ test('registerActivityRoutes resolves server entry extension during mixed migrat
  * 
  * Each test creates temporary activity configs and cleans them up after execution.
  */
-test('initializeActivityRegistry filters dev activities in production mode', async () => {
+void test('initializeActivityRegistry filters dev activities in production mode', async () => {
   // Create a temporary test directory structure
   const testRoot = join(__dirname, '../../activities/test-activity-dev')
   const testConfigPath = join(testRoot, 'activity.config.js')
@@ -350,7 +350,7 @@ test('initializeActivityRegistry filters dev activities in production mode', asy
   }
 })
 
-test('initializeActivityRegistry preserves dev activities in development mode', async () => {
+void test('initializeActivityRegistry preserves dev activities in development mode', async () => {
   // Create a temporary test directory structure
   const testRoot = join(__dirname, '../../activities/test-activity-dev2')
   const testConfigPath = join(testRoot, 'activity.config.js')
@@ -402,7 +402,7 @@ test('initializeActivityRegistry preserves dev activities in development mode', 
   }
 })
 
-test('getAllowedActivities returns correct filtered list after initialization', async () => {
+void test('getAllowedActivities returns correct filtered list after initialization', async () => {
   const { initializeActivityRegistry, getAllowedActivities } = await importRegistryModule()
 
   // Initialize
@@ -429,7 +429,7 @@ test('getAllowedActivities returns correct filtered list after initialization', 
   )
 })
 
-test('initializeActivityRegistry handles config load failure in production', async () => {
+void test('initializeActivityRegistry handles config load failure in production', async () => {
   // Create a temporary test directory with a broken config
   const testRoot = join(__dirname, '../../activities/test-activity-broken')
   const testConfigPath = join(testRoot, 'activity.config.js')
@@ -492,7 +492,7 @@ test('initializeActivityRegistry handles config load failure in production', asy
   }
 })
 
-test('initializeActivityRegistry handles config load failure in development', async () => {
+void test('initializeActivityRegistry handles config load failure in development', async () => {
   // Create a temporary test directory with a broken config
   const testRoot = join(__dirname, '../../activities/test-activity-broken-dev')
   const testConfigPath = join(testRoot, 'activity.config.js')
@@ -542,7 +542,7 @@ test('initializeActivityRegistry handles config load failure in development', as
   }
 })
 
-test('initializeActivityRegistry handles missing isDev flag (defaults to production)', async () => {
+void test('initializeActivityRegistry handles missing isDev flag (defaults to production)', async () => {
   // Create a temporary test directory with config without isDev flag
   const testRoot = join(__dirname, '../../activities/test-activity-no-flag')
   const testConfigPath = join(testRoot, 'activity.config.js')

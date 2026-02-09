@@ -158,8 +158,8 @@ export default function GalleryWalkSoloViewer() {
 
   const sortedFeedback = useMemo(() => {
     if (!fileResult) return [];
-    return [...(fileResult.data.feedback || [])].sort(
-      (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+    return [...fileResult.data.feedback].sort(
+      (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0),
     );
   }, [fileResult]);
 
@@ -179,7 +179,7 @@ export default function GalleryWalkSoloViewer() {
   const tableFeedback = useMemo(() => {
     const entries = [...sortedFeedback];
     const directionFactor = tableSortDirection === 'asc' ? 1 : -1;
-    const normalizeString = (value: unknown) => (value || '').toString().toLowerCase();
+    const normalizeString = (value: unknown) => (value ?? '').toString().toLowerCase();
     const getRecipientLabel = (entry: FeedbackEntry) => (
       reviewees[entry.to || '']?.name
       || reviewees[entry.to || '']?.projectTitle
@@ -206,8 +206,8 @@ export default function GalleryWalkSoloViewer() {
           break;
         case 'createdAt':
         default:
-          aValue = a.createdAt || 0;
-          bValue = b.createdAt || 0;
+          aValue = a.createdAt ?? 0;
+          bValue = b.createdAt ?? 0;
           break;
       }
       if (aValue < bValue) return -1 * directionFactor;

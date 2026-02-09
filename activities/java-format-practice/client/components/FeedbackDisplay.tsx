@@ -72,7 +72,7 @@ export default function FeedbackDisplay({
         return;
       }
       // Enter: advance for correct, dismiss for incorrect
-      if (e.key === 'Enter' && feedback && feedbackReadyRef.current) {
+      if (e.key === 'Enter' && feedbackReadyRef.current) {
         if (feedback.isCorrect) {
           if (showNextButton && onNewChallenge) {
             onNewChallenge();
@@ -83,7 +83,7 @@ export default function FeedbackDisplay({
         }
       }
       // Escape always dismisses modal and clears feedback
-      if (e.key === 'Escape' && feedback && feedbackReadyRef.current) {
+      if (e.key === 'Escape' && feedbackReadyRef.current) {
         if (dismissHandlerRef.current) dismissHandlerRef.current();
       }
       // Handle Tab key for focus trap
@@ -165,7 +165,7 @@ export default function FeedbackDisplay({
           ) : (
             <div className="feedback-message">{feedback.message}</div>
           )}
-          {feedback.explanation && (
+          {typeof feedback.explanation === 'string' && feedback.explanation.length > 0 && (
             <div className="feedback-explanation">{feedback.explanation}</div>
           )}
         </div>

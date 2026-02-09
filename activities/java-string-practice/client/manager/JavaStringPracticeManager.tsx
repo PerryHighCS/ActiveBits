@@ -97,7 +97,7 @@ export default function JavaStringPracticeManager() {
   }, [])
 
   const handleWsOpen = useCallback(() => {
-    fetchStudents()
+    void fetchStudents()
   }, [fetchStudents])
 
   const buildWsUrl = useCallback((): string | null => {

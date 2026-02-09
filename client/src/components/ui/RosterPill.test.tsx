@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
 import RosterPill from './RosterPill'
 
-test('RosterPill shows hostname and action labels in default view', () => {
+void test('RosterPill shows hostname and action labels in default view', () => {
   const html = renderToStaticMarkup(
     <RosterPill hostname="alpha-student" onRemove={() => {}} onRename={() => {}} />,
   )

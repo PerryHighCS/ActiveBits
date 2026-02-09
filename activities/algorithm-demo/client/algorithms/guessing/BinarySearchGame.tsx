@@ -54,7 +54,7 @@ const PSEUDOCODE = [
 ]
 
 function getBinarySearchGameState(state: unknown): BinarySearchGameState {
-  if (!state || typeof state !== 'object') {
+  if (state === null || state === undefined || typeof state !== 'object') {
     return initBinarySearchGameState()
   }
   return state as BinarySearchGameState

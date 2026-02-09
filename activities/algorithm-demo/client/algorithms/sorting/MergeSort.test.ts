@@ -18,7 +18,7 @@ interface MergeSortStateLike {
   scratchWritten: number[]
 }
 
-test('MergeSort initState creates expected state shell', () => {
+void test('MergeSort initState creates expected state shell', () => {
   const state = MergeSort.initState?.(8) as unknown as MergeSortStateLike
 
   assert.equal(state.array.length, 8)
@@ -36,7 +36,7 @@ test('MergeSort initState creates expected state shell', () => {
   assert.deepEqual(state.scratchWritten, [])
 })
 
-test('MergeSort reduceEvent advances first step and supports reset', () => {
+void test('MergeSort reduceEvent advances first step and supports reset', () => {
   const state = MergeSort.initState?.(6) as unknown as MergeSortStateLike
   const next = MergeSort.reduceEvent?.(
     state as unknown as Record<string, unknown>,

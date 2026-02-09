@@ -1,4 +1,4 @@
-import { ReactNode, MouseEvent } from 'react';
+import type { ReactNode, MouseEvent } from 'react';
 
 interface Challenge {
   op?: string;

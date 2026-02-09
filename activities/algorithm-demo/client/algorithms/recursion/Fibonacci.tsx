@@ -87,7 +87,7 @@ function initFibonacciState(n = 6): FibonacciState {
 }
 
 function getFibonacciState(state: unknown): FibonacciState {
-  if (!state || typeof state !== 'object') {
+  if (state === null || state === undefined || typeof state !== 'object') {
     return initFibonacciState()
   }
   return state as FibonacciState

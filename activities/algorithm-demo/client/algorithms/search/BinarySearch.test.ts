@@ -17,7 +17,7 @@ interface BinarySearchStateLike {
   history: Array<Record<string, unknown>>
 }
 
-test('BinarySearch initState creates sorted array and default pointers', () => {
+void test('BinarySearch initState creates sorted array and default pointers', () => {
   const state = BinarySearch.initState?.(10, null) as unknown as BinarySearchStateLike
 
   assert.equal(state.array.length, 10)
@@ -32,7 +32,7 @@ test('BinarySearch initState creates sorted array and default pointers', () => {
   assert.equal(sorted, true)
 })
 
-test('BinarySearch reduceEvent advances algorithm and handles setTarget', () => {
+void test('BinarySearch reduceEvent advances algorithm and handles setTarget', () => {
   const state = BinarySearch.initState?.(8, 50) as unknown as BinarySearchStateLike
   const next = BinarySearch.reduceEvent?.(
     state as unknown as Record<string, unknown>,

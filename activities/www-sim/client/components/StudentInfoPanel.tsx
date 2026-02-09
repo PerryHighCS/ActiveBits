@@ -45,7 +45,7 @@ export default function StudentInfoPanel({ hostname, template, hostingMap }: Stu
 
       <div>
         <h4 className="font-semibold text-gray-700 mb-1">Files they need to request:</h4>
-        {template?.fragments?.length ? (
+        {(template?.fragments?.length ?? 0) > 0 ? (
           <ul className="list-disc list-inside text-sm">
             {template.fragments.map((fragment) => (
               <li key={fragment.hash} className="font-mono">

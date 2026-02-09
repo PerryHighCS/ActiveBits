@@ -25,7 +25,7 @@ const rawOptions = {
   },
 }
 
-test('parseDeepLinkOptions keeps supported option metadata', () => {
+void test('parseDeepLinkOptions keeps supported option metadata', () => {
   const parsed = parseDeepLinkOptions(rawOptions)
 
   assert.equal(parsed.algorithm?.label, 'Algorithm')
@@ -34,7 +34,7 @@ test('parseDeepLinkOptions keeps supported option metadata', () => {
   assert.equal(parsed.challenge?.type, 'text')
 })
 
-test('initializeDeepLinkOptions and normalizeSelectedOptions respect allowed keys', () => {
+void test('initializeDeepLinkOptions and normalizeSelectedOptions respect allowed keys', () => {
   assert.deepEqual(initializeDeepLinkOptions(rawOptions), {
     algorithm: '',
     challenge: '',
@@ -51,12 +51,12 @@ test('initializeDeepLinkOptions and normalizeSelectedOptions respect allowed key
   })
 })
 
-test('buildQueryString and buildSoloLink include only non-empty params', () => {
+void test('buildQueryString and buildSoloLink include only non-empty params', () => {
   assert.equal(buildQueryString({ algorithm: 'merge-sort', challenge: '' }), '?algorithm=merge-sort')
   assert.equal(buildSoloLink('https://bits.example', 'algorithm-demo', { algorithm: 'merge-sort' }), 'https://bits.example/solo/algorithm-demo?algorithm=merge-sort')
 })
 
-test('describeSelectedOptions maps option labels and falls back to raw values', () => {
+void test('describeSelectedOptions maps option labels and falls back to raw values', () => {
   const descriptions = describeSelectedOptions(rawOptions, {
     algorithm: 'merge-sort',
     challenge: 'arrays',
@@ -65,6 +65,6 @@ test('describeSelectedOptions maps option labels and falls back to raw values', 
   assert.deepEqual(descriptions, ['Algorithm: Merge Sort', 'Challenge: arrays'])
 })
 
-test('buildPersistentSessionKey creates stable map keys', () => {
+void test('buildPersistentSessionKey creates stable map keys', () => {
   assert.equal(buildPersistentSessionKey('raffle', 'abc123'), 'raffle:abc123')
 })

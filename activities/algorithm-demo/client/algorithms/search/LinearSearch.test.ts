@@ -14,7 +14,7 @@ interface LinearSearchStateLike {
   highlightedLines: Set<string>
 }
 
-test('LinearSearch initState builds expected state shape', () => {
+void test('LinearSearch initState builds expected state shape', () => {
   const state = LinearSearch.initState?.(8, null) as unknown as LinearSearchStateLike
 
   assert.equal(Array.isArray(state.array), true)
@@ -29,7 +29,7 @@ test('LinearSearch initState builds expected state shape', () => {
   assert.equal(state.highlightedLines instanceof Set, true)
 })
 
-test('LinearSearch reduceEvent advances step and supports reset', () => {
+void test('LinearSearch reduceEvent advances step and supports reset', () => {
   const state = LinearSearch.initState?.(6, 42) as unknown as LinearSearchStateLike
   const next = LinearSearch.reduceEvent?.(
     state as unknown as Record<string, unknown>,

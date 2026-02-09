@@ -41,11 +41,11 @@ export default function RouteLegend({ title = 'Viewing', items = [] }: RouteLege
       ))}
       {showBruteForceProgress ? (
         <ProgressBar
-          value={bruteForceItem?.progressCurrent || 0}
-          max={bruteForceItem?.progressTotal || 0}
+          value={bruteForceItem?.progressCurrent ?? 0}
+          max={bruteForceItem?.progressTotal ?? 0}
           label={`Brute force checks: ${getProgressLabel(
-            bruteForceItem?.progressCurrent || 0,
-            bruteForceItem?.progressTotal || 0,
+            bruteForceItem?.progressCurrent ?? 0,
+            bruteForceItem?.progressTotal ?? 0,
           )}`}
         />
       ) : null}

@@ -1,4 +1,4 @@
-import { ReactNode, RefObject, MouseEvent } from 'react'
+import type { ReactNode, RefObject, MouseEvent } from 'react'
 import QuestionHintSection from './QuestionHintSection.js'
 import InteractiveListSection from './InteractiveListSection.js'
 import HintDisplay from './HintDisplay.js'

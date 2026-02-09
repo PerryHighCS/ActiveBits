@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
 import PseudocodeRenderer from './PseudocodeRenderer'
 
-test('PseudocodeRenderer supports highlight arrays and overlay values', () => {
+void test('PseudocodeRenderer supports highlight arrays and overlay values', () => {
   const html = renderToStaticMarkup(
     <PseudocodeRenderer
       lines={['line one', 'line two']}
@@ -19,7 +19,7 @@ test('PseudocodeRenderer supports highlight arrays and overlay values', () => {
   assert.match(html, />42</)
 })
 
-test('PseudocodeRenderer supports highlightedIds compatibility path', () => {
+void test('PseudocodeRenderer supports highlightedIds compatibility path', () => {
   const html = renderToStaticMarkup(
     <PseudocodeRenderer
       lines={['line one']}

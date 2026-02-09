@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { sortFeedbackEntries, insertFeedbackEntry } from './feedbackUtils';
 import { getTimestampMeta } from './managerUtils';
 
-test('sortFeedbackEntries sorts by createdAt descending by default', () => {
+void test('sortFeedbackEntries sorts by createdAt descending by default', () => {
   const entries = [
     { id: '1', createdAt: 10 },
     { id: '2', createdAt: 30 },
@@ -13,7 +13,7 @@ test('sortFeedbackEntries sorts by createdAt descending by default', () => {
   assert.deepEqual(sorted.map((e) => e.id), ['2', '3', '1']);
 });
 
-test('sortFeedbackEntries handles ascending order and undefined values', () => {
+void test('sortFeedbackEntries handles ascending order and undefined values', () => {
   const entries = [
     { id: '1', createdAt: undefined },
     { id: '2', createdAt: 5 },
@@ -23,7 +23,7 @@ test('sortFeedbackEntries handles ascending order and undefined values', () => {
   assert.deepEqual(sorted.map((e) => e.id), ['1', '3', '2']);
 });
 
-test('sortFeedbackEntries works with alternate fields', () => {
+void test('sortFeedbackEntries works with alternate fields', () => {
   const entries = [
     { id: 'a', to: 'B' },
     { id: 'b', to: 'A' },
@@ -32,7 +32,7 @@ test('sortFeedbackEntries works with alternate fields', () => {
   assert.deepEqual(sorted.map((e) => e.id), ['b', 'a']);
 });
 
-test('insertFeedbackEntry replaces duplicate ids and prepends new entry', () => {
+void test('insertFeedbackEntry replaces duplicate ids and prepends new entry', () => {
   const existing = [
     { id: '1', message: 'Old' },
     { id: '2', message: 'Another' },
@@ -43,7 +43,7 @@ test('insertFeedbackEntry replaces duplicate ids and prepends new entry', () => 
   assert.equal(result.length, 2);
 });
 
-test('getTimestampMeta returns date and hides date for same day', () => {
+void test('getTimestampMeta returns date and hides date for same day', () => {
   const now = new Date('2024-01-01T10:00:00Z');
   const sample = new Date('2024-01-01T14:00:00Z');
   const meta = getTimestampMeta(sample, now);
@@ -51,7 +51,7 @@ test('getTimestampMeta returns date and hides date for same day', () => {
   assert.equal(meta.showDateOnScreen, false);
 });
 
-test('getTimestampMeta shows date if different day', () => {
+void test('getTimestampMeta shows date if different day', () => {
   const now = new Date('2024-01-02T10:00:00Z');
   const sample = new Date('2024-01-01T14:00:00Z');
   const meta = getTimestampMeta(sample, now);

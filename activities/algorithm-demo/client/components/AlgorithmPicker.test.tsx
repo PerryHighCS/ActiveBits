@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
 import AlgorithmPicker from './AlgorithmPicker'
 
-test('AlgorithmPicker renders cards and selected styling', () => {
+void test('AlgorithmPicker renders cards and selected styling', () => {
   const html = renderToStaticMarkup(
     <AlgorithmPicker
       algorithms={[
@@ -22,7 +22,7 @@ test('AlgorithmPicker renders cards and selected styling', () => {
   assert.equal((html.match(/type="button"/g) ?? []).length, 2)
 })
 
-test('AlgorithmPicker disables entries without ids', () => {
+void test('AlgorithmPicker disables entries without ids', () => {
   const html = renderToStaticMarkup(
     <AlgorithmPicker
       algorithms={[

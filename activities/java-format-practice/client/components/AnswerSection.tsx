@@ -195,7 +195,7 @@ export default function AnswerSection({
         : Array.from({ length: formatCalls.length }, () => []);
       const callAnswers = Array.isArray(base[callIdx])
         ? [...(base[callIdx] ?? [])]
-        : new Array(parsedCalls[callIdx]?.parts?.length || 1).fill('');
+        : new Array(parsedCalls[callIdx]?.parts?.length ?? 1).fill('');
       callAnswers[partIdx] = value;
       base[callIdx] = callAnswers;
       return base;
@@ -368,7 +368,7 @@ export default function AnswerSection({
                         )}
                         <span className="ide-static" aria-hidden="true">{parsed.after}</span>
                       </>
-                    ) : active && (!parsed.inputs || parsed.inputs.length === 0) ? (
+                    ) : active && parsed.inputs.length === 0 ? (
                       <span className="ide-static">{call.skeleton}</span>
                     ) : solvedAdjustedParts ? (
                       <>

@@ -9,13 +9,13 @@ import {
   normalizeNoteStyleId,
 } from './noteStyles'
 
-test('generateShortId returns uppercase alphanumeric ids of requested length', () => {
+void test('generateShortId returns uppercase alphanumeric ids of requested length', () => {
   const id = generateShortId(8)
   assert.equal(id.length, 8)
   assert.match(id, /^[BCDFGHJKLMNPQRSTVWXYZ23456789]{8}$/)
 })
 
-test('normalizeNoteStyleId falls back to default style for invalid values', () => {
+void test('normalizeNoteStyleId falls back to default style for invalid values', () => {
   assert.equal(normalizeNoteStyleId('invalid-style'), DEFAULT_NOTE_STYLE_ID)
   assert.equal(normalizeNoteStyleId(null), DEFAULT_NOTE_STYLE_ID)
 
@@ -24,7 +24,7 @@ test('normalizeNoteStyleId falls back to default style for invalid values', () =
   assert.equal(isNoteStyleId(validId), true)
 })
 
-test('getNoteStyleClassName returns expected class and defaults safely', () => {
+void test('getNoteStyleClassName returns expected class and defaults safely', () => {
   const validId = NOTE_STYLE_OPTIONS[2]?.id
   const validClassName = NOTE_STYLE_OPTIONS[2]?.className
   assert.equal(getNoteStyleClassName(validId), validClassName)

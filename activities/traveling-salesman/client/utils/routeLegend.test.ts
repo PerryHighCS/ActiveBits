@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildLegendItems, dedupeLegendItems } from './routeLegend'
 
-test('buildLegendItems includes primary and mapped route items', () => {
+void test('buildLegendItems includes primary and mapped route items', () => {
   const items = buildLegendItems({
     primary: { id: 'primary', type: 'student', label: 'Primary' },
     routes: [
@@ -15,7 +15,7 @@ test('buildLegendItems includes primary and mapped route items', () => {
   assert.equal(items[1]?.label, 'Heuristic')
 })
 
-test('dedupeLegendItems keeps the latest item for duplicate ids', () => {
+void test('dedupeLegendItems keeps the latest item for duplicate ids', () => {
   const deduped = dedupeLegendItems([
     { id: 'x', type: 'student', label: 'First' },
     { id: 'x', type: 'student', label: 'Second' },

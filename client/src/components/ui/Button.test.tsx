@@ -4,13 +4,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import Button from './Button'
 import { resolveButtonVariantClass } from './buttonStyles'
 
-test('resolveButtonVariantClass returns expected classes for known variants', () => {
+void test('resolveButtonVariantClass returns expected classes for known variants', () => {
   assert.match(resolveButtonVariantClass('default'), /bg-blue-500/)
   assert.match(resolveButtonVariantClass('outline'), /border-blue-500/)
   assert.match(resolveButtonVariantClass('text'), /text-blue-500/)
 })
 
-test('resolveButtonVariantClass warns and returns empty class for unknown variant', () => {
+void test('resolveButtonVariantClass warns and returns empty class for unknown variant', () => {
   const warnings: string[] = []
   const className = resolveButtonVariantClass('fancy', (message) => {
     warnings.push(message)
@@ -20,7 +20,7 @@ test('resolveButtonVariantClass warns and returns empty class for unknown varian
   assert.deepEqual(warnings, ['Unknown variant: fancy'])
 })
 
-test('Button renders default type and disabled styling', () => {
+void test('Button renders default type and disabled styling', () => {
   const html = renderToStaticMarkup(
     <Button disabled className="extra-class">
       Save

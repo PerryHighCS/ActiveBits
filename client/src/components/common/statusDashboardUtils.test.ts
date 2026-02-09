@@ -2,20 +2,20 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildByTypeEntries, buildSessionRows, fmtBytes, fmtInt } from './statusDashboardUtils'
 
-test('fmtInt returns fallback for non-finite values', () => {
+void test('fmtInt returns fallback for non-finite values', () => {
   assert.equal(fmtInt(42), '42')
   assert.equal(fmtInt(Number.NaN), '-')
   assert.equal(fmtInt(undefined), '-')
 })
 
-test('fmtBytes formats byte values with unit scaling', () => {
+void test('fmtBytes formats byte values with unit scaling', () => {
   assert.equal(fmtBytes(0), '0.0 B')
   assert.equal(fmtBytes(1024), '1.0 KB')
   assert.equal(fmtBytes(1536), '1.5 KB')
   assert.equal(fmtBytes(Number.NaN), '-')
 })
 
-test('buildByTypeEntries returns all activity ids with stable sorting and zero defaults', () => {
+void test('buildByTypeEntries returns all activity ids with stable sorting and zero defaults', () => {
   const entries = buildByTypeEntries(['www-sim', 'raffle', 'gallery-walk'], {
     raffle: 3,
     'gallery-walk': 1,
@@ -28,7 +28,7 @@ test('buildByTypeEntries returns all activity ids with stable sorting and zero d
   ])
 })
 
-test('buildSessionRows sorts by lastActivity and maps defaults', () => {
+void test('buildSessionRows sorts by lastActivity and maps defaults', () => {
   const rows = buildSessionRows([
     {
       id: 'older',
@@ -57,7 +57,7 @@ test('buildSessionRows sorts by lastActivity and maps defaults', () => {
   assert.equal(rows[1]?.ttl, '0s')
 })
 
-test('buildSessionRows treats invalid lastActivity timestamps as zero for deterministic sorting', () => {
+void test('buildSessionRows treats invalid lastActivity timestamps as zero for deterministic sorting', () => {
   const rows = buildSessionRows([
     { id: 'invalid', lastActivity: '2024-01-01T00:00:00.000Z-nope' },
     { id: 'valid-newer', lastActivity: '2024-01-03T00:00:00.000Z' },

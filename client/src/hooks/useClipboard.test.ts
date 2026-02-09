@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { copyTextWithReset } from './useClipboard'
 
-test('copyTextWithReset copies text and schedules reset', async () => {
+void test('copyTextWithReset copies text and schedules reset', async () => {
   let copiedText: string | null = null
   const scheduledCallbacks: Array<() => void> = []
   let scheduledDelay: number | null = null
@@ -38,7 +38,7 @@ test('copyTextWithReset copies text and schedules reset', async () => {
   assert.equal(timeoutRef.current, null)
 })
 
-test('copyTextWithReset clears previous timer before scheduling a new one', async () => {
+void test('copyTextWithReset clears previous timer before scheduling a new one', async () => {
   let copiedText: string | null = null
   const clearedTimers: Array<ReturnType<typeof setTimeout>> = []
   const previousHandle = { id: 1 } as unknown as ReturnType<typeof setTimeout>
@@ -64,7 +64,7 @@ test('copyTextWithReset clears previous timer before scheduling a new one', asyn
   assert.equal(timeoutRef.current, newHandle)
 })
 
-test('copyTextWithReset returns false for missing text', async () => {
+void test('copyTextWithReset returns false for missing text', async () => {
   const timeoutRef: { current: ReturnType<typeof setTimeout> | null } = { current: null }
   let writeCalls = 0
 
@@ -82,7 +82,7 @@ test('copyTextWithReset returns false for missing text', async () => {
   assert.equal(timeoutRef.current, null)
 })
 
-test('copyTextWithReset returns false and reports write errors', async () => {
+void test('copyTextWithReset returns false and reports write errors', async () => {
   const timeoutRef: { current: ReturnType<typeof setTimeout> | null } = { current: null }
   const expectedError = new Error('clipboard unavailable')
   let observedError: unknown = null

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import ActivityRoster from './ActivityRoster'
 import { buildUniqueRosterRowKeys } from './activityRosterKeys'
 
-test('buildUniqueRosterRowKeys prefers id, then name, then index and enforces uniqueness', () => {
+void test('buildUniqueRosterRowKeys prefers id, then name, then index and enforces uniqueness', () => {
   const keys = buildUniqueRosterRowKeys([
     { id: 'a', name: 'Ada' },
     { id: 'a', name: 'Ada' },
@@ -16,7 +16,7 @@ test('buildUniqueRosterRowKeys prefers id, then name, then index and enforces un
   assert.deepEqual(keys, ['id:a', 'id:a:1', 'name:Lin', 'name:Lin:1', 'index:4'])
 })
 
-test('ActivityRoster renders empty message when there are no students', () => {
+void test('ActivityRoster renders empty message when there are no students', () => {
   const html = renderToStaticMarkup(
     <ActivityRoster columns={[{ id: 'name', label: 'Student' }]} />,
   )
@@ -24,7 +24,7 @@ test('ActivityRoster renders empty message when there are no students', () => {
   assert.match(html, /No students yet\./)
 })
 
-test('ActivityRoster renders loading and error states', () => {
+void test('ActivityRoster renders loading and error states', () => {
   const loadingHtml = renderToStaticMarkup(
     <ActivityRoster loading columns={[{ id: 'name', label: 'Student' }]} />,
   )
@@ -41,7 +41,7 @@ test('ActivityRoster renders loading and error states', () => {
   assert.doesNotMatch(errorHtml, /Loading…/)
 })
 
-test('ActivityRoster renders rows and sort icons', () => {
+void test('ActivityRoster renders rows and sort icons', () => {
   const html = renderToStaticMarkup(
     <ActivityRoster
       students={[

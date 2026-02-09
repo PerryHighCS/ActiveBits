@@ -4,7 +4,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ProgressBar from './ProgressBar'
 
-test('ProgressBar renders label and clamped width', () => {
+void test('ProgressBar renders label and clamped width', () => {
   const html = renderToStaticMarkup(React.createElement(ProgressBar, { value: 150, max: 100, label: 'Load' }))
   assert.match(html, /Load/)
   assert.match(html, /width:100%/)

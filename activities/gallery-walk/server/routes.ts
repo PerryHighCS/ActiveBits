@@ -172,7 +172,7 @@ function asGalleryWalkSession(session: SessionRecord | null): GalleryWalkSession
 }
 
 export function sanitizeName(value: unknown, fallback: string | null = '', maxLength = 200): string | null {
-  if (!value || typeof value !== 'string') return fallback
+  if (value == null || typeof value !== 'string') return fallback
   const trimmed = value.trim()
   if (trimmed.length === 0) return fallback
   return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed
@@ -197,7 +197,7 @@ export default function setupGalleryWalkRoutes(app: GalleryWalkRouteApp, session
       }
     }
 
-    const clients = ws.wss.clients || new Set<ActiveBitsWebSocket>()
+    const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
     for (const socket of clients as Set<GalleryWalkSocket>) {
       if (socket.readyState === 1 && socket.sessionId === sessionId) {
         try {
@@ -363,8 +363,8 @@ export default function setupGalleryWalkRoutes(app: GalleryWalkRouteApp, session
     }
 
     session.data.feedback.push(feedbackEntry)
-    session.data.stats.reviewees[revieweeId] = (session.data.stats.reviewees[revieweeId] || 0) + 1
-    session.data.stats.reviewers[reviewerId] = (session.data.stats.reviewers[reviewerId] || 0) + 1
+    session.data.stats.reviewees[revieweeId] = (session.data.stats.reviewees[revieweeId] ?? 0) + 1
+    session.data.stats.reviewers[reviewerId] = (session.data.stats.reviewers[reviewerId] ?? 0) + 1
 
     await sessions.set(session.id, session)
     await broadcast('feedback-added', { feedback: feedbackEntry }, session.id)
@@ -466,7 +466,7 @@ export default function setupGalleryWalkRoutes(app: GalleryWalkRouteApp, session
     }
 
     const body = ensurePlainObject(req.body)
-    const title = sanitizeName(body.title || '', '', 200) || ''
+    const title = sanitizeName(body.title ?? '', '', 200) || ''
     session.data.config = ensurePlainObject(session.data.config)
     session.data.config.title = title
     await sessions.set(session.id, session)

@@ -5,6 +5,10 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import jsdoc from 'eslint-plugin-jsdoc'
+import { dirname } from 'path'
+import { fileURLToPath } from 'url'
+
+const tsconfigRootDir = dirname(fileURLToPath(import.meta.url))
 
 export default [
   { ignores: ['dist'] },
@@ -42,6 +46,8 @@ export default [
       parserOptions: {
         ecmaFeatures: { jsx: true },
         sourceType: 'module',
+        project: './tsconfig.json',
+        tsconfigRootDir,
       },
     },
     plugins: {
@@ -57,7 +63,23 @@ export default [
       ...reactHooks.configs.recommended.rules,
       'no-unused-vars': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
+      ],
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+      '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: false }],
+      '@typescript-eslint/strict-boolean-expressions': [
+        'error',
+        {
+          allowNullableString: true,
+          allowNullableBoolean: true,
+          allowNullableObject: true,
+          allowAny: false,
+        },
+      ],
       '@typescript-eslint/no-unused-expressions': 'error',
       'no-useless-assignment': 'error',
       'prefer-const': 'error',

@@ -13,7 +13,7 @@ interface FibonacciStateLike {
   currentStep: string | null
 }
 
-test('Fibonacci initState creates expected recursion state shell', () => {
+void test('Fibonacci initState creates expected recursion state shell', () => {
   const state = Fibonacci.initState?.(6) as unknown as FibonacciStateLike
 
   assert.equal(state.n, 6)
@@ -26,7 +26,7 @@ test('Fibonacci initState creates expected recursion state shell', () => {
   assert.equal(state.currentStep, null)
 })
 
-test('Fibonacci reduceEvent advances first step and supports setN', () => {
+void test('Fibonacci reduceEvent advances first step and supports setN', () => {
   const state = Fibonacci.initState?.(6) as unknown as FibonacciStateLike
   const next = Fibonacci.reduceEvent?.(
     state as unknown as Record<string, unknown>,
