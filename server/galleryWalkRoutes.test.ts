@@ -1,6 +1,6 @@
 import test, { type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
-import http from 'node:http'
+import type http from 'node:http'
 import express from 'express'
 import setupGalleryWalkRoutes, { sanitizeName } from '../activities/gallery-walk/server/routes.js'
 import { createSessionStore } from 'activebits-server/core/sessions.js'
@@ -79,7 +79,7 @@ async function startTestServer(): Promise<{
   })
 
   const address = server.address()
-  if (!address || typeof address === 'string') {
+  if (address === null || typeof address === 'string') {
     throw new Error('Failed to determine test server address')
   }
   const baseUrl = `http://127.0.0.1:${address.port}`

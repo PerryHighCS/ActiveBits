@@ -40,7 +40,7 @@ void test('keepalive refreshes session activity', async () => {
 
   await new Promise<void>((resolve) => server.listen(0, resolve))
   const address = server.address()
-  if (!address || typeof address === 'string') {
+  if (address === null || typeof address === 'string') {
     throw new Error('Failed to bind test server')
   }
   const ws = new WebSocket(`ws://localhost:${address.port}/ws?sessionId=${session.id}`)

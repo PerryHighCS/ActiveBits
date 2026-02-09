@@ -50,11 +50,13 @@ void test('createBroadcastSubscriptionHelper subscribes once and forwards messag
   ensure('')
 
   assert.equal(subscribedChannel, 'session:abc:broadcast')
-  assert.ok(broadcastHandler, 'handler registered')
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+  assert.ok(broadcastHandler, 'handler was registered')
 
   console.log('[TEST] Testing broadcast robustness against individual WebSocket send failures (expected error output follows):')
   assert.doesNotThrow(() => {
-    void broadcastHandler?.({ type: 'foo' })
+    // After assert.ok(), we know broadcastHandler is not null/undefined
+    void broadcastHandler!({ type: 'foo' })
   })
   assert.equal(sentPayloads.length, 1)
   assert.equal(sentPayloads[0], JSON.stringify({ type: 'foo' }))
