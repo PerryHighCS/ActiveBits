@@ -56,6 +56,9 @@ export function insertFeedbackEntry<T extends SortableFeedbackEntry>(
   nextEntry?: T | null,
 ): T[] {
   if (!nextEntry || typeof nextEntry !== 'object') return entries;
+  if (typeof nextEntry.id !== 'string' || nextEntry.id.trim().length === 0) {
+    return [nextEntry, ...entries];
+  }
   const filtered = entries.filter((entry) => entry?.id !== nextEntry.id);
   return [nextEntry, ...filtered];
 }

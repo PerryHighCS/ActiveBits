@@ -43,6 +43,23 @@ void test('insertFeedbackEntry replaces duplicate ids and prepends new entry', (
   assert.equal(result.length, 2);
 });
 
+void test('insertFeedbackEntry prepends id-less entries without removing existing id-less rows', () => {
+  const existing = [
+    { id: undefined, message: 'Older missing id' },
+    { id: '2', message: 'Another' },
+  ];
+
+  const undefinedId = insertFeedbackEntry(existing, { id: undefined, message: 'New missing id' });
+  assert.equal(undefinedId.length, 3);
+  assert.equal(undefinedId[0]?.message, 'New missing id');
+  assert.equal(undefinedId[1]?.message, 'Older missing id');
+
+  const blankId = insertFeedbackEntry(existing, { id: '   ', message: 'Blank id' });
+  assert.equal(blankId.length, 3);
+  assert.equal(blankId[0]?.message, 'Blank id');
+  assert.equal(blankId[1]?.message, 'Older missing id');
+});
+
 void test('getTimestampMeta returns date and hides date for same day', () => {
   const now = new Date('2024-01-01T10:00:00Z');
   const sample = new Date('2024-01-01T14:00:00Z');

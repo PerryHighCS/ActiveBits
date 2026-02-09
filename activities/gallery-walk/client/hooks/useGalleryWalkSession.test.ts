@@ -59,3 +59,20 @@ void test('insertOrReplaceFeedbackEntry prepends and deduplicates by id', () => 
   assert.deepEqual(updated.map((item) => item.id), ['1', '2']);
   assert.equal(updated[0]?.message, 'new');
 });
+
+void test('insertOrReplaceFeedbackEntry prepends entries without non-empty ids without deduping undefined ids', () => {
+  const existing: GalleryWalkFeedbackEntry[] = [
+    { id: undefined, message: 'older undefined id' },
+    { id: '2', message: 'two' },
+  ];
+
+  const updatedWithUndefinedId = insertOrReplaceFeedbackEntry(existing, { id: undefined, message: 'new undefined id' });
+  assert.equal(updatedWithUndefinedId.length, 3);
+  assert.equal(updatedWithUndefinedId[0]?.message, 'new undefined id');
+  assert.equal(updatedWithUndefinedId[1]?.message, 'older undefined id');
+
+  const updatedWithBlankId = insertOrReplaceFeedbackEntry(existing, { id: '   ', message: 'blank id' });
+  assert.equal(updatedWithBlankId.length, 3);
+  assert.equal(updatedWithBlankId[0]?.message, 'blank id');
+  assert.equal(updatedWithBlankId[1]?.message, 'older undefined id');
+});

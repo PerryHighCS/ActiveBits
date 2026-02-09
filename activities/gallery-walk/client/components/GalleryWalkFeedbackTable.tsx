@@ -37,6 +37,24 @@ function normalizeKeyPart(value: unknown): string {
   return String(value);
 }
 
+function toKeyLabel(value: unknown, maxLength = 24): string {
+  const normalized = normalizeKeyPart(value).trim();
+  if (normalized === '') return '-';
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength)}~`;
+}
+
+function hashStringFNV1a(value: string): string {
+  let hash = 0x811c9dc5;
+
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
 export function buildFeedbackRowKeys(feedback: FeedbackEntry[]): string[] {
   const seenKeys = new Map<string, number>();
 
@@ -45,16 +63,18 @@ export function buildFeedbackRowKeys(feedback: FeedbackEntry[]): string[] {
       return `id:${entry.id}`;
     }
 
-    const baseKey = [
+    const createdAtPart = Number.isFinite(entry.createdAt) ? String(entry.createdAt) : 'na';
+    const signature = [
       normalizeKeyPart(entry.to),
       normalizeKeyPart(entry.from),
       normalizeKeyPart(entry.fromNameSnapshot),
-      Number.isFinite(entry.createdAt) ? String(entry.createdAt) : '',
+      createdAtPart,
       normalizeKeyPart(entry.message),
-    ].join('|');
-    const occurrence = seenKeys.get(baseKey) ?? 0;
-    seenKeys.set(baseKey, occurrence + 1);
-    return occurrence === 0 ? `entry:${baseKey}` : `entry:${baseKey}#${occurrence + 1}`;
+    ].join('\u001f');
+    const compactKey = `entry:${toKeyLabel(entry.to)}|${toKeyLabel(entry.from)}|${createdAtPart}|${hashStringFNV1a(signature)}`;
+    const occurrence = seenKeys.get(compactKey) ?? 0;
+    seenKeys.set(compactKey, occurrence + 1);
+    return occurrence === 0 ? compactKey : `${compactKey}#${occurrence + 1}`;
   });
 }
 

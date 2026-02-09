@@ -5,11 +5,11 @@ import React from 'react'
  * Displays the challenge prompt safely
  */
 interface ChallengeQuestionProps {
-  prompt: unknown
+  prompt: string | null | undefined
 }
 
 export default function ChallengeQuestion({ prompt }: ChallengeQuestionProps) {
-  if (prompt == null || typeof prompt !== 'string' || prompt.trim().length === 0) {
+  if (prompt == null || prompt.trim().length === 0) {
     return (
       <React.Fragment>
         <div className="question">Invalid question</div>

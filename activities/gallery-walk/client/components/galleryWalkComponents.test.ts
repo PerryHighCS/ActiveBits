@@ -40,24 +40,24 @@ void test('gallery-walk converted components export callable React components', 
 });
 
 void test('buildFeedbackRowKeys prefers id and uses stable field-derived fallback keys', () => {
+  const longMessage = 'Nice work '.repeat(50);
   const baselineKeys = buildFeedbackRowKeys([
     { id: 'feedback-1', message: 'Great structure' },
-    { to: 'student-a', from: 'reviewer-a', fromNameSnapshot: 'Alex', createdAt: 1700000000000, message: 'Nice work' },
+    { to: 'student-a', from: 'reviewer-a', fromNameSnapshot: 'Alex', createdAt: 1700000000000, message: longMessage },
   ]);
 
-  assert.deepEqual(baselineKeys, [
-    'id:feedback-1',
-    'entry:student-a|reviewer-a|Alex|1700000000000|Nice work',
-  ]);
+  assert.equal(baselineKeys[0], 'id:feedback-1');
+  assert.match(baselineKeys[1] ?? '', /^entry:student-a\|reviewer-a\|1700000000000\|[a-z0-9]+$/);
+  assert.ok(!(baselineKeys[1] ?? '').includes(longMessage));
 
   const withInsertedEntry = buildFeedbackRowKeys([
     { to: 'student-b', from: 'reviewer-b', createdAt: 1700000001000, message: 'Inserted row' },
     { id: 'feedback-1', message: 'Great structure' },
-    { to: 'student-a', from: 'reviewer-a', fromNameSnapshot: 'Alex', createdAt: 1700000000000, message: 'Nice work' },
+    { to: 'student-a', from: 'reviewer-a', fromNameSnapshot: 'Alex', createdAt: 1700000000000, message: longMessage },
   ]);
 
   assert.equal(withInsertedEntry[1], 'id:feedback-1');
-  assert.equal(withInsertedEntry[2], 'entry:student-a|reviewer-a|Alex|1700000000000|Nice work');
+  assert.equal(withInsertedEntry[2], baselineKeys[1]);
 });
 
 void test('buildFeedbackRowKeys disambiguates duplicate fallback keys deterministically', () => {
@@ -67,8 +67,6 @@ void test('buildFeedbackRowKeys disambiguates duplicate fallback keys determinis
   ];
 
   const keys = buildFeedbackRowKeys(duplicateEntries);
-  assert.deepEqual(keys, [
-    'entry:student-a|reviewer-a||1700000000000|Same note',
-    'entry:student-a|reviewer-a||1700000000000|Same note#2',
-  ]);
+  assert.match(keys[0] ?? '', /^entry:student-a\|reviewer-a\|1700000000000\|[a-z0-9]+$/);
+  assert.equal(keys[1], `${keys[0]}#2`);
 });

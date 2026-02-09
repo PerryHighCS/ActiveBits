@@ -140,6 +140,10 @@ export function insertOrReplaceFeedbackEntry(
   previous: GalleryWalkFeedbackEntry[],
   entry: GalleryWalkFeedbackEntry,
 ): GalleryWalkFeedbackEntry[] {
+  if (typeof entry.id !== 'string' || entry.id.trim().length === 0) {
+    return [entry, ...previous];
+  }
+
   const next = previous.filter((item) => item.id !== entry.id);
   next.unshift(entry);
   return next;
