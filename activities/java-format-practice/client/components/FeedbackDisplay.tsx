@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JavaFormatFeedback } from '../../javaFormatPracticeTypes.js'
+import type { JavaFormatFeedback } from '../../javaFormatPracticeTypes.js';
 
 interface FeedbackDisplayProps {
   feedback: JavaFormatFeedback | null
@@ -68,7 +68,7 @@ export default function FeedbackDisplay({
 
     const handleKeyPress = (e: KeyboardEvent) => {
       // Guard against feedback becoming null while handler is still attached
-      if (!feedback) return;
+      if (feedback == null) return;
 
       // Don't handle keyboard events if the button is focused (let the button's onClick handle it)
       if (e.target === buttonRef.current) {
