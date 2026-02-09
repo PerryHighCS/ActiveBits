@@ -66,9 +66,17 @@ Run these minimum checks based on scope:
 
 ## Import and Specifier Conventions
 
-1. Backend/runtime imports must be Node-resolvable (NodeNext/ESM-safe).
-2. Treat `tsconfig` path aliases as compile-time/editor aids unless runtime support is explicitly configured.
-3. Keep cross-workspace import boundaries explicit (prefer package/export boundaries over deep ad-hoc paths).
+1. **Use `.js` extensions for all relative imports** in TypeScript source files to support Node ESM resolution and ensure consistency between test execution (via `node:test`) and build output.
+   - ✓ `import { x } from './utils.js'`
+   - ✓ `import { x } from '../../shared/noteStyles.js'`
+   - ✗ `import { x } from './utils'` (avoid — breaks under Node ESM)
+   - **Rationale:** Extensionless imports rely on module resolution that varies by context. TypeScript tooling (and bundlers like Vite) auto-resolve, but Node's native ESM loader does not. Tests run via `node --import tsx --test` use Node ESM resolution directly, so `.js` extensions must be present.
+
+2. **Backend/runtime imports must be Node-resolvable** (NodeNext/ESM-safe). Do not rely on bundler-only features (e.g., `tsconfig` path aliases) for runtime-critical code paths.
+
+3. Treat `tsconfig` path aliases (e.g., `@src/`) as compile-time/editor aids only unless runtime support is explicitly configured.
+
+4. Keep cross-workspace import boundaries explicit (prefer package/export boundaries over deep ad-hoc paths).
 
 ## Temporary Workaround Policy
 
