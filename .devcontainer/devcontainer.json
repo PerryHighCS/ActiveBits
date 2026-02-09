@@ -5,10 +5,9 @@
   "workspaceFolder": "/workspaces/ActiveBits",
   "features": {
     "ghcr.io/devcontainers/features/node:1": {},
-    "ghcr.io/devcontainers/features/common-utils": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
       "username": "vscode"
-    },
-    "ghcr.io/devcontainers/features/common-utils:2": {}
+    }
   },
   "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && npm install --workspaces --include-workspace-root",
   "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Setup script failed'",

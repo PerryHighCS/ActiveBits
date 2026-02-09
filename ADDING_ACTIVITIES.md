@@ -15,9 +15,9 @@ mkdir -p activities/quiz/server
 
 ### Step 2: Create the Student Component
 
-**File: `activities/quiz/client/student/QuizPage.jsx`**
+**File: `activities/quiz/client/student/QuizPage.tsx`**
 
-```jsx
+```tsx
 import React, { useState } from 'react';
 import Button from '@src/components/ui/Button';
 
@@ -60,9 +60,9 @@ export default function QuizPage({ sessionData }) {
 
 ### Step 3: Create the Manager Component
 
-**File: `activities/quiz/client/manager/QuizManager.jsx`**
+**File: `activities/quiz/client/manager/QuizManager.tsx`**
 
-```jsx
+```tsx
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
@@ -134,9 +134,9 @@ export default function QuizManager() {
 
 ### Step 4: Create the Client Entry (components/footer only, lazy-loaded)
 
-**File: `activities/quiz/client/index.js`** (or `.jsx` if using JSX in `footerContent`)
+**File: `activities/quiz/client/index.ts`** (or `.tsx` if using JSX in `footerContent`)
 
-```javascript
+```typescript
 import QuizManager from './manager/QuizManager';
 import QuizPage from './student/QuizPage';
 
@@ -147,14 +147,14 @@ export default {
 };
 ```
 
-Keep metadata (id/name/description/color/soloMode + optional soloModeMeta overrides) in `activity.config.js` to avoid dueling sources of truth. The client entry is lazy-loaded via `React.lazy`, so keep it side-effect free and focused on exporting the components/footer. The loader merges `{...config, ...clientEntry}` at runtime, and each activity builds into its own chunk (`activity-<id>-<hash>.js`).
+Keep metadata (id/name/description/color/soloMode + optional soloModeMeta overrides) in `activity.config.ts` to avoid dueling sources of truth. The client entry is lazy-loaded via `React.lazy`, so keep it side-effect free and focused on exporting the components/footer. The loader merges `{...config, ...clientEntry}` at runtime, and each activity builds into its own chunk (`activity-<id>-<hash>.js`).
 
 ### Step 5: Create Server Routes
 
-**File: `activities/quiz/server/routes.js`**
+**File: `activities/quiz/server/routes.ts`**
 
-```javascript
-import { createSession } from '../../../server/core/sessions.js';
+```typescript
+import { createSession } from 'activebits-server/core/sessions.js';
 
 export default function setupQuizRoutes(app, sessions, ws) {
   // Create quiz session
@@ -213,9 +213,9 @@ export default function setupQuizRoutes(app, sessions, ws) {
 
 When using Valkey for session persistence, sessions loaded after a server restart may have incomplete or missing data structures. To prevent runtime errors, register activity-specific session normalizers inside your activity's server entry file.
 
-**File: `activities/<your-activity>/server/routes.js` (or wherever you set up routes)**
+**File: `activities/<your-activity>/server/routes.ts` (or wherever you set up routes)**
 
-```javascript
+```typescript
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js';
 
 registerSessionNormalizer('quiz', (session) => {
@@ -229,13 +229,13 @@ registerSessionNormalizer('quiz', (session) => {
 - The normalizer receives the live session object. Mutate `session.data` directly to ensure required fields exist.
 - Use `Array.isArray(...)` before assuming an array, and treat plain objects defensively (`value && typeof value === 'object' && !Array.isArray(value)`).
 - You only need to register the normalizer once per activity; the activity module is loaded during server startup.
-- These normalizers are applied automatically whenever sessions are loaded from Valkey or from the in-memory store, so you don't have to touch `server/core/sessions.js`.
+- These normalizers are applied automatically whenever sessions are loaded from Valkey or from the in-memory store, so you don't have to touch `server/core/sessions.ts`.
 
 ### Step 6: Add the Activity Config (auto-discovery)
 
-**File: `activities/quiz/activity.config.js`**
+**File: `activities/quiz/activity.config.ts`**
 
-```javascript
+```typescript
 export default {
   id: 'quiz',
   name: 'Quiz',
@@ -260,20 +260,20 @@ export default {
       ]
     }
   },
-  clientEntry: './client/index.js',  // or .jsx if using JSX in footerContent
-  serverEntry: './server/routes.js',
+  clientEntry: './client/index.ts',  // or .tsx if using JSX in footerContent
+  serverEntry: './server/routes.ts',
 };
 ```
 
-Activities are auto-discovered from `activities/*/activity.config.js`; no central registry needs updating.
+Activities are auto-discovered from `activities/*/activity.config.ts`; no central registry needs updating.
 
 ### Step 7: Update the Activity Tests
 
-**File: `client/src/activities/index.test.js`**
+**File: `client/src/activities/index.test.ts`**
 
 Add your new activity to the `EXPECTED_ACTIVITIES` array to ensure it's properly discovered on the client side:
 
-```javascript
+```typescript
 const EXPECTED_ACTIVITIES = [
   "java-string-practice",
   "python-list-practice",
@@ -283,11 +283,11 @@ const EXPECTED_ACTIVITIES = [
 ];
 ```
 
-**File: `server/activities/activityRegistry.test.js`**
+**File: `server/activities/activityRegistry.test.ts`**
 
 Also add your new activity to the `EXPECTED_ACTIVITIES` array in the server-side test:
 
-```javascript
+```typescript
 const EXPECTED_ACTIVITIES = [
   "java-string-practice",
   "python-list-practice",
@@ -326,19 +326,19 @@ Your new activity is now fully integrated:
 When adding a new activity, create these files:
 
 **Client (inside `activities/{name}/client/`):**
-- [ ] `index.js` (or `.jsx`) - Activity config (exports id/name/description/etc. plus ManagerComponent/StudentComponent)
-- [ ] `manager/Manager.jsx` - Teacher view (use SessionHeader)
-- [ ] `student/Student.jsx` - Student view (use useSessionEndedHandler)
+- [ ] `index.ts` (or `.tsx`) - Activity client entry (exports ManagerComponent/StudentComponent/footerContent)
+- [ ] `manager/Manager.tsx` - Teacher view (use SessionHeader)
+- [ ] `student/Student.tsx` - Student view (use useSessionEndedHandler)
 - [ ] `components/` - Activity-specific UI (optional)
 
 **Server (inside `activities/{name}/server/`):**
-- [ ] `routes.js` - API endpoints/WebSocket setup
+- [ ] `routes.ts` - API endpoints/WebSocket setup
 
 **Tests:**
-- [ ] Add activity ID to `EXPECTED_ACTIVITIES` in `client/src/activities/index.test.js`
-- [ ] Add activity ID to `EXPECTED_ACTIVITIES` in `server/activities/activityRegistry.test.js`
+- [ ] Add activity ID to `EXPECTED_ACTIVITIES` in `client/src/activities/index.test.ts`
+- [ ] Add activity ID to `EXPECTED_ACTIVITIES` in `server/activities/activityRegistry.test.ts`
 
-No central registry updates are needed; activities are auto-discovered from `activities/*/activity.config.js`.
+No central registry updates are needed; activities are auto-discovered from `activities/*/activity.config.ts`.
 
 ## Tips
 
@@ -364,7 +364,7 @@ Enable solo mode (`soloMode: true`) for activities that:
 
 ### Example: Solo-Only Activity
 
-```javascript
+```typescript
 export const practiceActivity = {
   id: 'practice',
   name: 'Practice Mode',
@@ -385,9 +385,9 @@ export const practiceActivity = {
 
 ### Customizing Solo Mode Labels
 
-Provide an optional `soloModeMeta` object in `activity.config.js` to override the Solo Bits card title/description and the "Copy Solo Practice Link" button text on the management dashboard:
+Provide an optional `soloModeMeta` object in `activity.config.ts` to override the Solo Bits card title/description and the "Copy Solo Practice Link" button text on the management dashboard:
 
-```javascript
+```typescript
 export default {
   // ...
   soloMode: true,
@@ -407,8 +407,8 @@ Solo mode activities support query parameters for creating pre-configured links 
 
 **Using Query Parameters:**
 
-1. **Define deepLinkOptions in activity.config.js:**
-```javascript
+1. **Define deepLinkOptions in activity.config.ts:**
+```typescript
 deepLinkOptions: {
   difficulty: {
     label: 'Pre-select Difficulty',
@@ -423,7 +423,7 @@ deepLinkOptions: {
 ```
 
 2. **Read parameters in your Student component:**
-```javascript
+```typescript
 import { useSearchParams } from 'react-router-dom';
 
 export default function QuizStudent({ sessionData }) {
@@ -457,7 +457,7 @@ export default function QuizStudent({ sessionData }) {
 ### Solo Mode Best Practices
 
 1. **Use localStorage for progress tracking**:
-```javascript
+```typescript
 const sessionId = 'solo-my-activity';
 const stats = JSON.parse(localStorage.getItem(`my-activity-stats-${sessionId}`));
 localStorage.setItem(`my-activity-stats-${sessionId}`, JSON.stringify(newStats));
@@ -472,7 +472,7 @@ localStorage.setItem(`my-activity-stats-${sessionId}`, JSON.stringify(newStats))
 For detailed information on component patterns, session management, and API design, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Polling for Updates (Manager Side)
-```javascript
+```typescript
 useEffect(() => {
   if (!sessionId) return;
   
@@ -487,7 +487,7 @@ useEffect(() => {
 ```
 
 ### Session Data Validation (Server)
-```javascript
+```typescript
 app.post('/api/my-activity/:sessionId/action', (req, res) => {
   const session = sessions[req.params.sessionId];
   if (!session || session.type !== 'my-activity') {
@@ -504,7 +504,7 @@ For activities that need real-time bidirectional communication, use WebSocket. S
 
 **Example WebSocket setup with session-ended handling:**
 
-```jsx
+```tsx
 import React, { useCallback, useEffect, useState } from 'react';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';

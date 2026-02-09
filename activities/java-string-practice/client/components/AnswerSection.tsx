@@ -10,6 +10,15 @@ interface AnswerSectionProps {
   onSubmit: (answer: JavaStringAnswer) => void
 }
 
+/**
+ * Mounting contract:
+ * Render this component only while feedback/results are hidden for the current challenge.
+ *
+ * Keyboard shortcuts (global keydown listener):
+ * - `Enter`: submit text/numeric answers when non-empty
+ * - `T` / `F`: submit equals challenge answers
+ * - `P` / `Z` / `N`: submit compareTo sign answers (positive/zero/negative)
+ */
 export default function AnswerSection({
   challenge,
   userAnswer,

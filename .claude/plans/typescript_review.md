@@ -237,7 +237,7 @@ Completed:
   - `server/routes/persistentSessionRoutes.ts`
   - `server/activities/activityRegistry.ts`
 - Added focused TS migration coverage:
-  - `server/phase3RoutesRegistryTs.test.ts`
+  - `server/routesRegistry.contract.test.ts`
 - Kept existing JavaScript runtime modules in place for now:
   - `server/routes/statusRoute.js`
   - `server/routes/persistentSessionRoutes.js`
@@ -250,7 +250,7 @@ Implementation notes:
 
 Validation:
 - `npm --workspace server run typecheck` -> pass
-- `node --import tsx --test server/phase3RoutesRegistryTs.test.ts` -> pass
+- `node --import tsx --test server/routesRegistry.contract.test.ts` -> pass
 - `node --import tsx --test server/activities/activityRegistry.test.js` -> pass
 - `npm --workspace server test` -> pass (outside sandbox; `38` pass, `0` fail)
 - `npm run typecheck --workspaces --if-present` -> pass
@@ -774,6 +774,130 @@ Validation:
 - `npm --workspace activities run typecheck` -> pass
 - `npm --workspace activities test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
+
+### Slice 5: README simplification (human-facing index)
+
+Completed:
+- Rewrote root README to be a simple, human-facing project description with documentation links only:
+  - `README.md`
+
+Implementation notes:
+- Removed operational command blocks, implementation details, and long runtime/deployment specifics from `README.md`.
+- Removed code snippets and technical deep-dives from `README.md` in favor of linking to canonical docs (`ADDING_ACTIVITIES.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`, and algorithm-demo docs).
+- Preserved the public student/instructor access URLs in a short access section.
+- `activities/algorithm-demo/QUICKSTART.md` was intentionally left unchanged for this slice.
+
+Validation:
+- Documentation path/link spot-checks for all linked local docs -> pass.
+- README content scan confirms no code blocks or command snippets remain.
+
+## Phase 5 Progress (Activities Migration)
+
+### Slice 8: Activity hardening follow-up (`activities/algorithm-demo`, algorithmState normalization)
+
+Completed:
+- Hardened algorithm-demo session/request normalization to reject array `algorithmState` payloads:
+  - `activities/algorithm-demo/server/routes.ts`
+- Added regression coverage for array payload coercion:
+  - `activities/algorithm-demo/server/routes.test.ts`
+
+Implementation notes:
+- Added `normalizeAlgorithmState(value)` helper requiring a plain object (`typeof === 'object' && !Array.isArray(...)`) and defaulting to `{}`.
+- Applied helper in:
+  - session normalization (`getSessionData`)
+  - select route (`POST /api/algorithm-demo/:sessionId/select`)
+  - state route (`POST /api/algorithm-demo/:sessionId/state`)
+- This keeps runtime shape aligned with declared `Record<string, unknown>` intent and avoids array-to-record coercion side effects.
+
+Validation:
+- `npm --workspace activities test` -> pass (`54` pass, `0` fail).
+
+### Slice 9: Activity hardening follow-up (`activities/java-format-practice`, safe evaluator string-literal guards)
+
+Completed:
+- Fixed expression validation to avoid false array/object-literal rejection when `[` or `{` appear only inside quoted strings:
+  - `activities/java-format-practice/client/utils/safeEvaluator.ts`
+- Added focused regression tests:
+  - `activities/java-format-practice/client/utils/safeEvaluator.test.ts`
+
+Implementation notes:
+- `validateExpressionSyntax` now checks the array/object literal regex against `exprToCheck` (string literals stripped), not the raw `expr`.
+- New tests assert quoted bracket/brace characters are allowed while actual array/object literal inputs are still rejected.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass.
+- `npm --workspace activities test` -> pass (`55` pass, `0` fail).
+
+## Phase 6 Progress (Scripts and Tooling Migration)
+
+### Slice 4: Documentation hardening (runtime/tooling policy clarity)
+
+Completed:
+- Tightened deployment/runtime documentation for post-migration conventions:
+  - `DEPLOYMENT.md`
+  - `README.md`
+- Standardized remaining architecture/docs code fences to TypeScript-first where examples describe TS modules:
+  - `ARCHITECTURE.md`
+  - `ADDING_ACTIVITIES.md`
+  - `ALGORITHM_DEMO_IMPLEMENTATION.md`
+  - `activities/algorithm-demo/README.md`
+  - `activities/algorithm-demo/EXTENSION_GUIDE.md`
+
+Implementation notes:
+- `DEPLOYMENT.md` now presents one TypeScript-first Render build/start command pair and no longer includes a legacy JS-era build command example.
+- Deployment prerequisites now align with migration baseline (`Node.js 22+`).
+- `README.md` now explicitly calls out intentional tooling exceptions (`server/eslint.config.js`, `activities/eslint.config.js`) for ESLint config compatibility.
+- Architecture and algorithm-demo docs no longer use `javascript`/`jsx` fences for TypeScript-oriented examples.
+
+Validation:
+- `rg -n 'activity\.config\.js|client/index\.js|client/index\.jsx|server/routes\.js|algorithms/index\.js|index\.test\.js|utils\.test\.js|SelectionSort\.jsx|BinarySearch\.jsx|Factorial\.jsx|BinarySearchGame\.jsx|App\.jsx|vite\.config\.js|verify-server\.js|```javascript|```jsx' README.md DEPLOYMENT.md ARCHITECTURE.md ADDING_ACTIVITIES.md ALGORITHM_DEMO_IMPLEMENTATION.md activities/algorithm-demo/README.md activities/algorithm-demo/QUICKSTART.md activities/algorithm-demo/EXTENSION_GUIDE.md` -> no matches.
+- Root script references used in docs remain valid:
+  - `node -e "...required scripts present..."` for `deploy,start,test,verify:server,typecheck` -> pass.
+- Concrete path spot-check for referenced files -> pass.
+
+### Slice 2: Documentation alignment (TypeScript-first examples)
+
+Completed:
+- Updated required migration docs to replace stale JS/JSX path references with current TS/TSX equivalents:
+  - `ADDING_ACTIVITIES.md`
+  - `ALGORITHM_DEMO_IMPLEMENTATION.md`
+  - `activities/algorithm-demo/README.md`
+  - `activities/algorithm-demo/EXTENSION_GUIDE.md`
+  - `ARCHITECTURE.md`
+- Kept runtime-safe backend import guidance in examples where NodeNext resolution expects `.js` specifiers at runtime (for example `activebits-server/core/sessions.js` and `activebits-server/core/sessionNormalization.js` in `.ts` route modules).
+
+Implementation notes:
+- `ADDING_ACTIVITIES.md` now uses TypeScript-first example filenames (`.ts`/`.tsx`) for activity config, client entry, manager/student components, and server routes.
+- `ARCHITECTURE.md` now references `activity.config.ts`, `App.tsx`, and `client/vite.config.ts`, and updates client/server entry examples to TS filenames.
+- Algorithm-demo docs now reflect current repository structure (`index.tsx`, `utils.ts`, `algorithms/index.ts`, `server/routes.ts`, `*.test.ts` / `*.test.tsx`) instead of pre-migration JS filenames.
+
+Validation:
+- `rg -n \"activity\\.config\\.js|client/index\\.js|client/index\\.jsx|server/routes\\.js|algorithms/index\\.js|index\\.test\\.js|utils\\.test\\.js|SelectionSort\\.jsx|BinarySearch\\.jsx|Factorial\\.jsx|BinarySearchGame\\.jsx|App\\.jsx|vite\\.config\\.js|server/core/sessions\\.ts\" ADDING_ACTIVITIES.md ALGORITHM_DEMO_IMPLEMENTATION.md activities/algorithm-demo/README.md activities/algorithm-demo/QUICKSTART.md activities/algorithm-demo/EXTENSION_GUIDE.md ARCHITECTURE.md DEPLOYMENT.md README.md` -> no stale migration-era file references found.
+- Path spot-check for concrete referenced files -> pass (`client/src/activities/index.test.ts`, `server/activities/activityRegistry.test.ts`, and current `activities/algorithm-demo` TS paths).
+
+## Phase 6 Progress (Scripts and Tooling Migration)
+
+### Slice 1: Repo script migration (`scripts/verify-server`)
+
+Completed:
+- Migrated root server smoke verification script to TypeScript:
+  - `scripts/verify-server.js` -> `scripts/verify-server.ts`
+- Updated root script wiring to execute the TS script with `tsx`:
+  - `package.json` (`verify:server` -> `node --import tsx scripts/verify-server.ts`)
+
+Implementation notes:
+- `verify-server.ts` preserves existing smoke-test behavior:
+  - starts server on test port (default `4010`)
+  - polls `/health-check` until ready timeout
+  - prints buffered server output on early exit/failure
+  - shuts down server with `SIGTERM` and exits non-zero on failure
+- Remaining `.js` files in migration scope are tooling configs that currently require JS runtime compatibility:
+  - `server/eslint.config.js`
+  - `activities/eslint.config.js`
+
+Validation:
+- `npm run typecheck --workspaces --if-present` -> pass
+- `npm test` -> pass (full root verification chain green, including `verify:deploy` and TS `verify:server`)
 
 ### Slice 5: Activity migration follow-up (`activities/java-format-practice`, server routes + shared types)
 

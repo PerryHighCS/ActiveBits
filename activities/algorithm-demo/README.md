@@ -33,7 +33,7 @@ A comprehensive instructor-driven algorithm demonstration system with synchroniz
 ### Message Protocol
 
 All WebSocket messages follow this envelope:
-```javascript
+```typescript
 {
   type: "algorithm-selected" | "state-sync" | "event" | "pointer",
   payload: any,
@@ -47,7 +47,7 @@ All WebSocket messages follow this envelope:
 
 Each algorithm implements this interface:
 
-```javascript
+```typescript
 {
   id: string,                    // Unique identifier (kebab-case)
   name: string,                  // Display name
@@ -72,7 +72,7 @@ Each algorithm implements this interface:
 
 ### Session State Structure
 
-```javascript
+```typescript
 {
   id: string,
   type: 'algorithm-demo',
@@ -95,7 +95,7 @@ Each algorithm implements this interface:
 Lines are automatically assigned span IDs: `line-0`, `line-1`, etc.
 
 Steps/events reference these IDs to highlight:
-```javascript
+```typescript
 highlightedLines: new Set(['line-2', 'line-5', 'line-8'])
 ```
 
@@ -124,37 +124,37 @@ Validation ensures all referenced IDs exist during algorithm registration.
 
 ```
 algorithm-demo/
-├── activity.config.js              # Activity metadata
+├── activity.config.ts              # Activity metadata
 ├── client/
-│   ├── index.jsx                   # Client entry point
-│   ├── utils.js                    # Shared utilities (messages, validation)
-│   ├── utils.test.js               # Utility tests
+│   ├── index.tsx                   # Client entry point
+│   ├── utils.ts                    # Shared utilities (messages, validation)
+│   ├── utils.test.ts               # Utility tests
 │   ├── components/
-│   │   ├── PseudocodeRenderer.jsx  # Pseudocode display with highlighting
+│   │   ├── PseudocodeRenderer.tsx  # Pseudocode display with highlighting
 │   │   ├── PseudocodeRenderer.css
-│   │   ├── AlgorithmPicker.jsx     # Algorithm selection UI
+│   │   ├── AlgorithmPicker.tsx     # Algorithm selection UI
 │   │   └── AlgorithmPicker.css
 │   ├── manager/
-│   │   ├── DemoManager.jsx         # Instructor view
+│   │   ├── DemoManager.tsx         # Instructor view
 │   │   └── DemoManager.css
 │   ├── student/
-│   │   ├── DemoStudent.jsx         # Student view (shared/solo)
+│   │   ├── DemoStudent.tsx         # Student view (shared/solo)
 │   │   └── DemoStudent.css
 │   └── algorithms/
-│       ├── index.js                # Algorithm registry & validation
-│       ├── index.test.js           # Algorithm registry tests
+│       ├── index.ts                # Algorithm registry & validation
+│       ├── index.test.ts           # Algorithm registry tests
 │       ├── sorting/
-│       │   ├── SelectionSort.jsx
-│       │   └── InsertionSort.jsx
+│       │   ├── SelectionSort.tsx
+│       │   └── InsertionSort.tsx
 │       ├── search/
-│       │   ├── BinarySearch.jsx
-│       │   └── LinearSearch.jsx
+│       │   ├── BinarySearch.tsx
+│       │   └── LinearSearch.tsx
 │       ├── recursion/
-│       │   └── Factorial.jsx
+│       │   └── Factorial.tsx
 │       └── guessing/
-│           └── BinarySearchGame.jsx
+│           └── BinarySearchGame.tsx
 └── server/
-    └── routes.js                   # API endpoints and WebSocket setup
+    └── routes.ts                   # API endpoints and WebSocket setup
 ```
 
 ## API Endpoints
@@ -176,9 +176,9 @@ algorithm-demo/
 
 ### 1. Create Algorithm Module
 
-Create `activities/algorithm-demo/client/algorithms/{category}/{AlgoName}.jsx`:
+Create `activities/algorithm-demo/client/algorithms/{category}/{AlgoName}.tsx`:
 
-```javascript
+```typescript
 const PSEUDOCODE = [
   'Algorithm(input)',
   '    do something',
@@ -210,10 +210,10 @@ export default MyAlgorithm;
 
 ### 2. Register Algorithm
 
-Add import to `activities/algorithm-demo/client/algorithms/index.js`:
+Add import to `activities/algorithm-demo/client/algorithms/index.ts`:
 
-```javascript
-import MyAlgorithm from './category/MyAlgorithm.jsx';
+```typescript
+import MyAlgorithm from './category/MyAlgorithm';
 
 const ALGORITHMS = [
   // ... existing
@@ -224,8 +224,8 @@ const ALGORITHMS = [
 ### 3. Update Tests
 
 Add algorithm ID to `EXPECTED_ACTIVITIES` in:
-- `client/src/activities/index.test.js`
-- `server/activities/activityRegistry.test.js`
+- `client/src/activities/index.test.ts`
+- `server/activities/activityRegistry.test.ts`
 
 ### 4. Validate
 
@@ -257,7 +257,7 @@ Tests message protocol, line ID validation, and event reducer pattern.
 
 Each algorithm manages its own state using a reducer-like pattern:
 
-```javascript
+```typescript
 function reduceEvent(state, event) {
   switch(event.type) {
     case 'nextStep':

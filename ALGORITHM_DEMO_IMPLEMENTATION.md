@@ -11,44 +11,44 @@ A comprehensive, production-ready algorithm demonstration system has been succes
 ### 1. Core Activity Structure
 - **Location**: `/workspaces/ActiveBits/activities/algorithm-demo/`
 - **Status**: ✅ Complete and tested
-- **Auto-discovery**: Yes (via activity.config.js)
+- **Auto-discovery**: Yes (via activity.config.ts)
 - **Server integration**: Full WebSocket support with broadcast
 - **Build output**: Separate chunk (activity-algorithm-demo-*.js)
 
 ### 2. Implemented Algorithms
 
 #### Sorting Algorithms
-1. **Selection Sort** (`SelectionSort.jsx`)
+1. **Selection Sort** (`SelectionSort.tsx`)
    - Step-by-step visualization of finding minimum and swapping
    - Array highlighting: current i (yellow), min (red), sorted (green)
    - Pseudocode with dynamic line highlighting
 
-2. **Insertion Sort** (`InsertionSort.jsx`)
+2. **Insertion Sort** (`InsertionSort.tsx`)
    - Build sorted array incrementally
    - Visualizes temp variable and shift operations
    - Step descriptions for each operation
 
 #### Search Algorithms
-3. **Binary Search** (`BinarySearch.jsx`)
+3. **Binary Search** (`BinarySearch.tsx`)
    - Efficient divide-and-conquer search
    - Visualizes left/right boundaries and eliminated elements
    - Target display and success state
    - History tracking of all comparisons
 
-4. **Linear Search** (`LinearSearch.jsx`)
+4. **Linear Search** (`LinearSearch.tsx`)
    - Sequential element-by-element search
    - Shows checked elements vs. unchecked
    - Comparison with binary search in efficiency
 
 #### Recursion Demonstrations
-5. **Factorial** (`Factorial.jsx`)
+5. **Factorial** (`Factorial.tsx`)
    - Call stack visualization
    - Frame states: active, waiting, returning
    - Result computation as stack unwinds
    - Adjustable input (1-10)
 
 #### Interactive & Game-based
-6. **Binary Search Guessing Game** (`BinarySearchGame.jsx`)
+6. **Binary Search Guessing Game** (`BinarySearchGame.tsx`)
    - Interactive guessing with instructor/student roles
    - Feedback: "Guess Higher/Lower"
    - Win condition with guess count
@@ -57,19 +57,19 @@ A comprehensive, production-ready algorithm demonstration system has been succes
 ### 3. Shared Components & Utilities
 
 #### Components
-- **PseudocodeRenderer.jsx/css**: Renders pseudocode with span ID support and highlighting
-- **AlgorithmPicker.jsx/css**: Algorithm selection UI with description cards
-- **DemoManager.jsx/css**: Instructor control panel with algorithm selection, step controls
-- **DemoStudent.jsx/css**: Student view (read-only in shared mode, full control in solo)
+- **PseudocodeRenderer.tsx/css**: Renders pseudocode with span ID support and highlighting
+- **AlgorithmPicker.tsx/css**: Algorithm selection UI with description cards
+- **DemoManager.tsx/css**: Instructor control panel with algorithm selection, step controls
+- **DemoStudent.tsx/css**: Student view (read-only in shared mode, full control in solo)
 
 #### Utilities
-- **utils.js**: Message protocol, validation functions, event reducers
-- **algorithms/index.js**: Algorithm registry with validation
+- **utils.ts**: Message protocol, validation functions, event reducers
+- **algorithms/index.ts**: Algorithm registry with validation
 
 ### 4. Message Protocol
 
 All WebSocket communications follow this structure:
-```javascript
+```typescript
 {
   type: "algorithm-selected" | "state-sync" | "event" | "pointer",
   payload: any,
@@ -87,7 +87,7 @@ All WebSocket communications follow this structure:
 
 ### 5. Server Integration
 
-**Routes** (`server/routes.js`):
+**Routes** (`server/routes.ts`):
 - `POST /api/algorithm-demo/create` - Create session
 - `GET /api/algorithm-demo/:sessionId/session` - Get current state
 - `POST /api/algorithm-demo/:sessionId/select` - Select algorithm
@@ -105,7 +105,7 @@ All WebSocket communications follow this structure:
 ## 🏗️ Architecture Details
 
 ### Algorithm Module Contract
-```javascript
+```typescript
 {
   id: string,                      // Unique ID (kebab-case)
   name: string,                    // Display name
@@ -154,13 +154,13 @@ All WebSocket communications follow this structure:
 ## 🧪 Testing & Validation
 
 ### Test Files Created
-1. **`activities/algorithm-demo/client/algorithms/index.test.js`**
+1. **`activities/algorithm-demo/client/algorithms/index.test.ts`**
    - Algorithm registry validation
    - Pseudocode line reference validation
    - Duplicate ID detection
    - Algorithm count verification
 
-2. **`activities/algorithm-demo/client/utils.test.js`**
+2. **`activities/algorithm-demo/client/utils.test.ts`**
    - Message protocol validation
    - Line ID validation
    - Event reducer pattern
@@ -186,38 +186,38 @@ All WebSocket communications follow this structure:
 
 ```
 activities/algorithm-demo/
-├── activity.config.js              # Metadata & auto-discovery
+├── activity.config.ts              # Metadata & auto-discovery
 ├── README.md                        # Comprehensive documentation
 ├── client/
-│   ├── index.jsx                   # Client entry point
-│   ├── utils.js                    # Shared utilities
-│   ├── utils.test.js               # Utility tests
+│   ├── index.tsx                   # Client entry point
+│   ├── utils.ts                    # Shared utilities
+│   ├── utils.test.ts               # Utility tests
 │   ├── components/
-│   │   ├── PseudocodeRenderer.jsx  # Pseudocode with highlighting
+│   │   ├── PseudocodeRenderer.tsx  # Pseudocode with highlighting
 │   │   ├── PseudocodeRenderer.css
-│   │   ├── AlgorithmPicker.jsx     # Algorithm selector
+│   │   ├── AlgorithmPicker.tsx     # Algorithm selector
 │   │   └── AlgorithmPicker.css
 │   ├── manager/
-│   │   ├── DemoManager.jsx         # Instructor interface
+│   │   ├── DemoManager.tsx         # Instructor interface
 │   │   └── DemoManager.css
 │   ├── student/
-│   │   ├── DemoStudent.jsx         # Student interface (shared/solo)
+│   │   ├── DemoStudent.tsx         # Student interface (shared/solo)
 │   │   └── DemoStudent.css
 │   └── algorithms/
-│       ├── index.js                # Registry & validation
-│       ├── index.test.js           # Registry tests
+│       ├── index.ts                # Registry & validation
+│       ├── index.test.ts           # Registry tests
 │       ├── sorting/
-│       │   ├── SelectionSort.jsx
-│       │   └── InsertionSort.jsx
+│       │   ├── SelectionSort.tsx
+│       │   └── InsertionSort.tsx
 │       ├── search/
-│       │   ├── BinarySearch.jsx
-│       │   └── LinearSearch.jsx
+│       │   ├── BinarySearch.tsx
+│       │   └── LinearSearch.tsx
 │       ├── recursion/
-│       │   └── Factorial.jsx
+│       │   └── Factorial.tsx
 │       └── guessing/
-│           └── BinarySearchGame.jsx
+│           └── BinarySearchGame.tsx
 └── server/
-    └── routes.js                   # API & WebSocket handlers
+    └── routes.ts                   # API & WebSocket handlers
 ```
 
 ---
@@ -248,7 +248,7 @@ activities/algorithm-demo/
 - ✅ Progress saved to localStorage
 
 ### System Features
-- ✅ Auto-discovery via activity.config.js
+- ✅ Auto-discovery via activity.config.ts
 - ✅ Lazy-loaded algorithm chunks
 - ✅ WebSocket with resilient reconnection
 - ✅ Session normalization for Valkey
@@ -334,7 +334,7 @@ The build successfully generates:
 
 1. Create algorithm module in `client/algorithms/{category}/`
 2. Implement algorithm contract (id, name, description, pseudocode, views, etc.)
-3. Add to `ALGORITHMS` array in `client/algorithms/index.js`
+3. Add to `ALGORITHMS` array in `client/algorithms/index.ts`
 4. Register step-by-step logic in `initState()` and `reduceEvent()`
 5. Tests automatically validate registration
 
@@ -404,4 +404,3 @@ Located at `activities/algorithm-demo/README.md` includes:
 ## 🎉 Ready for Production
 
 The Algorithm Demo activity is complete, tested, documented, and ready for deployment. Instructors can immediately start leading algorithm demonstrations, and students can both participate in synchronized sessions and practice independently in solo mode.
-

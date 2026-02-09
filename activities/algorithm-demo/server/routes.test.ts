@@ -185,3 +185,59 @@ void test('select route returns 404 for missing session', async () => {
   assert.equal(res.statusCode, 404)
   assert.deepEqual(res.body, { error: 'Session not found' })
 })
+
+void test('select route normalizes array algorithmState payload to object', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createAlgorithmDemoSession('s1'),
+  })
+  setupAlgorithmDemoRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/algorithm-demo/:sessionId/select']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest({ sessionId: 's1' }, {
+      algorithmId: 'linear-search',
+      algorithmState: [1, 2, 3],
+    }),
+    res as unknown as Response,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const updatedData = storeState.store.s1?.data as Record<string, unknown>
+  assert.deepEqual(updatedData.algorithmState, {})
+  assert.equal(storeState.published.length, 1)
+  assert.deepEqual(storeState.published[0]?.message.payload, {})
+})
+
+void test('select route remains successful when publishBroadcast throws', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createAlgorithmDemoSession('s1'),
+  })
+  storeState.sessions.publishBroadcast = async () => {
+    throw new Error('pubsub down')
+  }
+  setupAlgorithmDemoRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/algorithm-demo/:sessionId/select']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest({ sessionId: 's1' }, {
+      algorithmId: 'binary-search',
+      algorithmState: { step: 2 },
+    }),
+    res as unknown as Response,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const updatedData = storeState.store.s1?.data as Record<string, unknown>
+  assert.equal(updatedData.algorithmId, 'binary-search')
+  assert.deepEqual(updatedData.algorithmState, { step: 2 })
+})

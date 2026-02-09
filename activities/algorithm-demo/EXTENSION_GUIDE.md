@@ -8,9 +8,9 @@ This guide provides detailed instructions for extending the Algorithm Demo activ
 
 ### Step 1: Create the Algorithm Module
 
-Create a new file in `client/algorithms/{category}/YourAlgorithm.jsx`:
+Create a new file in `client/algorithms/{category}/YourAlgorithm.tsx`:
 
-```javascript
+```tsx
 import React from 'react';
 import PseudocodeRenderer from '../../components/PseudocodeRenderer';
 
@@ -141,10 +141,10 @@ export default YourAlgorithm;
 
 ### Step 2: Register the Algorithm
 
-Add import to `activities/algorithm-demo/client/algorithms/index.js`:
+Add import to `activities/algorithm-demo/client/algorithms/index.ts`:
 
-```javascript
-import YourAlgorithm from './category/YourAlgorithm.jsx';
+```typescript
+import YourAlgorithm from './category/YourAlgorithm';
 
 const ALGORITHMS = [
   // ... existing algorithms
@@ -154,8 +154,8 @@ const ALGORITHMS = [
 
 ### Step 3: Update Tests
 
-Add to `client/src/activities/index.test.js`:
-```javascript
+Add to `client/src/activities/index.test.ts`:
+```typescript
 const EXPECTED_ACTIVITIES = [
   "algorithm-demo",
   // ... other activities
@@ -180,7 +180,7 @@ Should see:
 
 ### Array Visualization Example
 
-```javascript
+```typescript
 function ArrayVisualization({ array, highlightedIndices }) {
   return (
     <div className="array-container">
@@ -229,7 +229,7 @@ CSS:
 
 ### Graph Visualization Example
 
-```javascript
+```typescript
 function GraphVisualization({ nodes, edges, highlightedNodes }) {
   return (
     <svg className="graph-svg" width="400" height="300">
@@ -269,7 +269,7 @@ function GraphVisualization({ nodes, edges, highlightedNodes }) {
 
 ### Simple Step Counter
 
-```javascript
+```typescript
 function performNextStep(state) {
   if (state.step >= PSEUDOCODE.length - 1) {
     return { ...state, complete: true };
@@ -286,7 +286,7 @@ function performNextStep(state) {
 
 ### Complex State with Nested Updates
 
-```javascript
+```typescript
 function performNextStep(state) {
   let array = [...state.array];
   let { i, j, minIdx } = state;
@@ -328,7 +328,7 @@ function performNextStep(state) {
 
 ### Algorithm with Configurable Parameters
 
-```javascript
+```typescript
 // In initState
 initState(arraySize = 8, maxValue = 100) {
   const array = Array.from({ length: arraySize }, () =>
@@ -359,7 +359,7 @@ initState(arraySize = 8, maxValue = 100) {
 
 ### Algorithm with History Tracking
 
-```javascript
+```typescript
 initState() {
   return {
     // ... state
@@ -393,7 +393,7 @@ function performNextStep(state) {
 
 ### Algorithm with Input Validation
 
-```javascript
+```typescript
 const YourAlgorithm = {
   // ... other fields
 
@@ -413,9 +413,9 @@ const YourAlgorithm = {
 
 ### Custom Endpoint
 
-Add to `server/routes.js`:
+Add to `server/routes.ts`:
 
-```javascript
+```typescript
 app.post('/api/algorithm-demo/:sessionId/custom-action', async (req, res) => {
   try {
     const session = await sessions.get(req.params.sessionId);
@@ -438,7 +438,7 @@ app.post('/api/algorithm-demo/:sessionId/custom-action', async (req, res) => {
 
 ### Recording Demonstrations
 
-```javascript
+```typescript
 // In session data
 session.data.recording = {
   startTime: Date.now(),
@@ -474,7 +474,7 @@ session.data.recording.steps.push({
 
 ### Color Palette
 
-```javascript
+```typescript
 const colors = {
   primary: '#4a90e2',       // Blue - current
   highlight: '#fffacd',    // Yellow - highlighted
@@ -490,12 +490,12 @@ const colors = {
 ## Performance Tips
 
 1. **Memoize expensive computations**
-   ```javascript
+   ```typescript
    const memoizedState = useMemo(() => computeState(state), [state]);
    ```
 
 2. **Avoid re-creating objects in render**
-   ```javascript
+   ```typescript
    // Bad
    highlightedIds={new Set(['line-0', 'line-1'])}
    
@@ -506,14 +506,14 @@ const colors = {
    ```
 
 3. **Optimize array operations**
-   ```javascript
+   ```typescript
    // Use slice/concat instead of spread for large arrays
    const newArray = state.array.slice();
    newArray[i] = value;
    ```
 
 4. **Debounce rapid updates**
-   ```javascript
+   ```typescript
    const [debouncedState, setDebouncedState] = useState(state);
    useEffect(() => {
      const timer = setTimeout(() => setDebouncedState(state), 100);
@@ -527,10 +527,10 @@ const colors = {
 
 ### Unit Test Template
 
-```javascript
+```typescript
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import YourAlgorithm from '../YourAlgorithm.jsx';
+import YourAlgorithm from '../YourAlgorithm.tsx';
 
 test('YourAlgorithm - initialization', () => {
   const state = YourAlgorithm.initState(10);
@@ -564,7 +564,7 @@ test('YourAlgorithm - completion', () => {
 
 ### Algorithm not appearing in picker
 
-1. Check `index.js` - algorithm added to `ALGORITHMS` array?
+1. Check `index.ts` - algorithm added to `ALGORITHMS` array?
 2. Run registry validation: `npm test --workspace client`
 3. Clear browser cache
 4. Rebuild: `npm run build --workspace client`
@@ -596,10 +596,10 @@ test('YourAlgorithm - completion', () => {
 ## Support & Examples
 
 For complete examples, see:
-- `SelectionSort.jsx` - Array-based sorting
-- `BinarySearch.jsx` - Search with pruning
-- `Factorial.jsx` - Recursion with stack
-- `BinarySearchGame.jsx` - Interactive game
+- `SelectionSort.tsx` - Array-based sorting
+- `BinarySearch.tsx` - Search with pruning
+- `Factorial.tsx` - Recursion with stack
+- `BinarySearchGame.tsx` - Interactive game
 
 All examples include:
 - Multiple state management patterns
@@ -607,4 +607,3 @@ All examples include:
 - User interaction handling
 - Step descriptions
 - Completion detection
-

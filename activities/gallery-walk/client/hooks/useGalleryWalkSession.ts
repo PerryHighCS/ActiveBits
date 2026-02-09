@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
+import type { SortableFeedbackEntry } from '../manager/feedbackUtils';
 
 const DEFAULT_STAGE = 'gallery';
 
 export type GalleryWalkStage = string;
 
-export type GalleryWalkFeedbackEntry = Record<string, unknown> & {
-  id?: string;
+export type GalleryWalkFeedbackEntry = SortableFeedbackEntry & {
+  to?: string | null;
+  fromNameSnapshot?: string;
+  createdAt?: number;
 };
 
 export type GalleryWalkRevieweeRecord = Record<string, unknown> & {

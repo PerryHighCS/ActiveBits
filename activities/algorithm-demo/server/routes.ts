@@ -47,6 +47,13 @@ interface EventRequestBody {
   payload?: unknown
 }
 
+function normalizeAlgorithmState(value: unknown): Record<string, unknown> {
+  if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return {}
+}
+
 function readSessionId(req: Request): string | null {
   return typeof req.params.sessionId === 'string' && req.params.sessionId.length > 0
     ? req.params.sessionId
@@ -65,10 +72,7 @@ function getSessionData(session: SessionRecord): AlgorithmDemoSessionData {
   const normalized: AlgorithmDemoSessionData = {
     ...data,
     algorithmId: typeof data.algorithmId === 'string' ? data.algorithmId : null,
-    algorithmState:
-      data.algorithmState != null && typeof data.algorithmState === 'object'
-        ? (data.algorithmState as Record<string, unknown>)
-        : {},
+    algorithmState: normalizeAlgorithmState(data.algorithmState),
     history,
   }
 
@@ -107,7 +111,11 @@ export default function setupAlgorithmDemoRoutes(
     const msgObj = { type, payload, timestamp: Date.now(), ...metadata }
     const msg = JSON.stringify(msgObj)
     if (sessions.publishBroadcast) {
-      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, msgObj)
+      try {
+        await sessions.publishBroadcast(`session:${sessionId}:broadcast`, msgObj)
+      } catch (err) {
+        console.error('Failed to publish algorithm-demo broadcast message:', err)
+      }
     }
 
     for (const client of ws.wss.clients) {
@@ -178,7 +186,7 @@ export default function setupAlgorithmDemoRoutes(
       const { algorithmId, algorithmState } = (req.body ?? {}) as SelectRequestBody
       const data = getSessionData(session)
       data.algorithmId = typeof algorithmId === 'string' ? algorithmId : null
-      data.algorithmState = algorithmState ?? {}
+      data.algorithmState = normalizeAlgorithmState(algorithmState)
       data.history.push({
         action: 'algorithm-selected',
         algorithmId: data.algorithmId,
@@ -215,7 +223,7 @@ export default function setupAlgorithmDemoRoutes(
 
       const { algorithmState } = (req.body ?? {}) as StateRequestBody
       const data = getSessionData(session)
-      data.algorithmState = algorithmState ?? {}
+      data.algorithmState = normalizeAlgorithmState(algorithmState)
       data.history.push({
         action: 'state-update',
         timestamp: Date.now(),

@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import SessionHeader from '@src/components/common/SessionHeader';
-import { sortFeedbackEntries, type SortDirection, type SortableFeedbackEntry } from './feedbackUtils';
+import { sortFeedbackEntries, type SortDirection, type SortableFeedbackField } from './feedbackUtils';
 import GalleryWalkFeedbackTable from '../components/GalleryWalkFeedbackTable';
 import GalleryWalkNotesView from '../components/GalleryWalkNotesView';
 import Button from '@src/components/ui/Button';
@@ -15,7 +15,7 @@ import useGalleryWalkSession, {
   type GalleryWalkReviewers,
 } from '../hooks/useGalleryWalkSession';
 
-type SortField = 'to' | 'fromNameSnapshot' | 'createdAt';
+type SortField = SortableFeedbackField;
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
@@ -118,7 +118,7 @@ export default function ManagerPage() {
   };
 
   const sortedFeedback = useMemo(
-    () => sortFeedbackEntries(feedback as SortableFeedbackEntry[], sortField, sortDirection) as GalleryWalkFeedbackEntry[],
+    () => sortFeedbackEntries(feedback, sortField, sortDirection),
     [feedback, sortField, sortDirection],
   );
 

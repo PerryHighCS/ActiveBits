@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { evaluateFormatString } from './utils/formatUtils'
+import { evaluateFormatString } from './utils/formatUtils.js'
 
 interface ChallengeVariable {
   name: string

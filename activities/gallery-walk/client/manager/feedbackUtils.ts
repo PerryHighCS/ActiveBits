@@ -1,21 +1,24 @@
 export type SortDirection = 'asc' | 'desc';
+export type SortableFeedbackField = 'to' | 'fromNameSnapshot' | 'createdAt';
 
 export type SortableFeedbackEntry = Record<string, unknown> & {
   id?: string;
+  to?: string | null;
+  fromNameSnapshot?: string;
+  createdAt?: number;
 };
 
 export function sortFeedbackEntries<T extends SortableFeedbackEntry>(
   entries: T[] = [],
-  field: string = 'createdAt',
+  field: SortableFeedbackField = 'createdAt',
   direction: SortDirection = 'desc',
 ): T[] {
-  const safeField = field || 'createdAt';
   const dir: SortDirection = direction === 'asc' ? 'asc' : 'desc';
   const multiplier = dir === 'asc' ? 1 : -1;
 
   return [...entries].sort((a, b) => {
-    const valA = a?.[safeField];
-    const valB = b?.[safeField];
+    const valA = a?.[field];
+    const valB = b?.[field];
     if (valA == null && valB == null) return 0;
     if (valA == null) return -1 * multiplier;
     if (valB == null) return 1 * multiplier;

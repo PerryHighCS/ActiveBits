@@ -11,7 +11,7 @@ async function importTsModule<T>(relativePath: string): Promise<T> {
   return (await import(moduleUrl)) as T
 }
 
-void test('phase 3 TS status route registers and serves a status payload', async () => {
+void test('status route registers and serves a status payload', async () => {
   const module = await importTsModule<{ registerStatusRoute: (options: {
     app: { get(path: string, handler: (_req: unknown, res: MockResponse) => void | Promise<void>): void }
     sessions: {
@@ -53,7 +53,7 @@ void test('phase 3 TS status route registers and serves a status payload', async
   assert.equal(payload?.sessions?.count, 0)
 })
 
-void test('phase 3 TS persistent routes register expected endpoints and cookie parser', async () => {
+void test('persistent routes register expected endpoints and cookie parser', async () => {
   const module = await importTsModule<{
     registerPersistentSessionRoutes: (options: {
       app: {
@@ -101,7 +101,7 @@ void test('phase 3 TS persistent routes register expected endpoints and cookie p
   assert.ok(postPaths.includes('/api/persistent-session/authenticate'))
 })
 
-void test('phase 3 TS activity registry exports expected API surface', async () => {
+void test('activity registry exports expected API surface', async () => {
   const module = await importTsModule<{
     getAllowedActivities: () => string[]
     isValidActivity: (activityName: string) => boolean
