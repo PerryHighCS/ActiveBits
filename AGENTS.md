@@ -54,6 +54,9 @@ Run these minimum checks based on scope:
 5. Cross-workspace changes
    - `npm run typecheck --workspaces --if-present`
    - `npm test`
+6. Sandbox/agent environments that block local port binding
+   - Keep `npm test` as the primary merge gate when available.
+   - If port-binding tests fail due environment constraints (for example `EPERM` on listen), run `npm run test:codex` and record the limitation in validation notes.
 
 ## Destructive Command Policy
 

@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint .",
     "test": "sh -c 'set -e; files=$(find . -not -path \"./node_modules/*\" \\( -name \"*.test.js\" -o -name \"*.test.ts\" \\) -print); if [ -z \"$files\" ]; then echo \"No server tests found\"; exit 0; fi; node --import tsx --test $files'",
+    "test:nonport": "sh -c 'set -e; files=$(find . -not -path \"./node_modules/*\" \\( -name \"*.test.js\" -o -name \"*.test.ts\" \\) ! -name \"galleryWalkRoutes.test.ts\" ! -name \"sessionStore.test.ts\" ! -name \"statusRoute.test.ts\" -print); if [ -z \"$files\" ]; then echo \"No server tests found\"; exit 0; fi; node --import tsx --test $files'",
     "typecheck": "tsc --noEmit",
     "test:valkey": "node --import tsx test-valkey.ts",
     "monitor:valkey": "node --import tsx monitor-valkey.ts"
