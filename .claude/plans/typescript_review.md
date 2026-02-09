@@ -775,6 +775,62 @@ Validation:
 - `npm --workspace activities test` -> pass
 - `npm run typecheck --workspaces --if-present` -> pass
 
+## Phase 7 Progress (Cleanup and Strictness Hardening)
+
+### Slice 3: Remove remaining JS tooling exceptions
+
+Completed:
+- Migrated remaining ESLint config files from `.js` to `.mjs`:
+  - `server/eslint.config.js` -> `server/eslint.config.mjs`
+  - `activities/eslint.config.js` -> `activities/eslint.config.mjs`
+- Tightened source-extension guard to enforce zero `.js/.jsx` files in migration scope:
+  - `scripts/verify-no-js-sources.sh` now fails on any `.js/.jsx` match under `client`, `server`, `activities`, `scripts`.
+
+Implementation notes:
+- Workspaces already run with `"type": "module"`, so ESLint flat config resolution remains compatible with `.mjs`.
+- This removes the last source-extension allowlist entries that previously exempted ESLint configs.
+
+Validation:
+- `npm --workspace server run lint` -> pass
+- `npm --workspace activities run lint` -> pass
+- `npm run verify:source-extensions` -> pass
+
+## Phase 7 Progress (Cleanup and Strictness Hardening)
+
+### Slice 1: Source extension guardrail
+
+Completed:
+- Added a dedicated source-extension guard script:
+  - `scripts/verify-no-js-sources.sh`
+- Added root package script:
+  - `npm run verify:source-extensions`
+
+Implementation notes:
+- Guard scans `client`, `server`, `activities`, and `scripts` for `.js/.jsx`.
+- Guard currently allows only documented tooling exceptions:
+  - `server/eslint.config.js`
+  - `activities/eslint.config.js`
+- This automates the previous manual `find` command in the migration plan.
+
+Validation:
+- `npm run verify:source-extensions` -> pass
+
+### Slice 2: Route-param strictness follow-up (`useParams` optional typing)
+
+Completed:
+- Updated remaining activity managers that still typed `sessionId` as always-present:
+  - `activities/gallery-walk/client/manager/ManagerPage.tsx`
+  - `activities/python-list-practice/client/manager/PythonListPracticeManager.tsx`
+
+Implementation notes:
+- Both components now use `useParams<{ sessionId?: string }>()`.
+- Guard expressions were normalized to explicit null checks where relevant (`sessionId == null` / `sessionId != null`) and reconnect logic now avoids string truthiness checks.
+
+Validation:
+- `npm --workspace activities run typecheck` -> pass
+- `npm --workspace activities test` -> pass
+- `npm run verify:source-extensions` -> pass
+
 ### Slice 5: README simplification (human-facing index)
 
 Completed:

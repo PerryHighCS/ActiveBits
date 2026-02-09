@@ -23,7 +23,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 export default function ManagerPage() {
-  const { sessionId } = useParams<{ sessionId: string }>();
+  const { sessionId } = useParams<{ sessionId?: string }>();
 
   const {
     stage,
@@ -133,7 +133,7 @@ export default function ManagerPage() {
     }
   }, [currentSignature, exportSignature]);
 
-  const hasUnsavedChanges = Boolean(sessionId && currentSignature !== exportSignature);
+  const hasUnsavedChanges = sessionId != null && currentSignature !== exportSignature;
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -262,14 +262,14 @@ export default function ManagerPage() {
       data-print-title={!showNotesView ? (sessionTitle || 'Gallery Walk Feedback') : undefined}
     >
       <div className="print:hidden">
-        <SessionHeader activityName="Gallery Walk" sessionId={sessionId || 'unknown'} />
+        <SessionHeader activityName="Gallery Walk" sessionId={sessionId ?? 'unknown'} />
       </div>
       {!showNotesView && (
         <p className="manager-print-title hidden print:block text-center text-lg font-semibold mb-4">
           {sessionTitle || 'Gallery Walk Feedback'}
         </p>
       )}
-      {!sessionId ? (
+      {sessionId == null ? (
         <div className="mt-6 text-gray-600 space-y-2">
           <p>No session selected. Start a Gallery Walk from the dashboard to get a join code.</p>
           <Link to="/manage" className="text-blue-600 underline">

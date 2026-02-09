@@ -21,7 +21,7 @@ interface WebSocketMessage {
 }
 
 const PythonListPracticeManager: FC = () => {
-  const { sessionId } = useParams<{ sessionId: string }>()
+  const { sessionId } = useParams<{ sessionId?: string }>()
   const navigate = useNavigate()
   const [students, setStudents] = useState<PythonListPracticeStudent[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -92,7 +92,7 @@ const PythonListPracticeManager: FC = () => {
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: Boolean(sessionId),
+    shouldReconnect: sessionId != null,
     onOpen: handleWsOpen,
     onMessage: handleWsMessage,
     onError: handleWsError,

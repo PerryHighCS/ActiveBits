@@ -43,7 +43,7 @@ if (nameSubmitted !== true && isSoloSession !== true)
 className="border-red-600! text-red-600! hover:bg-red-50! hover:text-red-700!"
 
 // AFTER (correct Tailwind syntax)
-className="!border-red-600 !text-red-600 hover:!bg-red-50 hover:!text-red-700"
+className="border-red-600! text-red-600! hover:bg-red-50! hover:text-red-700!"
 ```
 **Impact**: In Tailwind CSS, the `!` modifier (for `!important`) comes BEFORE the class name, not after.
 

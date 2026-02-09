@@ -22,6 +22,7 @@
         "test:activities:activity:hb": "sh scripts/with-heartbeat.sh \"activity test\" npm run test:activities:activity",
         "verify:deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
         "verify:server": "node --import tsx scripts/verify-server.ts",
+        "verify:source-extensions": "bash scripts/verify-no-js-sources.sh",
         "typecheck": "npm run typecheck --workspaces --if-present",
         "typecheck:hb": "sh scripts/with-heartbeat.sh \"typecheck\" npm run typecheck",
         "test:chunks": "npm run typecheck && npm run lint && npm --workspace client test && npm --workspace server test && npm --workspace activities test",

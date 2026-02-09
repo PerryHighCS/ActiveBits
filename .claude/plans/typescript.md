@@ -718,7 +718,7 @@ npm run build
 npm start
 
 # check remaining JS/JSX source files in migration scope
-find client server activities scripts -path '*/node_modules/*' -prune -o -path '*/dist/*' -prune -o \( -name "*.js" -o -name "*.jsx" \) -print
+npm run verify:source-extensions
 
 # final typecheck
 npm run typecheck --workspaces --if-present
