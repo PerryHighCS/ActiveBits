@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
-import AlgorithmPicker from '../components/AlgorithmPicker'
+import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
-  getAllAlgorithms,
   getAlgorithm,
+  getAllAlgorithms,
   type AlgorithmState,
   type AlgorithmViewProps,
 } from '../algorithms'
+import AlgorithmPicker from '../components/AlgorithmPicker'
 import { MESSAGE_TYPES, hydrateAlgorithmState, normalizeAlgorithmState } from '../utils'
 import './DemoStudent.css'
 

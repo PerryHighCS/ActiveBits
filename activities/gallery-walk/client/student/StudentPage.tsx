@@ -1,20 +1,20 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import ReviewerScanner from '../components/ReviewerScanner.js';
-import ProjectStationCard from '../components/ProjectStationCard.js';
-import LocalReviewerForm from '../components/LocalReviewerForm.js';
-import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer.js';
-import FeedbackView from '../components/FeedbackView.js';
-import ReviewerPanel from '../components/ReviewerPanel.js';
-import RegistrationForm from '../components/RegistrationForm.js';
-import useGalleryWalkSession, {
-  type GalleryWalkFeedbackEntry,
-  type GalleryWalkRevieweeRecord,
-  getMessageFeedbackEntry,
-  getMessageReviewees,
-} from '../hooks/useGalleryWalkSession.js';
-import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
 import { generateShortId } from '../../shared/id.js';
+import { DEFAULT_NOTE_STYLE_ID, isNoteStyleId } from '../../shared/noteStyles.js';
+import FeedbackView from '../components/FeedbackView.js';
+import GalleryWalkSoloViewer from '../components/GalleryWalkSoloViewer.js';
+import LocalReviewerForm from '../components/LocalReviewerForm.js';
+import ProjectStationCard from '../components/ProjectStationCard.js';
+import RegistrationForm from '../components/RegistrationForm.js';
+import ReviewerPanel from '../components/ReviewerPanel.js';
+import ReviewerScanner from '../components/ReviewerScanner.js';
+import useGalleryWalkSession, {
+    type GalleryWalkFeedbackEntry,
+    type GalleryWalkRevieweeRecord,
+    getMessageFeedbackEntry,
+    getMessageReviewees,
+} from '../hooks/useGalleryWalkSession.js';
 
 const REVIEWEE_ID_PATTERN = /^[A-Z0-9]{6}$/;
 const REVIEWER_ID_PATTERN = /^[A-Z0-9]{6,12}$/;

@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
 import FeedbackCards, { buildFeedbackCardKeys } from './FeedbackCards.js';
 import FeedbackView from './FeedbackView.js';

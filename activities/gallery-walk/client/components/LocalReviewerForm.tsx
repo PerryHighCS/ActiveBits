@@ -1,6 +1,6 @@
 import React from 'react';
-import NoteStyleSelect from './NoteStyleSelect.js';
 import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles.js';
+import NoteStyleSelect from './NoteStyleSelect.js';
 
 interface LocalReviewerFormProps {
   reviewerName: string;

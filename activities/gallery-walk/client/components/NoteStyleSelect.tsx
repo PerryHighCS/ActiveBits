@@ -1,10 +1,10 @@
 import React, {
-  useState,
-  useRef,
-  useEffect,
-  useMemo,
-  useId,
-  useCallback,
+    useCallback,
+    useEffect,
+    useId,
+    useMemo,
+    useRef,
+    useState,
 } from 'react';
 import { NOTE_STYLE_OPTIONS } from '../../shared/noteStyles.js';
 

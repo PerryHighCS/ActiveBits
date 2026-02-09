@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
+import { hashStringFNV1a, normalizeKeyPart, toKeyLabel } from '../../shared/keyUtils.js';
 import { getNoteStyleClassName, normalizeNoteStyleId } from '../../shared/noteStyles.js';
-import { normalizeKeyPart, toKeyLabel, hashStringFNV1a } from '../../shared/keyUtils.js';
 
 interface FeedbackCardEntry {
   id?: string;

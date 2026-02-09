@@ -1,6 +1,6 @@
-import React from 'react';
-import type { ReactNode } from 'react';
 import Button from '@src/components/ui/Button.js';
+import type { ReactNode } from 'react';
+import React from 'react';
 
 interface ToggleLabels {
   notes: string;

@@ -1,16 +1,16 @@
-import {
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-  useEffect,
-} from 'react';
-import type { ReactNode } from 'react';
 import Button from '@src/components/ui/Button';
+import type { ReactNode } from 'react';
+import {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from 'react';
 import FeedbackCards from './FeedbackCards.js';
+import FeedbackViewSwitcher from './FeedbackViewSwitcher.js';
 import GalleryWalkFeedbackTable from './GalleryWalkFeedbackTable.js';
 import GalleryWalkNotesView from './GalleryWalkNotesView.js';
-import FeedbackViewSwitcher from './FeedbackViewSwitcher.js';
 
 type ViewerMode = 'notes' | 'table';
 type SortField = 'to' | 'from' | 'createdAt';

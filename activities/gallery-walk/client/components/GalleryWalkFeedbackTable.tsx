@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
 import type { ReactNode } from 'react';
+import React, { useMemo } from 'react';
+import { hashStringFNV1a, normalizeKeyPart, toKeyLabel } from '../../shared/keyUtils.js';
 import { getTimestampMeta } from '../manager/managerUtils.js';
-import { normalizeKeyPart, toKeyLabel, hashStringFNV1a } from '../../shared/keyUtils.js';
 
 interface FeedbackEntry {
   id?: string;
