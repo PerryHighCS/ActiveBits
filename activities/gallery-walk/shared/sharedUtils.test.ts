@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { generateShortId } from './id'
-import { hashStringFNV1a, normalizeKeyPart, toKeyLabel } from './keyUtils'
+import { generateShortId } from './id.js'
+import { hashStringFNV1a, normalizeKeyPart, toKeyLabel } from './keyUtils.js'
 import {
     DEFAULT_NOTE_STYLE_ID,
     NOTE_STYLE_OPTIONS,
     getNoteStyleClassName,
     isNoteStyleId,
     normalizeNoteStyleId,
-} from './noteStyles'
+} from './noteStyles.js'
 
 void test('generateShortId returns uppercase alphanumeric ids of requested length', () => {
   const id = generateShortId(8)

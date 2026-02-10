@@ -8,7 +8,7 @@ import {
   getMessageFeedbackEntry,
   insertOrReplaceFeedbackEntry,
   type GalleryWalkFeedbackEntry,
-} from './useGalleryWalkSession';
+} from './useGalleryWalkSession.js';
 
 void test('buildGalleryWalkWsUrl derives protocol from location', () => {
   const secure = buildGalleryWalkWsUrl('abc123', { protocol: 'https:', host: 'example.com' });
