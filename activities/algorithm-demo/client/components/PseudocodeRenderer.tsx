@@ -46,7 +46,7 @@ export default function PseudocodeRenderer({
       {lines.map((line, idx) => {
         const overlayEntry = overlays[`line-${idx}`]
         return (
-          <div key={idx} className="pseudocode-line">
+          <span key={idx} className="pseudocode-line">
             <span
               id={`line-${idx}`}
               className={`pseudocode-span ${highlightSet.has(`line-${idx}`) ? 'highlighted' : ''} ${overlayEntry != null ? 'has-overlay' : ''}`}
@@ -54,7 +54,7 @@ export default function PseudocodeRenderer({
               {renderPseudocodeWithBold(line)}
               {overlayEntry != null && renderOverlay(overlayEntry)}
             </span>
-          </div>
+          </span>
         )
       })}
     </pre>

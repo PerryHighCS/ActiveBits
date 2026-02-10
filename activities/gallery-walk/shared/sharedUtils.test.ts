@@ -16,6 +16,14 @@ void test('generateShortId returns uppercase alphanumeric ids of requested lengt
   assert.match(id, /^[BCDFGHJKLMNPQRSTVWXYZ23456789]{8}$/)
 })
 
+void test('generateShortId uses default length and handles non-positive lengths', () => {
+  const defaultId = generateShortId()
+  assert.equal(defaultId.length, 6)
+  assert.match(defaultId, /^[BCDFGHJKLMNPQRSTVWXYZ23456789]{6}$/)
+  assert.equal(generateShortId(0), '')
+  assert.equal(generateShortId(-2), '')
+})
+
 void test('normalizeNoteStyleId falls back to default style for invalid values', () => {
   assert.equal(normalizeNoteStyleId('invalid-style'), DEFAULT_NOTE_STYLE_ID)
   assert.equal(normalizeNoteStyleId(null), DEFAULT_NOTE_STYLE_ID)

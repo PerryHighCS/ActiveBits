@@ -89,4 +89,6 @@ void test('FormatReferenceModal renders sections only when open', () => {
   assert.match(openMarkup, /Formatter Reference/)
   assert.match(openMarkup, /Specifiers/)
   assert.match(openMarkup, /Tips/)
+  assert.match(openMarkup, /<th[^>]*scope="col"[^>]*>Specifier<\/th>/)
+  assert.match(openMarkup, /<th[^>]*scope="col"[^>]*>Type<\/th>/)
 })

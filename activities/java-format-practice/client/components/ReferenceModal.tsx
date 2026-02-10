@@ -31,7 +31,9 @@ function renderTable(section: ReferenceTableSection) {
         <thead>
           <tr>
             {section.columns.map((column) => (
-              <th key={column}>{column}</th>
+              <th key={column} scope="col">
+                {column}
+              </th>
             ))}
           </tr>
         </thead>

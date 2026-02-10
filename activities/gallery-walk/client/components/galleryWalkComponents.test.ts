@@ -71,6 +71,16 @@ void test('buildFeedbackRowKeys disambiguates duplicate fallback keys determinis
   assert.equal(keys[1], `${keys[0]}#2`);
 });
 
+void test('buildFeedbackRowKeys disambiguates duplicate id keys deterministically', () => {
+  const keys = buildFeedbackRowKeys([
+    { id: 'dup-id', message: 'first' },
+    { id: 'dup-id', message: 'second' },
+  ]);
+
+  assert.equal(keys[0], 'id:dup-id');
+  assert.equal(keys[1], 'id:dup-id#2');
+});
+
 void test('buildFeedbackCardKeys prefers id and uses stable field-derived fallback keys', () => {
   const longMessage = 'Excellent work '.repeat(50);
   const baselineKeys = buildFeedbackCardKeys([
@@ -101,4 +111,14 @@ void test('buildFeedbackCardKeys disambiguates duplicate fallback keys determini
   const keys = buildFeedbackCardKeys(duplicateEntries);
   assert.match(keys[0] ?? '', /^card:Alex\|1700000000000\|[a-z0-9]+$/);
   assert.equal(keys[1], `${keys[0]}#2`);
+});
+
+void test('buildFeedbackCardKeys disambiguates duplicate id keys deterministically', () => {
+  const keys = buildFeedbackCardKeys([
+    { id: 'dup-id', message: 'first' },
+    { id: 'dup-id', message: 'second' },
+  ]);
+
+  assert.equal(keys[0], 'id:dup-id');
+  assert.equal(keys[1], 'id:dup-id#2');
 });

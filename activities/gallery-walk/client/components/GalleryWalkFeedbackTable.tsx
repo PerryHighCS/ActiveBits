@@ -38,7 +38,10 @@ export function buildFeedbackRowKeys(feedback: FeedbackEntry[]): string[] {
 
   return feedback.map((entry) => {
     if (typeof entry.id === 'string' && entry.id.trim() !== '') {
-      return `id:${entry.id}`;
+      const idKey = `id:${entry.id}`;
+      const occurrence = seenKeys.get(idKey) ?? 0;
+      seenKeys.set(idKey, occurrence + 1);
+      return occurrence === 0 ? idKey : `${idKey}#${occurrence + 1}`;
     }
 
     const createdAtPart = Number.isFinite(entry.createdAt) ? String(entry.createdAt) : 'na';
