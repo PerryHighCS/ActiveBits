@@ -69,5 +69,5 @@ export default function ChallengeSelector({
         </fieldset>
       </div>
     </React.Fragment>
-  );
+  )
 }
