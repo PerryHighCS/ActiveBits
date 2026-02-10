@@ -1,10 +1,10 @@
 import React, {
-    useCallback,
-    useEffect,
-    useId,
-    useMemo,
-    useRef,
-    useState,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
 } from 'react';
 import { NOTE_STYLE_OPTIONS } from '../../shared/noteStyles.js';
 
@@ -175,7 +175,7 @@ export default function NoteStyleSelect({
           aria-activedescendant={NOTE_STYLE_OPTIONS[highlightedIndex]?.id ? `note-style-option-${NOTE_STYLE_OPTIONS[highlightedIndex].id}` : undefined}
           tabIndex={-1}
           ref={listboxRef}
-          className="absolute z-10 w-64 max-h-[16rem] overflow-auto rounded border border-gray-200 bg-white p-3 shadow-lg focus:outline-none"
+          className="absolute z-10 w-64 max-h-64 overflow-auto rounded border border-gray-200 bg-white p-3 shadow-lg focus:outline-none"
           style={dropdownPlacement === 'top'
             ? { bottom: 'calc(100% + 0.5rem)' }
             : { top: 'calc(100% + 0.5rem)' }}
