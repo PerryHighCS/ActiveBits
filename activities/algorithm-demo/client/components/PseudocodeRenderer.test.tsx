@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
-import PseudocodeRenderer from './PseudocodeRenderer'
+import PseudocodeRenderer from './PseudocodeRenderer.js'
 
 void test('PseudocodeRenderer supports highlight arrays and overlay values', () => {
   const html = renderToStaticMarkup(

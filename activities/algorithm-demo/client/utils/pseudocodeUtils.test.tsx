@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { renderBoldText, renderPseudocodeWithBold } from './pseudocodeUtils'
+import { renderBoldText, renderPseudocodeWithBold } from './pseudocodeUtils.js'
 
 void test('renderBoldText tokenizes markdown-style bold spans', () => {
   const tokens = renderBoldText('**function** mergeSort(arr)')

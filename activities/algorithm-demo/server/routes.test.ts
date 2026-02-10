@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Request, Response } from 'express'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
-import setupAlgorithmDemoRoutes from './routes'
+import setupAlgorithmDemoRoutes from './routes.js'
 
 type RouteHandler = (req: Request, res: Response) => Promise<void>
 type MockSocket = { readyState: number; sessionId?: string | null; send: (payload: string) => void }

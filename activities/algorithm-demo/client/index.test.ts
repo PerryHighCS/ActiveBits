@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import algorithmDemoActivity from './index'
+import algorithmDemoActivity from './index.js'
 
 void test('algorithm-demo activity client module exports manager/student components', () => {
   assert.equal(typeof algorithmDemoActivity.ManagerComponent, 'function')

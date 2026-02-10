@@ -11,7 +11,7 @@ import {
   validateLineIds,
   hydrateAlgorithmState,
   type ReducibleAlgorithmState,
-} from './utils'
+} from './utils.js'
 
 void test('MESSAGE_TYPES enum', () => {
   assert.equal(MESSAGE_TYPES.ALGORITHM_SELECTED, 'algorithm-selected')

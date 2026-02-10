@@ -2,20 +2,20 @@ import { useCallback, useEffect, useRef, useState, type ComponentType } from 're
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
-import AlgorithmPicker from '../components/AlgorithmPicker'
+import AlgorithmPicker from '../components/AlgorithmPicker.js'
 import {
   getAllAlgorithms,
   getAlgorithm,
   type AlgorithmState,
   type AlgorithmViewProps,
-} from '../algorithms'
+} from '../algorithms/index.js'
 import {
   MESSAGE_TYPES,
   createMessage,
   hydrateAlgorithmState,
   messageReplacer,
   normalizeAlgorithmState,
-} from '../utils'
+} from '../utils.js'
 import './DemoManager.css'
 
 interface SessionResponseData {

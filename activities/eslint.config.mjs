@@ -15,6 +15,7 @@ const tsRules = {
   ...tsEslintFlatRecommendedRules,
   ...tsEslintRecommendedRules,
   'no-unused-vars': 'off',
+  'no-unused-expressions': 'off',
   '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
   '@typescript-eslint/no-explicit-any': 'error',
   '@typescript-eslint/consistent-type-imports': [

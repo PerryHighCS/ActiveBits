@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import PseudocodeRenderer from '../../components/PseudocodeRenderer'
-import type { AlgorithmEvent, AlgorithmModule, AlgorithmState, AlgorithmViewProps } from '../index'
+import PseudocodeRenderer from '../../components/PseudocodeRenderer.js'
+import type { AlgorithmEvent, AlgorithmModule, AlgorithmState, AlgorithmViewProps } from '../index.js'
 
 type FrameState = 'active' | 'waiting' | 'returning'
 type AnimationTarget = string | null

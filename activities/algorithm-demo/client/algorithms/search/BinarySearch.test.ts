@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import BinarySearch from './BinarySearch'
+import BinarySearch from './BinarySearch.js'
 
 interface BinarySearchStateLike {
   array: number[]

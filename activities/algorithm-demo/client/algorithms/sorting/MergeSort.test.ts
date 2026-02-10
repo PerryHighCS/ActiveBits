@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import MergeSort from './MergeSort'
+import MergeSort from './MergeSort.js'
 
 interface MergeSortStateLike {
   array: number[]

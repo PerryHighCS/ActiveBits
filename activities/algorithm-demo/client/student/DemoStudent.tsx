@@ -7,9 +7,9 @@ import {
   getAllAlgorithms,
   type AlgorithmState,
   type AlgorithmViewProps,
-} from '../algorithms'
-import AlgorithmPicker from '../components/AlgorithmPicker'
-import { MESSAGE_TYPES, hydrateAlgorithmState, normalizeAlgorithmState } from '../utils'
+} from '../algorithms/index.js'
+import AlgorithmPicker from '../components/AlgorithmPicker.js'
+import { MESSAGE_TYPES, hydrateAlgorithmState, normalizeAlgorithmState } from '../utils.js'
 import './DemoStudent.css'
 
 interface DemoStudentProps {

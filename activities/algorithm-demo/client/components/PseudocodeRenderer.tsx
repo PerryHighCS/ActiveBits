@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import './PseudocodeRenderer.css'
-import { renderPseudocodeWithBold } from '../utils/pseudocodeUtils'
+import { renderPseudocodeWithBold } from '../utils/pseudocodeUtils.js'
 
 type HighlightSource = Set<string> | string[]
 

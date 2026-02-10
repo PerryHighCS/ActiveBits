@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import BinarySearchGame from './BinarySearchGame'
+import BinarySearchGame from './BinarySearchGame.js'
 
 interface BinarySearchGameStateLike {
   maxN: number

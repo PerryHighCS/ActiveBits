@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseBroadcastMessage } from './DemoManager'
+import { parseBroadcastMessage } from './DemoManager.js'
 
 void test('parseBroadcastMessage accepts valid broadcast envelopes', () => {
   const parsed = parseBroadcastMessage(

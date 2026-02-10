@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
-import AlgorithmPicker from './AlgorithmPicker'
+import AlgorithmPicker from './AlgorithmPicker.js'
 
 void test('AlgorithmPicker renders cards and selected styling', () => {
   const html = renderToStaticMarkup(

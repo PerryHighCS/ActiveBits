@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import Factorial from './Factorial'
+import Factorial from './Factorial.js'
 
 interface FactorialStateLike {
   n: number

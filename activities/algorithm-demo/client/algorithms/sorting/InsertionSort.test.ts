@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import InsertionSort from './InsertionSort'
+import InsertionSort from './InsertionSort.js'
 
 interface InsertionSortStateLike {
   array: number[]

@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
-import PseudocodeRenderer from '../../components/PseudocodeRenderer'
-import type { AlgorithmEvent, AlgorithmModule, AlgorithmState, AlgorithmViewProps } from '../index'
+import PseudocodeRenderer from '../../components/PseudocodeRenderer.js'
+import type { AlgorithmEvent, AlgorithmModule, AlgorithmState, AlgorithmViewProps } from '../index.js'
 
 interface SelectionSortState extends AlgorithmState {
   array: number[]

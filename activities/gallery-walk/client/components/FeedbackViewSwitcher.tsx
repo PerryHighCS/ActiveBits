@@ -1,4 +1,4 @@
-import Button from '@src/components/ui/Button.js';
+import Button from '@src/components/ui/Button';
 import type { ReactNode } from 'react';
 import React from 'react';
 

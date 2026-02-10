@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import Fibonacci from './Fibonacci'
+import Fibonacci from './Fibonacci.js'
 
 interface FibonacciStateLike {
   n: number

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import LinearSearch from './LinearSearch'
+import LinearSearch from './LinearSearch.js'
 
 interface LinearSearchStateLike {
   array: number[]

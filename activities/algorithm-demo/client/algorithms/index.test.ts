@@ -5,7 +5,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getAllAlgorithms, validateAlgorithmRegistry } from '../algorithms/index'
+import { getAllAlgorithms, validateAlgorithmRegistry } from '../algorithms/index.js'
 
 void test('algorithm registry - validate structure', () => {
   const result = validateAlgorithmRegistry()
