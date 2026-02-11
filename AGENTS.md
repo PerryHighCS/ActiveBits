@@ -20,15 +20,14 @@ Before making changes, read these files when relevant:
 
 ## Working Rules
 
-1. Run baseline checks before large refactors or migrations.
+1. Run baseline checks before large refactors.
 2. Prefer small, phase-scoped commits and PRs.
 3. Always run `npm test` before committing.
 4. From the package root you can call `npm test`; the commit should pass all tests before merge.
 5. Fix any test, lint, or type errors until the whole suite is green.
-6. Do not rely on TypeScript path aliases for backend runtime resolution unless runtime support exists.
-7. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
-8. Add or update tests for the code you change, even if nobody asked.
-9. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
+6. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
+7. Add or update tests for the code you change, even if nobody asked.
+8. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
 
 ## Preflight Checklist
 
@@ -57,7 +56,6 @@ Run these minimum checks based on scope:
    - `npm --workspace activities test`
    - `npm --workspace activities run lint` (fix any linting errors before commit)
 5. Cross-workspace changes
-   - `npm run typecheck --workspaces --if-present`
    - `npm run lint` (if root lint script exists; linting is included in `npm test`)
    - `npm test` (runs unit tests + linting across all workspaces)
 6. Sandbox/agent environments that block local port binding
@@ -69,27 +67,17 @@ Run these minimum checks based on scope:
 1. Do not run destructive commands (for example: `git reset --hard`, broad `rm -rf`, forced history rewrites) unless explicitly requested.
 2. If a potentially destructive action is required, ask for confirmation first.
 
-## Import and Specifier Conventions
+## Import Conventions
 
-1. **Use `.js` extensions for all relative imports** in TypeScript source files to support Node ESM resolution and ensure consistency between test execution (via `node:test`) and build output.
-   - ✓ `import { x } from './utils.js'`
-   - ✓ `import { x } from '../../shared/noteStyles.js'`
-   - ✗ `import { x } from './utils'` (avoid — breaks under Node ESM)
-   - **Rationale:** Extensionless imports rely on module resolution that varies by context. TypeScript tooling (and bundlers like Vite) auto-resolve, but Node's native ESM loader does not. Tests run via `node --import tsx --test` use Node ESM resolution directly, so `.js` extensions must be present.
-
-2. **Backend/runtime imports must be Node-resolvable** (NodeNext/ESM-safe). Do not rely on bundler-only features (e.g., `tsconfig` path aliases) for runtime-critical code paths.
-
-3. Treat `tsconfig` path aliases (e.g., `@src/`) as compile-time/editor aids only unless runtime support is explicitly configured.
-
-4. Keep cross-workspace import boundaries explicit (prefer package/export boundaries over deep ad-hoc paths).
+1. Backend/runtime imports must be directly runtime-resolvable. Do not rely on bundler-only features for runtime-critical code paths unless runtime support is explicitly configured.
+2. Keep cross-workspace import boundaries explicit (prefer package/export boundaries over deep ad-hoc paths).
 
 ## Temporary Workaround Policy
 
-1. New `@ts-ignore`, temporary `any`, compatibility shim, or migration workaround must include:
+1. Any temporary compatibility shim or workaround must include:
    - inline reason
    - owner
    - cleanup condition or target date
-2. Prefer `@ts-expect-error` over `@ts-ignore` when applicable.
 
 ## PR Metadata Standard
 
@@ -122,15 +110,19 @@ Use these logs to keep work auditable:
    - Durable notes/discoveries for future work.
 2. `.agent/knowledge/react-best-practices.md`
    - React patterns, optimizations, and accessibility guidance.
+3. `.agent/knowledge/testing-patterns.md`
+   - Shared testing setups, failure patterns, and reliability guidance.
+4. `.agent/knowledge/deployment-notes.md`
+   - Environment/runtime deployment constraints and operational learnings.
+5. `.agent/knowledge/data-contracts.md`
+   - API contracts, payload assumptions, and compatibility expectations.
+6. `.agent/knowledge/performance-notes.md`
+   - Profiling findings, bottlenecks, and optimization tradeoffs.
+7. `.agent/knowledge/security-notes.md`
+   - Security boundaries, validation rules, and sensitive-data handling guidance.
 
 If a log file is missing, create it when first needed.
-
-## Historical Discoveries
-
-These files capture migration-era decisions and evidence. Treat them as historical context, not required day-to-day operating docs:
-
-1. `.agent/plans/typescript.md`
-2. `.agent/plans/typescript_review.md`
+If a discovery does not fit an existing knowledge file, create a new `.agent/knowledge/<category>.md` file and define its purpose at the top. Prefer extending an existing category first; create a new category only when the topic is durable and likely to be reused.
 
 ## Repo Discoveries Format
 
@@ -147,6 +139,5 @@ When adding an entry to `.agent/knowledge/repo_discoveries.md`, include:
 ## Definition of Done (General)
 
 1. Relevant tests pass.
-2. Typecheck passes where applicable.
-3. Documentation is updated for any workflow/runtime/build change.
-4. Notes are recorded in the appropriate log files.
+2. Documentation is updated for any workflow/runtime/build change.
+3. Notes are recorded in the appropriate log files.
