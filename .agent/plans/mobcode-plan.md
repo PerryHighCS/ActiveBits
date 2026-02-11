@@ -170,7 +170,7 @@ All isolated to the `activity-mobcode-*.js` chunk via Vite's existing `manualChu
 
 ### Step 1: Scaffold + Config
 - Create directory structure under `activities/mobcode/`
-- Write `activity.config.ts` (`id: 'mobcode'`, `color: 'emerald'`, `soloMode: false`)
+- Write `activity.config.ts` (`id: 'mobcode'`, `color: 'sky'`, `soloMode: false`)
 - Write stub `client/index.tsx` and `server/routes.ts`
 - Add `"mobcode"` to `EXPECTED_ACTIVITIES` in both test files:
   - [index.test.ts](client/src/activities/index.test.ts)
