@@ -51,7 +51,9 @@ activities/syncdeck/
 ## `activity.config.ts`
 
 ```typescript
-export default {
+import type { ActivityConfig } from '../../types/activity.js'
+
+const syncdeckConfig: ActivityConfig = {
   id: 'syncdeck',
   name: 'SyncDeck',
   description: 'Host a synchronized Reveal.js presentation for your class',
@@ -63,6 +65,8 @@ export default {
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',
 }
+
+export default syncdeckConfig
 ```
 
 ---
@@ -251,6 +255,8 @@ Slide trigger: `isValidRevealEnvelope(data) && data.action === 'embedded-activit
 **Panel A — Start a live session:**
 URL input → validate → `POST /api/syncdeck/create` → store `instructorPasscode` in sessionStorage → `POST /api/syncdeck/{id}/configure` with `{ presentationUrl, instructorPasscode }` → navigate to `/manage/syncdeck/{id}`
 
+Panel A configures **before** navigation. This avoids an unnecessary second configure call after the manager view mounts.
+
 **Panel B — Create a permanent link:**
 URL input + teacher code input → validate URL → `POST /api/syncdeck/create-link` → display copyable link (includes `urlHash`)
 
@@ -260,10 +266,12 @@ URL input + teacher code input → validate URL → `POST /api/syncdeck/create-l
 2. Connect: `/ws/syncdeck?sessionId={id}&instructorPasscode={passcode}` via `useResilientWebSocket`
 3. On `session-state`: update local `presentationUrl` and state
 4. `configure` endpoint usage (bind session to deck URL after session exists):
-   - Non-persistent live session path (`POST /api/syncdeck/create` just returned): manager calls `POST /api/syncdeck/{sessionId}/configure` with `{ presentationUrl, instructorPasscode }`
+   - Panel A ("Start a live session") path: configure is already called **before** navigation; manager view should not call configure again unless session still has no `presentationUrl`
    - Persistent-link startup path (teacher came from permanent link): manager calls `POST /api/syncdeck/{sessionId}/configure` with `{ presentationUrl, instructorPasscode, urlHash }`
+   - Manual/fallback manager setup path (session exists but no `presentationUrl`): manager may call `configure` with `{ presentationUrl, instructorPasscode }`
    - Client never sends `persistentHash`; server derives it from `sessionId` when verifying `urlHash`
    - If `urlHash` is present but no persistent hash mapping exists for `sessionId`, server rejects configure
+   - Idempotency guard: manager only attempts configure when `session-state.presentationUrl` is empty/null
 5. Once `presentationUrl` known: mount iframe
 6. On iframe `load` / `ready` postMessage: send `setRole: instructor` command
 
