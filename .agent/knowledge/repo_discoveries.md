@@ -37,3 +37,19 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `client/package.json`; `package-lock.json`; `npm --workspace client outdated tailwindcss @tailwindcss/vite`; `npm --workspace client run typecheck`; `npm --workspace client run lint`; `npm --workspace client test`; `npm --workspace client run build`; `npm test`
 - Follow-up action: Keep patch-level Tailwind updates in regular dependency maintenance cadence; no immediate remediation needed.
 - Owner: Codex
+
+- Date: 2026-02-23
+- Area: client
+- Discovery: `deepLinkOptions` now supports an explicit per-field validator contract (`validator: 'url'`) that is parsed by dashboard utilities and enforced in ManageDashboard modals with inline field errors and disabled actions.
+- Why it matters: Activity configs can require valid URL inputs before link creation/copy/open actions, reducing malformed deep-link generation and improving teacher feedback in the modal UX.
+- Evidence: `types/activity.ts`; `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/activity.config.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `npm --workspace client test`
+- Follow-up action: Reuse `validator: 'url'` for any future deep-link text fields that represent external links; add additional validator types only when there is a concrete activity need.
+- Owner: Codex
+
+- Date: 2026-02-23
+- Area: server
+- Discovery: SyncDeck now validates `presentationUrl` format in both deep-link generation (`/api/syncdeck/generate-url`) and runtime configure (`/api/syncdeck/:sessionId/configure`) so the configure path no longer accepts non-http(s) URLs.
+- Why it matters: Prevents bypass where malformed or unsafe URLs could be injected at configure time even if deep-link generation validates correctly.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `npm --workspace activities run test:activity --activity=syncdeck`; `npm test`
+- Follow-up action: Keep validation helpers aligned if URL policy is tightened (for example hostname allowlists), and mirror policy in both generation and configure endpoints.
+- Owner: Codex

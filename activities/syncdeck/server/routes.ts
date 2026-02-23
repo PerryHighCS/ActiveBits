@@ -1,16 +1,30 @@
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import { findHashBySessionId, generatePersistentHash } from 'activebits-server/core/persistentSessions.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
-import { randomBytes } from 'node:crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
+
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
+const MAX_SESSIONS_PER_COOKIE = 20
+const MAX_TEACHER_CODE_LENGTH = 100
+const HMAC_SECRET = process.env.PERSISTENT_SESSION_SECRET || 'default-secret-change-in-production'
+
+interface CookieSessionEntry {
+  key: string
+  teacherCode: string
+  selectedOptions?: Record<string, unknown>
+}
 
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): void
+  cookie?(name: string, value: string, options: Record<string, unknown>): void
 }
 
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
+  cookies?: Record<string, unknown>
 }
 
 interface SyncDeckRouteApp {
@@ -103,11 +117,135 @@ function readStringField(payload: unknown, key: string): string | null {
   return typeof value === 'string' ? value : null
 }
 
+function toSelectedOptions(value: unknown): Record<string, unknown> {
+  return isPlainObject(value) ? value : {}
+}
+
+function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry[] {
+  if (cookieValue == null) {
+    return []
+  }
+
+  let parsedCookie: unknown
+  try {
+    parsedCookie = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue
+  } catch {
+    return []
+  }
+
+  if (!Array.isArray(parsedCookie)) {
+    return []
+  }
+
+  return parsedCookie
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        isPlainObject(entry) && typeof entry.key === 'string' && typeof entry.teacherCode === 'string',
+    )
+    .map((entry) => ({
+      key: String(entry.key),
+      teacherCode: entry.teacherCode as string,
+      selectedOptions: toSelectedOptions(entry.selectedOptions),
+    }))
+}
+
+function validatePresentationUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function computeUrlHash(persistentHash: string, presentationUrl: string): string {
+  return createHmac('sha256', HMAC_SECRET).update(`${persistentHash}|${presentationUrl}`).digest('hex').substring(0, 16)
+}
+
+function verifyUrlHash(persistentHash: string, presentationUrl: string, candidate: string): boolean {
+  if (candidate.length !== 16) {
+    return false
+  }
+
+  const expected = computeUrlHash(persistentHash, presentationUrl)
+  try {
+    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(candidate, 'hex'))
+  } catch {
+    return false
+  }
+}
+
 registerSessionNormalizer('syncdeck', (session) => {
   session.data = normalizeSessionData(session.data)
 })
 
 export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
+  app.post('/api/syncdeck/generate-url', async (req, res) => {
+    const body = isPlainObject(req.body) ? req.body : {}
+    const activityName = readStringField(body, 'activityName')
+    const teacherCode = readStringField(body, 'teacherCode')
+    const selectedOptions = toSelectedOptions(body.selectedOptions)
+    const presentationUrl = typeof selectedOptions.presentationUrl === 'string' ? selectedOptions.presentationUrl : null
+
+    if (activityName !== 'syncdeck' || !teacherCode) {
+      res.status(400).json({ error: 'Missing or invalid activityName or teacherCode' })
+      return
+    }
+
+    if (teacherCode.length < 6) {
+      res.status(400).json({ error: 'Teacher code must be at least 6 characters' })
+      return
+    }
+
+    if (teacherCode.length > MAX_TEACHER_CODE_LENGTH) {
+      res.status(400).json({ error: `Teacher code must be at most ${MAX_TEACHER_CODE_LENGTH} characters` })
+      return
+    }
+
+    if (!presentationUrl || !validatePresentationUrl(presentationUrl)) {
+      res.status(400).json({ error: 'presentationUrl must be a valid http(s) URL' })
+      return
+    }
+
+    const { hash } = generatePersistentHash('syncdeck', teacherCode)
+    const urlHash = computeUrlHash(hash, presentationUrl)
+
+    const cookieName = 'persistent_sessions'
+    let sessionEntries = parsePersistentSessionsCookie(req.cookies?.[cookieName])
+    const cookieKey = `syncdeck:${hash}`
+    const existingIndex = sessionEntries.findIndex((entry) => entry.key === cookieKey)
+    if (existingIndex !== -1) {
+      sessionEntries.splice(existingIndex, 1)
+    }
+
+    sessionEntries.push({
+      key: cookieKey,
+      teacherCode,
+      selectedOptions: { presentationUrl },
+    })
+
+    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
+      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
+    }
+
+    res.cookie?.(cookieName, JSON.stringify(sessionEntries), {
+      maxAge: ONE_YEAR_MS,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+    })
+
+    const params = new URLSearchParams({
+      presentationUrl,
+      urlHash,
+    })
+
+    res.json({
+      hash,
+      url: `/activity/syncdeck/${hash}?${params.toString()}`,
+    })
+  })
+
   app.post('/api/syncdeck/create', async (_req, res) => {
     const session = await createSession(sessions, { data: {} })
     session.type = 'syncdeck'
@@ -135,10 +273,38 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const presentationUrl = readStringField(req.body, 'presentationUrl')
     const instructorPasscode = readStringField(req.body, 'instructorPasscode')
-    if (!presentationUrl || !instructorPasscode || instructorPasscode !== session.data.instructorPasscode) {
+    const urlHash = readStringField(req.body, 'urlHash')
+    const persistentHashFromClient = readStringField(req.body, 'persistentHash')
+    if (
+      !presentationUrl ||
+      !validatePresentationUrl(presentationUrl) ||
+      !instructorPasscode ||
+      instructorPasscode !== session.data.instructorPasscode
+    ) {
       const response = res as unknown as JsonResponse
       response.status(400).json({ error: 'invalid payload' })
       return
+    }
+
+    if (persistentHashFromClient) {
+      const response = res as unknown as JsonResponse
+      response.status(400).json({ error: 'persistentHash must not be provided by client' })
+      return
+    }
+
+    if (urlHash) {
+      const persistentHash = await findHashBySessionId(sessionId)
+      if (!persistentHash) {
+        const response = res as unknown as JsonResponse
+        response.status(400).json({ error: 'invalid payload' })
+        return
+      }
+
+      if (!verifyUrlHash(persistentHash, presentationUrl, urlHash)) {
+        const response = res as unknown as JsonResponse
+        response.status(400).json({ error: 'invalid payload' })
+        return
+      }
     }
 
     session.data.presentationUrl = presentationUrl

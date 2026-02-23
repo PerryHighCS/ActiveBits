@@ -4,6 +4,18 @@ export type ActivityRenderableComponent =
   | ComponentType<unknown>
   | LazyExoticComponent<ComponentType<unknown>>
 
+export interface ActivityDeepLinkOptionChoice {
+  value: string
+  label: string
+}
+
+export interface ActivityDeepLinkOption {
+  label?: string
+  type?: 'select' | 'text'
+  options?: ActivityDeepLinkOptionChoice[]
+  validator?: 'url'
+}
+
 export interface ActivityConfig {
   id: string
   name: string
@@ -16,7 +28,12 @@ export interface ActivityConfig {
     description?: string
     buttonText?: string
   }
-  deepLinkOptions?: Record<string, unknown>
+  deepLinkOptions?: Record<string, ActivityDeepLinkOption>
+  deepLinkGenerator?: {
+    endpoint: string
+    mode?: 'replace-url' | 'append-query'
+    expectsSelectedOptions?: boolean
+  }
   isDev?: boolean
   clientEntry?: string
   serverEntry?: string

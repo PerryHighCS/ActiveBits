@@ -4,13 +4,16 @@ import { activities } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
 import { useClipboard } from '@src/hooks/useClipboard'
 import {
+  buildPersistentLinkUrl,
   buildPersistentSessionKey,
   buildQueryString,
   buildSoloLink,
   describeSelectedOptions,
   initializeDeepLinkOptions,
   normalizeSelectedOptions,
+  parseDeepLinkGenerator,
   parseDeepLinkOptions,
+  validateDeepLinkSelection,
   type DeepLinkSelection,
 } from './manageDashboardUtils'
 import Modal from '../ui/Modal'
@@ -217,19 +220,36 @@ export default function ManageDashboard() {
       return
     }
 
+    const optionValidationErrors = validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)
+    if (Object.keys(optionValidationErrors).length > 0) {
+      setError('Please fix the highlighted link options')
+      return
+    }
+
     setError(null)
     setIsCreating(true)
 
     try {
       const selectedOptions = normalizeSelectedOptions(selectedActivity.deepLinkOptions, persistentOptions)
-      const response = await fetch('/api/persistent-session/create', {
+      const deepLinkGenerator = parseDeepLinkGenerator(selectedActivity.deepLinkGenerator)
+      const endpoint = deepLinkGenerator?.endpoint ?? '/api/persistent-session/create'
+      const requestBody = {
+        activityName: selectedActivity.id,
+        teacherCode: teacherCode.trim(),
+        selectedOptions,
+      }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          activityName: selectedActivity.id,
-          teacherCode: teacherCode.trim(),
-          selectedOptions,
-        }),
+        body: JSON.stringify(
+          deepLinkGenerator?.expectsSelectedOptions === false
+            ? {
+                activityName: requestBody.activityName,
+                teacherCode: requestBody.teacherCode,
+              }
+            : requestBody,
+        ),
       })
 
       if (!response.ok) {
@@ -251,7 +271,7 @@ export default function ManageDashboard() {
         throw new Error('Failed to create persistent link')
       }
 
-      const fullUrl = `${getWindowOrigin()}${payload.url}${buildQueryString(selectedOptions)}`
+      const fullUrl = buildPersistentLinkUrl(getWindowOrigin(), payload.url, selectedOptions, deepLinkGenerator)
       setPersistentUrl(fullUrl)
 
       setSavedSessions((previous) => ({
@@ -291,6 +311,16 @@ export default function ManageDashboard() {
 
   const getSoloLink = (activityId: string, options: Record<string, unknown> = {}): string =>
     buildSoloLink(getWindowOrigin(), activityId, options)
+
+  const selectedActivityOptions = selectedActivity ? parseDeepLinkOptions(selectedActivity.deepLinkOptions) : {}
+  const persistentOptionErrors = selectedActivity
+    ? validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)
+    : {}
+  const hasPersistentOptionErrors = Object.keys(persistentOptionErrors).length > 0
+
+  const soloActivityOptions = soloActivity ? parseDeepLinkOptions(soloActivity.deepLinkOptions) : {}
+  const soloOptionErrors = soloActivity ? validateDeepLinkSelection(soloActivity.deepLinkOptions, soloOptions) : {}
+  const hasSoloOptionErrors = Object.keys(soloOptionErrors).length > 0
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -467,11 +497,11 @@ export default function ManageDashboard() {
               <p className="text-xs text-gray-500 mt-1">Remember this code! You'll need it to start sessions from this link.</p>
             </div>
 
-            {selectedActivity && Object.keys(parseDeepLinkOptions(selectedActivity.deepLinkOptions)).length > 0 && (
+            {selectedActivity && Object.keys(selectedActivityOptions).length > 0 && (
               <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
                 <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
                 <div className="flex flex-col gap-3">
-                  {Object.entries(parseDeepLinkOptions(selectedActivity.deepLinkOptions)).map(([key, option]) => (
+                  {Object.entries(selectedActivityOptions).map(([key, option]) => (
                     <label key={key} className="text-sm text-gray-700">
                       <span className="block font-semibold mb-1">{option.label || key}</span>
                       {option.type === 'select' ? (
@@ -501,8 +531,11 @@ export default function ManageDashboard() {
                               [key]: event.target.value,
                             }))
                           }
-                          className="w-full border-2 border-gray-300 rounded px-3 py-2"
+                          className={`w-full border-2 rounded px-3 py-2 ${persistentOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
                         />
+                      )}
+                      {persistentOptionErrors[key] && (
+                        <span className="block mt-1 text-xs text-red-600">{persistentOptionErrors[key]}</span>
                       )}
                     </label>
                   ))}
@@ -512,7 +545,7 @@ export default function ManageDashboard() {
 
             {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
 
-            <Button type="submit" disabled={isCreating || teacherCode.length < 6}>
+            <Button type="submit" disabled={isCreating || teacherCode.length < 6 || hasPersistentOptionErrors}>
               {isCreating ? 'Creating...' : 'Generate Link'}
             </Button>
           </form>
@@ -558,11 +591,11 @@ export default function ManageDashboard() {
         title={`${soloActivity?.soloModeMeta?.title || soloActivity?.name || 'Solo'} Practice Link`}
       >
         <div className="flex flex-col gap-4">
-          {soloActivity && Object.keys(parseDeepLinkOptions(soloActivity.deepLinkOptions)).length > 0 && (
+          {soloActivity && Object.keys(soloActivityOptions).length > 0 && (
             <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
               <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
               <div className="flex flex-col gap-3">
-                {Object.entries(parseDeepLinkOptions(soloActivity.deepLinkOptions)).map(([key, option]) => (
+                {Object.entries(soloActivityOptions).map(([key, option]) => (
                   <label key={key} className="text-sm text-gray-700">
                     <span className="block font-semibold mb-1">{option.label || key}</span>
                     {option.type === 'select' ? (
@@ -592,9 +625,10 @@ export default function ManageDashboard() {
                             [key]: event.target.value,
                           }))
                         }
-                        className="w-full border-2 border-gray-300 rounded px-3 py-2"
+                        className={`w-full border-2 rounded px-3 py-2 ${soloOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
                       />
                     )}
+                    {soloOptionErrors[key] && <span className="block mt-1 text-xs text-red-600">{soloOptionErrors[key]}</span>}
                   </label>
                 ))}
               </div>
@@ -611,12 +645,17 @@ export default function ManageDashboard() {
               onClick={() => {
                 if (!soloActivity) return
 
+                if (hasSoloOptionErrors) {
+                  return
+                }
+
                 const link = getSoloLink(
                   soloActivity.id,
                   normalizeSelectedOptions(soloActivity.deepLinkOptions, soloOptions),
                 )
                 void copyToClipboard(link)
               }}
+              disabled={hasSoloOptionErrors}
             >
               {soloActivity &&
               isCopied(getSoloLink(soloActivity.id, normalizeSelectedOptions(soloActivity.deepLinkOptions, soloOptions)))
@@ -627,13 +666,18 @@ export default function ManageDashboard() {
               onClick={() => {
                 if (!soloActivity || typeof window === 'undefined') return
 
+                if (hasSoloOptionErrors) {
+                  return
+                }
+
                 const link = getSoloLink(
                   soloActivity.id,
                   normalizeSelectedOptions(soloActivity.deepLinkOptions, soloOptions),
                 )
                 window.open(link, '_blank')
               }}
-              className="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded transition-colors"
+              className={`text-white font-semibold py-2 px-4 rounded transition-colors ${hasSoloOptionErrors ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-600 hover:bg-gray-700'}`}
+              disabled={hasSoloOptionErrors}
             >
               Open in New Tab
             </button>

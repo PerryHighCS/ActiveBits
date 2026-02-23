@@ -24,3 +24,12 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Follow-up action: Implement verification in SyncDeck configure path and add explicit tampered-`urlHash` test coverage.
 - Owner: Codex
 
+- Date: 2026-02-23
+- Area: deep-link input validation (client + server)
+- Threat or risk: Without field-level validation, malformed or unsafe presentation links can be entered in modals and later submitted through alternative paths.
+- Control or mitigation: Added declarative `validator: 'url'` support in activity deep-link options; ManageDashboard now shows inline errors and disables create/copy/open actions for invalid URL inputs; SyncDeck server configure route independently validates `presentationUrl` as `http(s)`.
+- Residual risk: URL syntax validation does not enforce destination trust (for example host allowlists). Instructors can still provide any public `http(s)` URL.
+- Validation (test/review/path): `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/server/routes.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `activities/syncdeck/server/routes.test.ts`; `npm test`.
+- Follow-up action: Add optional hostname/domain allowlist policy if deployment requires restricting presentation origins.
+- Owner: Codex
+
