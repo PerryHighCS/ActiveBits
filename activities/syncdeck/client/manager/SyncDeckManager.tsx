@@ -183,7 +183,7 @@ function buildPasscodeKey(sessionId: string): string {
 function validatePresentationUrl(value: string): boolean {
   try {
     const parsed = new URL(value)
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
   } catch {
     return false
   }
@@ -585,9 +585,21 @@ const SyncDeckManager: FC = () => {
       return
     }
 
+    const expectedOrigin = (() => {
+      try {
+        return new URL(presentationUrl).origin
+      } catch {
+        return null
+      }
+    })()
+
     const handleMessage = (event: MessageEvent) => {
       const iframeWindow = presentationIframeRef.current?.contentWindow
       if (!iframeWindow || event.source !== iframeWindow) {
+        return
+      }
+
+      if (!expectedOrigin || event.origin !== expectedOrigin) {
         return
       }
 
@@ -623,7 +635,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       window.removeEventListener('message', handleMessage)
     }
-  }, [isConfigurePanelOpen])
+  }, [isConfigurePanelOpen, presentationUrl])
 
   if (!sessionId) {
     return (
