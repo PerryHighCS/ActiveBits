@@ -1,7 +1,7 @@
-import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -17,6 +17,7 @@ let testImportCounter = 0
  */
 const EXPECTED_ACTIVITIES = [
   'algorithm-demo',
+  'syncdeck',
   'java-string-practice',
   'java-format-practice',
   'python-list-practice',

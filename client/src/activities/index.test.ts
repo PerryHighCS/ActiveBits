@@ -1,7 +1,7 @@
-import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 interface ActivityConfigModule {
@@ -15,6 +15,7 @@ const __dirname = dirname(__filename)
 
 const EXPECTED_ACTIVITIES = [
   'algorithm-demo',
+  'syncdeck',
   'java-string-practice',
   'java-format-practice',
   'python-list-practice',
