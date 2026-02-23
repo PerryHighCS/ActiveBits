@@ -59,6 +59,7 @@ Use `action: "command"` with a command payload.
 - `setRole`
 - `allowStudentForwardTo`
 - `setStudentBoundary` (alias for explicit boundary set)
+- `clearBoundary` — removes explicit boundary; student reverts to "follow instructor" mode (boundary auto-captures from next sync)
 - `toggleOverview` — opens/closes the custom storyboard strip (does **not** activate Reveal's built-in grid overview)
 - `showOverview` — opens the custom storyboard strip
 - `hideOverview` — closes the custom storyboard strip
@@ -113,6 +114,8 @@ Allows a student to move forward up to the specified boundary, even if instructo
 ```
 
 Notes:
+- Once an explicit boundary is set, instructor sync commands (`setState`, `slide`, `next`, `prev`) no longer auto-advance the boundary. Only a new `allowStudentForwardTo` / `setStudentBoundary` call will change it.
+- If the student is already **past** the new boundary when it is received, they are immediately rubber-banded back to it.
 - Navigation enforcement (preventing forward travel) applies only when role is `student`.
 - When sent to an **instructor** iframe, the boundary is stored and shown as a visual marker in the storyboard strip (display only — the instructor can still navigate freely). A `studentBoundaryChanged` message is still emitted with `role: "instructor"`.
 - With default plugin settings (`studentCanNavigateBack: true`, `studentCanNavigateForward: false`), student can move backward and forward only up to the granted boundary.
@@ -128,6 +131,24 @@ Notes:
     "syncToBoundary": true
   }
 }
+```
+
+#### `clearBoundary`
+
+Removes the explicit boundary. The student reverts to **follow-instructor mode**: the boundary auto-captures from the next `setState` / `slide` / `next` / `prev` sync command received from the host.
+
+```json
+{ "name": "clearBoundary" }
+```
+
+Host pattern for "turn off boundary, limit student to instructor's current position":
+```js
+// 1. Clear the explicit boundary (enables follow-instructor mode again)
+studentIframe.postMessage({ type: 'reveal-sync', action: 'command',
+  payload: { name: 'clearBoundary' } }, '*');
+// 2. Send a sync so the first auto-capture sets the boundary at instructor's position
+studentIframe.postMessage({ type: 'reveal-sync', action: 'command',
+  payload: { name: 'setState', payload: { state: instructorState } } }, '*');
 ```
 
 #### `toggleOverview` / `showOverview` / `hideOverview`
@@ -226,7 +247,9 @@ Sent by **any role** on: slide change, fragment shown/hidden, pause, resume, ove
 
 `overview` reflects whether the **custom storyboard strip** is currently open (`true` = strip is visible).
 
-`studentBoundary` — `null` until a boundary has been established; `{ h, v, f }` once set. Non-null for **both student and instructor** roles once a boundary is in effect. For instructors this reflects the boundary currently displayed in the storyboard strip.
+`studentBoundary` — `null` until a boundary has been established; `{ h, v, f }` once set. Non-null for **both student and instructor** roles once a boundary is in effect. For instructors this reflects the boundary currently displayed in the storyboard strip. Cleared to `null` when `clearBoundary` command is received.
+
+`boundaryIsLocal` — `true` when this iframe set the boundary itself (via the storyboard ⚑ button) rather than receiving it from the host. The storyboard uses this to skip forward-navigation restrictions for the acting instructor even if their role hasn't been upgraded to `"instructor"` yet.
 
 ### `roleChanged`
 
