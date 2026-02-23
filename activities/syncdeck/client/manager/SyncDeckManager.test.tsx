@@ -29,4 +29,19 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /session-123/i)
   assert.match(html, /Copy Join URL/i)
   assert.match(html, /End Session/i)
+  assert.match(html, /Configure Presentation/i)
+  assert.match(html, /Presentation URL/i)
+  assert.match(html, /Start Session/i)
+})
+
+void test('SyncDeckManager pre-fills presentation URL from query params', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={['/manage/syncdeck/session-123?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck']}>
+      <Routes>
+        <Route path="/manage/syncdeck/:sessionId" element={<SyncDeckManager />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+
+  assert.match(html, /value="https:\/\/slides\.example\/deck"/i)
 })

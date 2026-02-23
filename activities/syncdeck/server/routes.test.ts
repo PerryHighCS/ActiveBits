@@ -56,12 +56,16 @@ function createResponse(): MockResponse {
 }
 
 function createMockApp() {
-  const handlers: { post: Record<string, RouteHandler> } = {
+  const handlers: { get: Record<string, RouteHandler>; post: Record<string, RouteHandler> } = {
+    get: {},
     post: {},
   }
 
   return {
     handlers,
+    get(path: string, handler: RouteHandler) {
+      handlers.get[path] = handler
+    },
     post(path: string, handler: RouteHandler) {
       handlers.post[path] = handler
     },
@@ -216,6 +220,74 @@ void test('generate-url rejects invalid presentationUrl', async () => {
 
   assert.equal(res.statusCode, 400)
   assert.deepEqual(res.body, { error: 'presentationUrl must be a valid http(s) URL' })
+})
+
+void test('instructor-passcode route returns passcode when teacher cookie matches persistent mapping', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', 'persistent-teacher-code')
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `syncdeck:${hash}`,
+            teacherCode: 'persistent-teacher-code',
+          },
+        ]),
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { instructorPasscode: 'teacher-passcode-1' })
+})
+
+void test('instructor-passcode route rejects request without matching teacher cookie', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', 'persistent-teacher-code')
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const res = createResponse()
+
+  await handler?.(createRequest({ sessionId: 's1' }, {}, {}), res)
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, { error: 'forbidden' })
 })
 
 void test('create route initializes syncdeck session state', async () => {

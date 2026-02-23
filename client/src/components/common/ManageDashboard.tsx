@@ -35,6 +35,7 @@ interface PersistentSessionListResponse {
 
 interface CreateSessionResponse {
   id?: string
+  instructorPasscode?: string
 }
 
 interface PersistentLinkCreateResponse {
@@ -110,6 +111,10 @@ function getActivityColor(activityId: string): string {
   return getActivityById(activityId)?.color || 'blue'
 }
 
+function buildSyncDeckPasscodeKey(sessionId: string): string {
+  return `syncdeck_instructor_${sessionId}`
+}
+
 export default function ManageDashboard() {
   const navigate = useNavigate()
   const [showPersistentModal, setShowPersistentModal] = useState(false)
@@ -171,6 +176,10 @@ export default function ManageDashboard() {
       const payload = (await response.json()) as CreateSessionResponse
       if (!payload.id) {
         throw new Error('Failed to create session')
+      }
+
+      if (activityId === 'syncdeck' && payload.instructorPasscode && typeof window !== 'undefined') {
+        window.sessionStorage.setItem(buildSyncDeckPasscodeKey(payload.id), payload.instructorPasscode)
       }
 
       void navigate(`/manage/${activityId}/${payload.id}`)

@@ -28,6 +28,7 @@ interface RouteRequest {
 }
 
 interface SyncDeckRouteApp {
+  get(path: string, handler: (req: RouteRequest, res: JsonResponse) => void | Promise<void>): void
   post(path: string, handler: (req: RouteRequest, res: JsonResponse) => void | Promise<void>): void
 }
 
@@ -180,6 +181,35 @@ registerSessionNormalizer('syncdeck', (session) => {
 })
 
 export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
+  app.get('/api/syncdeck/:sessionId/instructor-passcode', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const persistentHash = await findHashBySessionId(sessionId)
+    if (!persistentHash) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
+    const hasTeacherCookie = sessionEntries.some((entry) => entry.key === `syncdeck:${persistentHash}`)
+    if (!hasTeacherCookie) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    res.json({ instructorPasscode: session.data.instructorPasscode })
+  })
+
   app.post('/api/syncdeck/generate-url', async (req, res) => {
     const body = isPlainObject(req.body) ? req.body : {}
     const activityName = readStringField(body, 'activityName')
