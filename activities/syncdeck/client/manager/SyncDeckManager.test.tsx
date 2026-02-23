@@ -25,5 +25,8 @@ void test('SyncDeckManager shows the active session id when provided', () => {
     </MemoryRouter>,
   )
 
-  assert.match(html, /Session session-123/i)
+  assert.match(html, /Join Code:/i)
+  assert.match(html, /session-123/i)
+  assert.match(html, /Copy Join URL/i)
+  assert.match(html, /End Session/i)
 })

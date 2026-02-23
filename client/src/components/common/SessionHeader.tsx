@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import React, { useState, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useClipboard } from '@src/hooks/useClipboard'
 import Button from '../ui/Button'

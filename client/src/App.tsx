@@ -32,54 +32,69 @@ function Footer() {
   )
 }
 
+function AppShell() {
+  const location = useLocation()
+  const pathSegments = location.pathname.split('/').filter(Boolean)
+  const manageActivityId = pathSegments[0] === 'manage' && pathSegments.length >= 2 ? pathSegments[1] : null
+  const manageActivity = manageActivityId ? activities.find((activity) => activity.id === manageActivityId) : null
+  const shouldExpandShell = manageActivity?.manageLayout?.expandShell === true
+  const appClassName = shouldExpandShell
+    ? 'w-full flex flex-col items-center min-h-screen print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
+    : 'w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
+
+  return (
+    <div className={appClassName}>
+      <div className="w-full grow">
+        <Routes>
+          <Route path="/status" element={<StatusDashboard />} />
+          <Route path="/manage" element={<ManageDashboard />} />
+          <Route path="/session-ended" element={<SessionEnded />} />
+
+          {activities.map((activity) => {
+            const ManagerComponent = activity.ManagerComponent
+            if (!ManagerComponent) return null
+
+            const TypedManagerComponent = ManagerComponent as AnyComponent
+
+            return (
+              <Fragment key={activity.id}>
+                <Route
+                  path={`/manage/${activity.id}`}
+                  element={
+                    <Suspense fallback={<LoadingFallback />}>
+                      <TypedManagerComponent />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path={`/manage/${activity.id}/:sessionId`}
+                  element={
+                    <Suspense fallback={<LoadingFallback />}>
+                      <TypedManagerComponent />
+                    </Suspense>
+                  }
+                />
+              </Fragment>
+            )
+          })}
+
+          <Route path="/activity/:activityName/:hash" element={<SessionRouter />} />
+          <Route path="/solo/:soloActivityId" element={<SessionRouter />} />
+
+          <Route path="/:sessionId" element={<SessionRouter />} />
+          <Route path="/" element={<SessionRouter />} />
+        </Routes>
+      </div>
+
+      <Footer />
+    </div>
+  )
+}
+
 export default function App() {
   return (
-    <div className="w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white">
-      <BrowserRouter>
-        <div className="w-full grow">
-          <Routes>
-            <Route path="/status" element={<StatusDashboard />} />
-            <Route path="/manage" element={<ManageDashboard />} />
-            <Route path="/session-ended" element={<SessionEnded />} />
-
-            {activities.map((activity) => {
-              const ManagerComponent = activity.ManagerComponent
-              if (!ManagerComponent) return null
-
-              const TypedManagerComponent = ManagerComponent as AnyComponent
-
-              return (
-                <Fragment key={activity.id}>
-                  <Route
-                    path={`/manage/${activity.id}`}
-                    element={
-                      <Suspense fallback={<LoadingFallback />}>
-                        <TypedManagerComponent />
-                      </Suspense>
-                    }
-                  />
-                  <Route
-                    path={`/manage/${activity.id}/:sessionId`}
-                    element={
-                      <Suspense fallback={<LoadingFallback />}>
-                        <TypedManagerComponent />
-                      </Suspense>
-                    }
-                  />
-                </Fragment>
-              )
-            })}
-
-            <Route path="/activity/:activityName/:hash" element={<SessionRouter />} />
-            <Route path="/solo/:soloActivityId" element={<SessionRouter />} />
-
-            <Route path="/:sessionId" element={<SessionRouter />} />
-            <Route path="/" element={<SessionRouter />} />
-          </Routes>
-        </div>
-
-        <Footer />
-      </BrowserRouter>
-    </div>
+    <BrowserRouter>
+      <AppShell />
+    </BrowserRouter>
   )
 }

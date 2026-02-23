@@ -34,6 +34,9 @@ export interface ActivityConfig {
     mode?: 'replace-url' | 'append-query'
     expectsSelectedOptions?: boolean
   }
+  manageLayout?: {
+    expandShell?: boolean
+  }
   isDev?: boolean
   clientEntry?: string
   serverEntry?: string

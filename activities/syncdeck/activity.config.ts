@@ -16,6 +16,9 @@ const syncdeckConfig: ActivityConfig = {
   deepLinkGenerator: {
     endpoint: '/api/syncdeck/generate-url',
   },
+  manageLayout: {
+    expandShell: true,
+  },
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',
 }
