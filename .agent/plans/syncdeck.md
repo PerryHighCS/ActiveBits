@@ -323,6 +323,14 @@ Envelope guard: `if (!isValidRevealEnvelope(event.data)) return`
   - Prefer `chalkboardCall` with `{ method: 'toggleChalkboard', args: [] }`
   - Fallback acceptable: `toggleChalkboard`
 
+### TODO: Chalkboard drawing propagation (future)
+
+- Current schema supports chalkboard **control commands** only (`toggleChalkboard`, `toggleNotesCanvas`, etc.).
+- Real-time stroke mirroring (instructor drawings appearing on student canvases) is **not yet defined** in the reveal-sync protocol.
+- Add protocol events for drawing data (snapshot + incremental delta) and relay them manager → server → students.
+- Implement/extend a presentation-side plugin to emit and apply chalkboard drawing updates deterministically.
+- Keep controls (`toggle*`, `clear*`, `reset*`) backward compatible while adding drawing sync events.
+
 ### URL Validation (before session create or link generate)
 
 1. Parse URL — reject non-http(s)

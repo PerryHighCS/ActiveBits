@@ -7,6 +7,7 @@ const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
 const isDevMode = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
+const PREFLIGHT_PING_TIMEOUT_MS = 4000
 
 interface SessionResponsePayload {
   session?: {
@@ -30,7 +31,10 @@ interface RevealCommandPayload {
 
 interface RevealSyncEnvelope {
   type?: unknown
+  version?: unknown
   action?: unknown
+  source?: unknown
+  role?: unknown
   payload?: unknown
 }
 
@@ -260,6 +264,14 @@ const SyncDeckManager: FC = () => {
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
+  const [isChalkboardOpen, setIsChalkboardOpen] = useState(false)
+  const [isPenOverlayOpen, setIsPenOverlayOpen] = useState(false)
+  const [isPreflightChecking, setIsPreflightChecking] = useState(false)
+  const [preflightWarning, setPreflightWarning] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [preflightValidatedUrl, setPreflightValidatedUrl] = useState<string | null>(null)
+  const [allowUnverifiedStartForUrl, setAllowUnverifiedStartForUrl] = useState<string | null>(null)
+  const [confirmStartForUrl, setConfirmStartForUrl] = useState<string | null>(null)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastInstructorPayloadRef = useRef<unknown>(null)
@@ -341,6 +353,19 @@ const SyncDeckManager: FC = () => {
 
   const studentJoinUrl = sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
   const urlHash = new URLSearchParams(location.search).get('urlHash')
+
+  useEffect(() => {
+    const normalizedUrl = presentationUrl.trim()
+    if (!preflightValidatedUrl || normalizedUrl === preflightValidatedUrl) {
+      return
+    }
+
+    setPreflightValidatedUrl(null)
+    setAllowUnverifiedStartForUrl(null)
+    setConfirmStartForUrl(null)
+    setPreviewUrl(null)
+    setPreflightWarning(null)
+  }, [presentationUrl, preflightValidatedUrl])
 
   useEffect(() => {
     if (!sessionId) {
@@ -471,6 +496,71 @@ const SyncDeckManager: FC = () => {
     )
   }
 
+  const relayInstructorPayload = (payload: unknown): void => {
+    const socket = instructorSocketRef.current
+    if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
+      return
+    }
+
+    try {
+      lastInstructorPayloadRef.current = payload
+      socket.send(
+        JSON.stringify({
+          type: 'syncdeck-state-update',
+          payload,
+        }),
+      )
+    } catch {
+      return
+    }
+  }
+
+  const toggleChalkboard = (): void => {
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow || !presentationOrigin) {
+      setStartError('Presentation is not ready for chalkboard controls.')
+      setStartSuccess(null)
+      return
+    }
+
+    const chalkboardCommand = buildRevealCommandMessage('chalkboardCall', {
+      method: 'toggleChalkboard',
+      args: [],
+    })
+
+    targetWindow.postMessage(
+      chalkboardCommand,
+      presentationOrigin,
+    )
+    relayInstructorPayload(chalkboardCommand)
+
+    setIsChalkboardOpen((current) => !current)
+    setStartError(null)
+  }
+
+  const togglePenOverlay = (): void => {
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow || !presentationOrigin) {
+      setStartError('Presentation is not ready for pen overlay controls.')
+      setStartSuccess(null)
+      return
+    }
+
+    const penOverlayCommand = buildRevealCommandMessage('chalkboardCall', {
+      method: 'toggleNotesCanvas',
+      args: [],
+    })
+
+    targetWindow.postMessage(
+      penOverlayCommand,
+      presentationOrigin,
+    )
+    relayInstructorPayload(penOverlayCommand)
+
+    setIsPenOverlayOpen((current) => !current)
+    setStartError(null)
+  }
+
   const handleForceSyncStudents = (): void => {
     const socket = instructorSocketRef.current
     if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
@@ -540,9 +630,162 @@ const SyncDeckManager: FC = () => {
       return
     }
 
+    const runPresentationPreflight = async (): Promise<{ valid: boolean; warning: string | null }> => {
+      if (typeof window === 'undefined' || typeof document === 'undefined') {
+        return { valid: false, warning: 'Presentation validation is unavailable in this environment.' }
+      }
+
+      let targetOrigin: string
+      try {
+        targetOrigin = new URL(normalizedUrl).origin
+      } catch {
+        return { valid: false, warning: 'Presentation URL must be a valid http(s) URL' }
+      }
+
+      return await new Promise((resolve) => {
+        const iframe = document.createElement('iframe')
+        iframe.src = normalizedUrl
+        iframe.setAttribute('aria-hidden', 'true')
+        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms')
+        iframe.style.position = 'fixed'
+        iframe.style.width = '1024px'
+        iframe.style.height = '576px'
+        iframe.style.left = '-99999px'
+        iframe.style.top = '0'
+        iframe.style.opacity = '0'
+        iframe.style.pointerEvents = 'none'
+        iframe.style.border = '0'
+
+        let settled = false
+        let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+        const cleanup = () => {
+          window.removeEventListener('message', handleMessage)
+          iframe.removeEventListener('load', handleLoad)
+          iframe.removeEventListener('error', handleError)
+          if (timeoutId != null) {
+            clearTimeout(timeoutId)
+          }
+          iframe.remove()
+        }
+
+        const finalize = (result: { valid: boolean; warning: string | null }) => {
+          if (settled) {
+            return
+          }
+          settled = true
+          cleanup()
+          resolve(result)
+        }
+
+        const parseEnvelope = (data: unknown): RevealSyncEnvelope | null => {
+          if (typeof data === 'string') {
+            try {
+              const parsed = JSON.parse(data) as unknown
+              return parsed != null && typeof parsed === 'object' ? (parsed as RevealSyncEnvelope) : null
+            } catch {
+              return null
+            }
+          }
+
+          return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
+        }
+
+        const handleMessage = (event: MessageEvent) => {
+          if (event.origin !== targetOrigin || event.source !== iframe.contentWindow) {
+            return
+          }
+
+          const envelope = parseEnvelope(event.data)
+          if (!envelope || envelope.type !== 'reveal-sync') {
+            return
+          }
+
+          if (envelope.action === 'pong') {
+            finalize({ valid: true, warning: null })
+          }
+        }
+
+        const handleLoad = () => {
+          try {
+            iframe.contentWindow?.postMessage(
+              {
+                type: 'reveal-sync',
+                version: '1.0.0',
+                action: 'command',
+                source: 'activebits-syncdeck-host',
+                role: 'instructor',
+                ts: Date.now(),
+                payload: {
+                  name: 'ping',
+                  payload: {},
+                },
+              },
+              targetOrigin,
+            )
+          } catch {
+            finalize({
+              valid: false,
+              warning: 'Presentation loaded, but sync ping could not be sent. You can continue anyway.',
+            })
+          }
+        }
+
+        const handleError = () => {
+          finalize({
+            valid: false,
+            warning: 'Presentation failed to load for validation. You can continue anyway.',
+          })
+        }
+
+        timeoutId = setTimeout(() => {
+          finalize({
+            valid: false,
+            warning: 'Presentation did not respond to sync ping in time. You can continue anyway.',
+          })
+        }, PREFLIGHT_PING_TIMEOUT_MS)
+
+        window.addEventListener('message', handleMessage)
+        iframe.addEventListener('load', handleLoad)
+        iframe.addEventListener('error', handleError)
+        document.body.appendChild(iframe)
+      })
+    }
+
+    const canBypassPreflight = allowUnverifiedStartForUrl === normalizedUrl
+
+    if (preflightValidatedUrl !== normalizedUrl && !canBypassPreflight) {
+      setIsPreflightChecking(true)
+      const preflightResult = await runPresentationPreflight()
+      setIsPreflightChecking(false)
+
+      if (preflightResult.valid) {
+        setPreflightValidatedUrl(normalizedUrl)
+        setAllowUnverifiedStartForUrl(null)
+        setConfirmStartForUrl(normalizedUrl)
+        setPreviewUrl(normalizedUrl)
+        setPreflightWarning(null)
+        setStartError(null)
+        setStartSuccess(null)
+        return
+      } else {
+        setPreflightValidatedUrl(null)
+        setConfirmStartForUrl(null)
+        setPreviewUrl(null)
+        setPreflightWarning(preflightResult.warning)
+        setAllowUnverifiedStartForUrl(normalizedUrl)
+        setStartError('Presentation sync validation failed. Click Start Session again to continue anyway.')
+        setStartSuccess(null)
+        return
+      }
+    }
+
+    if (preflightValidatedUrl === normalizedUrl && confirmStartForUrl === normalizedUrl) {
+      setConfirmStartForUrl(null)
+    }
+
     setIsStartingSession(true)
     setStartError(null)
-
     try {
       const response = await fetch(`/api/syncdeck/${sessionId}/configure`, {
         method: 'POST',
@@ -576,7 +819,16 @@ const SyncDeckManager: FC = () => {
     } finally {
       setIsStartingSession(false)
     }
-  }, [sessionId, presentationUrl, isPasscodeReady, instructorPasscode, urlHash])
+  }, [
+    sessionId,
+    presentationUrl,
+    isPasscodeReady,
+    instructorPasscode,
+    urlHash,
+    preflightValidatedUrl,
+    allowUnverifiedStartForUrl,
+    confirmStartForUrl,
+  ])
 
   const handleStartSession = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -712,6 +964,15 @@ const SyncDeckManager: FC = () => {
       ? `${baseStatusMessage} • ${debugInstructorMessage}`
       : baseStatusMessage
 
+  const normalizedPresentationUrl = presentationUrl.trim()
+  const showStartAnyway =
+    Boolean(preflightWarning) &&
+    allowUnverifiedStartForUrl === normalizedPresentationUrl &&
+    preflightValidatedUrl !== normalizedPresentationUrl
+  const showConfirmStart =
+    preflightValidatedUrl === normalizedPresentationUrl &&
+    confirmStartForUrl === normalizedPresentationUrl
+
   return (
     <div className={isConfigurePanelOpen ? 'min-h-screen flex flex-col' : 'h-screen flex flex-col overflow-hidden'}>
       <div className="sticky top-0 z-20 bg-white border-b border-gray-200 w-full">
@@ -740,6 +1001,34 @@ const SyncDeckManager: FC = () => {
               disabled={isConfigurePanelOpen || instructorConnectionState !== 'connected'}
             >
               📍
+            </button>
+            <button
+              type="button"
+              onClick={toggleChalkboard}
+              className={`ml-2 px-2 py-1 rounded border text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed ${
+                isChalkboardOpen
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              title="Toggle chalkboard screen"
+              aria-label="Toggle chalkboard screen"
+              disabled={isConfigurePanelOpen}
+            >
+              ⬛
+            </button>
+            <button
+              type="button"
+              onClick={togglePenOverlay}
+              className={`ml-2 px-2 py-1 rounded border text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed ${
+                isPenOverlayOpen
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              title="Toggle pen overlay"
+              aria-label="Toggle pen overlay"
+              disabled={isConfigurePanelOpen}
+            >
+              ✏️
             </button>
           </div>
 
@@ -809,10 +1098,38 @@ const SyncDeckManager: FC = () => {
                 <button
                   type="submit"
                   className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                  disabled={isStartingSession || !isPasscodeReady}
+                  disabled={isStartingSession || !isPasscodeReady || isPreflightChecking}
                 >
-                  {isStartingSession ? 'Starting…' : 'Start Session'}
+                  {isPreflightChecking
+                    ? 'Validating…'
+                    : isStartingSession
+                      ? 'Starting…'
+                      : showStartAnyway
+                        ? 'Start Anyway'
+                        : showConfirmStart
+                          ? 'Start Verified Session'
+                          : 'Start Session'}
                 </button>
+
+                {preflightWarning && (
+                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                    {preflightWarning}
+                  </p>
+                )}
+
+                {previewUrl && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-gray-700">Deck preview (first visible slide)</p>
+                    <div className="border border-gray-200 rounded overflow-hidden bg-white w-full max-w-md aspect-video">
+                      <iframe
+                        title="SyncDeck preflight preview"
+                        src={previewUrl}
+                        className="w-full h-full pointer-events-none"
+                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                      />
+                    </div>
+                  </div>
+                )}
               </form>
               ) : null}
 
@@ -827,10 +1144,6 @@ const SyncDeckManager: FC = () => {
                   sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
                 />
               </div>
-            )}
-
-            {isConfigurePanelOpen && (
-              <p className="text-sm text-gray-700">Presentation sync controls will be added in the next implementation pass.</p>
             )}
           </div>
         </div>

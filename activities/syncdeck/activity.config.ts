@@ -15,6 +15,7 @@ const syncdeckConfig: ActivityConfig = {
   },
   deepLinkGenerator: {
     endpoint: '/api/syncdeck/generate-url',
+    requiresPreflight: true,
   },
   manageLayout: {
     expandShell: true,

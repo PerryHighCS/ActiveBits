@@ -14,6 +14,7 @@ export interface DeepLinkGeneratorConfig {
   endpoint: string
   mode: 'replace-url' | 'append-query'
   expectsSelectedOptions: boolean
+  requiresPreflight: boolean
 }
 
 export type DeepLinkOptions = Record<string, DeepLinkOption>
@@ -51,6 +52,7 @@ export function parseDeepLinkGenerator(rawDeepLinkGenerator: unknown): DeepLinkG
     endpoint,
     mode: rawDeepLinkGenerator.mode === 'append-query' ? 'append-query' : 'replace-url',
     expectsSelectedOptions: rawDeepLinkGenerator.expectsSelectedOptions !== false,
+    requiresPreflight: rawDeepLinkGenerator.requiresPreflight === true,
   }
 }
 

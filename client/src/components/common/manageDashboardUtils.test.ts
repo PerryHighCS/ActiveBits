@@ -99,12 +99,21 @@ void test('parseDeepLinkGenerator validates and normalizes generator metadata', 
     endpoint: '/api/syncdeck/generate-url',
     mode: 'replace-url',
     expectsSelectedOptions: true,
+    requiresPreflight: false,
   })
 
   assert.deepEqual(parseDeepLinkGenerator({ endpoint: '/api/custom', mode: 'append-query', expectsSelectedOptions: false }), {
     endpoint: '/api/custom',
     mode: 'append-query',
     expectsSelectedOptions: false,
+    requiresPreflight: false,
+  })
+
+  assert.deepEqual(parseDeepLinkGenerator({ endpoint: '/api/syncdeck/generate-url', requiresPreflight: true }), {
+    endpoint: '/api/syncdeck/generate-url',
+    mode: 'replace-url',
+    expectsSelectedOptions: true,
+    requiresPreflight: true,
   })
 })
 
@@ -119,7 +128,7 @@ void test('buildPersistentLinkUrl appends query only for legacy or append-query 
       'https://bits.example',
       '/activity/syncdeck/hash2?presentationUrl=https%3A%2F%2Fslides.example&urlHash=abcd',
       { presentationUrl: 'https://tamper.example' },
-      { endpoint: '/api/syncdeck/generate-url', mode: 'replace-url', expectsSelectedOptions: true },
+      { endpoint: '/api/syncdeck/generate-url', mode: 'replace-url', expectsSelectedOptions: true, requiresPreflight: false },
     ),
     'https://bits.example/activity/syncdeck/hash2?presentationUrl=https%3A%2F%2Fslides.example&urlHash=abcd',
   )
