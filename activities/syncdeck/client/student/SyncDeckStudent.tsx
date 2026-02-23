@@ -46,7 +46,33 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function toRevealCommandMessage(rawPayload: unknown): Record<string, unknown> | null {
+function normalizeIndices(value: unknown): { h: number; v: number; f: number } | null {
+  if (!isPlainObject(value)) {
+    return null
+  }
+
+  const h = value.h
+  const v = value.v
+  const f = value.f
+
+  if (typeof h !== 'number' || !Number.isFinite(h)) {
+    return null
+  }
+
+  if (typeof v !== 'number' || !Number.isFinite(v)) {
+    return null
+  }
+
+  const fragment = typeof f === 'number' && Number.isFinite(f) ? f : 0
+
+  return {
+    h,
+    v,
+    f: fragment,
+  }
+}
+
+export function toRevealCommandMessage(rawPayload: unknown): Record<string, unknown> | null {
   if (!isPlainObject(rawPayload)) {
     return null
   }
@@ -58,6 +84,34 @@ function toRevealCommandMessage(rawPayload: unknown): Record<string, unknown> | 
 
   if (message.action === 'command') {
     return rawPayload
+  }
+
+  if (message.action === 'studentBoundaryChanged') {
+    if (!isPlainObject(message.payload)) {
+      return null
+    }
+
+    const boundary = normalizeIndices((message.payload as { studentBoundary?: unknown }).studentBoundary)
+    if (!boundary) {
+      return null
+    }
+
+    return {
+      type: 'reveal-sync',
+      version: typeof message.version === 'string' ? message.version : '1.0.0',
+      action: 'command',
+      deckId: typeof message.deckId === 'string' ? message.deckId : null,
+      role: 'instructor',
+      source: 'reveal-iframe-sync',
+      ts: Date.now(),
+      payload: {
+        name: 'setStudentBoundary',
+        payload: {
+          indices: boundary,
+          syncToBoundary: false,
+        },
+      },
+    }
   }
 
   if (message.action !== 'state' || !isPlainObject(message.payload)) {

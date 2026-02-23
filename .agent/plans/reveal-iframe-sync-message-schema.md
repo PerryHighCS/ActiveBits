@@ -113,9 +113,10 @@ Allows a student to move forward up to the specified boundary, even if instructo
 ```
 
 Notes:
-- Boundary is enforced only when role is `student`.
+- Navigation enforcement (preventing forward travel) applies only when role is `student`.
+- When sent to an **instructor** iframe, the boundary is stored and shown as a visual marker in the storyboard strip (display only — the instructor can still navigate freely). A `studentBoundaryChanged` message is still emitted with `role: "instructor"`.
 - With default plugin settings (`studentCanNavigateBack: true`, `studentCanNavigateForward: false`), student can move backward and forward only up to the granted boundary.
-- `syncToBoundary: true` also jumps the student immediately to that location.
+- `syncToBoundary: true` also jumps the student immediately to that location (ignored for instructor role).
 
 #### `setStudentBoundary` (explicit alias)
 
@@ -214,7 +215,7 @@ Sent by **any role** on: slide change, fragment shown/hidden, pause, resume, ove
       "canNavigateBack": true,
       "canNavigateForward": true
     },
-    "studentBoundary": null,
+    "studentBoundary": { "h": 5, "v": 0, "f": 0 },
     "revealState": {},
     "indices": { "h": 4, "v": 0, "f": 1 },
     "paused": false,
@@ -224,6 +225,8 @@ Sent by **any role** on: slide change, fragment shown/hidden, pause, resume, ove
 ```
 
 `overview` reflects whether the **custom storyboard strip** is currently open (`true` = strip is visible).
+
+`studentBoundary` — `null` until a boundary has been established; `{ h, v, f }` once set. Non-null for **both student and instructor** roles once a boundary is in effect. For instructors this reflects the boundary currently displayed in the storyboard strip.
 
 ### `roleChanged`
 
@@ -236,7 +239,7 @@ Sent by **any role** on: slide change, fragment shown/hidden, pause, resume, ove
 
 ### `studentBoundaryChanged`
 
-Emitted after `allowStudentForwardTo` / `setStudentBoundary` is applied.
+Emitted after `allowStudentForwardTo` / `setStudentBoundary` is applied, or when the instructor moves the boundary by clicking a storyboard thumbnail.
 
 ```json
 {
@@ -247,6 +250,10 @@ Emitted after `allowStudentForwardTo` / `setStudentBoundary` is applied.
   }
 }
 ```
+
+Valid `reason` values: `"allowStudentForwardTo"`, `"setStudentBoundary"`, `"instructorSet"`.
+
+`"instructorSet"` means the instructor clicked a boundary button in the storyboard strip. The host should relay this to the student iframe as a `setStudentBoundary` command. Check `role` in the message envelope to distinguish instructor-originated changes from student-side updates.
 
 ### `pong`
 
