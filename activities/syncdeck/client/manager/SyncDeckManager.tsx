@@ -1,7 +1,8 @@
-import { useEffect, useState, type FC, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
 const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
+const isDevMode = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true
 
 interface SessionResponsePayload {
   session?: {
@@ -24,6 +25,39 @@ function validatePresentationUrl(value: string): boolean {
   }
 }
 
+function formatDebugMessagePayload(data: unknown): string {
+  const truncate = (value: string): string => (value.length > 220 ? `${value.slice(0, 220)}…` : value)
+
+  const serialize = (value: unknown): string => {
+    if (typeof value === 'string') {
+      return truncate(value)
+    }
+    try {
+      return truncate(JSON.stringify(value))
+    } catch {
+      return truncate(String(value))
+    }
+  }
+
+  const extractPayload = (value: unknown): unknown => {
+    if (value == null || typeof value !== 'object' || !('payload' in value)) {
+      return value
+    }
+    return (value as { payload: unknown }).payload
+  }
+
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data) as unknown
+      return serialize(extractPayload(parsed))
+    } catch {
+      return serialize(data)
+    }
+  }
+
+  return serialize(extractPayload(data))
+}
+
 const SyncDeckManager: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
@@ -40,6 +74,8 @@ const SyncDeckManager: FC = () => {
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
+  const [debugInstructorMessage, setDebugInstructorMessage] = useState<string | null>(null)
+  const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
 
   const studentJoinUrl = sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
   const urlHash = new URLSearchParams(location.search).get('urlHash')
@@ -252,6 +288,27 @@ const SyncDeckManager: FC = () => {
     isStartingSession,
   ])
 
+  useEffect(() => {
+    if (!isDevMode || isConfigurePanelOpen) {
+      return
+    }
+
+    const handleMessage = (event: MessageEvent) => {
+      const iframeWindow = presentationIframeRef.current?.contentWindow
+      if (!iframeWindow || event.source !== iframeWindow) {
+        return
+      }
+
+      const payload = formatDebugMessagePayload(event.data)
+      setDebugInstructorMessage(payload)
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => {
+      window.removeEventListener('message', handleMessage)
+    }
+  }, [isConfigurePanelOpen])
+
   if (!sessionId) {
     return (
       <div className="p-6 max-w-3xl mx-auto space-y-3">
@@ -261,6 +318,22 @@ const SyncDeckManager: FC = () => {
     )
   }
 
+  const statusClassName = startError
+    ? 'text-red-600'
+    : startSuccess
+      ? 'text-green-700'
+      : !isPasscodeReady
+        ? 'text-gray-600'
+        : 'text-blue-700'
+
+  const baseStatusMessage =
+    startError || startSuccess || (!isPasscodeReady ? 'Loading instructor credentials…' : debugInstructorMessage)
+
+  const mergedStatusMessage =
+    !startError && isDevMode && debugInstructorMessage && baseStatusMessage !== debugInstructorMessage
+      ? `${baseStatusMessage} • ${debugInstructorMessage}`
+      : baseStatusMessage
+
   return (
     <div className={isConfigurePanelOpen ? 'min-h-screen flex flex-col' : 'h-screen flex flex-col overflow-hidden'}>
       <div className="sticky top-0 z-20 bg-white border-b border-gray-200 w-full">
@@ -268,6 +341,10 @@ const SyncDeckManager: FC = () => {
           <div className="flex items-center min-w-0">
             <h1 className="text-2xl font-bold text-gray-800">SyncDeck</h1>
           </div>
+
+          {(startError || startSuccess || !isPasscodeReady || (isDevMode && debugInstructorMessage)) && (
+            <p className={`text-sm ${statusClassName} flex-1 min-w-0 truncate`}>{mergedStatusMessage}</p>
+          )}
 
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2">
@@ -301,16 +378,6 @@ const SyncDeckManager: FC = () => {
             </button>
           </div>
         </div>
-
-        {(startError || startSuccess || !isPasscodeReady) && (
-          <div className="px-6 pb-3">
-            {startError && <p className="text-sm text-red-600 bg-red-50 rounded p-2">{startError}</p>}
-            {!startError && startSuccess && <p className="text-sm text-green-700 bg-green-50 rounded p-2">{startSuccess}</p>}
-            {!startError && !startSuccess && !isPasscodeReady && (
-              <p className="text-sm text-gray-600 bg-gray-50 rounded p-2">Loading instructor credentials…</p>
-            )}
-          </div>
-        )}
       </div>
 
       <div className={isConfigurePanelOpen ? 'p-6 max-w-4xl mx-auto space-y-3 w-full' : 'flex-1 min-h-0 w-full'}>
@@ -341,6 +408,7 @@ const SyncDeckManager: FC = () => {
         {!isConfigurePanelOpen && validatePresentationUrl(presentationUrl) && (
           <div className="w-full h-full min-h-0 bg-white overflow-hidden">
             <iframe
+              ref={presentationIframeRef}
               title="SyncDeck Presentation"
               src={presentationUrl}
               className="w-full h-full"

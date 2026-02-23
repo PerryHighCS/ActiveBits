@@ -9,7 +9,7 @@ import { activities } from './activities'
 import { findFooterActivity } from './appUtils'
 
 const footerClass =
-  'text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto'
+  'text-center text-sm text-gray-500 mt-4 w-full bg-white border-t border-gray-300 p-4 mx-auto empty:hidden empty:mt-0 empty:border-0 empty:p-0'
 
 type AnyComponent = ComponentType<Record<string, unknown>>
 
