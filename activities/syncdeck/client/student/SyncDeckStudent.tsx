@@ -38,6 +38,7 @@ interface RevealSyncStatePayload {
   isOpen?: unknown
   visible?: unknown
   revealState?: unknown
+  studentBoundary?: unknown
 }
 
 const WS_OPEN_READY_STATE = 1
@@ -72,6 +73,54 @@ function normalizeIndices(value: unknown): { h: number; v: number; f: number } |
   }
 }
 
+function buildSetStudentBoundaryCommand(message: RevealSyncEnvelope): Record<string, unknown> | null {
+  const role = message.role
+  if (typeof role === 'string' && role !== 'instructor') {
+    return null
+  }
+
+  const boundaryFromPayload = isPlainObject(message.payload)
+    ? normalizeIndices((message.payload as { studentBoundary?: unknown }).studentBoundary)
+    : null
+  if (!boundaryFromPayload) {
+    return null
+  }
+
+  return {
+    type: 'reveal-sync',
+    version: typeof message.version === 'string' ? message.version : '1.0.0',
+    action: 'command',
+    deckId: typeof message.deckId === 'string' ? message.deckId : null,
+    role: 'instructor',
+    source: 'reveal-iframe-sync',
+    ts: Date.now(),
+    payload: {
+      name: 'setStudentBoundary',
+      payload: {
+        indices: boundaryFromPayload,
+        syncToBoundary: false,
+      },
+    },
+  }
+}
+
+export function toRevealBoundaryCommandMessage(rawPayload: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  if (message.type !== 'reveal-sync') {
+    return null
+  }
+
+  if (message.action === 'studentBoundaryChanged' || message.action === 'state') {
+    return buildSetStudentBoundaryCommand(message)
+  }
+
+  return null
+}
+
 export function toRevealCommandMessage(rawPayload: unknown): Record<string, unknown> | null {
   if (!isPlainObject(rawPayload)) {
     return null
@@ -84,34 +133,6 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
 
   if (message.action === 'command') {
     return rawPayload
-  }
-
-  if (message.action === 'studentBoundaryChanged') {
-    if (!isPlainObject(message.payload)) {
-      return null
-    }
-
-    const boundary = normalizeIndices((message.payload as { studentBoundary?: unknown }).studentBoundary)
-    if (!boundary) {
-      return null
-    }
-
-    return {
-      type: 'reveal-sync',
-      version: typeof message.version === 'string' ? message.version : '1.0.0',
-      action: 'command',
-      deckId: typeof message.deckId === 'string' ? message.deckId : null,
-      role: 'instructor',
-      source: 'reveal-iframe-sync',
-      ts: Date.now(),
-      payload: {
-        name: 'setStudentBoundary',
-        payload: {
-          indices: boundary,
-          syncToBoundary: false,
-        },
-      },
-    }
   }
 
   if (message.action !== 'state' || !isPlainObject(message.payload)) {
@@ -360,13 +381,21 @@ const SyncDeckStudent: FC = () => {
           return
         }
 
+        const boundaryCommand = toRevealBoundaryCommandMessage(parsed.payload)
+        if (boundaryCommand != null) {
+          sendPayloadToIframe(boundaryCommand)
+        }
+
         const revealCommand = toRevealCommandMessage(parsed.payload)
         if (revealCommand == null) {
-          return
+          if (boundaryCommand == null) {
+            return
+          }
+        } else {
+          sendPayloadToIframe(revealCommand)
         }
 
         setStatusMessage('Receiving instructor sync…')
-        sendPayloadToIframe(revealCommand)
       } catch {
         return
       }

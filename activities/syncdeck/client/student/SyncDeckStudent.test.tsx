@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import SyncDeckStudent from './SyncDeckStudent.js'
 import { toRevealCommandMessage } from './SyncDeckStudent.js'
+import { toRevealBoundaryCommandMessage } from './SyncDeckStudent.js'
 
 void test('SyncDeckStudent renders join guidance copy', () => {
   const html = renderToStaticMarkup(
@@ -17,8 +18,35 @@ void test('SyncDeckStudent renders join guidance copy', () => {
   assert.match(html, /Loading SyncDeck session|Waiting for instructor to configure the presentation/i)
 })
 
-void test('toRevealCommandMessage maps studentBoundaryChanged to setStudentBoundary command', () => {
+void test('toRevealCommandMessage ignores studentBoundaryChanged messages', () => {
   const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'studentBoundaryChanged',
+    payload: {
+      reason: 'instructorSet',
+      studentBoundary: { h: 3, v: 1, f: 0 },
+    },
+  })
+
+  assert.equal(result, null)
+})
+
+void test('toRevealCommandMessage ignores invalid studentBoundaryChanged payload', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    action: 'studentBoundaryChanged',
+    payload: {
+      reason: 'instructorSet',
+      studentBoundary: { h: '3', v: 1 },
+    },
+  })
+
+  assert.equal(result, null)
+})
+
+void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged to setStudentBoundary command', () => {
+  const result = toRevealBoundaryCommandMessage({
     type: 'reveal-sync',
     version: '1.0.0',
     action: 'studentBoundaryChanged',
@@ -47,13 +75,29 @@ void test('toRevealCommandMessage maps studentBoundaryChanged to setStudentBound
   assert.equal(typeof result?.ts, 'number')
 })
 
-void test('toRevealCommandMessage rejects studentBoundaryChanged payload without valid boundary', () => {
-  const result = toRevealCommandMessage({
+void test('toRevealBoundaryCommandMessage maps state payload studentBoundary to setStudentBoundary command', () => {
+  const result = toRevealBoundaryCommandMessage({
     type: 'reveal-sync',
-    action: 'studentBoundaryChanged',
+    version: '1.0.0',
+    action: 'state',
+    role: 'instructor',
     payload: {
-      reason: 'instructorSet',
-      studentBoundary: { h: '3', v: 1 },
+      studentBoundary: { h: 7, v: 0, f: 0 },
+      indices: { h: 2, v: 0, f: 0 },
+    },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'setStudentBoundary')
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown } })?.payload?.indices, { h: 7, v: 0, f: 0 })
+})
+
+void test('toRevealBoundaryCommandMessage ignores non-instructor role payloads', () => {
+  const result = toRevealBoundaryCommandMessage({
+    type: 'reveal-sync',
+    action: 'state',
+    role: 'student',
+    payload: {
+      studentBoundary: { h: 2, v: 0, f: 0 },
     },
   })
 
