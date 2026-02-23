@@ -64,6 +64,7 @@ interface SyncDeckSessionData extends Record<string, unknown> {
   presentationUrl: string | null
   instructorPasscode: string
   instructorState: SyncDeckInstructorState | null
+  lastInstructorPayload: unknown
   students: SyncDeckStudent[]
   embeddedActivities: SyncDeckEmbeddedActivity[]
 }
@@ -77,6 +78,15 @@ interface SyncDeckSocket extends ActiveBitsWebSocket {
   isInstructor?: boolean
   sessionId?: string | null
 }
+
+interface SyncDeckWsMessage {
+  type?: unknown
+  payload?: unknown
+}
+
+const WS_OPEN_READY_STATE = 1
+const SYNCDECK_WS_UPDATE_TYPE = 'syncdeck-state-update'
+const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -96,10 +106,45 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
         ? source.instructorPasscode
         : createInstructorPasscode(),
     instructorState: null,
+    lastInstructorPayload: source.lastInstructorPayload ?? null,
     students: Array.isArray(source.students) ? (source.students as SyncDeckStudent[]) : [],
     embeddedActivities: Array.isArray(source.embeddedActivities)
       ? (source.embeddedActivities as SyncDeckEmbeddedActivity[])
       : [],
+  }
+}
+
+function parseWsMessage(raw: unknown): SyncDeckWsMessage | null {
+  try {
+    const text =
+      typeof raw === 'string'
+        ? raw
+        : raw instanceof Buffer
+          ? raw.toString('utf8')
+          : Buffer.isBuffer(raw)
+            ? raw.toString('utf8')
+            : String(raw)
+    const parsed = JSON.parse(text) as unknown
+    return isPlainObject(parsed) ? (parsed as SyncDeckWsMessage) : null
+  } catch {
+    return null
+  }
+}
+
+function sendSyncDeckState(socket: ActiveBitsWebSocket, payload: unknown): void {
+  if (socket.readyState !== WS_OPEN_READY_STATE) {
+    return
+  }
+
+  try {
+    socket.send(
+      JSON.stringify({
+        type: SYNCDECK_WS_BROADCAST_TYPE,
+        payload,
+      }),
+    )
+  } catch {
+    // Ignore socket send failures.
   }
 }
 
@@ -349,8 +394,66 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     client.sessionId = query.get('sessionId')
     client.isInstructor = false
 
-    socket.on('message', () => {
+    const sessionId = client.sessionId
+    if (!sessionId) {
+      socket.close(1008, 'missing sessionId')
       return
+    }
+
+    const role = query.get('role')
+    const instructorPasscode = query.get('instructorPasscode')
+
+    ;(async () => {
+      const session = asSyncDeckSession(await sessions.get(sessionId))
+      if (!session) {
+        socket.close(1008, 'invalid session')
+        return
+      }
+
+      if (role === 'instructor') {
+        if (!instructorPasscode || instructorPasscode !== session.data.instructorPasscode) {
+          socket.close(1008, 'forbidden')
+          return
+        }
+        client.isInstructor = true
+        return
+      }
+
+      if (session.data.lastInstructorPayload != null) {
+        sendSyncDeckState(socket, session.data.lastInstructorPayload)
+      }
+    })().catch(() => {
+      socket.close(1011, 'syncdeck initialization failed')
+    })
+
+    socket.on('message', (raw: unknown) => {
+      void (async () => {
+        if (!client.isInstructor || !client.sessionId) {
+          return
+        }
+
+        const message = parseWsMessage(raw)
+        if (!message || message.type !== SYNCDECK_WS_UPDATE_TYPE) {
+          return
+        }
+
+        const session = asSyncDeckSession(await sessions.get(client.sessionId))
+        if (!session) {
+          return
+        }
+
+        session.data.lastInstructorPayload = message.payload ?? null
+        await sessions.set(session.id, session)
+
+        for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+          if (peer.sessionId !== session.id || peer.isInstructor || peer === client) {
+            continue
+          }
+          sendSyncDeckState(peer, message.payload ?? null)
+        }
+      })().catch(() => {
+        return
+      })
     })
   })
 }

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 
 const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
 const isDevMode = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true
+const WS_OPEN_READY_STATE = 1
 
 interface SessionResponsePayload {
   session?: {
@@ -76,6 +78,26 @@ const SyncDeckManager: FC = () => {
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
   const [debugInstructorMessage, setDebugInstructorMessage] = useState<string | null>(null)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
+
+  const buildInstructorWsUrl = (): string | null => {
+    if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelOpen) {
+      return null
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const params = new URLSearchParams({
+      sessionId,
+      role: 'instructor',
+      instructorPasscode,
+    })
+    return `${protocol}//${window.location.host}/ws/syncdeck?${params.toString()}`
+  }
+
+  const { connect: connectInstructorWs, disconnect: disconnectInstructorWs, socketRef: instructorSocketRef } =
+    useResilientWebSocket({
+      buildUrl: buildInstructorWsUrl,
+      shouldReconnect: Boolean(sessionId && instructorPasscode && !isConfigurePanelOpen),
+    })
 
   const studentJoinUrl = sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
   const urlHash = new URLSearchParams(location.search).get('urlHash')
@@ -289,6 +311,18 @@ const SyncDeckManager: FC = () => {
   ])
 
   useEffect(() => {
+    if (isConfigurePanelOpen || !sessionId || !instructorPasscode) {
+      disconnectInstructorWs()
+      return undefined
+    }
+
+    connectInstructorWs()
+    return () => {
+      disconnectInstructorWs()
+    }
+  }, [isConfigurePanelOpen, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
+
+  useEffect(() => {
     if (!isDevMode || isConfigurePanelOpen) {
       return
     }
@@ -301,6 +335,22 @@ const SyncDeckManager: FC = () => {
 
       const payload = formatDebugMessagePayload(event.data)
       setDebugInstructorMessage(payload)
+
+      const socket = instructorSocketRef.current
+      if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
+        return
+      }
+
+      try {
+        socket.send(
+          JSON.stringify({
+            type: 'syncdeck-state-update',
+            payload: event.data,
+          }),
+        )
+      } catch {
+        return
+      }
     }
 
     window.addEventListener('message', handleMessage)
