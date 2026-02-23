@@ -1,5 +1,5 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
-import { useCallback, useEffect, useRef, useState, type FC, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 
@@ -262,6 +262,15 @@ const SyncDeckManager: FC = () => {
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastInstructorPayloadRef = useRef<unknown>(null)
+
+  const presentationOrigin = useMemo(() => {
+    try {
+      return new URL(presentationUrl).origin
+    } catch {
+      return null
+    }
+  }, [presentationUrl])
 
   const buildInstructorWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelOpen) {
@@ -452,14 +461,61 @@ const SyncDeckManager: FC = () => {
 
   const toggleStoryboard = (): void => {
     const targetWindow = presentationIframeRef.current?.contentWindow
-    if (!targetWindow) {
+    if (!targetWindow || !presentationOrigin) {
       return
     }
 
     targetWindow.postMessage(
       buildRevealCommandMessage('toggleOverview', {}),
-      '*',
+      presentationOrigin,
     )
+  }
+
+  const handleForceSyncStudents = (): void => {
+    const socket = instructorSocketRef.current
+    if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
+      setStartError('Cannot force sync while disconnected from sync server.')
+      setStartSuccess(null)
+      return
+    }
+
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow || !presentationOrigin) {
+      setStartError('Presentation is not ready for force sync.')
+      setStartSuccess(null)
+      return
+    }
+
+    if (lastInstructorPayloadRef.current != null) {
+      try {
+        socket.send(
+          JSON.stringify({
+            type: 'syncdeck-state-update',
+            payload: lastInstructorPayloadRef.current,
+          }),
+        )
+      } catch {
+        setStartError('Unable to send force sync update to students.')
+        setStartSuccess(null)
+        return
+      }
+    }
+
+    targetWindow.postMessage(
+      {
+        type: 'reveal-sync',
+        version: '1.0.0',
+        action: 'requestState',
+        source: 'activebits-syncdeck-host',
+        role: 'instructor',
+        ts: Date.now(),
+        payload: {},
+      },
+      presentationOrigin,
+    )
+
+    setStartError(null)
+    setStartSuccess('Force sync sent. Students are syncing to your current position.')
   }
 
   const startSession = useCallback(async (): Promise<void> => {
@@ -586,21 +642,13 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    const expectedOrigin = (() => {
-      try {
-        return new URL(presentationUrl).origin
-      } catch {
-        return null
-      }
-    })()
-
     const handleMessage = (event: MessageEvent) => {
       const iframeWindow = presentationIframeRef.current?.contentWindow
       if (!iframeWindow || event.source !== iframeWindow) {
         return
       }
 
-      if (!expectedOrigin || event.origin !== expectedOrigin) {
+      if (!presentationOrigin || event.origin !== presentationOrigin) {
         return
       }
 
@@ -621,6 +669,7 @@ const SyncDeckManager: FC = () => {
 
       try {
         const sanitizedPayload = stripOverviewFromStateEnvelope(event.data)
+        lastInstructorPayloadRef.current = sanitizedPayload
         socket.send(
           JSON.stringify({
             type: 'syncdeck-state-update',
@@ -636,7 +685,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       window.removeEventListener('message', handleMessage)
     }
-  }, [isConfigurePanelOpen, presentationUrl])
+  }, [isConfigurePanelOpen, presentationOrigin])
 
   if (!sessionId) {
     return (
@@ -681,6 +730,16 @@ const SyncDeckManager: FC = () => {
               aria-label={isStoryboardOpen ? 'Hide storyboard' : 'Show storyboard'}
             >
               🎞️
+            </button>
+            <button
+              type="button"
+              onClick={handleForceSyncStudents}
+              className="ml-2 px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Force sync students to current position"
+              aria-label="Force sync students to current position"
+              disabled={isConfigurePanelOpen || instructorConnectionState !== 'connected'}
+            >
+              📍
             </button>
           </div>
 
