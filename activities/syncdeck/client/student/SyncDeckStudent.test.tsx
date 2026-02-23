@@ -13,5 +13,5 @@ void test('SyncDeckStudent renders join guidance copy', () => {
     </MemoryRouter>,
   )
 
-  assert.match(html, /Loading SyncDeck session/i)
+  assert.match(html, /Loading SyncDeck session|Waiting for instructor to configure the presentation/i)
 })

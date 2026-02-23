@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type FC, type FormEvent } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { useCallback, useEffect, useRef, useState, type FC, type FormEvent } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 
 const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
 const isDevMode = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true
 const WS_OPEN_READY_STATE = 1
+const DISCONNECTED_STATUS_DELAY_MS = 250
 
 interface SessionResponsePayload {
   session?: {
@@ -77,9 +79,12 @@ const SyncDeckManager: FC = () => {
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
   const [debugInstructorMessage, setDebugInstructorMessage] = useState<string | null>(null)
+  const [instructorConnectionState, setInstructorConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
+  const [instructorConnectionTooltip, setInstructorConnectionTooltip] = useState('Not connected to sync server')
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const buildInstructorWsUrl = (): string | null => {
+  const buildInstructorWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelOpen) {
       return null
     }
@@ -91,12 +96,30 @@ const SyncDeckManager: FC = () => {
       instructorPasscode,
     })
     return `${protocol}//${window.location.host}/ws/syncdeck?${params.toString()}`
-  }
+  }, [sessionId, instructorPasscode, isConfigurePanelOpen])
 
   const { connect: connectInstructorWs, disconnect: disconnectInstructorWs, socketRef: instructorSocketRef } =
     useResilientWebSocket({
       buildUrl: buildInstructorWsUrl,
       shouldReconnect: Boolean(sessionId && instructorPasscode && !isConfigurePanelOpen),
+      onOpen: () => {
+        if (disconnectStatusTimeoutRef.current != null) {
+          clearTimeout(disconnectStatusTimeoutRef.current)
+          disconnectStatusTimeoutRef.current = null
+        }
+        setInstructorConnectionState('connected')
+        setInstructorConnectionTooltip('Connected to sync server')
+      },
+      onClose: () => {
+        if (disconnectStatusTimeoutRef.current != null) {
+          clearTimeout(disconnectStatusTimeoutRef.current)
+        }
+        disconnectStatusTimeoutRef.current = setTimeout(() => {
+          setInstructorConnectionState('disconnected')
+          setInstructorConnectionTooltip('Disconnected from sync server')
+          disconnectStatusTimeoutRef.current = null
+        }, DISCONNECTED_STATUS_DELAY_MS)
+      },
     })
 
   const studentJoinUrl = sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
@@ -312,6 +335,12 @@ const SyncDeckManager: FC = () => {
 
   useEffect(() => {
     if (isConfigurePanelOpen || !sessionId || !instructorPasscode) {
+      if (disconnectStatusTimeoutRef.current != null) {
+        clearTimeout(disconnectStatusTimeoutRef.current)
+        disconnectStatusTimeoutRef.current = null
+      }
+      setInstructorConnectionState('disconnected')
+      setInstructorConnectionTooltip('Connects when presentation starts')
       disconnectInstructorWs()
       return undefined
     }
@@ -321,6 +350,15 @@ const SyncDeckManager: FC = () => {
       disconnectInstructorWs()
     }
   }, [isConfigurePanelOpen, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
+
+  useEffect(
+    () => () => {
+      if (disconnectStatusTimeoutRef.current != null) {
+        clearTimeout(disconnectStatusTimeoutRef.current)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     if (isConfigurePanelOpen) {
@@ -400,6 +438,7 @@ const SyncDeckManager: FC = () => {
 
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2">
+              <ConnectionStatusDot state={instructorConnectionState} tooltip={instructorConnectionTooltip} />
               <span className="text-sm text-gray-600">Join Code:</span>
               <code
                 onClick={() => {
