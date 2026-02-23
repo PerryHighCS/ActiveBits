@@ -77,6 +77,8 @@ interface SyncDeckSession extends SessionRecord {
 interface SyncDeckSocket extends ActiveBitsWebSocket {
   isInstructor?: boolean
   sessionId?: string | null
+  studentId?: string | null
+  studentName?: string | null
 }
 
 interface SyncDeckWsMessage {
@@ -87,6 +89,7 @@ interface SyncDeckWsMessage {
 const WS_OPEN_READY_STATE = 1
 const SYNCDECK_WS_UPDATE_TYPE = 'syncdeck-state-update'
 const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
+const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -146,6 +149,32 @@ function sendSyncDeckState(socket: ActiveBitsWebSocket, payload: unknown): void 
   } catch {
     // Ignore socket send failures.
   }
+}
+
+function normalizeStudentId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > 80) {
+    return null
+  }
+
+  return trimmed
+}
+
+function normalizeStudentName(value: unknown): string {
+  if (typeof value !== 'string') {
+    return 'Student'
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return 'Student'
+  }
+
+  return trimmed.slice(0, 80)
 }
 
 function asSyncDeckSession(session: SessionRecord | null): SyncDeckSession | null {
@@ -226,6 +255,52 @@ registerSessionNormalizer('syncdeck', (session) => {
 })
 
 export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
+  const broadcastStudentsToInstructors = async (sessionId: string): Promise<void> => {
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      return
+    }
+
+    const connectedStudentIds = new Set<string>()
+    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+      if (
+        peer.readyState === WS_OPEN_READY_STATE &&
+        peer.sessionId === session.id &&
+        !peer.isInstructor &&
+        typeof peer.studentId === 'string'
+      ) {
+        connectedStudentIds.add(peer.studentId)
+      }
+    }
+
+    const payload = {
+      students: session.data.students.map((student) => ({
+        studentId: student.studentId,
+        name: student.name,
+        joinedAt: student.joinedAt,
+        lastSeenAt: student.lastSeenAt,
+        connected: connectedStudentIds.has(student.studentId),
+      })),
+      connectedCount: connectedStudentIds.size,
+    }
+
+    const serialized = JSON.stringify({
+      type: SYNCDECK_WS_STUDENTS_TYPE,
+      payload,
+    })
+
+    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+      if (peer.readyState !== WS_OPEN_READY_STATE || peer.sessionId !== session.id || !peer.isInstructor) {
+        continue
+      }
+      try {
+        peer.send(serialized)
+      } catch {
+        // Ignore socket send failures.
+      }
+    }
+  }
+
   app.get('/api/syncdeck/:sessionId/instructor-passcode', async (req, res) => {
     const sessionId = req.params.sessionId
     if (!sessionId) {
@@ -393,6 +468,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const client = socket as SyncDeckSocket
     client.sessionId = query.get('sessionId')
     client.isInstructor = false
+    client.studentId = normalizeStudentId(query.get('studentId'))
+    client.studentName = normalizeStudentName(query.get('studentName'))
 
     const sessionId = client.sessionId
     if (!sessionId) {
@@ -416,12 +493,34 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           return
         }
         client.isInstructor = true
+        await broadcastStudentsToInstructors(session.id)
         return
+      }
+
+      if (client.studentId) {
+        const now = Date.now()
+        const existingStudent = session.data.students.find((student) => student.studentId === client.studentId)
+        if (existingStudent) {
+          existingStudent.lastSeenAt = now
+          existingStudent.name = client.studentName ?? existingStudent.name
+        } else {
+          session.data.students.push({
+            studentId: client.studentId,
+            name: client.studentName ?? 'Student',
+            joinedAt: now,
+            lastSeenAt: now,
+            lastIndices: null,
+            lastStudentStateAt: null,
+          })
+        }
+        await sessions.set(session.id, session)
       }
 
       if (session.data.lastInstructorPayload != null) {
         sendSyncDeckState(socket, session.data.lastInstructorPayload)
       }
+
+      await broadcastStudentsToInstructors(session.id)
     })().catch(() => {
       socket.close(1011, 'syncdeck initialization failed')
     })
@@ -454,6 +553,14 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       })().catch(() => {
         return
       })
+    })
+
+    socket.on('close', () => {
+      if (!client.sessionId) {
+        return
+      }
+
+      void broadcastStudentsToInstructors(client.sessionId)
     })
   })
 }

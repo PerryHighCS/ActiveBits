@@ -286,6 +286,49 @@ void test('syncdeck websocket relays instructor updates to students in session',
   assert.deepEqual(updatedSession.lastInstructorPayload, { type: 'slidechanged', payload: { h: 3, v: 1, f: 0 } })
 })
 
+void test('syncdeck websocket broadcasts student presence count to instructor', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const instructorSocket = new MockSocket()
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(instructorSocket)
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(
+    instructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+      instructorPasscode: 'teacher-pass',
+    }),
+    ws.wss,
+  )
+
+  handler?.(
+    studentSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'student-1',
+      studentName: 'Student',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: { connectedCount?: unknown } })
+  const studentsMessage = delivered.find((entry) => entry.type === 'syncdeck-students')
+  assert.ok(studentsMessage)
+  assert.equal(studentsMessage?.payload?.connectedCount, 1)
+})
+
 void test('generate-url returns signed syncdeck persistent link and sets cookie', async () => {
   const app = createMockApp()
   const ws = createMockWs()

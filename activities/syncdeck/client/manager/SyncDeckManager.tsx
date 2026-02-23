@@ -16,6 +16,20 @@ interface SessionResponsePayload {
   }
 }
 
+interface SyncDeckStudentPresenceMessage {
+  type?: unknown
+  payload?: {
+    connectedCount?: unknown
+    students?: unknown
+  }
+}
+
+interface SyncDeckStudentPresence {
+  studentId: string
+  name: string
+  connected: boolean
+}
+
 function buildPasscodeKey(sessionId: string): string {
   return `${SYNCDECK_PASSCODE_KEY_PREFIX}${sessionId}`
 }
@@ -81,6 +95,9 @@ const SyncDeckManager: FC = () => {
   const [debugInstructorMessage, setDebugInstructorMessage] = useState<string | null>(null)
   const [instructorConnectionState, setInstructorConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [instructorConnectionTooltip, setInstructorConnectionTooltip] = useState('Not connected to sync server')
+  const [connectedStudentCount, setConnectedStudentCount] = useState(0)
+  const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
+  const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -119,6 +136,35 @@ const SyncDeckManager: FC = () => {
           setInstructorConnectionTooltip('Disconnected from sync server')
           disconnectStatusTimeoutRef.current = null
         }, DISCONNECTED_STATUS_DELAY_MS)
+      },
+      onMessage: (event) => {
+        try {
+          const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage
+          if (message.type !== 'syncdeck-students') {
+            return
+          }
+
+          const connectedCount = message.payload?.connectedCount
+          if (typeof connectedCount === 'number' && Number.isFinite(connectedCount) && connectedCount >= 0) {
+            setConnectedStudentCount(connectedCount)
+          }
+
+          if (Array.isArray(message.payload?.students)) {
+            const nextStudents = message.payload.students
+              .filter(
+                (entry): entry is { studentId?: unknown; name?: unknown; connected?: unknown } =>
+                  entry != null && typeof entry === 'object',
+              )
+              .map((entry) => ({
+                studentId: typeof entry.studentId === 'string' ? entry.studentId : 'unknown',
+                name: typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name.trim() : 'Student',
+                connected: entry.connected === true,
+              }))
+            setStudents(nextStudents)
+          }
+        } catch {
+          return
+        }
       },
     })
 
@@ -438,6 +484,13 @@ const SyncDeckManager: FC = () => {
 
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsStudentsPanelOpen((current) => !current)}
+                className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Students: {connectedStudentCount}
+              </button>
               <ConnectionStatusDot state={instructorConnectionState} tooltip={instructorConnectionTooltip} />
               <span className="text-sm text-gray-600">Join Code:</span>
               <code
@@ -471,46 +524,83 @@ const SyncDeckManager: FC = () => {
         </div>
       </div>
 
-      <div className={isConfigurePanelOpen ? 'p-6 max-w-4xl mx-auto space-y-3 w-full' : 'flex-1 min-h-0 w-full'}>
-        {isConfigurePanelOpen ? (
-          <form onSubmit={handleStartSession} className="bg-white border border-gray-200 rounded p-4 space-y-3">
-            <h2 className="text-lg font-semibold text-gray-800">Configure Presentation</h2>
-            <label className="block text-sm text-gray-700">
-              <span className="block font-semibold mb-1">Presentation URL</span>
-              <input
-                type="url"
-                value={presentationUrl}
-                onChange={(event) => setPresentationUrl(event.target.value)}
-                className="w-full border-2 border-gray-300 rounded px-3 py-2"
-                placeholder="https://slides.example.com/deck"
-                required
-              />
-            </label>
-            <button
-              type="submit"
-              className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
-              disabled={isStartingSession || !isPasscodeReady}
-            >
-              {isStartingSession ? 'Starting…' : 'Start Session'}
-            </button>
-          </form>
-          ) : null}
+      <div className="flex-1 min-h-0 flex">
+        <div className="flex-1 min-w-0 min-h-0">
+          <div className={isConfigurePanelOpen ? 'p-6 max-w-4xl mx-auto space-y-3 w-full' : 'h-full min-h-0 w-full'}>
+            {isConfigurePanelOpen ? (
+              <form onSubmit={handleStartSession} className="bg-white border border-gray-200 rounded p-4 space-y-3">
+                <h2 className="text-lg font-semibold text-gray-800">Configure Presentation</h2>
+                <label className="block text-sm text-gray-700">
+                  <span className="block font-semibold mb-1">Presentation URL</span>
+                  <input
+                    type="url"
+                    value={presentationUrl}
+                    onChange={(event) => setPresentationUrl(event.target.value)}
+                    className="w-full border-2 border-gray-300 rounded px-3 py-2"
+                    placeholder="https://slides.example.com/deck"
+                    required
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                  disabled={isStartingSession || !isPasscodeReady}
+                >
+                  {isStartingSession ? 'Starting…' : 'Start Session'}
+                </button>
+              </form>
+              ) : null}
 
-        {!isConfigurePanelOpen && validatePresentationUrl(presentationUrl) && (
-          <div className="w-full h-full min-h-0 bg-white overflow-hidden">
-            <iframe
-              ref={presentationIframeRef}
-              title="SyncDeck Presentation"
-              src={presentationUrl}
-              className="w-full h-full"
-              allow="fullscreen"
-            />
+            {!isConfigurePanelOpen && validatePresentationUrl(presentationUrl) && (
+              <div className="w-full h-full min-h-0 bg-white overflow-hidden">
+                <iframe
+                  ref={presentationIframeRef}
+                  title="SyncDeck Presentation"
+                  src={presentationUrl}
+                  className="w-full h-full"
+                  allow="fullscreen"
+                />
+              </div>
+            )}
+
+            {isConfigurePanelOpen && (
+              <p className="text-sm text-gray-700">Presentation sync controls will be added in the next implementation pass.</p>
+            )}
           </div>
-        )}
+        </div>
 
-        {isConfigurePanelOpen && (
-          <p className="text-sm text-gray-700">Presentation sync controls will be added in the next implementation pass.</p>
-        )}
+        <aside
+          className={`h-full bg-white shadow-lg overflow-hidden transition-[width] duration-200 ${
+            isStudentsPanelOpen ? 'w-80 border-l border-gray-200' : 'w-0 border-l-0'
+          }`}
+        >
+          <div className="h-full flex flex-col">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-800">Connected Students</h2>
+              <button
+                type="button"
+                onClick={() => setIsStudentsPanelOpen(false)}
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {students.filter((student) => student.connected).length === 0 ? (
+                <p className="text-sm text-gray-600">No connected students yet.</p>
+              ) : (
+                students
+                  .filter((student) => student.connected)
+                  .map((student) => (
+                    <div key={student.studentId} className="px-3 py-2 rounded border border-gray-200 bg-gray-50">
+                      <p className="text-sm font-medium text-gray-800 truncate">{student.name}</p>
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   )

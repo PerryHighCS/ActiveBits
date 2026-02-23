@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FC } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
 import { useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
@@ -90,6 +90,34 @@ function validatePresentationUrl(value: string): boolean {
   }
 }
 
+function getStoredStudentName(sessionId: string): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  const stored = window.sessionStorage.getItem(`syncdeck_student_name_${sessionId}`)
+  return typeof stored === 'string' ? stored.trim() : ''
+}
+
+function buildStudentIdentity(sessionId: string, studentName: string): { studentId: string; studentName: string } | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const key = `syncdeck_student_id_${sessionId}`
+  let studentId = window.sessionStorage.getItem(key)
+  if (!studentId) {
+    const generatedId = window.crypto?.randomUUID?.() ?? `student-${Date.now().toString(36)}`
+    studentId = generatedId
+    window.sessionStorage.setItem(key, generatedId)
+  }
+
+  return {
+    studentId,
+    studentName,
+  }
+}
+
 const SyncDeckStudent: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const [isLoading, setIsLoading] = useState(true)
@@ -98,9 +126,28 @@ const SyncDeckStudent: FC = () => {
   const [isWaitingForConfiguration, setIsWaitingForConfiguration] = useState(false)
   const [statusMessage, setStatusMessage] = useState('Waiting for instructor sync…')
   const [connectionState, setConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
+  const [studentNameInput, setStudentNameInput] = useState('')
+  const [studentName, setStudentName] = useState('')
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const pendingPayloadRef = useRef<unknown>(null)
   const attachSessionEndedHandler = useSessionEndedHandler()
+
+  useEffect(() => {
+    if (!sessionId) {
+      return
+    }
+
+    const storedName = getStoredStudentName(sessionId)
+    setStudentName(storedName)
+    setStudentNameInput(storedName)
+  }, [sessionId])
+
+  const studentIdentity = useMemo(() => {
+    if (!sessionId || studentName.trim().length === 0) {
+      return null
+    }
+    return buildStudentIdentity(sessionId, studentName)
+  }, [sessionId, studentName])
 
   const sendPayloadToIframe = useCallback((payload: unknown) => {
     const target = iframeRef.current?.contentWindow
@@ -135,14 +182,18 @@ const SyncDeckStudent: FC = () => {
   )
 
   const buildStudentWsUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined' || !sessionId || !presentationUrl) {
+    if (typeof window === 'undefined' || !sessionId || !presentationUrl || !studentIdentity) {
       return null
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams({ sessionId })
+    const params = new URLSearchParams({
+      sessionId,
+      studentId: studentIdentity.studentId,
+      studentName: studentIdentity.studentName,
+    })
     return `${protocol}//${window.location.host}/ws/syncdeck?${params.toString()}`
-  }, [sessionId, presentationUrl])
+  }, [sessionId, presentationUrl, studentIdentity])
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs, socketRef: studentSocketRef } =
     useResilientWebSocket({
@@ -255,7 +306,7 @@ const SyncDeckStudent: FC = () => {
   }, [sessionId, isWaitingForConfiguration])
 
   useEffect(() => {
-    if (!sessionId || !presentationUrl) {
+    if (!sessionId || !presentationUrl || studentName.trim().length === 0) {
       disconnectStudentWs()
       return undefined
     }
@@ -264,7 +315,24 @@ const SyncDeckStudent: FC = () => {
     return () => {
       disconnectStudentWs()
     }
-  }, [sessionId, presentationUrl, connectStudentWs, disconnectStudentWs])
+  }, [sessionId, presentationUrl, studentName, connectStudentWs, disconnectStudentWs])
+
+  const handleNameSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!sessionId) {
+      return
+    }
+
+    const normalized = studentNameInput.trim().slice(0, 80)
+    if (normalized.length === 0) {
+      return
+    }
+
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, normalized)
+    }
+    setStudentName(normalized)
+  }
 
   const handleIframeLoad = useCallback(() => {
     if (pendingPayloadRef.current !== null) {
@@ -304,6 +372,35 @@ const SyncDeckStudent: FC = () => {
       <div className="p-6 max-w-3xl mx-auto space-y-3">
         <h1 className="text-2xl font-bold">SyncDeck</h1>
         <p className="text-sm text-gray-700">{error || 'Session unavailable.'}</p>
+      </div>
+    )
+  }
+
+  if (studentName.trim().length === 0) {
+    return (
+      <div className="fixed inset-0 z-10 bg-white flex items-center justify-center p-6">
+        <form onSubmit={handleNameSubmit} className="w-full max-w-md border border-gray-200 rounded p-4 space-y-3">
+          <h1 className="text-xl font-bold text-gray-800">Join SyncDeck</h1>
+          <label className="block text-sm text-gray-700">
+            <span className="block font-semibold mb-1">Your Name</span>
+            <input
+              type="text"
+              value={studentNameInput}
+              onChange={(event) => setStudentNameInput(event.target.value)}
+              className="w-full border-2 border-gray-300 rounded px-3 py-2"
+              placeholder="Enter your name"
+              maxLength={80}
+              required
+              autoFocus
+            />
+          </label>
+          <button
+            type="submit"
+            className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
+          >
+            Join Presentation
+          </button>
+        </form>
       </div>
     )
   }
