@@ -14,7 +14,7 @@ Protocol reference: [`.agent/plans/reveal-iframe-sync-message-schema.md`](./reve
 - **Permanent link format**: `/activity/syncdeck/{hash}?presentationUrl={url-encoded-url}&urlHash={signed-hash}`
   - `hash`: standard 20-char HMAC of activityName + teacherCode (existing infrastructure)
   - `urlHash`: 16-char HMAC of `hash + '|' + presentationUrl` using server HMAC secret. Implicitly salted because `hash` itself contains an 8-char random salt.
-  - Verified link creation goes through the manager's own panel. ManageDashboard's generic modal still works (teacher code only, no URL) — produces an unverified link that the manager can configure post-auth.
+  - Verified link creation uses the existing ManageDashboard deep-link flow, but routes through an activity-specific URL generator endpoint for SyncDeck.
 - `presentationUrl` query param is an optional instructor-only prefill input. `urlHash` is server-generated metadata for persistent links and is never trusted as a `configure` input. Students joining a session ignore both and always load from `session.data.presentationUrl`.
 - **`presentationUrl` lives in `session.data`** — set by instructor after session start via REST. Students receive it from the server (not from URL params), enabling join via `/{sessionId}` as well as the full link.
 - **State relay**: Instructor iframe → postMessage → Manager → WS → Server → broadcast → Student WS → postMessage → Student iframe
@@ -59,9 +59,18 @@ const syncdeckConfig: ActivityConfig = {
   description: 'Host a synchronized Reveal.js presentation for your class',
   color: 'indigo',
   soloMode: false,
-  // No deepLinkOptions: permanent link creation is handled in the manager UI
-  // to ensure urlHash is generated. ManageDashboard generic modal still works
-  // (teacher code only) producing an unverified link.
+  deepLinkOptions: {
+    presentationUrl: {
+      label: 'Presentation URL',
+      type: 'text',
+    },
+  },
+  // Proposed extension to shared deep-link creation flow.
+  // ManageDashboard uses this endpoint instead of generic
+  // /api/persistent-session/create for this activity.
+  deepLinkGenerator: {
+    endpoint: '/api/syncdeck/generate-url',
+  },
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',
 }
@@ -151,10 +160,10 @@ function verifyUrlHash(persistentHash: string, presentationUrl: string, candidat
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | `POST` | `/api/syncdeck/create` | none | Dashboard "Start Session Now". Creates session with `instructorPasscode`. Returns `{ id, instructorPasscode }`. |
-| `POST` | `/api/syncdeck/create-link` | teacher code in body | Manager's verified link creation. Validates URL (http/https), calls `generatePersistentHash('syncdeck', teacherCode)`, computes `urlHash`, sets `persistent_sessions` cookie (mirrors `/api/persistent-session/create` logic). Returns `{ hash, urlHash, url }`. |
+| `POST` | `/api/syncdeck/generate-url` | teacher code in body | SyncDeck deep-link generator used by the shared ManageDashboard flow. Accepts `{ activityName, teacherCode, selectedOptions }`, validates supported options (including `presentationUrl`), creates persistent hash, computes `urlHash`, sets `persistent_sessions` cookie, returns `{ hash, url }`. |
 | `GET` | `/api/syncdeck/:sessionId/instructor-passcode` | `persistent_sessions` cookie | For persistent sessions: verifies teacher via `findHashBySessionId` + cookie lookup. Returns `{ instructorPasscode }` from session.data. |
 | `POST` | `/api/syncdeck/:sessionId/register-student` | none | Student join/rejoin. Validates name and issues/refreshes signed `syncdeck_student_<sessionId>` cookie. Reuses existing `studentId` from cookie when valid; otherwise creates a new student (with empty `lastIndices`). Returns `{ studentId, name }`. |
-| `POST` | `/api/syncdeck/:sessionId/configure` | `instructorPasscode` in body | Post-create session configuration step that binds the live session to a `presentationUrl`. Client always sends `presentationUrl` + `instructorPasscode`; client also sends `urlHash` only for the persistent-link startup path. Server derives `persistentHash` from `sessionId` (`findHashBySessionId`) when `urlHash` is present and verifies URL integrity before storing. Reject if `urlHash` is present but no persistent mapping exists. |
+| `POST` | `/api/syncdeck/:sessionId/configure` | `instructorPasscode` in body | Post-create session configuration step that binds the live session to a `presentationUrl`. Client always sends `presentationUrl` + `instructorPasscode`; client also sends `urlHash` for persistent-link startup path. Server derives `persistentHash` from `sessionId` (`findHashBySessionId`) when `urlHash` is present and verifies URL integrity before storing. Reject if `urlHash` is present but no persistent mapping exists. |
 
 ### WebSocket `/ws/syncdeck`
 
@@ -258,7 +267,7 @@ URL input → validate → `POST /api/syncdeck/create` → store `instructorPass
 Panel A configures **before** navigation. This avoids an unnecessary second configure call after the manager view mounts.
 
 **Panel B — Create a permanent link:**
-URL input + teacher code input → validate URL → `POST /api/syncdeck/create-link` → display copyable link (includes `urlHash`)
+Managed by the shared ManageDashboard deep-link modal using SyncDeck's activity-configured generator endpoint (`POST /api/syncdeck/generate-url`) with `selectedOptions.presentationUrl`.
 
 ### Active session flow
 
@@ -437,9 +446,10 @@ Required cases:
   - creates session with `type = 'syncdeck'`
   - returns `{ id, instructorPasscode }`
   - initializes session data shape (`presentationUrl`, `students`, `embeddedActivities`)
-- `POST /api/syncdeck/create-link`
-  - rejects invalid/non-http(s) URL
-  - returns `hash`, `urlHash`, `url`
+- `POST /api/syncdeck/generate-url`
+  - accepts `{ activityName, teacherCode, selectedOptions }`
+  - validates `selectedOptions.presentationUrl` as required http(s) URL
+  - returns `hash`, `url` (where `url` includes `presentationUrl` + `urlHash` query params)
   - sets `persistent_sessions` cookie
 - `POST /api/syncdeck/:sessionId/configure`
   - acts as the post-create "bind session to presentation URL" step
@@ -516,6 +526,73 @@ Required cases:
 
 ---
 
+## Implementation Checklist: Shared Deep-Link Generator Flow
+
+### A) Type and config contract
+
+1. Extend `types/activity.ts`:
+  - Add optional `deepLinkGenerator` on `ActivityConfig`:
+    - `endpoint: string` (required when object present)
+    - `mode?: 'replace-url' | 'append-query'` (default `'replace-url'`)
+    - `expectsSelectedOptions?: boolean` (default true)
+  - Keep all existing `deepLinkOptions` behavior backward compatible.
+
+2. Update SyncDeck config in `activities/syncdeck/activity.config.ts`:
+  - Add `deepLinkOptions.presentationUrl` as text field.
+  - Add `deepLinkGenerator.endpoint = '/api/syncdeck/generate-url'`.
+
+### B) ManageDashboard integration
+
+3. Update `client/src/components/common/ManageDashboard.tsx` create-link flow:
+  - If selected activity has `deepLinkGenerator.endpoint`, call that endpoint.
+  - Else fall back to `/api/persistent-session/create` unchanged.
+  - Send payload:
+    - `activityName`
+    - `teacherCode`
+    - `selectedOptions` (normalized by existing deep-link utilities)
+  - Use returned `url` as authoritative URL to display/copy.
+
+4. Keep utility behavior in `client/src/components/common/manageDashboardUtils.ts`:
+  - No API changes required for parsing/normalizing deep-link options.
+  - Continue to build option query strings for legacy activities.
+
+### C) SyncDeck URL generator endpoint
+
+5. Implement in `activities/syncdeck/server/routes.ts`:
+  - `POST /api/syncdeck/generate-url`.
+  - Validate:
+    - `activityName === 'syncdeck'`
+    - `teacherCode` (same length policy as persistent-session route)
+    - `selectedOptions.presentationUrl` is valid http(s) URL.
+  - Generate persistent hash via shared helper.
+  - Compute `urlHash` from `hash + '|' + presentationUrl`.
+  - Persist teacher cookie entry in `persistent_sessions` (same structure as generic flow, including `selectedOptions`).
+  - Return `{ hash, url }` where `url` includes both `presentationUrl` and `urlHash` query params.
+
+6. Keep generic route untouched in `server/routes/persistentSessionRoutes.ts`:
+  - No SyncDeck-specific logic added there.
+  - Existing activities continue using `/api/persistent-session/create`.
+
+### D) Runtime verification path
+
+7. Ensure SyncDeck configure path still validates integrity:
+  - `POST /api/syncdeck/:sessionId/configure` accepts `urlHash` only for persistent-startup path.
+  - Server derives persistent hash from `sessionId` and verifies `urlHash` against provided `presentationUrl`.
+
+8. Optional hardening follow-up:
+  - Add per-option validators in SyncDeck route file so future options are validated centrally.
+  - Keep validator map local to activity server module.
+
+### E) Tests
+
+9. `activities/syncdeck/server/routes.test.ts`:
+  - Add generate-url tests (valid payload, invalid URL, invalid teacher code, cookie set, returned URL includes `urlHash`).
+10. `client/src/components/common/manageDashboardUtils.test.ts` and/or `ManageDashboard` tests:
+  - Add branch coverage for custom generator endpoint path.
+11. Run `npm --workspace activities test` and `npm test`.
+
+---
+
 ## Implementation Sequence
 
 1. `activities/syncdeck/activity.config.ts`
@@ -540,9 +617,9 @@ Required cases:
 
 ### Manual checks (focused integration/UX)
 
-3. `/manage` → SyncDeck card visible; "Start Session Now" and generic "Create Permanent Link" (teacher code only)
+3. `/manage` → SyncDeck card visible; "Create Permanent Link" modal includes `presentationUrl` deep-link option
 4. Click "Start Session Now" → manager pre-session; enter URL; validate (ping passes envelope check); session created; passcode in sessionStorage; active manager view
-5. Manager pre-session panel B: enter URL + teacher code → link with `presentationUrl` + `urlHash` generated
+5. In ManageDashboard persistent-link modal for SyncDeck: enter teacher code + `presentationUrl` → custom generator endpoint returns link with `presentationUrl` + `urlHash`
 6. Visit generated link as instructor (with cookie) → `GET /api/syncdeck/{sessionId}/instructor-passcode` → WS connects → `instructor-ack` received
 7. Visit same link in another tab (no cookie) → waiting room → teacher starts → student receives `session-started` → name entry form (no URL entry required)
 8. Student enters name → `POST /api/syncdeck/{sessionId}/register-student` sets student cookie + returns `studentId` → student WS connects → instructor sees student count
