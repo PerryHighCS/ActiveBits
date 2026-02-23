@@ -3,6 +3,7 @@ import {
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   initializePersistentStorage,
+  resolvePersistentSessionSecret,
   startPersistentSession,
 } from 'activebits-server/core/persistentSessions.js'
 import assert from 'node:assert/strict'
@@ -11,7 +12,7 @@ import test from 'node:test'
 import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../../types/websocket.js'
 import setupSyncDeckRoutes from './routes.js'
 
-const HMAC_SECRET = process.env.PERSISTENT_SESSION_SECRET || 'default-secret-change-in-production'
+const HMAC_SECRET = resolvePersistentSessionSecret()
 
 interface RouteRequest {
   params: Record<string, string | undefined>

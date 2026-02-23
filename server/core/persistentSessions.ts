@@ -35,7 +35,8 @@ const MAX_ATTEMPTS = 5
 const WAITER_TIMEOUT = 600_000
 const CLEANUP_INTERVAL = 60_000
 
-const HMAC_SECRET = process.env.PERSISTENT_SESSION_SECRET || 'default-secret-change-in-production'
+const DEFAULT_HMAC_SECRET = 'default-secret-change-in-production'
+const MIN_SECRET_LENGTH = 32
 
 function createInMemoryPersistentStore(): PersistentSessionStore {
   const memoryStore = new Map<string, unknown>()
@@ -113,30 +114,52 @@ const weakSecrets = [
   'admin',
   'letmein',
   'qwerty',
-  'default-secret-change-in-production',
+  DEFAULT_HMAC_SECRET,
 ]
 
-const envSecret = process.env.PERSISTENT_SESSION_SECRET
-if (envSecret == null) {
-  if (process.env.NODE_ENV === 'production') {
-    console.error('⚠️  SECURITY WARNING: PERSISTENT_SESSION_SECRET is not set in production!')
-    console.error('⚠️  Using default HMAC secret is a security risk.')
-    console.error('⚠️  Set PERSISTENT_SESSION_SECRET environment variable immediately.')
-  } else {
-    console.warn('⚠️  Development mode: Using default HMAC secret. Set PERSISTENT_SESSION_SECRET for production.')
-  }
-} else {
-  if (envSecret.length < 32) {
-    console.warn(
-      '⚠️  SECURITY WARNING: PERSISTENT_SESSION_SECRET is less than 32 characters. Use a longer, randomly generated secret for production.',
-    )
-  }
-  if (weakSecrets.includes(envSecret.toLowerCase())) {
-    console.warn(
-      '⚠️  SECURITY WARNING: PERSISTENT_SESSION_SECRET appears to be a weak or default value. Choose a strong, unique secret.',
-    )
-  }
+function isWeakPersistentSessionSecret(secret: string): boolean {
+  return weakSecrets.includes(secret.toLowerCase())
 }
+
+export function resolvePersistentSessionSecret(): string {
+  const envSecret = process.env.PERSISTENT_SESSION_SECRET?.trim()
+  const isProduction = process.env.NODE_ENV === 'production'
+
+  if (!envSecret) {
+    if (isProduction) {
+      throw new Error('PERSISTENT_SESSION_SECRET must be set in production.')
+    }
+
+    console.warn('⚠️  Development mode: Using default HMAC secret. Set PERSISTENT_SESSION_SECRET for production.')
+    return DEFAULT_HMAC_SECRET
+  }
+
+  if (envSecret.length < MIN_SECRET_LENGTH) {
+    const message =
+      `PERSISTENT_SESSION_SECRET must be at least ${MIN_SECRET_LENGTH} characters. ` +
+      'Use a longer, randomly generated secret.'
+
+    if (isProduction) {
+      throw new Error(message)
+    }
+
+    console.warn(`⚠️  SECURITY WARNING: ${message}`)
+  }
+
+  if (isWeakPersistentSessionSecret(envSecret)) {
+    const message = 'PERSISTENT_SESSION_SECRET appears to be a weak or default value. Choose a strong, unique secret.'
+
+    if (isProduction) {
+      throw new Error(message)
+    }
+
+    console.warn(`⚠️  SECURITY WARNING: ${message}`)
+  }
+
+  return envSecret
+}
+
+const HMAC_SECRET = resolvePersistentSessionSecret()
 
 export function hashTeacherCode(teacherCode: string): string {
   return createHash('sha256').update(teacherCode).digest('hex')

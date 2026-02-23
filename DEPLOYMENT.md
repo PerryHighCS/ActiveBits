@@ -119,7 +119,7 @@ ActiveBits supports two session storage modes:
 |----------|----------|---------|-------------|
 | `VALKEY_URL` | No | (none) | Valkey/Redis connection URL. If not set, uses in-memory storage. |
 | `NODE_ENV` | No | `development` | Set to `production` for production deployment. |
-| `PERSISTENT_SESSION_SECRET` | **Yes** | (weak default) | HMAC secret for persistent session links. MUST be set in production! |
+| `PERSISTENT_SESSION_SECRET` | **Yes** | (dev fallback only) | HMAC secret for persistent session links. Production startup fails if missing or weak. |
 | `SESSION_TTL_MS` | No | `3600000` | Session TTL in milliseconds (default: 1 hour). |
 | `PORT` | No | `3000` | Server port (Render sets this automatically). |
 

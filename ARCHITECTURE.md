@@ -184,7 +184,7 @@ Permanent sessions use HMAC-SHA256 authentication:
   - Secure flag enabled in production (HTTPS only)
   - HMAC prevents URL tampering
   - Cookie size limit (20 sessions max with FIFO eviction)
-  - Production warnings for default HMAC secret
+  - Production startup fails when `PERSISTENT_SESSION_SECRET` is missing or weak
 
 ### Session Termination
 When a teacher ends a session:

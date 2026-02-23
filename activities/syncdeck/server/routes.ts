@@ -1,5 +1,9 @@
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
-import { findHashBySessionId, generatePersistentHash } from 'activebits-server/core/persistentSessions.js'
+import {
+  findHashBySessionId,
+  generatePersistentHash,
+  resolvePersistentSessionSecret,
+} from 'activebits-server/core/persistentSessions.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -7,7 +11,7 @@ import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
 const MAX_TEACHER_CODE_LENGTH = 100
-const HMAC_SECRET = process.env.PERSISTENT_SESSION_SECRET || 'default-secret-change-in-production'
+const HMAC_SECRET = resolvePersistentSessionSecret()
 
 interface CookieSessionEntry {
   key: string
