@@ -323,7 +323,7 @@ const SyncDeckManager: FC = () => {
   }, [isConfigurePanelOpen, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
 
   useEffect(() => {
-    if (!isDevMode || isConfigurePanelOpen) {
+    if (isConfigurePanelOpen) {
       return
     }
 
@@ -333,8 +333,10 @@ const SyncDeckManager: FC = () => {
         return
       }
 
-      const payload = formatDebugMessagePayload(event.data)
-      setDebugInstructorMessage(payload)
+      if (isDevMode) {
+        const payload = formatDebugMessagePayload(event.data)
+        setDebugInstructorMessage(payload)
+      }
 
       const socket = instructorSocketRef.current
       if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
