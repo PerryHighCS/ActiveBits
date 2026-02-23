@@ -3,6 +3,14 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
 const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
 
+interface SessionResponsePayload {
+  session?: {
+    data?: {
+      presentationUrl?: unknown
+    }
+  }
+}
+
 function buildPasscodeKey(sessionId: string): string {
   return `${SYNCDECK_PASSCODE_KEY_PREFIX}${sessionId}`
 }
@@ -35,6 +43,44 @@ const SyncDeckManager: FC = () => {
 
   const studentJoinUrl = sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
   const urlHash = new URLSearchParams(location.search).get('urlHash')
+
+  useEffect(() => {
+    if (!sessionId) {
+      return
+    }
+
+    let isCancelled = false
+
+    const loadExistingPresentation = async (): Promise<void> => {
+      try {
+        const response = await fetch(`/api/session/${sessionId}`)
+        if (!response.ok) {
+          return
+        }
+
+        const payload = (await response.json()) as SessionResponsePayload
+        const existingPresentationUrl = payload.session?.data?.presentationUrl
+        if (typeof existingPresentationUrl !== 'string' || !validatePresentationUrl(existingPresentationUrl)) {
+          return
+        }
+
+        if (!isCancelled) {
+          setPresentationUrl(existingPresentationUrl)
+          setIsConfigurePanelOpen(false)
+          setStartSuccess('Presentation loaded. Session is ready.')
+          setStartError(null)
+        }
+      } catch {
+        return
+      }
+    }
+
+    void loadExistingPresentation()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [sessionId])
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -181,7 +227,7 @@ const SyncDeckManager: FC = () => {
   }
 
   useEffect(() => {
-    if (hasAutoStarted || !sessionId) {
+    if (hasAutoStarted || !sessionId || !isConfigurePanelOpen) {
       return
     }
 
@@ -199,6 +245,7 @@ const SyncDeckManager: FC = () => {
   }, [
     hasAutoStarted,
     sessionId,
+    isConfigurePanelOpen,
     presentationUrl,
     isPasscodeReady,
     instructorPasscode,
@@ -215,7 +262,7 @@ const SyncDeckManager: FC = () => {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className={isConfigurePanelOpen ? 'min-h-screen flex flex-col' : 'h-screen flex flex-col overflow-hidden'}>
       <div className="sticky top-0 z-20 bg-white border-b border-gray-200 w-full">
         <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center min-w-0">
@@ -266,7 +313,7 @@ const SyncDeckManager: FC = () => {
         )}
       </div>
 
-      <div className="p-6 max-w-4xl mx-auto space-y-3">
+      <div className={isConfigurePanelOpen ? 'p-6 max-w-4xl mx-auto space-y-3 w-full' : 'flex-1 min-h-0 w-full'}>
         {isConfigurePanelOpen ? (
           <form onSubmit={handleStartSession} className="bg-white border border-gray-200 rounded p-4 space-y-3">
             <h2 className="text-lg font-semibold text-gray-800">Configure Presentation</h2>
@@ -291,7 +338,20 @@ const SyncDeckManager: FC = () => {
           </form>
           ) : null}
 
-        <p className="text-sm text-gray-700">Presentation sync controls will be added in the next implementation pass.</p>
+        {!isConfigurePanelOpen && validatePresentationUrl(presentationUrl) && (
+          <div className="w-full h-full min-h-0 bg-white overflow-hidden">
+            <iframe
+              title="SyncDeck Presentation"
+              src={presentationUrl}
+              className="w-full h-full"
+              allow="fullscreen"
+            />
+          </div>
+        )}
+
+        {isConfigurePanelOpen && (
+          <p className="text-sm text-gray-700">Presentation sync controls will be added in the next implementation pass.</p>
+        )}
       </div>
     </div>
   )
