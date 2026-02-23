@@ -462,7 +462,7 @@ const SyncDeckManager: FC = () => {
     )
   }
 
-  const startSession = async (): Promise<void> => {
+  const startSession = useCallback(async (): Promise<void> => {
     if (!sessionId) return
 
     const normalizedUrl = presentationUrl.trim()
@@ -520,7 +520,7 @@ const SyncDeckManager: FC = () => {
     } finally {
       setIsStartingSession(false)
     }
-  }
+  }, [sessionId, presentationUrl, isPasscodeReady, instructorPasscode, urlHash])
 
   const handleStartSession = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -551,6 +551,7 @@ const SyncDeckManager: FC = () => {
     isPasscodeReady,
     instructorPasscode,
     isStartingSession,
+    startSession,
   ])
 
   useEffect(() => {
