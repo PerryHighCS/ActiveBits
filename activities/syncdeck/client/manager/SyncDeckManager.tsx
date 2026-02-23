@@ -24,6 +24,152 @@ interface SyncDeckStudentPresenceMessage {
   }
 }
 
+interface RevealCommandPayload {
+  [key: string]: unknown
+}
+
+interface RevealSyncEnvelope {
+  type?: unknown
+  action?: unknown
+  payload?: unknown
+}
+
+interface RevealSyncStatePayload {
+  overview?: unknown
+  storyboardDisplayed?: unknown
+  open?: unknown
+  isOpen?: unknown
+  visible?: unknown
+  revealState?: unknown
+}
+
+function stripOverviewFromStateEnvelope(data: unknown): unknown {
+  if (
+    data == null ||
+    typeof data !== 'object' ||
+    !('type' in data) ||
+    (data as { type?: unknown }).type !== 'reveal-sync' ||
+    !('action' in data) ||
+    (data as { action?: unknown }).action !== 'state' ||
+    !('payload' in data) ||
+    (data as { payload?: unknown }).payload == null ||
+    typeof (data as { payload?: unknown }).payload !== 'object'
+  ) {
+    return data
+  }
+
+  const envelope = data as {
+    payload: {
+      overview?: unknown
+      storyboardDisplayed?: unknown
+      revealState?: unknown
+      [key: string]: unknown
+    }
+    [key: string]: unknown
+  }
+
+  let revealState = envelope.payload.revealState
+  if (revealState != null && typeof revealState === 'object') {
+    const mutableRevealState = {
+      ...(revealState as Record<string, unknown>),
+      overview: false,
+    }
+    if ('storyboardDisplayed' in mutableRevealState) {
+      delete mutableRevealState.storyboardDisplayed
+    }
+    revealState = mutableRevealState
+  }
+
+  const nextPayload = {
+    ...envelope.payload,
+    overview: false,
+    revealState,
+  }
+
+  if ('storyboardDisplayed' in nextPayload) {
+    delete nextPayload.storyboardDisplayed
+  }
+
+  return {
+    ...envelope,
+    payload: nextPayload,
+  }
+}
+
+function extractStoryboardDisplayed(data: unknown): boolean | null {
+  const fromPayload = (payload: unknown): boolean | null => {
+    if (payload == null || typeof payload !== 'object') {
+      return null
+    }
+
+    const statePayload = payload as RevealSyncStatePayload
+    if (typeof statePayload.overview === 'boolean') {
+      return statePayload.overview
+    }
+    if (typeof statePayload.open === 'boolean') {
+      return statePayload.open
+    }
+    if (typeof statePayload.isOpen === 'boolean') {
+      return statePayload.isOpen
+    }
+    if (typeof statePayload.visible === 'boolean') {
+      return statePayload.visible
+    }
+    if (typeof statePayload.storyboardDisplayed === 'boolean') {
+      return statePayload.storyboardDisplayed
+    }
+
+    if (statePayload.revealState != null && typeof statePayload.revealState === 'object') {
+      const revealState = statePayload.revealState as { storyboardDisplayed?: unknown }
+      if (typeof revealState.storyboardDisplayed === 'boolean') {
+        return revealState.storyboardDisplayed
+      }
+    }
+
+    return null
+  }
+
+  const parseValue = (value: unknown): boolean | null => {
+    if (value == null || typeof value !== 'object') {
+      return null
+    }
+
+    const envelope = value as RevealSyncEnvelope
+    if (envelope.type !== 'reveal-sync') {
+      return null
+    }
+
+    if (envelope.action === 'storyboard-shown') {
+      return true
+    }
+    if (envelope.action === 'storyboard-hidden') {
+      return false
+    }
+    if (envelope.action === 'overview-shown') {
+      return true
+    }
+    if (envelope.action === 'overview-hidden') {
+      return false
+    }
+
+    if (envelope.action === 'state' || envelope.action === 'storyboard' || envelope.action === 'overview') {
+      return fromPayload(envelope.payload)
+    }
+
+    return null
+  }
+
+  if (typeof data === 'string') {
+    try {
+      return parseValue(JSON.parse(data) as unknown)
+    } catch {
+      return null
+    }
+  }
+
+  return parseValue(data)
+}
+
 interface SyncDeckStudentPresence {
   studentId: string
   name: string
@@ -76,6 +222,21 @@ function formatDebugMessagePayload(data: unknown): string {
   return serialize(extractPayload(data))
 }
 
+function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {
+  return {
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'command',
+    source: 'activebits-syncdeck-host',
+    role: 'instructor',
+    ts: Date.now(),
+    payload: {
+      name,
+      payload,
+    },
+  }
+}
+
 const SyncDeckManager: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
@@ -98,6 +259,7 @@ const SyncDeckManager: FC = () => {
   const [connectedStudentCount, setConnectedStudentCount] = useState(0)
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
+  const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -288,6 +450,18 @@ const SyncDeckManager: FC = () => {
     void navigate('/manage')
   }
 
+  const toggleStoryboard = (): void => {
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow) {
+      return
+    }
+
+    targetWindow.postMessage(
+      buildRevealCommandMessage('toggleOverview', {}),
+      '*',
+    )
+  }
+
   const startSession = async (): Promise<void> => {
     if (!sessionId) return
 
@@ -417,6 +591,11 @@ const SyncDeckManager: FC = () => {
         return
       }
 
+      const storyboardDisplayed = extractStoryboardDisplayed(event.data)
+      if (typeof storyboardDisplayed === 'boolean') {
+        setIsStoryboardOpen(storyboardDisplayed)
+      }
+
       if (isDevMode) {
         const payload = formatDebugMessagePayload(event.data)
         setDebugInstructorMessage(payload)
@@ -428,10 +607,11 @@ const SyncDeckManager: FC = () => {
       }
 
       try {
+        const sanitizedPayload = stripOverviewFromStateEnvelope(event.data)
         socket.send(
           JSON.stringify({
             type: 'syncdeck-state-update',
-            payload: event.data,
+            payload: sanitizedPayload,
           }),
         )
       } catch {
@@ -476,6 +656,19 @@ const SyncDeckManager: FC = () => {
         <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center min-w-0">
             <h1 className="text-2xl font-bold text-gray-800">SyncDeck</h1>
+            <button
+              type="button"
+              onClick={toggleStoryboard}
+              className={`ml-3 px-2 py-1 rounded border text-gray-700 ${
+                isStoryboardOpen
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              title={isStoryboardOpen ? 'Hide storyboard' : 'Show storyboard'}
+              aria-label={isStoryboardOpen ? 'Hide storyboard' : 'Show storyboard'}
+            >
+              🎞️
+            </button>
           </div>
 
           {(startError || startSuccess || !isPasscodeReady || (isDevMode && debugInstructorMessage)) && (

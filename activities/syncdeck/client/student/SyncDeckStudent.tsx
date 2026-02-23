@@ -27,6 +27,19 @@ interface RevealSyncEnvelope {
   payload?: unknown
 }
 
+interface RevealCommandPayload {
+  [key: string]: unknown
+}
+
+interface RevealSyncStatePayload {
+  overview?: unknown
+  storyboardDisplayed?: unknown
+  open?: unknown
+  isOpen?: unknown
+  visible?: unknown
+  revealState?: unknown
+}
+
 const WS_OPEN_READY_STATE = 1
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -81,6 +94,95 @@ function toRevealCommandMessage(rawPayload: unknown): Record<string, unknown> | 
   }
 }
 
+function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {
+  return {
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'command',
+    source: 'activebits-syncdeck-host',
+    role: 'student',
+    ts: Date.now(),
+    payload: {
+      name,
+      payload,
+    },
+  }
+}
+
+function extractStoryboardDisplayed(data: unknown): boolean | null {
+  const fromPayload = (payload: unknown): boolean | null => {
+    if (payload == null || typeof payload !== 'object') {
+      return null
+    }
+
+    const statePayload = payload as RevealSyncStatePayload
+    if (typeof statePayload.overview === 'boolean') {
+      return statePayload.overview
+    }
+    if (typeof statePayload.open === 'boolean') {
+      return statePayload.open
+    }
+    if (typeof statePayload.isOpen === 'boolean') {
+      return statePayload.isOpen
+    }
+    if (typeof statePayload.visible === 'boolean') {
+      return statePayload.visible
+    }
+    if (typeof statePayload.storyboardDisplayed === 'boolean') {
+      return statePayload.storyboardDisplayed
+    }
+
+    if (statePayload.revealState != null && typeof statePayload.revealState === 'object') {
+      const revealState = statePayload.revealState as { storyboardDisplayed?: unknown }
+      if (typeof revealState.storyboardDisplayed === 'boolean') {
+        return revealState.storyboardDisplayed
+      }
+    }
+
+    return null
+  }
+
+  const parseValue = (value: unknown): boolean | null => {
+    if (value == null || typeof value !== 'object') {
+      return null
+    }
+
+    const envelope = value as RevealSyncEnvelope
+    if (envelope.type !== 'reveal-sync') {
+      return null
+    }
+
+    if (envelope.action === 'storyboard-shown') {
+      return true
+    }
+    if (envelope.action === 'storyboard-hidden') {
+      return false
+    }
+    if (envelope.action === 'overview-shown') {
+      return true
+    }
+    if (envelope.action === 'overview-hidden') {
+      return false
+    }
+
+    if (envelope.action === 'state' || envelope.action === 'storyboard' || envelope.action === 'overview') {
+      return fromPayload(envelope.payload)
+    }
+
+    return null
+  }
+
+  if (typeof data === 'string') {
+    try {
+      return parseValue(JSON.parse(data) as unknown)
+    } catch {
+      return null
+    }
+  }
+
+  return parseValue(data)
+}
+
 function validatePresentationUrl(value: string): boolean {
   try {
     const parsed = new URL(value)
@@ -126,6 +228,7 @@ const SyncDeckStudent: FC = () => {
   const [isWaitingForConfiguration, setIsWaitingForConfiguration] = useState(false)
   const [statusMessage, setStatusMessage] = useState('Waiting for instructor sync…')
   const [connectionState, setConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
+  const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [studentNameInput, setStudentNameInput] = useState('')
   const [studentName, setStudentName] = useState('')
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
@@ -157,6 +260,25 @@ const SyncDeckStudent: FC = () => {
     }
 
     target.postMessage(payload, '*')
+  }, [])
+
+  useEffect(() => {
+    const handleIframeMessage = (event: MessageEvent) => {
+      const iframeWindow = iframeRef.current?.contentWindow
+      if (!iframeWindow || event.source !== iframeWindow) {
+        return
+      }
+
+      const storyboardDisplayed = extractStoryboardDisplayed(event.data)
+      if (typeof storyboardDisplayed === 'boolean') {
+        setIsStoryboardOpen(storyboardDisplayed)
+      }
+    }
+
+    window.addEventListener('message', handleIframeMessage)
+    return () => {
+      window.removeEventListener('message', handleIframeMessage)
+    }
   }, [])
 
   const handleWsMessage = useCallback(
@@ -345,6 +467,12 @@ const SyncDeckStudent: FC = () => {
     }
   }, [sendPayloadToIframe, studentSocketRef])
 
+  const toggleStoryboard = useCallback(() => {
+    sendPayloadToIframe(
+      buildRevealCommandMessage('toggleOverview', {}),
+    )
+  }, [sendPayloadToIframe])
+
   if (!sessionId) {
     return (
       <div className="p-6 max-w-3xl mx-auto space-y-3">
@@ -408,7 +536,22 @@ const SyncDeckStudent: FC = () => {
   return (
     <div className="fixed inset-0 z-10 bg-white flex flex-col overflow-hidden">
       <div className="bg-white border-b border-gray-200 w-full px-6 py-4 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-gray-800">SyncDeck</h1>
+        <div className="flex items-center">
+          <h1 className="text-2xl font-bold text-gray-800">SyncDeck</h1>
+          <button
+            type="button"
+            onClick={toggleStoryboard}
+            className={`ml-3 px-2 py-1 rounded border text-gray-700 ${
+              isStoryboardOpen
+                ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                : 'border-gray-300 hover:bg-gray-50'
+            }`}
+            title={isStoryboardOpen ? 'Hide storyboard' : 'Show storyboard'}
+            aria-label={isStoryboardOpen ? 'Hide storyboard' : 'Show storyboard'}
+          >
+            🎞️
+          </button>
+        </div>
         <div className="flex items-center gap-4 min-w-0">
           <ConnectionStatusDot state={connectionState} tooltip={statusMessage} />
           <p className="text-sm text-gray-600 whitespace-nowrap">

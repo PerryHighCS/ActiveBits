@@ -59,6 +59,9 @@ Use `action: "command"` with a command payload.
 - `setRole`
 - `allowStudentForwardTo`
 - `setStudentBoundary` (alias for explicit boundary set)
+- `toggleOverview` — opens/closes the custom storyboard strip (does **not** activate Reveal's built-in grid overview)
+- `showOverview` — opens the custom storyboard strip
+- `hideOverview` — closes the custom storyboard strip
 - `chalkboardCall`
 - `toggleChalkboard`
 - `toggleNotesCanvas`
@@ -126,6 +129,23 @@ Notes:
 }
 ```
 
+#### `toggleOverview` / `showOverview` / `hideOverview`
+
+These commands drive the **custom storyboard strip** in the iframe (via `reveal-storyboard.js`).
+They do **not** activate Reveal.js's built-in grid overview mode.
+
+```json
+{ "name": "toggleOverview" }
+```
+```json
+{ "name": "showOverview" }
+```
+```json
+{ "name": "hideOverview" }
+```
+
+Note: sending `setState` with `overview: true` has the same effect as `showOverview` — the `overview` flag is stripped from the Reveal state before it is applied, and the storyboard strip is opened instead.
+
 #### `chalkboardCall`
 
 ```json
@@ -178,9 +198,11 @@ Sent on init (if `autoAnnounceReady`) and when role changes.
 }
 ```
 
+`overview` reflects whether the **custom storyboard strip** is currently open — not Reveal's native grid overview (which is always suppressed). `true` = strip is visible.
+
 ### `state`
 
-Sent by instructor on deck changes and returned when host sends `requestState`.
+Sent by **any role** on: slide change, fragment shown/hidden, pause, resume, overview shown/hidden, **storyboard strip opened/closed**. Also returned when host sends `requestState`. Students emit state so the host can track their position.
 
 ```json
 {
@@ -200,6 +222,8 @@ Sent by instructor on deck changes and returned when host sends `requestState`.
   }
 }
 ```
+
+`overview` reflects whether the **custom storyboard strip** is currently open (`true` = strip is visible).
 
 ### `roleChanged`
 
