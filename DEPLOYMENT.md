@@ -34,7 +34,7 @@ ActiveBits supports two session storage modes:
 
 - Render.com account
 - GitHub repository with ActiveBits code
-- Node.js 18+ environment
+- Node.js 22+ environment
 
 ### Step 1: Create Valkey Instance
 
@@ -58,9 +58,14 @@ ActiveBits supports two session storage modes:
    - **Region**: Same as Valkey instance
    - **Branch**: `main` (or your deployment branch)
    - **Runtime**: Node
-   - **Build Command**: `npm install && cd client && npm install && npm run build && cd ../server && npm install`
+   - **Build Command**: `npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client && npm run build --workspace server`
    - **Start Command**: `cd server && npm start`
    - **Plan**: Choose based on expected traffic (Starter plan for testing, Standard+ for production)
+
+   **TypeScript server runtime policy (current)**:
+   - `npm run build --workspace server` runs `tsc -p server/tsconfig.build.json` and emits `server/dist/server.js` from `server/server.ts` plus other `server/**/*.ts` modules.
+   - `npm start` runs compiled output (`dist/server.js`) when present, and falls back to TS runtime (`node --import tsx server.ts`) when dist output is absent.
+   - Production expectation remains compiled runtime (`node dist/server.js`).
 
 5. **Environment Variables**:
    ```
@@ -117,6 +122,22 @@ ActiveBits supports two session storage modes:
 | `PERSISTENT_SESSION_SECRET` | **Yes** | (weak default) | HMAC secret for persistent session links. MUST be set in production! |
 | `SESSION_TTL_MS` | No | `3600000` | Session TTL in milliseconds (default: 1 hour). |
 | `PORT` | No | `3000` | Server port (Render sets this automatically). |
+
+## Source Map Policy (Open-Source Repo)
+
+ActiveBits intentionally ships source maps in production for debugging and teaching transparency.
+
+1. **Client source maps**:
+   - Enable Vite production source maps (`build.sourcemap: true`).
+   - Publish generated `.map` files with client assets.
+
+2. **Server source maps (post-TypeScript migration / TS server emit available)**:
+   - Keep `sourceMap: true` in `server/tsconfig.build.json`.
+   - Deploy emitted `.map` files with `server/dist`.
+
+3. **Operational verification**:
+   - Confirm `.map` files are present in deployment artifacts.
+   - Verify stack traces map to original TypeScript source during incident debugging.
 
 ## Scaling Considerations
 

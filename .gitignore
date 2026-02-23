@@ -12,6 +12,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.eslintcache
+*.eslintcache
 
 # Editor directories and files
 .vscode/*
@@ -23,3 +25,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# claude files
+.claude/*
+!.claude/plans/
+!.claude/plans/**
+!.claude/knowledge/
+!.claude/knowledge/**

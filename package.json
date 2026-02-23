@@ -8,24 +8,46 @@
         "activities"
     ],
     "scripts": {
-        "build": "echo 'Quick build (assumes dependencies installed). Use npm run deploy for full install+build.' && npm run build --workspace client",
+        "build": "npm run typecheck && echo 'Quick build (assumes dependencies installed). Use npm run deploy for full install+build.' && npm run build --workspace client",
         "deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
         "start": "npm start --prefix server",
         "dev": "export NODE_ENV='dev' && concurrently \"npm run dev --prefix client\" \"npm run start --prefix server\"",
+        "lint": "npm --workspace client run lint && npm --workspace server run lint && npm --workspace activities run lint",
+        "lint:activities": "npm --workspace activities run lint",
+        "lint:activities:scope": "npm --workspace activities run lint:scope",
+        "lint:activities:activity": "npm --workspace activities run lint:activity",
+        "test:activities:scope": "npm --workspace activities run test:scope",
+        "test:activities:activity": "npm --workspace activities run test:activity",
+        "test:activities:scope:hb": "sh scripts/with-heartbeat.sh \"activities scope test\" npm run test:activities:scope",
+        "test:activities:activity:hb": "sh scripts/with-heartbeat.sh \"activity test\" npm run test:activities:activity",
         "verify:deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
-        "verify:server": "node scripts/verify-server.js",
-        "test": "npm --workspace client test && npm --workspace server test && npm --workspace activities test && npm run verify:deploy && npm run verify:server"
+        "verify:server": "node --import tsx scripts/verify-server.ts",
+        "verify:source-extensions": "bash scripts/verify-no-js-sources.sh",
+        "typecheck": "npm run typecheck --workspaces --if-present",
+        "typecheck:hb": "sh scripts/with-heartbeat.sh \"typecheck\" npm run typecheck",
+        "test:chunks": "npm run typecheck && npm run lint && npm --workspace client test && npm --workspace server test && npm --workspace activities test",
+        "test:chunks:hb": "sh scripts/with-heartbeat.sh \"typecheck\" npm run typecheck && sh scripts/with-heartbeat.sh \"client test\" npm --workspace client test && sh scripts/with-heartbeat.sh \"server test\" npm --workspace server test && sh scripts/with-heartbeat.sh \"activities test\" npm --workspace activities test",
+        "test:codex": "npm run typecheck && npm run lint && npm --workspace client test && npm --workspace server run test:nonport && npm --workspace activities test",
+        "test:codex:hb": "sh scripts/with-heartbeat.sh \"test:codex\" npm run test:codex",
+        "test:hb": "sh scripts/with-heartbeat.sh \"npm test\" npm test",
+        "test": "npm run typecheck && npm run lint && npm --workspace client test && npm --workspace server test && npm --workspace activities test && npm run verify:deploy && npm run verify:server"
     },
     "keywords": [],
     "author": "",
     "license": "MIT",
     "description": "",
+    "engines": {
+        "node": ">=22"
+    },
     "dependencies": {
         "express": "^5.1.0",
         "vite": "^7.2.2",
         "ws": "^8.18.3"
     },
     "devDependencies": {
-        "concurrently": "^9.1.2"
+        "@types/node": "^25.2.1",
+        "concurrently": "^9.1.2",
+        "tsx": "^4.20.6",
+        "typescript": "^5.9.3"
     }
 }

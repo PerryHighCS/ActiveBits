@@ -10,15 +10,15 @@ ActiveBits is a modular, activity-based learning platform designed for classroom
 ActiveBits/
 ├── activities/                      # Co-located activities (auto-discovered)
 │   ├── raffle/
-│   │   ├── activity.config.js       # Metadata + client/server entry pointers
+│   │   ├── activity.config.ts       # Metadata + client/server entry pointers
 │   │   ├── client/                  # Manager/Student components and assets
 │   │   └── server/                  # API/WebSocket routes and data
 │   ├── www-sim/
-│   │   ├── activity.config.js
+│   │   ├── activity.config.ts
 │   │   ├── client/
 │   │   └── server/
 │   ├── java-string-practice/
-│   │   ├── activity.config.js
+│   │   ├── activity.config.ts
 │   │   ├── client/
 │   │   └── server/
 │   └  ...
@@ -26,11 +26,11 @@ ActiveBits/
 │   └── src/
 │       ├── activities/              # Loader that imports from /activities configs
 │       ├── components/              # Shared UI and common components
-│       └── App.jsx                  # Main app component
+│       └── App.tsx                  # Main app component
 └── server/
     ├── activities/                  # Activity discovery/registry loader
     ├── core/                        # Core server modules
-    └── server.js                    # Main server entry point
+    └── server.ts                    # Main TypeScript server entry point
 ```
 
 ## User Flow
@@ -69,10 +69,10 @@ ActiveBits/
 
 ### Activity Configuration
 
-Each activity owns a config at `/activities/<id>/activity.config.js` that declares metadata plus pointers to the client and server entry files. The client auto-discovers these configs (and loads the client entries), and the server auto-discovers them to load route handlers. Adding a new activity only requires dropping a new folder with a config plus the corresponding client/server entry files—no central registry to update.
+Each activity owns a config at `/activities/<id>/activity.config.ts` that declares metadata plus pointers to the client and server entry files. The client auto-discovers these configs (and loads the client entries), and the server auto-discovers them to load route handlers. Adding a new activity only requires dropping a new folder with a config plus the corresponding client/server entry files—no central registry to update.
 
-`activity.config.js` (metadata + entry pointers):
-```javascript
+`activity.config.ts` (metadata + entry pointers):
+```typescript
 export default {
   id: 'activity-id',            // Unique identifier
   name: 'Display Name',         // Human-readable name
@@ -84,30 +84,30 @@ export default {
     description: 'Solo mode description',
     buttonText: 'Copy Solo Link',
   },
-  clientEntry: './client/index.js',  // Component entry (JS/JSX)
-  serverEntry: './server/routes.js', // Server routes
+  clientEntry: './client/index.ts',  // Component entry (TS/TSX)
+  serverEntry: './server/routes.ts', // Server routes
 };
 ```
 
-`client/index.js` (components/footer only, lazy-loaded chunk):
-```javascript
+`client/index.ts` (components/footer only, lazy-loaded chunk):
+```typescript
 import ManagerComp from './manager/ManagerComp';
 import StudentComp from './student/StudentComp';
 
 export default {
   ManagerComponent: ManagerComp,
   StudentComponent: StudentComp,
-  footerContent: null, // JSX if desired (use .jsx + import React)
+  footerContent: null, // JSX if desired (use .tsx if footerContent includes JSX)
 };
 ```
 
-The loader merges `{...config, ...clientEntry}`; keeping metadata in `activity.config.js` avoids dueling sources of truth.
+The loader merges `{...config, ...clientEntry}`; keeping metadata in `activity.config.ts` avoids dueling sources of truth.
 
-Client entries are lazy-loaded with `React.lazy` so each activity ships in its own Vite chunk, named `activity-<id>-<hash>.js` via `manualChunks` in `client/vite.config.js`.
+Client entries are lazy-loaded with `React.lazy` so each activity ships in its own Vite chunk, named `activity-<id>-<hash>.js` via `manualChunks` in `client/vite.config.ts`.
 
 ### Automatic Route Generation
 
-Routes are automatically generated in `App.jsx` based on registered activities:
+Routes are automatically generated in `App.tsx` based on registered activities:
 - `/manage/{activity-id}` - Manager view without a sessionId (manager components should create sessions via dashboard APIs)
 - `/manage/{activity-id}/{session-id}` - Manage existing session
 
@@ -123,7 +123,7 @@ Solo mode enables students to practice activities independently without requirin
 
 Enable solo mode by setting `soloMode: true` in the activity configuration:
 
-```javascript
+```typescript
 export const myActivity = {
   id: 'my-activity',
   name: 'My Activity',
@@ -232,7 +232,7 @@ Activities can use URL query parameters for direct deep linking to specific cont
 - **java-practice**: `?challenge=intermediate` - Starts with intermediate difficulty
 
 **Implementation pattern (Manager):**
-```javascript
+```typescript
 import { useSearchParams } from 'react-router-dom';
 
 export default function MyActivityManager() {
@@ -248,7 +248,7 @@ export default function MyActivityManager() {
 ```
 
 **Implementation pattern (Student):**
-```javascript
+```typescript
 export default function MyActivityStudent({ sessionData, persistentSessionInfo }) {
   const presetParam = persistentSessionInfo?.queryParams?.preset;
   
@@ -289,7 +289,7 @@ Notes
 ### Manager Component
 Receives `sessionId` from URL params via `useParams()`. Should use `SessionHeader` component for consistent UI:
 
-```jsx
+```tsx
 import SessionHeader from '@src/components/common/SessionHeader';
 
 export default function MyActivityManager() {
@@ -318,7 +318,7 @@ export default function MyActivityManager() {
 ### Student Component
 Receives `sessionData` prop from `SessionRouter`. Should handle session termination:
 
-```jsx
+```tsx
 import { useCallback, useEffect } from 'react';
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
@@ -393,7 +393,7 @@ that contain a hash that allows teachers to use a code to enter the management d
 - **Secret Management**: Production deployments must set `PERSISTENT_SESSION_SECRET` environment variable
 
 ### Input Validation
-- Activity names validated against centralized registry (`activityRegistry.js`)
+- Activity names validated against centralized registry (`activityRegistry.ts`)
 - Teacher code length validated (6-100 characters) to prevent DoS attacks
 - Session IDs sanitized before database/session lookups
 - Cookie size limits prevent abuse (max 20 sessions per browser)

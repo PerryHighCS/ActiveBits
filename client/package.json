@@ -7,9 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "npm run lint && npm run test:unit",
-    "test:unit": "sh -c 'set -e; files=$(find src -name \"*.test.js\" -print); if [ -z \"$files\" ]; then echo \"No client tests found\"; exit 0; fi; node --test $files'",
+    "test": "npm run test:unit",
+    "test:unit": "sh -c 'set -e; files=$(find src \\( -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No client tests found\"; exit 0; fi; node --import tsx --test $files'",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.3",
@@ -23,13 +27,18 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",
+    "@types/node": "^25.2.1",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@typescript-eslint/eslint-plugin": "^8.46.0",
+    "@typescript-eslint/parser": "^8.46.0",
+    "@vitejs/plugin-react": "^5.1.0",
     "eslint": "^9.21.0",
+    "eslint-plugin-jsdoc": "^62.5.4",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.19",
     "globals": "^15.15.0",
-    "vite": "^6.4.1"
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2"
   }
 }

@@ -3,11 +3,32 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "sh -c 'set -e; files=$(find . -path \"./node_modules\" -prune -o -name \"*.test.js\" -print); if [ -z \"$files\" ]; then echo \"No activities tests found\"; exit 0; fi; node --test --import ../scripts/jsx-loader-register.mjs $files'"
+    "lint": "eslint .",
+    "lint:scope": "sh -c 'target=\"${npm_config_target:-.}\"; target=\"${target#./}\"; target=\"${target#activities/}\"; eslint \"$target\" \"$@\"' --",
+    "lint:activity": "sh -c 'activity=\"${npm_config_activity:?set --activity=<activity-folder>}\"; activity=\"${activity#./}\"; activity=\"${activity#activities/}\"; eslint \"$activity\" \"$@\"' --",
+    "test:scope": "sh -c 'set -e; target=\"${npm_config_target:-.}\"; target=\"${target#./}\"; target=\"${target#activities/}\"; files=$(find \"$target\" -path \"*/node_modules/*\" -prune -o \\( -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No tests found under $target\"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files'",
+    "test:activity": "sh -c 'set -e; activity=\"${npm_config_activity:?set --activity=<activity-folder>}\"; activity=\"${activity#./}\"; activity=\"${activity#activities/}\"; files=$(find \"$activity\" -path \"*/node_modules/*\" -prune -o \\( -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No tests found under $activity\"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files'",
+    "test": "sh -c 'set -e; files=$(find . -path \"./node_modules\" -prune -o \\( -name \"*.test.ts\" -o -name \"*.test.tsx\" \\) -print); if [ -z \"$files\" ]; then echo \"No activities tests found\"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files'",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "dependencies": {
     "activebits-server": "file:../server",
     "qrcode.react": "^4.2.0",
     "react-zxing": "^2.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.2.1",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "eslint": "^10.0.0",
+    "eslint-plugin-jsdoc": "^62.5.4",
+    "globals": "^17.3.0",
+    "typescript": "^5.9.3"
   }
 }
