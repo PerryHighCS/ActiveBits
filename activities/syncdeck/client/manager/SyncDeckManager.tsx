@@ -765,6 +765,7 @@ const SyncDeckManager: FC = () => {
                   src={presentationUrl}
                   className="w-full h-full"
                   allow="fullscreen"
+                  sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
                 />
               </div>
             )}

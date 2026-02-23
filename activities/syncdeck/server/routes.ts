@@ -233,6 +233,20 @@ function validatePresentationUrl(value: string): boolean {
   }
 }
 
+function verifyInstructorPasscode(expected: string, candidate: string): boolean {
+  const expectedBuffer = Buffer.from(expected, 'utf8')
+  const candidateBuffer = Buffer.from(candidate, 'utf8')
+  if (expectedBuffer.length !== candidateBuffer.length) {
+    return false
+  }
+
+  try {
+    return timingSafeEqual(expectedBuffer, candidateBuffer)
+  } catch {
+    return false
+  }
+}
+
 function computeUrlHash(persistentHash: string, presentationUrl: string): string {
   return createHmac('sha256', HMAC_SECRET).update(`${persistentHash}|${presentationUrl}`).digest('hex').substring(0, 16)
 }
@@ -429,7 +443,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       !presentationUrl ||
       !validatePresentationUrl(presentationUrl) ||
       !instructorPasscode ||
-      instructorPasscode !== session.data.instructorPasscode
+      !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)
     ) {
       const response = res as unknown as JsonResponse
       response.status(400).json({ error: 'invalid payload' })
@@ -488,7 +502,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
 
       if (role === 'instructor') {
-        if (!instructorPasscode || instructorPasscode !== session.data.instructorPasscode) {
+        if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
           socket.close(1008, 'forbidden')
           return
         }

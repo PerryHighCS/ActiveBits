@@ -252,15 +252,32 @@ const SyncDeckStudent: FC = () => {
     return buildStudentIdentity(sessionId, studentName)
   }, [sessionId, studentName])
 
+  const presentationOrigin = useMemo(() => {
+    if (!presentationUrl || !validatePresentationUrl(presentationUrl)) {
+      return null
+    }
+
+    try {
+      return new URL(presentationUrl).origin
+    } catch {
+      return null
+    }
+  }, [presentationUrl])
+
   const sendPayloadToIframe = useCallback((payload: unknown) => {
+    if (!presentationOrigin) {
+      pendingPayloadRef.current = payload
+      return
+    }
+
     const target = iframeRef.current?.contentWindow
     if (!target) {
       pendingPayloadRef.current = payload
       return
     }
 
-    target.postMessage(payload, '*')
-  }, [])
+    target.postMessage(payload, presentationOrigin)
+  }, [presentationOrigin])
 
   useEffect(() => {
     const handleIframeMessage = (event: MessageEvent) => {
@@ -567,6 +584,7 @@ const SyncDeckStudent: FC = () => {
           src={presentationUrl}
           className="w-full h-full"
           allow="fullscreen"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
           onLoad={handleIframeLoad}
         />
       </div>
