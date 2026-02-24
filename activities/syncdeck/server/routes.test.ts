@@ -244,6 +244,61 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
   assert.deepEqual(message.payload, { type: 'slidechanged', payload: { h: 2, v: 0, f: 0 } })
 })
 
+void test('syncdeck websocket replays paused state snapshot to student on connect', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        lastInstructorPayload: {
+          type: 'reveal-sync',
+          action: 'state',
+          payload: {
+            indices: { h: 2, v: 0, f: 0 },
+            paused: true,
+            revealState: {
+              indexh: 2,
+              indexv: 0,
+              indexf: 0,
+              paused: true,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(studentSocket.sent.length, 1)
+  const message = JSON.parse(studentSocket.sent[0] ?? '{}') as { type?: string; payload?: unknown }
+  assert.equal(message.type, 'syncdeck-state')
+  assert.deepEqual(message.payload, {
+    type: 'reveal-sync',
+    action: 'state',
+    payload: {
+      indices: { h: 2, v: 0, f: 0 },
+      paused: true,
+      revealState: {
+        indexh: 2,
+        indexv: 0,
+        indexf: 0,
+        paused: true,
+      },
+    },
+  })
+})
+
 void test('syncdeck websocket relays instructor updates to students in session', async () => {
   const app = createMockApp()
   const ws = createMockWs()

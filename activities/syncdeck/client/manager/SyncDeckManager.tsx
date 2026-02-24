@@ -244,7 +244,7 @@ function extractPausedState(data: unknown): boolean | null {
   return parseValue(data)
 }
 
-function includePausedInStateEnvelope(data: unknown, fallbackPaused: boolean | null = null): unknown {
+export function includePausedInStateEnvelope(data: unknown, fallbackPaused: boolean | null = null): unknown {
   if (
     data == null ||
     typeof data !== 'object' ||
@@ -286,6 +286,30 @@ function includePausedInStateEnvelope(data: unknown, fallbackPaused: boolean | n
       revealState,
     },
   }
+}
+
+export function buildPausedSnapshotFromAction(
+  actionPayload: unknown,
+  lastStatePayload: unknown,
+): unknown | null {
+  if (!isPlainObject(actionPayload)) {
+    return null
+  }
+
+  const envelope = actionPayload as RevealSyncEnvelope
+  if (envelope.type !== 'reveal-sync') {
+    return null
+  }
+
+  if (envelope.action !== 'paused' && envelope.action !== 'resumed') {
+    return null
+  }
+
+  if (lastStatePayload == null) {
+    return null
+  }
+
+  return includePausedInStateEnvelope(lastStatePayload, envelope.action === 'paused')
 }
 
 interface SyncDeckStudentPresence {
@@ -1256,12 +1280,8 @@ const SyncDeckManager: FC = () => {
           }
         }
 
-        if (
-          envelope?.type === 'reveal-sync' &&
-          (envelope.action === 'paused' || envelope.action === 'resumed') &&
-          lastInstructorStatePayloadRef.current != null
-        ) {
-          const pausedStatePayload = includePausedInStateEnvelope(lastInstructorStatePayloadRef.current, envelope.action === 'paused')
+        const pausedStatePayload = buildPausedSnapshotFromAction(event.data, lastInstructorStatePayloadRef.current)
+        if (pausedStatePayload != null) {
           lastInstructorStatePayloadRef.current = pausedStatePayload
           lastInstructorPayloadRef.current = pausedStatePayload
           socket.send(

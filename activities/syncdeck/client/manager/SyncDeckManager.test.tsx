@@ -10,6 +10,8 @@ import { attachInstructorIndicesToBoundaryChangePayload } from './SyncDeckManage
 import { shouldSuppressInstructorStateBroadcast } from './SyncDeckManager.js'
 import { buildBoundaryClearedPayload } from './SyncDeckManager.js'
 import { extractSyncDeckStatePayload } from './SyncDeckManager.js'
+import { includePausedInStateEnvelope } from './SyncDeckManager.js'
+import { buildPausedSnapshotFromAction } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -184,4 +186,64 @@ void test('extractSyncDeckStatePayload ignores non-syncdeck-state message', () =
   })
 
   assert.equal(extracted, null)
+})
+
+void test('includePausedInStateEnvelope prefers explicit fallback over stale payload paused value', () => {
+  const updated = includePausedInStateEnvelope(
+    {
+      type: 'reveal-sync',
+      action: 'state',
+      payload: {
+        paused: false,
+        revealState: { paused: false, indexh: 2, indexv: 0, indexf: 0 },
+        indices: { h: 2, v: 0, f: 0 },
+      },
+    },
+    true,
+  ) as { payload?: { paused?: unknown; revealState?: { paused?: unknown } } }
+
+  assert.equal(updated.payload?.paused, true)
+  assert.equal(updated.payload?.revealState?.paused, true)
+})
+
+void test('buildPausedSnapshotFromAction synthesizes paused state snapshot from paused action', () => {
+  const snapshot = buildPausedSnapshotFromAction(
+    {
+      type: 'reveal-sync',
+      action: 'paused',
+    },
+    {
+      type: 'reveal-sync',
+      action: 'state',
+      payload: {
+        paused: false,
+        revealState: { paused: false, indexh: 3, indexv: 1, indexf: 0 },
+        indices: { h: 3, v: 1, f: 0 },
+      },
+    },
+  ) as { payload?: { paused?: unknown; revealState?: { paused?: unknown } } }
+
+  assert.equal(snapshot.payload?.paused, true)
+  assert.equal(snapshot.payload?.revealState?.paused, true)
+})
+
+void test('buildPausedSnapshotFromAction synthesizes resumed state snapshot from resumed action', () => {
+  const snapshot = buildPausedSnapshotFromAction(
+    {
+      type: 'reveal-sync',
+      action: 'resumed',
+    },
+    {
+      type: 'reveal-sync',
+      action: 'state',
+      payload: {
+        paused: true,
+        revealState: { paused: true, indexh: 3, indexv: 1, indexf: 0 },
+        indices: { h: 3, v: 1, f: 0 },
+      },
+    },
+  ) as { payload?: { paused?: unknown; revealState?: { paused?: unknown } } }
+
+  assert.equal(snapshot.payload?.paused, false)
+  assert.equal(snapshot.payload?.revealState?.paused, false)
 })
