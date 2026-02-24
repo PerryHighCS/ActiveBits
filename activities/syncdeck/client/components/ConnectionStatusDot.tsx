@@ -11,10 +11,18 @@ const ConnectionStatusDot: FC<ConnectionStatusDotProps> = ({ state, tooltip, cla
 
   return (
     <span
-      className={`inline-block h-3 w-3 rounded-full ${colorClass}${className ? ` ${className}` : ''}`}
+      className={`inline-flex items-center${className ? ` ${className}` : ''}`}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
       title={tooltip}
-      aria-label={tooltip}
-    />
+    >
+      <span
+        aria-hidden="true"
+        className={`inline-block h-3 w-3 rounded-full ${colorClass}`}
+      />
+      <span className="sr-only">{tooltip}</span>
+    </span>
   )
 }
 

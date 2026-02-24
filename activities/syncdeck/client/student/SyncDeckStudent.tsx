@@ -230,15 +230,6 @@ function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: number;
   return normalizeIndices(payload.indices)
 }
 
-function extractRevealAction(rawPayload: unknown): string | null {
-  if (!isPlainObject(rawPayload)) {
-    return null
-  }
-
-  const message = rawPayload as RevealSyncEnvelope
-  return typeof message.action === 'string' ? message.action : null
-}
-
 function computeBoundaryDetails(
   rawPayload: unknown,
   studentIndices: { h: number; v: number; f: number } | null,
@@ -434,14 +425,6 @@ function getStoredStudentName(sessionId: string): string {
   return typeof stored === 'string' ? stored.trim() : ''
 }
 
-function formatIndicesForLog(indices: { h: number; v: number; f: number } | null): string {
-  if (!indices) {
-    return 'null'
-  }
-
-  return `${indices.h}.${indices.v}.${indices.f}`
-}
-
 function isForceSyncBoundaryCommand(rawPayload: unknown): boolean {
   if (!isPlainObject(rawPayload)) {
     return false
@@ -567,13 +550,8 @@ const SyncDeckStudent: FC = () => {
 
         if (isForceSyncBoundaryCommand(parsed.payload) && studentBacktrackOptOutRef.current) {
           setBacktrackOptOut(false)
-          console.log('[SyncDeck][Student] backtrack opt-out reset by force sync', {
-            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
-            instructorPosition: formatIndicesForLog(lastInstructorIndicesRef.current),
-          })
         }
 
-        const action = extractRevealAction(parsed.payload)
         const boundaryDetails = computeBoundaryDetails(
           parsed.payload,
           localStudentIndicesRef.current,
@@ -588,31 +566,7 @@ const SyncDeckStudent: FC = () => {
             lastEffectiveMaxPositionRef.current,
           )
         ) {
-            setBacktrackOptOut(false)
-          console.log('[SyncDeck][Student] backtrack opt-out reset by max position update', {
-            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
-            maxPosition: formatIndicesForLog(lastEffectiveMaxPositionRef.current),
-          })
-        }
-
-        if (action === 'state') {
-          console.log('[SyncDeck][Student] instructor move/state', {
-            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
-            instructorPosition: formatIndicesForLog(boundaryDetails?.instructorIndices ?? null),
-            computedBoundary: formatIndicesForLog(boundaryDetails?.effectiveBoundary ?? null),
-            setBoundary: formatIndicesForLog(boundaryDetails?.setBoundary ?? null),
-            syncToBoundary: boundaryDetails?.syncToBoundary === true,
-          })
-        }
-
-        if (action === 'studentBoundaryChanged') {
-          console.log('[SyncDeck][Student] boundary changed', {
-            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
-            instructorPosition: formatIndicesForLog(boundaryDetails?.instructorIndices ?? null),
-            computedBoundary: formatIndicesForLog(boundaryDetails?.effectiveBoundary ?? null),
-            setBoundary: formatIndicesForLog(boundaryDetails?.setBoundary ?? null),
-            syncToBoundary: boundaryDetails?.syncToBoundary === true,
-          })
+          setBacktrackOptOut(false)
         }
 
         const boundaryCommand = toRevealBoundaryCommandMessage(
@@ -621,15 +575,6 @@ const SyncDeckStudent: FC = () => {
           lastInstructorIndicesRef.current,
         )
         if (boundaryCommand != null) {
-          const boundaryPayload = boundaryCommand.payload.payload as
-            | { indices?: unknown; syncToBoundary?: unknown }
-            | undefined
-          const computedBoundary = normalizeIndices(boundaryPayload?.indices)
-          console.log('[SyncDeck][Student] boundary command', {
-            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
-            computedBoundary: formatIndicesForLog(computedBoundary),
-            syncToBoundary: boundaryPayload?.syncToBoundary === true,
-          })
           sendPayloadToIframe(boundaryCommand)
         }
 
@@ -645,11 +590,6 @@ const SyncDeckStudent: FC = () => {
             localStudentIndicesRef.current,
             incomingInstructorIndices,
           )
-          console.log('[SyncDeck][Student] state command', {
-            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
-            instructorPosition: formatIndicesForLog(incomingInstructorIndices),
-            suppressedByBacktrackOptOut: suppressForwardSync,
-          })
           if (!suppressForwardSync) {
             sendPayloadToIframe(revealCommand)
           }
@@ -675,25 +615,11 @@ const SyncDeckStudent: FC = () => {
       lastInstructorIndicesRef.current,
     )
     if (boundaryCommand != null) {
-      const boundaryPayload = boundaryCommand.payload.payload as
-        | { indices?: unknown; syncToBoundary?: unknown }
-        | undefined
-      const computedBoundary = normalizeIndices(boundaryPayload?.indices)
-      console.log('[SyncDeck][Student] replay boundary command', {
-        currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
-        computedBoundary: formatIndicesForLog(computedBoundary),
-        syncToBoundary: boundaryPayload?.syncToBoundary === true,
-      })
       sendPayloadToIframe(boundaryCommand)
     }
 
     const revealCommand = toRevealCommandMessage(payload)
     if (revealCommand != null) {
-      const incomingInstructorIndices = extractIndicesFromRevealStateMessage(payload)
-      console.log('[SyncDeck][Student] replay state command', {
-        currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
-        instructorPosition: formatIndicesForLog(incomingInstructorIndices),
-      })
       sendPayloadToIframe(revealCommand)
     }
   }, [sendPayloadToIframe])
@@ -725,27 +651,15 @@ const SyncDeckStudent: FC = () => {
           compareIndices(localIndices, maxPosition) < 0
         ) {
           setBacktrackOptOut(true)
-          console.log('[SyncDeck][Student] backtrack opt-out enabled', {
-            currentPosition: formatIndicesForLog(localIndices),
-            maxPosition: formatIndicesForLog(maxPosition),
-          })
         }
 
         if (shouldResetBacktrackOptOutByMaxPosition(studentBacktrackOptOutRef.current, localIndices, maxPosition)) {
           setBacktrackOptOut(false)
-          console.log('[SyncDeck][Student] backtrack opt-out reset by catch-up', {
-            currentPosition: formatIndicesForLog(localIndices),
-            maxPosition: formatIndicesForLog(maxPosition),
-          })
         }
       }
 
       if (!hasSeenIframeReadySignalRef.current && isRevealSyncMessage(event.data)) {
         hasSeenIframeReadySignalRef.current = true
-        console.log('[SyncDeck][Student] iframe ready signal received', {
-          action: event.data.action,
-          currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
-        })
         replayLatestInstructorSyncToIframe()
       }
     }
@@ -969,9 +883,6 @@ const SyncDeckStudent: FC = () => {
     )
     localStudentIndicesRef.current = instructorIndices
     setBacktrackOptOut(false)
-    console.log('[SyncDeck][Student] fast-forwarded to instructor position', {
-      instructorPosition: formatIndicesForLog(instructorIndices),
-    })
   }, [sendPayloadToIframe, setBacktrackOptOut])
 
   if (!sessionId) {

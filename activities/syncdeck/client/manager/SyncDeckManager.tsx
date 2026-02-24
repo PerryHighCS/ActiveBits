@@ -1,4 +1,5 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
@@ -7,7 +8,6 @@ const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
 const isDevMode = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
-const PREFLIGHT_PING_TIMEOUT_MS = 4000
 const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
 
 interface SessionResponsePayload {
@@ -194,7 +194,7 @@ interface SyncDeckStudentPresence {
   connected: boolean
 }
 
-function buildPasscodeKey(sessionId: string): string {
+function buildSyncDeckPasscodeKey(sessionId: string): string {
   return `${SYNCDECK_PASSCODE_KEY_PREFIX}${sessionId}`
 }
 
@@ -545,19 +545,12 @@ const SyncDeckManager: FC = () => {
               lastInstructorStatePayloadRef.current = statePayload
             }
 
-            console.log('[SyncDeck][Manager] ws syncdeck-state received', {
-              restoredIndices: currentIndices,
-              iframeReady: hasSeenInstructorIframeReadySignalRef.current,
-            })
-
             const targetWindow = presentationIframeRef.current?.contentWindow
             if (targetWindow && presentationOrigin && hasSeenInstructorIframeReadySignalRef.current) {
-              console.log('[SyncDeck][Manager] applying ws restore payload to iframe immediately')
               if (currentIndices) {
                 targetWindow.postMessage(buildRestoreCommandFromPayload(statePayload), presentationOrigin)
               }
             } else if (currentIndices) {
-              console.log('[SyncDeck][Manager] queueing ws restore payload until iframe ready')
               pendingRestorePayloadRef.current = statePayload
             }
             return
@@ -655,7 +648,7 @@ const SyncDeckManager: FC = () => {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      const fromStorage = window.sessionStorage.getItem(buildPasscodeKey(sessionId))
+      const fromStorage = window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId))
       if (fromStorage) {
         if (!isCancelled) {
           setInstructorPasscode(fromStorage)
@@ -678,7 +671,7 @@ const SyncDeckManager: FC = () => {
 
         const payload = (await response.json()) as { instructorPasscode?: string }
         if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
-          window.sessionStorage.setItem(buildPasscodeKey(sessionId), payload.instructorPasscode)
+          window.sessionStorage.setItem(buildSyncDeckPasscodeKey(sessionId), payload.instructorPasscode)
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
@@ -863,12 +856,6 @@ const SyncDeckManager: FC = () => {
     restoreTargetIndicesRef.current = extractIndicesFromRevealPayload(queuedRestorePayload)
     suppressOutboundStateUntilRestoreRef.current = queuedRestorePayload != null
 
-    console.log('[SyncDeck][Manager] iframe load', {
-      hasQueuedRestore: queuedRestorePayload != null,
-      restoreTargetIndices: restoreTargetIndicesRef.current,
-      suppressOutboundUntilRestore: suppressOutboundStateUntilRestoreRef.current,
-    })
-
     targetWindow.postMessage(
       buildInstructorRoleCommandMessage(),
       presentationOrigin,
@@ -897,133 +884,11 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    const runPresentationPreflight = async (): Promise<{ valid: boolean; warning: string | null }> => {
-      if (typeof window === 'undefined' || typeof document === 'undefined') {
-        return { valid: false, warning: 'Presentation validation is unavailable in this environment.' }
-      }
-
-      let targetOrigin: string
-      try {
-        targetOrigin = new URL(normalizedUrl).origin
-      } catch {
-        return { valid: false, warning: 'Presentation URL must be a valid http(s) URL' }
-      }
-
-      return await new Promise((resolve) => {
-        const iframe = document.createElement('iframe')
-        iframe.src = normalizedUrl
-        iframe.setAttribute('aria-hidden', 'true')
-        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms')
-        iframe.style.position = 'fixed'
-        iframe.style.width = '1024px'
-        iframe.style.height = '576px'
-        iframe.style.left = '-99999px'
-        iframe.style.top = '0'
-        iframe.style.opacity = '0'
-        iframe.style.pointerEvents = 'none'
-        iframe.style.border = '0'
-
-        let settled = false
-        let timeoutId: ReturnType<typeof setTimeout> | null = null
-
-        const cleanup = () => {
-          window.removeEventListener('message', handleMessage)
-          iframe.removeEventListener('load', handleLoad)
-          iframe.removeEventListener('error', handleError)
-          if (timeoutId != null) {
-            clearTimeout(timeoutId)
-          }
-          iframe.remove()
-        }
-
-        const finalize = (result: { valid: boolean; warning: string | null }) => {
-          if (settled) {
-            return
-          }
-          settled = true
-          cleanup()
-          resolve(result)
-        }
-
-        const parseEnvelope = (data: unknown): RevealSyncEnvelope | null => {
-          if (typeof data === 'string') {
-            try {
-              const parsed = JSON.parse(data) as unknown
-              return parsed != null && typeof parsed === 'object' ? (parsed as RevealSyncEnvelope) : null
-            } catch {
-              return null
-            }
-          }
-
-          return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
-        }
-
-        const handleMessage = (event: MessageEvent) => {
-          if (event.origin !== targetOrigin || event.source !== iframe.contentWindow) {
-            return
-          }
-
-          const envelope = parseEnvelope(event.data)
-          if (!envelope || envelope.type !== 'reveal-sync') {
-            return
-          }
-
-          if (envelope.action === 'pong') {
-            finalize({ valid: true, warning: null })
-          }
-        }
-
-        const handleLoad = () => {
-          try {
-            iframe.contentWindow?.postMessage(
-              {
-                type: 'reveal-sync',
-                version: '1.0.0',
-                action: 'command',
-                source: 'activebits-syncdeck-host',
-                role: 'instructor',
-                ts: Date.now(),
-                payload: {
-                  name: 'ping',
-                  payload: {},
-                },
-              },
-              targetOrigin,
-            )
-          } catch {
-            finalize({
-              valid: false,
-              warning: 'Presentation loaded, but sync ping could not be sent. You can continue anyway.',
-            })
-          }
-        }
-
-        const handleError = () => {
-          finalize({
-            valid: false,
-            warning: 'Presentation failed to load for validation. You can continue anyway.',
-          })
-        }
-
-        timeoutId = setTimeout(() => {
-          finalize({
-            valid: false,
-            warning: 'Presentation did not respond to sync ping in time. You can continue anyway.',
-          })
-        }, PREFLIGHT_PING_TIMEOUT_MS)
-
-        window.addEventListener('message', handleMessage)
-        iframe.addEventListener('load', handleLoad)
-        iframe.addEventListener('error', handleError)
-        document.body.appendChild(iframe)
-      })
-    }
-
     const canBypassPreflight = allowUnverifiedStartForUrl === normalizedUrl
 
     if (preflightValidatedUrl !== normalizedUrl && !canBypassPreflight) {
       setIsPreflightChecking(true)
-      const preflightResult = await runPresentationPreflight()
+      const preflightResult = await runSyncDeckPresentationPreflight(normalizedUrl)
       setIsPreflightChecking(false)
 
       if (preflightResult.valid) {
@@ -1184,27 +1049,21 @@ const SyncDeckManager: FC = () => {
       const initialEnvelope = parseRevealSyncEnvelope(event.data)
       if (!hasSeenInstructorIframeReadySignalRef.current && initialEnvelope?.type === 'reveal-sync') {
         hasSeenInstructorIframeReadySignalRef.current = true
-        console.log('[SyncDeck][Manager] iframe ready signal received', {
-          action: initialEnvelope.action,
-        })
         const targetWindow = presentationIframeRef.current?.contentWindow
         if (targetWindow && presentationOrigin) {
           let restorePayload: unknown | null = null
           if (pendingRestorePayloadRef.current != null) {
             restorePayload = pendingRestorePayloadRef.current
-            console.log('[SyncDeck][Manager] replaying queued restore payload to iframe')
             targetWindow.postMessage(buildRestoreCommandFromPayload(restorePayload), presentationOrigin)
             pendingRestorePayloadRef.current = null
           } else if (lastInstructorStatePayloadRef.current != null) {
             restorePayload = lastInstructorStatePayloadRef.current
-            console.log('[SyncDeck][Manager] replaying last instructor payload to iframe')
             targetWindow.postMessage(buildRestoreCommandFromPayload(restorePayload), presentationOrigin)
           }
 
           restoreTargetIndicesRef.current = extractIndicesFromRevealPayload(restorePayload)
           if (restorePayload == null || restoreTargetIndicesRef.current == null) {
             suppressOutboundStateUntilRestoreRef.current = false
-            console.log('[SyncDeck][Manager] restore suppression disabled (no restore target)')
           }
         }
       }
@@ -1230,16 +1089,7 @@ const SyncDeckManager: FC = () => {
             compareIndices(instructorIndices, restoreTargetIndices) >= 0
           ) {
             suppressOutboundStateUntilRestoreRef.current = false
-            console.log('[SyncDeck][Manager] restore suppression lifted', {
-              currentIndices: instructorIndices,
-              restoreTargetIndices,
-            })
           }
-
-          console.log('[SyncDeck][Manager] suppressing outbound instructor state during restore', {
-            currentIndices: instructorIndices,
-            restoreTargetIndices,
-          })
 
           if (isDevMode) {
             setDebugInstructorMessage('Holding outbound state until restored position is applied')
@@ -1305,11 +1155,6 @@ const SyncDeckManager: FC = () => {
           if (sanitizedIndices) {
             lastInstructorStatePayloadRef.current = sanitizedPayload
           }
-        }
-        if (envelope?.type === 'reveal-sync' && envelope.action === 'state') {
-          console.log('[SyncDeck][Manager] relaying instructor state update', {
-            indices: extractIndicesFromRevealPayload(sanitizedPayload),
-          })
         }
         socket.send(
           JSON.stringify({

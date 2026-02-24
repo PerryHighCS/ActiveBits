@@ -6,6 +6,7 @@ import {
 } from 'activebits-server/core/persistentSessions.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { isIP } from 'node:net'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
@@ -311,7 +312,49 @@ function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry
 function validatePresentationUrl(value: string): boolean {
   try {
     const parsed = new URL(value)
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.hostname.length === 0) {
+      return false
+    }
+
+    if (parsed.username.length > 0 || parsed.password.length > 0) {
+      return false
+    }
+
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+      return false
+    }
+
+    const ipVersion = isIP(hostname)
+    if (ipVersion === 4) {
+      const octets = hostname.split('.').map((segment) => Number.parseInt(segment, 10))
+      if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+        return false
+      }
+
+      const a = octets[0] ?? -1
+      const b = octets[1] ?? -1
+      if (
+        a === 10 ||
+        a === 127 ||
+        a === 0 ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168) ||
+        (a === 100 && b >= 64 && b <= 127) ||
+        (a === 198 && (b === 18 || b === 19))
+      ) {
+        return false
+      }
+    }
+
+    if (ipVersion === 6) {
+      if (hostname === '::1' || hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe8') || hostname.startsWith('fe9') || hostname.startsWith('fea') || hostname.startsWith('feb')) {
+        return false
+      }
+    }
+
+    return true
   } catch {
     return false
   }

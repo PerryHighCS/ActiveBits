@@ -615,6 +615,54 @@ void test('generate-url rejects invalid presentationUrl', async () => {
   assert.deepEqual(res.body, { error: 'presentationUrl must be a valid http(s) URL' })
 })
 
+void test('generate-url rejects credential-bearing presentationUrl', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/generate-url']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest({}, {
+      activityName: 'syncdeck',
+      teacherCode: 'teacher-123',
+      selectedOptions: {
+        presentationUrl: 'https://user:pass@slides.example.com/deck',
+      },
+    }),
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, { error: 'presentationUrl must be a valid http(s) URL' })
+})
+
+void test('generate-url rejects localhost presentationUrl', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/generate-url']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest({}, {
+      activityName: 'syncdeck',
+      teacherCode: 'teacher-123',
+      selectedOptions: {
+        presentationUrl: 'https://localhost/deck',
+      },
+    }),
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, { error: 'presentationUrl must be a valid http(s) URL' })
+})
+
 void test('instructor-passcode route returns passcode when teacher cookie matches persistent mapping', async () => {
   initializePersistentStorage(null)
 
@@ -897,6 +945,52 @@ void test('configure route rejects invalid presentationUrl', async () => {
     createRequest(
       { sessionId: 's1' },
       { presentationUrl: 'javascript:alert(1)', instructorPasscode: 'teacher-pass' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, { error: 'invalid payload' })
+})
+
+void test('configure route rejects credential-bearing presentationUrl', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/configure']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { presentationUrl: 'https://user:pass@example.com/deck', instructorPasscode: 'teacher-pass' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, { error: 'invalid payload' })
+})
+
+void test('configure route rejects private-network presentationUrl', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/configure']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { presentationUrl: 'https://192.168.1.10/deck', instructorPasscode: 'teacher-pass' },
     ),
     res,
   )
