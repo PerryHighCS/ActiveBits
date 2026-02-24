@@ -1,9 +1,9 @@
 # SyncDeck Future Plan
 
-This document now tracks **post-v1 work only** and is intentionally aligned with:
+This document now tracks and is intentionally aligned with:
 - `.agent/plans/syncdeck-checklist.md`
-
-v1 implementation details, delivered behavior, and completed checkpoints are out of scope for this plan.
+Checklist status and execution order should be maintained in in this file and 
+this checklist should be modified as plans change with new or updated goals.
 
 ## Scope
 
@@ -25,9 +25,6 @@ Future planning is currently organized into three tracks:
 - Instructor header indicates:
   - `# Students connected`
   - `# Students behind`
-
-### Notes
-- This section represents enhancements targeted for future iterations.
 
 ---
 
@@ -81,7 +78,3 @@ For each track:
 3. Implement behind small, reviewable commits.
 4. Validate with activity-scope tests, then full repo tests.
 
-## Source of Truth
-
-Checklist status and execution order should be maintained in:
-- `.agent/plans/syncdeck-checklist.md`
