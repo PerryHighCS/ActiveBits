@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-void test('resolvePersistentSessionSecret warns once for short non-production secret', async () => {
+void test('resolvePersistentSessionSecret caches value and warning behavior per process', async () => {
   const previousNodeEnv = process.env.NODE_ENV
   const previousSecret = process.env.PERSISTENT_SESSION_SECRET
   const originalWarn = console.warn
@@ -9,21 +9,22 @@ void test('resolvePersistentSessionSecret warns once for short non-production se
 
   try {
     process.env.NODE_ENV = 'development'
-    process.env.PERSISTENT_SESSION_SECRET = 'this-is-a-strong-development-secret-value-12345'
-
-    const modulePath = `./core/persistentSessions.ts?test=${Date.now()}-${Math.random()}`
-    const persistentSessionsModule = (await import(modulePath)) as {
-      resolvePersistentSessionSecret: () => string
-    }
+    process.env.PERSISTENT_SESSION_SECRET = 'a'
 
     console.warn = (...args: unknown[]) => {
       warnings.push(args.map((arg) => String(arg)).join(' '))
     }
 
-    process.env.PERSISTENT_SESSION_SECRET = 'a'
+    const modulePath = `./core/persistentSessions.ts?test=${Date.now()}-${Math.random()}`
+    const persistentSessionsModule = (await import(modulePath)) as {
+      resolvePersistentSessionSecret: () => string
+    }
+    const firstResolved = persistentSessionsModule.resolvePersistentSessionSecret()
+    assert.equal(firstResolved, 'a')
 
-    const resolved = persistentSessionsModule.resolvePersistentSessionSecret()
-    assert.equal(resolved, 'a')
+    process.env.PERSISTENT_SESSION_SECRET = 'this-is-a-strong-development-secret-value-12345'
+    const secondResolved = persistentSessionsModule.resolvePersistentSessionSecret()
+    assert.equal(secondResolved, 'a')
 
     const lengthWarnings = warnings.filter((entry) => entry.includes('must be at least'))
     const weakWarnings = warnings.filter((entry) => entry.includes('appears to be a weak or default value'))

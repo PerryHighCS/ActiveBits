@@ -558,6 +558,26 @@ export function buildStudentWebSocketUrl(params: {
   return `${wsProtocol}//${host}/ws/syncdeck?${queryParams.toString()}`
 }
 
+export function resolveIframePostMessageTargetOrigin(params: {
+  observedOrigin?: string | null
+  configuredOrigin?: string | null
+  iframeRuntimeOrigin?: string | null
+}): string | null {
+  const observedOrigin = typeof params.observedOrigin === 'string' ? params.observedOrigin.trim() : ''
+  const configuredOrigin = typeof params.configuredOrigin === 'string' ? params.configuredOrigin.trim() : ''
+  const iframeRuntimeOrigin = typeof params.iframeRuntimeOrigin === 'string' ? params.iframeRuntimeOrigin.trim() : ''
+
+  if (observedOrigin && observedOrigin !== 'null') {
+    return observedOrigin
+  }
+
+  if (iframeRuntimeOrigin && iframeRuntimeOrigin !== 'null') {
+    return iframeRuntimeOrigin
+  }
+
+  return configuredOrigin || null
+}
+
 function getStoredStudentName(sessionId: string): string {
   if (typeof window === 'undefined') {
     return ''
@@ -644,6 +664,7 @@ const SyncDeckStudent: FC = () => {
   const activeDrawingToolModeRef = useRef<SyncDeckDrawingToolMode>('none')
   const pendingDrawingToolModeRef = useRef<SyncDeckDrawingToolMode | null>(null)
   const hasSeenIframeReadySignalRef = useRef(false)
+  const lastObservedIframeOriginRef = useRef<string | null>(null)
   const studentBacktrackOptOutRef = useRef(false)
   const attachSessionEndedHandler = useSessionEndedHandler()
 
@@ -674,6 +695,15 @@ const SyncDeckStudent: FC = () => {
     }
   }, [presentationUrl])
 
+  const getIframeRuntimeOrigin = useCallback((): string | null => {
+    try {
+      const runtimeOrigin = iframeRef.current?.contentWindow?.location.origin
+      return typeof runtimeOrigin === 'string' ? runtimeOrigin : null
+    } catch {
+      return null
+    }
+  }, [])
+
   const sendPayloadToIframe = useCallback((payload: unknown) => {
     if (!presentationOrigin) {
       pendingPayloadQueueRef.current.push(payload)
@@ -686,8 +716,22 @@ const SyncDeckStudent: FC = () => {
       return
     }
 
-    target.postMessage(payload, presentationOrigin)
-  }, [presentationOrigin])
+    const targetOrigin = resolveIframePostMessageTargetOrigin({
+      observedOrigin: lastObservedIframeOriginRef.current,
+      configuredOrigin: presentationOrigin,
+      iframeRuntimeOrigin: getIframeRuntimeOrigin(),
+    })
+    if (!targetOrigin) {
+      pendingPayloadQueueRef.current.push(payload)
+      return
+    }
+
+    try {
+      target.postMessage(payload, targetOrigin)
+    } catch {
+      pendingPayloadQueueRef.current.push(payload)
+    }
+  }, [getIframeRuntimeOrigin, presentationOrigin])
 
   const setBacktrackOptOut = useCallback((value: boolean) => {
     studentBacktrackOptOutRef.current = value
@@ -709,13 +753,26 @@ const SyncDeckStudent: FC = () => {
       }
 
       const postToolToggle = (method: 'toggleChalkboard' | 'toggleNotesCanvas') => {
-        target.postMessage(
-          buildRevealCommandMessage('chalkboardCall', {
-            method,
-            args: [],
-          }),
-          presentationOrigin,
-        )
+        const targetOrigin = resolveIframePostMessageTargetOrigin({
+          observedOrigin: lastObservedIframeOriginRef.current,
+          configuredOrigin: presentationOrigin,
+          iframeRuntimeOrigin: getIframeRuntimeOrigin(),
+        })
+        if (!targetOrigin) {
+          return
+        }
+
+        try {
+          target.postMessage(
+            buildRevealCommandMessage('chalkboardCall', {
+              method,
+              args: [],
+            }),
+            targetOrigin,
+          )
+        } catch {
+          pendingDrawingToolModeRef.current = nextMode
+        }
       }
 
       if (currentMode === 'chalkboard') {
@@ -733,7 +790,7 @@ const SyncDeckStudent: FC = () => {
       activeDrawingToolModeRef.current = nextMode
       pendingDrawingToolModeRef.current = null
     },
-    [presentationOrigin],
+    [getIframeRuntimeOrigin, presentationOrigin],
   )
 
   const handleWsMessage = useCallback(
@@ -837,6 +894,10 @@ const SyncDeckStudent: FC = () => {
       const iframeWindow = iframeRef.current?.contentWindow
       if (!iframeWindow || event.source !== iframeWindow) {
         return
+      }
+
+      if (typeof event.origin === 'string' && event.origin.length > 0 && event.origin !== 'null') {
+        lastObservedIframeOriginRef.current = event.origin
       }
 
       const storyboardDisplayed = extractStoryboardDisplayed(event.data)

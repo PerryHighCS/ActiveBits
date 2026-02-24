@@ -117,11 +117,17 @@ const weakSecrets = [
   DEFAULT_HMAC_SECRET,
 ]
 
+let cachedPersistentSessionSecret: string | null = null
+
 function isWeakPersistentSessionSecret(secret: string): boolean {
   return weakSecrets.includes(secret.toLowerCase())
 }
 
 export function resolvePersistentSessionSecret(): string {
+  if (cachedPersistentSessionSecret != null) {
+    return cachedPersistentSessionSecret
+  }
+
   const envSecret = process.env.PERSISTENT_SESSION_SECRET?.trim()
   const isProduction = process.env.NODE_ENV === 'production'
 
@@ -131,7 +137,8 @@ export function resolvePersistentSessionSecret(): string {
     }
 
     console.warn('⚠️  Development mode: Using default HMAC secret. Set PERSISTENT_SESSION_SECRET for production.')
-    return DEFAULT_HMAC_SECRET
+    cachedPersistentSessionSecret = DEFAULT_HMAC_SECRET
+    return cachedPersistentSessionSecret
   }
 
   if (envSecret.length < MIN_SECRET_LENGTH) {
@@ -144,7 +151,8 @@ export function resolvePersistentSessionSecret(): string {
     }
 
     console.warn(`⚠️  SECURITY WARNING: ${message}`)
-    return envSecret
+    cachedPersistentSessionSecret = envSecret
+    return cachedPersistentSessionSecret
   }
 
   if (isWeakPersistentSessionSecret(envSecret)) {
@@ -157,7 +165,8 @@ export function resolvePersistentSessionSecret(): string {
     console.warn(`⚠️  SECURITY WARNING: ${message}`)
   }
 
-  return envSecret
+  cachedPersistentSessionSecret = envSecret
+  return cachedPersistentSessionSecret
 }
 
 const HMAC_SECRET = resolvePersistentSessionSecret()

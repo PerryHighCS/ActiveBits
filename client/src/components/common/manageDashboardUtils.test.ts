@@ -8,7 +8,9 @@ import {
   describeSelectedOptions,
   initializeDeepLinkOptions,
   normalizeSelectedOptions,
+  parseCreateSessionBootstrap,
   parseDeepLinkGenerator,
+  persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkOptions,
   validateDeepLinkSelection,
 } from './manageDashboardUtils'
@@ -195,6 +197,65 @@ void test('parseDeepLinkGenerator ignores unknown generator properties', () => {
       },
     },
   )
+})
+
+void test('parseCreateSessionBootstrap validates sessionStorage bootstrap metadata', () => {
+  assert.equal(parseCreateSessionBootstrap(null), null)
+
+  assert.deepEqual(
+    parseCreateSessionBootstrap({
+      sessionStorage: [
+        { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
+        { keyPrefix: '  ', responseField: 'ignored' },
+        { keyPrefix: 'x_', responseField: '' },
+      ],
+    }),
+    {
+      sessionStorage: [
+        { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
+      ],
+    },
+  )
+})
+
+void test('persistCreateSessionBootstrapToSessionStorage stores declared create response fields', () => {
+  const originalWindow = globalThis.window
+  const writes = new Map<string, string>()
+  const fakeSessionStorage = {
+    setItem(key: string, value: string) {
+      writes.set(key, value)
+    },
+  }
+
+  Object.defineProperty(globalThis, 'window', {
+    value: { sessionStorage: fakeSessionStorage },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    persistCreateSessionBootstrapToSessionStorage(
+      {
+        sessionStorage: [
+          { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
+          { keyPrefix: 'x_', responseField: 'missingField' },
+        ],
+      },
+      'session-123',
+      {
+        id: 'session-123',
+        instructorPasscode: 'teacher-passcode',
+      },
+    )
+
+    assert.deepEqual(Array.from(writes.entries()), [['syncdeck_instructor_session-123', 'teacher-passcode']])
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
 })
 
 void test('buildPersistentLinkUrl appends query only for legacy or append-query mode', () => {

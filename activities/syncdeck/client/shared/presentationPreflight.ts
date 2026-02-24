@@ -5,7 +5,10 @@ export interface SyncDeckPreflightResult {
 
 const PREFLIGHT_PING_TIMEOUT_MS = 4000
 
-export async function runSyncDeckPresentationPreflight(url: string): Promise<SyncDeckPreflightResult> {
+export async function runSyncDeckPresentationPreflight(
+  url: string,
+  options?: { timeoutMs?: number },
+): Promise<SyncDeckPreflightResult> {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return { valid: false, warning: 'Presentation validation is unavailable in this environment.' }
   }
@@ -113,12 +116,17 @@ export async function runSyncDeckPresentationPreflight(url: string): Promise<Syn
       })
     }
 
+    const timeoutMs =
+      typeof options?.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+        ? Math.floor(options.timeoutMs)
+        : PREFLIGHT_PING_TIMEOUT_MS
+
     timeoutId = setTimeout(() => {
       finalize({
         valid: false,
         warning: 'Presentation did not respond to sync ping in time. You can continue anyway.',
       })
-    }, PREFLIGHT_PING_TIMEOUT_MS)
+    }, timeoutMs)
 
     window.addEventListener('message', handleMessage)
     iframe.addEventListener('load', handleLoad)

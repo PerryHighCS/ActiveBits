@@ -22,6 +22,20 @@ export interface ActivityDeepLinkPreflightConfig {
   timeoutMs?: number
 }
 
+export interface ActivityDeepLinkPreflightResult {
+  valid: boolean
+  warning: string | null
+}
+
+export interface ActivityCreateSessionBootstrapSessionStorageEntry {
+  keyPrefix: string
+  responseField: string
+}
+
+export interface ActivityCreateSessionBootstrapConfig {
+  sessionStorage?: ActivityCreateSessionBootstrapSessionStorageEntry[]
+}
+
 export interface ActivityConfig {
   id: string
   name: string
@@ -41,6 +55,7 @@ export interface ActivityConfig {
     expectsSelectedOptions?: boolean
     preflight?: ActivityDeepLinkPreflightConfig
   }
+  createSessionBootstrap?: ActivityCreateSessionBootstrapConfig
   manageLayout?: {
     expandShell?: boolean
   }
@@ -54,6 +69,10 @@ export interface ActivityClientModule {
   ManagerComponent?: ComponentType<unknown>
   StudentComponent?: ComponentType<unknown>
   footerContent?: ReactNode | (() => ReactNode)
+  runDeepLinkPreflight?: (
+    preflight: ActivityDeepLinkPreflightConfig,
+    rawValue: string,
+  ) => Promise<ActivityDeepLinkPreflightResult>
 }
 
 export interface ActivityRegistryEntry extends ActivityConfig {

@@ -553,6 +553,55 @@ void test('syncdeck websocket replays buffered chalkboard snapshot and delta to 
   assert.equal(chalkboardStrokeMessages.length, 1)
 })
 
+void test('syncdeck websocket caps replayed chalkboard delta from oversized persisted buffer', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const oversizedDelta = Array.from({ length: 250 }, (_, index) => ({
+    mode: 1,
+    event: { type: 'draw', seq: index },
+  }))
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        chalkboard: {
+          snapshot: null,
+          delta: oversizedDelta,
+        },
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const delivered = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
+  const chalkboardStrokeMessages = delivered.filter((entry) => {
+    if (entry.type !== 'syncdeck-state') {
+      return false
+    }
+
+    const payload = asRecord(entry.payload)
+    const commandPayload = asRecord(payload?.payload)
+    return commandPayload?.name === 'chalkboardStroke'
+  })
+
+  assert.equal(chalkboardStrokeMessages.length, 200)
+
+  const firstStrokePayload = asRecord(asRecord(asRecord(chalkboardStrokeMessages[0]?.payload)?.payload)?.payload)
+  const lastStrokePayload = asRecord(asRecord(asRecord(chalkboardStrokeMessages[199]?.payload)?.payload)?.payload)
+  assert.equal(asRecord(firstStrokePayload?.event)?.seq, 50)
+  assert.equal(asRecord(lastStrokePayload?.event)?.seq, 249)
+})
+
 void test('syncdeck websocket updates and clears chalkboard buffer from instructor commands', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -623,6 +672,40 @@ void test('syncdeck websocket updates and clears chalkboard buffer from instruct
   }
   assert.equal(beforeReset.chalkboard?.snapshot, 'snapshot-1')
   assert.equal(beforeReset.chalkboard?.delta.length, 1)
+
+  for (let index = 0; index < 250; index += 1) {
+    instructorSocket.emit(
+      'message',
+      JSON.stringify({
+        type: 'syncdeck-state-update',
+        payload: {
+          type: 'reveal-sync',
+          action: 'command',
+          payload: {
+            name: 'chalkboardStroke',
+            payload: {
+              mode: 1,
+              event: { type: 'draw', seq: index },
+            },
+          },
+        },
+      }),
+    )
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const cappedBuffer = state.store.s1?.data as {
+    chalkboard?: {
+      snapshot: string | null
+      delta: Array<Record<string, unknown>>
+    }
+  }
+  assert.equal(cappedBuffer.chalkboard?.delta.length, 200)
+  const firstCappedStroke = asRecord(cappedBuffer.chalkboard?.delta[0])
+  const lastCappedStroke = asRecord(cappedBuffer.chalkboard?.delta[199])
+  assert.equal(asRecord(firstCappedStroke?.event)?.seq, 50)
+  assert.equal(asRecord(lastCappedStroke?.event)?.seq, 249)
 
   instructorSocket.emit(
     'message',
@@ -880,12 +963,20 @@ void test('generate-url returns signed syncdeck persistent link and sets cookie'
   assert.equal(typeof payload.hash, 'string')
   assert.equal(typeof payload.url, 'string')
   assert.match(payload.url ?? '', /^\/activity\/syncdeck\/[a-f0-9]{20}\?presentationUrl=.*&urlHash=[a-f0-9]{16}$/)
+  const generatedUrl = new URL(payload.url ?? '', 'https://bits.example')
+  const urlHash = generatedUrl.searchParams.get('urlHash')
+  assert.equal(typeof urlHash, 'string')
+  assert.match(urlHash ?? '', /^[a-f0-9]{16}$/)
 
   assert.equal(res.cookies.length, 1)
   assert.equal(res.cookies[0]?.name, 'persistent_sessions')
   const cookiePayload = JSON.parse(res.cookies[0]?.value || '[]') as Array<Record<string, unknown>>
   assert.equal(cookiePayload.length, 1)
   assert.match(String(cookiePayload[0]?.key ?? ''), /^syncdeck:[a-f0-9]{20}$/)
+  assert.deepEqual(cookiePayload[0]?.selectedOptions, {
+    presentationUrl: 'https://slides.example.com/deck',
+    urlHash,
+  })
 })
 
 void test('generate-url rejects invalid presentationUrl', async () => {

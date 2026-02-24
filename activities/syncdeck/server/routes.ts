@@ -106,6 +106,7 @@ const SYNCDECK_WS_UPDATE_TYPE = 'syncdeck-state-update'
 const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
 const REVEAL_SYNC_PROTOCOL_VERSION = '1.1.0'
+const MAX_CHALKBOARD_DELTA_STROKES = 200
 
 type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'
 
@@ -255,6 +256,10 @@ function normalizeChalkboardDelta(value: unknown): Record<string, unknown>[] {
     if (isPlainObject(entry)) {
       delta.push(entry)
     }
+  }
+
+  if (delta.length > MAX_CHALKBOARD_DELTA_STROKES) {
+    return delta.slice(-MAX_CHALKBOARD_DELTA_STROKES)
   }
 
   return delta
@@ -446,6 +451,9 @@ function applyChalkboardBufferUpdate(sessionData: SyncDeckSessionData, payload: 
 
   if (command.name === 'chalkboardStroke') {
     sessionData.chalkboard.delta.push(command.payload)
+    if (sessionData.chalkboard.delta.length > MAX_CHALKBOARD_DELTA_STROKES) {
+      sessionData.chalkboard.delta.splice(0, sessionData.chalkboard.delta.length - MAX_CHALKBOARD_DELTA_STROKES)
+    }
     return
   }
 
@@ -755,7 +763,10 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     sessionEntries.push({
       key: cookieKey,
       teacherCode,
-      selectedOptions: { presentationUrl },
+      selectedOptions: {
+        presentationUrl,
+        urlHash,
+      },
     })
 
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {

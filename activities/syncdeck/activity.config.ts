@@ -20,6 +20,14 @@ const syncdeckConfig: ActivityConfig = {
       optionKey: 'presentationUrl',
     },
   },
+  createSessionBootstrap: {
+    sessionStorage: [
+      {
+        keyPrefix: 'syncdeck_instructor_',
+        responseField: 'instructorPasscode',
+      },
+    ],
+  },
   manageLayout: {
     expandShell: true,
   },

@@ -493,6 +493,67 @@ void test('initializeActivityRegistry handles config load failure in production'
   }
 })
 
+void test('initializeActivityRegistry rejects schema-invalid activity config in production', async () => {
+  const testRoot = join(__dirname, '../../activities/test-activity-invalid-schema')
+  const testConfigPath = join(testRoot, 'activity.config.js')
+
+  if (existsSync(testRoot)) {
+    rmSync(testRoot, { recursive: true, force: true })
+  }
+
+  try {
+    mkdirSync(testRoot, { recursive: true })
+    writeFileSync(
+      testConfigPath,
+      `export default {
+  id: 'test-activity-invalid-schema',
+  name: 'Test Invalid Schema Activity',
+  description: 'Valid syntax but invalid shared contract',
+  color: 'orange',
+  soloMode: true,
+  serverEntry: './server/routes.js',
+  deepLinkGenerator: {
+    endpoint: '/api/test',
+    mode: 'wrong-mode',
+  },
+};`,
+    )
+
+    const originalEnv = process.env.NODE_ENV
+    const originalExit = process.exit
+    process.env.NODE_ENV = 'production'
+
+    let exitCalled = false
+    let exitCode: number | string | null | undefined = null
+    process.exit = ((code?: number | string | null): never => {
+      exitCalled = true
+      exitCode = code
+      throw new Error(`process.exit(${code})`)
+    }) as typeof process.exit
+
+    try {
+      const freshModule = await importRegistryModule()
+
+      console.log('[TEST] Expected production schema-validation error output follows for intentionally invalid activity config.')
+
+      await assert.rejects(
+        async () => await freshModule.initializeActivityRegistry(),
+        (err: unknown) => err instanceof Error && err.message === 'process.exit(1)',
+      )
+
+      assert.ok(exitCalled, 'process.exit should be called for schema-invalid config in production')
+      assert.equal(exitCode, 1)
+    } finally {
+      process.exit = originalExit
+      process.env.NODE_ENV = originalEnv
+    }
+  } finally {
+    if (existsSync(testRoot)) {
+      rmSync(testRoot, { recursive: true, force: true })
+    }
+  }
+})
+
 void test('initializeActivityRegistry handles config load failure in development', async () => {
   // Create a temporary test directory with a broken config
   const testRoot = join(__dirname, '../../activities/test-activity-broken-dev')

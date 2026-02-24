@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import activityConfigSchema from '../../types/activityConfigSchema.js'
 
 interface ActivityConfigLike extends Record<string, unknown> {
   serverEntry?: string
@@ -97,8 +98,7 @@ function discoverConfigPaths(): DiscoveredConfig[] {
 async function loadConfig(configPath: string): Promise<ActivityConfigLike> {
   const moduleUrl = pathToFileURL(configPath)
   const mod = (await import(moduleUrl.href)) as { default?: unknown }
-  const rawConfig = mod.default
-  const config = rawConfig != null && typeof rawConfig === 'object' ? (rawConfig as ActivityConfigLike) : {}
+  const config = activityConfigSchema.parseActivityConfig(mod.default, configPath) as ActivityConfigLike
   const baseUrl = new URL('.', moduleUrl.href)
   return {
     ...config,

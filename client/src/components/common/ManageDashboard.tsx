@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { activities } from '@src/activities'
+import { activities, runActivityDeepLinkPreflight } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
 import { useClipboard } from '@src/hooks/useClipboard'
 import {
@@ -11,9 +11,9 @@ import {
   describeSelectedOptions,
   initializeDeepLinkOptions,
   normalizeSelectedOptions,
+  persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkGenerator,
   parseDeepLinkOptions,
-  runDeepLinkPreflight,
   validateDeepLinkSelection,
   type DeepLinkSelection,
 } from './manageDashboardUtils'
@@ -36,7 +36,7 @@ interface PersistentSessionListResponse {
 
 interface CreateSessionResponse {
   id?: string
-  instructorPasscode?: string
+  [key: string]: unknown
 }
 
 interface PersistentLinkCreateResponse {
@@ -112,10 +112,6 @@ function getActivityColor(activityId: string): string {
   return getActivityById(activityId)?.color || 'blue'
 }
 
-function buildSyncDeckPasscodeKey(sessionId: string): string {
-  return `syncdeck_instructor_${sessionId}`
-}
-
 export default function ManageDashboard() {
   const navigate = useNavigate()
   const [showPersistentModal, setShowPersistentModal] = useState(false)
@@ -185,9 +181,7 @@ export default function ManageDashboard() {
         throw new Error('Failed to create session')
       }
 
-      if (activityId === 'syncdeck' && payload.instructorPasscode && typeof window !== 'undefined') {
-        window.sessionStorage.setItem(buildSyncDeckPasscodeKey(payload.id), payload.instructorPasscode)
-      }
+      persistCreateSessionBootstrapToSessionStorage(getActivityById(activityId)?.createSessionBootstrap, payload.id, payload)
 
       void navigate(`/manage/${activityId}/${payload.id}`)
     } catch (createError) {
@@ -305,7 +299,7 @@ export default function ManageDashboard() {
         const canBypassPreflight = allowUnverifiedGenerateForUrl === normalizedPreflightValue
         if (preflightValidatedUrl !== normalizedPreflightValue && !canBypassPreflight) {
           setIsPreflightChecking(true)
-          const preflightResult = await runDeepLinkPreflight(preflight, normalizedPreflightValue)
+          const preflightResult = await runActivityDeepLinkPreflight(selectedActivity.id, preflight, normalizedPreflightValue)
           setIsPreflightChecking(false)
 
           if (preflightResult.valid) {

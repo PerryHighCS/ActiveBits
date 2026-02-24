@@ -7,6 +7,7 @@ import { toRevealCommandMessage } from './SyncDeckStudent.js'
 import { toRevealBoundaryCommandMessage } from './SyncDeckStudent.js'
 import { buildStudentRoleCommandMessage } from './SyncDeckStudent.js'
 import { buildStudentWebSocketUrl } from './SyncDeckStudent.js'
+import { resolveIframePostMessageTargetOrigin } from './SyncDeckStudent.js'
 import { shouldSuppressForwardInstructorSync } from './SyncDeckStudent.js'
 import { shouldResetBacktrackOptOutByMaxPosition } from './SyncDeckStudent.js'
 
@@ -49,6 +50,41 @@ void test('buildStudentWebSocketUrl returns null when student id is missing', ()
   })
 
   assert.equal(url, null)
+})
+
+void test('resolveIframePostMessageTargetOrigin prefers iframe runtime origin and falls back to configured origin', () => {
+  assert.equal(
+    resolveIframePostMessageTargetOrigin({
+      observedOrigin: 'https://iframe-observed.example',
+      configuredOrigin: 'https://perryhighcs.github.io',
+      iframeRuntimeOrigin: 'https://stunning-cod-77vqjr9x64q2wq5r-3000.app.github.dev',
+    }),
+    'https://iframe-observed.example',
+  )
+
+  assert.equal(
+    resolveIframePostMessageTargetOrigin({
+      configuredOrigin: 'https://perryhighcs.github.io',
+      iframeRuntimeOrigin: 'https://stunning-cod-77vqjr9x64q2wq5r-3000.app.github.dev',
+    }),
+    'https://stunning-cod-77vqjr9x64q2wq5r-3000.app.github.dev',
+  )
+
+  assert.equal(
+    resolveIframePostMessageTargetOrigin({
+      configuredOrigin: 'https://perryhighcs.github.io',
+      iframeRuntimeOrigin: 'null',
+    }),
+    'https://perryhighcs.github.io',
+  )
+
+  assert.equal(
+    resolveIframePostMessageTargetOrigin({
+      configuredOrigin: '',
+      iframeRuntimeOrigin: null,
+    }),
+    null,
+  )
 })
 
 void test('toRevealCommandMessage ignores studentBoundaryChanged messages', () => {
