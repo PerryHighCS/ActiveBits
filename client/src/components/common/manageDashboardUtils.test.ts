@@ -61,6 +61,20 @@ void test('initializeDeepLinkOptions and normalizeSelectedOptions respect allowe
   })
 })
 
+void test('normalizeSelectedOptions trims text/url values and keeps select values as-is', () => {
+  const normalized = normalizeSelectedOptions(rawOptions, {
+    algorithm: ' merge-sort ',
+    challenge: '  arrays  ',
+    presentationUrl: '  https://slides.example.com/deck  ',
+  })
+
+  assert.deepEqual(normalized, {
+    algorithm: ' merge-sort ',
+    challenge: 'arrays',
+    presentationUrl: 'https://slides.example.com/deck',
+  })
+})
+
 void test('buildQueryString and buildSoloLink include only non-empty params', () => {
   assert.equal(buildQueryString({ algorithm: 'merge-sort', challenge: '' }), '?algorithm=merge-sort')
   assert.equal(buildSoloLink('https://bits.example', 'algorithm-demo', { algorithm: 'merge-sort' }), 'https://bits.example/solo/algorithm-demo?algorithm=merge-sort')

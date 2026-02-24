@@ -988,7 +988,9 @@ const SyncDeckManager: FC = () => {
     )
   }, [presentationOrigin])
 
-  const startSession = useCallback(async (): Promise<void> => {
+  const startSession = useCallback(async (options?: { automatic?: boolean }): Promise<void> => {
+    const automaticStart = options?.automatic === true
+
     if (!sessionId) return
 
     const normalizedUrl = presentationUrl.trim()
@@ -1022,21 +1024,27 @@ const SyncDeckManager: FC = () => {
       if (preflightResult.valid) {
         setPreflightValidatedUrl(normalizedUrl)
         setAllowUnverifiedStartForUrl(null)
-        setConfirmStartForUrl(normalizedUrl)
+        setConfirmStartForUrl(automaticStart ? null : normalizedUrl)
         setPreviewUrl(normalizedUrl)
         setPreflightWarning(null)
         setStartError(null)
         setStartSuccess(null)
-        return
+        if (!automaticStart) {
+          return
+        }
       } else {
         setPreflightValidatedUrl(null)
         setConfirmStartForUrl(null)
         setPreviewUrl(null)
         setPreflightWarning(preflightResult.warning)
         setAllowUnverifiedStartForUrl(normalizedUrl)
-        setStartError('Presentation sync validation failed. Click Start Session again to continue anyway.')
+        setStartError(
+          automaticStart ? null : 'Presentation sync validation failed. Click Start Session again to continue anyway.',
+        )
         setStartSuccess(null)
-        return
+        if (!automaticStart) {
+          return
+        }
       }
     }
 
@@ -1110,7 +1118,7 @@ const SyncDeckManager: FC = () => {
     }
 
     setHasAutoStarted(true)
-    void startSession()
+    void startSession({ automatic: true })
   }, [
     hasAutoStarted,
     sessionId,
@@ -1382,7 +1390,7 @@ const SyncDeckManager: FC = () => {
               aria-label="Toggle chalkboard screen"
               disabled={isConfigurePanelOpen}
             >
-              🧑‍🏫
+              🖍️
             </button>
             <button
               type="button"
@@ -1489,7 +1497,7 @@ const SyncDeckManager: FC = () => {
                         title="SyncDeck preflight preview"
                         src={previewUrl}
                         className="w-full h-full pointer-events-none"
-                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                        sandbox="allow-scripts allow-same-origin"
                       />
                     </div>
                   </div>

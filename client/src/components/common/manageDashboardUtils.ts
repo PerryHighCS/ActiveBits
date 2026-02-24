@@ -122,7 +122,7 @@ async function runRevealSyncPingPreflight(url: string, timeoutMs: number): Promi
     const iframe = document.createElement('iframe')
     iframe.src = url
     iframe.setAttribute('aria-hidden', 'true')
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms')
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin')
     iframe.style.position = 'fixed'
     iframe.style.width = '1024px'
     iframe.style.height = '576px'
@@ -281,10 +281,14 @@ export function normalizeSelectedOptions(
   }
 
   return Object.entries(rawSelectedOptions).reduce<DeepLinkSelection>((selection, [key, value]) => {
-    if (!allowedOptions[key]) return selection
+    const option = allowedOptions[key]
+    if (!option) return selection
     if (value === null || value === undefined || value === '') return selection
 
-    selection[key] = toStringValue(value)
+    const normalizedValue = option.type === 'text' || option.validator === 'url' ? toStringValue(value).trim() : toStringValue(value)
+    if (normalizedValue === '') return selection
+
+    selection[key] = normalizedValue
     return selection
   }, {})
 }

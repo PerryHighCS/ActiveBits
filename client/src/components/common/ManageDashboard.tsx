@@ -674,7 +674,7 @@ export default function ManageDashboard() {
                     title="SyncDeck link preflight preview"
                     src={preflightPreviewUrl}
                     className="w-full h-full pointer-events-none"
-                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                    sandbox="allow-scripts allow-same-origin"
                   />
                 </div>
               </div>

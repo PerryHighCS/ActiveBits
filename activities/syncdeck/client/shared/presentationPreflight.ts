@@ -21,7 +21,7 @@ export async function runSyncDeckPresentationPreflight(url: string): Promise<Syn
     const iframe = document.createElement('iframe')
     iframe.src = url
     iframe.setAttribute('aria-hidden', 'true')
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms')
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin')
     iframe.style.position = 'fixed'
     iframe.style.width = '1024px'
     iframe.style.height = '576px'
