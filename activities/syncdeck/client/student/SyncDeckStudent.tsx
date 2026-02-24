@@ -48,6 +48,8 @@ interface RevealStateIndicesPayload {
   studentBoundary?: unknown
 }
 
+type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
+
 const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
@@ -258,8 +260,41 @@ function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: number;
     return null
   }
 
+  const legacyMessage = rawPayload as { type?: unknown; payload?: unknown }
+  if (legacyMessage.type === 'slidechanged' && isPlainObject(legacyMessage.payload)) {
+    const legacyPayload = legacyMessage.payload as { h?: unknown; v?: unknown; f?: unknown }
+    return normalizeIndices({
+      h: legacyPayload.h,
+      v: legacyPayload.v,
+      f: legacyPayload.f,
+    })
+  }
+
   const message = rawPayload as RevealSyncEnvelope
-  if (message.type !== 'reveal-sync' || !isPlainObject(message.payload)) {
+  if (message.type !== 'reveal-sync') {
+    return null
+  }
+
+  if (!isPlainObject(message.payload)) {
+    return null
+  }
+
+  if (message.action === 'command') {
+    const commandPayload = message.payload as { name?: unknown; payload?: unknown }
+    if (commandPayload.name === 'setState' && isPlainObject(commandPayload.payload)) {
+      const statePayload = commandPayload.payload as { state?: unknown }
+      if (isPlainObject(statePayload.state)) {
+        const state = statePayload.state as { indexh?: unknown; indexv?: unknown; indexf?: unknown }
+        return normalizeIndices({
+          h: state.indexh,
+          v: state.indexv,
+          f: state.indexf,
+        })
+      }
+    }
+  }
+
+  if (message.action !== 'state') {
     return null
   }
 
@@ -482,6 +517,18 @@ function validatePresentationUrl(value: string): boolean {
   }
 }
 
+function parseDrawingToolModePayload(payload: unknown): SyncDeckDrawingToolMode | null {
+  if (!isPlainObject(payload) || payload.type !== 'syncdeck-tool-mode') {
+    return null
+  }
+
+  if (payload.mode === 'chalkboard' || payload.mode === 'pen' || payload.mode === 'none') {
+    return payload.mode
+  }
+
+  return null
+}
+
 export function buildStudentWebSocketUrl(params: {
   sessionId?: string | null
   presentationUrl?: string | null
@@ -589,11 +636,13 @@ const SyncDeckStudent: FC = () => {
   const [isRegisteringStudent, setIsRegisteringStudent] = useState(false)
   const [joinError, setJoinError] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
-  const pendingPayloadRef = useRef<unknown>(null)
+  const pendingPayloadQueueRef = useRef<unknown[]>([])
   const localStudentIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const lastInstructorIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const lastEffectiveMaxPositionRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const latestInstructorPayloadRef = useRef<unknown>(null)
+  const activeDrawingToolModeRef = useRef<SyncDeckDrawingToolMode>('none')
+  const pendingDrawingToolModeRef = useRef<SyncDeckDrawingToolMode | null>(null)
   const hasSeenIframeReadySignalRef = useRef(false)
   const studentBacktrackOptOutRef = useRef(false)
   const attachSessionEndedHandler = useSessionEndedHandler()
@@ -627,13 +676,13 @@ const SyncDeckStudent: FC = () => {
 
   const sendPayloadToIframe = useCallback((payload: unknown) => {
     if (!presentationOrigin) {
-      pendingPayloadRef.current = payload
+      pendingPayloadQueueRef.current.push(payload)
       return
     }
 
     const target = iframeRef.current?.contentWindow
     if (!target) {
-      pendingPayloadRef.current = payload
+      pendingPayloadQueueRef.current.push(payload)
       return
     }
 
@@ -645,6 +694,48 @@ const SyncDeckStudent: FC = () => {
     setIsBacktrackOptOut(value)
   }, [])
 
+  const applyDrawingToolModeToIframe = useCallback(
+    (nextMode: SyncDeckDrawingToolMode): void => {
+      const target = iframeRef.current?.contentWindow
+      if (!target || !presentationOrigin || !hasSeenIframeReadySignalRef.current) {
+        pendingDrawingToolModeRef.current = nextMode
+        return
+      }
+
+      const currentMode = activeDrawingToolModeRef.current
+      if (currentMode === nextMode) {
+        pendingDrawingToolModeRef.current = null
+        return
+      }
+
+      const postToolToggle = (method: 'toggleChalkboard' | 'toggleNotesCanvas') => {
+        target.postMessage(
+          buildRevealCommandMessage('chalkboardCall', {
+            method,
+            args: [],
+          }),
+          presentationOrigin,
+        )
+      }
+
+      if (currentMode === 'chalkboard') {
+        postToolToggle('toggleChalkboard')
+      } else if (currentMode === 'pen') {
+        postToolToggle('toggleNotesCanvas')
+      }
+
+      if (nextMode === 'chalkboard') {
+        postToolToggle('toggleChalkboard')
+      } else if (nextMode === 'pen') {
+        postToolToggle('toggleNotesCanvas')
+      }
+
+      activeDrawingToolModeRef.current = nextMode
+      pendingDrawingToolModeRef.current = null
+    },
+    [presentationOrigin],
+  )
+
   const handleWsMessage = useCallback(
     (event: MessageEvent<string>) => {
       try {
@@ -653,9 +744,15 @@ const SyncDeckStudent: FC = () => {
           return
         }
 
-        latestInstructorPayloadRef.current = parsed.payload
+        const drawingToolMode = parseDrawingToolModePayload(parsed.payload)
+        if (drawingToolMode) {
+          applyDrawingToolModeToIframe(drawingToolMode)
+          return
+        }
+
         const instructorIndices = extractIndicesFromRevealStateMessage(parsed.payload)
         if (instructorIndices) {
+          latestInstructorPayloadRef.current = parsed.payload
           lastInstructorIndicesRef.current = instructorIndices
         }
 
@@ -711,7 +808,7 @@ const SyncDeckStudent: FC = () => {
         return
       }
     },
-    [sendPayloadToIframe, setBacktrackOptOut],
+    [applyDrawingToolModeToIframe, sendPayloadToIframe, setBacktrackOptOut],
   )
 
   const replayLatestInstructorSyncToIframe = useCallback(() => {
@@ -771,6 +868,16 @@ const SyncDeckStudent: FC = () => {
 
       if (!hasSeenIframeReadySignalRef.current && isRevealSyncMessage(event.data)) {
         hasSeenIframeReadySignalRef.current = true
+        if (pendingPayloadQueueRef.current.length > 0) {
+          const queuedPayloads = [...pendingPayloadQueueRef.current]
+          pendingPayloadQueueRef.current = []
+          for (const queuedPayload of queuedPayloads) {
+            sendPayloadToIframe(queuedPayload)
+          }
+        }
+        if (pendingDrawingToolModeRef.current != null) {
+          applyDrawingToolModeToIframe(pendingDrawingToolModeRef.current)
+        }
         replayLatestInstructorSyncToIframe()
       }
     }
@@ -779,7 +886,7 @@ const SyncDeckStudent: FC = () => {
     return () => {
       window.removeEventListener('message', handleIframeMessage)
     }
-  }, [replayLatestInstructorSyncToIframe, setBacktrackOptOut])
+  }, [applyDrawingToolModeToIframe, replayLatestInstructorSyncToIframe, sendPayloadToIframe, setBacktrackOptOut])
 
   const buildStudentWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined') {
@@ -978,15 +1085,10 @@ const SyncDeckStudent: FC = () => {
     hasSeenIframeReadySignalRef.current = false
     sendPayloadToIframe(buildStudentRoleCommandMessage())
 
-    if (pendingPayloadRef.current !== null) {
-      sendPayloadToIframe(pendingPayloadRef.current)
-      pendingPayloadRef.current = null
-    }
-
     if (studentSocketRef.current?.readyState === WS_OPEN_READY_STATE) {
       setStatusMessage('Connected to instructor sync')
     }
-  }, [replayLatestInstructorSyncToIframe, sendPayloadToIframe, studentSocketRef])
+  }, [sendPayloadToIframe, studentSocketRef])
 
   const toggleStoryboard = useCallback(() => {
     sendPayloadToIframe(

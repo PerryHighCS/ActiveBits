@@ -9,6 +9,7 @@ const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
 const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
+const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 
 interface SessionResponsePayload {
   session?: {
@@ -37,6 +38,10 @@ interface RevealCommandPayload {
 
 interface RevealStatePayload {
   indices?: unknown
+  revealState?: unknown
+  indexh?: unknown
+  indexv?: unknown
+  indexf?: unknown
 }
 
 interface RevealSyncEnvelope {
@@ -54,6 +59,8 @@ interface RelayCommandPayloadEnvelope {
   name?: unknown
   payload?: unknown
 }
+
+type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
 interface RevealSyncStatePayload {
   overview?: unknown
@@ -415,6 +422,39 @@ function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: 
   }
 }
 
+function extractIndicesFromRevealStateObject(value: unknown): { h: number; v: number; f: number } | null {
+  if (!isPlainObject(value)) {
+    return null
+  }
+
+  const candidate = value as {
+    indexh?: unknown
+    indexv?: unknown
+    indexf?: unknown
+    h?: unknown
+    v?: unknown
+    f?: unknown
+  }
+
+  if (typeof candidate.indexh === 'number' && Number.isFinite(candidate.indexh) && typeof candidate.indexv === 'number' && Number.isFinite(candidate.indexv)) {
+    return {
+      h: candidate.indexh,
+      v: candidate.indexv,
+      f: typeof candidate.indexf === 'number' && Number.isFinite(candidate.indexf) ? candidate.indexf : 0,
+    }
+  }
+
+  if (typeof candidate.h === 'number' && Number.isFinite(candidate.h) && typeof candidate.v === 'number' && Number.isFinite(candidate.v)) {
+    return {
+      h: candidate.h,
+      v: candidate.v,
+      f: typeof candidate.f === 'number' && Number.isFinite(candidate.f) ? candidate.f : 0,
+    }
+  }
+
+  return null
+}
+
 export function shouldSuppressInstructorStateBroadcast(
   instructorIndices: { h: number; v: number; f: number } | null,
   explicitBoundary: { h: number; v: number; f: number } | null,
@@ -478,6 +518,25 @@ function isInboundChalkboardReplayCommand(name: string | null): boolean {
   return name === 'chalkboardState' || name === 'chalkboardStroke'
 }
 
+function parseDrawingToolModePayload(payload: unknown): SyncDeckDrawingToolMode | null {
+  if (!isPlainObject(payload) || payload.type !== 'syncdeck-tool-mode') {
+    return null
+  }
+
+  if (payload.mode === 'chalkboard' || payload.mode === 'pen' || payload.mode === 'none') {
+    return payload.mode
+  }
+
+  return null
+}
+
+function buildDrawingToolModePayload(mode: SyncDeckDrawingToolMode): Record<string, unknown> {
+  return {
+    type: 'syncdeck-tool-mode',
+    mode,
+  }
+}
+
 function isChalkboardRelayAction(action: unknown): action is ChalkboardRelayAction {
   return action === 'chalkboardStroke' || action === 'chalkboardState'
 }
@@ -536,7 +595,100 @@ export function toChalkboardRelayCommand(rawPayload: unknown): Record<string, un
   }
 }
 
-function buildRestoreCommandFromPayload(payload: unknown): unknown {
+function readChalkboardSnapshotStorage(payload: unknown): string | null {
+  if (!isPlainObject(payload)) {
+    return null
+  }
+
+  if (payload.type !== 'reveal-sync' || payload.action !== 'command' || !isPlainObject(payload.payload)) {
+    return null
+  }
+
+  if (payload.payload.name !== 'chalkboardState' || !isPlainObject(payload.payload.payload)) {
+    return null
+  }
+
+  const storage = payload.payload.payload.storage
+  if (typeof storage !== 'string') {
+    return null
+  }
+
+  return storage
+}
+
+function buildChalkboardStateRelayWithStorage(storage: string, template: unknown): Record<string, unknown> {
+  const envelope = parseRevealSyncEnvelope(template)
+  return {
+    type: 'reveal-sync',
+    version: typeof envelope?.version === 'string' ? envelope.version : '1.0.0',
+    action: 'command',
+    source: 'activebits-syncdeck-host',
+    role: 'instructor',
+    ts: Date.now(),
+    payload: {
+      name: 'chalkboardState',
+      payload: {
+        storage,
+      },
+    },
+  }
+}
+
+export function applyChalkboardSnapshotFallback(
+  relayPayload: unknown,
+  cachedSnapshotStorage: string | null,
+): { relayPayload: unknown; restoredSnapshotStorage: string | null } {
+  const storage = readChalkboardSnapshotStorage(relayPayload)
+  if (storage == null) {
+    return {
+      relayPayload,
+      restoredSnapshotStorage: null,
+    }
+  }
+
+  if (storage.trim().length > 0 || cachedSnapshotStorage == null || cachedSnapshotStorage.trim().length === 0) {
+    return {
+      relayPayload,
+      restoredSnapshotStorage: null,
+    }
+  }
+
+  return {
+    relayPayload: buildChalkboardStateRelayWithStorage(cachedSnapshotStorage, relayPayload),
+    restoredSnapshotStorage: cachedSnapshotStorage,
+  }
+}
+
+export function buildRestoreCommandFromPayload(payload: unknown): unknown {
+  if (isPlainObject(payload)) {
+    const legacyMessage = payload as { type?: unknown; payload?: unknown }
+    if (legacyMessage.type === 'slidechanged' && isPlainObject(legacyMessage.payload)) {
+      const indices = extractIndicesFromRevealStateObject(legacyMessage.payload)
+      if (!indices) {
+        return payload
+      }
+
+      return {
+        type: 'reveal-sync',
+        version: '1.0.0',
+        action: 'command',
+        source: 'activebits-syncdeck-host',
+        role: 'instructor',
+        ts: Date.now(),
+        payload: {
+          name: 'setState',
+          payload: {
+            state: {
+              indexh: indices.h,
+              indexv: indices.v,
+              indexf: indices.f,
+            },
+          },
+        },
+      }
+    }
+  }
+
   const envelope = parseRevealSyncEnvelope(payload)
   if (!envelope || envelope.type !== 'reveal-sync') {
     return payload
@@ -553,16 +705,25 @@ function buildRestoreCommandFromPayload(payload: unknown): unknown {
   const statePayload = envelope.payload as {
     revealState?: unknown
     indices?: { h?: unknown; v?: unknown; f?: unknown }
+    indexh?: unknown
+    indexv?: unknown
+    indexf?: unknown
   }
 
   const revealState = isPlainObject(statePayload.revealState) ? statePayload.revealState : null
-  const indices = isPlainObject(statePayload.indices) ? statePayload.indices : null
+  const indices = normalizeIndices(statePayload.indices)
+    ?? extractIndicesFromRevealStateObject(revealState)
+    ?? extractIndicesFromRevealStateObject(statePayload)
+  if (!indices) {
+    return payload
+  }
+
   const pausedState = extractPausedState(payload)
   const mergedState = {
     ...(revealState ?? {}),
-    indexh: typeof indices?.h === 'number' ? indices.h : (revealState as { indexh?: unknown } | null)?.indexh ?? 0,
-    indexv: typeof indices?.v === 'number' ? indices.v : (revealState as { indexv?: unknown } | null)?.indexv ?? 0,
-    indexf: typeof indices?.f === 'number' ? indices.f : (revealState as { indexf?: unknown } | null)?.indexf ?? 0,
+    indexh: indices.h,
+    indexv: indices.v,
+    indexf: indices.f,
     ...(typeof pausedState === 'boolean' ? { paused: pausedState } : {}),
   }
 
@@ -595,18 +756,38 @@ export function extractSyncDeckStatePayload(message: unknown): unknown | null {
   return candidate.payload ?? null
 }
 
-function extractIndicesFromRevealPayload(payload: unknown): { h: number; v: number; f: number } | null {
+export function extractIndicesFromRevealPayload(payload: unknown): { h: number; v: number; f: number } | null {
   if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) {
     return null
   }
 
+  const legacyMessage = payload as { type?: unknown; payload?: unknown }
+  if (legacyMessage.type === 'slidechanged' && isPlainObject(legacyMessage.payload)) {
+    return extractIndicesFromRevealStateObject(legacyMessage.payload)
+  }
+
   const message = payload as { type?: unknown; action?: unknown; payload?: unknown }
-  if (message.type !== 'reveal-sync' || message.action !== 'state') {
+  if (message.type !== 'reveal-sync') {
+    return null
+  }
+
+  if (message.action === 'command' && isPlainObject(message.payload)) {
+    const commandPayload = message.payload as { name?: unknown; payload?: unknown }
+    if (commandPayload.name === 'setState' && isPlainObject(commandPayload.payload)) {
+      const stateContainer = commandPayload.payload as { state?: unknown }
+      return extractIndicesFromRevealStateObject(stateContainer.state)
+    }
+    return null
+  }
+
+  if (message.action !== 'state') {
     return null
   }
 
   const messagePayload = message.payload as RevealStatePayload | undefined
   return normalizeIndices(messagePayload?.indices)
+    ?? extractIndicesFromRevealStateObject(messagePayload?.revealState)
+    ?? extractIndicesFromRevealStateObject(messagePayload)
 }
 
 export function attachInstructorIndicesToBoundaryChangePayload(
@@ -690,6 +871,9 @@ const SyncDeckManager: FC = () => {
   const lastInstructorStatePayloadRef = useRef<unknown>(null)
   const pendingRestorePayloadRef = useRef<unknown>(null)
   const pendingInstructorReplayCommandsRef = useRef<unknown[]>([])
+  const pendingInstructorDrawingToolModeRef = useRef<SyncDeckDrawingToolMode | null>(null)
+  const cachedChalkboardSnapshotStorageRef = useRef<string | null>(null)
+  const activeInstructorDrawingToolModeRef = useRef<SyncDeckDrawingToolMode>('none')
   const connectedStudentIdsRef = useRef<Set<string>>(new Set())
   const pendingChalkboardStateRequestRef = useRef(false)
   const hasAppliedReloadChalkboardStateRef = useRef(false)
@@ -698,6 +882,34 @@ const SyncDeckManager: FC = () => {
   const hasSeenInstructorIframeReadySignalRef = useRef(false)
   const suppressOutboundStateUntilRestoreRef = useRef(false)
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearRestoreSuppressionTimeout = useCallback((): void => {
+    if (restoreSuppressionTimeoutRef.current != null) {
+      clearTimeout(restoreSuppressionTimeoutRef.current)
+      restoreSuppressionTimeoutRef.current = null
+    }
+  }, [])
+
+  const releaseRestoreSuppression = useCallback((): void => {
+    suppressOutboundStateUntilRestoreRef.current = false
+    restoreTargetIndicesRef.current = null
+    clearRestoreSuppressionTimeout()
+  }, [clearRestoreSuppressionTimeout])
+
+  const armRestoreSuppression = useCallback(
+    (targetIndices: { h: number; v: number; f: number } | null): void => {
+      suppressOutboundStateUntilRestoreRef.current = true
+      restoreTargetIndicesRef.current = targetIndices
+      clearRestoreSuppressionTimeout()
+      restoreSuppressionTimeoutRef.current = setTimeout(() => {
+        suppressOutboundStateUntilRestoreRef.current = false
+        restoreTargetIndicesRef.current = null
+        restoreSuppressionTimeoutRef.current = null
+      }, RESTORE_SUPPRESSION_TIMEOUT_MS)
+    },
+    [clearRestoreSuppressionTimeout],
+  )
 
   const presentationOrigin = useMemo(() => {
     try {
@@ -720,6 +932,48 @@ const SyncDeckManager: FC = () => {
     )
     pendingChalkboardStateRequestRef.current = false
   }, [presentationOrigin])
+
+  const applyDrawingToolModeToInstructorIframe = useCallback(
+    (nextMode: SyncDeckDrawingToolMode): void => {
+      const targetWindow = presentationIframeRef.current?.contentWindow
+      if (!targetWindow || !presentationOrigin || !hasSeenInstructorIframeReadySignalRef.current) {
+        pendingInstructorDrawingToolModeRef.current = nextMode
+        return
+      }
+
+      const currentMode = activeInstructorDrawingToolModeRef.current
+      if (currentMode === nextMode) {
+        pendingInstructorDrawingToolModeRef.current = null
+        return
+      }
+
+      const sendToggle = (method: 'toggleChalkboard' | 'toggleNotesCanvas') => {
+        targetWindow.postMessage(
+          buildRevealCommandMessage('chalkboardCall', {
+            method,
+            args: [],
+          }),
+          presentationOrigin,
+        )
+      }
+
+      if (currentMode === 'chalkboard') {
+        sendToggle('toggleChalkboard')
+      } else if (currentMode === 'pen') {
+        sendToggle('toggleNotesCanvas')
+      }
+
+      if (nextMode === 'chalkboard') {
+        sendToggle('toggleChalkboard')
+      } else if (nextMode === 'pen') {
+        sendToggle('toggleNotesCanvas')
+      }
+
+      activeInstructorDrawingToolModeRef.current = nextMode
+      pendingInstructorDrawingToolModeRef.current = null
+    },
+    [presentationOrigin],
+  )
 
   const buildInstructorWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelOpen) {
@@ -762,27 +1016,27 @@ const SyncDeckManager: FC = () => {
           const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage
           const statePayload = extractSyncDeckStatePayload(message)
           if (statePayload != null) {
+            const drawingToolMode = parseDrawingToolModePayload(statePayload)
+            if (drawingToolMode) {
+              setIsChalkboardOpen(drawingToolMode === 'chalkboard')
+              setIsPenOverlayOpen(drawingToolMode === 'pen')
+
+              if (sessionId && typeof window !== 'undefined') {
+                window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), drawingToolMode === 'chalkboard' ? '1' : '0')
+              }
+              applyDrawingToolModeToInstructorIframe(drawingToolMode)
+              return
+            }
+
             lastInstructorPayloadRef.current = statePayload
             const commandName = extractRevealCommandName(statePayload)
             if (isInboundChalkboardReplayCommand(commandName)) {
-              const targetWindow = presentationIframeRef.current?.contentWindow
-              if (!isChalkboardOpen) {
-                setIsChalkboardOpen(true)
-                if (sessionId && typeof window !== 'undefined') {
-                  window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), '1')
-                }
+              const replayStorage = readChalkboardSnapshotStorage(statePayload)
+              if (replayStorage != null && replayStorage.trim().length > 0) {
+                cachedChalkboardSnapshotStorageRef.current = replayStorage
               }
-
+              const targetWindow = presentationIframeRef.current?.contentWindow
               if (targetWindow && presentationOrigin && hasSeenInstructorIframeReadySignalRef.current) {
-                if (!isChalkboardOpen) {
-                  targetWindow.postMessage(
-                    buildRevealCommandMessage('chalkboardCall', {
-                      method: 'toggleChalkboard',
-                      args: [],
-                    }),
-                    presentationOrigin,
-                  )
-                }
                 targetWindow.postMessage(statePayload, presentationOrigin)
               } else {
                 pendingInstructorReplayCommandsRef.current.push(statePayload)
@@ -807,10 +1061,12 @@ const SyncDeckManager: FC = () => {
             const targetWindow = presentationIframeRef.current?.contentWindow
             if (targetWindow && presentationOrigin && hasSeenInstructorIframeReadySignalRef.current) {
               if (currentIndices) {
+                armRestoreSuppression(currentIndices)
                 targetWindow.postMessage(buildRestoreCommandFromPayload(statePayload), presentationOrigin)
               }
             } else if (currentIndices) {
               pendingRestorePayloadRef.current = statePayload
+              armRestoreSuppression(currentIndices)
             }
             return
           }
@@ -1041,32 +1297,23 @@ const SyncDeckManager: FC = () => {
   }
 
   const toggleChalkboard = (): void => {
-    const targetWindow = presentationIframeRef.current?.contentWindow
-    if (!targetWindow || !presentationOrigin) {
+    if (!presentationOrigin || !presentationIframeRef.current?.contentWindow) {
       setStartError('Presentation is not ready for chalkboard controls.')
       setStartSuccess(null)
       return
     }
 
-    const chalkboardCommand = buildRevealCommandMessage('chalkboardCall', {
-      method: 'toggleChalkboard',
-      args: [],
-    })
+    const currentMode = activeInstructorDrawingToolModeRef.current
+    const nextDrawingToolMode: SyncDeckDrawingToolMode = currentMode === 'chalkboard' ? 'none' : 'chalkboard'
+    applyDrawingToolModeToInstructorIframe(nextDrawingToolMode)
+    relayInstructorPayload(buildDrawingToolModePayload(nextDrawingToolMode))
 
-    targetWindow.postMessage(
-      chalkboardCommand,
-      presentationOrigin,
-    )
-    relayInstructorPayload(chalkboardCommand)
-
-    setIsChalkboardOpen((current) => {
-      const nextValue = !current
-      if (sessionId && typeof window !== 'undefined') {
-        window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), nextValue ? '1' : '0')
-      }
-
-      return nextValue
-    })
+    setIsChalkboardOpen(nextDrawingToolMode === 'chalkboard')
+    setIsPenOverlayOpen(nextDrawingToolMode === 'pen')
+    if (sessionId && typeof window !== 'undefined') {
+      const nextValue = nextDrawingToolMode === 'chalkboard'
+      window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), nextValue ? '1' : '0')
+    }
     setStartError(null)
   }
 
@@ -1099,25 +1346,23 @@ const SyncDeckManager: FC = () => {
   }
 
   const togglePenOverlay = (): void => {
-    const targetWindow = presentationIframeRef.current?.contentWindow
-    if (!targetWindow || !presentationOrigin) {
+    if (!presentationOrigin || !presentationIframeRef.current?.contentWindow) {
       setStartError('Presentation is not ready for pen overlay controls.')
       setStartSuccess(null)
       return
     }
 
-    const penOverlayCommand = buildRevealCommandMessage('chalkboardCall', {
-      method: 'toggleNotesCanvas',
-      args: [],
-    })
+    const currentMode = activeInstructorDrawingToolModeRef.current
+    const nextDrawingToolMode: SyncDeckDrawingToolMode = currentMode === 'pen' ? 'none' : 'pen'
+    applyDrawingToolModeToInstructorIframe(nextDrawingToolMode)
+    relayInstructorPayload(buildDrawingToolModePayload(nextDrawingToolMode))
 
-    targetWindow.postMessage(
-      penOverlayCommand,
-      presentationOrigin,
-    )
-    relayInstructorPayload(penOverlayCommand)
-
-    setIsPenOverlayOpen((current) => !current)
+    setIsPenOverlayOpen(nextDrawingToolMode === 'pen')
+    setIsChalkboardOpen(nextDrawingToolMode === 'chalkboard')
+    if (sessionId && typeof window !== 'undefined') {
+      const nextValue = nextDrawingToolMode === 'chalkboard'
+      window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), nextValue ? '1' : '0')
+    }
     setStartError(null)
   }
 
@@ -1179,16 +1424,15 @@ const SyncDeckManager: FC = () => {
     }
 
     hasSeenInstructorIframeReadySignalRef.current = false
-  hasAppliedReloadChalkboardStateRef.current = false
+    hasAppliedReloadChalkboardStateRef.current = false
     const queuedRestorePayload = pendingRestorePayloadRef.current ?? lastInstructorStatePayloadRef.current
-    restoreTargetIndicesRef.current = extractIndicesFromRevealPayload(queuedRestorePayload)
-    suppressOutboundStateUntilRestoreRef.current = queuedRestorePayload != null
+    armRestoreSuppression(extractIndicesFromRevealPayload(queuedRestorePayload))
 
     targetWindow.postMessage(
       buildInstructorRoleCommandMessage(),
       presentationOrigin,
     )
-  }, [presentationOrigin])
+  }, [presentationOrigin, armRestoreSuppression])
 
   const startSession = useCallback(async (options?: { automatic?: boolean }): Promise<void> => {
     const automaticStart = options?.automatic === true
@@ -1404,8 +1648,8 @@ const SyncDeckManager: FC = () => {
           }
 
           restoreTargetIndicesRef.current = extractIndicesFromRevealPayload(restorePayload)
-          if (restorePayload == null || restoreTargetIndicesRef.current == null) {
-            suppressOutboundStateUntilRestoreRef.current = false
+          if (restorePayload != null && restoreTargetIndicesRef.current != null) {
+            armRestoreSuppression(restoreTargetIndicesRef.current)
           }
 
           if (pendingInstructorReplayCommandsRef.current.length > 0) {
@@ -1415,14 +1659,8 @@ const SyncDeckManager: FC = () => {
             pendingInstructorReplayCommandsRef.current = []
           }
 
-          if (!hasAppliedReloadChalkboardStateRef.current && isChalkboardOpen) {
-            targetWindow.postMessage(
-              buildRevealCommandMessage('chalkboardCall', {
-                method: 'toggleChalkboard',
-                args: [],
-              }),
-              presentationOrigin,
-            )
+          if (pendingInstructorDrawingToolModeRef.current != null) {
+            applyDrawingToolModeToInstructorIframe(pendingInstructorDrawingToolModeRef.current)
           }
           hasAppliedReloadChalkboardStateRef.current = true
 
@@ -1442,11 +1680,28 @@ const SyncDeckManager: FC = () => {
         const envelope = parseRevealSyncEnvelope(event.data)
         const chalkboardRelayCommand = toChalkboardRelayCommand(event.data)
         if (chalkboardRelayCommand != null) {
-          lastInstructorPayloadRef.current = chalkboardRelayCommand
+          const relayWithFallback = applyChalkboardSnapshotFallback(
+            chalkboardRelayCommand,
+            cachedChalkboardSnapshotStorageRef.current,
+          )
+          const outboundChalkboardRelayCommand = relayWithFallback.relayPayload
+          const outboundStorage = readChalkboardSnapshotStorage(outboundChalkboardRelayCommand)
+          if (outboundStorage != null && outboundStorage.trim().length > 0) {
+            cachedChalkboardSnapshotStorageRef.current = outboundStorage
+          }
+
+          if (relayWithFallback.restoredSnapshotStorage && presentationOrigin) {
+            const targetWindow = presentationIframeRef.current?.contentWindow
+            if (targetWindow) {
+              targetWindow.postMessage(outboundChalkboardRelayCommand, presentationOrigin)
+            }
+          }
+
+          lastInstructorPayloadRef.current = outboundChalkboardRelayCommand
           socket.send(
             JSON.stringify({
               type: 'syncdeck-state-update',
-              payload: chalkboardRelayCommand,
+              payload: outboundChalkboardRelayCommand,
             }),
           )
           return
@@ -1459,15 +1714,16 @@ const SyncDeckManager: FC = () => {
 
         if (envelope?.type === 'reveal-sync' && envelope.action === 'state' && suppressOutboundStateUntilRestoreRef.current) {
           const restoreTargetIndices = restoreTargetIndicesRef.current
-          if (
+          const hasReachedRestoreTarget =
             restoreTargetIndices != null &&
             instructorIndices != null &&
             compareIndices(instructorIndices, restoreTargetIndices) >= 0
-          ) {
-            suppressOutboundStateUntilRestoreRef.current = false
+
+          if (!hasReachedRestoreTarget) {
+            return
           }
 
-          return
+          releaseRestoreSuppression()
         }
 
         if (envelope?.type === 'reveal-sync' && isPlainObject(envelope.payload)) {
@@ -1555,7 +1811,21 @@ const SyncDeckManager: FC = () => {
     return () => {
       window.removeEventListener('message', handleMessage)
     }
-  }, [isConfigurePanelOpen, presentationOrigin, requestChalkboardStateFromInstructor, isChalkboardOpen])
+  }, [
+    isConfigurePanelOpen,
+    presentationOrigin,
+    requestChalkboardStateFromInstructor,
+    applyDrawingToolModeToInstructorIframe,
+    armRestoreSuppression,
+    releaseRestoreSuppression,
+  ])
+
+  useEffect(
+    () => () => {
+      clearRestoreSuppressionTimeout()
+    },
+    [clearRestoreSuppressionTimeout],
+  )
 
   if (!sessionId) {
     return (

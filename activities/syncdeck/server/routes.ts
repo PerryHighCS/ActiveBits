@@ -70,12 +70,16 @@ interface SyncDeckChalkboardBuffer {
   delta: Record<string, unknown>[]
 }
 
+type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
+
 interface SyncDeckSessionData extends Record<string, unknown> {
   presentationUrl: string | null
   instructorPasscode: string
   instructorState: SyncDeckInstructorState | null
   lastInstructorPayload: unknown
+  lastInstructorStatePayload: unknown
   chalkboard: SyncDeckChalkboardBuffer
+  drawingToolMode: SyncDeckDrawingToolMode
   students: SyncDeckStudent[]
   embeddedActivities: SyncDeckEmbeddedActivity[]
 }
@@ -270,8 +274,87 @@ function normalizeChalkboardBuffer(value: unknown): SyncDeckChalkboardBuffer {
   }
 }
 
+function normalizeDrawingToolMode(value: unknown): SyncDeckDrawingToolMode {
+  if (value === 'chalkboard' || value === 'pen' || value === 'none') {
+    return value
+  }
+
+  return 'none'
+}
+
+function extractIndicesFromRevealStateObject(value: unknown): { h: number; v: number; f: number } | null {
+  if (!isPlainObject(value)) {
+    return null
+  }
+
+  if (
+    typeof value.indexh === 'number' &&
+    Number.isFinite(value.indexh) &&
+    typeof value.indexv === 'number' &&
+    Number.isFinite(value.indexv)
+  ) {
+    return {
+      h: value.indexh,
+      v: value.indexv,
+      f: typeof value.indexf === 'number' && Number.isFinite(value.indexf) ? value.indexf : 0,
+    }
+  }
+
+  if (typeof value.h === 'number' && Number.isFinite(value.h) && typeof value.v === 'number' && Number.isFinite(value.v)) {
+    return {
+      h: value.h,
+      v: value.v,
+      f: typeof value.f === 'number' && Number.isFinite(value.f) ? value.f : 0,
+    }
+  }
+
+  return null
+}
+
+function extractIndicesFromInstructorPayload(payload: unknown): { h: number; v: number; f: number } | null {
+  if (!isPlainObject(payload)) {
+    return null
+  }
+
+  if (payload.type === 'slidechanged' && isPlainObject(payload.payload)) {
+    return extractIndicesFromRevealStateObject(payload.payload)
+  }
+
+  if (payload.type !== 'reveal-sync') {
+    return null
+  }
+
+  if (payload.action === 'command' && isPlainObject(payload.payload)) {
+    const commandName = payload.payload.name
+    if (commandName === 'setState' && isPlainObject(payload.payload.payload)) {
+      return extractIndicesFromRevealStateObject(payload.payload.payload.state)
+    }
+    return null
+  }
+
+  if (payload.action !== 'state' || !isPlainObject(payload.payload)) {
+    return null
+  }
+
+  if (isPlainObject(payload.payload.indices)) {
+    const indices = extractIndicesFromRevealStateObject(payload.payload.indices)
+    if (indices) {
+      return indices
+    }
+  }
+
+  return extractIndicesFromRevealStateObject(payload.payload.revealState) ?? extractIndicesFromRevealStateObject(payload.payload)
+}
+
 function normalizeSessionData(data: unknown): SyncDeckSessionData {
   const source = isPlainObject(data) ? data : {}
+  const normalizedLastInstructorPayload = source.lastInstructorPayload ?? null
+  const normalizedLastInstructorStatePayload =
+    source.lastInstructorStatePayload != null && extractIndicesFromInstructorPayload(source.lastInstructorStatePayload)
+      ? source.lastInstructorStatePayload
+      : extractIndicesFromInstructorPayload(normalizedLastInstructorPayload)
+        ? normalizedLastInstructorPayload
+        : null
 
   return {
     presentationUrl: typeof source.presentationUrl === 'string' ? source.presentationUrl : null,
@@ -280,10 +363,27 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
         ? source.instructorPasscode
         : createInstructorPasscode(),
     instructorState: null,
-    lastInstructorPayload: source.lastInstructorPayload ?? null,
+    lastInstructorPayload: normalizedLastInstructorPayload,
+    lastInstructorStatePayload: normalizedLastInstructorStatePayload,
     chalkboard: normalizeChalkboardBuffer(source.chalkboard),
+    drawingToolMode: normalizeDrawingToolMode(source.drawingToolMode),
     students: normalizeStudents(source.students),
     embeddedActivities: normalizeEmbeddedActivities(source.embeddedActivities),
+  }
+}
+
+function parseDrawingToolModeUpdate(payload: unknown): SyncDeckDrawingToolMode | null {
+  if (!isPlainObject(payload) || payload.type !== 'syncdeck-tool-mode') {
+    return null
+  }
+
+  return normalizeDrawingToolMode(payload.mode)
+}
+
+function buildDrawingToolModePayload(mode: SyncDeckDrawingToolMode): Record<string, unknown> {
+  return {
+    type: 'syncdeck-tool-mode',
+    mode,
   }
 }
 
@@ -811,6 +911,20 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           return
         }
         client.isInstructor = true
+        if (session.data.lastInstructorStatePayload != null) {
+          if (!parseChalkboardCommand(session.data.lastInstructorStatePayload)) {
+            sendSyncDeckState(socket, session.data.lastInstructorStatePayload)
+          }
+        }
+        if (session.data.lastInstructorPayload != null) {
+          if (
+            session.data.lastInstructorPayload !== session.data.lastInstructorStatePayload &&
+            !parseChalkboardCommand(session.data.lastInstructorPayload)
+          ) {
+            sendSyncDeckState(socket, session.data.lastInstructorPayload)
+          }
+        }
+        sendSyncDeckState(socket, buildDrawingToolModePayload(session.data.drawingToolMode))
         sendBufferedChalkboardState(socket, session.data.chalkboard)
         await broadcastStudentsToInstructors(session.id)
         return
@@ -836,11 +950,18 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
 
       if (session.data.lastInstructorPayload != null) {
-        if (!parseChalkboardCommand(session.data.lastInstructorPayload)) {
+        if (session.data.lastInstructorStatePayload != null && !parseChalkboardCommand(session.data.lastInstructorStatePayload)) {
+          sendSyncDeckState(socket, session.data.lastInstructorStatePayload)
+        }
+        if (
+          session.data.lastInstructorPayload !== session.data.lastInstructorStatePayload &&
+          !parseChalkboardCommand(session.data.lastInstructorPayload)
+        ) {
           sendSyncDeckState(socket, session.data.lastInstructorPayload)
         }
       }
 
+      sendSyncDeckState(socket, buildDrawingToolModePayload(session.data.drawingToolMode))
       sendBufferedChalkboardState(socket, session.data.chalkboard)
 
       await broadcastStudentsToInstructors(session.id)
@@ -865,7 +986,14 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         }
 
         session.data.lastInstructorPayload = message.payload ?? null
+        if (extractIndicesFromInstructorPayload(message.payload) != null) {
+          session.data.lastInstructorStatePayload = message.payload
+        }
         applyChalkboardBufferUpdate(session.data, message.payload)
+        const drawingToolModeUpdate = parseDrawingToolModeUpdate(message.payload)
+        if (drawingToolModeUpdate) {
+          session.data.drawingToolMode = drawingToolModeUpdate
+        }
         await sessions.set(session.id, session)
 
         for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {

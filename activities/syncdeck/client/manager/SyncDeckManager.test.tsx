@@ -12,6 +12,10 @@ import { buildBoundaryClearedPayload } from './SyncDeckManager.js'
 import { extractSyncDeckStatePayload } from './SyncDeckManager.js'
 import { includePausedInStateEnvelope } from './SyncDeckManager.js'
 import { buildPausedSnapshotFromAction } from './SyncDeckManager.js'
+import { toChalkboardRelayCommand } from './SyncDeckManager.js'
+import { extractIndicesFromRevealPayload } from './SyncDeckManager.js'
+import { buildRestoreCommandFromPayload } from './SyncDeckManager.js'
+import { applyChalkboardSnapshotFallback } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -188,6 +192,79 @@ void test('extractSyncDeckStatePayload ignores non-syncdeck-state message', () =
   assert.equal(extracted, null)
 })
 
+void test('extractIndicesFromRevealPayload reads indices from state payload top-level index fields', () => {
+  const indices = extractIndicesFromRevealPayload({
+    type: 'reveal-sync',
+    action: 'state',
+    payload: {
+      indexh: 7,
+      indexv: 2,
+      indexf: 1,
+    },
+  })
+
+  assert.deepEqual(indices, { h: 7, v: 2, f: 1 })
+})
+
+void test('extractIndicesFromRevealPayload reads indices from setState command payload', () => {
+  const indices = extractIndicesFromRevealPayload({
+    type: 'reveal-sync',
+    action: 'command',
+    payload: {
+      name: 'setState',
+      payload: {
+        state: {
+          indexh: 5,
+          indexv: 0,
+          indexf: 0,
+        },
+      },
+    },
+  })
+
+  assert.deepEqual(indices, { h: 5, v: 0, f: 0 })
+})
+
+void test('buildRestoreCommandFromPayload converts legacy slidechanged payload into setState command', () => {
+  const restored = buildRestoreCommandFromPayload({
+    type: 'slidechanged',
+    payload: {
+      h: 3,
+      v: 1,
+      f: 0,
+    },
+  }) as { action?: unknown; payload?: { name?: unknown; payload?: { state?: unknown } } }
+
+  assert.equal(restored.action, 'command')
+  assert.equal(restored.payload?.name, 'setState')
+  assert.deepEqual(restored.payload?.payload?.state, {
+    indexh: 3,
+    indexv: 1,
+    indexf: 0,
+  })
+})
+
+void test('buildRestoreCommandFromPayload preserves state indices from top-level state payload fields', () => {
+  const restored = buildRestoreCommandFromPayload({
+    type: 'reveal-sync',
+    action: 'state',
+    payload: {
+      indexh: 4,
+      indexv: 2,
+      indexf: 0,
+      paused: true,
+    },
+  }) as { payload?: { name?: unknown; payload?: { state?: unknown } } }
+
+  assert.equal(restored.payload?.name, 'setState')
+  assert.deepEqual(restored.payload?.payload?.state, {
+    indexh: 4,
+    indexv: 2,
+    indexf: 0,
+    paused: true,
+  })
+})
+
 void test('includePausedInStateEnvelope prefers explicit fallback over stale payload paused value', () => {
   const updated = includePausedInStateEnvelope(
     {
@@ -246,4 +323,106 @@ void test('buildPausedSnapshotFromAction synthesizes resumed state snapshot from
 
   assert.equal(snapshot.payload?.paused, false)
   assert.equal(snapshot.payload?.revealState?.paused, false)
+})
+
+void test('toChalkboardRelayCommand maps chalkboardStroke action to command envelope', () => {
+  const relayCommand = toChalkboardRelayCommand({
+    type: 'reveal-sync',
+    version: '1.1.0',
+    action: 'chalkboardStroke',
+    payload: {
+      mode: 1,
+      event: { type: 'draw', x1: 1, y1: 2, x2: 3, y2: 4, board: 0 },
+    },
+  })
+
+  assert.equal(relayCommand?.type, 'reveal-sync')
+  assert.equal(relayCommand?.action, 'command')
+  assert.equal((relayCommand?.payload as { name?: unknown })?.name, 'chalkboardStroke')
+  assert.deepEqual((relayCommand?.payload as { payload?: unknown })?.payload, {
+    mode: 1,
+    event: { type: 'draw', x1: 1, y1: 2, x2: 3, y2: 4, board: 0 },
+  })
+})
+
+void test('toChalkboardRelayCommand maps chalkboardState action to command envelope', () => {
+  const relayCommand = toChalkboardRelayCommand({
+    type: 'reveal-sync',
+    action: 'chalkboardState',
+    payload: {
+      storage: '[{"width":960,"height":700,"data":[]}]',
+    },
+  })
+
+  assert.equal(relayCommand?.type, 'reveal-sync')
+  assert.equal(relayCommand?.action, 'command')
+  assert.equal((relayCommand?.payload as { name?: unknown })?.name, 'chalkboardState')
+  assert.deepEqual((relayCommand?.payload as { payload?: unknown })?.payload, {
+    storage: '[{"width":960,"height":700,"data":[]}]',
+  })
+})
+
+void test('toChalkboardRelayCommand maps chalkboard command envelope payload name', () => {
+  const relayCommand = toChalkboardRelayCommand({
+    type: 'reveal-sync',
+    action: 'command',
+    payload: {
+      name: 'chalkboardStroke',
+      payload: {
+        mode: 1,
+        event: { type: 'erase', x: 12, y: 18, board: 0 },
+      },
+    },
+  })
+
+  assert.equal(relayCommand?.action, 'command')
+  assert.equal((relayCommand?.payload as { name?: unknown })?.name, 'chalkboardStroke')
+  assert.deepEqual((relayCommand?.payload as { payload?: unknown })?.payload, {
+    mode: 1,
+    event: { type: 'erase', x: 12, y: 18, board: 0 },
+  })
+})
+
+void test('applyChalkboardSnapshotFallback replaces empty chalkboardState storage with cached snapshot', () => {
+  const result = applyChalkboardSnapshotFallback(
+    {
+      type: 'reveal-sync',
+      action: 'command',
+      payload: {
+        name: 'chalkboardState',
+        payload: {
+          storage: '',
+        },
+      },
+    },
+    '[{"width":960,"height":700,"data":[{"x":1,"y":2}]}]',
+  ) as {
+    relayPayload: { payload?: { payload?: { storage?: unknown } } }
+    restoredSnapshotStorage: string | null
+  }
+
+  assert.equal(result.restoredSnapshotStorage, '[{"width":960,"height":700,"data":[{"x":1,"y":2}]}]')
+  assert.equal(result.relayPayload.payload?.payload?.storage, '[{"width":960,"height":700,"data":[{"x":1,"y":2}]}]')
+})
+
+void test('applyChalkboardSnapshotFallback does not replace non-empty chalkboardState storage', () => {
+  const result = applyChalkboardSnapshotFallback(
+    {
+      type: 'reveal-sync',
+      action: 'command',
+      payload: {
+        name: 'chalkboardState',
+        payload: {
+          storage: '[{"width":960,"height":700,"data":[]}]',
+        },
+      },
+    },
+    '[{"width":960,"height":700,"data":[{"x":1,"y":2}]}]',
+  ) as {
+    relayPayload: { payload?: { payload?: { storage?: unknown } } }
+    restoredSnapshotStorage: string | null
+  }
+
+  assert.equal(result.restoredSnapshotStorage, null)
+  assert.equal(result.relayPayload.payload?.payload?.storage, '[{"width":960,"height":700,"data":[]}]')
 })

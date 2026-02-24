@@ -154,10 +154,12 @@ function createSyncDeckSession(id: string, instructorPasscode = 'passcode-1'): S
       instructorPasscode,
       instructorState: null,
       lastInstructorPayload: null,
+      lastInstructorStatePayload: null,
       chalkboard: {
         snapshot: null,
         delta: [],
       },
+      drawingToolMode: 'none',
       students: [],
       embeddedActivities: [],
     },
@@ -244,10 +246,116 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
   handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
   await new Promise((resolve) => setTimeout(resolve, 0))
 
-  assert.equal(studentSocket.sent.length, 1)
-  const message = JSON.parse(studentSocket.sent[0] ?? '{}') as { type?: string; payload?: unknown }
-  assert.equal(message.type, 'syncdeck-state')
-  assert.deepEqual(message.payload, { type: 'slidechanged', payload: { h: 2, v: 0, f: 0 } })
+  const delivered = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
+  assert.ok(delivered.some((entry) => entry.type === 'syncdeck-state'))
+  assert.ok(
+    delivered.some(
+      (entry) =>
+        entry.type === 'syncdeck-state' &&
+        asRecord(entry.payload)?.type === 'syncdeck-tool-mode' &&
+        asRecord(entry.payload)?.mode === 'none',
+    ),
+  )
+  assert.ok(
+    delivered.some(
+      (entry) =>
+        entry.type === 'syncdeck-state' &&
+        asRecord(entry.payload)?.type === 'slidechanged' &&
+        JSON.stringify(asRecord(entry.payload)?.payload) === JSON.stringify({ h: 2, v: 0, f: 0 }),
+    ),
+  )
+})
+
+void test('syncdeck websocket sends latest state snapshot to instructor on connect', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        lastInstructorPayload: { type: 'slidechanged', payload: { h: 5, v: 1, f: 0 } },
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const instructorSocket = new MockSocket()
+  ws.wss.clients.add(instructorSocket)
+
+  handler?.(
+    instructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+      instructorPasscode: 'teacher-pass',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
+  assert.ok(delivered.some((entry) => entry.type === 'syncdeck-state'))
+  assert.ok(
+    delivered.some(
+      (entry) =>
+        entry.type === 'syncdeck-state' &&
+        asRecord(entry.payload)?.type === 'slidechanged' &&
+        JSON.stringify(asRecord(entry.payload)?.payload) === JSON.stringify({ h: 5, v: 1, f: 0 }),
+    ),
+  )
+})
+
+void test('syncdeck websocket sends latest position snapshot to instructor when last payload is non-position', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        lastInstructorPayload: {
+          type: 'syncdeck-tool-mode',
+          mode: 'chalkboard',
+        },
+        lastInstructorStatePayload: {
+          type: 'slidechanged',
+          payload: { h: 6, v: 2, f: 0 },
+        },
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const instructorSocket = new MockSocket()
+  ws.wss.clients.add(instructorSocket)
+
+  handler?.(
+    instructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+      instructorPasscode: 'teacher-pass',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
+  assert.ok(
+    delivered.some(
+      (entry) =>
+        entry.type === 'syncdeck-state' &&
+        asRecord(entry.payload)?.type === 'slidechanged' &&
+        JSON.stringify(asRecord(entry.payload)?.payload) === JSON.stringify({ h: 6, v: 2, f: 0 }),
+    ),
+  )
 })
 
 void test('syncdeck websocket relays instructor updates to students in session', async () => {
@@ -295,8 +403,9 @@ void test('syncdeck websocket relays instructor updates to students in session',
     { type: 'slidechanged', payload: { h: 3, v: 1, f: 0 } },
   )
 
-  const updatedSession = state.store.s1?.data as { lastInstructorPayload?: unknown }
+  const updatedSession = state.store.s1?.data as { lastInstructorPayload?: unknown; lastInstructorStatePayload?: unknown }
   assert.deepEqual(updatedSession.lastInstructorPayload, { type: 'slidechanged', payload: { h: 3, v: 1, f: 0 } })
+  assert.deepEqual(updatedSession.lastInstructorStatePayload, { type: 'slidechanged', payload: { h: 3, v: 1, f: 0 } })
 })
 
 void test('syncdeck websocket replays buffered chalkboard snapshot and delta to student on connect', async () => {
@@ -541,6 +650,47 @@ void test('syncdeck websocket updates and clears chalkboard buffer from instruct
   assert.deepEqual(afterReset.chalkboard?.delta, [])
 })
 
+void test('syncdeck websocket persists drawing tool mode updates from instructor', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const instructorSocket = new MockSocket()
+  ws.wss.clients.add(instructorSocket)
+
+  handler?.(
+    instructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+      instructorPasscode: 'teacher-pass',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  instructorSocket.emit(
+    'message',
+    JSON.stringify({
+      type: 'syncdeck-state-update',
+      payload: {
+        type: 'syncdeck-tool-mode',
+        mode: 'pen',
+      },
+    }),
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const updatedSession = state.store.s1?.data as { drawingToolMode?: unknown }
+  assert.equal(updatedSession.drawingToolMode, 'pen')
+})
+
 void test('syncdeck websocket broadcasts student presence count to instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -673,6 +823,7 @@ void test('syncdeck session normalization filters malformed persisted students a
       snapshot: string | null
       delta: Array<Record<string, unknown>>
     }
+    drawingToolMode: 'none' | 'chalkboard' | 'pen'
   }
 
   assert.equal(normalizedSessionData.students.length, 1)
@@ -700,6 +851,7 @@ void test('syncdeck session normalization filters malformed persisted students a
 
   assert.equal(normalizedSessionData.chalkboard.snapshot, null)
   assert.deepEqual(normalizedSessionData.chalkboard.delta, [{ mode: 1, event: { type: 'draw' } }])
+  assert.equal(normalizedSessionData.drawingToolMode, 'none')
 })
 
 void test('generate-url returns signed syncdeck persistent link and sets cookie', async () => {
