@@ -5,13 +5,15 @@ import {
   resolvePersistentSessionSecret,
 } from 'activebits-server/core/persistentSessions.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
 const MAX_TEACHER_CODE_LENGTH = 100
+const MAX_STUDENT_NAME_LENGTH = 80
 const HMAC_SECRET = resolvePersistentSessionSecret()
+const STUDENT_COOKIE_PREFIX = 'syncdeck_student_'
 
 interface CookieSessionEntry {
   key: string
@@ -168,17 +170,87 @@ function normalizeStudentId(value: unknown): string | null {
   return trimmed
 }
 
-function normalizeStudentName(value: unknown): string {
+function validateStudentName(value: unknown): string | null {
   if (typeof value !== 'string') {
-    return 'Student'
+    return null
   }
 
   const trimmed = value.trim()
-  if (trimmed.length === 0) {
-    return 'Student'
+  if (trimmed.length === 0 || trimmed.length > MAX_STUDENT_NAME_LENGTH) {
+    return null
   }
 
-  return trimmed.slice(0, 80)
+  return trimmed
+}
+
+function createStudentId(): string {
+  return randomUUID?.() ?? randomBytes(16).toString('hex')
+}
+
+function parseCookieHeader(cookieHeader: unknown): Record<string, string> {
+  if (typeof cookieHeader !== 'string') {
+    return {}
+  }
+
+  const entries = cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+
+  const parsed: Record<string, string> = {}
+  for (const entry of entries) {
+    const separatorIndex = entry.indexOf('=')
+    if (separatorIndex < 1) {
+      continue
+    }
+
+    const key = entry.slice(0, separatorIndex).trim()
+    const value = entry.slice(separatorIndex + 1).trim()
+    if (!key || value.length === 0) {
+      continue
+    }
+
+    parsed[key] = decodeURIComponent(value)
+  }
+
+  return parsed
+}
+
+function computeStudentCookieSignature(sessionId: string, studentId: string): string {
+  return createHmac('sha256', HMAC_SECRET).update(`${sessionId}|${studentId}`).digest('hex').substring(0, 16)
+}
+
+function buildStudentCookieValue(sessionId: string, studentId: string): string {
+  const signature = computeStudentCookieSignature(sessionId, studentId)
+  return `${studentId}.${signature}`
+}
+
+function getStudentIdFromSignedCookie(sessionId: string, cookieValue: unknown): string | null {
+  if (typeof cookieValue !== 'string') {
+    return null
+  }
+
+  const separatorIndex = cookieValue.lastIndexOf('.')
+  if (separatorIndex < 1 || separatorIndex === cookieValue.length - 1) {
+    return null
+  }
+
+  const studentId = cookieValue.slice(0, separatorIndex)
+  const signature = cookieValue.slice(separatorIndex + 1)
+
+  const normalizedStudentId = normalizeStudentId(studentId)
+  if (!normalizedStudentId || signature.length !== 16) {
+    return null
+  }
+
+  const expectedSignature = computeStudentCookieSignature(sessionId, normalizedStudentId)
+  try {
+    return timingSafeEqual(Buffer.from(expectedSignature, 'hex'), Buffer.from(signature, 'hex'))
+      ? normalizedStudentId
+      : null
+  } catch {
+    return null
+  }
 }
 
 function asSyncDeckSession(session: SessionRecord | null): SyncDeckSession | null {
@@ -424,6 +496,60 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
   })
 
+  app.post('/api/syncdeck/:sessionId/register-student', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const name = validateStudentName(readStringField(req.body, 'name'))
+    if (!name) {
+      res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+
+    const cookieName = `${STUDENT_COOKIE_PREFIX}${session.id}`
+    const cookieStudentId = getStudentIdFromSignedCookie(session.id, req.cookies?.[cookieName])
+    const now = Date.now()
+    let student =
+      cookieStudentId != null
+        ? session.data.students.find((candidate) => candidate.studentId === cookieStudentId) ?? null
+        : null
+
+    if (!student) {
+      student = {
+        studentId: createStudentId(),
+        name,
+        joinedAt: now,
+        lastSeenAt: now,
+        lastIndices: null,
+        lastStudentStateAt: null,
+      }
+      session.data.students.push(student)
+    } else {
+      student.name = name
+      student.lastSeenAt = now
+    }
+
+    await sessions.set(session.id, session)
+
+    res.cookie?.(cookieName, buildStudentCookieValue(session.id, student.studentId), {
+      maxAge: ONE_YEAR_MS,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+    })
+
+    res.json({ studentId: student.studentId, name: student.name })
+  })
+
   app.post('/api/syncdeck/:sessionId/configure', async (req, res) => {
     const sessionId = req.params.sessionId
     if (!sessionId) {
@@ -486,8 +612,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const client = socket as SyncDeckSocket
     client.sessionId = query.get('sessionId')
     client.isInstructor = false
-    client.studentId = normalizeStudentId(query.get('studentId'))
-    client.studentName = normalizeStudentName(query.get('studentName'))
+    client.studentId = null
+    client.studentName = null
 
     const sessionId = client.sessionId
     if (!sessionId) {
@@ -515,23 +641,18 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
-      if (client.studentId) {
+      const wsCookies = parseCookieHeader(client.upgradeHeaders?.cookie)
+      const studentCookieName = `${STUDENT_COOKIE_PREFIX}${session.id}`
+      const studentIdFromCookie = getStudentIdFromSignedCookie(session.id, wsCookies[studentCookieName])
+      if (studentIdFromCookie) {
         const now = Date.now()
-        const existingStudent = session.data.students.find((student) => student.studentId === client.studentId)
+        const existingStudent = session.data.students.find((student) => student.studentId === studentIdFromCookie)
         if (existingStudent) {
+          client.studentId = existingStudent.studentId
+          client.studentName = existingStudent.name
           existingStudent.lastSeenAt = now
-          existingStudent.name = client.studentName ?? existingStudent.name
-        } else {
-          session.data.students.push({
-            studentId: client.studentId,
-            name: client.studentName ?? 'Student',
-            joinedAt: now,
-            lastSeenAt: now,
-            lastIndices: null,
-            lastStudentStateAt: null,
-          })
+          await sessions.set(session.id, session)
         }
-        await sessions.set(session.id, session)
       }
 
       if (session.data.lastInstructorPayload != null) {

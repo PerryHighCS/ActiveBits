@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
@@ -41,6 +41,25 @@ interface RevealSyncStatePayload {
   studentBoundary?: unknown
 }
 
+interface RevealStateIndicesPayload {
+  indices?: unknown
+  studentBoundary?: unknown
+}
+
+interface RevealCommandMessage {
+  type: 'reveal-sync'
+  version: string
+  action: 'command'
+  deckId: string | null
+  role: 'instructor'
+  source: 'reveal-iframe-sync'
+  ts: number
+  payload: {
+    name: string
+    payload?: Record<string, unknown>
+  }
+}
+
 const WS_OPEN_READY_STATE = 1
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -73,6 +92,23 @@ function normalizeIndices(value: unknown): { h: number; v: number; f: number } |
   }
 }
 
+function buildBoundaryCommandEnvelope(
+  message: RevealSyncEnvelope,
+  name: string,
+  payload?: Record<string, unknown>,
+): RevealCommandMessage {
+  return {
+    type: 'reveal-sync',
+    version: typeof message.version === 'string' ? message.version : '1.0.0',
+    action: 'command',
+    deckId: typeof message.deckId === 'string' ? message.deckId : null,
+    role: 'instructor',
+    source: 'reveal-iframe-sync',
+    ts: Date.now(),
+    payload: payload ? { name, payload } : { name },
+  }
+}
+
 function buildSetStudentBoundaryCommand(message: RevealSyncEnvelope): Record<string, unknown> | null {
   const role = message.role
   if (typeof role === 'string' && role !== 'instructor') {
@@ -86,22 +122,19 @@ function buildSetStudentBoundaryCommand(message: RevealSyncEnvelope): Record<str
     return null
   }
 
-  return {
-    type: 'reveal-sync',
-    version: typeof message.version === 'string' ? message.version : '1.0.0',
-    action: 'command',
-    deckId: typeof message.deckId === 'string' ? message.deckId : null,
-    role: 'instructor',
-    source: 'reveal-iframe-sync',
-    ts: Date.now(),
-    payload: {
-      name: 'setStudentBoundary',
-      payload: {
-        indices: boundaryFromPayload,
-        syncToBoundary: false,
-      },
-    },
+  return buildBoundaryCommandEnvelope(message, 'setStudentBoundary', {
+    indices: boundaryFromPayload,
+    syncToBoundary: false,
+  })
+}
+
+function buildClearBoundaryCommand(message: RevealSyncEnvelope): Record<string, unknown> | null {
+  const role = message.role
+  if (typeof role === 'string' && role !== 'instructor') {
+    return null
   }
+
+  return buildBoundaryCommandEnvelope(message, 'clearBoundary')
 }
 
 export function toRevealBoundaryCommandMessage(rawPayload: unknown): Record<string, unknown> | null {
@@ -115,6 +148,13 @@ export function toRevealBoundaryCommandMessage(rawPayload: unknown): Record<stri
   }
 
   if (message.action === 'studentBoundaryChanged' || message.action === 'state') {
+    if (isPlainObject(message.payload) && 'studentBoundary' in message.payload) {
+      const boundaryValue = (message.payload as { studentBoundary?: unknown }).studentBoundary
+      if (boundaryValue == null) {
+        return buildClearBoundaryCommand(message)
+      }
+    }
+
     return buildSetStudentBoundaryCommand(message)
   }
 
@@ -146,10 +186,11 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
 
   const revealState = isPlainObject(statePayload.revealState) ? statePayload.revealState : null
   const indices = isPlainObject(statePayload.indices) ? statePayload.indices : null
-  const fallbackState = {
-    indexh: typeof indices?.h === 'number' ? indices.h : 0,
-    indexv: typeof indices?.v === 'number' ? indices.v : 0,
-    indexf: typeof indices?.f === 'number' ? indices.f : 0,
+  const mergedState = {
+    ...(revealState ?? {}),
+    indexh: typeof indices?.h === 'number' ? indices.h : (revealState as { indexh?: unknown } | null)?.indexh ?? 0,
+    indexv: typeof indices?.v === 'number' ? indices.v : (revealState as { indexv?: unknown } | null)?.indexv ?? 0,
+    indexf: typeof indices?.f === 'number' ? indices.f : (revealState as { indexf?: unknown } | null)?.indexf ?? 0,
   }
 
   return {
@@ -163,7 +204,7 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
     payload: {
       name: 'setState',
       payload: {
-        state: revealState ?? fallbackState,
+        state: mergedState,
       },
     },
   }
@@ -182,6 +223,12 @@ function buildRevealCommandMessage(name: string, payload: RevealCommandPayload):
       payload,
     },
   }
+}
+
+export function buildStudentRoleCommandMessage(): Record<string, unknown> {
+  return buildRevealCommandMessage('setRole', {
+    role: 'student',
+  })
 }
 
 function extractStoryboardDisplayed(data: unknown): boolean | null {
@@ -276,25 +323,6 @@ function getStoredStudentName(sessionId: string): string {
   return typeof stored === 'string' ? stored.trim() : ''
 }
 
-function buildStudentIdentity(sessionId: string, studentName: string): { studentId: string; studentName: string } | null {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  const key = `syncdeck_student_id_${sessionId}`
-  let studentId = window.sessionStorage.getItem(key)
-  if (!studentId) {
-    const generatedId = window.crypto?.randomUUID?.() ?? `student-${Date.now().toString(36)}`
-    studentId = generatedId
-    window.sessionStorage.setItem(key, generatedId)
-  }
-
-  return {
-    studentId,
-    studentName,
-  }
-}
-
 const SyncDeckStudent: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const [isLoading, setIsLoading] = useState(true)
@@ -305,7 +333,9 @@ const SyncDeckStudent: FC = () => {
   const [connectionState, setConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [studentNameInput, setStudentNameInput] = useState('')
-  const [studentName, setStudentName] = useState('')
+  const [registeredStudentName, setRegisteredStudentName] = useState('')
+  const [isRegisteringStudent, setIsRegisteringStudent] = useState(false)
+  const [joinError, setJoinError] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const pendingPayloadRef = useRef<unknown>(null)
   const attachSessionEndedHandler = useSessionEndedHandler()
@@ -316,16 +346,8 @@ const SyncDeckStudent: FC = () => {
     }
 
     const storedName = getStoredStudentName(sessionId)
-    setStudentName(storedName)
     setStudentNameInput(storedName)
   }, [sessionId])
-
-  const studentIdentity = useMemo(() => {
-    if (!sessionId || studentName.trim().length === 0) {
-      return null
-    }
-    return buildStudentIdentity(sessionId, studentName)
-  }, [sessionId, studentName])
 
   const presentationOrigin = useMemo(() => {
     if (!presentationUrl || !validatePresentationUrl(presentationUrl)) {
@@ -404,18 +426,16 @@ const SyncDeckStudent: FC = () => {
   )
 
   const buildStudentWsUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined' || !sessionId || !presentationUrl || !studentIdentity) {
+    if (typeof window === 'undefined' || !sessionId || !presentationUrl) {
       return null
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const params = new URLSearchParams({
       sessionId,
-      studentId: studentIdentity.studentId,
-      studentName: studentIdentity.studentName,
     })
     return `${protocol}//${window.location.host}/ws/syncdeck?${params.toString()}`
-  }, [sessionId, presentationUrl, studentIdentity])
+  }, [sessionId, presentationUrl])
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs, socketRef: studentSocketRef } =
     useResilientWebSocket({
@@ -528,7 +548,7 @@ const SyncDeckStudent: FC = () => {
   }, [sessionId, isWaitingForConfiguration])
 
   useEffect(() => {
-    if (!sessionId || !presentationUrl || studentName.trim().length === 0) {
+    if (!sessionId || !presentationUrl || registeredStudentName.trim().length === 0) {
       disconnectStudentWs()
       return undefined
     }
@@ -537,26 +557,53 @@ const SyncDeckStudent: FC = () => {
     return () => {
       disconnectStudentWs()
     }
-  }, [sessionId, presentationUrl, studentName, connectStudentWs, disconnectStudentWs])
+  }, [sessionId, presentationUrl, registeredStudentName, connectStudentWs, disconnectStudentWs])
 
-  const handleNameSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleNameSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
-    if (!sessionId) {
+    if (!sessionId || !presentationUrl || isRegisteringStudent) {
       return
     }
 
     const normalized = studentNameInput.trim().slice(0, 80)
     if (normalized.length === 0) {
+      setJoinError('Please enter your name before joining.')
       return
     }
 
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, normalized)
+    setIsRegisteringStudent(true)
+    setJoinError(null)
+    try {
+      const response = await fetch(`/api/syncdeck/${sessionId}/register-student`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ name: normalized }),
+      })
+
+      if (!response.ok) {
+        setJoinError('Unable to join this presentation right now. Please try again.')
+        return
+      }
+
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, normalized)
+      }
+
+      setRegisteredStudentName(normalized)
+      setJoinError(null)
+    } catch {
+      setJoinError('Unable to join this presentation right now. Please try again.')
+    } finally {
+      setIsRegisteringStudent(false)
     }
-    setStudentName(normalized)
   }
 
   const handleIframeLoad = useCallback(() => {
+    sendPayloadToIframe(buildStudentRoleCommandMessage())
+
     if (pendingPayloadRef.current !== null) {
       sendPayloadToIframe(pendingPayloadRef.current)
       pendingPayloadRef.current = null
@@ -604,7 +651,7 @@ const SyncDeckStudent: FC = () => {
     )
   }
 
-  if (studentName.trim().length === 0) {
+  if (registeredStudentName.trim().length === 0) {
     return (
       <div className="fixed inset-0 z-10 bg-white flex items-center justify-center p-6">
         <form onSubmit={handleNameSubmit} className="w-full max-w-md border border-gray-200 rounded p-4 space-y-3">
@@ -622,11 +669,13 @@ const SyncDeckStudent: FC = () => {
               autoFocus
             />
           </label>
+          {joinError ? <p className="text-sm text-red-600">{joinError}</p> : null}
           <button
             type="submit"
+            disabled={isRegisteringStudent}
             className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
           >
-            Join Presentation
+            {isRegisteringStudent ? 'Joining…' : 'Join Presentation'}
           </button>
         </form>
       </div>

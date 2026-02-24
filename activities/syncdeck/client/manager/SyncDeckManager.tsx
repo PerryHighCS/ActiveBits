@@ -29,6 +29,10 @@ interface RevealCommandPayload {
   [key: string]: unknown
 }
 
+interface RevealStatePayload {
+  indices?: unknown
+}
+
 interface RevealSyncEnvelope {
   type?: unknown
   version?: unknown
@@ -239,6 +243,54 @@ function buildRevealCommandMessage(name: string, payload: RevealCommandPayload):
       payload,
     },
   }
+}
+
+function normalizeIndices(value: unknown): { h: number; v: number; f: number } | null {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const candidate = value as { h?: unknown; v?: unknown; f?: unknown }
+  if (typeof candidate.h !== 'number' || !Number.isFinite(candidate.h)) {
+    return null
+  }
+  if (typeof candidate.v !== 'number' || !Number.isFinite(candidate.v)) {
+    return null
+  }
+
+  const fragment = typeof candidate.f === 'number' && Number.isFinite(candidate.f) ? candidate.f : 0
+  return {
+    h: candidate.h,
+    v: candidate.v,
+    f: fragment,
+  }
+}
+
+function extractIndicesFromRevealPayload(payload: unknown): { h: number; v: number; f: number } | null {
+  if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null
+  }
+
+  const message = payload as { type?: unknown; action?: unknown; payload?: unknown }
+  if (message.type !== 'reveal-sync' || message.action !== 'state') {
+    return null
+  }
+
+  const messagePayload = message.payload as RevealStatePayload | undefined
+  return normalizeIndices(messagePayload?.indices)
+}
+
+export function buildForceSyncBoundaryCommandMessage(indices: { h: number; v: number; f: number }): Record<string, unknown> {
+  return buildRevealCommandMessage('setStudentBoundary', {
+    indices,
+    syncToBoundary: true,
+  })
+}
+
+export function buildInstructorRoleCommandMessage(): Record<string, unknown> {
+  return buildRevealCommandMessage('setRole', {
+    role: 'instructor',
+  })
 }
 
 const SyncDeckManager: FC = () => {
@@ -576,14 +628,18 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    if (lastInstructorPayloadRef.current != null) {
+    const currentInstructorIndices = extractIndicesFromRevealPayload(lastInstructorPayloadRef.current)
+    if (currentInstructorIndices != null) {
       try {
         socket.send(
           JSON.stringify({
             type: 'syncdeck-state-update',
-            payload: lastInstructorPayloadRef.current,
+            payload: buildForceSyncBoundaryCommandMessage(currentInstructorIndices),
           }),
         )
+        setStartError(null)
+        setStartSuccess('Force sync sent. Students are syncing to your current position.')
+        return
       } catch {
         setStartError('Unable to send force sync update to students.')
         setStartSuccess(null)
@@ -607,6 +663,18 @@ const SyncDeckManager: FC = () => {
     setStartError(null)
     setStartSuccess('Force sync sent. Students are syncing to your current position.')
   }
+
+  const handlePresentationIframeLoad = useCallback((): void => {
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow || !presentationOrigin) {
+      return
+    }
+
+    targetWindow.postMessage(
+      buildInstructorRoleCommandMessage(),
+      presentationOrigin,
+    )
+  }, [presentationOrigin])
 
   const startSession = useCallback(async (): Promise<void> => {
     if (!sessionId) return
@@ -1142,6 +1210,7 @@ const SyncDeckManager: FC = () => {
                   className="w-full h-full"
                   allow="fullscreen"
                   sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                  onLoad={handlePresentationIframeLoad}
                 />
               </div>
             )}

@@ -156,6 +156,7 @@ class MockSocket implements ActiveBitsWebSocket {
   sessionId?: string | null
   isAlive?: boolean
   clientIp?: string
+  upgradeHeaders?: Record<string, string | string[] | undefined>
   readyState = 1
   sent: string[] = []
   closeCalls: Array<{ code?: number; reason?: string }> = []
@@ -197,6 +198,11 @@ class MockSocket implements ActiveBitsWebSocket {
 
 function computeUrlHash(persistentHash: string, presentationUrl: string): string {
   return createHmac('sha256', HMAC_SECRET).update(`${persistentHash}|${presentationUrl}`).digest('hex').substring(0, 16)
+}
+
+function computeStudentCookieValue(sessionId: string, studentId: string): string {
+  const signature = createHmac('sha256', HMAC_SECRET).update(`${sessionId}|${studentId}`).digest('hex').substring(0, 16)
+  return `${studentId}.${signature}`
 }
 
 void test('setupSyncDeckRoutes registers syncdeck websocket namespace', () => {
@@ -251,6 +257,9 @@ void test('syncdeck websocket relays instructor updates to students in session',
 
   const instructorSocket = new MockSocket()
   const studentSocket = new MockSocket()
+  studentSocket.upgradeHeaders = {
+    cookie: `syncdeck_student_s1=${computeStudentCookieValue('s1', 'student-1')}`,
+  }
   ws.wss.clients.add(instructorSocket)
   ws.wss.clients.add(studentSocket)
 
@@ -291,7 +300,22 @@ void test('syncdeck websocket broadcasts student presence count to instructor', 
   const app = createMockApp()
   const ws = createMockWs()
   const state = createSessionStore({
-    s1: createSyncDeckSession('s1', 'teacher-pass'),
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [
+          {
+            studentId: 'student-1',
+            name: 'Student',
+            joinedAt: Date.now(),
+            lastSeenAt: Date.now(),
+            lastIndices: null,
+            lastStudentStateAt: null,
+          },
+        ],
+      },
+    },
   })
 
   setupSyncDeckRoutes(app, state.sessions, ws)
@@ -300,6 +324,9 @@ void test('syncdeck websocket broadcasts student presence count to instructor', 
 
   const instructorSocket = new MockSocket()
   const studentSocket = new MockSocket()
+  studentSocket.upgradeHeaders = {
+    cookie: `syncdeck_student_s1=${computeStudentCookieValue('s1', 'student-1')}`,
+  }
   ws.wss.clients.add(instructorSocket)
   ws.wss.clients.add(studentSocket)
 
@@ -315,19 +342,145 @@ void test('syncdeck websocket broadcasts student presence count to instructor', 
 
   handler?.(
     studentSocket,
-    new URLSearchParams({
-      sessionId: 's1',
-      studentId: 'student-1',
-      studentName: 'Student',
-    }),
+    new URLSearchParams({ sessionId: 's1' }),
     ws.wss,
   )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: { connectedCount?: unknown } })
-  const studentsMessage = delivered.find((entry) => entry.type === 'syncdeck-students')
+  const studentMessages = delivered.filter((entry) => entry.type === 'syncdeck-students')
+  const studentsMessage = studentMessages[studentMessages.length - 1]
   assert.ok(studentsMessage)
   assert.equal(studentsMessage?.payload?.connectedCount, 1)
+})
+
+void test('register-student creates student and sets signed cookie', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        name: 'Casey',
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const payload = res.body as { studentId?: string; name?: string }
+  assert.equal(typeof payload.studentId, 'string')
+  assert.equal(payload.name, 'Casey')
+
+  assert.equal(res.cookies.length, 1)
+  assert.equal(res.cookies[0]?.name, 'syncdeck_student_s1')
+  assert.equal(res.cookies[0]?.options.httpOnly, true)
+
+  const storedStudents = (storeState.store.s1?.data as { students?: Array<{ studentId?: string; name?: string }> }).students
+  assert.equal(storedStudents?.length, 1)
+  assert.equal(storedStudents?.[0]?.name, 'Casey')
+  assert.equal(storedStudents?.[0]?.studentId, payload.studentId)
+})
+
+void test('register-student reuses existing student from valid signed cookie', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const existingStudentId = 'student-keep'
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [
+          {
+            studentId: existingStudentId,
+            name: 'Original',
+            joinedAt: Date.now() - 1000,
+            lastSeenAt: Date.now() - 1000,
+            lastIndices: null,
+            lastStudentStateAt: null,
+          },
+        ],
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { name: 'Updated Name' },
+      {
+        syncdeck_student_s1: computeStudentCookieValue('s1', existingStudentId),
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const payload = res.body as { studentId?: string; name?: string }
+  assert.equal(payload.studentId, existingStudentId)
+  assert.equal(payload.name, 'Updated Name')
+
+  const storedStudents = (storeState.store.s1?.data as { students?: Array<{ studentId?: string; name?: string }> }).students
+  assert.equal(storedStudents?.length, 1)
+  assert.equal(storedStudents?.[0]?.studentId, existingStudentId)
+  assert.equal(storedStudents?.[0]?.name, 'Updated Name')
+})
+
+void test('register-student ignores tampered cookie and creates a new student', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [
+          {
+            studentId: 'student-existing',
+            name: 'Existing',
+            joinedAt: Date.now() - 2000,
+            lastSeenAt: Date.now() - 2000,
+            lastIndices: null,
+            lastStudentStateAt: null,
+          },
+        ],
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { name: 'Fresh' },
+      {
+        syncdeck_student_s1: 'student-existing.deadbeefdeadbeef',
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const payload = res.body as { studentId?: string }
+  assert.notEqual(payload.studentId, 'student-existing')
+
+  const storedStudents = (storeState.store.s1?.data as { students?: Array<{ studentId?: string }> }).students
+  assert.equal(storedStudents?.length, 2)
 })
 
 void test('generate-url returns signed syncdeck persistent link and sets cookie', async () => {

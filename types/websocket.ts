@@ -2,6 +2,7 @@ export interface ActiveBitsWebSocket {
   sessionId?: string | null
   isAlive?: boolean
   clientIp?: string
+  upgradeHeaders?: Record<string, string | string[] | undefined>
   readyState: number
   send(data: string): void
   on(event: string, listener: (...args: unknown[]) => void): void

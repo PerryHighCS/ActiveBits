@@ -3,6 +3,8 @@ import test from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import SyncDeckManager from './SyncDeckManager.js'
+import { buildInstructorRoleCommandMessage } from './SyncDeckManager.js'
+import { buildForceSyncBoundaryCommandMessage } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -47,4 +49,34 @@ void test('SyncDeckManager pre-fills presentation URL from query params', () => 
   )
 
   assert.match(html, /value="https:\/\/slides\.example\/deck"/i)
+})
+
+void test('buildInstructorRoleCommandMessage emits setRole instructor command', () => {
+  const message = buildInstructorRoleCommandMessage()
+
+  assert.equal(message.type, 'reveal-sync')
+  assert.equal(message.action, 'command')
+  assert.equal(message.role, 'instructor')
+  assert.equal(message.source, 'activebits-syncdeck-host')
+  assert.deepEqual(message.payload, {
+    name: 'setRole',
+    payload: {
+      role: 'instructor',
+    },
+  })
+})
+
+void test('buildForceSyncBoundaryCommandMessage emits setStudentBoundary sync command', () => {
+  const message = buildForceSyncBoundaryCommandMessage({ h: 5, v: 1, f: 0 })
+
+  assert.equal(message.type, 'reveal-sync')
+  assert.equal(message.action, 'command')
+  assert.equal(message.role, 'instructor')
+  assert.deepEqual(message.payload, {
+    name: 'setStudentBoundary',
+    payload: {
+      indices: { h: 5, v: 1, f: 0 },
+      syncToBoundary: true,
+    },
+  })
 })
