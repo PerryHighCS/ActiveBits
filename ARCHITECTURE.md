@@ -84,6 +84,24 @@ export default {
     description: 'Solo mode description',
     buttonText: 'Copy Solo Link',
   },
+  // Optional: shared permanent-link modal options and server-side link generation
+  deepLinkOptions: {
+    presentationUrl: {
+      label: 'Presentation URL',
+      type: 'text',
+      validator: 'url',
+    },
+  },
+  deepLinkGenerator: {
+    endpoint: '/api/my-activity/generate-url',
+    mode: 'replace-url', // optional: 'replace-url' | 'append-query'
+    expectsSelectedOptions: true, // optional
+    preflight: { // optional
+      type: 'reveal-sync-ping',
+      optionKey: 'presentationUrl',
+      timeoutMs: 4000,
+    },
+  },
   clientEntry: './client/index.ts',  // Component entry (TS/TSX)
   serverEntry: './server/routes.ts', // Server routes
 };
@@ -214,6 +232,8 @@ Each activity defines its own endpoints under `/api/{activity-id}/...`
 4. Teacher accesses `/activity/{activityName}/{hash}` → checks cookie → authenticates via WebSocket
 5. Server validates HMAC and teacher code, creates/resets session
 6. Teacher auto-authenticated and redirected to manager view
+
+Activities can override the default link-generation endpoint using `activity.config.ts > deepLinkGenerator.endpoint`. Activities that need client-side preflight before generating links can declare `deepLinkGenerator.preflight` and the shared dashboard will run the declared strategy without activity-specific imports.
 
 ### Deep Linking with Query Parameters
 Activities can use URL query parameters for direct deep linking to specific content or configurations. This allows instructors to create presentation-ready links that automatically configure the activity.

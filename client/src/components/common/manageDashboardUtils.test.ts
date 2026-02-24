@@ -99,7 +99,6 @@ void test('parseDeepLinkGenerator validates and normalizes generator metadata', 
     endpoint: '/api/syncdeck/generate-url',
     mode: 'replace-url',
     expectsSelectedOptions: true,
-    requiresPreflight: false,
     preflight: null,
   })
 
@@ -107,20 +106,7 @@ void test('parseDeepLinkGenerator validates and normalizes generator metadata', 
     endpoint: '/api/custom',
     mode: 'append-query',
     expectsSelectedOptions: false,
-    requiresPreflight: false,
     preflight: null,
-  })
-
-  assert.deepEqual(parseDeepLinkGenerator({ endpoint: '/api/syncdeck/generate-url', requiresPreflight: true }), {
-    endpoint: '/api/syncdeck/generate-url',
-    mode: 'replace-url',
-    expectsSelectedOptions: true,
-    requiresPreflight: true,
-    preflight: {
-      type: 'reveal-sync-ping',
-      optionKey: 'presentationUrl',
-      timeoutMs: 4000,
-    },
   })
 
   assert.deepEqual(
@@ -136,7 +122,6 @@ void test('parseDeepLinkGenerator validates and normalizes generator metadata', 
       endpoint: '/api/syncdeck/generate-url',
       mode: 'replace-url',
       expectsSelectedOptions: true,
-      requiresPreflight: true,
       preflight: {
         type: 'reveal-sync-ping',
         optionKey: 'presentationUrl',
@@ -157,17 +142,29 @@ void test('parseDeepLinkGenerator validates and normalizes generator metadata', 
       endpoint: '/api/syncdeck/generate-url',
       mode: 'replace-url',
       expectsSelectedOptions: true,
-      requiresPreflight: false,
       preflight: null,
     },
   )
 })
 
-void test('parseDeepLinkGenerator favors explicit preflight config over legacy requiresPreflight', () => {
+void test('parseDeepLinkGenerator ignores unknown generator properties', () => {
   assert.deepEqual(
     parseDeepLinkGenerator({
       endpoint: '/api/syncdeck/generate-url',
-      requiresPreflight: true,
+      unsupportedFlag: true,
+    }),
+    {
+      endpoint: '/api/syncdeck/generate-url',
+      mode: 'replace-url',
+      expectsSelectedOptions: true,
+      preflight: null,
+    },
+  )
+
+  assert.deepEqual(
+    parseDeepLinkGenerator({
+      endpoint: '/api/syncdeck/generate-url',
+      unsupportedFlag: true,
       preflight: {
         type: 'reveal-sync-ping',
         optionKey: 'deckUrl',
@@ -177,7 +174,6 @@ void test('parseDeepLinkGenerator favors explicit preflight config over legacy r
       endpoint: '/api/syncdeck/generate-url',
       mode: 'replace-url',
       expectsSelectedOptions: true,
-      requiresPreflight: true,
       preflight: {
         type: 'reveal-sync-ping',
         optionKey: 'deckUrl',
@@ -202,7 +198,6 @@ void test('buildPersistentLinkUrl appends query only for legacy or append-query 
         endpoint: '/api/syncdeck/generate-url',
         mode: 'replace-url',
         expectsSelectedOptions: true,
-        requiresPreflight: false,
         preflight: null,
       },
     ),

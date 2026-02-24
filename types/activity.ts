@@ -39,7 +39,6 @@ export interface ActivityConfig {
     endpoint: string
     mode?: 'replace-url' | 'append-query'
     expectsSelectedOptions?: boolean
-    requiresPreflight?: boolean
     preflight?: ActivityDeepLinkPreflightConfig
   }
   manageLayout?: {

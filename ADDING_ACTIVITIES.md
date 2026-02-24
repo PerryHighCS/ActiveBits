@@ -258,7 +258,26 @@ export default {
         { value: 'medium', label: 'Medium' },
         { value: 'hard', label: 'Hard' },
       ]
-    }
+    },
+    presentationUrl: {
+      label: 'Presentation URL',
+      type: 'text',
+      validator: 'url',
+    },
+  },
+  // Optional: use an activity-specific permanent-link generator endpoint
+  deepLinkGenerator: {
+    endpoint: '/api/quiz/generate-url',
+    // Optional mode: 'replace-url' (default) or 'append-query'
+    mode: 'replace-url',
+    // Optional: if false, dashboard omits selectedOptions in request body
+    expectsSelectedOptions: true,
+    // Optional preflight declaration for shared dashboard validation
+    preflight: {
+      type: 'reveal-sync-ping',
+      optionKey: 'presentationUrl',
+      timeoutMs: 4000,
+    },
   },
   clientEntry: './client/index.ts',  // or .tsx if using JSX in footerContent
   serverEntry: './server/routes.ts',

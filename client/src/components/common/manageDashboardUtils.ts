@@ -14,7 +14,6 @@ export interface DeepLinkGeneratorConfig {
   endpoint: string
   mode: 'replace-url' | 'append-query'
   expectsSelectedOptions: boolean
-  requiresPreflight: boolean
   preflight: DeepLinkPreflightConfig | null
 }
 
@@ -61,28 +60,15 @@ export function parseDeepLinkGenerator(rawDeepLinkGenerator: unknown): DeepLinkG
   }
 
   const parsePreflight = (): DeepLinkPreflightConfig | null => {
-    const legacyRequiresPreflight = rawDeepLinkGenerator.requiresPreflight === true
     const rawPreflight = rawDeepLinkGenerator.preflight
     if (!isObjectRecord(rawPreflight)) {
-      return legacyRequiresPreflight
-        ? {
-            type: 'reveal-sync-ping',
-            optionKey: 'presentationUrl',
-            timeoutMs: 4000,
-          }
-        : null
+      return null
     }
 
     const type = rawPreflight.type === 'reveal-sync-ping' ? 'reveal-sync-ping' : null
     const optionKey = typeof rawPreflight.optionKey === 'string' ? rawPreflight.optionKey.trim() : ''
     if (!type || !optionKey) {
-      return legacyRequiresPreflight
-        ? {
-            type: 'reveal-sync-ping',
-            optionKey: 'presentationUrl',
-            timeoutMs: 4000,
-          }
-        : null
+      return null
     }
 
     const timeoutMs =
@@ -103,7 +89,6 @@ export function parseDeepLinkGenerator(rawDeepLinkGenerator: unknown): DeepLinkG
     endpoint,
     mode: rawDeepLinkGenerator.mode === 'append-query' ? 'append-query' : 'replace-url',
     expectsSelectedOptions: rawDeepLinkGenerator.expectsSelectedOptions !== false,
-    requiresPreflight: preflight !== null,
     preflight,
   }
 }
