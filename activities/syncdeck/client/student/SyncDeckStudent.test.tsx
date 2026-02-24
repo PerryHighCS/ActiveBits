@@ -6,6 +6,7 @@ import SyncDeckStudent from './SyncDeckStudent.js'
 import { toRevealCommandMessage } from './SyncDeckStudent.js'
 import { toRevealBoundaryCommandMessage } from './SyncDeckStudent.js'
 import { buildStudentRoleCommandMessage } from './SyncDeckStudent.js'
+import { buildStudentWebSocketUrl } from './SyncDeckStudent.js'
 import { shouldSuppressForwardInstructorSync } from './SyncDeckStudent.js'
 import { shouldResetBacktrackOptOutByMaxPosition } from './SyncDeckStudent.js'
 
@@ -19,6 +20,35 @@ void test('SyncDeckStudent renders join guidance copy', () => {
   )
 
   assert.match(html, /Loading SyncDeck session|Waiting for instructor to configure the presentation/i)
+})
+
+void test('buildStudentWebSocketUrl includes student identity query params', () => {
+  const url = buildStudentWebSocketUrl({
+    sessionId: 'session-123',
+    presentationUrl: 'https://slides.example/deck',
+    studentId: 'student-abc',
+    studentName: 'Ada Lovelace',
+    protocol: 'https:',
+    host: 'activebits.example',
+  })
+
+  assert.equal(
+    url,
+    'wss://activebits.example/ws/syncdeck?sessionId=session-123&studentId=student-abc&studentName=Ada+Lovelace',
+  )
+})
+
+void test('buildStudentWebSocketUrl returns null when student id is missing', () => {
+  const url = buildStudentWebSocketUrl({
+    sessionId: 'session-123',
+    presentationUrl: 'https://slides.example/deck',
+    studentId: '',
+    studentName: 'Ada Lovelace',
+    protocol: 'https:',
+    host: 'activebits.example',
+  })
+
+  assert.equal(url, null)
 })
 
 void test('toRevealCommandMessage ignores studentBoundaryChanged messages', () => {
@@ -148,6 +178,62 @@ void test('toRevealCommandMessage maps resumed action to setState unpaused comma
     },
   })
   assert.equal(typeof (result as { ts?: unknown })?.ts, 'number')
+})
+
+void test('toRevealCommandMessage maps chalkboardStroke action to command envelope', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.1.0',
+    action: 'chalkboardStroke',
+    payload: {
+      mode: 1,
+      event: { type: 'draw', x1: 10, y1: 11, x2: 12, y2: 13, board: 0 },
+    },
+  }) as { action?: unknown; payload?: { name?: unknown; payload?: unknown }; ts?: unknown }
+
+  assert.equal(result.action, 'command')
+  assert.equal(result.payload?.name, 'chalkboardStroke')
+  assert.deepEqual(result.payload?.payload, {
+    mode: 1,
+    event: { type: 'draw', x1: 10, y1: 11, x2: 12, y2: 13, board: 0 },
+  })
+  assert.equal(typeof result.ts, 'number')
+})
+
+void test('toRevealCommandMessage maps chalkboardState action to command envelope', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.1.0',
+    action: 'chalkboardState',
+    payload: {
+      storage: '[{"width":960,"height":700,"data":[]}]',
+    },
+  }) as { action?: unknown; payload?: { name?: unknown; payload?: unknown }; ts?: unknown }
+
+  assert.equal(result.action, 'command')
+  assert.equal(result.payload?.name, 'chalkboardState')
+  assert.deepEqual(result.payload?.payload, {
+    storage: '[{"width":960,"height":700,"data":[]}]',
+  })
+  assert.equal(typeof result.ts, 'number')
+})
+
+void test('toRevealCommandMessage maps top-level chalkboard action without reveal-sync type', () => {
+  const result = toRevealCommandMessage({
+    action: 'chalkboardStroke',
+    payload: {
+      mode: 1,
+      event: { type: 'draw', x1: 1, y1: 2, x2: 3, y2: 4, board: 0 },
+    },
+  }) as { type?: unknown; action?: unknown; payload?: { name?: unknown; payload?: unknown } }
+
+  assert.equal(result.type, 'reveal-sync')
+  assert.equal(result.action, 'command')
+  assert.equal(result.payload?.name, 'chalkboardStroke')
+  assert.deepEqual(result.payload?.payload, {
+    mode: 1,
+    event: { type: 'draw', x1: 1, y1: 2, x2: 3, y2: 4, board: 0 },
+  })
 })
 
 void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged to setStudentBoundary command', () => {

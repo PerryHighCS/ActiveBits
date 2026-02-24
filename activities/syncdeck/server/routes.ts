@@ -65,11 +65,17 @@ interface SyncDeckEmbeddedActivity {
   endedAt: number | null
 }
 
+interface SyncDeckChalkboardBuffer {
+  snapshot: string | null
+  delta: Record<string, unknown>[]
+}
+
 interface SyncDeckSessionData extends Record<string, unknown> {
   presentationUrl: string | null
   instructorPasscode: string
   instructorState: SyncDeckInstructorState | null
   lastInstructorPayload: unknown
+  chalkboard: SyncDeckChalkboardBuffer
   students: SyncDeckStudent[]
   embeddedActivities: SyncDeckEmbeddedActivity[]
 }
@@ -95,6 +101,9 @@ const WS_OPEN_READY_STATE = 1
 const SYNCDECK_WS_UPDATE_TYPE = 'syncdeck-state-update'
 const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
+const REVEAL_SYNC_PROTOCOL_VERSION = '1.1.0'
+
+type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -224,6 +233,43 @@ function normalizeEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivity[]
   return activities
 }
 
+function normalizeChalkboardSnapshot(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  return value
+}
+
+function normalizeChalkboardDelta(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const delta: Record<string, unknown>[] = []
+  for (const entry of value) {
+    if (isPlainObject(entry)) {
+      delta.push(entry)
+    }
+  }
+
+  return delta
+}
+
+function normalizeChalkboardBuffer(value: unknown): SyncDeckChalkboardBuffer {
+  if (!isPlainObject(value)) {
+    return {
+      snapshot: null,
+      delta: [],
+    }
+  }
+
+  return {
+    snapshot: normalizeChalkboardSnapshot(value.snapshot),
+    delta: normalizeChalkboardDelta(value.delta),
+  }
+}
+
 function normalizeSessionData(data: unknown): SyncDeckSessionData {
   const source = isPlainObject(data) ? data : {}
 
@@ -235,8 +281,103 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
         : createInstructorPasscode(),
     instructorState: null,
     lastInstructorPayload: source.lastInstructorPayload ?? null,
+    chalkboard: normalizeChalkboardBuffer(source.chalkboard),
     students: normalizeStudents(source.students),
     embeddedActivities: normalizeEmbeddedActivities(source.embeddedActivities),
+  }
+}
+
+function toChalkboardCommandName(value: unknown): ChalkboardCommandName | null {
+  if (value === 'chalkboardStroke' || value === 'chalkboardState' || value === 'clearChalkboard' || value === 'resetChalkboard') {
+    return value
+  }
+
+  return null
+}
+
+function parseChalkboardCommand(payload: unknown): { name: ChalkboardCommandName; payload: Record<string, unknown> } | null {
+  if (!isPlainObject(payload)) {
+    return null
+  }
+
+  const revealAction = toChalkboardCommandName(payload.action)
+  if (revealAction) {
+    return {
+      name: revealAction,
+      payload: isPlainObject(payload.payload) ? payload.payload : {},
+    }
+  }
+
+  if (payload.action === 'command' && isPlainObject(payload.payload)) {
+    const commandPayload = payload.payload
+    const commandName = toChalkboardCommandName(commandPayload.name)
+    if (!commandName) {
+      return null
+    }
+
+    return {
+      name: commandName,
+      payload: isPlainObject(commandPayload.payload) ? commandPayload.payload : {},
+    }
+  }
+
+  const topLevelCommandName = toChalkboardCommandName(payload.name)
+  if (!topLevelCommandName) {
+    return null
+  }
+
+  return {
+    name: topLevelCommandName,
+    payload: isPlainObject(payload.payload) ? payload.payload : {},
+  }
+}
+
+function applyChalkboardBufferUpdate(sessionData: SyncDeckSessionData, payload: unknown): void {
+  const command = parseChalkboardCommand(payload)
+  if (!command) {
+    return
+  }
+
+  if (command.name === 'chalkboardState') {
+    sessionData.chalkboard.snapshot = typeof command.payload.storage === 'string' ? command.payload.storage : null
+    sessionData.chalkboard.delta = []
+    return
+  }
+
+  if (command.name === 'chalkboardStroke') {
+    sessionData.chalkboard.delta.push(command.payload)
+    return
+  }
+
+  if (command.name === 'clearChalkboard' || command.name === 'resetChalkboard') {
+    sessionData.chalkboard.snapshot = null
+    sessionData.chalkboard.delta = []
+  }
+}
+
+function createRevealCommandEnvelope(name: 'chalkboardStroke' | 'chalkboardState', payload: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: 'reveal-sync',
+    version: REVEAL_SYNC_PROTOCOL_VERSION,
+    action: 'command',
+    deckId: null,
+    role: 'instructor',
+    source: 'reveal-iframe-sync',
+    ts: Date.now(),
+    payload: {
+      name,
+      payload,
+    },
+  }
+}
+
+function sendBufferedChalkboardState(socket: ActiveBitsWebSocket, chalkboard: SyncDeckChalkboardBuffer): void {
+  if (chalkboard.snapshot != null) {
+    sendSyncDeckState(socket, createRevealCommandEnvelope('chalkboardState', { storage: chalkboard.snapshot }))
+  }
+
+  for (const strokePayload of chalkboard.delta) {
+    sendSyncDeckState(socket, createRevealCommandEnvelope('chalkboardStroke', strokePayload))
   }
 }
 
@@ -549,6 +690,40 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
   })
 
+  app.post('/api/syncdeck/:sessionId/register-student', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      const response = res as unknown as JsonResponse
+      response.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      const response = res as unknown as JsonResponse
+      response.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const name = normalizeStudentName(readStringField(req.body, 'name'))
+    const studentId = randomBytes(8).toString('hex')
+    const now = Date.now()
+
+    session.data.students.push({
+      studentId,
+      name,
+      joinedAt: now,
+      lastSeenAt: now,
+      lastIndices: null,
+      lastStudentStateAt: null,
+    })
+    await sessions.set(session.id, session)
+    await broadcastStudentsToInstructors(session.id)
+
+    const response = res as unknown as JsonResponse
+    response.json({ studentId, name })
+  })
+
   app.post('/api/syncdeck/:sessionId/configure', async (req, res) => {
     const sessionId = req.params.sessionId
     if (!sessionId) {
@@ -660,8 +835,12 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
 
       if (session.data.lastInstructorPayload != null) {
-        sendSyncDeckState(socket, session.data.lastInstructorPayload)
+        if (!parseChalkboardCommand(session.data.lastInstructorPayload)) {
+          sendSyncDeckState(socket, session.data.lastInstructorPayload)
+        }
       }
+
+      sendBufferedChalkboardState(socket, session.data.chalkboard)
 
       await broadcastStudentsToInstructors(session.id)
     })().catch(() => {
@@ -685,6 +864,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         }
 
         session.data.lastInstructorPayload = message.payload ?? null
+        applyChalkboardBufferUpdate(session.data, message.payload)
         await sessions.set(session.id, session)
 
         for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {

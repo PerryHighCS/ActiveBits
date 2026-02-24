@@ -27,6 +27,8 @@ interface RevealSyncEnvelope {
   payload?: unknown
 }
 
+type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
+
 interface RevealCommandPayload {
   [key: string]: unknown
 }
@@ -102,6 +104,41 @@ function isRevealSyncMessage(value: unknown): value is RevealSyncEnvelope {
   }
 
   return value.type === 'reveal-sync' && typeof value.action === 'string'
+}
+
+function isChalkboardRelayAction(action: unknown): action is ChalkboardRelayAction {
+  return action === 'chalkboardStroke' || action === 'chalkboardState'
+}
+
+function toChalkboardCommandMessage(rawPayload: unknown): RevealCommandMessage | null {
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  const action = message.action
+  const topLevelName = (rawPayload as { name?: unknown }).name
+
+  if (message.type === 'reveal-sync' && action === 'command' && isPlainObject(message.payload)) {
+    const commandPayload = message.payload as { name?: unknown; payload?: unknown }
+    if (isChalkboardRelayAction(commandPayload.name)) {
+      return buildBoundaryCommandEnvelope(message, commandPayload.name, isPlainObject(commandPayload.payload) ? commandPayload.payload : {})
+    }
+  }
+
+  const resolvedAction =
+    (isChalkboardRelayAction(action) ? action : null) ??
+    (isChalkboardRelayAction(topLevelName) ? topLevelName : null)
+
+  if (!resolvedAction) {
+    return null
+  }
+
+  return buildBoundaryCommandEnvelope(
+    message,
+    resolvedAction,
+    isPlainObject(message.payload) ? (message.payload as Record<string, unknown>) : {},
+  )
 }
 
 function normalizeIndices(value: unknown): { h: number; v: number; f: number } | null {
@@ -264,6 +301,11 @@ function computeBoundaryDetails(
 }
 
 export function toRevealCommandMessage(rawPayload: unknown): Record<string, unknown> | RevealCommandMessage | null {
+  const chalkboardCommand = toChalkboardCommandMessage(rawPayload)
+  if (chalkboardCommand != null) {
+    return chalkboardCommand
+  }
+
   if (!isPlainObject(rawPayload)) {
     return null
   }
@@ -440,12 +482,50 @@ function validatePresentationUrl(value: string): boolean {
   }
 }
 
+export function buildStudentWebSocketUrl(params: {
+  sessionId?: string | null
+  presentationUrl?: string | null
+  studentId?: string | null
+  studentName?: string | null
+  protocol?: string | null
+  host?: string | null
+}): string | null {
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : ''
+  const presentationUrl = typeof params.presentationUrl === 'string' ? params.presentationUrl.trim() : ''
+  const studentId = typeof params.studentId === 'string' ? params.studentId.trim() : ''
+  const studentName = typeof params.studentName === 'string' ? params.studentName.trim() : ''
+  const protocol = typeof params.protocol === 'string' ? params.protocol : ''
+  const host = typeof params.host === 'string' ? params.host.trim() : ''
+
+  if (!sessionId || !presentationUrl || !studentId || !host) {
+    return null
+  }
+
+  const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:'
+  const queryParams = new URLSearchParams({
+    sessionId,
+    studentId,
+    studentName: studentName || 'Student',
+  })
+
+  return `${wsProtocol}//${host}/ws/syncdeck?${queryParams.toString()}`
+}
+
 function getStoredStudentName(sessionId: string): string {
   if (typeof window === 'undefined') {
     return ''
   }
 
   const stored = window.sessionStorage.getItem(`syncdeck_student_name_${sessionId}`)
+  return typeof stored === 'string' ? stored.trim() : ''
+}
+
+function getStoredStudentId(sessionId: string): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  const stored = window.sessionStorage.getItem(`syncdeck_student_id_${sessionId}`)
   return typeof stored === 'string' ? stored.trim() : ''
 }
 
@@ -505,6 +585,7 @@ const SyncDeckStudent: FC = () => {
   const [isBacktrackOptOut, setIsBacktrackOptOut] = useState(false)
   const [studentNameInput, setStudentNameInput] = useState('')
   const [registeredStudentName, setRegisteredStudentName] = useState('')
+  const [registeredStudentId, setRegisteredStudentId] = useState('')
   const [isRegisteringStudent, setIsRegisteringStudent] = useState(false)
   const [joinError, setJoinError] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
@@ -523,7 +604,13 @@ const SyncDeckStudent: FC = () => {
     }
 
     const storedName = getStoredStudentName(sessionId)
+    const storedStudentId = getStoredStudentId(sessionId)
     setStudentNameInput(storedName)
+
+    if (storedName.length > 0 && storedStudentId.length > 0) {
+      setRegisteredStudentName(storedName)
+      setRegisteredStudentId(storedStudentId)
+    }
   }, [sessionId])
 
   const presentationOrigin = useMemo(() => {
@@ -695,16 +782,19 @@ const SyncDeckStudent: FC = () => {
   }, [replayLatestInstructorSyncToIframe, setBacktrackOptOut])
 
   const buildStudentWsUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined' || !sessionId || !presentationUrl) {
+    if (typeof window === 'undefined') {
       return null
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams({
+    return buildStudentWebSocketUrl({
       sessionId,
+      presentationUrl,
+      studentId: registeredStudentId,
+      studentName: registeredStudentName,
+      protocol: window.location.protocol,
+      host: window.location.host,
     })
-    return `${protocol}//${window.location.host}/ws/syncdeck?${params.toString()}`
-  }, [sessionId, presentationUrl])
+  }, [sessionId, presentationUrl, registeredStudentId, registeredStudentName])
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs, socketRef: studentSocketRef } =
     useResilientWebSocket({
@@ -826,7 +916,7 @@ const SyncDeckStudent: FC = () => {
     return () => {
       disconnectStudentWs()
     }
-  }, [sessionId, presentationUrl, registeredStudentName, connectStudentWs, disconnectStudentWs])
+  }, [sessionId, presentationUrl, registeredStudentName, registeredStudentId, connectStudentWs, disconnectStudentWs])
 
   const handleNameSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -857,11 +947,25 @@ const SyncDeckStudent: FC = () => {
         return
       }
 
-      if (typeof window !== 'undefined') {
-        window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, normalized)
+      const payload = (await response.json()) as { studentId?: unknown; name?: unknown }
+      const nextStudentId = typeof payload.studentId === 'string' ? payload.studentId.trim() : ''
+      const nextStudentName =
+        typeof payload.name === 'string' && payload.name.trim().length > 0
+          ? payload.name.trim().slice(0, 80)
+          : normalized
+
+      if (nextStudentId.length === 0) {
+        setJoinError('Unable to join this presentation right now. Please try again.')
+        return
       }
 
-      setRegisteredStudentName(normalized)
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, nextStudentName)
+        window.sessionStorage.setItem(`syncdeck_student_id_${sessionId}`, nextStudentId)
+      }
+
+      setRegisteredStudentName(nextStudentName)
+      setRegisteredStudentId(nextStudentId)
       setJoinError(null)
     } catch {
       setJoinError('Unable to join this presentation right now. Please try again.')
