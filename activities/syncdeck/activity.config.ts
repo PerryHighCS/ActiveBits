@@ -28,6 +28,9 @@ const syncdeckConfig: ActivityConfig = {
       },
     ],
   },
+  manageDashboard: {
+    customPersistentLinkBuilder: true,
+  },
   manageLayout: {
     expandShell: true,
   },

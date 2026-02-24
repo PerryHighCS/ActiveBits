@@ -229,6 +229,20 @@ function parseManageLayout(raw: unknown, context: string): ActivityConfig['manag
   }
 }
 
+function parseManageDashboard(raw: unknown, context: string): ActivityConfig['manageDashboard'] {
+  if (raw == null) {
+    return undefined
+  }
+  if (!isRecord(raw)) {
+    throw new Error(`${context}: "manageDashboard" must be an object when provided`)
+  }
+
+  const customPersistentLinkBuilder = readOptionalBoolean(raw, 'customPersistentLinkBuilder', `${context}.manageDashboard`)
+  return {
+    ...(customPersistentLinkBuilder !== undefined ? { customPersistentLinkBuilder } : {}),
+  }
+}
+
 export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.config'): ActivityConfig {
   if (!isRecord(rawConfig)) {
     throw new Error(`${sourceLabel}: default export must be an object`)
@@ -257,6 +271,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const deepLinkOptions = parseDeepLinkOptions(rawConfig.deepLinkOptions, context)
   const deepLinkGenerator = parseDeepLinkGenerator(rawConfig.deepLinkGenerator, context)
   const createSessionBootstrap = parseCreateSessionBootstrap(rawConfig.createSessionBootstrap, context)
+  const manageDashboard = parseManageDashboard(rawConfig.manageDashboard, context)
   const manageLayout = parseManageLayout(rawConfig.manageLayout, context)
 
   if (title !== undefined) parsed.title = title
@@ -267,6 +282,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   if (deepLinkOptions !== undefined) parsed.deepLinkOptions = deepLinkOptions
   if (deepLinkGenerator !== undefined) parsed.deepLinkGenerator = deepLinkGenerator
   if (createSessionBootstrap !== undefined) parsed.createSessionBootstrap = createSessionBootstrap
+  if (manageDashboard !== undefined) parsed.manageDashboard = manageDashboard
   if (manageLayout !== undefined) parsed.manageLayout = manageLayout
 
   return parsed

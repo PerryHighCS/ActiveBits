@@ -186,12 +186,20 @@ export const activities: ActivityRegistryEntry[] = preferredConfigEntries
       activityId,
       'footerContent',
     )
+    const PersistentLinkBuilderComponent = createLazyComponent(
+      clientLoader,
+      (resolved) => resolved.PersistentLinkBuilderComponent as ComponentType<unknown> | null | undefined,
+      undefined,
+      activityId,
+      'PersistentLinkBuilderComponent',
+    )
 
     return {
       ...cfg,
       ManagerComponent,
       StudentComponent,
       FooterComponent,
+      PersistentLinkBuilderComponent,
     }
   })
   .filter((activity): activity is ActivityRegistryEntry => activity !== null)
