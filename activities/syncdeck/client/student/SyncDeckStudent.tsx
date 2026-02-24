@@ -263,7 +263,7 @@ function computeBoundaryDetails(
   }
 }
 
-export function toRevealCommandMessage(rawPayload: unknown): Record<string, unknown> | null {
+export function toRevealCommandMessage(rawPayload: unknown): Record<string, unknown> | RevealCommandMessage | null {
   if (!isPlainObject(rawPayload)) {
     return null
   }
