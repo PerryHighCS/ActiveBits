@@ -583,7 +583,7 @@ export function toChalkboardRelayCommand(rawPayload: unknown): Record<string, un
 
   return {
     type: 'reveal-sync',
-    version: typeof envelope.version === 'string' ? envelope.version : '1.0.0',
+    version: typeof envelope?.version === 'string' ? envelope.version : '1.0.0',
     action: 'command',
     source: 'activebits-syncdeck-host',
     role: 'instructor',
@@ -1309,7 +1309,7 @@ const SyncDeckManager: FC = () => {
     relayInstructorPayload(buildDrawingToolModePayload(nextDrawingToolMode))
 
     setIsChalkboardOpen(nextDrawingToolMode === 'chalkboard')
-    setIsPenOverlayOpen(nextDrawingToolMode === 'pen')
+    setIsPenOverlayOpen(false)
     if (sessionId && typeof window !== 'undefined') {
       const nextValue = nextDrawingToolMode === 'chalkboard'
       window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), nextValue ? '1' : '0')
@@ -1358,9 +1358,9 @@ const SyncDeckManager: FC = () => {
     relayInstructorPayload(buildDrawingToolModePayload(nextDrawingToolMode))
 
     setIsPenOverlayOpen(nextDrawingToolMode === 'pen')
-    setIsChalkboardOpen(nextDrawingToolMode === 'chalkboard')
+    setIsChalkboardOpen(false)
     if (sessionId && typeof window !== 'undefined') {
-      const nextValue = nextDrawingToolMode === 'chalkboard'
+      const nextValue = false
       window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), nextValue ? '1' : '0')
     }
     setStartError(null)
