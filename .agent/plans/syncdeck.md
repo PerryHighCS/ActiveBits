@@ -6,6 +6,8 @@ A new "SyncDeck" activity where one or more instructors drive an HTML presentati
 
 Protocol reference: [`.agent/plans/reveal-iframe-sync-message-schema.md`](./reveal-iframe-sync-message-schema.md)
 
+Checklist tracker: [`.agent/plans/syncdeck-checklist.md`](./syncdeck-checklist.md). Update it as tasks are completed.
+
 ---
 
 ## Architecture Overview
