@@ -31,14 +31,6 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-02-23
-- Area: tooling
-- Discovery: Client Tailwind stack can be upgraded from `4.2.0` to `4.2.1` (`tailwindcss`, `@tailwindcss/vite`) without regressions in this repo.
-- Why it matters: Confirms a low-risk dependency refresh path for frontend styling/build tooling and reduces uncertainty for future version bumps in the same range.
-- Evidence: `client/package.json`; `package-lock.json`; `npm --workspace client outdated tailwindcss @tailwindcss/vite`; `npm --workspace client run typecheck`; `npm --workspace client run lint`; `npm --workspace client test`; `npm --workspace client run build`; `npm test`
-- Follow-up action: Keep patch-level Tailwind updates in regular dependency maintenance cadence; no immediate remediation needed.
-- Owner: Codex
-
-- Date: 2026-02-23
 - Area: client
 - Discovery: `deepLinkOptions` now supports an explicit per-field validator contract (`validator: 'url'`) that is parsed by dashboard utilities and enforced in ManageDashboard modals with inline field errors and disabled actions.
 - Why it matters: Activity configs can require valid URL inputs before link creation/copy/open actions, reducing malformed deep-link generation and improving teacher feedback in the modal UX.
