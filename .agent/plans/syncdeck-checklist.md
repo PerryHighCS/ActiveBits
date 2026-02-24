@@ -18,6 +18,8 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
     - [ ] Need some kind of picker for the activities that can give codes to presentation
 
 - [ ] Chalkboard
+    - [ ] Combine chalkboard button and pen button into one unified control
+    - [ ] Add a blank-screen tool that is available when chalkboard is active
     - [ ] See if current plugin is extendable with tool switching back and forth
     - [ ] Create new version? With color picker, tool swap, erase all
     - [ ] Transmit drawings to students

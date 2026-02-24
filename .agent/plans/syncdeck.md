@@ -57,6 +57,8 @@ Future planning is currently organized into three tracks:
 - Move from basic controls to richer collaborative chalkboard behavior.
 
 ### Planned Work
+- Combine chalkboard + pen overlay controls into a single unified chalkboard tool button.
+- When chalkboard mode is active, provide a dedicated screen-blank tool.
 - Evaluate whether current plugin is extensible for tool switching.
 - If needed, create a new version with:
   - Color picker
