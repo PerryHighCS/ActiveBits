@@ -67,6 +67,13 @@ ActiveBits/
 
 ## Activity Registration System
 
+### Activity Containment Boundary
+
+- Activities are self-contained by default. Activity-specific logic (validation rules, protocol handling, UI flow, and feature behavior) belongs in `activities/<id>/...`.
+- Shared layers (`client/src/components/common`, `client/src/hooks`, shared server routes/core, etc.) should expose generic contracts only and remain activity-agnostic.
+- Shared modules must not import activity-specific implementation files.
+- If a shared capability is needed, add a generic interface/config contract in shared code and let each activity declare or implement its own behavior through that contract.
+
 ### Activity Configuration
 
 Each activity owns a config at `/activities/<id>/activity.config.ts` that declares metadata plus pointers to the client and server entry files. The client auto-discovers these configs (and loads the client entries), and the server auto-discovers them to load route handlers. Adding a new activity only requires dropping a new folder with a config plus the corresponding client/server entry files—no central registry to update.

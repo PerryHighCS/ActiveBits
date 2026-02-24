@@ -365,9 +365,10 @@ No central registry updates are needed; activities are auto-discovered from `act
 2. **Test incrementally** - Build and test as you add each component
 3. **Follow naming conventions** - Use kebab-case for folder names, PascalCase for components
 4. **Keep activities self-contained** - All activity code should live in its folder
-5. **Reuse shared UI** - Import from `@src/components/ui/` when possible
-6. **Use SessionHeader** - All manager components should use the unified SessionHeader
-7. **Handle session termination** - Student components should use useSessionEndedHandler hook
+5. **Do not leak activity logic into shared modules** - If behavior is activity-specific, keep it in `activities/<id>/...` and wire it through generic shared contracts
+6. **Reuse shared UI** - Import from `@src/components/ui/` when possible
+7. **Use SessionHeader** - All manager components should use the unified SessionHeader
+8. **Handle session termination** - Student components should use useSessionEndedHandler hook
 
 ## Solo Mode Activities
 
