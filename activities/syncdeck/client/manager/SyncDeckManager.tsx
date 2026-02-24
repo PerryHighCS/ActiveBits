@@ -5,7 +5,6 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 
 const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
-const isDevMode = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
 const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
@@ -50,6 +49,7 @@ interface RevealSyncEnvelope {
 
 interface RevealSyncStatePayload {
   overview?: unknown
+  paused?: unknown
   storyboardDisplayed?: unknown
   open?: unknown
   isOpen?: unknown
@@ -188,6 +188,106 @@ function extractStoryboardDisplayed(data: unknown): boolean | null {
   return parseValue(data)
 }
 
+function extractPausedState(data: unknown): boolean | null {
+  const fromPayload = (payload: unknown): boolean | null => {
+    if (payload == null || typeof payload !== 'object') {
+      return null
+    }
+
+    const statePayload = payload as RevealSyncStatePayload
+    if (typeof statePayload.paused === 'boolean') {
+      return statePayload.paused
+    }
+
+    if (statePayload.revealState != null && typeof statePayload.revealState === 'object') {
+      const revealState = statePayload.revealState as { paused?: unknown }
+      if (typeof revealState.paused === 'boolean') {
+        return revealState.paused
+      }
+    }
+
+    return null
+  }
+
+  const parseValue = (value: unknown): boolean | null => {
+    if (value == null || typeof value !== 'object') {
+      return null
+    }
+
+    const envelope = value as RevealSyncEnvelope
+    if (envelope.type !== 'reveal-sync') {
+      return null
+    }
+
+    if (envelope.action === 'paused') {
+      return true
+    }
+    if (envelope.action === 'resumed') {
+      return false
+    }
+
+    if (envelope.action === 'state') {
+      return fromPayload(envelope.payload)
+    }
+
+    return null
+  }
+
+  if (typeof data === 'string') {
+    try {
+      return parseValue(JSON.parse(data) as unknown)
+    } catch {
+      return null
+    }
+  }
+
+  return parseValue(data)
+}
+
+function includePausedInStateEnvelope(data: unknown, fallbackPaused: boolean | null = null): unknown {
+  if (
+    data == null ||
+    typeof data !== 'object' ||
+    !('type' in data) ||
+    (data as { type?: unknown }).type !== 'reveal-sync' ||
+    !('action' in data) ||
+    (data as { action?: unknown }).action !== 'state' ||
+    !('payload' in data) ||
+    (data as { payload?: unknown }).payload == null ||
+    typeof (data as { payload?: unknown }).payload !== 'object'
+  ) {
+    return data
+  }
+
+  const envelope = data as {
+    payload: {
+      revealState?: unknown
+      [key: string]: unknown
+    }
+    [key: string]: unknown
+  }
+
+  const pausedFromPayload = extractPausedState(data)
+  const resolvedPaused = typeof fallbackPaused === 'boolean' ? fallbackPaused : pausedFromPayload
+  if (typeof resolvedPaused !== 'boolean') {
+    return data
+  }
+
+  const revealState =
+    envelope.payload.revealState != null && typeof envelope.payload.revealState === 'object'
+      ? ({ ...(envelope.payload.revealState as Record<string, unknown>), paused: resolvedPaused } as Record<string, unknown>)
+      : ({ paused: resolvedPaused } as Record<string, unknown>)
+
+  return {
+    ...envelope,
+    payload: {
+      ...envelope.payload,
+      paused: resolvedPaused,
+      revealState,
+    },
+  }
+}
+
 interface SyncDeckStudentPresence {
   studentId: string
   name: string
@@ -205,39 +305,6 @@ function validatePresentationUrl(value: string): boolean {
   } catch {
     return false
   }
-}
-
-function formatDebugMessagePayload(data: unknown): string {
-  const truncate = (value: string): string => (value.length > 220 ? `${value.slice(0, 220)}…` : value)
-
-  const serialize = (value: unknown): string => {
-    if (typeof value === 'string') {
-      return truncate(value)
-    }
-    try {
-      return truncate(JSON.stringify(value))
-    } catch {
-      return truncate(String(value))
-    }
-  }
-
-  const extractPayload = (value: unknown): unknown => {
-    if (value == null || typeof value !== 'object' || !('payload' in value)) {
-      return value
-    }
-    return (value as { payload: unknown }).payload
-  }
-
-  if (typeof data === 'string') {
-    try {
-      const parsed = JSON.parse(data) as unknown
-      return serialize(extractPayload(parsed))
-    } catch {
-      return serialize(data)
-    }
-  }
-
-  return serialize(extractPayload(data))
 }
 
 function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {
@@ -353,11 +420,13 @@ function buildRestoreCommandFromPayload(payload: unknown): unknown {
 
   const revealState = isPlainObject(statePayload.revealState) ? statePayload.revealState : null
   const indices = isPlainObject(statePayload.indices) ? statePayload.indices : null
+  const pausedState = extractPausedState(payload)
   const mergedState = {
     ...(revealState ?? {}),
     indexh: typeof indices?.h === 'number' ? indices.h : (revealState as { indexh?: unknown } | null)?.indexh ?? 0,
     indexv: typeof indices?.v === 'number' ? indices.v : (revealState as { indexv?: unknown } | null)?.indexv ?? 0,
     indexf: typeof indices?.f === 'number' ? indices.f : (revealState as { indexf?: unknown } | null)?.indexf ?? 0,
+    ...(typeof pausedState === 'boolean' ? { paused: pausedState } : {}),
   }
 
   return {
@@ -457,19 +526,19 @@ const SyncDeckManager: FC = () => {
     return params.get('presentationUrl') ?? ''
   })
   const [isStartingSession, setIsStartingSession] = useState(false)
-  const [startError, setStartError] = useState<string | null>(null)
-  const [startSuccess, setStartSuccess] = useState<string | null>(null)
+  const [, setStartError] = useState<string | null>(null)
+  const [, setStartSuccess] = useState<string | null>(null)
   const [isConfigurePanelOpen, setIsConfigurePanelOpen] = useState(true)
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
-  const [debugInstructorMessage, setDebugInstructorMessage] = useState<string | null>(null)
   const [instructorConnectionState, setInstructorConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [instructorConnectionTooltip, setInstructorConnectionTooltip] = useState('Not connected to sync server')
   const [connectedStudentCount, setConnectedStudentCount] = useState(0)
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
+  const [isPresentationPaused, setIsPresentationPaused] = useState(false)
   const [isChalkboardOpen, setIsChalkboardOpen] = useState(false)
   const [isPenOverlayOpen, setIsPenOverlayOpen] = useState(false)
   const [isPreflightChecking, setIsPreflightChecking] = useState(false)
@@ -543,6 +612,10 @@ const SyncDeckManager: FC = () => {
             if (currentIndices) {
               lastInstructorIndicesRef.current = currentIndices
               lastInstructorStatePayloadRef.current = statePayload
+            }
+            const paused = extractPausedState(statePayload)
+            if (typeof paused === 'boolean') {
+              setIsPresentationPaused(paused)
             }
 
             const targetWindow = presentationIframeRef.current?.contentWindow
@@ -768,6 +841,35 @@ const SyncDeckManager: FC = () => {
     relayInstructorPayload(chalkboardCommand)
 
     setIsChalkboardOpen((current) => !current)
+    setStartError(null)
+  }
+
+  const togglePresentationPause = (): void => {
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow || !presentationOrigin) {
+      setStartError('Presentation is not ready for pause controls.')
+      setStartSuccess(null)
+      return
+    }
+
+    const pauseCommand = buildRevealCommandMessage('togglePause', {})
+
+    targetWindow.postMessage(
+      pauseCommand,
+      presentationOrigin,
+    )
+    relayInstructorPayload(pauseCommand)
+
+    const nextPaused = !isPresentationPaused
+    setIsPresentationPaused(nextPaused)
+
+    if (lastInstructorStatePayloadRef.current != null) {
+      const pausedStatePayload = includePausedInStateEnvelope(lastInstructorStatePayloadRef.current, nextPaused)
+      lastInstructorStatePayloadRef.current = pausedStatePayload
+      lastInstructorPayloadRef.current = pausedStatePayload
+      relayInstructorPayload(pausedStatePayload)
+    }
+
     setStartError(null)
   }
 
@@ -1043,9 +1145,9 @@ const SyncDeckManager: FC = () => {
         setIsStoryboardOpen(storyboardDisplayed)
       }
 
-      if (isDevMode) {
-        const payload = formatDebugMessagePayload(event.data)
-        setDebugInstructorMessage(payload)
+      const pausedState = extractPausedState(event.data)
+      if (typeof pausedState === 'boolean') {
+        setIsPresentationPaused(pausedState)
       }
 
       const initialEnvelope = parseRevealSyncEnvelope(event.data)
@@ -1093,9 +1195,6 @@ const SyncDeckManager: FC = () => {
             suppressOutboundStateUntilRestoreRef.current = false
           }
 
-          if (isDevMode) {
-            setDebugInstructorMessage('Holding outbound state until restored position is applied')
-          }
           return
         }
 
@@ -1114,9 +1213,6 @@ const SyncDeckManager: FC = () => {
           envelope.action === 'state' &&
           shouldSuppressInstructorStateBroadcast(lastInstructorIndicesRef.current, explicitBoundaryRef.current)
         ) {
-          if (isDevMode) {
-            setDebugInstructorMessage('State update held until instructor passes explicit boundary')
-          }
           return
         }
 
@@ -1150,7 +1246,8 @@ const SyncDeckManager: FC = () => {
           event.data,
           lastInstructorIndicesRef.current,
         )
-        const sanitizedPayload = stripOverviewFromStateEnvelope(payloadWithInstructorIndices)
+        const payloadWithPauseState = includePausedInStateEnvelope(payloadWithInstructorIndices, pausedState)
+        const sanitizedPayload = stripOverviewFromStateEnvelope(payloadWithPauseState)
         lastInstructorPayloadRef.current = sanitizedPayload
         if (envelope?.type === 'reveal-sync' && envelope.action === 'state') {
           const sanitizedIndices = extractIndicesFromRevealPayload(sanitizedPayload)
@@ -1158,6 +1255,23 @@ const SyncDeckManager: FC = () => {
             lastInstructorStatePayloadRef.current = sanitizedPayload
           }
         }
+
+        if (
+          envelope?.type === 'reveal-sync' &&
+          (envelope.action === 'paused' || envelope.action === 'resumed') &&
+          lastInstructorStatePayloadRef.current != null
+        ) {
+          const pausedStatePayload = includePausedInStateEnvelope(lastInstructorStatePayloadRef.current, envelope.action === 'paused')
+          lastInstructorStatePayloadRef.current = pausedStatePayload
+          lastInstructorPayloadRef.current = pausedStatePayload
+          socket.send(
+            JSON.stringify({
+              type: 'syncdeck-state-update',
+              payload: pausedStatePayload,
+            }),
+          )
+        }
+
         socket.send(
           JSON.stringify({
             type: 'syncdeck-state-update',
@@ -1183,22 +1297,6 @@ const SyncDeckManager: FC = () => {
       </div>
     )
   }
-
-  const statusClassName = startError
-    ? 'text-red-600'
-    : startSuccess
-      ? 'text-green-700'
-      : !isPasscodeReady
-        ? 'text-gray-600'
-        : 'text-blue-700'
-
-  const baseStatusMessage =
-    startError || startSuccess || (!isPasscodeReady ? 'Loading instructor credentials…' : debugInstructorMessage)
-
-  const mergedStatusMessage =
-    !startError && isDevMode && debugInstructorMessage && baseStatusMessage !== debugInstructorMessage
-      ? `${baseStatusMessage} • ${debugInstructorMessage}`
-      : baseStatusMessage
 
   const normalizedPresentationUrl = presentationUrl.trim()
   const showStartAnyway =
@@ -1240,6 +1338,20 @@ const SyncDeckManager: FC = () => {
             </button>
             <button
               type="button"
+              onClick={togglePresentationPause}
+              className={`ml-2 px-2 py-1 rounded border text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed ${
+                isPresentationPaused
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              title={isPresentationPaused ? 'Resume presentation' : 'Pause presentation'}
+              aria-label={isPresentationPaused ? 'Resume presentation' : 'Pause presentation'}
+              disabled={isConfigurePanelOpen}
+            >
+              ⬛
+            </button>
+            <button
+              type="button"
               onClick={toggleChalkboard}
               className={`ml-2 px-2 py-1 rounded border text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed ${
                 isChalkboardOpen
@@ -1250,7 +1362,7 @@ const SyncDeckManager: FC = () => {
               aria-label="Toggle chalkboard screen"
               disabled={isConfigurePanelOpen}
             >
-              ⬛
+              🧑‍🏫
             </button>
             <button
               type="button"
@@ -1267,10 +1379,6 @@ const SyncDeckManager: FC = () => {
               ✏️
             </button>
           </div>
-
-          {(startError || startSuccess || !isPasscodeReady || (isDevMode && debugInstructorMessage)) && (
-            <p className={`text-sm ${statusClassName} flex-1 min-w-0 truncate`}>{mergedStatusMessage}</p>
-          )}
 
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2">

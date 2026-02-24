@@ -67,6 +67,89 @@ void test('toRevealCommandMessage merges indices into revealState to preserve fr
   })
 })
 
+void test('toRevealCommandMessage preserves paused state from payload', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    payload: {
+      paused: true,
+      revealState: { indexh: 1, indexv: 0 },
+      indices: { h: 1, v: 0, f: 2 },
+    },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'setState')
+  assert.deepEqual((result?.payload as { payload?: { state?: unknown } })?.payload?.state, {
+    indexh: 1,
+    indexv: 0,
+    indexf: 2,
+    paused: true,
+  })
+})
+
+void test('toRevealCommandMessage maps paused action to setState paused command', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'paused',
+    deckId: 'deck-123',
+    role: 'instructor',
+    source: 'reveal-iframe-sync',
+    payload: {},
+  })
+
+  assert.deepEqual(result, {
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'command',
+    deckId: 'deck-123',
+    role: 'instructor',
+    source: 'reveal-iframe-sync',
+    ts: (result as { ts?: unknown })?.ts,
+    payload: {
+      name: 'setState',
+      payload: {
+        state: {
+          paused: true,
+        },
+      },
+    },
+  })
+  assert.equal(typeof (result as { ts?: unknown })?.ts, 'number')
+})
+
+void test('toRevealCommandMessage maps resumed action to setState unpaused command', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'resumed',
+    deckId: 'deck-123',
+    role: 'instructor',
+    source: 'reveal-iframe-sync',
+    payload: {},
+  })
+
+  assert.deepEqual(result, {
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'command',
+    deckId: 'deck-123',
+    role: 'instructor',
+    source: 'reveal-iframe-sync',
+    ts: (result as { ts?: unknown })?.ts,
+    payload: {
+      name: 'setState',
+      payload: {
+        state: {
+          paused: false,
+        },
+      },
+    },
+  })
+  assert.equal(typeof (result as { ts?: unknown })?.ts, 'number')
+})
+
 void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged to setStudentBoundary command', () => {
   const result = toRevealBoundaryCommandMessage({
     type: 'reveal-sync',

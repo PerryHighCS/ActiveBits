@@ -277,6 +277,22 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
     return rawPayload
   }
 
+  if (message.action === 'paused') {
+    return buildBoundaryCommandEnvelope(message, 'setState', {
+      state: {
+        paused: true,
+      },
+    })
+  }
+
+  if (message.action === 'resumed') {
+    return buildBoundaryCommandEnvelope(message, 'setState', {
+      state: {
+        paused: false,
+      },
+    })
+  }
+
   if (message.action !== 'state' || !isPlainObject(message.payload)) {
     return null
   }
@@ -284,15 +300,23 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
   const statePayload = message.payload as {
     revealState?: unknown
     indices?: { h?: unknown; v?: unknown; f?: unknown }
+    paused?: unknown
   }
 
   const revealState = isPlainObject(statePayload.revealState) ? statePayload.revealState : null
   const indices = isPlainObject(statePayload.indices) ? statePayload.indices : null
+  const pausedFromPayload = typeof statePayload.paused === 'boolean' ? statePayload.paused : null
+  const pausedFromRevealState =
+    typeof (revealState as { paused?: unknown } | null)?.paused === 'boolean'
+      ? ((revealState as { paused?: unknown }).paused as boolean)
+      : null
+  const pausedState = pausedFromPayload ?? pausedFromRevealState
   const mergedState = {
     ...(revealState ?? {}),
     indexh: typeof indices?.h === 'number' ? indices.h : (revealState as { indexh?: unknown } | null)?.indexh ?? 0,
     indexv: typeof indices?.v === 'number' ? indices.v : (revealState as { indexv?: unknown } | null)?.indexv ?? 0,
     indexf: typeof indices?.f === 'number' ? indices.f : (revealState as { indexf?: unknown } | null)?.indexf ?? 0,
+    ...(typeof pausedState === 'boolean' ? { paused: pausedState } : {}),
   }
 
   return {
