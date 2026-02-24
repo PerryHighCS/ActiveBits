@@ -100,6 +100,7 @@ void test('parseDeepLinkGenerator validates and normalizes generator metadata', 
     mode: 'replace-url',
     expectsSelectedOptions: true,
     requiresPreflight: false,
+    preflight: null,
   })
 
   assert.deepEqual(parseDeepLinkGenerator({ endpoint: '/api/custom', mode: 'append-query', expectsSelectedOptions: false }), {
@@ -107,6 +108,7 @@ void test('parseDeepLinkGenerator validates and normalizes generator metadata', 
     mode: 'append-query',
     expectsSelectedOptions: false,
     requiresPreflight: false,
+    preflight: null,
   })
 
   assert.deepEqual(parseDeepLinkGenerator({ endpoint: '/api/syncdeck/generate-url', requiresPreflight: true }), {
@@ -114,7 +116,75 @@ void test('parseDeepLinkGenerator validates and normalizes generator metadata', 
     mode: 'replace-url',
     expectsSelectedOptions: true,
     requiresPreflight: true,
+    preflight: {
+      type: 'reveal-sync-ping',
+      optionKey: 'presentationUrl',
+      timeoutMs: 4000,
+    },
   })
+
+  assert.deepEqual(
+    parseDeepLinkGenerator({
+      endpoint: '/api/syncdeck/generate-url',
+      preflight: {
+        type: 'reveal-sync-ping',
+        optionKey: 'presentationUrl',
+        timeoutMs: 5000,
+      },
+    }),
+    {
+      endpoint: '/api/syncdeck/generate-url',
+      mode: 'replace-url',
+      expectsSelectedOptions: true,
+      requiresPreflight: true,
+      preflight: {
+        type: 'reveal-sync-ping',
+        optionKey: 'presentationUrl',
+        timeoutMs: 5000,
+      },
+    },
+  )
+
+  assert.deepEqual(
+    parseDeepLinkGenerator({
+      endpoint: '/api/syncdeck/generate-url',
+      preflight: {
+        type: 'reveal-sync-ping',
+        optionKey: '',
+      },
+    }),
+    {
+      endpoint: '/api/syncdeck/generate-url',
+      mode: 'replace-url',
+      expectsSelectedOptions: true,
+      requiresPreflight: false,
+      preflight: null,
+    },
+  )
+})
+
+void test('parseDeepLinkGenerator favors explicit preflight config over legacy requiresPreflight', () => {
+  assert.deepEqual(
+    parseDeepLinkGenerator({
+      endpoint: '/api/syncdeck/generate-url',
+      requiresPreflight: true,
+      preflight: {
+        type: 'reveal-sync-ping',
+        optionKey: 'deckUrl',
+      },
+    }),
+    {
+      endpoint: '/api/syncdeck/generate-url',
+      mode: 'replace-url',
+      expectsSelectedOptions: true,
+      requiresPreflight: true,
+      preflight: {
+        type: 'reveal-sync-ping',
+        optionKey: 'deckUrl',
+        timeoutMs: 4000,
+      },
+    },
+  )
 })
 
 void test('buildPersistentLinkUrl appends query only for legacy or append-query mode', () => {
@@ -128,7 +198,13 @@ void test('buildPersistentLinkUrl appends query only for legacy or append-query 
       'https://bits.example',
       '/activity/syncdeck/hash2?presentationUrl=https%3A%2F%2Fslides.example&urlHash=abcd',
       { presentationUrl: 'https://tamper.example' },
-      { endpoint: '/api/syncdeck/generate-url', mode: 'replace-url', expectsSelectedOptions: true, requiresPreflight: false },
+      {
+        endpoint: '/api/syncdeck/generate-url',
+        mode: 'replace-url',
+        expectsSelectedOptions: true,
+        requiresPreflight: false,
+        preflight: null,
+      },
     ),
     'https://bits.example/activity/syncdeck/hash2?presentationUrl=https%3A%2F%2Fslides.example&urlHash=abcd',
   )

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildPersistentAuthenticateApiUrl,
   buildPersistentTeacherCodeApiUrl,
   buildPersistentSessionWsUrl,
   getWaiterMessage,
@@ -57,6 +58,10 @@ void test('buildPersistentTeacherCodeApiUrl encodes hash path segment and query 
     apiUrl,
     '/api/persistent-session/abc%2F123%3Fx%20y/teacher-code?activityName=gallery+walk%2Fqa%26v2',
   )
+})
+
+void test('buildPersistentAuthenticateApiUrl returns static endpoint path', () => {
+  assert.equal(buildPersistentAuthenticateApiUrl(), '/api/persistent-session/authenticate')
 })
 
 void test('parseWaitingRoomMessage parses valid JSON and returns null for malformed payloads', () => {

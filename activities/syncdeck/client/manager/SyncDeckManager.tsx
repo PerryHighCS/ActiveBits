@@ -886,7 +886,9 @@ const SyncDeckManager: FC = () => {
 
     const canBypassPreflight = allowUnverifiedStartForUrl === normalizedUrl
 
-    if (preflightValidatedUrl !== normalizedUrl && !canBypassPreflight) {
+    const shouldRunPreflight = !urlHash
+
+    if (shouldRunPreflight && preflightValidatedUrl !== normalizedUrl && !canBypassPreflight) {
       setIsPreflightChecking(true)
       const preflightResult = await runSyncDeckPresentationPreflight(normalizedUrl)
       setIsPreflightChecking(false)

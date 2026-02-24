@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { activities } from '@src/activities'
-import { runSyncDeckPresentationPreflight } from '@activities/syncdeck/client/shared/presentationPreflight.js'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
 import { useClipboard } from '@src/hooks/useClipboard'
 import {
@@ -14,6 +13,7 @@ import {
   normalizeSelectedOptions,
   parseDeepLinkGenerator,
   parseDeepLinkOptions,
+  runDeepLinkPreflight,
   validateDeepLinkSelection,
   type DeepLinkSelection,
 } from './manageDashboardUtils'
@@ -223,8 +223,27 @@ export default function ManageDashboard() {
   }
 
   useEffect(() => {
-    const normalizedUrl = typeof persistentOptions.presentationUrl === 'string' ? persistentOptions.presentationUrl.trim() : ''
-    if (!normalizedUrl || !preflightValidatedUrl || normalizedUrl === preflightValidatedUrl) {
+    const selectedGenerator = parseDeepLinkGenerator(selectedActivity?.deepLinkGenerator)
+    const preflightOptionKey = selectedGenerator?.preflight?.optionKey
+    const normalizedPreflightValue =
+      preflightOptionKey && typeof persistentOptions[preflightOptionKey] === 'string'
+        ? persistentOptions[preflightOptionKey].trim()
+        : ''
+
+    if (!selectedGenerator?.preflight) {
+      if (!preflightWarning && !preflightPreviewUrl && !preflightValidatedUrl && !allowUnverifiedGenerateForUrl && !confirmGenerateForUrl) {
+        return
+      }
+
+      setPreflightWarning(null)
+      setPreflightPreviewUrl(null)
+      setPreflightValidatedUrl(null)
+      setAllowUnverifiedGenerateForUrl(null)
+      setConfirmGenerateForUrl(null)
+      return
+    }
+
+    if (!normalizedPreflightValue || !preflightValidatedUrl || normalizedPreflightValue === preflightValidatedUrl) {
       return
     }
 
@@ -233,7 +252,15 @@ export default function ManageDashboard() {
     setPreflightValidatedUrl(null)
     setAllowUnverifiedGenerateForUrl(null)
     setConfirmGenerateForUrl(null)
-  }, [persistentOptions, preflightValidatedUrl])
+  }, [
+    allowUnverifiedGenerateForUrl,
+    confirmGenerateForUrl,
+    persistentOptions,
+    preflightPreviewUrl,
+    preflightValidatedUrl,
+    preflightWarning,
+    selectedActivity,
+  ])
 
   const openSoloModal = (activity: DashboardActivity): void => {
     setSoloActivity(activity)
@@ -267,36 +294,39 @@ export default function ManageDashboard() {
     try {
       const selectedOptions = normalizeSelectedOptions(selectedActivity.deepLinkOptions, persistentOptions)
       const deepLinkGenerator = parseDeepLinkGenerator(selectedActivity.deepLinkGenerator)
-      const requiresPersistentPreflight = deepLinkGenerator?.requiresPreflight === true
-      const normalizedPresentationUrl =
-        typeof selectedOptions.presentationUrl === 'string' ? selectedOptions.presentationUrl.trim() : ''
+      const preflight = deepLinkGenerator?.preflight ?? null
+      const selectedPreflightValue = preflight ? selectedOptions[preflight.optionKey] : undefined
+      const normalizedPreflightValue =
+        typeof selectedPreflightValue === 'string'
+          ? selectedPreflightValue.trim()
+          : ''
 
-      if (requiresPersistentPreflight && normalizedPresentationUrl) {
-        const canBypassPreflight = allowUnverifiedGenerateForUrl === normalizedPresentationUrl
-        if (preflightValidatedUrl !== normalizedPresentationUrl && !canBypassPreflight) {
+      if (preflight && normalizedPreflightValue) {
+        const canBypassPreflight = allowUnverifiedGenerateForUrl === normalizedPreflightValue
+        if (preflightValidatedUrl !== normalizedPreflightValue && !canBypassPreflight) {
           setIsPreflightChecking(true)
-          const preflightResult = await runSyncDeckPresentationPreflight(normalizedPresentationUrl)
+          const preflightResult = await runDeepLinkPreflight(preflight, normalizedPreflightValue)
           setIsPreflightChecking(false)
 
           if (preflightResult.valid) {
-            setPreflightValidatedUrl(normalizedPresentationUrl)
+            setPreflightValidatedUrl(normalizedPreflightValue)
             setAllowUnverifiedGenerateForUrl(null)
-            setConfirmGenerateForUrl(normalizedPresentationUrl)
+            setConfirmGenerateForUrl(normalizedPreflightValue)
             setPreflightWarning(null)
-            setPreflightPreviewUrl(normalizedPresentationUrl)
+            setPreflightPreviewUrl(preflight.type === 'reveal-sync-ping' ? normalizedPreflightValue : null)
             return
           } else {
             setPreflightValidatedUrl(null)
             setPreflightPreviewUrl(null)
             setPreflightWarning(preflightResult.warning)
-            setAllowUnverifiedGenerateForUrl(normalizedPresentationUrl)
+            setAllowUnverifiedGenerateForUrl(normalizedPreflightValue)
             setConfirmGenerateForUrl(null)
-            setError('Presentation sync validation failed. Click Generate Anyway to continue.')
+            setError('Link validation failed. Click Generate Anyway to continue.')
             return
           }
         }
 
-        if (preflightValidatedUrl === normalizedPresentationUrl && confirmGenerateForUrl === normalizedPresentationUrl) {
+        if (preflightValidatedUrl === normalizedPreflightValue && confirmGenerateForUrl === normalizedPreflightValue) {
           setConfirmGenerateForUrl(null)
         }
       }
@@ -381,9 +411,9 @@ export default function ManageDashboard() {
   const getSoloLink = (activityId: string, options: Record<string, unknown> = {}): string =>
     buildSoloLink(getWindowOrigin(), activityId, options)
 
+  const selectedActivityGenerator = parseDeepLinkGenerator(selectedActivity?.deepLinkGenerator)
+  const selectedActivityPreflight = selectedActivityGenerator?.preflight ?? null
   const selectedActivityOptions = selectedActivity ? parseDeepLinkOptions(selectedActivity.deepLinkOptions) : {}
-  const selectedActivityPreflightRequired =
-    parseDeepLinkGenerator(selectedActivity?.deepLinkGenerator)?.requiresPreflight === true
   const persistentOptionErrors = selectedActivity
     ? validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)
     : {}
@@ -392,17 +422,22 @@ export default function ManageDashboard() {
   const soloActivityOptions = soloActivity ? parseDeepLinkOptions(soloActivity.deepLinkOptions) : {}
   const soloOptionErrors = soloActivity ? validateDeepLinkSelection(soloActivity.deepLinkOptions, soloOptions) : {}
   const hasSoloOptionErrors = Object.keys(soloOptionErrors).length > 0
-  const persistentPresentationUrl =
-    typeof persistentOptions.presentationUrl === 'string' ? persistentOptions.presentationUrl.trim() : ''
+  const persistentPreflightRawValue = selectedActivityPreflight
+    ? persistentOptions[selectedActivityPreflight.optionKey]
+    : undefined
+  const persistentPreflightValue =
+    typeof persistentPreflightRawValue === 'string'
+      ? persistentPreflightRawValue.trim()
+      : ''
   const showGenerateAnyway =
-    selectedActivityPreflightRequired &&
+    Boolean(selectedActivityPreflight) &&
     Boolean(preflightWarning) &&
-    Boolean(persistentPresentationUrl) &&
-    allowUnverifiedGenerateForUrl === persistentPresentationUrl
+    Boolean(persistentPreflightValue) &&
+    allowUnverifiedGenerateForUrl === persistentPreflightValue
   const showGenerateVerified =
-    selectedActivityPreflightRequired &&
-    preflightValidatedUrl === persistentPresentationUrl &&
-    confirmGenerateForUrl === persistentPresentationUrl
+    Boolean(selectedActivityPreflight) &&
+    preflightValidatedUrl === persistentPreflightValue &&
+    confirmGenerateForUrl === persistentPreflightValue
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -627,11 +662,11 @@ export default function ManageDashboard() {
 
             {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
 
-            {preflightWarning && selectedActivityPreflightRequired && (
+            {preflightWarning && selectedActivityPreflight && (
               <p className="text-amber-700 text-sm bg-amber-50 border border-amber-200 p-2 rounded">{preflightWarning}</p>
             )}
 
-            {preflightPreviewUrl && selectedActivityPreflightRequired && (
+            {preflightPreviewUrl && selectedActivityPreflight?.type === 'reveal-sync-ping' && (
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-gray-700">Deck preview (first visible slide)</p>
                 <div className="border border-gray-200 rounded overflow-hidden bg-white w-full max-w-md aspect-video">

@@ -16,6 +16,12 @@ export interface ActivityDeepLinkOption {
   validator?: 'url'
 }
 
+export interface ActivityDeepLinkPreflightConfig {
+  type: 'reveal-sync-ping'
+  optionKey: string
+  timeoutMs?: number
+}
+
 export interface ActivityConfig {
   id: string
   name: string
@@ -34,6 +40,7 @@ export interface ActivityConfig {
     mode?: 'replace-url' | 'append-query'
     expectsSelectedOptions?: boolean
     requiresPreflight?: boolean
+    preflight?: ActivityDeepLinkPreflightConfig
   }
   manageLayout?: {
     expandShell?: boolean

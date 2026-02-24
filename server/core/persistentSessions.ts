@@ -144,6 +144,7 @@ export function resolvePersistentSessionSecret(): string {
     }
 
     console.warn(`⚠️  SECURITY WARNING: ${message}`)
+    return envSecret
   }
 
   if (isWeakPersistentSessionSecret(envSecret)) {
