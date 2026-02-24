@@ -811,6 +811,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           return
         }
         client.isInstructor = true
+        sendBufferedChalkboardState(socket, session.data.chalkboard)
         await broadcastStudentsToInstructors(session.id)
         return
       }

@@ -375,6 +375,75 @@ void test('syncdeck websocket replays buffered chalkboard snapshot and delta to 
   assert.equal(chalkboardStrokeMessages.length, 2)
 })
 
+void test('syncdeck websocket replays buffered chalkboard snapshot and delta to instructor on connect', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        chalkboard: {
+          snapshot: '[{"width":960,"height":700,"data":[{"foo":"bar"}]}]',
+          delta: [
+            { mode: 1, event: { type: 'draw', x1: 3, y1: 4, x2: 5, y2: 6, board: 0, color: 0, time: 11 } },
+          ],
+        },
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const instructorSocket = new MockSocket()
+  ws.wss.clients.add(instructorSocket)
+
+  handler?.(
+    instructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+      instructorPasscode: 'teacher-pass',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
+  const chalkboardStateMessage = delivered.find(
+    (entry) => {
+      if (entry.type !== 'syncdeck-state') {
+        return false
+      }
+
+      const payload = asRecord(entry.payload)
+      const commandPayload = asRecord(payload?.payload)
+      return commandPayload?.name === 'chalkboardState'
+    },
+  )
+  assert.ok(chalkboardStateMessage)
+
+  const chalkboardStatePayload = asRecord(chalkboardStateMessage?.payload)
+  const chalkboardStateCommandPayload = asRecord(chalkboardStatePayload?.payload)
+  const chalkboardStateStoragePayload = asRecord(chalkboardStateCommandPayload?.payload)
+  assert.equal(chalkboardStateStoragePayload?.storage, '[{"width":960,"height":700,"data":[{"foo":"bar"}]}]')
+
+  const chalkboardStrokeMessages = delivered.filter(
+    (entry) => {
+      if (entry.type !== 'syncdeck-state') {
+        return false
+      }
+
+      const payload = asRecord(entry.payload)
+      const commandPayload = asRecord(payload?.payload)
+      return commandPayload?.name === 'chalkboardStroke'
+    },
+  )
+  assert.equal(chalkboardStrokeMessages.length, 1)
+})
+
 void test('syncdeck websocket updates and clears chalkboard buffer from instructor commands', async () => {
   const app = createMockApp()
   const ws = createMockWs()

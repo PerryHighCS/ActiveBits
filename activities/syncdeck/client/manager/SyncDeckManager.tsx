@@ -5,6 +5,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 
 const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
+const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
 const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
@@ -44,6 +45,13 @@ interface RevealSyncEnvelope {
   action?: unknown
   source?: unknown
   role?: unknown
+  payload?: unknown
+}
+
+type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
+
+interface RelayCommandPayloadEnvelope {
+  name?: unknown
   payload?: unknown
 }
 
@@ -244,6 +252,28 @@ function extractPausedState(data: unknown): boolean | null {
   return parseValue(data)
 }
 
+function extractPauseStateFromCommand(data: unknown): boolean | null {
+  const envelope = parseRevealSyncEnvelope(data)
+  if (!envelope || envelope.type !== 'reveal-sync') {
+    return null
+  }
+
+  if (envelope.action !== 'command' || !isPlainObject(envelope.payload)) {
+    return null
+  }
+
+  const commandName = envelope.payload.name
+  if (commandName === 'pause') {
+    return true
+  }
+
+  if (commandName === 'resume') {
+    return false
+  }
+
+  return null
+}
+
 export function includePausedInStateEnvelope(data: unknown, fallbackPaused: boolean | null = null): unknown {
   if (
     data == null ||
@@ -320,6 +350,10 @@ interface SyncDeckStudentPresence {
 
 function buildSyncDeckPasscodeKey(sessionId: string): string {
   return `${SYNCDECK_PASSCODE_KEY_PREFIX}${sessionId}`
+}
+
+function buildSyncDeckChalkboardOpenKey(sessionId: string): string {
+  return `${SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX}${sessionId}`
 }
 
 function validatePresentationUrl(value: string): boolean {
@@ -421,6 +455,85 @@ function parseRevealSyncEnvelope(data: unknown): RevealSyncEnvelope | null {
   }
 
   return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
+}
+
+function extractRevealCommandName(data: unknown): string | null {
+  const envelope = parseRevealSyncEnvelope(data)
+  if (!envelope || envelope.type !== 'reveal-sync') {
+    return null
+  }
+
+  if (typeof envelope.action === 'string' && envelope.action !== 'command') {
+    return envelope.action
+  }
+
+  if (envelope.action === 'command' && isPlainObject(envelope.payload) && typeof envelope.payload.name === 'string') {
+    return envelope.payload.name
+  }
+
+  return null
+}
+
+function isInboundChalkboardReplayCommand(name: string | null): boolean {
+  return name === 'chalkboardState' || name === 'chalkboardStroke'
+}
+
+function isChalkboardRelayAction(action: unknown): action is ChalkboardRelayAction {
+  return action === 'chalkboardStroke' || action === 'chalkboardState'
+}
+
+function toChalkboardAction(value: unknown): ChalkboardRelayAction | null {
+  return isChalkboardRelayAction(value) ? value : null
+}
+
+function asRelayCommandPayloadEnvelope(value: unknown): RelayCommandPayloadEnvelope | null {
+  return isPlainObject(value) ? (value as RelayCommandPayloadEnvelope) : null
+}
+
+export function toChalkboardRelayCommand(rawPayload: unknown): Record<string, unknown> | null {
+  const envelope = parseRevealSyncEnvelope(rawPayload)
+  const directAction = toChalkboardAction(envelope?.action)
+  const directName = toChalkboardAction((rawPayload as { name?: unknown } | null)?.name)
+
+  const commandEnvelope = asRelayCommandPayloadEnvelope(envelope?.payload)
+  const commandName = toChalkboardAction(commandEnvelope?.name)
+  if (envelope?.type === 'reveal-sync' && envelope.action === 'command' && commandName) {
+    return {
+      type: 'reveal-sync',
+      version: typeof envelope.version === 'string' ? envelope.version : '1.0.0',
+      action: 'command',
+      source: 'activebits-syncdeck-host',
+      role: 'instructor',
+      ts: Date.now(),
+      payload: {
+        name: commandName,
+        payload: commandEnvelope?.payload,
+      },
+    }
+  }
+
+  const topLevelAction = toChalkboardAction((rawPayload as { action?: unknown } | null)?.action)
+  const topLevelName = toChalkboardAction((rawPayload as { name?: unknown } | null)?.name)
+  const action = directAction ?? directName ?? topLevelAction ?? topLevelName
+  if (!action) {
+    return null
+  }
+
+  const payloadFromEnvelope = envelope?.payload
+  const payloadFromRaw = (rawPayload as { payload?: unknown } | null)?.payload
+
+  return {
+    type: 'reveal-sync',
+    version: typeof envelope.version === 'string' ? envelope.version : '1.0.0',
+    action: 'command',
+    source: 'activebits-syncdeck-host',
+    role: 'instructor',
+    ts: Date.now(),
+    payload: {
+      name: action,
+      payload: payloadFromEnvelope ?? payloadFromRaw,
+    },
+  }
 }
 
 function buildRestoreCommandFromPayload(payload: unknown): unknown {
@@ -576,6 +689,10 @@ const SyncDeckManager: FC = () => {
   const lastInstructorPayloadRef = useRef<unknown>(null)
   const lastInstructorStatePayloadRef = useRef<unknown>(null)
   const pendingRestorePayloadRef = useRef<unknown>(null)
+  const pendingInstructorReplayCommandsRef = useRef<unknown[]>([])
+  const connectedStudentIdsRef = useRef<Set<string>>(new Set())
+  const pendingChalkboardStateRequestRef = useRef(false)
+  const hasAppliedReloadChalkboardStateRef = useRef(false)
   const lastInstructorIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const explicitBoundaryRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const hasSeenInstructorIframeReadySignalRef = useRef(false)
@@ -589,6 +706,20 @@ const SyncDeckManager: FC = () => {
       return null
     }
   }, [presentationUrl])
+
+  const requestChalkboardStateFromInstructor = useCallback((): void => {
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow || !presentationOrigin || !hasSeenInstructorIframeReadySignalRef.current) {
+      pendingChalkboardStateRequestRef.current = true
+      return
+    }
+
+    targetWindow.postMessage(
+      buildRevealCommandMessage('requestChalkboardState', {}),
+      presentationOrigin,
+    )
+    pendingChalkboardStateRequestRef.current = false
+  }, [presentationOrigin])
 
   const buildInstructorWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelOpen) {
@@ -632,6 +763,33 @@ const SyncDeckManager: FC = () => {
           const statePayload = extractSyncDeckStatePayload(message)
           if (statePayload != null) {
             lastInstructorPayloadRef.current = statePayload
+            const commandName = extractRevealCommandName(statePayload)
+            if (isInboundChalkboardReplayCommand(commandName)) {
+              const targetWindow = presentationIframeRef.current?.contentWindow
+              if (!isChalkboardOpen) {
+                setIsChalkboardOpen(true)
+                if (sessionId && typeof window !== 'undefined') {
+                  window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), '1')
+                }
+              }
+
+              if (targetWindow && presentationOrigin && hasSeenInstructorIframeReadySignalRef.current) {
+                if (!isChalkboardOpen) {
+                  targetWindow.postMessage(
+                    buildRevealCommandMessage('chalkboardCall', {
+                      method: 'toggleChalkboard',
+                      args: [],
+                    }),
+                    presentationOrigin,
+                  )
+                }
+                targetWindow.postMessage(statePayload, presentationOrigin)
+              } else {
+                pendingInstructorReplayCommandsRef.current.push(statePayload)
+              }
+              return
+            }
+
             const currentIndices = extractIndicesFromRevealPayload(statePayload)
             if (currentIndices) {
               lastInstructorIndicesRef.current = currentIndices
@@ -640,6 +798,10 @@ const SyncDeckManager: FC = () => {
             const paused = extractPausedState(statePayload)
             if (typeof paused === 'boolean') {
               setIsPresentationPaused(paused)
+            }
+            const pausedFromCommand = extractPauseStateFromCommand(statePayload)
+            if (typeof pausedFromCommand === 'boolean') {
+              setIsPresentationPaused(pausedFromCommand)
             }
 
             const targetWindow = presentationIframeRef.current?.contentWindow
@@ -673,6 +835,21 @@ const SyncDeckManager: FC = () => {
                 name: typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name.trim() : 'Student',
                 connected: entry.connected === true,
               }))
+
+            const nextConnectedStudentIds = new Set(
+              nextStudents
+                .filter((entry) => entry.connected)
+                .map((entry) => entry.studentId),
+            )
+            const hasNewlyConnectedStudent = Array.from(nextConnectedStudentIds).some(
+              (studentId) => !connectedStudentIdsRef.current.has(studentId),
+            )
+            connectedStudentIdsRef.current = nextConnectedStudentIds
+
+            if (hasNewlyConnectedStudent) {
+              requestChalkboardStateFromInstructor()
+            }
+
             setStudents(nextStudents)
           }
         } catch {
@@ -734,6 +911,24 @@ const SyncDeckManager: FC = () => {
       isCancelled = true
     }
   }, [sessionId])
+
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined') {
+      setIsChalkboardOpen(false)
+      return
+    }
+
+    const stored = window.sessionStorage.getItem(buildSyncDeckChalkboardOpenKey(sessionId))
+    setIsChalkboardOpen(stored === '1')
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined') {
+      return
+    }
+
+    window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), isChalkboardOpen ? '1' : '0')
+  }, [sessionId, isChalkboardOpen])
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -864,7 +1059,14 @@ const SyncDeckManager: FC = () => {
     )
     relayInstructorPayload(chalkboardCommand)
 
-    setIsChalkboardOpen((current) => !current)
+    setIsChalkboardOpen((current) => {
+      const nextValue = !current
+      if (sessionId && typeof window !== 'undefined') {
+        window.sessionStorage.setItem(buildSyncDeckChalkboardOpenKey(sessionId), nextValue ? '1' : '0')
+      }
+
+      return nextValue
+    })
     setStartError(null)
   }
 
@@ -876,15 +1078,14 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    const pauseCommand = buildRevealCommandMessage('togglePause', {})
+    const nextPaused = !isPresentationPaused
+    const pauseCommand = buildRevealCommandMessage(nextPaused ? 'pause' : 'resume', {})
 
     targetWindow.postMessage(
       pauseCommand,
       presentationOrigin,
     )
     relayInstructorPayload(pauseCommand)
-
-    const nextPaused = !isPresentationPaused
     setIsPresentationPaused(nextPaused)
 
     if (lastInstructorStatePayloadRef.current != null) {
@@ -978,6 +1179,7 @@ const SyncDeckManager: FC = () => {
     }
 
     hasSeenInstructorIframeReadySignalRef.current = false
+  hasAppliedReloadChalkboardStateRef.current = false
     const queuedRestorePayload = pendingRestorePayloadRef.current ?? lastInstructorStatePayloadRef.current
     restoreTargetIndicesRef.current = extractIndicesFromRevealPayload(queuedRestorePayload)
     suppressOutboundStateUntilRestoreRef.current = queuedRestorePayload != null
@@ -1181,6 +1383,10 @@ const SyncDeckManager: FC = () => {
       if (typeof pausedState === 'boolean') {
         setIsPresentationPaused(pausedState)
       }
+      const pausedStateFromCommand = extractPauseStateFromCommand(event.data)
+      if (typeof pausedStateFromCommand === 'boolean') {
+        setIsPresentationPaused(pausedStateFromCommand)
+      }
 
       const initialEnvelope = parseRevealSyncEnvelope(event.data)
       if (!hasSeenInstructorIframeReadySignalRef.current && initialEnvelope?.type === 'reveal-sync') {
@@ -1201,6 +1407,29 @@ const SyncDeckManager: FC = () => {
           if (restorePayload == null || restoreTargetIndicesRef.current == null) {
             suppressOutboundStateUntilRestoreRef.current = false
           }
+
+          if (pendingInstructorReplayCommandsRef.current.length > 0) {
+            for (const replayCommand of pendingInstructorReplayCommandsRef.current) {
+              targetWindow.postMessage(replayCommand, presentationOrigin)
+            }
+            pendingInstructorReplayCommandsRef.current = []
+          }
+
+          if (!hasAppliedReloadChalkboardStateRef.current && isChalkboardOpen) {
+            targetWindow.postMessage(
+              buildRevealCommandMessage('chalkboardCall', {
+                method: 'toggleChalkboard',
+                args: [],
+              }),
+              presentationOrigin,
+            )
+          }
+          hasAppliedReloadChalkboardStateRef.current = true
+
+          requestChalkboardStateFromInstructor()
+          if (pendingChalkboardStateRequestRef.current) {
+            requestChalkboardStateFromInstructor()
+          }
         }
       }
 
@@ -1211,6 +1440,17 @@ const SyncDeckManager: FC = () => {
 
       try {
         const envelope = parseRevealSyncEnvelope(event.data)
+        const chalkboardRelayCommand = toChalkboardRelayCommand(event.data)
+        if (chalkboardRelayCommand != null) {
+          lastInstructorPayloadRef.current = chalkboardRelayCommand
+          socket.send(
+            JSON.stringify({
+              type: 'syncdeck-state-update',
+              payload: chalkboardRelayCommand,
+            }),
+          )
+          return
+        }
 
         const instructorIndices = extractIndicesFromRevealPayload(event.data)
         if (instructorIndices) {
@@ -1315,7 +1555,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       window.removeEventListener('message', handleMessage)
     }
-  }, [isConfigurePanelOpen, presentationOrigin])
+  }, [isConfigurePanelOpen, presentationOrigin, requestChalkboardStateFromInstructor, isChalkboardOpen])
 
   if (!sessionId) {
     return (
