@@ -7,7 +7,7 @@ This document defines the `postMessage` protocol used by `js/reveal-iframe-sync.
 ```json
 {
   "type": "reveal-sync",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "action": "ready",
   "deckId": "2d-arrays",
   "role": "student",
@@ -68,6 +68,9 @@ Use `action: "command"` with a command payload.
 - `toggleNotesCanvas`
 - `clearChalkboard`
 - `resetChalkboard`
+- `chalkboardStroke` — relay a single instructor draw/erase event to a student canvas
+- `chalkboardState` — replace the student's full drawing storage and redraw
+- `requestChalkboardState` — ask an instructor iframe for a full state snapshot (iframe responds with `chalkboardState` upward message)
 - `ping`
 
 ### Command payload shapes
@@ -98,6 +101,16 @@ Use `action: "command"` with a command payload.
   "payload": { "role": "student" }
 }
 ```
+
+#### `pause` / `resume` / `togglePause`
+
+When role is `student`, host-issued pause is treated as host-owned lock:
+
+- After `pause` (or `togglePause` resolving to paused), local unpause attempts in the student iframe are immediately reverted.
+- Only host `resume` (or `togglePause` resolving to unpaused) clears the lock.
+- While host pause lock is active for students, the iframe shows a full-screen pause overlay and capture-phase input blocking prevents local keyboard/mouse/touch navigation until host resume.
+
+This ensures only the instructor/host can unblank student screens after a host pause.
 
 #### `allowStudentForwardTo` (recommended for temporary handoff)
 
@@ -178,6 +191,69 @@ Note: sending `setState` with `overview: true` has the same effect as `showOverv
     "args": []
   }
 }
+```
+
+#### `chalkboardStroke`
+
+Relay a single draw or erase event from the instructor to a student iframe. Coordinates are in logical space (divided by canvas scale on the instructor side), so they replay correctly at any student viewport size.
+
+```json
+{
+  "name": "chalkboardStroke",
+  "payload": {
+    "mode": 1,
+    "slide": { "h": 3, "v": 0, "f": -1 },
+    "event": {
+      "type": "draw",
+      "x1": 120.5, "y1": 80.0, "x2": 125.0, "y2": 83.2,
+      "color": 0,
+      "board": 0,
+      "time": 4200
+    }
+  }
+}
+```
+
+Erase variant:
+```json
+{
+  "name": "chalkboardStroke",
+  "payload": {
+    "mode": 1,
+    "slide": { "h": 3, "v": 0, "f": -1 },
+    "event": { "type": "erase", "x": 120.5, "y": 80.0, "board": 0, "time": 4350 }
+  }
+}
+```
+
+- `mode` — `0` = notes canvas, `1` = chalkboard canvas
+- `color` — integer index into the instructor's color palette (same index applies on the student side since palettes are identical)
+- `board` — chalkboard page index (for mode 1 only; mode 0 ignores it)
+- Strokes for slides not currently visible are stored and replayed when the student navigates to that slide
+
+#### `chalkboardState`
+
+Full state sync. Replace the target iframe's entire drawing storage with a snapshot and immediately redraw the current slide.
+
+Sent to **student** iframes to propagate instructor drawings. Also sent back to the **instructor** iframe after a reload — the host uses its cached snapshot to restore drawings that would otherwise be lost when the instructor's in-memory state is reset on page load.
+
+```json
+{
+  "name": "chalkboardState",
+  "payload": {
+    "storage": "[{\"width\":960,\"height\":700,\"data\":[...]}]"
+  }
+}
+```
+
+`storage` is the JSON string returned by `RevealChalkboard.getData()` on the instructor side.
+
+#### `requestChalkboardState`
+
+Ask the instructor iframe for a full state snapshot. The iframe responds with a `chalkboardState` upward message.
+
+```json
+{ "name": "requestChalkboardState" }
 ```
 
 ### Request current state
@@ -287,6 +363,51 @@ Valid `reason` values: `"allowStudentForwardTo"`, `"setStudentBoundary"`, `"inst
 }
 ```
 
+### `chalkboardStroke`
+
+Sent by the **instructor** iframe on every draw or erase event. The host should relay this as a `chalkboardStroke` command to all student iframes.
+
+```json
+{
+  "action": "chalkboardStroke",
+  "payload": {
+    "mode": 1,
+    "slide": { "h": 3, "v": 0, "f": -1 },
+    "event": {
+      "type": "draw",
+      "x1": 120.5, "y1": 80.0, "x2": 125.0, "y2": 83.2,
+      "color": 0, "board": 0, "time": 4200
+    }
+  }
+}
+```
+
+The host relays this verbatim as a `chalkboardStroke` **command** to student iframes:
+```js
+studentIframe.postMessage({
+  type: 'reveal-sync', action: 'command',
+  payload: { name: 'chalkboardStroke', ...msg.payload }
+}, '*');
+```
+
+### `chalkboardState`
+
+Sent by the **instructor** iframe in two situations:
+
+1. **In response to `requestChalkboardState`** — explicit host request for a full snapshot.
+2. **Automatically on `setRole: instructor`** — the iframe posts its current state immediately after being promoted to instructor. On a fresh load this will be an empty storage blob; on a reload within the same session the in-memory state from before the reload will have been lost (sessionStorage is not used — the host is the source of truth). The host should relay this to all connected student iframes.
+
+The host should relay this as a `chalkboardState` command to student iframes.
+
+```json
+{
+  "action": "chalkboardState",
+  "payload": {
+    "storage": "[{\"width\":960,\"height\":700,\"data\":[...]}]"
+  }
+}
+```
+
 ### `warn`
 
 ```json
@@ -306,6 +427,48 @@ Valid `reason` values: `"allowStudentForwardTo"`, `"setStudentBoundary"`, `"inst
 - Prefer strict `allowedOrigins`/`hostOrigin` values in production instead of `*`.
 - After sending `setRole: student`, send `allowStudentForwardTo` to define handoff range.
 - Keep command ordering deterministic (role first, then boundary/state commands).
+
+### Chalkboard session state (snapshot + delta)
+
+The host should maintain a per-session chalkboard buffer with two parts:
+
+```js
+session.chalkboard = {
+  snapshot: null,  // string — last getData() blob from the instructor
+  delta:    [],    // array  — ordered chalkboardStroke payloads since the snapshot
+}
+```
+
+**When to update the buffer:**
+
+| Upward message from instructor | Action |
+|---|---|
+| `chalkboardState` (on `setRole: instructor` or slide change) | Replace `snapshot` with `payload.storage`; clear `delta` |
+| `chalkboardStroke` | Append `payload` to `delta` |
+| `clearChalkboard` / `resetChalkboard` relayed upward* | Clear `delta`; optionally request a fresh snapshot via `requestChalkboardState` |
+
+\* These are not currently relayed upward by the iframe; the host clears its buffer when it sends these commands downward.
+
+**When to send state to a student** (on join, reload, or explicit request):
+
+```js
+// 1. Send the snapshot (restores all drawings up to last slide change)
+if (session.chalkboard.snapshot) {
+  student.postMessage({ ..., payload: { name: 'chalkboardState',
+    storage: session.chalkboard.snapshot } });
+}
+// 2. Replay the delta (applies strokes drawn since the last slide change)
+for (const stroke of session.chalkboard.delta) {
+  student.postMessage({ ..., payload: { name: 'chalkboardStroke', ...stroke } });
+}
+```
+
+**Why this works without gaps:**
+
+- On `setRole: instructor` the iframe auto-broadcasts a full `chalkboardState`. The host stores this as the initial snapshot and starts with an empty delta.
+- Each instructor stroke arrives as a `chalkboardStroke`. The host relays it to connected students immediately and appends it to the delta.
+- On every slide change the iframe sends a fresh `chalkboardState`. The host replaces the snapshot and clears the delta — the new snapshot already incorporates all strokes from the previous slide, so the delta is always short (only strokes on the *current* slide).
+- If the instructor reloads, the iframe starts with empty in-memory storage and auto-broadcasts an empty `chalkboardState` on `setRole`. The host should respond by immediately sending a `chalkboardState` command back to the instructor (with its cached snapshot) to restore the drawings, then relay the same snapshot to all students.
 
 ### Compatibility policy (recommended)
 
@@ -329,7 +492,7 @@ function isCompatibleProtocol(hostVersion, messageVersion) {
 }
 
 // Usage in message handler
-const HOST_SYNC_PROTOCOL = '1.0.0';
+const HOST_SYNC_PROTOCOL = '1.1.0';
 if (!isCompatibleProtocol(HOST_SYNC_PROTOCOL, data.version)) {
   // Ignore message or request iframe reload/update
   return;
