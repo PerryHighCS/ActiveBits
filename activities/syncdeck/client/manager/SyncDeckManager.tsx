@@ -8,6 +8,7 @@ const isDevMode = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
 const PREFLIGHT_PING_TIMEOUT_MS = 4000
+const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
 
 interface SessionResponsePayload {
   session?: {
@@ -23,6 +24,11 @@ interface SyncDeckStudentPresenceMessage {
     connectedCount?: unknown
     students?: unknown
   }
+}
+
+interface SyncDeckStateSnapshotMessage {
+  type?: unknown
+  payload?: unknown
 }
 
 interface RevealCommandPayload {
@@ -49,6 +55,10 @@ interface RevealSyncStatePayload {
   isOpen?: unknown
   visible?: unknown
   revealState?: unknown
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function stripOverviewFromStateEnvelope(data: unknown): unknown {
@@ -266,6 +276,119 @@ function normalizeIndices(value: unknown): { h: number; v: number; f: number } |
   }
 }
 
+function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
+  if (a.h !== b.h) return a.h - b.h
+  if (a.v !== b.v) return a.v - b.v
+  return a.f - b.f
+}
+
+function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: number; v: number; f: number } {
+  return {
+    h: indices.h,
+    v: indices.v,
+    f: SLIDE_END_FRAGMENT_INDEX,
+  }
+}
+
+export function shouldSuppressInstructorStateBroadcast(
+  instructorIndices: { h: number; v: number; f: number } | null,
+  explicitBoundary: { h: number; v: number; f: number } | null,
+): boolean {
+  if (!instructorIndices || !explicitBoundary) {
+    return false
+  }
+
+  return compareIndices(instructorIndices, explicitBoundary) <= 0
+}
+
+export function buildBoundaryClearedPayload(
+  instructorIndices: { h: number; v: number; f: number },
+): Record<string, unknown> {
+  return {
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'studentBoundaryChanged',
+    source: 'activebits-syncdeck-host',
+    role: 'instructor',
+    ts: Date.now(),
+    payload: {
+      reason: 'instructorSet',
+      studentBoundary: null,
+      indices: instructorIndices,
+    },
+  }
+}
+
+function parseRevealSyncEnvelope(data: unknown): RevealSyncEnvelope | null {
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data) as unknown
+      return parsed != null && typeof parsed === 'object' ? (parsed as RevealSyncEnvelope) : null
+    } catch {
+      return null
+    }
+  }
+
+  return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
+}
+
+function buildRestoreCommandFromPayload(payload: unknown): unknown {
+  const envelope = parseRevealSyncEnvelope(payload)
+  if (!envelope || envelope.type !== 'reveal-sync') {
+    return payload
+  }
+
+  if (envelope.action === 'command') {
+    return payload
+  }
+
+  if (envelope.action !== 'state' || !isPlainObject(envelope.payload)) {
+    return payload
+  }
+
+  const statePayload = envelope.payload as {
+    revealState?: unknown
+    indices?: { h?: unknown; v?: unknown; f?: unknown }
+  }
+
+  const revealState = isPlainObject(statePayload.revealState) ? statePayload.revealState : null
+  const indices = isPlainObject(statePayload.indices) ? statePayload.indices : null
+  const mergedState = {
+    ...(revealState ?? {}),
+    indexh: typeof indices?.h === 'number' ? indices.h : (revealState as { indexh?: unknown } | null)?.indexh ?? 0,
+    indexv: typeof indices?.v === 'number' ? indices.v : (revealState as { indexv?: unknown } | null)?.indexv ?? 0,
+    indexf: typeof indices?.f === 'number' ? indices.f : (revealState as { indexf?: unknown } | null)?.indexf ?? 0,
+  }
+
+  return {
+    type: 'reveal-sync',
+    version: typeof envelope.version === 'string' ? envelope.version : '1.0.0',
+    action: 'command',
+    source: 'activebits-syncdeck-host',
+    role: 'instructor',
+    ts: Date.now(),
+    payload: {
+      name: 'setState',
+      payload: {
+        state: mergedState,
+      },
+    },
+  }
+}
+
+export function extractSyncDeckStatePayload(message: unknown): unknown | null {
+  if (message == null || typeof message !== 'object') {
+    return null
+  }
+
+  const candidate = message as SyncDeckStateSnapshotMessage
+  if (candidate.type !== 'syncdeck-state') {
+    return null
+  }
+
+  return candidate.payload ?? null
+}
+
 function extractIndicesFromRevealPayload(payload: unknown): { h: number; v: number; f: number } | null {
   if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) {
     return null
@@ -280,11 +403,42 @@ function extractIndicesFromRevealPayload(payload: unknown): { h: number; v: numb
   return normalizeIndices(messagePayload?.indices)
 }
 
+export function attachInstructorIndicesToBoundaryChangePayload(
+  payload: unknown,
+  instructorIndices: { h: number; v: number; f: number } | null,
+): unknown {
+  if (!instructorIndices || !isPlainObject(payload)) {
+    return payload
+  }
+
+  const envelope = payload as RevealSyncEnvelope
+  if (envelope.type !== 'reveal-sync' || envelope.action !== 'studentBoundaryChanged' || !isPlainObject(envelope.payload)) {
+    return payload
+  }
+
+  const boundaryPayload = envelope.payload as { indices?: unknown; [key: string]: unknown }
+  if (normalizeIndices(boundaryPayload.indices)) {
+    return payload
+  }
+
+  return {
+    ...envelope,
+    payload: {
+      ...boundaryPayload,
+      indices: instructorIndices,
+    },
+  }
+}
+
 export function buildForceSyncBoundaryCommandMessage(indices: { h: number; v: number; f: number }): Record<string, unknown> {
   return buildRevealCommandMessage('setStudentBoundary', {
     indices,
     syncToBoundary: true,
   })
+}
+
+export function buildClearBoundaryCommandMessage(): Record<string, unknown> {
+  return buildRevealCommandMessage('clearBoundary', {})
 }
 
 export function buildInstructorRoleCommandMessage(): Record<string, unknown> {
@@ -327,6 +481,13 @@ const SyncDeckManager: FC = () => {
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastInstructorPayloadRef = useRef<unknown>(null)
+  const lastInstructorStatePayloadRef = useRef<unknown>(null)
+  const pendingRestorePayloadRef = useRef<unknown>(null)
+  const lastInstructorIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const explicitBoundaryRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const hasSeenInstructorIframeReadySignalRef = useRef(false)
+  const suppressOutboundStateUntilRestoreRef = useRef(false)
+  const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
 
   const presentationOrigin = useMemo(() => {
     try {
@@ -375,6 +536,33 @@ const SyncDeckManager: FC = () => {
       onMessage: (event) => {
         try {
           const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage
+          const statePayload = extractSyncDeckStatePayload(message)
+          if (statePayload != null) {
+            lastInstructorPayloadRef.current = statePayload
+            const currentIndices = extractIndicesFromRevealPayload(statePayload)
+            if (currentIndices) {
+              lastInstructorIndicesRef.current = currentIndices
+              lastInstructorStatePayloadRef.current = statePayload
+            }
+
+            console.log('[SyncDeck][Manager] ws syncdeck-state received', {
+              restoredIndices: currentIndices,
+              iframeReady: hasSeenInstructorIframeReadySignalRef.current,
+            })
+
+            const targetWindow = presentationIframeRef.current?.contentWindow
+            if (targetWindow && presentationOrigin && hasSeenInstructorIframeReadySignalRef.current) {
+              console.log('[SyncDeck][Manager] applying ws restore payload to iframe immediately')
+              if (currentIndices) {
+                targetWindow.postMessage(buildRestoreCommandFromPayload(statePayload), presentationOrigin)
+              }
+            } else if (currentIndices) {
+              console.log('[SyncDeck][Manager] queueing ws restore payload until iframe ready')
+              pendingRestorePayloadRef.current = statePayload
+            }
+            return
+          }
+
           if (message.type !== 'syncdeck-students') {
             return
           }
@@ -669,6 +857,17 @@ const SyncDeckManager: FC = () => {
     if (!targetWindow || !presentationOrigin) {
       return
     }
+
+    hasSeenInstructorIframeReadySignalRef.current = false
+    const queuedRestorePayload = pendingRestorePayloadRef.current ?? lastInstructorStatePayloadRef.current
+    restoreTargetIndicesRef.current = extractIndicesFromRevealPayload(queuedRestorePayload)
+    suppressOutboundStateUntilRestoreRef.current = queuedRestorePayload != null
+
+    console.log('[SyncDeck][Manager] iframe load', {
+      hasQueuedRestore: queuedRestorePayload != null,
+      restoreTargetIndices: restoreTargetIndicesRef.current,
+      suppressOutboundUntilRestore: suppressOutboundStateUntilRestoreRef.current,
+    })
 
     targetWindow.postMessage(
       buildInstructorRoleCommandMessage(),
@@ -982,14 +1181,136 @@ const SyncDeckManager: FC = () => {
         setDebugInstructorMessage(payload)
       }
 
+      const initialEnvelope = parseRevealSyncEnvelope(event.data)
+      if (!hasSeenInstructorIframeReadySignalRef.current && initialEnvelope?.type === 'reveal-sync') {
+        hasSeenInstructorIframeReadySignalRef.current = true
+        console.log('[SyncDeck][Manager] iframe ready signal received', {
+          action: initialEnvelope.action,
+        })
+        const targetWindow = presentationIframeRef.current?.contentWindow
+        if (targetWindow && presentationOrigin) {
+          let restorePayload: unknown | null = null
+          if (pendingRestorePayloadRef.current != null) {
+            restorePayload = pendingRestorePayloadRef.current
+            console.log('[SyncDeck][Manager] replaying queued restore payload to iframe')
+            targetWindow.postMessage(buildRestoreCommandFromPayload(restorePayload), presentationOrigin)
+            pendingRestorePayloadRef.current = null
+          } else if (lastInstructorStatePayloadRef.current != null) {
+            restorePayload = lastInstructorStatePayloadRef.current
+            console.log('[SyncDeck][Manager] replaying last instructor payload to iframe')
+            targetWindow.postMessage(buildRestoreCommandFromPayload(restorePayload), presentationOrigin)
+          }
+
+          restoreTargetIndicesRef.current = extractIndicesFromRevealPayload(restorePayload)
+          if (restorePayload == null || restoreTargetIndicesRef.current == null) {
+            suppressOutboundStateUntilRestoreRef.current = false
+            console.log('[SyncDeck][Manager] restore suppression disabled (no restore target)')
+          }
+        }
+      }
+
       const socket = instructorSocketRef.current
       if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
         return
       }
 
       try {
-        const sanitizedPayload = stripOverviewFromStateEnvelope(event.data)
+        const envelope = parseRevealSyncEnvelope(event.data)
+
+        const instructorIndices = extractIndicesFromRevealPayload(event.data)
+        if (instructorIndices) {
+          lastInstructorIndicesRef.current = instructorIndices
+        }
+
+        if (envelope?.type === 'reveal-sync' && envelope.action === 'state' && suppressOutboundStateUntilRestoreRef.current) {
+          const restoreTargetIndices = restoreTargetIndicesRef.current
+          if (
+            restoreTargetIndices != null &&
+            instructorIndices != null &&
+            compareIndices(instructorIndices, restoreTargetIndices) >= 0
+          ) {
+            suppressOutboundStateUntilRestoreRef.current = false
+            console.log('[SyncDeck][Manager] restore suppression lifted', {
+              currentIndices: instructorIndices,
+              restoreTargetIndices,
+            })
+          }
+
+          console.log('[SyncDeck][Manager] suppressing outbound instructor state during restore', {
+            currentIndices: instructorIndices,
+            restoreTargetIndices,
+          })
+
+          if (isDevMode) {
+            setDebugInstructorMessage('Holding outbound state until restored position is applied')
+          }
+          return
+        }
+
+        if (envelope?.type === 'reveal-sync' && isPlainObject(envelope.payload)) {
+          const payload = envelope.payload as { studentBoundary?: unknown }
+          const rawBoundary = normalizeIndices(payload.studentBoundary)
+          if (rawBoundary) {
+            explicitBoundaryRef.current = toSlideEndBoundary(rawBoundary)
+          } else if (payload.studentBoundary === null) {
+            explicitBoundaryRef.current = null
+          }
+        }
+
+        if (
+          envelope?.type === 'reveal-sync' &&
+          envelope.action === 'state' &&
+          shouldSuppressInstructorStateBroadcast(lastInstructorIndicesRef.current, explicitBoundaryRef.current)
+        ) {
+          if (isDevMode) {
+            setDebugInstructorMessage('State update held until instructor passes explicit boundary')
+          }
+          return
+        }
+
+        if (
+          envelope?.type === 'reveal-sync' &&
+          envelope.action === 'state' &&
+          lastInstructorIndicesRef.current != null &&
+          explicitBoundaryRef.current != null &&
+          compareIndices(lastInstructorIndicesRef.current, explicitBoundaryRef.current) > 0
+        ) {
+          const targetWindow = presentationIframeRef.current?.contentWindow
+          if (targetWindow && presentationOrigin) {
+            targetWindow.postMessage(buildClearBoundaryCommandMessage(), presentationOrigin)
+          }
+
+          const boundaryClearedPayload = buildBoundaryClearedPayload(lastInstructorIndicesRef.current)
+          try {
+            socket.send(
+              JSON.stringify({
+                type: 'syncdeck-state-update',
+                payload: boundaryClearedPayload,
+              }),
+            )
+            explicitBoundaryRef.current = null
+          } catch {
+            return
+          }
+        }
+
+        const payloadWithInstructorIndices = attachInstructorIndicesToBoundaryChangePayload(
+          event.data,
+          lastInstructorIndicesRef.current,
+        )
+        const sanitizedPayload = stripOverviewFromStateEnvelope(payloadWithInstructorIndices)
         lastInstructorPayloadRef.current = sanitizedPayload
+        if (envelope?.type === 'reveal-sync' && envelope.action === 'state') {
+          const sanitizedIndices = extractIndicesFromRevealPayload(sanitizedPayload)
+          if (sanitizedIndices) {
+            lastInstructorStatePayloadRef.current = sanitizedPayload
+          }
+        }
+        if (envelope?.type === 'reveal-sync' && envelope.action === 'state') {
+          console.log('[SyncDeck][Manager] relaying instructor state update', {
+            indices: extractIndicesFromRevealPayload(sanitizedPayload),
+          })
+        }
         socket.send(
           JSON.stringify({
             type: 'syncdeck-state-update',

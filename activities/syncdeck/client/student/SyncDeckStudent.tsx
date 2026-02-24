@@ -46,6 +46,36 @@ interface RevealStateIndicesPayload {
   studentBoundary?: unknown
 }
 
+const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
+
+function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
+  if (a.h !== b.h) return a.h - b.h
+  if (a.v !== b.v) return a.v - b.v
+  return a.f - b.f
+}
+
+function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: number; v: number; f: number } {
+  return {
+    h: indices.h,
+    v: indices.v,
+    f: SLIDE_END_FRAGMENT_INDEX,
+  }
+}
+
+function resolveEffectiveBoundary(
+  instructorIndices: { h: number; v: number; f: number } | null,
+  setBoundary: { h: number; v: number; f: number } | null,
+): { h: number; v: number; f: number } | null {
+  if (!instructorIndices) {
+    return setBoundary
+  }
+  if (!setBoundary) {
+    return instructorIndices
+  }
+
+  return compareIndices(instructorIndices, setBoundary) >= 0 ? instructorIndices : setBoundary
+}
+
 interface RevealCommandMessage {
   type: 'reveal-sync'
   version: string
@@ -64,6 +94,14 @@ const WS_OPEN_READY_STATE = 1
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isRevealSyncMessage(value: unknown): value is RevealSyncEnvelope {
+  if (!isPlainObject(value)) {
+    return false
+  }
+
+  return value.type === 'reveal-sync' && typeof value.action === 'string'
 }
 
 function normalizeIndices(value: unknown): { h: number; v: number; f: number } | null {
@@ -109,35 +147,51 @@ function buildBoundaryCommandEnvelope(
   }
 }
 
-function buildSetStudentBoundaryCommand(message: RevealSyncEnvelope): Record<string, unknown> | null {
+function shouldSnapBackToBoundary(
+  studentIndices: { h: number; v: number; f: number } | null,
+  boundary: { h: number; v: number; f: number },
+): boolean {
+  if (!studentIndices) {
+    return true
+  }
+
+  return compareIndices(studentIndices, boundary) > 0
+}
+
+function buildSetStudentBoundaryCommand(
+  message: RevealSyncEnvelope,
+  studentIndices: { h: number; v: number; f: number } | null = null,
+  fallbackInstructorIndices: { h: number; v: number; f: number } | null = null,
+): RevealCommandMessage | null {
   const role = message.role
   if (typeof role === 'string' && role !== 'instructor') {
     return null
   }
 
-  const boundaryFromPayload = isPlainObject(message.payload)
-    ? normalizeIndices((message.payload as { studentBoundary?: unknown }).studentBoundary)
-    : null
-  if (!boundaryFromPayload) {
+  const payload = isPlainObject(message.payload) ? (message.payload as RevealStateIndicesPayload) : null
+  if (!payload) {
+    return null
+  }
+
+  const instructorIndices = normalizeIndices(payload.indices) ?? fallbackInstructorIndices
+  const rawSetBoundary = normalizeIndices(payload.studentBoundary)
+  const setBoundary = rawSetBoundary ? toSlideEndBoundary(rawSetBoundary) : null
+  const effectiveBoundary = resolveEffectiveBoundary(instructorIndices, setBoundary)
+  if (!effectiveBoundary) {
     return null
   }
 
   return buildBoundaryCommandEnvelope(message, 'setStudentBoundary', {
-    indices: boundaryFromPayload,
-    syncToBoundary: false,
+    indices: effectiveBoundary,
+    syncToBoundary: shouldSnapBackToBoundary(studentIndices, effectiveBoundary),
   })
 }
 
-function buildClearBoundaryCommand(message: RevealSyncEnvelope): Record<string, unknown> | null {
-  const role = message.role
-  if (typeof role === 'string' && role !== 'instructor') {
-    return null
-  }
-
-  return buildBoundaryCommandEnvelope(message, 'clearBoundary')
-}
-
-export function toRevealBoundaryCommandMessage(rawPayload: unknown): Record<string, unknown> | null {
+export function toRevealBoundaryCommandMessage(
+  rawPayload: unknown,
+  studentIndices: { h: number; v: number; f: number } | null = null,
+  fallbackInstructorIndices: { h: number; v: number; f: number } | null = null,
+): RevealCommandMessage | null {
   if (!isPlainObject(rawPayload)) {
     return null
   }
@@ -147,18 +201,75 @@ export function toRevealBoundaryCommandMessage(rawPayload: unknown): Record<stri
     return null
   }
 
-  if (message.action === 'studentBoundaryChanged' || message.action === 'state') {
-    if (isPlainObject(message.payload) && 'studentBoundary' in message.payload) {
-      const boundaryValue = (message.payload as { studentBoundary?: unknown }).studentBoundary
-      if (boundaryValue == null) {
-        return buildClearBoundaryCommand(message)
-      }
+  if (message.action === 'state') {
+    return buildSetStudentBoundaryCommand(message, studentIndices, fallbackInstructorIndices)
+  }
+
+  if (message.action === 'studentBoundaryChanged') {
+    if (!isPlainObject(message.payload)) {
+      return null
     }
 
-    return buildSetStudentBoundaryCommand(message)
+    return buildSetStudentBoundaryCommand(message, studentIndices, fallbackInstructorIndices)
   }
 
   return null
+}
+
+function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: number; v: number; f: number } | null {
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  if (message.type !== 'reveal-sync' || !isPlainObject(message.payload)) {
+    return null
+  }
+
+  const payload = message.payload as RevealStateIndicesPayload
+  return normalizeIndices(payload.indices)
+}
+
+function extractRevealAction(rawPayload: unknown): string | null {
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  return typeof message.action === 'string' ? message.action : null
+}
+
+function computeBoundaryDetails(
+  rawPayload: unknown,
+  studentIndices: { h: number; v: number; f: number } | null,
+  fallbackInstructorIndices: { h: number; v: number; f: number } | null,
+): {
+  instructorIndices: { h: number; v: number; f: number } | null
+  setBoundary: { h: number; v: number; f: number } | null
+  effectiveBoundary: { h: number; v: number; f: number } | null
+  syncToBoundary: boolean
+} | null {
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  if (message.type !== 'reveal-sync' || !isPlainObject(message.payload)) {
+    return null
+  }
+
+  const payload = message.payload as RevealStateIndicesPayload
+  const instructorIndices = normalizeIndices(payload.indices) ?? fallbackInstructorIndices
+  const rawSetBoundary = normalizeIndices(payload.studentBoundary)
+  const setBoundary = rawSetBoundary ? toSlideEndBoundary(rawSetBoundary) : null
+  const effectiveBoundary = resolveEffectiveBoundary(instructorIndices, setBoundary)
+
+  return {
+    instructorIndices,
+    setBoundary,
+    effectiveBoundary,
+    syncToBoundary: effectiveBoundary ? shouldSnapBackToBoundary(studentIndices, effectiveBoundary) : false,
+  }
 }
 
 export function toRevealCommandMessage(rawPayload: unknown): Record<string, unknown> | null {
@@ -323,6 +434,58 @@ function getStoredStudentName(sessionId: string): string {
   return typeof stored === 'string' ? stored.trim() : ''
 }
 
+function formatIndicesForLog(indices: { h: number; v: number; f: number } | null): string {
+  if (!indices) {
+    return 'null'
+  }
+
+  return `${indices.h}.${indices.v}.${indices.f}`
+}
+
+function isForceSyncBoundaryCommand(rawPayload: unknown): boolean {
+  if (!isPlainObject(rawPayload)) {
+    return false
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  if (message.type !== 'reveal-sync' || message.action !== 'command' || !isPlainObject(message.payload)) {
+    return false
+  }
+
+  const payload = message.payload as {
+    name?: unknown
+    payload?: {
+      syncToBoundary?: unknown
+    }
+  }
+
+  return payload.name === 'setStudentBoundary' && payload.payload?.syncToBoundary === true
+}
+
+export function shouldSuppressForwardInstructorSync(
+  studentHasBacktrackOptOut: boolean,
+  studentPosition: { h: number; v: number; f: number } | null,
+  instructorPosition: { h: number; v: number; f: number } | null,
+): boolean {
+  if (!studentHasBacktrackOptOut || !studentPosition || !instructorPosition) {
+    return false
+  }
+
+  return compareIndices(instructorPosition, studentPosition) > 0
+}
+
+export function shouldResetBacktrackOptOutByMaxPosition(
+  studentHasBacktrackOptOut: boolean,
+  studentPosition: { h: number; v: number; f: number } | null,
+  maxPosition: { h: number; v: number; f: number } | null,
+): boolean {
+  if (!studentHasBacktrackOptOut || !studentPosition || !maxPosition) {
+    return false
+  }
+
+  return compareIndices(studentPosition, maxPosition) >= 0
+}
+
 const SyncDeckStudent: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const [isLoading, setIsLoading] = useState(true)
@@ -332,12 +495,19 @@ const SyncDeckStudent: FC = () => {
   const [statusMessage, setStatusMessage] = useState('Waiting for instructor sync…')
   const [connectionState, setConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
+  const [isBacktrackOptOut, setIsBacktrackOptOut] = useState(false)
   const [studentNameInput, setStudentNameInput] = useState('')
   const [registeredStudentName, setRegisteredStudentName] = useState('')
   const [isRegisteringStudent, setIsRegisteringStudent] = useState(false)
   const [joinError, setJoinError] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const pendingPayloadRef = useRef<unknown>(null)
+  const localStudentIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const lastInstructorIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const lastEffectiveMaxPositionRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const latestInstructorPayloadRef = useRef<unknown>(null)
+  const hasSeenIframeReadySignalRef = useRef(false)
+  const studentBacktrackOptOutRef = useRef(false)
   const attachSessionEndedHandler = useSessionEndedHandler()
 
   useEffect(() => {
@@ -376,6 +546,158 @@ const SyncDeckStudent: FC = () => {
     target.postMessage(payload, presentationOrigin)
   }, [presentationOrigin])
 
+  const setBacktrackOptOut = useCallback((value: boolean) => {
+    studentBacktrackOptOutRef.current = value
+    setIsBacktrackOptOut(value)
+  }, [])
+
+  const handleWsMessage = useCallback(
+    (event: MessageEvent<string>) => {
+      try {
+        const parsed = JSON.parse(event.data) as SyncDeckWsMessage
+        if (parsed.type !== 'syncdeck-state') {
+          return
+        }
+
+        latestInstructorPayloadRef.current = parsed.payload
+        const instructorIndices = extractIndicesFromRevealStateMessage(parsed.payload)
+        if (instructorIndices) {
+          lastInstructorIndicesRef.current = instructorIndices
+        }
+
+        if (isForceSyncBoundaryCommand(parsed.payload) && studentBacktrackOptOutRef.current) {
+          setBacktrackOptOut(false)
+          console.log('[SyncDeck][Student] backtrack opt-out reset by force sync', {
+            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
+            instructorPosition: formatIndicesForLog(lastInstructorIndicesRef.current),
+          })
+        }
+
+        const action = extractRevealAction(parsed.payload)
+        const boundaryDetails = computeBoundaryDetails(
+          parsed.payload,
+          localStudentIndicesRef.current,
+          lastInstructorIndicesRef.current,
+        )
+        lastEffectiveMaxPositionRef.current = boundaryDetails?.effectiveBoundary ?? null
+
+        if (
+          shouldResetBacktrackOptOutByMaxPosition(
+            studentBacktrackOptOutRef.current,
+            localStudentIndicesRef.current,
+            lastEffectiveMaxPositionRef.current,
+          )
+        ) {
+            setBacktrackOptOut(false)
+          console.log('[SyncDeck][Student] backtrack opt-out reset by max position update', {
+            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
+            maxPosition: formatIndicesForLog(lastEffectiveMaxPositionRef.current),
+          })
+        }
+
+        if (action === 'state') {
+          console.log('[SyncDeck][Student] instructor move/state', {
+            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
+            instructorPosition: formatIndicesForLog(boundaryDetails?.instructorIndices ?? null),
+            computedBoundary: formatIndicesForLog(boundaryDetails?.effectiveBoundary ?? null),
+            setBoundary: formatIndicesForLog(boundaryDetails?.setBoundary ?? null),
+            syncToBoundary: boundaryDetails?.syncToBoundary === true,
+          })
+        }
+
+        if (action === 'studentBoundaryChanged') {
+          console.log('[SyncDeck][Student] boundary changed', {
+            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
+            instructorPosition: formatIndicesForLog(boundaryDetails?.instructorIndices ?? null),
+            computedBoundary: formatIndicesForLog(boundaryDetails?.effectiveBoundary ?? null),
+            setBoundary: formatIndicesForLog(boundaryDetails?.setBoundary ?? null),
+            syncToBoundary: boundaryDetails?.syncToBoundary === true,
+          })
+        }
+
+        const boundaryCommand = toRevealBoundaryCommandMessage(
+          parsed.payload,
+          localStudentIndicesRef.current,
+          lastInstructorIndicesRef.current,
+        )
+        if (boundaryCommand != null) {
+          const boundaryPayload = boundaryCommand.payload.payload as
+            | { indices?: unknown; syncToBoundary?: unknown }
+            | undefined
+          const computedBoundary = normalizeIndices(boundaryPayload?.indices)
+          console.log('[SyncDeck][Student] boundary command', {
+            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
+            computedBoundary: formatIndicesForLog(computedBoundary),
+            syncToBoundary: boundaryPayload?.syncToBoundary === true,
+          })
+          sendPayloadToIframe(boundaryCommand)
+        }
+
+        const revealCommand = toRevealCommandMessage(parsed.payload)
+        if (revealCommand == null) {
+          if (boundaryCommand == null) {
+            return
+          }
+        } else {
+          const incomingInstructorIndices = extractIndicesFromRevealStateMessage(parsed.payload)
+          const suppressForwardSync = shouldSuppressForwardInstructorSync(
+            studentBacktrackOptOutRef.current,
+            localStudentIndicesRef.current,
+            incomingInstructorIndices,
+          )
+          console.log('[SyncDeck][Student] state command', {
+            currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
+            instructorPosition: formatIndicesForLog(incomingInstructorIndices),
+            suppressedByBacktrackOptOut: suppressForwardSync,
+          })
+          if (!suppressForwardSync) {
+            sendPayloadToIframe(revealCommand)
+          }
+        }
+
+        setStatusMessage('Receiving instructor sync…')
+      } catch {
+        return
+      }
+    },
+    [sendPayloadToIframe, setBacktrackOptOut],
+  )
+
+  const replayLatestInstructorSyncToIframe = useCallback(() => {
+    const payload = latestInstructorPayloadRef.current
+    if (payload == null) {
+      return
+    }
+
+    const boundaryCommand = toRevealBoundaryCommandMessage(
+      payload,
+      localStudentIndicesRef.current,
+      lastInstructorIndicesRef.current,
+    )
+    if (boundaryCommand != null) {
+      const boundaryPayload = boundaryCommand.payload.payload as
+        | { indices?: unknown; syncToBoundary?: unknown }
+        | undefined
+      const computedBoundary = normalizeIndices(boundaryPayload?.indices)
+      console.log('[SyncDeck][Student] replay boundary command', {
+        currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
+        computedBoundary: formatIndicesForLog(computedBoundary),
+        syncToBoundary: boundaryPayload?.syncToBoundary === true,
+      })
+      sendPayloadToIframe(boundaryCommand)
+    }
+
+    const revealCommand = toRevealCommandMessage(payload)
+    if (revealCommand != null) {
+      const incomingInstructorIndices = extractIndicesFromRevealStateMessage(payload)
+      console.log('[SyncDeck][Student] replay state command', {
+        currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
+        instructorPosition: formatIndicesForLog(incomingInstructorIndices),
+      })
+      sendPayloadToIframe(revealCommand)
+    }
+  }, [sendPayloadToIframe])
+
   useEffect(() => {
     const handleIframeMessage = (event: MessageEvent) => {
       const iframeWindow = iframeRef.current?.contentWindow
@@ -387,43 +709,52 @@ const SyncDeckStudent: FC = () => {
       if (typeof storyboardDisplayed === 'boolean') {
         setIsStoryboardOpen(storyboardDisplayed)
       }
+
+      const localIndices = extractIndicesFromRevealStateMessage(event.data)
+      if (localIndices) {
+        const previousLocalIndices = localStudentIndicesRef.current
+        localStudentIndicesRef.current = localIndices
+
+        const instructorIndices = lastInstructorIndicesRef.current
+        const maxPosition = lastEffectiveMaxPositionRef.current ?? instructorIndices
+        if (
+          !studentBacktrackOptOutRef.current &&
+          previousLocalIndices != null &&
+          compareIndices(localIndices, previousLocalIndices) < 0 &&
+          maxPosition != null &&
+          compareIndices(localIndices, maxPosition) < 0
+        ) {
+          setBacktrackOptOut(true)
+          console.log('[SyncDeck][Student] backtrack opt-out enabled', {
+            currentPosition: formatIndicesForLog(localIndices),
+            maxPosition: formatIndicesForLog(maxPosition),
+          })
+        }
+
+        if (shouldResetBacktrackOptOutByMaxPosition(studentBacktrackOptOutRef.current, localIndices, maxPosition)) {
+          setBacktrackOptOut(false)
+          console.log('[SyncDeck][Student] backtrack opt-out reset by catch-up', {
+            currentPosition: formatIndicesForLog(localIndices),
+            maxPosition: formatIndicesForLog(maxPosition),
+          })
+        }
+      }
+
+      if (!hasSeenIframeReadySignalRef.current && isRevealSyncMessage(event.data)) {
+        hasSeenIframeReadySignalRef.current = true
+        console.log('[SyncDeck][Student] iframe ready signal received', {
+          action: event.data.action,
+          currentPosition: formatIndicesForLog(localStudentIndicesRef.current),
+        })
+        replayLatestInstructorSyncToIframe()
+      }
     }
 
     window.addEventListener('message', handleIframeMessage)
     return () => {
       window.removeEventListener('message', handleIframeMessage)
     }
-  }, [])
-
-  const handleWsMessage = useCallback(
-    (event: MessageEvent<string>) => {
-      try {
-        const parsed = JSON.parse(event.data) as SyncDeckWsMessage
-        if (parsed.type !== 'syncdeck-state') {
-          return
-        }
-
-        const boundaryCommand = toRevealBoundaryCommandMessage(parsed.payload)
-        if (boundaryCommand != null) {
-          sendPayloadToIframe(boundaryCommand)
-        }
-
-        const revealCommand = toRevealCommandMessage(parsed.payload)
-        if (revealCommand == null) {
-          if (boundaryCommand == null) {
-            return
-          }
-        } else {
-          sendPayloadToIframe(revealCommand)
-        }
-
-        setStatusMessage('Receiving instructor sync…')
-      } catch {
-        return
-      }
-    },
-    [sendPayloadToIframe],
-  )
+  }, [replayLatestInstructorSyncToIframe, setBacktrackOptOut])
 
   const buildStudentWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined' || !sessionId || !presentationUrl) {
@@ -602,6 +933,7 @@ const SyncDeckStudent: FC = () => {
   }
 
   const handleIframeLoad = useCallback(() => {
+    hasSeenIframeReadySignalRef.current = false
     sendPayloadToIframe(buildStudentRoleCommandMessage())
 
     if (pendingPayloadRef.current !== null) {
@@ -612,13 +944,35 @@ const SyncDeckStudent: FC = () => {
     if (studentSocketRef.current?.readyState === WS_OPEN_READY_STATE) {
       setStatusMessage('Connected to instructor sync')
     }
-  }, [sendPayloadToIframe, studentSocketRef])
+  }, [replayLatestInstructorSyncToIframe, sendPayloadToIframe, studentSocketRef])
 
   const toggleStoryboard = useCallback(() => {
     sendPayloadToIframe(
       buildRevealCommandMessage('toggleOverview', {}),
     )
   }, [sendPayloadToIframe])
+
+  const handleFastForwardToInstructor = useCallback(() => {
+    const instructorIndices = lastInstructorIndicesRef.current
+    if (!instructorIndices) {
+      return
+    }
+
+    sendPayloadToIframe(
+      buildRevealCommandMessage('setState', {
+        state: {
+          indexh: instructorIndices.h,
+          indexv: instructorIndices.v,
+          indexf: instructorIndices.f,
+        },
+      }),
+    )
+    localStudentIndicesRef.current = instructorIndices
+    setBacktrackOptOut(false)
+    console.log('[SyncDeck][Student] fast-forwarded to instructor position', {
+      instructorPosition: formatIndicesForLog(instructorIndices),
+    })
+  }, [sendPayloadToIframe, setBacktrackOptOut])
 
   if (!sessionId) {
     return (
@@ -700,6 +1054,17 @@ const SyncDeckStudent: FC = () => {
           >
             🎞️
           </button>
+          {isBacktrackOptOut ? (
+            <button
+              type="button"
+              onClick={handleFastForwardToInstructor}
+              className="ml-2 px-2 py-1 rounded border border-indigo-600 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+              title="Fast-forward to instructor"
+              aria-label="Fast-forward to instructor"
+            >
+              ⏩
+            </button>
+          ) : null}
         </div>
         <div className="flex items-center gap-4 min-w-0">
           <ConnectionStatusDot state={connectionState} tooltip={statusMessage} />

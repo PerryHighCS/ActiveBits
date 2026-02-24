@@ -279,7 +279,11 @@ void test('syncdeck websocket relays instructor updates to students in session',
     'message',
     JSON.stringify({
       type: 'syncdeck-state-update',
-      payload: { type: 'slidechanged', payload: { h: 3, v: 1, f: 0 } },
+      payload: {
+        type: 'reveal-sync',
+        action: 'state',
+        payload: { indices: { h: 3, v: 1, f: 0 } },
+      },
     }),
   )
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -289,11 +293,81 @@ void test('syncdeck websocket relays instructor updates to students in session',
   const latestDelivered = delivered[delivered.length - 1]
   assert.deepEqual(
     latestDelivered?.payload,
-    { type: 'slidechanged', payload: { h: 3, v: 1, f: 0 } },
+    {
+      type: 'reveal-sync',
+      action: 'state',
+      payload: { indices: { h: 3, v: 1, f: 0 } },
+    },
   )
 
   const updatedSession = state.store.s1?.data as { lastInstructorPayload?: unknown }
-  assert.deepEqual(updatedSession.lastInstructorPayload, { type: 'slidechanged', payload: { h: 3, v: 1, f: 0 } })
+  assert.deepEqual(updatedSession.lastInstructorPayload, {
+    type: 'reveal-sync',
+    action: 'state',
+    payload: { indices: { h: 3, v: 1, f: 0 } },
+  })
+})
+
+void test('syncdeck websocket does not overwrite persisted snapshot with non-state instructor payload', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const persistedStatePayload = {
+    type: 'reveal-sync',
+    action: 'state',
+    payload: { indices: { h: 2, v: 0, f: 0 } },
+  }
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        lastInstructorPayload: persistedStatePayload,
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const instructorSocket = new MockSocket()
+  const studentSocket = new MockSocket()
+  studentSocket.upgradeHeaders = {
+    cookie: `syncdeck_student_s1=${computeStudentCookieValue('s1', 'student-1')}`,
+  }
+  ws.wss.clients.add(instructorSocket)
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(
+    instructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+      instructorPasscode: 'teacher-pass',
+    }),
+    ws.wss,
+  )
+  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  instructorSocket.emit(
+    'message',
+    JSON.stringify({
+      type: 'syncdeck-state-update',
+      payload: {
+        type: 'reveal-sync',
+        action: 'command',
+        payload: {
+          name: 'setRole',
+          payload: { role: 'instructor' },
+        },
+      },
+    }),
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const updatedSession = state.store.s1?.data as { lastInstructorPayload?: unknown }
+  assert.deepEqual(updatedSession.lastInstructorPayload, persistedStatePayload)
 })
 
 void test('syncdeck websocket broadcasts student presence count to instructor', async () => {

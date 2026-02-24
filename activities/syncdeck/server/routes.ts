@@ -101,6 +101,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+function isPersistableInstructorStatePayload(payload: unknown): boolean {
+  if (!isPlainObject(payload)) {
+    return false
+  }
+
+  return payload.type === 'reveal-sync' && payload.action === 'state'
+}
+
 function createInstructorPasscode(): string {
   return randomBytes(16).toString('hex')
 }
@@ -637,6 +645,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           return
         }
         client.isInstructor = true
+        if (session.data.lastInstructorPayload != null) {
+          sendSyncDeckState(socket, session.data.lastInstructorPayload)
+        }
         await broadcastStudentsToInstructors(session.id)
         return
       }
@@ -680,14 +691,17 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           return
         }
 
-        session.data.lastInstructorPayload = message.payload ?? null
-        await sessions.set(session.id, session)
+        const nextPayload = message.payload ?? null
+        if (isPersistableInstructorStatePayload(nextPayload)) {
+          session.data.lastInstructorPayload = nextPayload
+          await sessions.set(session.id, session)
+        }
 
         for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
           if (peer.sessionId !== session.id || peer.isInstructor || peer === client) {
             continue
           }
-          sendSyncDeckState(peer, message.payload ?? null)
+          sendSyncDeckState(peer, nextPayload)
         }
       })().catch(() => {
         return

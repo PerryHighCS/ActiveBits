@@ -6,6 +6,8 @@ import SyncDeckStudent from './SyncDeckStudent.js'
 import { toRevealCommandMessage } from './SyncDeckStudent.js'
 import { toRevealBoundaryCommandMessage } from './SyncDeckStudent.js'
 import { buildStudentRoleCommandMessage } from './SyncDeckStudent.js'
+import { shouldSuppressForwardInstructorSync } from './SyncDeckStudent.js'
+import { shouldResetBacktrackOptOutByMaxPosition } from './SyncDeckStudent.js'
 
 void test('SyncDeckStudent renders join guidance copy', () => {
   const html = renderToStaticMarkup(
@@ -87,8 +89,8 @@ void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged to setStud
     payload: {
       name: 'setStudentBoundary',
       payload: {
-        indices: { h: 3, v: 1, f: 0 },
-        syncToBoundary: false,
+        indices: { h: 3, v: 1, f: Number.MAX_SAFE_INTEGER },
+        syncToBoundary: true,
       },
     },
   })
@@ -108,7 +110,51 @@ void test('toRevealBoundaryCommandMessage maps state payload studentBoundary to 
   })
 
   assert.equal((result?.payload as { name?: string })?.name, 'setStudentBoundary')
-  assert.deepEqual((result?.payload as { payload?: { indices?: unknown } })?.payload?.indices, { h: 7, v: 0, f: 0 })
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown } })?.payload?.indices, {
+    h: 7,
+    v: 0,
+    f: Number.MAX_SAFE_INTEGER,
+  })
+})
+
+void test('toRevealBoundaryCommandMessage uses instructor indices when set boundary is behind', () => {
+  const result = toRevealBoundaryCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    role: 'instructor',
+    payload: {
+      studentBoundary: { h: 2, v: 0, f: 0 },
+      indices: { h: 3, v: 1, f: 2 },
+    },
+  })
+
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown } })?.payload?.indices, {
+    h: 3,
+    v: 1,
+    f: 2,
+  })
+})
+
+void test('toRevealBoundaryCommandMessage sets syncToBoundary when student is beyond new max boundary', () => {
+  const result = toRevealBoundaryCommandMessage(
+    {
+      type: 'reveal-sync',
+      version: '1.0.0',
+      action: 'state',
+      role: 'instructor',
+      payload: {
+        studentBoundary: null,
+        indices: { h: 2, v: 0, f: 0 },
+      },
+    },
+    { h: 4, v: 0, f: 0 },
+  )
+
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
+    indices: { h: 2, v: 0, f: 0 },
+    syncToBoundary: true,
+  })
 })
 
 void test('toRevealBoundaryCommandMessage ignores non-instructor role payloads', () => {
@@ -124,7 +170,7 @@ void test('toRevealBoundaryCommandMessage ignores non-instructor role payloads',
   assert.equal(result, null)
 })
 
-void test('toRevealBoundaryCommandMessage maps state payload with null boundary to clearBoundary command', () => {
+void test('toRevealBoundaryCommandMessage maps state payload with null boundary to instructor-position setStudentBoundary', () => {
   const result = toRevealBoundaryCommandMessage({
     type: 'reveal-sync',
     version: '1.0.0',
@@ -136,34 +182,34 @@ void test('toRevealBoundaryCommandMessage maps state payload with null boundary 
     },
   })
 
-  assert.deepEqual(result, {
-    type: 'reveal-sync',
-    version: '1.0.0',
-    action: 'command',
-    deckId: null,
-    role: 'instructor',
-    source: 'reveal-iframe-sync',
-    ts: result?.ts,
-    payload: {
-      name: 'clearBoundary',
-    },
+  assert.equal((result?.payload as { name?: string })?.name, 'setStudentBoundary')
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
+    indices: { h: 2, v: 0, f: 0 },
+    syncToBoundary: true,
   })
-  assert.equal(typeof result?.ts, 'number')
 })
 
-void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged null payload to clearBoundary command', () => {
-  const result = toRevealBoundaryCommandMessage({
-    type: 'reveal-sync',
-    version: '1.0.0',
-    action: 'studentBoundaryChanged',
-    role: 'instructor',
-    payload: {
-      reason: 'instructorSet',
-      studentBoundary: null,
+void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged null payload to fallback instructor boundary', () => {
+  const result = toRevealBoundaryCommandMessage(
+    {
+      type: 'reveal-sync',
+      version: '1.0.0',
+      action: 'studentBoundaryChanged',
+      role: 'instructor',
+      payload: {
+        reason: 'instructorSet',
+        studentBoundary: null,
+      },
     },
-  })
+    { h: 3, v: 0, f: 0 },
+    { h: 2, v: 0, f: 0 },
+  )
 
-  assert.equal((result?.payload as { name?: string })?.name, 'clearBoundary')
+  assert.equal((result?.payload as { name?: string })?.name, 'setStudentBoundary')
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
+    indices: { h: 2, v: 0, f: 0 },
+    syncToBoundary: true,
+  })
 })
 
 void test('buildStudentRoleCommandMessage emits setRole student command', () => {
@@ -179,4 +225,44 @@ void test('buildStudentRoleCommandMessage emits setRole student command', () => 
       role: 'student',
     },
   })
+})
+
+void test('shouldSuppressForwardInstructorSync suppresses when opted-out student is behind instructor', () => {
+  const result = shouldSuppressForwardInstructorSync(
+    true,
+    { h: 2, v: 0, f: 0 },
+    { h: 3, v: 0, f: 0 },
+  )
+
+  assert.equal(result, true)
+})
+
+void test('shouldSuppressForwardInstructorSync allows sync when student has caught up', () => {
+  const result = shouldSuppressForwardInstructorSync(
+    true,
+    { h: 3, v: 0, f: 0 },
+    { h: 3, v: 0, f: 0 },
+  )
+
+  assert.equal(result, false)
+})
+
+void test('shouldResetBacktrackOptOutByMaxPosition resets when student reaches max position', () => {
+  const result = shouldResetBacktrackOptOutByMaxPosition(
+    true,
+    { h: 3, v: 0, f: 0 },
+    { h: 3, v: 0, f: 0 },
+  )
+
+  assert.equal(result, true)
+})
+
+void test('shouldResetBacktrackOptOutByMaxPosition does not reset when student remains behind max position', () => {
+  const result = shouldResetBacktrackOptOutByMaxPosition(
+    true,
+    { h: 2, v: 0, f: 0 },
+    { h: 3, v: 0, f: 0 },
+  )
+
+  assert.equal(result, false)
 })
