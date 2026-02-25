@@ -21,7 +21,7 @@ Create a practical, phased plan to move ActiveBits toward comprehensive and audi
 - Preserve existing behavior unless explicitly requested.
 - Keep migration-compatible mixed-extension test discovery (`.test.js/.test.ts/.test.tsx`).
 - Respect known sandbox limits: socket-binding tests require canonical verification outside restricted sandbox.
-- Follow repo validation contract in `AGENTS.md`.
+- Follow the repository's validation and agent contract documentation.
 
 ## Coverage Dimensions
 
