@@ -258,6 +258,55 @@ void test('persistCreateSessionBootstrapToSessionStorage stores declared create 
   }
 })
 
+void test('persistCreateSessionBootstrapToSessionStorage ignores sessionStorage write failures', () => {
+  const originalWindow = globalThis.window
+  const originalWarn = console.warn
+  const warnings: string[] = []
+  let writeAttempts = 0
+  const fakeSessionStorage = {
+    setItem() {
+      writeAttempts += 1
+      throw new Error('quota exceeded')
+    },
+  }
+
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map((arg) => String(arg)).join(' '))
+  }
+
+  Object.defineProperty(globalThis, 'window', {
+    value: { sessionStorage: fakeSessionStorage },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    persistCreateSessionBootstrapToSessionStorage(
+      {
+        sessionStorage: [
+          { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
+        ],
+      },
+      'session-123',
+      {
+        instructorPasscode: 'teacher-passcode',
+      },
+    )
+
+    assert.equal(writeAttempts, 1)
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0] ?? '', /\[ManageDashboard\] Failed to persist create-session bootstrap data to sessionStorage:/)
+    assert.match(warnings[0] ?? '', /quota exceeded/)
+  } finally {
+    console.warn = originalWarn
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
 void test('buildPersistentLinkUrl appends query only for legacy or append-query mode', () => {
   assert.equal(
     buildPersistentLinkUrl('https://bits.example', '/activity/raffle/hash1', { topic: 'arrays' }, null),

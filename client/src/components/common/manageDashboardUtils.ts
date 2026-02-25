@@ -145,7 +145,12 @@ export function persistCreateSessionBootstrapToSessionStorage(
     if (typeof value !== 'string' || value.length === 0) {
       continue
     }
-    window.sessionStorage.setItem(`${entry.keyPrefix}${sessionId}`, value)
+
+    try {
+      window.sessionStorage.setItem(`${entry.keyPrefix}${sessionId}`, value)
+    } catch (error) {
+      console.warn('[ManageDashboard] Failed to persist create-session bootstrap data to sessionStorage:', error)
+    }
   }
 }
 

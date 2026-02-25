@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ComponentType, type FormEvent } from 'react'
+import { Suspense, useCallback, useEffect, useState, type ComponentType, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { activities } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
@@ -492,12 +492,14 @@ export default function ManageDashboard() {
       <Modal open={showPersistentModal} onClose={closePersistentModal} title={`Create Permanent Link - ${selectedActivity?.name}`}>
         {!persistentUrl ? (
           CustomPersistentLinkBuilder && selectedActivity ? (
+            <Suspense fallback={<p className="text-sm text-gray-600">Loading link builder...</p>}>
               <CustomPersistentLinkBuilder
-              activityId={selectedActivity.id}
-              onCreated={async (result: ActivityPersistentLinkBuildResult) => {
-                await handlePersistentLinkCreated(selectedActivity.id, result)
-              }}
-            />
+                activityId={selectedActivity.id}
+                onCreated={async (result: ActivityPersistentLinkBuildResult) => {
+                  await handlePersistentLinkCreated(selectedActivity.id, result)
+                }}
+              />
+            </Suspense>
           ) : (
             <form onSubmit={createPersistentLink} className="flex flex-col gap-4">
               <p className="text-gray-700">
