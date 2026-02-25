@@ -38,7 +38,7 @@ Each touched area should be classified on these axes:
 1. Inventory all existing tests by workspace and type.
 2. Tag each test as `unit`, `contract`, `integration`, or `smoke`.
 3. Identify critical flows with no explicit tests.
-4. Record baseline in `.claude/plans/testing_coverage_review.md`.
+4. Record baseline in `.agent/plans/testing_coverage_review.md`.
 
 Suggested inventory commands:
 
