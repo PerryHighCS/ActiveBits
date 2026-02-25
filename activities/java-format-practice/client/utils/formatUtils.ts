@@ -91,11 +91,9 @@ export function evaluateFormatString(formatStr: string, args: unknown[] = []): s
           } else if ((type === 'd' || type === 'x' || type === 'X') && argIndex < args.length) {
             // Integer/hex with width: %3d, %03d, %04X, etc.
             const rawArg = args[argIndex]
-            let num: string
+            let num = String(Number.parseInt(String(rawArg), 10) || 0)
 
-            if (type === 'd') {
-              num = String(Number.parseInt(String(rawArg), 10) || 0)
-            } else if (type === 'x' || type === 'X') {
+            if (type === 'x' || type === 'X') {
               const intValue = Number.parseInt(String(rawArg), 10) || 0
               num = Math.trunc(intValue).toString(16)
               if (type === 'X') num = num.toUpperCase()
