@@ -27,7 +27,7 @@ Before making changes, read these files when relevant:
 
 Before making code changes:
 
-1. Confirm branch and working tree status.
+1. Confirm branch and working tree status. NEVER commit to `main`.
 2. If unexpected unrelated file changes are discovered, pause and ask how to proceed.
 3. Read relevant docs (`README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`).
 4. Identify change scope (docs-only, client, server, activities, cross-workspace).
