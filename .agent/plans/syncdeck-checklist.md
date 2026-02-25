@@ -14,6 +14,13 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - with id and parentid as session ids
         - server does not cull children until parent is culled
         - student ids/names synced to parent session
+    - [ ] Define embedded-activity activation/claim flow for already-connected parent-session users
+        - evaluate persistent-link-like flow vs session-connected flow
+        - candidate: instructor requests child session over parent websocket, then joins child session
+        - parent session sends per-user claim tokens so users claim mapped seats in child session
+    - [ ] Define multi-instructor arbitration for embedded-activity activation
+        - prevent duplicate child-session creation when multiple instructors are connected
+        - define lock/leader/ownership rules for create/retry/cancel flows
     - [ ] Instructor should be able to download a report - activities will need to be able to generate html for report
     - [ ] Need some kind of picker for the activities that can give codes to presentation
 

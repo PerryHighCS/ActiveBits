@@ -42,12 +42,21 @@ Future planning is currently organized into three tracks:
   - Parent/child IDs are session IDs.
   - Server does not cull children until parent is culled.
   - Student identities/names sync from parent session.
+- Define embedded-activity activation/claim flow for already-connected sessions.
+  - Evaluate whether this should mirror persistent-link activation, or use a parent-session-connected flow.
+  - Candidate approach: instructor requests child session creation over parent websocket, then joins child session.
+  - Parent session distributes per-user claim tokens so each connected user can claim their mapped seat in the child session.
+- Define multi-instructor arbitration for embedded-activity activation.
+  - Prevent duplicate child-session creation when multiple instructors are connected.
+  - Decide lock/leader/ownership rules for who can initiate (and retry/cancel) child-session opens.
 - Instructor can download a report.
   - Activities may need to generate HTML for reporting.
 - Add an activity picker that can issue codes for presentation use.
 
 ### Notes
 - Session-linking, lifecycle, and reporting contracts should be specified before implementation.
+- Activation/claim protocol for embedded sessions should be specified before implementation; current websocket child-session handoff idea is only a candidate design.
+- Multi-instructor arbitration/locking rules should be specified before implementation to avoid duplicate child sessions.
 
 ---
 
@@ -79,4 +88,3 @@ For each track:
 2. Add focused server + client tests.
 3. Implement behind small, reviewable commits.
 4. Validate with activity-scope tests, then full repo tests.
-
