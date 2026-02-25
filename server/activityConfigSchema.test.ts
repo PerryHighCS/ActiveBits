@@ -87,3 +87,23 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
     /responseField/,
   )
 })
+
+void test('parseActivityConfig removes optional keys when input provides null', () => {
+  const parsed = parseActivityConfig(
+    {
+      id: 'nullables',
+      name: 'Nullables',
+      description: 'desc',
+      color: 'green',
+      soloMode: false,
+      title: null,
+      deepLinkOptions: null,
+    },
+    'null-config',
+  )
+
+  assert.equal(parsed.title, undefined)
+  assert.equal(parsed.deepLinkOptions, undefined)
+  assert.equal('title' in parsed, false)
+  assert.equal('deepLinkOptions' in parsed, false)
+})

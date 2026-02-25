@@ -243,6 +243,18 @@ function parseManageDashboard(raw: unknown, context: string): ActivityConfig['ma
   }
 }
 
+function assignOptionalField<K extends keyof ActivityConfig>(
+  target: ActivityConfig,
+  key: K,
+  value: ActivityConfig[K] | undefined,
+): void {
+  if (value === undefined) {
+    delete target[key]
+    return
+  }
+  target[key] = value
+}
+
 export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.config'): ActivityConfig {
   if (!isRecord(rawConfig)) {
     throw new Error(`${sourceLabel}: default export must be an object`)
@@ -274,16 +286,16 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const manageDashboard = parseManageDashboard(rawConfig.manageDashboard, context)
   const manageLayout = parseManageLayout(rawConfig.manageLayout, context)
 
-  if (title !== undefined) parsed.title = title
-  if (clientEntry !== undefined) parsed.clientEntry = clientEntry
-  if (serverEntry !== undefined) parsed.serverEntry = serverEntry
-  if (isDev !== undefined) parsed.isDev = isDev
-  if (soloModeMeta !== undefined) parsed.soloModeMeta = soloModeMeta
-  if (deepLinkOptions !== undefined) parsed.deepLinkOptions = deepLinkOptions
-  if (deepLinkGenerator !== undefined) parsed.deepLinkGenerator = deepLinkGenerator
-  if (createSessionBootstrap !== undefined) parsed.createSessionBootstrap = createSessionBootstrap
-  if (manageDashboard !== undefined) parsed.manageDashboard = manageDashboard
-  if (manageLayout !== undefined) parsed.manageLayout = manageLayout
+  assignOptionalField(parsed, 'title', title)
+  assignOptionalField(parsed, 'clientEntry', clientEntry)
+  assignOptionalField(parsed, 'serverEntry', serverEntry)
+  assignOptionalField(parsed, 'isDev', isDev)
+  assignOptionalField(parsed, 'soloModeMeta', soloModeMeta)
+  assignOptionalField(parsed, 'deepLinkOptions', deepLinkOptions)
+  assignOptionalField(parsed, 'deepLinkGenerator', deepLinkGenerator)
+  assignOptionalField(parsed, 'createSessionBootstrap', createSessionBootstrap)
+  assignOptionalField(parsed, 'manageDashboard', manageDashboard)
+  assignOptionalField(parsed, 'manageLayout', manageLayout)
 
   return parsed
 }
