@@ -109,6 +109,9 @@ export default {
       timeoutMs: 4000,
     },
   },
+  manageDashboard: { // optional shared dashboard hints/capabilities
+    customPersistentLinkBuilder: true, // activity-owned persistent-link UI in dashboard modal
+  },
   clientEntry: './client/index.ts',  // Component entry (TS/TSX)
   serverEntry: './server/routes.ts', // Server routes
 };
@@ -122,6 +125,7 @@ import StudentComp from './student/StudentComp';
 export default {
   ManagerComponent: ManagerComp,
   StudentComponent: StudentComp,
+  PersistentLinkBuilderComponent: null, // optional: activity-owned permanent-link modal UI
   footerContent: null, // JSX if desired (use .tsx if footerContent includes JSX)
 };
 ```
@@ -240,7 +244,13 @@ Each activity defines its own endpoints under `/api/{activity-id}/...`
 5. Server validates HMAC and teacher code, creates/resets session
 6. Teacher auto-authenticated and redirected to manager view
 
-Activities can override the default link-generation endpoint using `activity.config.ts > deepLinkGenerator.endpoint`. Activities that need client-side preflight before generating links can declare `deepLinkGenerator.preflight` and the shared dashboard will run the declared strategy without activity-specific imports.
+Activities can override the default link-generation endpoint using `activity.config.ts > deepLinkGenerator.endpoint`.
+
+For simple permanent-link UX, shared `ManageDashboard` can render generic fields from `deepLinkOptions` and submit to the configured generator endpoint.
+
+For advanced or protocol-specific UX (for example iframe preview / custom validation), an activity can set `activity.config.ts > manageDashboard.customPersistentLinkBuilder = true` and export `PersistentLinkBuilderComponent` from its client entry. In that mode, the activity owns the modal form/preflight/submit flow while `ManageDashboard` only provides the placement shell and post-create success display.
+
+`deepLinkGenerator.preflight` remains activity metadata, but shared dashboard code should not interpret activity-specific preflight protocol names directly.
 
 ### Deep Linking with Query Parameters
 Activities can use URL query parameters for direct deep linking to specific content or configurations. This allows instructors to create presentation-ready links that automatically configure the activity.
