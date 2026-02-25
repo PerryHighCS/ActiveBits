@@ -16,6 +16,8 @@ const cases: EvaluateCase[] = [
   { name: 'left align %-15s', format: '%-15s | test', args: ['admin'], expected: 'admin           | test' },
   { name: 'right align %2d', format: 'Failed: %2d', args: [3], expected: 'Failed:  3' },
   { name: 'zero pad %03d', format: '%03d', args: [7], expected: '007' },
+  { name: 'uppercase hex %04X', format: '%04X', args: [48879], expected: 'BEEF' },
+  { name: 'lowercase hex %04x', format: '%04x', args: [48879], expected: 'beef' },
   { name: 'multiple placeholders', format: 'Name: %s, Age: %d', args: ['Alice', 30], expected: 'Name: Alice, Age: 30' },
   { name: 'newline %n', format: 'Line 1%nLine 2', args: [], expected: 'Line 1\nLine 2' },
   {

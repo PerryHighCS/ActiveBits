@@ -1,7 +1,5 @@
 # AGENTS.md
 
-This file defines the default execution contract for human and AI agents working in this repository.
-
 ## Goals
 
 1. Keep work safe, incremental, and reviewable.
@@ -16,27 +14,24 @@ Before making changes, read these files when relevant:
 1. `README.md` (project commands and structure)
 2. `ARCHITECTURE.md` (system boundaries and runtime model)
 3. `DEPLOYMENT.md` (production/deploy constraints)
-4. `.agent/knowledge/react-best-practices.md` (React patterns and optimization guidance)
+4. `.agent/knowledge/*.md` (discovered patterns and optimization guidance)
 
 ## Working Rules
 
-1. Run baseline checks before large refactors.
-2. Prefer small, phase-scoped commits and PRs.
-3. Always run `npm test` before committing.
-4. From the package root you can call `npm test`; the commit should pass all tests before merge.
-5. Fix any failing tests or lint errors until the whole suite is green.
-6. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
-7. Add or update tests for the code you change, even if nobody asked.
-8. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
+1. From the package root you can call `npm test`; all tests must pass before commit.
+2. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
+3. Add or update tests for the code you change, even if nobody asked.
+4. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
 
 ## Preflight Checklist
 
 Before making code changes:
 
 1. Confirm branch and working tree status.
-2. Read relevant docs (`README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`).
-3. Identify change scope (docs-only, client, server, activities, cross-workspace).
-4. Run at least the relevant baseline command(s) for touched areas.
+2. If unexpected unrelated file changes are discovered, pause and ask how to proceed.
+3. Read relevant docs (`README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`).
+4. Identify change scope (docs-only, client, server, activities, cross-workspace).
+5. If requirements conflict with repository safety or deployment guarantees, escalate before continuing.
 
 ## Verification Matrix
 
@@ -44,20 +39,9 @@ Run these minimum checks based on scope:
 
 1. Docs-only changes
    - Verify links/commands in changed docs are accurate.
-2. Client-only code changes
-   - `npm --workspace client test`
-   - `npm --workspace client run build` (when build/runtime paths are affected)
-   - `npm --workspace client run lint` (fix any linting errors before commit)
-3. Server-only code changes
-   - `npm --workspace server test`
-   - `npm run verify:server` (when runtime/startup behavior is affected)
-   - `npm --workspace server run lint` (if linting script exists)
-4. Activities-only changes
-   - `npm --workspace activities test`
-   - `npm --workspace activities run lint` (fix any linting errors before commit)
-5. Cross-workspace changes
-   - `npm run lint` (if root lint script exists; linting is included in `npm test`)
-   - `npm test` (runs unit tests + linting across all workspaces)
+2. Code changes
+   - Run appropriate workspace tests including lint and typecheck.
+   - For cross-workspace changes, ensure `npm test` passes
 6. Sandbox/agent environments that block local port binding
    - Keep `npm test` as the primary merge gate when available.
    - If port-binding tests fail due environment constraints (for example `EPERM` on listen), run `npm run test:codex` and record the limitation in validation notes.
@@ -87,29 +71,6 @@ Run these minimum checks based on scope:
    - owner
    - cleanup condition or target date
 
-## PR Metadata Standard
-
-Each PR should include:
-
-1. Scope summary (what changed and why).
-2. Risk level and likely regression areas.
-3. Validation commands run and outcomes.
-4. Docs updated (or explicit `none required` rationale).
-5. Rollback approach.
-
-## Release-Impact Rule
-
-If a change affects runtime, build, or deployment behavior:
-
-1. Update `DEPLOYMENT.md` in the same PR.
-2. Update `README.md` quick-start/build/run commands as needed.
-3. Update `ARCHITECTURE.md` if system boundaries or runtime flow changed.
-
-## Ownership and Escalation
-
-1. If unexpected unrelated file changes are discovered, pause and ask how to proceed.
-2. If requirements conflict with repository safety or deployment guarantees, escalate before continuing.
-
 ## Evidence and Tracking
 
 Use these logs to keep work auditable:
@@ -131,18 +92,6 @@ Use these logs to keep work auditable:
 
 If a log file is missing, create it when first needed.
 If a discovery does not fit an existing knowledge file, create a new `.agent/knowledge/<category>.md` file and define its purpose at the top. Prefer extending an existing category first; create a new category only when the topic is durable and likely to be reused.
-
-## Repo Discoveries Format
-
-When adding an entry to `.agent/knowledge/repo_discoveries.md`, include:
-
-1. Date
-2. Area (client/server/activities/tooling/docs)
-3. Discovery
-4. Why it matters
-5. Evidence (file path and/or command)
-6. Follow-up action
-7. Owner
 
 ## Definition of Done (General)
 

@@ -35,6 +35,21 @@ void test('ChallengeSelector renders difficulty/theme controls with selected sta
   assert.match(markup, /Spy Badge/)
 })
 
+void test('ChallengeSelector disables all controls when disabled', () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(ChallengeSelector, {
+      currentDifficulty: 'beginner',
+      currentTheme: 'all',
+      onDifficultyChange: () => {},
+      onThemeChange: () => {},
+      isDisabled: true,
+    }),
+  )
+
+  const disabledCount = [...markup.matchAll(/\sdisabled=""/g)].length
+  assert.equal(disabledCount, 7)
+})
+
 void test('StatsPanel computes and renders accuracy', () => {
   const markup = renderToStaticMarkup(
     React.createElement(StatsPanel, {
