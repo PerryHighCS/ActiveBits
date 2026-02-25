@@ -131,7 +131,7 @@ Each phase should be shipped in small PR slices with explicit validation command
 
 ## Immediate Next Step
 
-Create `.claude/plans/testing_coverage_review.md` with:
+Create `.agent/plans/testing_coverage_review.md` with:
 
 1. Test inventory table.
 2. Flow-to-test mapping.
