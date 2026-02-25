@@ -1,5 +1,12 @@
 import React, { type ComponentType } from 'react'
-import type { ActivityClientModule, ActivityConfig, ActivityRegistryEntry } from '../../../types/activity.js'
+import type {
+  ActivityClientModule,
+  ActivityConfig,
+  ActivityDeepLinkPreflightConfig,
+  ActivityDeepLinkPreflightResult,
+  ActivityRegistryEntry,
+} from '../../../types/activity.js'
+import activityConfigSchema from '../../../types/activityConfigSchema.js'
 
 /**
  * Activity Registry (auto-discovered)
@@ -29,6 +36,7 @@ const CONFIG_EXTENSION_PRIORITY = ['.ts', '.js'] as const
 const CLIENT_EXTENSION_PRIORITY = ['.tsx', '.ts', '.jsx', '.js'] as const
 
 const isDevelopment = import.meta.env.MODE === 'development'
+const { parseActivityConfig } = activityConfigSchema
 
 function getExtensionPriority(modulePath: string, priorityOrder: readonly string[]): number {
   const index = priorityOrder.findIndex((ext) => modulePath.endsWith(ext))
@@ -50,10 +58,12 @@ const preferredConfigEntries = (() => {
   const byActivityId = new Map<string, [string, ActivityConfigModule]>()
 
   for (const [modulePath, moduleExports] of Object.entries(configModules)) {
-    const cfg = moduleExports.default
-
-    if (!cfg?.id) {
-      console.warn(`Activity config at "${modulePath}" is missing an id`)
+    let cfg: ActivityConfig
+    try {
+      cfg = parseActivityConfig(moduleExports.default, modulePath)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`Invalid activity config at "${modulePath}", skipping: ${message}`)
       continue
     }
 
@@ -176,12 +186,20 @@ export const activities: ActivityRegistryEntry[] = preferredConfigEntries
       activityId,
       'footerContent',
     )
+    const PersistentLinkBuilderComponent = createLazyComponent(
+      clientLoader,
+      (resolved) => resolved.PersistentLinkBuilderComponent as ComponentType<unknown> | null | undefined,
+      undefined,
+      activityId,
+      'PersistentLinkBuilderComponent',
+    )
 
     return {
       ...cfg,
       ManagerComponent,
       StudentComponent,
       FooterComponent,
+      PersistentLinkBuilderComponent,
     }
   })
   .filter((activity): activity is ActivityRegistryEntry => activity !== null)
@@ -193,6 +211,24 @@ export const activityMap: Record<string, ActivityRegistryEntry> = activities.red
 
 export function getActivity(id: string): ActivityRegistryEntry | undefined {
   return activityMap[id]
+}
+
+export async function runActivityDeepLinkPreflight(
+  activityId: string,
+  preflight: ActivityDeepLinkPreflightConfig,
+  rawValue: string,
+): Promise<ActivityDeepLinkPreflightResult> {
+  const clientLoader = findClientLoader(activityId)
+  if (!clientLoader) {
+    return { valid: false, warning: 'Validation is unavailable for this activity.' }
+  }
+
+  const resolved = await resolveClientModule(clientLoader)
+  if (typeof resolved.runDeepLinkPreflight !== 'function') {
+    return { valid: false, warning: 'Validation is unavailable for this activity.' }
+  }
+
+  return await resolved.runDeepLinkPreflight(preflight, rawValue)
 }
 
 export default activities

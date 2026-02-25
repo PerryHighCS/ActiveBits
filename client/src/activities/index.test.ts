@@ -1,8 +1,9 @@
-import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import activityConfigSchema from '../../../types/activityConfigSchema.js'
 
 interface ActivityConfigModule {
   default?: {
@@ -15,6 +16,7 @@ const __dirname = dirname(__filename)
 
 const EXPECTED_ACTIVITIES = [
   'algorithm-demo',
+  'syncdeck',
   'java-string-practice',
   'java-format-practice',
   'python-list-practice',
@@ -43,6 +45,8 @@ async function loadActivityConfig(configPath: string): Promise<ActivityConfigMod
   const module = (await import(pathToFileURL(configPath).href)) as ActivityConfigModule
   return module.default
 }
+
+const { parseActivityConfig } = activityConfigSchema
 
 void test('all expected activities exist with required files', () => {
   const activitiesDir = join(__dirname, '../../../activities')
@@ -138,4 +142,60 @@ void test('activity count matches expected count', async () => {
     EXPECTED_ACTIVITIES.length,
     `Expected ${EXPECTED_ACTIVITIES.length} non-dev activities, found ${nonDevActivityCount}`,
   )
+})
+
+void test('client registry-style config parsing skips invalid config modules with warning', () => {
+  const originalWarn = console.warn
+  const warnings: string[] = []
+
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map((arg) => String(arg)).join(' '))
+  }
+
+  try {
+    const configModules = {
+      '@activities/good/activity.config.ts': {
+        default: {
+          id: 'good',
+          name: 'Good',
+          description: 'valid config',
+          color: 'blue',
+          soloMode: true,
+        },
+      },
+      '@activities/bad/activity.config.ts': {
+        default: {
+          id: 'bad',
+          name: 'Bad',
+          description: 'invalid config',
+          color: 'red',
+          soloMode: false,
+          deepLinkGenerator: {
+            endpoint: '/api/bad',
+            mode: 'wrong-mode',
+          },
+        },
+      },
+    } satisfies Record<string, { default?: unknown }>
+
+    const acceptedIds: string[] = []
+
+    for (const [modulePath, moduleExports] of Object.entries(configModules)) {
+      try {
+        const cfg = parseActivityConfig(moduleExports.default, modulePath)
+        acceptedIds.push(cfg.id)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`Invalid activity config at "${modulePath}", skipping: ${message}`)
+      }
+    }
+
+    assert.deepEqual(acceptedIds, ['good'])
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0] ?? '', /Invalid activity config at "@activities\/bad\/activity\.config\.ts", skipping:/)
+    assert.match(warnings[0] ?? '', /deepLinkGenerator/)
+    assert.match(warnings[0] ?? '', /mode/)
+  } finally {
+    console.warn = originalWarn
+  }
 })

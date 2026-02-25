@@ -1,18 +1,24 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { Suspense, useCallback, useEffect, useState, type ComponentType, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { activities } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
 import { useClipboard } from '@src/hooks/useClipboard'
+import type { ActivityPersistentLinkBuildResult, ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import {
+  buildPersistentLinkUrl,
   buildPersistentSessionKey,
   buildQueryString,
   buildSoloLink,
   describeSelectedOptions,
   initializeDeepLinkOptions,
   normalizeSelectedOptions,
+  persistCreateSessionBootstrapToSessionStorage,
+  parseDeepLinkGenerator,
   parseDeepLinkOptions,
+  validateDeepLinkSelection,
   type DeepLinkSelection,
 } from './manageDashboardUtils'
+import { resolveCustomPersistentLinkBuilder } from './manageDashboardViewUtils'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 
@@ -32,6 +38,7 @@ interface PersistentSessionListResponse {
 
 interface CreateSessionResponse {
   id?: string
+  [key: string]: unknown
 }
 
 interface PersistentLinkCreateResponse {
@@ -170,6 +177,8 @@ export default function ManageDashboard() {
         throw new Error('Failed to create session')
       }
 
+      persistCreateSessionBootstrapToSessionStorage(getActivityById(activityId)?.createSessionBootstrap, payload.id, payload)
+
       void navigate(`/manage/${activityId}/${payload.id}`)
     } catch (createError) {
       console.error(createError)
@@ -197,6 +206,21 @@ export default function ManageDashboard() {
     setPersistentOptions({})
   }
 
+  const handlePersistentLinkCreated = useCallback(
+    async (activityId: string, result: ActivityPersistentLinkBuildResult): Promise<void> => {
+      setError(null)
+      setPersistentUrl(result.fullUrl)
+
+      setSavedSessions((previous) => ({
+        ...previous,
+        [buildPersistentSessionKey(activityId, result.hash)]: result.teacherCode,
+      }))
+
+      await refreshPersistentSessions()
+    },
+    [refreshPersistentSessions],
+  )
+
   const openSoloModal = (activity: DashboardActivity): void => {
     setSoloActivity(activity)
     setSoloOptions(initializeDeepLinkOptions(activity.deepLinkOptions))
@@ -217,19 +241,36 @@ export default function ManageDashboard() {
       return
     }
 
+    const optionValidationErrors = validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)
+    if (Object.keys(optionValidationErrors).length > 0) {
+      setError('Please fix the highlighted link options')
+      return
+    }
+
     setError(null)
     setIsCreating(true)
 
     try {
       const selectedOptions = normalizeSelectedOptions(selectedActivity.deepLinkOptions, persistentOptions)
-      const response = await fetch('/api/persistent-session/create', {
+      const deepLinkGenerator = parseDeepLinkGenerator(selectedActivity.deepLinkGenerator)
+      const endpoint = deepLinkGenerator?.endpoint ?? '/api/persistent-session/create'
+      const requestBody = {
+        activityName: selectedActivity.id,
+        teacherCode: teacherCode.trim(),
+        selectedOptions,
+      }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          activityName: selectedActivity.id,
-          teacherCode: teacherCode.trim(),
-          selectedOptions,
-        }),
+        body: JSON.stringify(
+          deepLinkGenerator?.expectsSelectedOptions === false
+            ? {
+                activityName: requestBody.activityName,
+                teacherCode: requestBody.teacherCode,
+              }
+            : requestBody,
+        ),
       })
 
       if (!response.ok) {
@@ -251,15 +292,13 @@ export default function ManageDashboard() {
         throw new Error('Failed to create persistent link')
       }
 
-      const fullUrl = `${getWindowOrigin()}${payload.url}${buildQueryString(selectedOptions)}`
-      setPersistentUrl(fullUrl)
-
-      setSavedSessions((previous) => ({
-        ...previous,
-        [buildPersistentSessionKey(selectedActivity.id, payload.hash as string)]: teacherCode.trim(),
-      }))
-
-      await refreshPersistentSessions()
+      const fullUrl = buildPersistentLinkUrl(getWindowOrigin(), payload.url, selectedOptions, deepLinkGenerator)
+      await handlePersistentLinkCreated(selectedActivity.id, {
+        fullUrl,
+        hash: payload.hash as string,
+        teacherCode: teacherCode.trim(),
+        selectedOptions,
+      })
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : String(createError))
     } finally {
@@ -291,6 +330,19 @@ export default function ManageDashboard() {
 
   const getSoloLink = (activityId: string, options: Record<string, unknown> = {}): string =>
     buildSoloLink(getWindowOrigin(), activityId, options)
+
+  const selectedActivityOptions = selectedActivity ? parseDeepLinkOptions(selectedActivity.deepLinkOptions) : {}
+  const persistentOptionErrors = selectedActivity
+    ? validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)
+    : {}
+  const hasPersistentOptionErrors = Object.keys(persistentOptionErrors).length > 0
+  const CustomPersistentLinkBuilder = resolveCustomPersistentLinkBuilder(selectedActivity) as
+    | ComponentType<ActivityPersistentLinkBuilderProps>
+    | null
+
+  const soloActivityOptions = soloActivity ? parseDeepLinkOptions(soloActivity.deepLinkOptions) : {}
+  const soloOptionErrors = soloActivity ? validateDeepLinkSelection(soloActivity.deepLinkOptions, soloOptions) : {}
+  const hasSoloOptionErrors = Object.keys(soloOptionErrors).length > 0
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -439,83 +491,99 @@ export default function ManageDashboard() {
 
       <Modal open={showPersistentModal} onClose={closePersistentModal} title={`Create Permanent Link - ${selectedActivity?.name}`}>
         {!persistentUrl ? (
-          <form onSubmit={createPersistentLink} className="flex flex-col gap-4">
-            <p className="text-gray-700">
-              Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL,
-              they'll wait until you start the session with your teacher code.
-            </p>
-
-            <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-2">
-              <p className="text-sm text-yellow-800">
-                <strong>⚠️ Security Note:</strong> This is for convenience, not security. The teacher code is stored in
-                your browser cookies and is not encrypted. Do not use sensitive passwords.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
-              <input
-                type="text"
-                value={teacherCode}
-                onChange={(event) => setTeacherCode(event.target.value)}
-                className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
-                placeholder="Create a Teacher Code for this link"
-                minLength={6}
-                required
-                autoComplete="off"
+          CustomPersistentLinkBuilder && selectedActivity ? (
+            <Suspense fallback={<p className="text-sm text-gray-600">Loading link builder...</p>}>
+              <CustomPersistentLinkBuilder
+                activityId={selectedActivity.id}
+                onCreated={async (result: ActivityPersistentLinkBuildResult) => {
+                  await handlePersistentLinkCreated(selectedActivity.id, result)
+                }}
               />
-              <p className="text-xs text-gray-500 mt-1">Remember this code! You'll need it to start sessions from this link.</p>
-            </div>
+            </Suspense>
+          ) : (
+            <form onSubmit={createPersistentLink} className="flex flex-col gap-4">
+              <p className="text-gray-700">
+                Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL,
+                they'll wait until you start the session with your teacher code.
+              </p>
 
-            {selectedActivity && Object.keys(parseDeepLinkOptions(selectedActivity.deepLinkOptions)).length > 0 && (
-              <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
-                <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
-                <div className="flex flex-col gap-3">
-                  {Object.entries(parseDeepLinkOptions(selectedActivity.deepLinkOptions)).map(([key, option]) => (
-                    <label key={key} className="text-sm text-gray-700">
-                      <span className="block font-semibold mb-1">{option.label || key}</span>
-                      {option.type === 'select' ? (
-                        <select
-                          value={persistentOptions[key] ?? ''}
-                          onChange={(event) =>
-                            setPersistentOptions((previous) => ({
-                              ...previous,
-                              [key]: event.target.value,
-                            }))
-                          }
-                          className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
-                        >
-                          {(option.options || []).map((entry) => (
-                            <option key={entry.value} value={entry.value}>
-                              {entry.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          value={persistentOptions[key] ?? ''}
-                          onChange={(event) =>
-                            setPersistentOptions((previous) => ({
-                              ...previous,
-                              [key]: event.target.value,
-                            }))
-                          }
-                          className="w-full border-2 border-gray-300 rounded px-3 py-2"
-                        />
-                      )}
-                    </label>
-                  ))}
-                </div>
+              <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-2">
+                <p className="text-sm text-yellow-800">
+                  <strong>⚠️ Security Note:</strong> This is for convenience, not security. The teacher code is stored in
+                  your browser cookies and is not encrypted. Do not use sensitive passwords.
+                </p>
               </div>
-            )}
 
-            {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+                <input
+                  type="text"
+                  value={teacherCode}
+                  onChange={(event) => setTeacherCode(event.target.value)}
+                  className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
+                  placeholder="Create a Teacher Code for this link"
+                  minLength={6}
+                  required
+                  autoComplete="off"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Remember this code! You'll need it to start sessions from this link.
+                </p>
+              </div>
 
-            <Button type="submit" disabled={isCreating || teacherCode.length < 6}>
-              {isCreating ? 'Creating...' : 'Generate Link'}
-            </Button>
-          </form>
+              {selectedActivity && Object.keys(selectedActivityOptions).length > 0 && (
+                <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
+                  <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
+                  <div className="flex flex-col gap-3">
+                    {Object.entries(selectedActivityOptions).map(([key, option]) => (
+                      <label key={key} className="text-sm text-gray-700">
+                        <span className="block font-semibold mb-1">{option.label || key}</span>
+                        {option.type === 'select' ? (
+                          <select
+                            value={persistentOptions[key] ?? ''}
+                            onChange={(event) =>
+                              setPersistentOptions((previous) => ({
+                                ...previous,
+                                [key]: event.target.value,
+                              }))
+                            }
+                            className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
+                          >
+                            {(option.options || []).map((entry) => (
+                              <option key={entry.value} value={entry.value}>
+                                {entry.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            value={persistentOptions[key] ?? ''}
+                            onChange={(event) =>
+                              setPersistentOptions((previous) => ({
+                                ...previous,
+                                [key]: event.target.value,
+                              }))
+                            }
+                            className={`w-full border-2 rounded px-3 py-2 ${persistentOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
+                          />
+                        )}
+                        {persistentOptionErrors[key] && (
+                          <span className="block mt-1 text-xs text-red-600">{persistentOptionErrors[key]}</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
+
+              <Button type="submit" disabled={isCreating || teacherCode.length < 6 || hasPersistentOptionErrors}>
+                {isCreating ? 'Creating...' : 'Generate Link'}
+              </Button>
+            </form>
+          )
         ) : (
           <div className="flex flex-col gap-4">
             <p className="text-green-600 font-semibold">✓ Permanent link created successfully!</p>
@@ -558,11 +626,11 @@ export default function ManageDashboard() {
         title={`${soloActivity?.soloModeMeta?.title || soloActivity?.name || 'Solo'} Practice Link`}
       >
         <div className="flex flex-col gap-4">
-          {soloActivity && Object.keys(parseDeepLinkOptions(soloActivity.deepLinkOptions)).length > 0 && (
+          {soloActivity && Object.keys(soloActivityOptions).length > 0 && (
             <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
               <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
               <div className="flex flex-col gap-3">
-                {Object.entries(parseDeepLinkOptions(soloActivity.deepLinkOptions)).map(([key, option]) => (
+                {Object.entries(soloActivityOptions).map(([key, option]) => (
                   <label key={key} className="text-sm text-gray-700">
                     <span className="block font-semibold mb-1">{option.label || key}</span>
                     {option.type === 'select' ? (
@@ -592,9 +660,10 @@ export default function ManageDashboard() {
                             [key]: event.target.value,
                           }))
                         }
-                        className="w-full border-2 border-gray-300 rounded px-3 py-2"
+                        className={`w-full border-2 rounded px-3 py-2 ${soloOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
                       />
                     )}
+                    {soloOptionErrors[key] && <span className="block mt-1 text-xs text-red-600">{soloOptionErrors[key]}</span>}
                   </label>
                 ))}
               </div>
@@ -611,12 +680,17 @@ export default function ManageDashboard() {
               onClick={() => {
                 if (!soloActivity) return
 
+                if (hasSoloOptionErrors) {
+                  return
+                }
+
                 const link = getSoloLink(
                   soloActivity.id,
                   normalizeSelectedOptions(soloActivity.deepLinkOptions, soloOptions),
                 )
                 void copyToClipboard(link)
               }}
+              disabled={hasSoloOptionErrors}
             >
               {soloActivity &&
               isCopied(getSoloLink(soloActivity.id, normalizeSelectedOptions(soloActivity.deepLinkOptions, soloOptions)))
@@ -627,13 +701,18 @@ export default function ManageDashboard() {
               onClick={() => {
                 if (!soloActivity || typeof window === 'undefined') return
 
+                if (hasSoloOptionErrors) {
+                  return
+                }
+
                 const link = getSoloLink(
                   soloActivity.id,
                   normalizeSelectedOptions(soloActivity.deepLinkOptions, soloOptions),
                 )
                 window.open(link, '_blank')
               }}
-              className="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded transition-colors"
+              className={`text-white font-semibold py-2 px-4 rounded transition-colors ${hasSoloOptionErrors ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-600 hover:bg-gray-700'}`}
+              disabled={hasSoloOptionErrors}
             >
               Open in New Tab
             </button>

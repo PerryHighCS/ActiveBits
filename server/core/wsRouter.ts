@@ -146,6 +146,7 @@ export function createWsRouter(server: UpgradeCapableServer, sessions: SessionSt
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.isAlive = true
         ws.clientIp = getClientIp(req)
+        ws.upgradeHeaders = req.headers
 
         const touch = async (): Promise<void> => {
           if (sessions?.touch == null || ws.sessionId == null) return

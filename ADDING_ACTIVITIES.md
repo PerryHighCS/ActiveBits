@@ -258,7 +258,26 @@ export default {
         { value: 'medium', label: 'Medium' },
         { value: 'hard', label: 'Hard' },
       ]
-    }
+    },
+    presentationUrl: {
+      label: 'Presentation URL',
+      type: 'text',
+      validator: 'url',
+    },
+  },
+  // Optional: use an activity-specific permanent-link generator endpoint
+  deepLinkGenerator: {
+    endpoint: '/api/quiz/generate-url',
+    // Optional mode: 'replace-url' (default) or 'append-query'
+    mode: 'replace-url',
+    // Optional: if false, dashboard omits selectedOptions in request body
+    expectsSelectedOptions: true,
+    // Optional preflight declaration for shared dashboard validation
+    preflight: {
+      type: 'reveal-sync-ping',
+      optionKey: 'presentationUrl',
+      timeoutMs: 4000,
+    },
   },
   clientEntry: './client/index.ts',  // or .tsx if using JSX in footerContent
   serverEntry: './server/routes.ts',
@@ -346,9 +365,10 @@ No central registry updates are needed; activities are auto-discovered from `act
 2. **Test incrementally** - Build and test as you add each component
 3. **Follow naming conventions** - Use kebab-case for folder names, PascalCase for components
 4. **Keep activities self-contained** - All activity code should live in its folder
-5. **Reuse shared UI** - Import from `@src/components/ui/` when possible
-6. **Use SessionHeader** - All manager components should use the unified SessionHeader
-7. **Handle session termination** - Student components should use useSessionEndedHandler hook
+5. **Do not leak activity logic into shared modules** - If behavior is activity-specific, keep it in `activities/<id>/...` and wire it through generic shared contracts
+6. **Reuse shared UI** - Import from `@src/components/ui/` when possible
+7. **Use SessionHeader** - All manager components should use the unified SessionHeader
+8. **Handle session termination** - Student components should use useSessionEndedHandler hook
 
 ## Solo Mode Activities
 

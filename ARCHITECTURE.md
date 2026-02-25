@@ -67,6 +67,13 @@ ActiveBits/
 
 ## Activity Registration System
 
+### Activity Containment Boundary
+
+- Activities are self-contained by default. Activity-specific logic (validation rules, protocol handling, UI flow, and feature behavior) belongs in `activities/<id>/...`.
+- Shared layers (`client/src/components/common`, `client/src/hooks`, shared server routes/core, etc.) should expose generic contracts only and remain activity-agnostic.
+- Shared modules must not import activity-specific implementation files.
+- If a shared capability is needed, add a generic interface/config contract in shared code and let each activity declare or implement its own behavior through that contract.
+
 ### Activity Configuration
 
 Each activity owns a config at `/activities/<id>/activity.config.ts` that declares metadata plus pointers to the client and server entry files. The client auto-discovers these configs (and loads the client entries), and the server auto-discovers them to load route handlers. Adding a new activity only requires dropping a new folder with a config plus the corresponding client/server entry files—no central registry to update.
@@ -84,6 +91,27 @@ export default {
     description: 'Solo mode description',
     buttonText: 'Copy Solo Link',
   },
+  // Optional: shared permanent-link modal options and server-side link generation
+  deepLinkOptions: {
+    presentationUrl: {
+      label: 'Presentation URL',
+      type: 'text',
+      validator: 'url',
+    },
+  },
+  deepLinkGenerator: {
+    endpoint: '/api/my-activity/generate-url',
+    mode: 'replace-url', // optional: 'replace-url' | 'append-query'
+    expectsSelectedOptions: true, // optional
+    preflight: { // optional
+      type: 'reveal-sync-ping',
+      optionKey: 'presentationUrl',
+      timeoutMs: 4000,
+    },
+  },
+  manageDashboard: { // optional shared dashboard hints/capabilities
+    customPersistentLinkBuilder: true, // activity-owned persistent-link UI in dashboard modal
+  },
   clientEntry: './client/index.ts',  // Component entry (TS/TSX)
   serverEntry: './server/routes.ts', // Server routes
 };
@@ -97,6 +125,7 @@ import StudentComp from './student/StudentComp';
 export default {
   ManagerComponent: ManagerComp,
   StudentComponent: StudentComp,
+  PersistentLinkBuilderComponent: null, // optional: activity-owned permanent-link modal UI
   footerContent: null, // JSX if desired (use .tsx if footerContent includes JSX)
 };
 ```
@@ -184,7 +213,7 @@ Permanent sessions use HMAC-SHA256 authentication:
   - Secure flag enabled in production (HTTPS only)
   - HMAC prevents URL tampering
   - Cookie size limit (20 sessions max with FIFO eviction)
-  - Production warnings for default HMAC secret
+  - Production startup fails when `PERSISTENT_SESSION_SECRET` is missing or weak
 
 ### Session Termination
 When a teacher ends a session:
@@ -214,6 +243,14 @@ Each activity defines its own endpoints under `/api/{activity-id}/...`
 4. Teacher accesses `/activity/{activityName}/{hash}` → checks cookie → authenticates via WebSocket
 5. Server validates HMAC and teacher code, creates/resets session
 6. Teacher auto-authenticated and redirected to manager view
+
+Activities can override the default link-generation endpoint using `activity.config.ts > deepLinkGenerator.endpoint`.
+
+For simple permanent-link UX, shared `ManageDashboard` can render generic fields from `deepLinkOptions` and submit to the configured generator endpoint.
+
+For advanced or protocol-specific UX (for example iframe preview / custom validation), an activity can set `activity.config.ts > manageDashboard.customPersistentLinkBuilder = true` and export `PersistentLinkBuilderComponent` from its client entry. In that mode, the activity owns the modal form/preflight/submit flow while `ManageDashboard` only provides the placement shell and post-create success display.
+
+`deepLinkGenerator.preflight` remains activity metadata, but shared dashboard code should not interpret activity-specific preflight protocol names directly.
 
 ### Deep Linking with Query Parameters
 Activities can use URL query parameters for direct deep linking to specific content or configurations. This allows instructors to create presentation-ready links that automatically configure the activity.

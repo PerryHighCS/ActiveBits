@@ -72,6 +72,14 @@ Run these minimum checks based on scope:
 1. Backend/runtime imports must be directly runtime-resolvable. Do not rely on bundler-only features for runtime-critical code paths unless runtime support is explicitly configured.
 2. Keep cross-workspace import boundaries explicit (prefer package/export boundaries over deep ad-hoc paths).
 
+## Activity Containment Policy
+
+1. Treat each activity as self-contained by default: activity-specific behavior, validation, protocol details, and UI flow should live under `activities/<activity-id>/...`.
+2. Shared modules (for example dashboard, routing, common hooks, shared utilities) must remain activity-agnostic and must not import activity-specific implementation files.
+3. If multiple activities need the same capability, define a generic contract in shared code (types/interfaces/callbacks/config declarations), and let each activity provide its own implementation/data through that contract.
+4. Do not add one-off conditionals in shared modules keyed to a specific activity unless explicitly approved as a temporary workaround.
+5. When introducing a temporary compatibility path that touches shared modules, document owner + cleanup condition and schedule removal.
+
 ## Temporary Workaround Policy
 
 1. Any temporary compatibility shim or workaround must include:

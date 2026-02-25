@@ -40,6 +40,10 @@ export function buildPersistentTeacherCodeApiUrl(hash: string, activityName: str
   return `/api/persistent-session/${encodeURIComponent(hash)}/teacher-code?${query.toString()}`
 }
 
+export function buildPersistentAuthenticateApiUrl(): string {
+  return '/api/persistent-session/authenticate'
+}
+
 export function parseWaitingRoomMessage(data: string): WaitingRoomRawMessage | null {
   try {
     const parsed = JSON.parse(data) as unknown

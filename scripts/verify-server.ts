@@ -1,5 +1,6 @@
 /* Smoke test: start the server on a test port and hit the health endpoint. */
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +16,10 @@ const env = {
   ...process.env,
   PORT: port,
   NODE_ENV: process.env.NODE_ENV ?? "production",
+  PERSISTENT_SESSION_SECRET:
+    process.env.PERSISTENT_SESSION_SECRET && process.env.PERSISTENT_SESSION_SECRET.trim().length > 0
+      ? process.env.PERSISTENT_SESSION_SECRET
+      : randomBytes(32).toString("hex"),
 };
 
 const distEntry = resolve(__dirname, "../server/dist/server.js");

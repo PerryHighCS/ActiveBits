@@ -1,0 +1,90 @@
+# SyncDeck Future Plan
+
+This document now tracks and is intentionally aligned with:
+- `.agent/plans/syncdeck-checklist.md`
+Checklist status and execution order should be maintained in in this file and 
+this checklist should be modified as plans change with new or updated goals.
+
+## Scope
+
+Future planning is currently organized into three tracks:
+1. Student position enhancements
+2. Embedded activities
+3. Chalkboard evolution
+
+---
+
+## 1) Student Position Enhancements
+
+### Goals
+- Improve instructor visibility into student progress.
+- Make student/instructor relative position status more actionable.
+
+### Planned Work
+- Student panel shows behind/synced/ahead indicator.
+- Instructor header indicates:
+  - `# Students connected`
+  - `# Students behind`
+
+---
+
+## 2) Embedded Activities
+
+### Goals
+- Let presentations launch embedded ActiveBits activities by slide events.
+- Keep embedded sessions linked to the parent SyncDeck session.
+- Support reporting and instructor workflows around embedded runs.
+
+### Planned Work
+- Presentations can start activity by slide events.
+- Embedded activities have their own session linked to parent session.
+  - Candidate ID shape: `CHILD:parentid:childid`.
+  - Parent/child IDs are session IDs.
+  - Server does not cull children until parent is culled.
+  - Student identities/names sync from parent session.
+- Define embedded-activity activation/claim flow for already-connected sessions.
+  - Evaluate whether this should mirror persistent-link activation, or use a parent-session-connected flow.
+  - Candidate approach: instructor requests child session creation over parent websocket, then joins child session.
+  - Parent session distributes per-user claim tokens so each connected user can claim their mapped seat in the child session.
+- Define multi-instructor arbitration for embedded-activity activation.
+  - Prevent duplicate child-session creation when multiple instructors are connected.
+  - Decide lock/leader/ownership rules for who can initiate (and retry/cancel) child-session opens.
+- Instructor can download a report.
+  - Activities may need to generate HTML for reporting.
+- Add an activity picker that can issue codes for presentation use.
+
+### Notes
+- Session-linking, lifecycle, and reporting contracts should be specified before implementation.
+- Activation/claim protocol for embedded sessions should be specified before implementation; current websocket child-session handoff idea is only a candidate design.
+- Multi-instructor arbitration/locking rules should be specified before implementation to avoid duplicate child sessions.
+
+---
+
+## 3) Chalkboard Evolution
+
+### Goals
+- Move from basic controls to richer collaborative chalkboard behavior.
+
+### Planned Work
+- Combine chalkboard + pen overlay controls into a single unified chalkboard tool button.
+- When chalkboard mode is active, provide a dedicated screen-blank tool.
+- Evaluate whether current plugin is extensible for tool switching.
+- If needed, create a new version with:
+  - Color picker
+  - Tool swap
+  - Erase all
+- Transmit drawings to students.
+- Decide whether drawings persist when progressing slides.
+
+### Notes
+- Protocol additions for stroke/state sync should be designed before UI expansion.
+
+---
+
+## Delivery Approach
+
+For each track:
+1. Define data/protocol contract first.
+2. Add focused server + client tests.
+3. Implement behind small, reviewable commits.
+4. Validate with activity-scope tests, then full repo tests.

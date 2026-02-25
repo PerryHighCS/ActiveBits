@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Button from '../ui/Button'
 import { getActivity } from '@src/activities'
 import {
+  buildPersistentAuthenticateApiUrl,
   buildPersistentTeacherCodeApiUrl,
   buildPersistentSessionWsUrl,
   getWaiterMessage,
@@ -15,6 +16,12 @@ interface WaitingRoomProps {
   activityName: string
   hash: string
   hasTeacherCookie: boolean
+}
+
+interface TeacherAuthenticateResponse {
+  error?: string
+  isStarted?: boolean
+  sessionId?: string | null
 }
 
 /**
@@ -127,17 +134,58 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
     }
   }, [activityName, hash, navigate])
 
-  const handleTeacherCodeSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleTeacherCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)
     setIsSubmitting(true)
     teacherAuthRequestedRef.current = true
 
+    const normalizedTeacherCode = teacherCode.trim()
+
+    try {
+      const authenticateResponse = await fetch(buildPersistentAuthenticateApiUrl(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          activityName,
+          hash,
+          teacherCode: normalizedTeacherCode,
+        }),
+      })
+
+      if (!authenticateResponse.ok) {
+        const payload = (await authenticateResponse.json().catch(() => ({}))) as TeacherAuthenticateResponse
+        throw new Error(payload.error || 'Invalid teacher code')
+      }
+
+      const payload = (await authenticateResponse.json()) as TeacherAuthenticateResponse
+      if (payload.isStarted && typeof payload.sessionId === 'string' && payload.sessionId.length > 0) {
+        const queryString = typeof window !== 'undefined' ? window.location.search : ''
+        const teacherPath = `/manage/${activityName}/${payload.sessionId}${queryString}`
+        if (!hasNavigatedRef.current) {
+          hasNavigatedRef.current = true
+          if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+            wsRef.current.close()
+          }
+          void navigate(teacherPath)
+        }
+        return
+      }
+    } catch (authenticateError) {
+      setError(authenticateError instanceof Error ? authenticateError.message : String(authenticateError))
+      setIsSubmitting(false)
+      teacherAuthRequestedRef.current = false
+      return
+    }
+
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
         JSON.stringify({
           type: 'verify-teacher-code',
-          teacherCode: teacherCode.trim(),
+          teacherCode: normalizedTeacherCode,
         }),
       )
     } else {
