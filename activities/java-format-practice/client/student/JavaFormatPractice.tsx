@@ -961,14 +961,9 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   };
 
   const handleDifficultyChange = (difficulty: JavaFormatDifficulty) => {
+    if (!isSoloSession) return;
+
     setSelectedDifficulty(difficulty);
-    if (!isSoloSession) {
-      fetch(`/api/java-format-practice/${sessionId}/difficulty`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ difficulty }),
-      }).catch((err) => console.error('Failed to update difficulty:', err));
-    }
     const challenge = getRandomChallenge(
       selectedTheme === 'all' ? null : selectedTheme,
       difficulty
@@ -981,14 +976,9 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   };
 
   const handleThemeChange = (theme: JavaFormatTheme) => {
+    if (!isSoloSession) return;
+
     setSelectedTheme(theme);
-    if (!isSoloSession) {
-      fetch(`/api/java-format-practice/${sessionId}/theme`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme }),
-      }).catch((err) => console.error('Failed to update theme:', err));
-    }
     const challenge = getRandomChallenge(
       theme === 'all' ? null : theme,
       selectedDifficulty
@@ -1091,7 +1081,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
           currentTheme={selectedTheme}
           onDifficultyChange={handleDifficultyChange}
           onThemeChange={handleThemeChange}
-          isDisabled={feedback?.isCorrect === true}
+          isDisabled={!isSoloSession || feedback?.isCorrect === true}
         />
 
         <div className="challenge-card">
