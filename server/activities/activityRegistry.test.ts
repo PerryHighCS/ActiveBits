@@ -49,6 +49,9 @@ interface ActivityRegistryModule {
   initializeActivityRegistry: () => Promise<void>
   getAllowedActivities: () => string[]
   registerActivityRoutes: (app: unknown, sessions: unknown, ws: unknown) => Promise<void>
+  __activityRegistryTestOnly?: {
+    isMissingDiscoveredConfigError: (err: unknown, configPath: string) => boolean
+  }
 }
 
 function firstExistingPath(paths: readonly string[]): string | null {
@@ -397,6 +400,35 @@ void test('initializeActivityRegistry preserves dev activities in development mo
     process.env.NODE_ENV = originalEnv
   } finally {
     // Clean up test files
+    if (existsSync(testRoot)) {
+      rmSync(testRoot, { recursive: true, force: true })
+    }
+  }
+})
+
+void test('registry treats ENOENT for disappeared discovered config as skippable race', async () => {
+  const testRoot = join(__dirname, '../../activities/test-activity-missing-race')
+  const testConfigPath = join(testRoot, 'activity.config.js')
+
+  if (existsSync(testRoot)) {
+    rmSync(testRoot, { recursive: true, force: true })
+  }
+
+  try {
+    mkdirSync(testRoot, { recursive: true })
+    const freshModule = await importRegistryModule()
+    const helper = freshModule.__activityRegistryTestOnly?.isMissingDiscoveredConfigError
+    assert.ok(helper, 'test helper export should be available')
+
+    const missingErr = Object.assign(
+      new Error(`ENOENT: no such file or directory, open '${testConfigPath}'`),
+      { code: 'ENOENT', path: testConfigPath },
+    )
+    assert.equal(helper(missingErr, testConfigPath), true, 'ENOENT for missing discovered config should be skippable')
+
+    writeFileSync(testConfigPath, 'export default {};\n')
+    assert.equal(helper(missingErr, testConfigPath), false, 'Existing config path should not be treated as disappeared')
+  } finally {
     if (existsSync(testRoot)) {
       rmSync(testRoot, { recursive: true, force: true })
     }

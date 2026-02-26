@@ -116,12 +116,17 @@ function isMissingDiscoveredConfigError(err: unknown, configPath: string): boole
     return false
   }
 
-  const moduleNotFoundError = err as Error & { code?: unknown }
-  if (moduleNotFoundError.code !== 'ERR_MODULE_NOT_FOUND') {
+  const missingConfigError = err as Error & { code?: unknown; path?: unknown }
+  const errorCode = missingConfigError.code
+  if (errorCode !== 'ERR_MODULE_NOT_FOUND' && errorCode !== 'ENOENT') {
     return false
   }
 
   const configUrl = pathToFileURL(configPath).href
+  if (missingConfigError.path === configPath) {
+    return true
+  }
+
   return err.message.includes(configPath) || err.message.includes(configUrl)
 }
 
@@ -212,4 +217,9 @@ export async function registerActivityRoutes(app: unknown, sessions: unknown, ws
       console.error(`Failed to load server routes for activity "${id}":`, err)
     }
   }
+}
+
+// Test-only export for deterministic regression coverage of loader race handling.
+export const __activityRegistryTestOnly = {
+  isMissingDiscoveredConfigError,
 }
