@@ -1,3 +1,5 @@
+import { isValidHttpUrl } from './urlValidationUtils'
+
 export interface DeepLinkOptionChoice {
   value: string
   label: string
@@ -47,15 +49,6 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function toStringValue(value: unknown): string {
   return typeof value === 'string' ? value : String(value ?? '')
-}
-
-function isValidHttpUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value)
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
-  } catch {
-    return false
-  }
 }
 
 export function parseDeepLinkGenerator(rawDeepLinkGenerator: unknown): DeepLinkGeneratorConfig | null {

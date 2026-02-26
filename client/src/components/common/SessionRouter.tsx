@@ -1,14 +1,16 @@
-import { Suspense, useEffect, useState, type ChangeEvent, type ComponentType, type FormEvent } from 'react'
+import { Suspense, useCallback, useEffect, useState, type ChangeEvent, type ComponentType, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
 import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
 import { getActivity, activities } from '@src/activities'
 import {
+  buildTeacherManagePathFromSession,
   buildPersistentSessionApiUrl,
   buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
+  getSessionPresentationUrlForTeacherRedirect,
   getPersistentSelectedOptionsFromSearch,
   getSoloActivities,
   isJoinSessionId,
@@ -101,6 +103,32 @@ const SessionRouter = () => {
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
 
+  const resolveTeacherManagePath = useCallback(
+    async (
+      nextActivityName: string,
+      nextSessionId: string,
+      queryString: string,
+    ): Promise<string> => {
+      if (nextActivityName !== 'syncdeck') {
+        return buildPersistentTeacherManagePath(nextActivityName, nextSessionId, queryString)
+      }
+
+      try {
+        const response = await fetch(`/api/session/${nextSessionId}`)
+        if (!response.ok) {
+          return buildPersistentTeacherManagePath(nextActivityName, nextSessionId, queryString)
+        }
+
+        const payload = (await response.json()) as SessionPayload
+        const sessionPresentationUrl = getSessionPresentationUrlForTeacherRedirect(payload.session)
+        return buildTeacherManagePathFromSession(nextActivityName, nextSessionId, queryString, sessionPresentationUrl)
+      } catch {
+        return buildPersistentTeacherManagePath(nextActivityName, nextSessionId, queryString)
+      }
+    },
+    [],
+  )
+
   useEffect(() => {
     if (hash && activityName) {
       setTeacherCode('')
@@ -162,6 +190,34 @@ const SessionRouter = () => {
         setIsLoadingPersistent(false)
       })
   }, [hash, activityName])
+
+  useEffect(() => {
+    if (!activityName) return
+    if (!persistentSessionInfo?.isStarted || !persistentSessionInfo.sessionId) return
+    if (!persistentSessionInfo.hasTeacherCookie) return
+
+    let isCancelled = false
+    const startedSessionId = persistentSessionInfo.sessionId
+    const queryString = getWindowSearch()
+
+    void (async () => {
+      const path = await resolveTeacherManagePath(activityName, startedSessionId, queryString)
+      if (!isCancelled) {
+        void navigate(path, { replace: true })
+      }
+    })()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [
+    activityName,
+    persistentSessionInfo?.hasTeacherCookie,
+    persistentSessionInfo?.isStarted,
+    persistentSessionInfo?.sessionId,
+    navigate,
+    resolveTeacherManagePath,
+  ])
 
   useEffect(() => {
     if (!hash || !activityName) return undefined
@@ -251,11 +307,6 @@ const SessionRouter = () => {
       const startedSessionId = persistentSessionInfo.sessionId
 
       if (persistentSessionInfo.hasTeacherCookie) {
-        const queryString = getWindowSearch()
-        void navigate(
-          buildPersistentTeacherManagePath(activityName, startedSessionId, queryString),
-          { replace: true },
-        )
         return <div className="text-center">Redirecting to session...</div>
       }
 
@@ -289,10 +340,9 @@ const SessionRouter = () => {
 
           const payload = (await response.json()) as TeacherAuthResponse
           const queryString = getWindowSearch()
-          void navigate(
-            buildPersistentTeacherManagePath(activityName, payload.sessionId || startedSessionId, queryString),
-            { replace: true },
-          )
+          const targetSessionId = payload.sessionId || startedSessionId
+          const path = await resolveTeacherManagePath(activityName, targetSessionId, queryString)
+          void navigate(path, { replace: true })
         } catch (authError) {
           setTeacherAuthError(authError instanceof Error ? authError.message : String(authError))
           setIsAuthenticatingTeacher(false)

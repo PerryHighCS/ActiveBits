@@ -1,11 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildTeacherManagePathFromSession,
   buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
   cleanExpiredSessions,
   getPersistentSelectedOptionsFromSearch,
   getPersistentQuerySuffix,
+  getSessionPresentationUrlForTeacherRedirect,
   getSoloActivities,
   isJoinSessionId,
   readCachedSession,
@@ -115,6 +117,76 @@ void test('buildPersistentTeacherManagePath drops permalink query for started sy
 void test('buildPersistentTeacherManagePath preserves query for non-syncdeck activities', () => {
   const path = buildPersistentTeacherManagePath('raffle', 'session-123', '?foo=bar')
   assert.equal(path, '/manage/raffle/session-123?foo=bar')
+})
+
+void test('getSessionPresentationUrlForTeacherRedirect returns validated session presentationUrl', () => {
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: ' https://slides.example/deck ' },
+    }),
+    'https://slides.example/deck',
+  )
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: 'javascript:alert(1)' },
+    }),
+    null,
+  )
+})
+
+void test('getSessionPresentationUrlForTeacherRedirect rejects malformed or unsafe payload/url variants', () => {
+  assert.equal(getSessionPresentationUrlForTeacherRedirect(null), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect(undefined), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({}), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({ data: null }), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({ data: {} }), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({ data: { presentationUrl: '' } }), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({ data: { presentationUrl: '   ' } }), null)
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: 'file:///etc/passwd' },
+    }),
+    null,
+  )
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: 'ftp://example.com/deck' },
+    }),
+    null,
+  )
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: '/relative/path' },
+    }),
+    null,
+  )
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: 'slides.example/deck' },
+    }),
+    null,
+  )
+})
+
+void test('buildTeacherManagePathFromSession uses session presentationUrl for syncdeck redirects', () => {
+  const path = buildTeacherManagePathFromSession(
+    'syncdeck',
+    'session-123',
+    '?presentationUrl=https%3A%2F%2Fwrong.example%2Fdeck&urlHash=abcd',
+    'https://slides.example/deck',
+  )
+  assert.equal(path, '/manage/syncdeck/session-123?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck')
+})
+
+void test('buildTeacherManagePathFromSession falls back for non-syncdeck or missing session url', () => {
+  assert.equal(
+    buildTeacherManagePathFromSession('syncdeck', 'session-123', '?foo=bar', null),
+    '/manage/syncdeck/session-123',
+  )
+  assert.equal(
+    buildTeacherManagePathFromSession('raffle', 'session-123', '?foo=bar', 'https://slides.example/deck'),
+    '/manage/raffle/session-123?foo=bar',
+  )
 })
 
 void test('getPersistentSelectedOptionsFromSearch filters query params by deepLinkOptions', () => {
