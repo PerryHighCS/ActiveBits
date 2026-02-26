@@ -5,6 +5,7 @@ import {
   buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
   cleanExpiredSessions,
+  getPersistentSelectedOptionsFromSearchForActivity,
   getPersistentSelectedOptionsFromSearch,
   getPersistentQuerySuffix,
   getSessionPresentationUrlForTeacherRedirect,
@@ -207,6 +208,29 @@ void test('getPersistentSelectedOptionsFromSearch filters query params by deepLi
 
 void test('getPersistentSelectedOptionsFromSearch returns empty object when no deepLinkOptions exist', () => {
   const selectedOptions = getPersistentSelectedOptionsFromSearch('?utm_source=email&debug=true', undefined)
+  assert.deepEqual(selectedOptions, {})
+})
+
+void test('getPersistentSelectedOptionsFromSearchForActivity preserves syncdeck permalink params without deepLinkOptions', () => {
+  const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
+    '?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&urlHash=A53762A75A8CC2E5&utm_source=email',
+    undefined,
+    'syncdeck',
+  )
+
+  assert.deepEqual(selectedOptions, {
+    presentationUrl: 'https://slides.example/deck',
+    urlHash: 'a53762a75a8cc2e5',
+  })
+})
+
+void test('getPersistentSelectedOptionsFromSearchForActivity ignores invalid syncdeck fallback params', () => {
+  const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
+    '?presentationUrl=javascript%3Aalert(1)&urlHash=not-a-real-hash',
+    undefined,
+    'syncdeck',
+  )
+
   assert.deepEqual(selectedOptions, {})
 })
 

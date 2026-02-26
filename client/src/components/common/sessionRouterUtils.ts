@@ -137,8 +137,35 @@ export function buildTeacherManagePathFromSession(
 }
 
 export function getPersistentSelectedOptionsFromSearch(search: string, rawDeepLinkOptions: unknown): Record<string, string> {
-  const rawSelectedOptions = Object.fromEntries(new URLSearchParams(search).entries())
-  return normalizeSelectedOptions(rawDeepLinkOptions, rawSelectedOptions)
+  return getPersistentSelectedOptionsFromSearchForActivity(search, rawDeepLinkOptions)
+}
+
+export function getPersistentSelectedOptionsFromSearchForActivity(
+  search: string,
+  rawDeepLinkOptions: unknown,
+  activityName?: string,
+): Record<string, string> {
+  const params = new URLSearchParams(search)
+  const rawSelectedOptions = Object.fromEntries(params.entries())
+  const selectedOptions = normalizeSelectedOptions(rawDeepLinkOptions, rawSelectedOptions)
+
+  if (activityName !== 'syncdeck') {
+    return selectedOptions
+  }
+
+  if (!selectedOptions.presentationUrl) {
+    const fallbackPresentationUrl = params.get('presentationUrl')?.trim() ?? ''
+    if (isValidHttpUrl(fallbackPresentationUrl)) {
+      selectedOptions.presentationUrl = fallbackPresentationUrl
+    }
+  }
+
+  const candidateUrlHash = params.get('urlHash')?.trim() ?? ''
+  if (candidateUrlHash && /^[a-f0-9]{16}$/i.test(candidateUrlHash)) {
+    selectedOptions.urlHash = candidateUrlHash.toLowerCase()
+  }
+
+  return selectedOptions
 }
 
 export function isJoinSessionId(input: string): boolean {
