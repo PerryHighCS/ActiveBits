@@ -29,16 +29,16 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.21.0",
+    "@eslint/js": "^10.0.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.3",
     "@types/node": "^25.2.1",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.46.0",
     "@typescript-eslint/parser": "^8.46.0",
-    "eslint": "^9.21.0",
+    "eslint": "^10.0.2",
     "eslint-plugin-jsdoc": "^62.5.4",
-    "globals": "^15.15.0",
+    "globals": "^17.3.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
