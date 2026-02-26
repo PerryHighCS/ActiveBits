@@ -605,6 +605,40 @@ function validatePresentationUrl(value: string): boolean {
   }
 }
 
+function normalizePersistentPresentationUrl(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  if (validatePresentationUrl(trimmed)) {
+    return trimmed
+  }
+
+  let current = trimmed
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const decoded = decodeURIComponent(current)
+      if (decoded === current) {
+        return null
+      }
+      if (validatePresentationUrl(decoded)) {
+        return decoded
+      }
+      current = decoded
+    } catch {
+      // Ignore decode errors and fall through to null.
+      return null
+    }
+  }
+
+  return null
+}
+
 function verifyInstructorPasscode(expected: string, candidate: string): boolean {
   const expectedBuffer = Buffer.from(expected, 'utf8')
   const candidateBuffer = Buffer.from(candidate, 'utf8')
@@ -722,14 +756,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const selectedOptions = isPlainObject(matchingEntry.selectedOptions) ? matchingEntry.selectedOptions : {}
     // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
     console.log('[SYNCDECK-DEBUG] instructor-passcode: cookie selectedOptions.presentationUrl =', JSON.stringify(selectedOptions.presentationUrl), '| urlHash =', JSON.stringify(selectedOptions.urlHash))
-    const persistentPresentationUrl =
-      typeof selectedOptions.presentationUrl === 'string' && validatePresentationUrl(selectedOptions.presentationUrl)
-        ? selectedOptions.presentationUrl
+    const persistentPresentationUrl = normalizePersistentPresentationUrl(selectedOptions.presentationUrl)
+    const candidateUrlHash =
+      typeof selectedOptions.urlHash === 'string' && selectedOptions.urlHash.trim().length > 0
+        ? selectedOptions.urlHash.trim()
         : null
     const persistentUrlHash =
-      typeof selectedOptions.urlHash === 'string' && selectedOptions.urlHash.trim().length > 0
-        ? selectedOptions.urlHash
-        : null
+      candidateUrlHash && persistentPresentationUrl && verifyUrlHash(persistentHash, persistentPresentationUrl, candidateUrlHash)
+        ? candidateUrlHash
+        : (persistentPresentationUrl ? computeUrlHash(persistentHash, persistentPresentationUrl) : null)
     // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
     console.log('[SYNCDECK-DEBUG] instructor-passcode: returning persistentPresentationUrl =', JSON.stringify(persistentPresentationUrl), '| persistentUrlHash =', JSON.stringify(persistentUrlHash))
 

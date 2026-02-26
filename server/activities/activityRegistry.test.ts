@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { isMissingDiscoveredConfigError } from './activityRegistryMissingConfigError.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -49,9 +51,6 @@ interface ActivityRegistryModule {
   initializeActivityRegistry: () => Promise<void>
   getAllowedActivities: () => string[]
   registerActivityRoutes: (app: unknown, sessions: unknown, ws: unknown) => Promise<void>
-  __activityRegistryTestOnly?: {
-    isMissingDiscoveredConfigError: (err: unknown, configPath: string) => boolean
-  }
 }
 
 function firstExistingPath(paths: readonly string[]): string | null {
@@ -406,28 +405,27 @@ void test('initializeActivityRegistry preserves dev activities in development mo
   }
 })
 
-void test('registry treats ENOENT for disappeared discovered config as skippable race', async () => {
-  const testRoot = join(__dirname, '../../activities/test-activity-missing-race')
+void test('isMissingDiscoveredConfigError treats ENOENT for disappeared discovered config as skippable race', async () => {
+  const testRoot = mkdtempSync(join(tmpdir(), 'activity-registry-missing-race-'))
   const testConfigPath = join(testRoot, 'activity.config.js')
 
-  if (existsSync(testRoot)) {
-    rmSync(testRoot, { recursive: true, force: true })
-  }
-
   try {
-    mkdirSync(testRoot, { recursive: true })
-    const freshModule = await importRegistryModule()
-    const helper = freshModule.__activityRegistryTestOnly?.isMissingDiscoveredConfigError
-    assert.ok(helper, 'test helper export should be available')
-
     const missingErr = Object.assign(
       new Error(`ENOENT: no such file or directory, open '${testConfigPath}'`),
       { code: 'ENOENT', path: testConfigPath },
     )
-    assert.equal(helper(missingErr, testConfigPath), true, 'ENOENT for missing discovered config should be skippable')
+    assert.equal(
+      isMissingDiscoveredConfigError(missingErr, testConfigPath),
+      true,
+      'ENOENT for missing discovered config should be skippable',
+    )
 
-    writeFileSync(testConfigPath, 'export default {};\n')
-    assert.equal(helper(missingErr, testConfigPath), false, 'Existing config path should not be treated as disappeared')
+    writeFileSync(testConfigPath, 'placeholder\n')
+    assert.equal(
+      isMissingDiscoveredConfigError(missingErr, testConfigPath),
+      false,
+      'Existing config path should not be treated as disappeared',
+    )
   } finally {
     if (existsSync(testRoot)) {
       rmSync(testRoot, { recursive: true, force: true })

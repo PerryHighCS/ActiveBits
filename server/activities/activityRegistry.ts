@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import activityConfigSchema from '../../types/activityConfigSchema.js'
+import { isMissingDiscoveredConfigError } from './activityRegistryMissingConfigError.js'
 
 interface ActivityConfigLike extends Record<string, unknown> {
   serverEntry?: string
@@ -107,29 +108,6 @@ async function loadConfig(configPath: string): Promise<ActivityConfigLike> {
   }
 }
 
-function isMissingDiscoveredConfigError(err: unknown, configPath: string): boolean {
-  if (fs.existsSync(configPath)) {
-    return false
-  }
-
-  if (!(err instanceof Error)) {
-    return false
-  }
-
-  const missingConfigError = err as Error & { code?: unknown; path?: unknown }
-  const errorCode = missingConfigError.code
-  if (errorCode !== 'ERR_MODULE_NOT_FOUND' && errorCode !== 'ENOENT') {
-    return false
-  }
-
-  const configUrl = pathToFileURL(configPath).href
-  if (missingConfigError.path === configPath) {
-    return true
-  }
-
-  return err.message.includes(configPath) || err.message.includes(configUrl)
-}
-
 /**
  * Filter discovered configs to exclude dev-only activities in production.
  * Returns configs with cached loadedConfig to avoid redundant loading.
@@ -217,9 +195,4 @@ export async function registerActivityRoutes(app: unknown, sessions: unknown, ws
       console.error(`Failed to load server routes for activity "${id}":`, err)
     }
   }
-}
-
-// Test-only export for deterministic regression coverage of loader race handling.
-export const __activityRegistryTestOnly = {
-  isMissingDiscoveredConfigError,
 }
