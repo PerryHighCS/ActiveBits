@@ -1033,6 +1033,10 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
           {
             key: `syncdeck:${hash}`,
             teacherCode: 'persistent-teacher-code',
+            selectedOptions: {
+              presentationUrl: 'https://slides.example/deck',
+              urlHash: 'abcd1234abcd1234',
+            },
           },
         ]),
       },
@@ -1041,7 +1045,11 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
   )
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, { instructorPasscode: 'teacher-passcode-1' })
+  assert.deepEqual(res.body, {
+    instructorPasscode: 'teacher-passcode-1',
+    persistentPresentationUrl: 'https://slides.example/deck',
+    persistentUrlHash: 'abcd1234abcd1234',
+  })
 })
 
 void test('instructor-passcode route rejects request without matching teacher cookie', async () => {

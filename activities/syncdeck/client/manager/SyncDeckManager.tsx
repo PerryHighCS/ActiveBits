@@ -19,6 +19,12 @@ interface SessionResponsePayload {
   }
 }
 
+interface InstructorPasscodeResponsePayload {
+  instructorPasscode?: unknown
+  persistentPresentationUrl?: unknown
+  persistentUrlHash?: unknown
+}
+
 interface SyncDeckStudentPresenceMessage {
   type?: unknown
   payload?: {
@@ -848,6 +854,7 @@ const SyncDeckManager: FC = () => {
   const [, setStartSuccess] = useState<string | null>(null)
   const [isConfigurePanelOpen, setIsConfigurePanelOpen] = useState(true)
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
+  const [persistentUrlHashFallback, setPersistentUrlHashFallback] = useState<string | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
   const [instructorConnectionState, setInstructorConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
@@ -1115,7 +1122,8 @@ const SyncDeckManager: FC = () => {
     })
 
   const studentJoinUrl = sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
-  const urlHash = new URLSearchParams(location.search).get('urlHash')
+  const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
+  const urlHash = queryUrlHash ?? persistentUrlHashFallback
 
   useEffect(() => {
     const normalizedUrl = presentationUrl.trim()
@@ -1212,21 +1220,41 @@ const SyncDeckManager: FC = () => {
         if (!response.ok) {
           if (!isCancelled) {
             setInstructorPasscode(null)
+            setPersistentUrlHashFallback(null)
             setIsPasscodeReady(true)
           }
           return
         }
 
-        const payload = (await response.json()) as { instructorPasscode?: string }
+        const payload = (await response.json()) as InstructorPasscodeResponsePayload
         if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
           window.sessionStorage.setItem(buildSyncDeckPasscodeKey(sessionId), payload.instructorPasscode)
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
         }
+
+        if (!isCancelled) {
+          const persistentPresentationUrl =
+            typeof payload.persistentPresentationUrl === 'string' && validatePresentationUrl(payload.persistentPresentationUrl)
+              ? payload.persistentPresentationUrl
+              : null
+          const persistentUrlHash =
+            typeof payload.persistentUrlHash === 'string' && payload.persistentUrlHash.trim().length > 0
+              ? payload.persistentUrlHash
+              : null
+
+          if (persistentPresentationUrl) {
+            setPresentationUrl((current) => (current.trim().length > 0 ? current : persistentPresentationUrl))
+          }
+          if (!queryUrlHash) {
+            setPersistentUrlHashFallback(persistentUrlHash)
+          }
+        }
       } catch {
         if (!isCancelled) {
           setInstructorPasscode(null)
+          setPersistentUrlHashFallback(null)
         }
       } finally {
         if (!isCancelled) {
@@ -1241,7 +1269,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [sessionId])
+  }, [sessionId, queryUrlHash])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
