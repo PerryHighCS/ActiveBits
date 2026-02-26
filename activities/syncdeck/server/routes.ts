@@ -719,7 +719,21 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    res.json({ instructorPasscode: session.data.instructorPasscode })
+    const selectedOptions = isPlainObject(matchingEntry.selectedOptions) ? matchingEntry.selectedOptions : {}
+    const persistentPresentationUrl =
+      typeof selectedOptions.presentationUrl === 'string' && validatePresentationUrl(selectedOptions.presentationUrl)
+        ? selectedOptions.presentationUrl
+        : null
+    const persistentUrlHash =
+      typeof selectedOptions.urlHash === 'string' && selectedOptions.urlHash.trim().length > 0
+        ? selectedOptions.urlHash
+        : null
+
+    res.json({
+      instructorPasscode: session.data.instructorPasscode,
+      ...(persistentPresentationUrl ? { persistentPresentationUrl } : {}),
+      ...(persistentUrlHash ? { persistentUrlHash } : {}),
+    })
   })
 
   app.post('/api/syncdeck/generate-url', async (req, res) => {
