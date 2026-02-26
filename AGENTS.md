@@ -44,19 +44,8 @@ Run these minimum checks based on scope:
 
 1. Docs-only changes
    - Verify links/commands in changed docs are accurate.
-2. Client-only code changes
-   - `npm --workspace client test`
-   - `npm --workspace client run build` (when build/runtime paths are affected)
-   - `npm --workspace client run typecheck` (fix any type errors before commit)
-   - `npm --workspace client run lint` (fix any linting errors before commit)
-3. Server-only code changes
-   - `npm --workspace server test`
-   - `npm run verify:server` (when runtime/startup behavior is affected)
-   - `npm --workspace server run lint` (if linting script exists)
-4. Activities-only changes
-   - `npm --workspace activities test`
-   - `npm --workspace activities run typecheck` (fix any type errors before commit)
-   - `npm --workspace activities run lint` (fix any linting errors before commit)
+2. Workspace specific changes
+   - Run the appropriate npm workspace tests, be sure to include lint and typecheck
 5. Cross-workspace changes
    - `npm test` (runs unit tests + typecheck + linting across all workspaces)
 6. Sandbox/agent environments that block local port binding
@@ -87,16 +76,6 @@ Run these minimum checks based on scope:
    - inline reason
    - owner
    - cleanup condition or target date
-
-## PR Metadata Standard
-
-Each PR should include:
-
-1. Scope summary (what changed and why).
-2. Risk level and likely regression areas.
-3. Validation commands run and outcomes.
-4. Docs updated (or explicit `none required` rationale).
-5. Rollback approach.
 
 ## Release-Impact Rule
 
@@ -132,18 +111,6 @@ Use these logs to keep work auditable:
 
 If a log file is missing, create it when first needed.
 If a discovery does not fit an existing knowledge file, create a new `.agent/knowledge/<category>.md` file and define its purpose at the top. Prefer extending an existing category first; create a new category only when the topic is durable and likely to be reused.
-
-## Repo Discoveries Format
-
-When adding an entry to `.agent/knowledge/repo_discoveries.md`, include:
-
-1. Date
-2. Area (client/server/activities/tooling/docs)
-3. Discovery
-4. Why it matters
-5. Evidence (file path and/or command)
-6. Follow-up action
-7. Owner
 
 ## Definition of Done (General)
 
