@@ -98,8 +98,13 @@ function createMockRes(): MockResponse {
   }
 }
 
-function buildCookieValue(activityName: string, hash: string, teacherCode: string): string {
-  return JSON.stringify([{ key: `${activityName}:${hash}`, teacherCode }])
+function buildCookieValue(
+  activityName: string,
+  hash: string,
+  teacherCode: string,
+  selectedOptions?: Record<string, unknown>,
+): string {
+  return JSON.stringify([{ key: `${activityName}:${hash}`, teacherCode, selectedOptions }])
 }
 
 function getRoute(app: ReturnType<typeof createMockApp>, method: 'GET' | 'POST', path: string): RouteHandler {
@@ -286,5 +291,54 @@ void test('authenticate persists selectedOptions from request body when cookie e
   assert.deepEqual(entry?.selectedOptions, {
     mode: 'review',
     prompt: 'exit ticket',
+  })
+})
+
+void test('authenticate preserves existing selectedOptions from cookie over request body', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const activityName = 'gallery-walk'
+  const teacherCode = 'persistent-teacher-preserve'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'syncdeck-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const handler = getRoute(app, 'POST', '/api/persistent-session/authenticate')
+  const req = createMockReq({
+    cookies: {
+      persistent_sessions: buildCookieValue(activityName, hash, teacherCode, {
+        mode: 'presentation',
+        prompt: 'warmup',
+      }),
+    },
+    body: {
+      activityName,
+      hash,
+      teacherCode,
+      selectedOptions: {
+        mode: 'review',
+        prompt: 'exit ticket',
+      },
+    },
+  })
+  const res = createMockRes()
+
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 200)
+  const cookie = res.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+  const parsed = JSON.parse(cookie.value) as Array<{ key?: string; selectedOptions?: Record<string, unknown> }>
+  const entry = parsed.find((candidate) => candidate.key === `${activityName}:${hash}`)
+  assert.deepEqual(entry?.selectedOptions, {
+    mode: 'presentation',
+    prompt: 'warmup',
   })
 })

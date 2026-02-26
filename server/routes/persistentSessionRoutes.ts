@@ -255,6 +255,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const cookieKey = `${activityName}:${hash}`
     const existingIndex = sessionEntries.findIndex((entry) => entry.key === cookieKey)
     const existingEntry = existingIndex >= 0 ? sessionEntries[existingIndex] : undefined
+    const existingSelectedOptions = toSelectedOptions(existingEntry?.selectedOptions)
 
     if (existingIndex !== -1) {
       sessionEntries.splice(existingIndex, 1)
@@ -265,8 +266,8 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // Preserve existing cookie options when available; otherwise bootstrap from the permalink URL
       // params submitted during teacher authentication on a new device.
       selectedOptions:
-        Object.keys(toSelectedOptions(existingEntry?.selectedOptions)).length > 0
-          ? toSelectedOptions(existingEntry?.selectedOptions)
+        Object.keys(existingSelectedOptions).length > 0
+          ? existingSelectedOptions
           : bodySelectedOptions,
     })
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
