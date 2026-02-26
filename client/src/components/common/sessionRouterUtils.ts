@@ -101,6 +101,41 @@ export function buildPersistentTeacherManagePath(activityName: string, sessionId
   return `/manage/${activityName}/${sessionId}${search}`
 }
 
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
+  } catch {
+    return false
+  }
+}
+
+function getObjectRecord(value: unknown): Record<string, unknown> | null {
+  return (value != null && typeof value === 'object') ? (value as Record<string, unknown>) : null
+}
+
+export function getSessionPresentationUrlForTeacherRedirect(sessionPayload: unknown): string | null {
+  const session = getObjectRecord(sessionPayload)
+  const data = getObjectRecord(session?.data)
+  const presentationUrl = typeof data?.presentationUrl === 'string' ? data.presentationUrl.trim() : ''
+  return isValidHttpUrl(presentationUrl) ? presentationUrl : null
+}
+
+export function buildTeacherManagePathFromSession(
+  activityName: string,
+  sessionId: string,
+  queryString: string,
+  sessionPresentationUrl: string | null,
+): string {
+  if (activityName !== 'syncdeck' || !sessionPresentationUrl) {
+    return buildPersistentTeacherManagePath(activityName, sessionId, queryString)
+  }
+
+  const query = new URLSearchParams()
+  query.set('presentationUrl', sessionPresentationUrl)
+  return `/manage/${activityName}/${sessionId}?${query.toString()}`
+}
+
 export function getPersistentSelectedOptionsFromSearch(search: string, rawDeepLinkOptions: unknown): Record<string, string> {
   const rawSelectedOptions = Object.fromEntries(new URLSearchParams(search).entries())
   return normalizeSelectedOptions(rawDeepLinkOptions, rawSelectedOptions)
