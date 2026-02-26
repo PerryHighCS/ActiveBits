@@ -224,6 +224,21 @@ void test('getPersistentSelectedOptionsFromSearchForActivity preserves syncdeck 
   })
 })
 
+void test('getPersistentSelectedOptionsFromSearchForActivity preserves syncdeck urlHash when deepLinkOptions exist', () => {
+  const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
+    '?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&urlHash=A53762A75A8CC2E5&utm_source=email',
+    {
+      presentationUrl: { type: 'text', validator: 'url' },
+    },
+    'syncdeck',
+  )
+
+  assert.deepEqual(selectedOptions, {
+    presentationUrl: 'https://slides.example/deck',
+    urlHash: 'a53762a75a8cc2e5',
+  })
+})
+
 void test('getPersistentSelectedOptionsFromSearchForActivity ignores invalid syncdeck fallback params', () => {
   const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
     '?presentationUrl=javascript%3Aalert(1)&urlHash=not-a-real-hash',
