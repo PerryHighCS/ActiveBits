@@ -39,10 +39,11 @@ Run these minimum checks based on scope:
 
 1. Docs-only changes
    - Verify links/commands in changed docs are accurate.
-2. Code changes
-   - Run appropriate workspace tests including lint and typecheck.
-   - For cross-workspace changes, ensure `npm test` passes
-6. Sandbox/agent environments that block local port binding
+2. Workspace specific changes
+   - Run the appropriate npm workspace tests, be sure to include lint and typecheck
+3. Cross-workspace changes
+   - `npm test` (runs unit tests + typecheck + linting across all workspaces)
+4. Sandbox/agent environments that block local port binding
    - Keep `npm test` as the primary merge gate when available.
    - If port-binding tests fail due environment constraints (for example `EPERM` on listen), run `npm run test:codex` and record the limitation in validation notes.
 
@@ -70,6 +71,19 @@ Run these minimum checks based on scope:
    - inline reason
    - owner
    - cleanup condition or target date
+
+## Release-Impact Rule
+
+If a change affects runtime, build, or deployment behavior:
+
+1. Update `DEPLOYMENT.md` in the same PR.
+2. Update `README.md` quick-start/build/run commands as needed.
+3. Update `ARCHITECTURE.md` if system boundaries or runtime flow changed.
+
+## Ownership and Escalation
+
+1. If unexpected unrelated file changes are discovered, pause and ask how to proceed.
+2. If requirements conflict with repository safety or deployment guarantees, escalate before continuing.
 
 ## Evidence and Tracking
 

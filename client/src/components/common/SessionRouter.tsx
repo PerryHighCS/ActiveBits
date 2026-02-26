@@ -6,6 +6,7 @@ import LoadingFallback from './LoadingFallback'
 import { getActivity, activities } from '@src/activities'
 import {
   buildPersistentSessionApiUrl,
+  buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
   getSoloActivities,
@@ -246,9 +247,14 @@ const SessionRouter = () => {
     }
 
     if (persistentSessionInfo?.isStarted && persistentSessionInfo.sessionId) {
+      const startedSessionId = persistentSessionInfo.sessionId
+
       if (persistentSessionInfo.hasTeacherCookie) {
         const queryString = getWindowSearch()
-        void navigate(`/manage/${activityName}/${persistentSessionInfo.sessionId}${queryString}`, { replace: true })
+        void navigate(
+          buildPersistentTeacherManagePath(activityName, startedSessionId, queryString),
+          { replace: true },
+        )
         return <div className="text-center">Redirecting to session...</div>
       }
 
@@ -279,7 +285,7 @@ const SessionRouter = () => {
           const payload = (await response.json()) as TeacherAuthResponse
           const queryString = getWindowSearch()
           void navigate(
-            `/manage/${activityName}/${payload.sessionId || persistentSessionInfo.sessionId}${queryString}`,
+            buildPersistentTeacherManagePath(activityName, payload.sessionId || startedSessionId, queryString),
             { replace: true },
           )
         } catch (authError) {

@@ -53,8 +53,8 @@ export function useResilientWebSocket({
 }: UseResilientWebSocketOptions = {}): UseResilientWebSocketResult {
   const socketRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectFnRef = useRef<() => WebSocket | null>(() => null)
   const reconnectAttemptsRef = useRef(0)
-  const reconnectConnectRef = useRef<(() => WebSocket | null) | null>(null)
   const manualCloseRef = useRef(false)
   const onOpenRef = useRef(onOpen)
   const onMessageRef = useRef(onMessage)
@@ -149,7 +149,7 @@ export function useResilientWebSocket({
         reconnectAttemptsRef.current += 1
 
         reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectConnectRef.current?.()
+          reconnectFnRef.current()
         }, delay)
       }
     }
@@ -165,7 +165,7 @@ export function useResilientWebSocket({
   ])
 
   useEffect(() => {
-    reconnectConnectRef.current = connect
+    reconnectFnRef.current = connect
   }, [connect])
 
   useEffect(() => {
