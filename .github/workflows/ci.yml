@@ -18,7 +18,18 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm_config_production=false npm install --workspaces --include-workspace-root
+        run: |
+          for attempt in 1 2 3; do
+            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Install failed (attempt $attempt). Retrying after short delay..."
+              sleep 3
+            fi
+          done
+          echo "Dependency install failed after 3 attempts"
+          exit 1
 
 
       - name: Run tests

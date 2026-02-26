@@ -22,6 +22,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Investigate the upstream source of percent-encoded `presentationUrl` values entering persistent cookies (likely a double-encoded permalink copy/share path) and consider normalizing URL-validated deep-link options when persisting generic persistent-session auth cookies.
 - Owner: Codex
 
+- Date: 2026-02-26
+- Area: tooling
+- Discovery: GitHub Actions dependency install can intermittently fail during `esbuild` postinstall with `spawnSync .../node_modules/esbuild/bin/esbuild ETXTBSY`; switching CI to `npm ci` and retrying the install step mitigates the runner-side binary write/execute race.
+- Why it matters: The failure occurs before tests run and is transient/infrastructure-related, causing flaky CI even when repository code is unchanged.
+- Evidence: `.github/workflows/ci.yml` (install step retry loop + `npm ci`); CI error logs showing `node_modules/esbuild/install.js` `ETXTBSY`
+- Follow-up action: If flakes continue, capture whether they cluster on a specific runner image and consider pinning npm version or adding a cache cleanup before retries.
+- Owner: Codex
+
 - Date: 2026-02-24
 - Area: activities
 - Discovery: SyncDeck chalkboard replay buffering now caps `chalkboard.delta` to the most recent 200 stroke commands during both runtime updates and persisted-session normalization.
