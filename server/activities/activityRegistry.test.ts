@@ -405,7 +405,7 @@ void test('initializeActivityRegistry preserves dev activities in development mo
   }
 })
 
-void test('registry treats ENOENT for disappeared discovered config as skippable race', async () => {
+void test('isMissingDiscoveredConfigError treats ENOENT for disappeared discovered config as skippable race', async () => {
   const testRoot = mkdtempSync(join(tmpdir(), 'activity-registry-missing-race-'))
   const testConfigPath = join(testRoot, 'activity.config.js')
 
