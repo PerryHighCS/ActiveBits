@@ -1013,7 +1013,10 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
   })
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
-  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', 'persistent-teacher-code')
+  const teacherCode = 'persistent-teacher-code'
+  const presentationUrl = 'https://slides.example/deck'
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', teacherCode)
+  const urlHash = computeUrlHash(hash, presentationUrl)
   await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
   await startPersistentSession(hash, 's1', {
     id: 'teacher-ws',
@@ -1032,10 +1035,10 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
         persistent_sessions: JSON.stringify([
           {
             key: `syncdeck:${hash}`,
-            teacherCode: 'persistent-teacher-code',
+            teacherCode,
             selectedOptions: {
-              presentationUrl: 'https://slides.example/deck',
-              urlHash: 'abcd1234abcd1234',
+              presentationUrl,
+              urlHash,
             },
           },
         ]),
@@ -1047,8 +1050,8 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
-    persistentPresentationUrl: 'https://slides.example/deck',
-    persistentUrlHash: 'abcd1234abcd1234',
+    persistentPresentationUrl: presentationUrl,
+    persistentUrlHash: urlHash,
   })
 })
 
@@ -1136,6 +1139,59 @@ void test('instructor-passcode route decodes double-encoded cookie presentationU
             teacherCode,
             selectedOptions: {
               presentationUrl: encodeURIComponent(encodeURIComponent(presentationUrl)),
+            },
+          },
+        ]),
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    instructorPasscode: 'teacher-passcode-1',
+    persistentPresentationUrl: presentationUrl,
+    persistentUrlHash: computeUrlHash(hash, presentationUrl),
+  })
+})
+
+void test('instructor-passcode route repairs stale cookie urlHash that does not match normalized presentationUrl', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const teacherCode = 'persistent-teacher-code'
+  const presentationUrl = 'https://perryhighcs.github.io/Presentations/CSA/2d-arrays.html'
+  const encodedPresentationUrl = encodeURIComponent(presentationUrl)
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', teacherCode)
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `syncdeck:${hash}`,
+            teacherCode,
+            selectedOptions: {
+              presentationUrl: encodedPresentationUrl,
+              // Stale hash computed against the encoded URL should not be trusted.
+              urlHash: computeUrlHash(hash, encodedPresentationUrl),
             },
           },
         ]),

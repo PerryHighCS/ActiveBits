@@ -757,9 +757,13 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
     console.log('[SYNCDECK-DEBUG] instructor-passcode: cookie selectedOptions.presentationUrl =', JSON.stringify(selectedOptions.presentationUrl), '| urlHash =', JSON.stringify(selectedOptions.urlHash))
     const persistentPresentationUrl = normalizePersistentPresentationUrl(selectedOptions.presentationUrl)
-    const persistentUrlHash =
+    const candidateUrlHash =
       typeof selectedOptions.urlHash === 'string' && selectedOptions.urlHash.trim().length > 0
-        ? selectedOptions.urlHash
+        ? selectedOptions.urlHash.trim()
+        : null
+    const persistentUrlHash =
+      candidateUrlHash && persistentPresentationUrl && verifyUrlHash(persistentHash, persistentPresentationUrl, candidateUrlHash)
+        ? candidateUrlHash
         : (persistentPresentationUrl ? computeUrlHash(persistentHash, persistentPresentationUrl) : null)
     // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
     console.log('[SYNCDECK-DEBUG] instructor-passcode: returning persistentPresentationUrl =', JSON.stringify(persistentPresentationUrl), '| persistentUrlHash =', JSON.stringify(persistentUrlHash))
