@@ -55,7 +55,6 @@ export function useResilientWebSocket({
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectFnRef = useRef<() => WebSocket | null>(() => null)
   const reconnectAttemptsRef = useRef(0)
-  const reconnectConnectRef = useRef<(() => WebSocket | null) | null>(null)
   const manualCloseRef = useRef(false)
   const onOpenRef = useRef(onOpen)
   const onMessageRef = useRef(onMessage)
