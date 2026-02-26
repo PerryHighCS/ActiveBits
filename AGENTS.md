@@ -47,6 +47,7 @@ Run these minimum checks based on scope:
 2. Client-only code changes
    - `npm --workspace client test`
    - `npm --workspace client run build` (when build/runtime paths are affected)
+   - `npm --workspace client run typecheck` (fix any type errors before commit)
    - `npm --workspace client run lint` (fix any linting errors before commit)
 3. Server-only code changes
    - `npm --workspace server test`
@@ -54,10 +55,10 @@ Run these minimum checks based on scope:
    - `npm --workspace server run lint` (if linting script exists)
 4. Activities-only changes
    - `npm --workspace activities test`
+   - `npm --workspace activities run typecheck` (fix any type errors before commit)
    - `npm --workspace activities run lint` (fix any linting errors before commit)
 5. Cross-workspace changes
-   - `npm run lint` (if root lint script exists; linting is included in `npm test`)
-   - `npm test` (runs unit tests + linting across all workspaces)
+   - `npm test` (runs unit tests + typecheck + linting across all workspaces)
 6. Sandbox/agent environments that block local port binding
    - Keep `npm test` as the primary merge gate when available.
    - If port-binding tests fail due environment constraints (for example `EPERM` on listen), run `npm run test:codex` and record the limitation in validation notes.

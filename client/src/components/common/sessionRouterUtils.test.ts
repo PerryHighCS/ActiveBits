@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
   cleanExpiredSessions,
   getPersistentQuerySuffix,
@@ -98,6 +99,21 @@ void test('buildPersistentSessionApiUrl encodes hash and activityName and preser
 void test('buildPersistentSessionApiUrl replaces existing activityName in search', () => {
   const url = buildPersistentSessionApiUrl('abc123', 'new-name', '?activityName=old&mode=solo')
   assert.equal(url, '/api/persistent-session/abc123?activityName=new-name&mode=solo')
+})
+
+void test('buildPersistentTeacherManagePath drops permalink query for started syncdeck sessions', () => {
+  const path = buildPersistentTeacherManagePath(
+    'syncdeck',
+    'session-123',
+    '?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&urlHash=abcd1234',
+  )
+
+  assert.equal(path, '/manage/syncdeck/session-123')
+})
+
+void test('buildPersistentTeacherManagePath preserves query for non-syncdeck activities', () => {
+  const path = buildPersistentTeacherManagePath('raffle', 'session-123', '?foo=bar')
+  assert.equal(path, '/manage/raffle/session-123?foo=bar')
 })
 
 void test('isJoinSessionId requires a full non-zero hex string', () => {

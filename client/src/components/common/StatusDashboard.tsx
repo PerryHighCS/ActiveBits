@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { activities } from '@src/activities'
 import {
   buildByTypeEntries,
@@ -51,7 +51,7 @@ export default function StatusDashboard() {
   const [error, setError] = useState('')
   const [paused, setPaused] = useState(false)
   const [intervalMs, setIntervalMs] = useState(5000)
-  const lastUpdatedRef = useRef<Date | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -65,7 +65,7 @@ export default function StatusDashboard() {
 
         setData(json)
         setError('')
-        lastUpdatedRef.current = new Date()
+        setLastUpdatedAt(new Date())
       } catch (err) {
         if (!mounted) return
         setError(err instanceof Error ? err.message : String(err))
@@ -112,7 +112,7 @@ export default function StatusDashboard() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <h1 style={{ fontSize: 18, margin: 0, color: '#111827' }}>ActiveBits Status</h1>
           <div style={{ fontSize: 12, color: '#6b7280' }}>
-            Last update: {lastUpdatedRef.current ? lastUpdatedRef.current.toLocaleTimeString() : '—'}
+            Last update: {lastUpdatedAt ? lastUpdatedAt.toLocaleTimeString() : '—'}
           </div>
           <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', alignItems: 'center' }}>
             <label htmlFor="refresh-interval" style={{ fontSize: 12, color: '#6b7280' }}>
