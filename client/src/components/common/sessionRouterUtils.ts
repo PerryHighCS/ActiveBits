@@ -1,4 +1,5 @@
 import type { ActivityRegistryEntry } from '../../../../types/activity.js'
+import { normalizeSelectedOptions } from './manageDashboardUtils'
 
 export const CACHE_TTL = 1000 * 60 * 60 * 12
 
@@ -98,6 +99,11 @@ export function buildPersistentTeacherManagePath(activityName: string, sessionId
   // SyncDeck should resume from live session state instead of reusing permalink bootstrap params.
   const search = activityName === 'syncdeck' ? '' : queryString
   return `/manage/${activityName}/${sessionId}${search}`
+}
+
+export function getPersistentSelectedOptionsFromSearch(search: string, rawDeepLinkOptions: unknown): Record<string, string> {
+  const rawSelectedOptions = Object.fromEntries(new URLSearchParams(search).entries())
+  return normalizeSelectedOptions(rawDeepLinkOptions, rawSelectedOptions)
 }
 
 export function isJoinSessionId(input: string): boolean {

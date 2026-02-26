@@ -4,6 +4,7 @@ import {
   buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
   cleanExpiredSessions,
+  getPersistentSelectedOptionsFromSearch,
   getPersistentQuerySuffix,
   getSoloActivities,
   isJoinSessionId,
@@ -114,6 +115,27 @@ void test('buildPersistentTeacherManagePath drops permalink query for started sy
 void test('buildPersistentTeacherManagePath preserves query for non-syncdeck activities', () => {
   const path = buildPersistentTeacherManagePath('raffle', 'session-123', '?foo=bar')
   assert.equal(path, '/manage/raffle/session-123?foo=bar')
+})
+
+void test('getPersistentSelectedOptionsFromSearch filters query params by deepLinkOptions', () => {
+  const selectedOptions = getPersistentSelectedOptionsFromSearch(
+    '?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&utm_source=email&mode=review&empty=',
+    {
+      presentationUrl: { type: 'text', validator: 'url' },
+      mode: { type: 'select' },
+      empty: { type: 'text' },
+    },
+  )
+
+  assert.deepEqual(selectedOptions, {
+    presentationUrl: 'https://slides.example/deck',
+    mode: 'review',
+  })
+})
+
+void test('getPersistentSelectedOptionsFromSearch returns empty object when no deepLinkOptions exist', () => {
+  const selectedOptions = getPersistentSelectedOptionsFromSearch('?utm_source=email&debug=true', undefined)
+  assert.deepEqual(selectedOptions, {})
 })
 
 void test('isJoinSessionId requires a full non-zero hex string', () => {

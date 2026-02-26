@@ -107,6 +107,24 @@ async function loadConfig(configPath: string): Promise<ActivityConfigLike> {
   }
 }
 
+function isMissingDiscoveredConfigError(err: unknown, configPath: string): boolean {
+  if (fs.existsSync(configPath)) {
+    return false
+  }
+
+  if (!(err instanceof Error)) {
+    return false
+  }
+
+  const moduleNotFoundError = err as Error & { code?: unknown }
+  if (moduleNotFoundError.code !== 'ERR_MODULE_NOT_FOUND') {
+    return false
+  }
+
+  const configUrl = pathToFileURL(configPath).href
+  return err.message.includes(configPath) || err.message.includes(configUrl)
+}
+
 /**
  * Filter discovered configs to exclude dev-only activities in production.
  * Returns configs with cached loadedConfig to avoid redundant loading.
@@ -120,6 +138,11 @@ async function filterConfigsByDevFlag(configs: DiscoveredConfig[]): Promise<Filt
       const loadedConfig = await loadConfig(config.configPath)
       configsWithLoaded.push({ ...config, loadedConfig })
     } catch (err) {
+      if (isMissingDiscoveredConfigError(err, config.configPath)) {
+        console.warn(`[activities] Config for "${config.id}" disappeared during registry initialization, skipping`)
+        continue
+      }
+
       if (!isDevelopment) {
         console.error(`\n[ERROR] Failed to load config for activity "${config.id}" at "${config.configPath}":\n`, err)
         console.error(`[FATAL] Cannot load activity config for "${config.id}" in production. Exiting startup.`)

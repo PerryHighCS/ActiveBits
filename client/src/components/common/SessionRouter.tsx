@@ -9,6 +9,7 @@ import {
   buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
+  getPersistentSelectedOptionsFromSearch,
   getSoloActivities,
   isJoinSessionId,
   readCachedSession,
@@ -81,14 +82,6 @@ const bgColorClasses: Record<string, string> = {
 
 function getWindowSearch(): string {
   return typeof window !== 'undefined' ? window.location.search : ''
-}
-
-function getPersistentSelectedOptionsFromSearch(): Record<string, string> {
-  if (typeof window === 'undefined') {
-    return {}
-  }
-
-  return Object.fromEntries(new URLSearchParams(window.location.search).entries())
 }
 
 const SessionRouter = () => {
@@ -282,7 +275,10 @@ const SessionRouter = () => {
               activityName,
               hash,
               teacherCode: teacherCode.trim(),
-              selectedOptions: getPersistentSelectedOptionsFromSearch(),
+              selectedOptions: getPersistentSelectedOptionsFromSearch(
+                getWindowSearch(),
+                getActivity(activityName)?.deepLinkOptions,
+              ),
             }),
           })
 
