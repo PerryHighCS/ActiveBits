@@ -9,6 +9,7 @@ import {
   buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
+  getPersistentSelectedOptionsFromSearch,
   getSoloActivities,
   isJoinSessionId,
   readCachedSession,
@@ -274,6 +275,10 @@ const SessionRouter = () => {
               activityName,
               hash,
               teacherCode: teacherCode.trim(),
+              selectedOptions: getPersistentSelectedOptionsFromSearch(
+                getWindowSearch(),
+                getActivity(activityName)?.deepLinkOptions,
+              ),
             }),
           })
 
