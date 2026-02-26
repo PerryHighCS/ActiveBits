@@ -619,13 +619,21 @@ function normalizePersistentPresentationUrl(value: unknown): string | null {
     return trimmed
   }
 
-  try {
-    const decoded = decodeURIComponent(trimmed)
-    if (decoded !== trimmed && validatePresentationUrl(decoded)) {
-      return decoded
+  let current = trimmed
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const decoded = decodeURIComponent(current)
+      if (decoded === current) {
+        return null
+      }
+      if (validatePresentationUrl(decoded)) {
+        return decoded
+      }
+      current = decoded
+    } catch {
+      // Ignore decode errors and fall through to null.
+      return null
     }
-  } catch {
-    // Ignore decode errors and fall through to null.
   }
 
   return null

@@ -1102,6 +1102,157 @@ void test('instructor-passcode route decodes encoded cookie presentationUrl and 
   })
 })
 
+void test('instructor-passcode route decodes double-encoded cookie presentationUrl and backfills missing urlHash', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const teacherCode = 'persistent-teacher-code'
+  const presentationUrl = 'https://perryhighcs.github.io/Presentations/CSA/2d-arrays.html'
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', teacherCode)
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `syncdeck:${hash}`,
+            teacherCode,
+            selectedOptions: {
+              presentationUrl: encodeURIComponent(encodeURIComponent(presentationUrl)),
+            },
+          },
+        ]),
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    instructorPasscode: 'teacher-passcode-1',
+    persistentPresentationUrl: presentationUrl,
+    persistentUrlHash: computeUrlHash(hash, presentationUrl),
+  })
+})
+
+void test('instructor-passcode route ignores invalid cookie presentationUrl edge cases', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', teacherCode)
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const invalidValues: unknown[] = [undefined, null, 42, '', '   ', '%E0%A4%A']
+
+  for (const presentationUrl of invalidValues) {
+    const res = createResponse()
+    await handler?.(
+      createRequest(
+        { sessionId: 's1' },
+        {},
+        {
+          persistent_sessions: [
+            {
+              key: `syncdeck:${hash}`,
+              teacherCode,
+              selectedOptions: { presentationUrl },
+            },
+          ],
+        },
+      ),
+      res,
+    )
+
+    assert.equal(res.statusCode, 200)
+    assert.deepEqual(res.body, {
+      instructorPasscode: 'teacher-passcode-1',
+    })
+  }
+})
+
+void test('instructor-passcode route preserves already-valid cookie presentationUrl values and backfills urlHash', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', teacherCode)
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const validUrls = [
+    'https://slides.example/deck',
+    'https://slides.example/deck?topic=2d-arrays&mode=review#slide-3',
+  ]
+
+  for (const presentationUrl of validUrls) {
+    const res = createResponse()
+    await handler?.(
+      createRequest(
+        { sessionId: 's1' },
+        {},
+        {
+          persistent_sessions: [
+            {
+              key: `syncdeck:${hash}`,
+              teacherCode,
+              selectedOptions: { presentationUrl },
+            },
+          ],
+        },
+      ),
+      res,
+    )
+
+    assert.equal(res.statusCode, 200)
+    assert.deepEqual(res.body, {
+      instructorPasscode: 'teacher-passcode-1',
+      persistentPresentationUrl: presentationUrl,
+      persistentUrlHash: computeUrlHash(hash, presentationUrl),
+    })
+  }
+})
+
 void test('instructor-passcode route rejects request without matching teacher cookie', async () => {
   initializePersistentStorage(null)
 
