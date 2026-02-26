@@ -1,5 +1,6 @@
 import type { ActivityRegistryEntry } from '../../../../types/activity.js'
 import { normalizeSelectedOptions } from './manageDashboardUtils'
+import { isValidHttpUrl } from './urlValidationUtils'
 
 export const CACHE_TTL = 1000 * 60 * 60 * 12
 
@@ -101,16 +102,10 @@ export function buildPersistentTeacherManagePath(activityName: string, sessionId
   return `/manage/${activityName}/${sessionId}${search}`
 }
 
-function isValidHttpUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value)
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
-  } catch {
-    return false
-  }
-}
-
 function getObjectRecord(value: unknown): Record<string, unknown> | null {
+  // Intentionally returns a nullable record (instead of a type guard like manageDashboardUtils)
+  // so callers can safely chain nested lookups (`getObjectRecord(x)?.child`) while parsing
+  // untrusted payloads without extra branching.
   return (value != null && typeof value === 'object') ? (value as Record<string, unknown>) : null
 }
 

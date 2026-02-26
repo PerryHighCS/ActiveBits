@@ -134,6 +134,40 @@ void test('getSessionPresentationUrlForTeacherRedirect returns validated session
   )
 })
 
+void test('getSessionPresentationUrlForTeacherRedirect rejects malformed or unsafe payload/url variants', () => {
+  assert.equal(getSessionPresentationUrlForTeacherRedirect(null), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect(undefined), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({}), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({ data: null }), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({ data: {} }), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({ data: { presentationUrl: '' } }), null)
+  assert.equal(getSessionPresentationUrlForTeacherRedirect({ data: { presentationUrl: '   ' } }), null)
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: 'file:///etc/passwd' },
+    }),
+    null,
+  )
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: 'ftp://example.com/deck' },
+    }),
+    null,
+  )
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: '/relative/path' },
+    }),
+    null,
+  )
+  assert.equal(
+    getSessionPresentationUrlForTeacherRedirect({
+      data: { presentationUrl: 'slides.example/deck' },
+    }),
+    null,
+  )
+})
+
 void test('buildTeacherManagePathFromSession uses session presentationUrl for syncdeck redirects', () => {
   const path = buildTeacherManagePathFromSession(
     'syncdeck',
