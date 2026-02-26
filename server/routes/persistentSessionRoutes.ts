@@ -257,6 +257,9 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const existingEntry = existingIndex >= 0 ? sessionEntries[existingIndex] : undefined
     const existingSelectedOptions = toSelectedOptions(existingEntry?.selectedOptions)
 
+    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
+    console.log('[SYNCDECK-DEBUG] authenticate: activityName =', activityName, '| bodySelectedOptions =', JSON.stringify(bodySelectedOptions), '| existingSelectedOptions =', JSON.stringify(existingSelectedOptions), '| will use:', Object.keys(existingSelectedOptions).length > 0 ? 'existing' : 'body')
+
     if (existingIndex !== -1) {
       sessionEntries.splice(existingIndex, 1)
     }
