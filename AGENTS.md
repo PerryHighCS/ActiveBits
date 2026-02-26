@@ -1,6 +1,4 @@
-# AGENTS.md
-
-This file defines the default execution contract for human and AI agents working in this repository.
+# ./AGENTS.md
 
 ## Goals
 
@@ -16,27 +14,24 @@ Before making changes, read these files when relevant:
 1. `README.md` (project commands and structure)
 2. `ARCHITECTURE.md` (system boundaries and runtime model)
 3. `DEPLOYMENT.md` (production/deploy constraints)
-4. `.agent/knowledge/react-best-practices.md` (React patterns and optimization guidance)
+4. `.agent/knowledge/*.md` (discovered patterns and optimization guidance)
 
 ## Working Rules
 
-1. Run baseline checks before large refactors.
-2. Prefer small, phase-scoped commits and PRs.
-3. Always run `npm test` before committing.
-4. From the package root you can call `npm test`; the commit should pass all tests before merge.
-5. Fix any failing tests or lint errors until the whole suite is green.
-6. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
-7. Add or update tests for the code you change, even if nobody asked.
-8. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
+1. From the package root you can call `npm test`; all tests must pass before commit.
+2. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
+3. Add or update tests for the code you change, even if nobody asked.
+4. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
 
 ## Preflight Checklist
 
 Before making code changes:
 
-1. Confirm branch and working tree status.
-2. Read relevant docs (`README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`).
-3. Identify change scope (docs-only, client, server, activities, cross-workspace).
-4. Run at least the relevant baseline command(s) for touched areas.
+1. Confirm branch and working tree status. NEVER commit to `main`.
+2. If unexpected unrelated file changes are discovered, pause and ask how to proceed.
+3. Read relevant docs (`README.md`, `ARCHITECTURE.md`, `DEPLOYMENT.md`).
+4. Identify change scope (docs-only, client, server, activities, cross-workspace).
+5. If requirements conflict with repository safety or deployment guarantees, escalate before continuing.
 
 ## Verification Matrix
 
@@ -46,9 +41,9 @@ Run these minimum checks based on scope:
    - Verify links/commands in changed docs are accurate.
 2. Workspace specific changes
    - Run the appropriate npm workspace tests, be sure to include lint and typecheck
-5. Cross-workspace changes
+3. Cross-workspace changes
    - `npm test` (runs unit tests + typecheck + linting across all workspaces)
-6. Sandbox/agent environments that block local port binding
+4. Sandbox/agent environments that block local port binding
    - Keep `npm test` as the primary merge gate when available.
    - If port-binding tests fail due environment constraints (for example `EPERM` on listen), run `npm run test:codex` and record the limitation in validation notes.
 

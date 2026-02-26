@@ -12,7 +12,7 @@
 
 /**
  * Evaluate a Java format string with given arguments.
- * Supports common format specifiers: %s, %d, %f, %n, %%
+ * Supports common format specifiers: %s, %d, %f, %x/%X, %n, %%
  * Also handles width and precision: %-20s, %3d, %.2f, %6.2f, %03d, etc.
  */
 export function evaluateFormatString(formatStr: string, args: unknown[] = []): string {
@@ -88,9 +88,17 @@ export function evaluateFormatString(formatStr: string, args: unknown[] = []): s
             }
             argIndex++;
             i = j + 1;
-          } else if (type === 'd' && argIndex < args.length) {
-            // Integer with width: %3d, %03d, %2d, etc.
-            const num = String(Number.parseInt(String(args[argIndex]), 10) || 0);
+          } else if ((type === 'd' || type === 'x' || type === 'X') && argIndex < args.length) {
+            // Integer/hex with width: %3d, %03d, %04X, etc.
+            const rawArg = args[argIndex]
+            let num = String(Number.parseInt(String(rawArg), 10) || 0)
+
+            if (type === 'x' || type === 'X') {
+              const intValue = Number.parseInt(String(rawArg), 10) || 0
+              num = Math.trunc(intValue).toString(16)
+              if (type === 'X') num = num.toUpperCase()
+            }
+
             const match = spec.match(/^(0)?(\d+)?$/);
             if (match) {
               const [, padZero, width] = match;
