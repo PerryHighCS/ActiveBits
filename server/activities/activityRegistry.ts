@@ -137,7 +137,7 @@ async function filterConfigsByDevFlag(configs: DiscoveredConfig[]): Promise<Filt
   return configsWithLoaded.filter((config) => !config.loadedConfig.isDev)
 }
 
-const discoveredConfigs = discoverConfigPaths()
+let discoveredConfigs: DiscoveredConfig[] = []
 let ALLOWED_ACTIVITIES: string[] = []
 let filteredConfigs: FilteredConfig[] = []
 
@@ -156,6 +156,7 @@ export function isValidActivity(activityName: string): boolean {
  * Initialize activity registry by filtering out dev-only activities in production.
  */
 export async function initializeActivityRegistry(): Promise<void> {
+  discoveredConfigs = discoverConfigPaths()
   filteredConfigs = await filterConfigsByDevFlag(discoveredConfigs)
   ALLOWED_ACTIVITIES = filteredConfigs.map((config) => config.id)
   const devCount = discoveredConfigs.length - filteredConfigs.length
