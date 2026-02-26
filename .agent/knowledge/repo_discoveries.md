@@ -16,7 +16,7 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-02-26
 - Area: activities
-- Discovery: SyncDeck `instructor-passcode` recovery for persistent sessions must normalize `selectedOptions.presentationUrl` from the cookie (including single-pass `decodeURIComponent` fallback when the stored value is percent-encoded) and recompute `urlHash` from the persistent hash when the cookie entry is missing `urlHash`.
+- Discovery: SyncDeck `instructor-passcode` recovery for persistent sessions must normalize `selectedOptions.presentationUrl` from the cookie (including iterative `decodeURIComponent` fallback with up to 3 decode attempts when the stored value is percent-encoded) and recompute `urlHash` from the persistent hash when the cookie entry is missing `urlHash`.
 - Why it matters: In the persistent-session teacher flow, the generic `persistent-session/authenticate` cookie rewrite can preserve or seed a cookie entry that lacks SyncDeck's `urlHash`, and encoded `presentationUrl` values fail URL validation, causing the manager to stall on the configure screen instead of auto-starting the presentation.
 - Evidence: `activities/syncdeck/server/routes.ts` (`/api/syncdeck/:sessionId/instructor-passcode`); `activities/syncdeck/server/routes.test.ts` (encoded cookie URL + missing `urlHash` regression)
 - Follow-up action: Investigate the upstream source of percent-encoded `presentationUrl` values entering persistent cookies (likely a double-encoded permalink copy/share path) and consider normalizing URL-validated deep-link options when persisting generic persistent-session auth cookies.

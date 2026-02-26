@@ -1237,13 +1237,13 @@ void test('instructor-passcode route ignores invalid cookie presentationUrl edge
         { sessionId: 's1' },
         {},
         {
-          persistent_sessions: [
+          persistent_sessions: JSON.stringify([
             {
               key: `syncdeck:${hash}`,
               teacherCode,
               selectedOptions: { presentationUrl },
             },
-          ],
+          ]),
         },
       ),
       res,
@@ -1288,13 +1288,13 @@ void test('instructor-passcode route preserves already-valid cookie presentation
         { sessionId: 's1' },
         {},
         {
-          persistent_sessions: [
+          persistent_sessions: JSON.stringify([
             {
               key: `syncdeck:${hash}`,
               teacherCode,
               selectedOptions: { presentationUrl },
             },
-          ],
+          ]),
         },
       ),
       res,
