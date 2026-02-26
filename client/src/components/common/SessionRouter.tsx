@@ -83,6 +83,14 @@ function getWindowSearch(): string {
   return typeof window !== 'undefined' ? window.location.search : ''
 }
 
+function getPersistentSelectedOptionsFromSearch(): Record<string, string> {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+
+  return Object.fromEntries(new URLSearchParams(window.location.search).entries())
+}
+
 const SessionRouter = () => {
   const [sessionIdInput, setSessionIdInput] = useState('')
   const [soloActivity, setSoloActivity] = useState<(typeof activities)[number] | null>(null)
@@ -274,6 +282,7 @@ const SessionRouter = () => {
               activityName,
               hash,
               teacherCode: teacherCode.trim(),
+              selectedOptions: getPersistentSelectedOptionsFromSearch(),
             }),
           })
 

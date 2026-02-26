@@ -219,6 +219,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const activityName = getBodyString(body, 'activityName')
     const hash = getBodyString(body, 'hash')
     const teacherCode = getBodyString(body, 'teacherCode')
+    const bodySelectedOptions = toSelectedOptions(body.selectedOptions)
 
     if (!activityName || !hash || !teacherCode) {
       res.status(400).json({ error: 'Missing activityName, hash, or teacherCode' })
@@ -261,7 +262,12 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     sessionEntries.push({
       key: cookieKey,
       teacherCode,
-      selectedOptions: toSelectedOptions(existingEntry?.selectedOptions),
+      // Preserve existing cookie options when available; otherwise bootstrap from the permalink URL
+      // params submitted during teacher authentication on a new device.
+      selectedOptions:
+        Object.keys(toSelectedOptions(existingEntry?.selectedOptions)).length > 0
+          ? toSelectedOptions(existingEntry?.selectedOptions)
+          : bodySelectedOptions,
     })
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
