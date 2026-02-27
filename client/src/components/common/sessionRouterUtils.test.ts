@@ -5,6 +5,7 @@ import {
   buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
   cleanExpiredSessions,
+  normalizePersistentPresentationUrl,
   getPersistentSelectedOptionsFromSearchForActivity,
   getPersistentSelectedOptionsFromSearch,
   getPersistentQuerySuffix,
@@ -230,6 +231,28 @@ void test('getPersistentSelectedOptionsFromSearchForActivity preserves syncdeck 
     {
       presentationUrl: { type: 'text', validator: 'url' },
     },
+    'syncdeck',
+  )
+
+  assert.deepEqual(selectedOptions, {
+    presentationUrl: 'https://slides.example/deck',
+    urlHash: 'a53762a75a8cc2e5',
+  })
+})
+
+void test('normalizePersistentPresentationUrl decodes encoded and up to triple-encoded syncdeck permalink URLs', () => {
+  const url = 'https://slides.example/deck'
+
+  assert.equal(normalizePersistentPresentationUrl(url), url)
+  assert.equal(normalizePersistentPresentationUrl(encodeURIComponent(url)), url)
+  assert.equal(normalizePersistentPresentationUrl(encodeURIComponent(encodeURIComponent(url))), url)
+  assert.equal(normalizePersistentPresentationUrl(encodeURIComponent(encodeURIComponent(encodeURIComponent(url)))), url)
+})
+
+void test('getPersistentSelectedOptionsFromSearchForActivity normalizes encoded syncdeck presentationUrl fallback', () => {
+  const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
+    '?presentationUrl=https%253A%252F%252Fslides.example%252Fdeck&urlHash=A53762A75A8CC2E5',
+    undefined,
     'syncdeck',
   )
 

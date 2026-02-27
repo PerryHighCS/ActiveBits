@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-02-27
+- Area: client
+- Discovery: SyncDeck persistent teacher auth from `WaitingRoom` must send `selectedOptions` parsed from the permalink query (including decode-normalized `presentationUrl` for encoded/double-encoded values), and manager passcode hydration should replace invalid current `presentationUrl` state with the validated cookie-backed `persistentPresentationUrl`.
+- Why it matters: Without `selectedOptions` in waiting-room auth, the refreshed `persistent_sessions` cookie loses `presentationUrl/urlHash`, making `/api/syncdeck/:sessionId/instructor-passcode` return null recovery fields; if query bootstrap is percent-encoded, manager state can remain invalid and block configure/start.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `client/src/components/common/sessionRouterUtils.test.ts`
+- Follow-up action: Remove temporary `[SYNCDECK-DEBUG]` logs after confirming production traces show decoded `selectedOptions.presentationUrl` and non-null `persistentPresentationUrl/persistentUrlHash` through waiting-room teacher startup.
+- Owner: Codex
+
 - Date: 2026-02-26
 - Area: activities
 - Discovery: SyncDeck `instructor-passcode` recovery for persistent sessions must normalize `selectedOptions.presentationUrl` from the cookie (including iterative `decodeURIComponent` fallback with up to 3 decode attempts when the stored value is percent-encoded) and recompute `urlHash` from the persistent hash when the cookie entry is missing `urlHash`.

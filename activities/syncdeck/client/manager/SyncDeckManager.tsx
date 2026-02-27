@@ -1260,9 +1260,20 @@ const SyncDeckManager: FC = () => {
 
           if (persistentPresentationUrl) {
             setPresentationUrl((current) => {
+              const normalizedCurrent = current.trim()
+              const shouldKeepCurrent = validatePresentationUrl(normalizedCurrent)
+              const nextPresentationUrl = shouldKeepCurrent ? normalizedCurrent : persistentPresentationUrl
               // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-              console.log('[SYNCDECK-DEBUG] setPresentationUrl from passcode API: current =', JSON.stringify(current), '| next =', JSON.stringify(current.trim().length > 0 ? current : persistentPresentationUrl))
-              return current.trim().length > 0 ? current : persistentPresentationUrl
+              console.log(
+                '[SYNCDECK-DEBUG] setPresentationUrl from passcode API:',
+                '| current =',
+                JSON.stringify(current),
+                '| currentValid =',
+                shouldKeepCurrent,
+                '| next =',
+                JSON.stringify(nextPresentationUrl),
+              )
+              return nextPresentationUrl
             })
           }
           if (!queryUrlHash) {

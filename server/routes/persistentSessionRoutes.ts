@@ -263,16 +263,26 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     if (existingIndex !== -1) {
       sessionEntries.splice(existingIndex, 1)
     }
+    const finalSelectedOptions =
+      Object.keys(existingSelectedOptions).length > 0
+        ? existingSelectedOptions
+        : bodySelectedOptions
     sessionEntries.push({
       key: cookieKey,
       teacherCode,
       // Preserve existing cookie options when available; otherwise bootstrap from the permalink URL
       // params submitted during teacher authentication on a new device.
-      selectedOptions:
-        Object.keys(existingSelectedOptions).length > 0
-          ? existingSelectedOptions
-          : bodySelectedOptions,
+      selectedOptions: finalSelectedOptions,
     })
+    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
+    console.log(
+      '[SYNCDECK-DEBUG] authenticate: cookieKey =',
+      cookieKey,
+      '| existingIndex =',
+      existingIndex,
+      '| finalSelectedOptions =',
+      JSON.stringify(finalSelectedOptions),
+    )
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
     }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Button from '../ui/Button'
 import { getActivity } from '@src/activities'
+import { getPersistentSelectedOptionsFromSearchForActivity } from './sessionRouterUtils'
 import {
   buildPersistentAuthenticateApiUrl,
   buildPersistentTeacherCodeApiUrl,
@@ -143,6 +144,23 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
     const normalizedTeacherCode = teacherCode.trim()
 
     try {
+      const queryString = typeof window !== 'undefined' ? window.location.search : ''
+      const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
+        queryString,
+        getActivity(activityName)?.deepLinkOptions,
+        activityName,
+      )
+      // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
+      console.log(
+        '[SYNCDECK-DEBUG] waiting-room authenticate submit:',
+        '| activityName =',
+        activityName,
+        '| raw search =',
+        queryString,
+        '| selectedOptions =',
+        JSON.stringify(selectedOptions),
+      )
+
       const authenticateResponse = await fetch(buildPersistentAuthenticateApiUrl(), {
         method: 'POST',
         headers: {
@@ -153,6 +171,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
           activityName,
           hash,
           teacherCode: normalizedTeacherCode,
+          selectedOptions,
         }),
       })
 
