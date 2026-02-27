@@ -25,7 +25,8 @@ Before making changes, read these files when relevant:
 5. All API endpoints must include proper error handling and logging.
 6. Use structured logging for all server-side events.
 7. Never expose, log, or commit secrets, API keys, or other sensitive information.
-
+8. Plans should be iterative and include checklists that must be updated as tasks are created and completed.
+ 
 ## Preflight Checklist
 
 Before making code changes:
