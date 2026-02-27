@@ -221,3 +221,19 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
 - Follow-up action: When schema fields move between payload objects, keep dual-read fallbacks (`capabilities` + `navigation`) until all decks are migrated.
 - Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
+- Discovery: SyncDeck manager restore suppression now drops the first outbound `reveal-sync` `state` emitted when an inbound restore reaches target indices, then releases suppression.
+- Why it matters: Prevents instructor-to-instructor echo loops where a relayed inbound state triggers a local `setState` restore, then re-broadcasts that same state back through the server.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Reuse `evaluateRestoreSuppressionForOutboundState` if additional restore paths are added so echo prevention remains consistent.
+- Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
+- Discovery: SyncDeck host-side iframe overlay arrow controls were removed from both manager and student shells; navigation is now expected to use presentation-native controls inside the deck.
+- Why it matters: Avoids duplicate/competing navigation UI at the host layer and removes schema-coupled host arrow-state complexity.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Keep host shell focused on sync/session controls; add navigation affordances in deck content/plugins if needed.
+- Owner: Codex

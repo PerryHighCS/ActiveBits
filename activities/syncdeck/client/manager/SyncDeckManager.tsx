@@ -460,6 +460,28 @@ function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; 
   return a.f - b.f
 }
 
+export function evaluateRestoreSuppressionForOutboundState(params: {
+  suppressOutboundUntilRestore: boolean
+  restoreTargetIndices: { h: number; v: number; f: number } | null
+  instructorIndices: { h: number; v: number; f: number } | null
+}): { shouldDrop: boolean; shouldRelease: boolean } {
+  if (!params.suppressOutboundUntilRestore) {
+    return { shouldDrop: false, shouldRelease: false }
+  }
+
+  const hasReachedRestoreTarget =
+    params.restoreTargetIndices != null &&
+    params.instructorIndices != null &&
+    compareIndices(params.instructorIndices, params.restoreTargetIndices) >= 0
+
+  if (!hasReachedRestoreTarget) {
+    return { shouldDrop: true, shouldRelease: false }
+  }
+
+  // Drop the first outbound state that confirms restore completion to avoid instructor-to-instructor echo.
+  return { shouldDrop: true, shouldRelease: true }
+}
+
 function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: number; v: number; f: number } {
   return {
     h: indices.h,
@@ -580,6 +602,10 @@ export function extractNavigationCapabilities(payload: unknown): SyncDeckNavigat
   const navigation = statePayload.navigation as {
     canGoBack?: unknown
     canGoForward?: unknown
+    canGoUp?: unknown
+    canGoDown?: unknown
+    canNavigateUp?: unknown
+    canNavigateDown?: unknown
   }
   if (typeof navigation.canGoBack !== 'boolean' || typeof navigation.canGoForward !== 'boolean') {
     return null
@@ -588,6 +614,16 @@ export function extractNavigationCapabilities(payload: unknown): SyncDeckNavigat
   return {
     canNavigateBack: navigation.canGoBack,
     canNavigateForward: navigation.canGoForward,
+    ...(typeof navigation.canGoUp === 'boolean'
+      ? { canNavigateUp: navigation.canGoUp }
+      : typeof navigation.canNavigateUp === 'boolean'
+        ? { canNavigateUp: navigation.canNavigateUp }
+        : {}),
+    ...(typeof navigation.canGoDown === 'boolean'
+      ? { canNavigateDown: navigation.canGoDown }
+      : typeof navigation.canNavigateDown === 'boolean'
+        ? { canNavigateDown: navigation.canNavigateDown }
+        : {}),
   }
 }
 
@@ -957,8 +993,6 @@ const SyncDeckManager: FC = () => {
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [isPresentationPaused, setIsPresentationPaused] = useState(false)
-  const [navigationIndices, setNavigationIndices] = useState<{ h: number; v: number; f: number } | null>(null)
-  const [navigationCapabilities, setNavigationCapabilities] = useState<SyncDeckNavigationCapabilities | null>(null)
   const [isChalkboardOpen, setIsChalkboardOpen] = useState(false)
   const [isPenOverlayOpen, setIsPenOverlayOpen] = useState(false)
   const [isPreflightChecking, setIsPreflightChecking] = useState(false)
@@ -1159,11 +1193,6 @@ const SyncDeckManager: FC = () => {
             if (currentIndices) {
               lastInstructorIndicesRef.current = currentIndices
               lastInstructorStatePayloadRef.current = statePayload
-              setNavigationIndices(currentIndices)
-            }
-            const nextNavigationCapabilities = extractNavigationCapabilities(statePayload)
-            if (nextNavigationCapabilities) {
-              setNavigationCapabilities(nextNavigationCapabilities)
             }
             const paused = extractPausedState(statePayload)
             if (typeof paused === 'boolean') {
@@ -1419,33 +1448,6 @@ const SyncDeckManager: FC = () => {
     )
   }
 
-  const handleDirectionalNavigation = useCallback((direction: SyncDeckNavigationDirection): void => {
-    const targetWindow = presentationIframeRef.current?.contentWindow
-    if (!targetWindow || !presentationOrigin) {
-      setStartError('Presentation is not ready for navigation controls.')
-      setStartSuccess(null)
-      return
-    }
-
-    const canNavigateBack = Boolean(navigationIndices && (navigationIndices.h > 0 || navigationIndices.v > 0 || navigationIndices.f > 0))
-
-    if ((direction === 'left' || direction === 'up') && !canNavigateBack) {
-      return
-    }
-    const targetIndices = buildDirectionalSlideIndices(navigationIndices, direction)
-    if (!targetIndices) {
-      return
-    }
-
-    targetWindow.postMessage(
-      buildRevealCommandMessage('slide', targetIndices),
-      presentationOrigin,
-    )
-    setNavigationIndices(targetIndices)
-    lastInstructorIndicesRef.current = targetIndices
-    setStartError(null)
-  }, [navigationIndices, presentationOrigin])
-
   const relayInstructorPayload = (payload: unknown): void => {
     if (!isInstructorSyncEnabledRef.current) {
       return
@@ -1598,6 +1600,7 @@ const SyncDeckManager: FC = () => {
 
   const toggleInstructorSync = useCallback((): void => {
     const nextEnabled = !isInstructorSyncEnabledRef.current
+    isInstructorSyncEnabledRef.current = nextEnabled
     setIsInstructorSyncEnabled(nextEnabled)
     setStartError(null)
 
@@ -1908,25 +1911,21 @@ const SyncDeckManager: FC = () => {
         const instructorIndices = extractIndicesFromRevealPayload(event.data)
         if (instructorIndices) {
           lastInstructorIndicesRef.current = instructorIndices
-          setNavigationIndices(instructorIndices)
-        }
-        const nextNavigationCapabilities = extractNavigationCapabilities(event.data)
-        if (nextNavigationCapabilities) {
-          setNavigationCapabilities(nextNavigationCapabilities)
         }
 
-        if (envelope?.type === 'reveal-sync' && envelope.action === 'state' && suppressOutboundStateUntilRestoreRef.current) {
-          const restoreTargetIndices = restoreTargetIndicesRef.current
-          const hasReachedRestoreTarget =
-            restoreTargetIndices != null &&
-            instructorIndices != null &&
-            compareIndices(instructorIndices, restoreTargetIndices) >= 0
+        if (envelope?.type === 'reveal-sync' && envelope.action === 'state') {
+          const restoreSuppression = evaluateRestoreSuppressionForOutboundState({
+            suppressOutboundUntilRestore: suppressOutboundStateUntilRestoreRef.current,
+            restoreTargetIndices: restoreTargetIndicesRef.current,
+            instructorIndices,
+          })
 
-          if (!hasReachedRestoreTarget) {
+          if (restoreSuppression.shouldRelease) {
+            releaseRestoreSuppression()
+          }
+          if (restoreSuppression.shouldDrop) {
             return
           }
-
-          releaseRestoreSuppression()
         }
 
         if (envelope?.type === 'reveal-sync' && isPlainObject(envelope.payload)) {
@@ -2040,15 +2039,6 @@ const SyncDeckManager: FC = () => {
   }
 
   const normalizedPresentationUrl = presentationUrl.trim()
-  const canNavigateBack = Boolean(navigationIndices && (navigationIndices.h > 0 || navigationIndices.v > 0 || navigationIndices.f > 0))
-  const canNavigateLeft = Boolean(navigationIndices && navigationIndices.h > 0 && canNavigateBack)
-  const canNavigateUp = Boolean(
-    navigationIndices &&
-    canNavigateBack &&
-    (navigationCapabilities?.canNavigateUp ?? navigationIndices.v > 0),
-  )
-  const canNavigateRight = Boolean(navigationIndices)
-  const canNavigateDown = Boolean(navigationIndices)
   const showStartAnyway =
     Boolean(preflightWarning) &&
     allowUnverifiedStartForUrl === normalizedPresentationUrl &&
@@ -2242,7 +2232,7 @@ const SyncDeckManager: FC = () => {
               ) : null}
 
             {!isConfigurePanelOpen && validatePresentationUrl(presentationUrl) && (
-              <div className="w-full h-full min-h-0 bg-white overflow-hidden relative">
+              <div className="w-full h-full min-h-0 bg-white overflow-hidden">
                 <iframe
                   ref={presentationIframeRef}
                   title="SyncDeck Presentation"
@@ -2252,42 +2242,6 @@ const SyncDeckManager: FC = () => {
                   sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
                   onLoad={handlePresentationIframeLoad}
                 />
-                <button
-                  type="button"
-                  onClick={() => handleDirectionalNavigation('left')}
-                  disabled={!canNavigateLeft}
-                  aria-label="Previous horizontal slide"
-                  className="absolute left-3 top-1/2 -translate-y-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  ◀
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDirectionalNavigation('right')}
-                  disabled={!canNavigateRight}
-                  aria-label="Next horizontal slide"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  ▶
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDirectionalNavigation('up')}
-                  disabled={!canNavigateUp}
-                  aria-label="Previous vertical slide"
-                  className="absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  ▲
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDirectionalNavigation('down')}
-                  disabled={!canNavigateDown}
-                  aria-label="Next vertical slide"
-                  className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  ▼
-                </button>
               </div>
             )}
           </div>

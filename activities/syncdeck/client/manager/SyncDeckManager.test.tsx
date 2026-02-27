@@ -18,6 +18,7 @@ import { buildRestoreCommandFromPayload } from './SyncDeckManager.js'
 import { applyChalkboardSnapshotFallback } from './SyncDeckManager.js'
 import { buildDirectionalSlideIndices } from './SyncDeckManager.js'
 import { extractNavigationCapabilities } from './SyncDeckManager.js'
+import { evaluateRestoreSuppressionForOutboundState } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -143,6 +144,58 @@ void test('extractNavigationCapabilities reads reveal sync navigation booleans f
     canNavigateBack: false,
     canNavigateForward: true,
   })
+})
+
+void test('extractNavigationCapabilities reads optional vertical navigation booleans from navigation payload', () => {
+  const capabilities = extractNavigationCapabilities({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      navigation: {
+        canGoBack: true,
+        canGoForward: true,
+        canGoUp: false,
+        canGoDown: true,
+      },
+    },
+  })
+
+  assert.deepEqual(capabilities, {
+    canNavigateBack: true,
+    canNavigateForward: true,
+    canNavigateUp: false,
+    canNavigateDown: true,
+  })
+})
+
+void test('evaluateRestoreSuppressionForOutboundState keeps outbound state when suppression is inactive', () => {
+  const result = evaluateRestoreSuppressionForOutboundState({
+    suppressOutboundUntilRestore: false,
+    restoreTargetIndices: { h: 3, v: 0, f: 0 },
+    instructorIndices: { h: 3, v: 0, f: 0 },
+  })
+
+  assert.deepEqual(result, { shouldDrop: false, shouldRelease: false })
+})
+
+void test('evaluateRestoreSuppressionForOutboundState drops outbound state before reaching restore target', () => {
+  const result = evaluateRestoreSuppressionForOutboundState({
+    suppressOutboundUntilRestore: true,
+    restoreTargetIndices: { h: 3, v: 0, f: 0 },
+    instructorIndices: { h: 2, v: 0, f: 0 },
+  })
+
+  assert.deepEqual(result, { shouldDrop: true, shouldRelease: false })
+})
+
+void test('evaluateRestoreSuppressionForOutboundState drops and releases when reaching restore target', () => {
+  const result = evaluateRestoreSuppressionForOutboundState({
+    suppressOutboundUntilRestore: true,
+    restoreTargetIndices: { h: 3, v: 0, f: 0 },
+    instructorIndices: { h: 3, v: 0, f: 0 },
+  })
+
+  assert.deepEqual(result, { shouldDrop: true, shouldRelease: true })
 })
 
 void test('buildClearBoundaryCommandMessage emits clearBoundary command', () => {
