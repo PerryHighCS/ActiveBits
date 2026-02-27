@@ -123,4 +123,8 @@ If a discovery does not fit an existing knowledge file, create a new `.agent/kno
 1. Relevant tests pass.
 2. Documentation is updated for any workflow/runtime/build change.
 3. Notes are recorded in the appropriate log files.
+<<<<<<< HEAD
 4. If following a plan, appropriate step(s) are marked as complete.
+=======
+4. If following a plan, appropriate step(s) are marked as complete.
+>>>>>>> d0776ea (add more direction on checklists)
