@@ -102,6 +102,39 @@ export function buildPersistentTeacherManagePath(activityName: string, sessionId
   return `/manage/${activityName}/${sessionId}${search}`
 }
 
+export function normalizePersistentPresentationUrl(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  if (isValidHttpUrl(trimmed)) {
+    return trimmed
+  }
+
+  let current = trimmed
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const decoded = decodeURIComponent(current)
+      if (decoded === current) {
+        return null
+      }
+      if (isValidHttpUrl(decoded)) {
+        return decoded
+      }
+      current = decoded
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
 function getObjectRecord(value: unknown): Record<string, unknown> | null {
   // Intentionally returns a nullable record (instead of a type guard like manageDashboardUtils)
   // so callers can safely chain nested lookups (`getObjectRecord(x)?.child`) while parsing
@@ -153,10 +186,15 @@ export function getPersistentSelectedOptionsFromSearchForActivity(
     return selectedOptions
   }
 
-  if (!selectedOptions.presentationUrl) {
-    const fallbackPresentationUrl = params.get('presentationUrl')?.trim() ?? ''
-    if (isValidHttpUrl(fallbackPresentationUrl)) {
+  const normalizedSelectedPresentationUrl = normalizePersistentPresentationUrl(selectedOptions.presentationUrl)
+  if (normalizedSelectedPresentationUrl) {
+    selectedOptions.presentationUrl = normalizedSelectedPresentationUrl
+  } else {
+    const fallbackPresentationUrl = normalizePersistentPresentationUrl(params.get('presentationUrl'))
+    if (fallbackPresentationUrl) {
       selectedOptions.presentationUrl = fallbackPresentationUrl
+    } else {
+      delete selectedOptions.presentationUrl
     }
   }
 

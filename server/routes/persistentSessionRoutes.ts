@@ -273,6 +273,16 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
           ? existingSelectedOptions
           : bodySelectedOptions,
     })
+    const finalSelectedOptions = Object.keys(existingSelectedOptions).length > 0 ? existingSelectedOptions : bodySelectedOptions
+    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
+    console.log(
+      '[SYNCDECK-DEBUG] authenticate: cookieKey =',
+      cookieKey,
+      '| existingIndex =',
+      existingIndex,
+      '| finalSelectedOptions =',
+      JSON.stringify(finalSelectedOptions),
+    )
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
     }
