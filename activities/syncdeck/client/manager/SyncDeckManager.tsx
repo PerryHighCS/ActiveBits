@@ -2069,6 +2069,7 @@ const SyncDeckManager: FC = () => {
             <button
               type="button"
               onClick={toggleInstructorSync}
+              aria-pressed={isInstructorSyncEnabled}
               className={`ml-2 px-2 py-1 rounded border text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed ${
                 isInstructorSyncEnabled
                   ? 'border-indigo-600 bg-indigo-50 text-indigo-700'

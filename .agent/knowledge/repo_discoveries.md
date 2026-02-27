@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-02-27
+- Area: docs
+- Discovery: Repository instructions now explicitly require frontend controls to include appropriate accessibility semantics and state attributes, with examples such as `aria-pressed`, `aria-expanded`, accessible names for icon-only controls, and preference for native interactive elements.
+- Why it matters: This makes accessibility requirements part of the default implementation standard instead of a per-review afterthought, which should reduce repeated UI fixes across activities and shared client code.
+- Evidence: `AGENTS.md`
+- Follow-up action: When adding or reviewing frontend controls, check semantics and state exposure alongside behavior and styling.
+- Owner: Codex
+
+- Date: 2026-02-27
 - Area: activities
 - Discovery: SyncDeck manager/student directional navigation is now host-overlaid on iframe edges (left/right/up/down) and driven by iframe `reveal-sync` `state/ready` payloads (`indices` + `capabilities.canNavigateBack/canNavigateForward`) rather than hardcoded deck assumptions.
 - Why it matters: Navigation controls can be reused across decks without per-presentation edits, and student forward controls now disable at the effective sync boundary unless the student has opted out by backtracking.
