@@ -61,21 +61,12 @@ interface RevealSyncEnvelope {
 }
 
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
-type SyncDeckNavigationDirection = 'left' | 'right' | 'up' | 'down'
-
 interface RelayCommandPayloadEnvelope {
   name?: unknown
   payload?: unknown
 }
 
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
-
-interface SyncDeckNavigationCapabilities {
-  canNavigateBack: boolean
-  canNavigateForward: boolean
-  canNavigateUp?: boolean
-  canNavigateDown?: boolean
-}
 
 interface RevealSyncStatePayload {
   capabilities?: unknown
@@ -91,35 +82,6 @@ interface RevealSyncStatePayload {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
-}
-
-export function buildDirectionalSlideIndices(
-  current: { h: number; v: number; f: number } | null,
-  direction: SyncDeckNavigationDirection,
-): { h: number; v: number; f: number } | null {
-  if (!current) {
-    return null
-  }
-
-  if (direction === 'left') {
-    if (current.h <= 0) {
-      return null
-    }
-    return { h: current.h - 1, v: current.v, f: 0 }
-  }
-
-  if (direction === 'right') {
-    return { h: current.h + 1, v: current.v, f: 0 }
-  }
-
-  if (direction === 'up') {
-    if (current.v <= 0) {
-      return null
-    }
-    return { h: current.h, v: current.v - 1, f: 0 }
-  }
-
-  return { h: current.h, v: current.v + 1, f: 0 }
 }
 
 function stripOverviewFromStateEnvelope(data: unknown): unknown {
@@ -563,68 +525,6 @@ function parseRevealSyncEnvelope(data: unknown): RevealSyncEnvelope | null {
   }
 
   return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
-}
-
-export function extractNavigationCapabilities(payload: unknown): SyncDeckNavigationCapabilities | null {
-  const envelope = parseRevealSyncEnvelope(payload)
-  if (!envelope || envelope.type !== 'reveal-sync') {
-    return null
-  }
-
-  if ((envelope.action !== 'ready' && envelope.action !== 'state') || !isPlainObject(envelope.payload)) {
-    return null
-  }
-
-  const statePayload = envelope.payload as { capabilities?: unknown; navigation?: unknown }
-  if (isPlainObject(statePayload.capabilities)) {
-    const capabilities = statePayload.capabilities as {
-      canNavigateBack?: unknown
-      canNavigateForward?: unknown
-      canNavigateUp?: unknown
-      canNavigateDown?: unknown
-    }
-    if (typeof capabilities.canNavigateBack !== 'boolean' || typeof capabilities.canNavigateForward !== 'boolean') {
-      return null
-    }
-
-    return {
-      canNavigateBack: capabilities.canNavigateBack,
-      canNavigateForward: capabilities.canNavigateForward,
-      ...(typeof capabilities.canNavigateUp === 'boolean' ? { canNavigateUp: capabilities.canNavigateUp } : {}),
-      ...(typeof capabilities.canNavigateDown === 'boolean' ? { canNavigateDown: capabilities.canNavigateDown } : {}),
-    }
-  }
-
-  if (!isPlainObject(statePayload.navigation)) {
-    return null
-  }
-
-  const navigation = statePayload.navigation as {
-    canGoBack?: unknown
-    canGoForward?: unknown
-    canGoUp?: unknown
-    canGoDown?: unknown
-    canNavigateUp?: unknown
-    canNavigateDown?: unknown
-  }
-  if (typeof navigation.canGoBack !== 'boolean' || typeof navigation.canGoForward !== 'boolean') {
-    return null
-  }
-
-  return {
-    canNavigateBack: navigation.canGoBack,
-    canNavigateForward: navigation.canGoForward,
-    ...(typeof navigation.canGoUp === 'boolean'
-      ? { canNavigateUp: navigation.canGoUp }
-      : typeof navigation.canNavigateUp === 'boolean'
-        ? { canNavigateUp: navigation.canNavigateUp }
-        : {}),
-    ...(typeof navigation.canGoDown === 'boolean'
-      ? { canNavigateDown: navigation.canGoDown }
-      : typeof navigation.canNavigateDown === 'boolean'
-        ? { canNavigateDown: navigation.canNavigateDown }
-        : {}),
-  }
 }
 
 function extractRevealCommandName(data: unknown): string | null {
@@ -1611,7 +1511,7 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    setStartSuccess('Instructor sync disabled. Local navigation is no longer broadcast.')
+    setStartSuccess('Instructor sync disabled. Local presentation updates are no longer sent or applied across instructors.')
   }, [connectInstructorWs, disconnectInstructorWs])
 
   const handlePresentationIframeLoad = useCallback((): void => {

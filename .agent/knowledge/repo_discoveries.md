@@ -208,26 +208,34 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-02-27
 - Area: activities
-- Discovery: SyncDeck overlay navigation now treats instructor arrows as sync-unrestricted controls while student arrows remain constrained by reveal capabilities and instructor boundary lock (`forwardLocked`).
-- Why it matters: Instructors can always advance/rewind the deck without being blocked by synchronous student restrictions, but students still cannot navigate ahead of the instructor boundary.
-- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
-- Follow-up action: Keep future navigation-lock updates role-aware (manager vs student) so synchronization rules do not regress instructor controls.
-- Owner: Codex
-
-- Date: 2026-02-27
-- Area: activities
 - Discovery: SyncDeck index extraction now accepts `reveal-sync` `action: "ready"` envelopes in both manager and student clients, not only `state`, so first-message index snapshots are retained.
-- Why it matters: Some decks publish navigation indices in the initial ready handshake; ignoring that message keeps overlay arrows disabled until a later state update (or indefinitely if none arrives).
+- Why it matters: Some decks publish navigation indices in the initial ready handshake, so keeping the parsers action-tolerant preserves first-message state if host-side navigation or diagnostics are reintroduced later.
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
 - Follow-up action: Keep reveal-sync parsing helpers action-tolerant when payload schema matches, and add tests whenever new actions can carry `indices`.
 - Owner: Codex
 
 - Date: 2026-02-27
 - Area: activities
-- Discovery: SyncDeck now supports `payload.navigation` from `reveal-sync` `ready`/`state` messages: `canGoBack`/`canGoForward` are mapped to host navigation booleans and `navigation.current` is used as an indices fallback when top-level `indices` is absent.
-- Why it matters: Host arrow controls now stay usable with the updated iframe schema where navigation readiness is emitted under `navigation`, including vertical index tracking from `navigation.current.v`.
+- Discovery: SyncDeck no longer exports unused `extractNavigationCapabilities()` helpers from the manager or student clients; dormant host-navigation parsing was removed because the shipped shells do not render overlay arrow controls that consume those values.
+- Why it matters: Keeps the SyncDeck client modules aligned with actual runtime behavior, removes duplicated parser code, and avoids implying a supported host-navigation API surface that is not part of the shipped UI.
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
-- Follow-up action: When schema fields move between payload objects, keep dual-read fallbacks (`capabilities` + `navigation`) until all decks are migrated.
+- Follow-up action: If host-side navigation returns, reintroduce protocol parsing only alongside a real runtime consumer and keep the implementation shared instead of duplicating manager/student helpers.
+- Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
+- Discovery: SyncDeck manager no longer exports the unused `buildDirectionalSlideIndices()` helper or its direction type; those test-only artifacts were removed because the host shell does not ship directional navigation controls.
+- Why it matters: Keeps the production module surface aligned with actual runtime behavior and avoids implying a supported host-navigation API that the manager does not use.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: If host-side directional navigation returns, add the helper back only alongside a real runtime caller rather than exporting test-only code from the manager module.
+- Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
+- Discovery: SyncDeck student no longer exports the unused `isForwardNavigationLocked()` helper; forward-lock calculation remained only in unit tests after student forward-lock UI was left out of the shipped shell.
+- Why it matters: Keeps `SyncDeckStudent.tsx` focused on active runtime behavior and avoids preserving a dead API surface that suggests the student shell currently enforces host-side forward-lock UI.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: If student forward-lock UI returns, add the calculation back alongside a real runtime caller rather than exporting it solely for tests.
 - Owner: Codex
 
 - Date: 2026-02-27

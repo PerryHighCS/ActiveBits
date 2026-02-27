@@ -53,13 +53,6 @@ interface RevealStateIndicesPayload {
 
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
-interface SyncDeckNavigationCapabilities {
-  canNavigateBack: boolean
-  canNavigateForward: boolean
-  canNavigateUp?: boolean
-  canNavigateDown?: boolean
-}
-
 const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
@@ -108,54 +101,6 @@ const WS_OPEN_READY_STATE = 1
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
-}
-
-export function extractNavigationCapabilities(payload: unknown): SyncDeckNavigationCapabilities | null {
-  if (!isPlainObject(payload)) {
-    return null
-  }
-
-  const message = payload as RevealSyncEnvelope
-  if (message.type !== 'reveal-sync' || (message.action !== 'ready' && message.action !== 'state') || !isPlainObject(message.payload)) {
-    return null
-  }
-
-  const statePayload = message.payload as { capabilities?: unknown; navigation?: unknown }
-  if (isPlainObject(statePayload.capabilities)) {
-    const capabilities = statePayload.capabilities as {
-      canNavigateBack?: unknown
-      canNavigateForward?: unknown
-      canNavigateUp?: unknown
-      canNavigateDown?: unknown
-    }
-    if (typeof capabilities.canNavigateBack !== 'boolean' || typeof capabilities.canNavigateForward !== 'boolean') {
-      return null
-    }
-
-    return {
-      canNavigateBack: capabilities.canNavigateBack,
-      canNavigateForward: capabilities.canNavigateForward,
-      ...(typeof capabilities.canNavigateUp === 'boolean' ? { canNavigateUp: capabilities.canNavigateUp } : {}),
-      ...(typeof capabilities.canNavigateDown === 'boolean' ? { canNavigateDown: capabilities.canNavigateDown } : {}),
-    }
-  }
-
-  if (!isPlainObject(statePayload.navigation)) {
-    return null
-  }
-
-  const navigation = statePayload.navigation as {
-    canGoBack?: unknown
-    canGoForward?: unknown
-  }
-  if (typeof navigation.canGoBack !== 'boolean' || typeof navigation.canGoForward !== 'boolean') {
-    return null
-  }
-
-  return {
-    canNavigateBack: navigation.canGoBack,
-    canNavigateForward: navigation.canGoForward,
-  }
 }
 
 function isRevealSyncMessage(value: unknown): value is RevealSyncEnvelope {
@@ -695,18 +640,6 @@ export function shouldResetBacktrackOptOutByMaxPosition(
   maxPosition: { h: number; v: number; f: number } | null,
 ): boolean {
   if (!studentHasBacktrackOptOut || !studentPosition || !maxPosition) {
-    return false
-  }
-
-  return compareIndices(studentPosition, maxPosition) >= 0
-}
-
-export function isForwardNavigationLocked(
-  studentHasBacktrackOptOut: boolean,
-  studentPosition: { h: number; v: number; f: number } | null,
-  maxPosition: { h: number; v: number; f: number } | null,
-): boolean {
-  if (studentHasBacktrackOptOut || !studentPosition || !maxPosition) {
     return false
   }
 
