@@ -11,7 +11,7 @@ import {
   CACHE_TTL,
   cleanExpiredSessions,
   getSessionPresentationUrlForTeacherRedirect,
-  getPersistentSelectedOptionsFromSearch,
+  getPersistentSelectedOptionsFromSearchForActivity,
   getSoloActivities,
   isJoinSessionId,
   readCachedSession,
@@ -326,9 +326,10 @@ const SessionRouter = () => {
               activityName,
               hash,
               teacherCode: teacherCode.trim(),
-              selectedOptions: getPersistentSelectedOptionsFromSearch(
+              selectedOptions: getPersistentSelectedOptionsFromSearchForActivity(
                 getWindowSearch(),
                 getActivity(activityName)?.deepLinkOptions,
+                activityName,
               ),
             }),
           })
