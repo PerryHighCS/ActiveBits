@@ -23,6 +23,10 @@ Before making changes, read these files when relevant:
 3. Add or update tests for the code you change, even if nobody asked.
 4. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
 5. Frontend controls must include appropriate accessibility semantics for their role and state. Use native elements when possible, and add relevant attributes such as `aria-label`, `aria-labelledby`, `aria-describedby`, `aria-controls`, `aria-expanded`, `aria-pressed`, `aria-selected`, and `disabled` when the control behavior requires them.
+6. All API endpoints must include proper error handling and logging.
+7. Use structured logging for all server-side events.
+8. Never expose, log, or commit secrets, API keys, or other sensitive information.
+9. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
 
 ## Preflight Checklist
 
@@ -120,3 +124,4 @@ If a discovery does not fit an existing knowledge file, create a new `.agent/kno
 1. Relevant tests pass.
 2. Documentation is updated for any workflow/runtime/build change.
 3. Notes are recorded in the appropriate log files.
+4. If following a plan, appropriate step(s) are marked as complete.
