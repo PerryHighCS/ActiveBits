@@ -44,6 +44,7 @@ interface RevealCommandPayload {
 
 interface RevealStatePayload {
   indices?: unknown
+  navigation?: unknown
   revealState?: unknown
   indexh?: unknown
   indexv?: unknown
@@ -60,6 +61,7 @@ interface RevealSyncEnvelope {
 }
 
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
+type SyncDeckNavigationDirection = 'left' | 'right' | 'up' | 'down'
 
 interface RelayCommandPayloadEnvelope {
   name?: unknown
@@ -68,7 +70,16 @@ interface RelayCommandPayloadEnvelope {
 
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
+interface SyncDeckNavigationCapabilities {
+  canNavigateBack: boolean
+  canNavigateForward: boolean
+  canNavigateUp?: boolean
+  canNavigateDown?: boolean
+}
+
 interface RevealSyncStatePayload {
+  capabilities?: unknown
+  navigation?: unknown
   overview?: unknown
   paused?: unknown
   storyboardDisplayed?: unknown
@@ -80,6 +91,35 @@ interface RevealSyncStatePayload {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function buildDirectionalSlideIndices(
+  current: { h: number; v: number; f: number } | null,
+  direction: SyncDeckNavigationDirection,
+): { h: number; v: number; f: number } | null {
+  if (!current) {
+    return null
+  }
+
+  if (direction === 'left') {
+    if (current.h <= 0) {
+      return null
+    }
+    return { h: current.h - 1, v: current.v, f: 0 }
+  }
+
+  if (direction === 'right') {
+    return { h: current.h + 1, v: current.v, f: 0 }
+  }
+
+  if (direction === 'up') {
+    if (current.v <= 0) {
+      return null
+    }
+    return { h: current.h, v: current.v - 1, f: 0 }
+  }
+
+  return { h: current.h, v: current.v + 1, f: 0 }
 }
 
 function stripOverviewFromStateEnvelope(data: unknown): unknown {
@@ -503,6 +543,54 @@ function parseRevealSyncEnvelope(data: unknown): RevealSyncEnvelope | null {
   return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
 }
 
+export function extractNavigationCapabilities(payload: unknown): SyncDeckNavigationCapabilities | null {
+  const envelope = parseRevealSyncEnvelope(payload)
+  if (!envelope || envelope.type !== 'reveal-sync') {
+    return null
+  }
+
+  if ((envelope.action !== 'ready' && envelope.action !== 'state') || !isPlainObject(envelope.payload)) {
+    return null
+  }
+
+  const statePayload = envelope.payload as { capabilities?: unknown; navigation?: unknown }
+  if (isPlainObject(statePayload.capabilities)) {
+    const capabilities = statePayload.capabilities as {
+      canNavigateBack?: unknown
+      canNavigateForward?: unknown
+      canNavigateUp?: unknown
+      canNavigateDown?: unknown
+    }
+    if (typeof capabilities.canNavigateBack !== 'boolean' || typeof capabilities.canNavigateForward !== 'boolean') {
+      return null
+    }
+
+    return {
+      canNavigateBack: capabilities.canNavigateBack,
+      canNavigateForward: capabilities.canNavigateForward,
+      ...(typeof capabilities.canNavigateUp === 'boolean' ? { canNavigateUp: capabilities.canNavigateUp } : {}),
+      ...(typeof capabilities.canNavigateDown === 'boolean' ? { canNavigateDown: capabilities.canNavigateDown } : {}),
+    }
+  }
+
+  if (!isPlainObject(statePayload.navigation)) {
+    return null
+  }
+
+  const navigation = statePayload.navigation as {
+    canGoBack?: unknown
+    canGoForward?: unknown
+  }
+  if (typeof navigation.canGoBack !== 'boolean' || typeof navigation.canGoForward !== 'boolean') {
+    return null
+  }
+
+  return {
+    canNavigateBack: navigation.canGoBack,
+    canNavigateForward: navigation.canGoForward,
+  }
+}
+
 function extractRevealCommandName(data: unknown): string | null {
   const envelope = parseRevealSyncEnvelope(data)
   if (!envelope || envelope.type !== 'reveal-sync') {
@@ -786,12 +874,15 @@ export function extractIndicesFromRevealPayload(payload: unknown): { h: number; 
     return null
   }
 
-  if (message.action !== 'state') {
+  if (message.action !== 'state' && message.action !== 'ready') {
     return null
   }
 
   const messagePayload = message.payload as RevealStatePayload | undefined
   return normalizeIndices(messagePayload?.indices)
+    ?? (isPlainObject(messagePayload?.navigation)
+      ? normalizeIndices((messagePayload.navigation as { current?: unknown }).current)
+      : null)
     ?? extractIndicesFromRevealStateObject(messagePayload?.revealState)
     ?? extractIndicesFromRevealStateObject(messagePayload)
 }
@@ -866,6 +957,8 @@ const SyncDeckManager: FC = () => {
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [isPresentationPaused, setIsPresentationPaused] = useState(false)
+  const [navigationIndices, setNavigationIndices] = useState<{ h: number; v: number; f: number } | null>(null)
+  const [navigationCapabilities, setNavigationCapabilities] = useState<SyncDeckNavigationCapabilities | null>(null)
   const [isChalkboardOpen, setIsChalkboardOpen] = useState(false)
   const [isPenOverlayOpen, setIsPenOverlayOpen] = useState(false)
   const [isPreflightChecking, setIsPreflightChecking] = useState(false)
@@ -1066,6 +1159,11 @@ const SyncDeckManager: FC = () => {
             if (currentIndices) {
               lastInstructorIndicesRef.current = currentIndices
               lastInstructorStatePayloadRef.current = statePayload
+              setNavigationIndices(currentIndices)
+            }
+            const nextNavigationCapabilities = extractNavigationCapabilities(statePayload)
+            if (nextNavigationCapabilities) {
+              setNavigationCapabilities(nextNavigationCapabilities)
             }
             const paused = extractPausedState(statePayload)
             if (typeof paused === 'boolean') {
@@ -1320,6 +1418,33 @@ const SyncDeckManager: FC = () => {
       presentationOrigin,
     )
   }
+
+  const handleDirectionalNavigation = useCallback((direction: SyncDeckNavigationDirection): void => {
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow || !presentationOrigin) {
+      setStartError('Presentation is not ready for navigation controls.')
+      setStartSuccess(null)
+      return
+    }
+
+    const canNavigateBack = Boolean(navigationIndices && (navigationIndices.h > 0 || navigationIndices.v > 0 || navigationIndices.f > 0))
+
+    if ((direction === 'left' || direction === 'up') && !canNavigateBack) {
+      return
+    }
+    const targetIndices = buildDirectionalSlideIndices(navigationIndices, direction)
+    if (!targetIndices) {
+      return
+    }
+
+    targetWindow.postMessage(
+      buildRevealCommandMessage('slide', targetIndices),
+      presentationOrigin,
+    )
+    setNavigationIndices(targetIndices)
+    lastInstructorIndicesRef.current = targetIndices
+    setStartError(null)
+  }, [navigationIndices, presentationOrigin])
 
   const relayInstructorPayload = (payload: unknown): void => {
     if (!isInstructorSyncEnabledRef.current) {
@@ -1783,6 +1908,11 @@ const SyncDeckManager: FC = () => {
         const instructorIndices = extractIndicesFromRevealPayload(event.data)
         if (instructorIndices) {
           lastInstructorIndicesRef.current = instructorIndices
+          setNavigationIndices(instructorIndices)
+        }
+        const nextNavigationCapabilities = extractNavigationCapabilities(event.data)
+        if (nextNavigationCapabilities) {
+          setNavigationCapabilities(nextNavigationCapabilities)
         }
 
         if (envelope?.type === 'reveal-sync' && envelope.action === 'state' && suppressOutboundStateUntilRestoreRef.current) {
@@ -1910,6 +2040,15 @@ const SyncDeckManager: FC = () => {
   }
 
   const normalizedPresentationUrl = presentationUrl.trim()
+  const canNavigateBack = Boolean(navigationIndices && (navigationIndices.h > 0 || navigationIndices.v > 0 || navigationIndices.f > 0))
+  const canNavigateLeft = Boolean(navigationIndices && navigationIndices.h > 0 && canNavigateBack)
+  const canNavigateUp = Boolean(
+    navigationIndices &&
+    canNavigateBack &&
+    (navigationCapabilities?.canNavigateUp ?? navigationIndices.v > 0),
+  )
+  const canNavigateRight = Boolean(navigationIndices)
+  const canNavigateDown = Boolean(navigationIndices)
   const showStartAnyway =
     Boolean(preflightWarning) &&
     allowUnverifiedStartForUrl === normalizedPresentationUrl &&
@@ -2103,7 +2242,7 @@ const SyncDeckManager: FC = () => {
               ) : null}
 
             {!isConfigurePanelOpen && validatePresentationUrl(presentationUrl) && (
-              <div className="w-full h-full min-h-0 bg-white overflow-hidden">
+              <div className="w-full h-full min-h-0 bg-white overflow-hidden relative">
                 <iframe
                   ref={presentationIframeRef}
                   title="SyncDeck Presentation"
@@ -2113,6 +2252,42 @@ const SyncDeckManager: FC = () => {
                   sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
                   onLoad={handlePresentationIframeLoad}
                 />
+                <button
+                  type="button"
+                  onClick={() => handleDirectionalNavigation('left')}
+                  disabled={!canNavigateLeft}
+                  aria-label="Previous horizontal slide"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ◀
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDirectionalNavigation('right')}
+                  disabled={!canNavigateRight}
+                  aria-label="Next horizontal slide"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ▶
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDirectionalNavigation('up')}
+                  disabled={!canNavigateUp}
+                  aria-label="Previous vertical slide"
+                  className="absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDirectionalNavigation('down')}
+                  disabled={!canNavigateDown}
+                  aria-label="Next vertical slide"
+                  className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ▼
+                </button>
               </div>
             )}
           </div>

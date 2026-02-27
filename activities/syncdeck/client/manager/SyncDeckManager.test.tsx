@@ -16,6 +16,8 @@ import { toChalkboardRelayCommand } from './SyncDeckManager.js'
 import { extractIndicesFromRevealPayload } from './SyncDeckManager.js'
 import { buildRestoreCommandFromPayload } from './SyncDeckManager.js'
 import { applyChalkboardSnapshotFallback } from './SyncDeckManager.js'
+import { buildDirectionalSlideIndices } from './SyncDeckManager.js'
+import { extractNavigationCapabilities } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -91,6 +93,55 @@ void test('buildForceSyncBoundaryCommandMessage emits setStudentBoundary sync co
       indices: { h: 5, v: 1, f: 0 },
       syncToBoundary: true,
     },
+  })
+})
+
+void test('buildDirectionalSlideIndices computes directional targets and blocks negative navigation', () => {
+  assert.deepEqual(buildDirectionalSlideIndices({ h: 4, v: 2, f: 3 }, 'left'), { h: 3, v: 2, f: 0 })
+  assert.deepEqual(buildDirectionalSlideIndices({ h: 4, v: 2, f: 3 }, 'right'), { h: 5, v: 2, f: 0 })
+  assert.deepEqual(buildDirectionalSlideIndices({ h: 4, v: 2, f: 3 }, 'up'), { h: 4, v: 1, f: 0 })
+  assert.deepEqual(buildDirectionalSlideIndices({ h: 4, v: 2, f: 3 }, 'down'), { h: 4, v: 3, f: 0 })
+  assert.equal(buildDirectionalSlideIndices({ h: 0, v: 2, f: 0 }, 'left'), null)
+  assert.equal(buildDirectionalSlideIndices({ h: 4, v: 0, f: 0 }, 'up'), null)
+})
+
+void test('extractNavigationCapabilities reads reveal sync navigation capabilities from state payload', () => {
+  const capabilities = extractNavigationCapabilities({
+    type: 'reveal-sync',
+    action: 'state',
+    payload: {
+      capabilities: {
+        canNavigateBack: true,
+        canNavigateForward: false,
+        canNavigateUp: true,
+        canNavigateDown: false,
+      },
+    },
+  })
+
+  assert.deepEqual(capabilities, {
+    canNavigateBack: true,
+    canNavigateForward: false,
+    canNavigateUp: true,
+    canNavigateDown: false,
+  })
+})
+
+void test('extractNavigationCapabilities reads reveal sync navigation booleans from navigation payload', () => {
+  const capabilities = extractNavigationCapabilities({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      navigation: {
+        canGoBack: false,
+        canGoForward: true,
+      },
+    },
+  })
+
+  assert.deepEqual(capabilities, {
+    canNavigateBack: false,
+    canNavigateForward: true,
   })
 })
 
@@ -224,6 +275,32 @@ void test('extractIndicesFromRevealPayload reads indices from setState command p
   })
 
   assert.deepEqual(indices, { h: 5, v: 0, f: 0 })
+})
+
+void test('extractIndicesFromRevealPayload reads indices from ready payload', () => {
+  const indices = extractIndicesFromRevealPayload({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      indices: { h: 2, v: 1, f: 0 },
+    },
+  })
+
+  assert.deepEqual(indices, { h: 2, v: 1, f: 0 })
+})
+
+void test('extractIndicesFromRevealPayload reads indices from ready navigation.current payload', () => {
+  const indices = extractIndicesFromRevealPayload({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      navigation: {
+        current: { h: 6, v: 2, f: 0 },
+      },
+    },
+  })
+
+  assert.deepEqual(indices, { h: 6, v: 2, f: 0 })
 })
 
 void test('buildRestoreCommandFromPayload converts legacy slidechanged payload into setState command', () => {

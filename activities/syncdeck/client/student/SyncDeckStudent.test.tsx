@@ -10,6 +10,9 @@ import { buildStudentWebSocketUrl } from './SyncDeckStudent.js'
 import { resolveIframePostMessageTargetOrigin } from './SyncDeckStudent.js'
 import { shouldSuppressForwardInstructorSync } from './SyncDeckStudent.js'
 import { shouldResetBacktrackOptOutByMaxPosition } from './SyncDeckStudent.js'
+import { isForwardNavigationLocked } from './SyncDeckStudent.js'
+import { extractIndicesFromRevealStateMessage } from './SyncDeckStudent.js'
+import { extractNavigationCapabilities } from './SyncDeckStudent.js'
 
 void test('SyncDeckStudent renders join guidance copy', () => {
   const html = renderToStaticMarkup(
@@ -417,6 +420,50 @@ void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged null paylo
   })
 })
 
+void test('extractIndicesFromRevealStateMessage reads indices from ready payload', () => {
+  const indices = extractIndicesFromRevealStateMessage({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      indices: { h: 4, v: 2, f: 1 },
+    },
+  })
+
+  assert.deepEqual(indices, { h: 4, v: 2, f: 1 })
+})
+
+void test('extractIndicesFromRevealStateMessage reads indices from ready navigation.current payload', () => {
+  const indices = extractIndicesFromRevealStateMessage({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      navigation: {
+        current: { h: 5, v: 3, f: 0 },
+      },
+    },
+  })
+
+  assert.deepEqual(indices, { h: 5, v: 3, f: 0 })
+})
+
+void test('extractNavigationCapabilities reads reveal sync navigation booleans from navigation payload', () => {
+  const capabilities = extractNavigationCapabilities({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      navigation: {
+        canGoBack: true,
+        canGoForward: false,
+      },
+    },
+  })
+
+  assert.deepEqual(capabilities, {
+    canNavigateBack: true,
+    canNavigateForward: false,
+  })
+})
+
 void test('buildStudentRoleCommandMessage emits setRole student command', () => {
   const message = buildStudentRoleCommandMessage()
 
@@ -470,4 +517,33 @@ void test('shouldResetBacktrackOptOutByMaxPosition does not reset when student r
   )
 
   assert.equal(result, false)
+})
+
+void test('isForwardNavigationLocked locks forward navigation at effective max position during sync mode', () => {
+  assert.equal(
+    isForwardNavigationLocked(
+      false,
+      { h: 3, v: 0, f: 0 },
+      { h: 3, v: 0, f: 0 },
+    ),
+    true,
+  )
+
+  assert.equal(
+    isForwardNavigationLocked(
+      false,
+      { h: 2, v: 0, f: 0 },
+      { h: 3, v: 0, f: 0 },
+    ),
+    false,
+  )
+
+  assert.equal(
+    isForwardNavigationLocked(
+      true,
+      { h: 3, v: 0, f: 0 },
+      { h: 3, v: 0, f: 0 },
+    ),
+    false,
+  )
 })

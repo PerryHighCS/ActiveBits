@@ -34,6 +34,8 @@ interface RevealCommandPayload {
 }
 
 interface RevealSyncStatePayload {
+  capabilities?: unknown
+  navigation?: unknown
   overview?: unknown
   storyboardDisplayed?: unknown
   open?: unknown
@@ -45,10 +47,19 @@ interface RevealSyncStatePayload {
 
 interface RevealStateIndicesPayload {
   indices?: unknown
+  navigation?: unknown
   studentBoundary?: unknown
 }
 
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
+type SyncDeckNavigationDirection = 'left' | 'right' | 'up' | 'down'
+
+interface SyncDeckNavigationCapabilities {
+  canNavigateBack: boolean
+  canNavigateForward: boolean
+  canNavigateUp?: boolean
+  canNavigateDown?: boolean
+}
 
 const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
 
@@ -98,6 +109,83 @@ const WS_OPEN_READY_STATE = 1
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function buildDirectionalSlideIndices(
+  current: { h: number; v: number; f: number } | null,
+  direction: SyncDeckNavigationDirection,
+): { h: number; v: number; f: number } | null {
+  if (!current) {
+    return null
+  }
+
+  if (direction === 'left') {
+    if (current.h <= 0) {
+      return null
+    }
+    return { h: current.h - 1, v: current.v, f: 0 }
+  }
+
+  if (direction === 'right') {
+    return { h: current.h + 1, v: current.v, f: 0 }
+  }
+
+  if (direction === 'up') {
+    if (current.v <= 0) {
+      return null
+    }
+    return { h: current.h, v: current.v - 1, f: 0 }
+  }
+
+  return { h: current.h, v: current.v + 1, f: 0 }
+}
+
+export function extractNavigationCapabilities(payload: unknown): SyncDeckNavigationCapabilities | null {
+  if (!isPlainObject(payload)) {
+    return null
+  }
+
+  const message = payload as RevealSyncEnvelope
+  if (message.type !== 'reveal-sync' || (message.action !== 'ready' && message.action !== 'state') || !isPlainObject(message.payload)) {
+    return null
+  }
+
+  const statePayload = message.payload as { capabilities?: unknown; navigation?: unknown }
+  if (isPlainObject(statePayload.capabilities)) {
+    const capabilities = statePayload.capabilities as {
+      canNavigateBack?: unknown
+      canNavigateForward?: unknown
+      canNavigateUp?: unknown
+      canNavigateDown?: unknown
+    }
+    if (typeof capabilities.canNavigateBack !== 'boolean' || typeof capabilities.canNavigateForward !== 'boolean') {
+      return null
+    }
+
+    return {
+      canNavigateBack: capabilities.canNavigateBack,
+      canNavigateForward: capabilities.canNavigateForward,
+      ...(typeof capabilities.canNavigateUp === 'boolean' ? { canNavigateUp: capabilities.canNavigateUp } : {}),
+      ...(typeof capabilities.canNavigateDown === 'boolean' ? { canNavigateDown: capabilities.canNavigateDown } : {}),
+    }
+  }
+
+  if (!isPlainObject(statePayload.navigation)) {
+    return null
+  }
+
+  const navigation = statePayload.navigation as {
+    canGoBack?: unknown
+    canGoForward?: unknown
+  }
+  if (typeof navigation.canGoBack !== 'boolean' || typeof navigation.canGoForward !== 'boolean') {
+    return null
+  }
+
+  return {
+    canNavigateBack: navigation.canGoBack,
+    canNavigateForward: navigation.canGoForward,
+  }
 }
 
 function isRevealSyncMessage(value: unknown): value is RevealSyncEnvelope {
@@ -255,7 +343,7 @@ export function toRevealBoundaryCommandMessage(
   return null
 }
 
-function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: number; v: number; f: number } | null {
+export function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: number; v: number; f: number } | null {
   if (!isPlainObject(rawPayload)) {
     return null
   }
@@ -294,12 +382,15 @@ function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: number;
     }
   }
 
-  if (message.action !== 'state') {
+  if (message.action !== 'state' && message.action !== 'ready') {
     return null
   }
 
   const payload = message.payload as RevealStateIndicesPayload
   return normalizeIndices(payload.indices)
+    ?? (isPlainObject(payload.navigation)
+      ? normalizeIndices((payload.navigation as { current?: unknown }).current)
+      : null)
 }
 
 function computeBoundaryDetails(
@@ -640,6 +731,18 @@ export function shouldResetBacktrackOptOutByMaxPosition(
   return compareIndices(studentPosition, maxPosition) >= 0
 }
 
+export function isForwardNavigationLocked(
+  studentHasBacktrackOptOut: boolean,
+  studentPosition: { h: number; v: number; f: number } | null,
+  maxPosition: { h: number; v: number; f: number } | null,
+): boolean {
+  if (studentHasBacktrackOptOut || !studentPosition || !maxPosition) {
+    return false
+  }
+
+  return compareIndices(studentPosition, maxPosition) >= 0
+}
+
 const SyncDeckStudent: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const [isLoading, setIsLoading] = useState(true)
@@ -650,6 +753,9 @@ const SyncDeckStudent: FC = () => {
   const [connectionState, setConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [isBacktrackOptOut, setIsBacktrackOptOut] = useState(false)
+  const [navigationIndices, setNavigationIndices] = useState<{ h: number; v: number; f: number } | null>(null)
+  const [navigationCapabilities, setNavigationCapabilities] = useState<SyncDeckNavigationCapabilities | null>(null)
+  const [effectiveMaxPosition, setEffectiveMaxPosition] = useState<{ h: number; v: number; f: number } | null>(null)
   const [studentNameInput, setStudentNameInput] = useState('')
   const [registeredStudentName, setRegisteredStudentName] = useState('')
   const [registeredStudentId, setRegisteredStudentId] = useState('')
@@ -811,6 +917,9 @@ const SyncDeckStudent: FC = () => {
         if (instructorIndices) {
           latestInstructorPayloadRef.current = parsed.payload
           lastInstructorIndicesRef.current = instructorIndices
+          if (localStudentIndicesRef.current == null) {
+            setNavigationIndices(instructorIndices)
+          }
         }
 
         if (isForceSyncBoundaryCommand(parsed.payload) && studentBacktrackOptOutRef.current) {
@@ -823,6 +932,7 @@ const SyncDeckStudent: FC = () => {
           lastInstructorIndicesRef.current,
         )
         lastEffectiveMaxPositionRef.current = boundaryDetails?.effectiveBoundary ?? null
+        setEffectiveMaxPosition(lastEffectiveMaxPositionRef.current)
 
         if (
           shouldResetBacktrackOptOutByMaxPosition(
@@ -909,6 +1019,7 @@ const SyncDeckStudent: FC = () => {
       if (localIndices) {
         const previousLocalIndices = localStudentIndicesRef.current
         localStudentIndicesRef.current = localIndices
+        setNavigationIndices(localIndices)
 
         const instructorIndices = lastInstructorIndicesRef.current
         const maxPosition = lastEffectiveMaxPositionRef.current ?? instructorIndices
@@ -925,6 +1036,11 @@ const SyncDeckStudent: FC = () => {
         if (shouldResetBacktrackOptOutByMaxPosition(studentBacktrackOptOutRef.current, localIndices, maxPosition)) {
           setBacktrackOptOut(false)
         }
+      }
+
+      const nextNavigationCapabilities = extractNavigationCapabilities(event.data)
+      if (nextNavigationCapabilities) {
+        setNavigationCapabilities(nextNavigationCapabilities)
       }
 
       if (!hasSeenIframeReadySignalRef.current && isRevealSyncMessage(event.data)) {
@@ -1157,6 +1273,32 @@ const SyncDeckStudent: FC = () => {
     )
   }, [sendPayloadToIframe])
 
+  const handleDirectionalNavigation = useCallback((direction: SyncDeckNavigationDirection) => {
+    const canNavigateBack = navigationCapabilities?.canNavigateBack
+      ?? Boolean(navigationIndices && (navigationIndices.h > 0 || navigationIndices.v > 0 || navigationIndices.f > 0))
+    const canNavigateForward = navigationCapabilities?.canNavigateForward ?? true
+    const forwardLocked = isForwardNavigationLocked(isBacktrackOptOut, navigationIndices, effectiveMaxPosition)
+
+    if ((direction === 'left' || direction === 'up') && !canNavigateBack) {
+      return
+    }
+
+    if ((direction === 'right' || direction === 'down') && (!canNavigateForward || forwardLocked)) {
+      return
+    }
+
+    const targetIndices = buildDirectionalSlideIndices(navigationIndices, direction)
+    if (!targetIndices) {
+      return
+    }
+
+    sendPayloadToIframe(
+      buildRevealCommandMessage('slide', targetIndices),
+    )
+    setNavigationIndices(targetIndices)
+    localStudentIndicesRef.current = targetIndices
+  }, [effectiveMaxPosition, isBacktrackOptOut, navigationCapabilities, navigationIndices, sendPayloadToIframe])
+
   const handleFastForwardToInstructor = useCallback(() => {
     const instructorIndices = lastInstructorIndicesRef.current
     if (!instructorIndices) {
@@ -1175,6 +1317,24 @@ const SyncDeckStudent: FC = () => {
     localStudentIndicesRef.current = instructorIndices
     setBacktrackOptOut(false)
   }, [sendPayloadToIframe, setBacktrackOptOut])
+
+  const canNavigateBack = navigationCapabilities?.canNavigateBack
+    ?? Boolean(navigationIndices && (navigationIndices.h > 0 || navigationIndices.v > 0 || navigationIndices.f > 0))
+  const canNavigateForward = navigationCapabilities?.canNavigateForward ?? true
+  const forwardLocked = isForwardNavigationLocked(isBacktrackOptOut, navigationIndices, effectiveMaxPosition)
+  const canNavigateLeft = Boolean(navigationIndices && navigationIndices.h > 0 && canNavigateBack)
+  const canNavigateUp = Boolean(
+    navigationIndices &&
+    canNavigateBack &&
+    (navigationCapabilities?.canNavigateUp ?? navigationIndices.v > 0),
+  )
+  const canNavigateRight = Boolean(navigationIndices && canNavigateForward && !forwardLocked)
+  const canNavigateDown = Boolean(
+    navigationIndices &&
+    canNavigateForward &&
+    !forwardLocked &&
+    (navigationCapabilities?.canNavigateDown ?? false),
+  )
 
   if (!sessionId) {
     return (
@@ -1276,7 +1436,7 @@ const SyncDeckStudent: FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 w-full overflow-hidden bg-white">
+      <div className="flex-1 min-h-0 w-full overflow-hidden bg-white relative">
         <iframe
           ref={iframeRef}
           title="SyncDeck Student Presentation"
@@ -1286,6 +1446,42 @@ const SyncDeckStudent: FC = () => {
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
           onLoad={handleIframeLoad}
         />
+        <button
+          type="button"
+          onClick={() => handleDirectionalNavigation('left')}
+          disabled={!canNavigateLeft}
+          aria-label="Previous horizontal slide"
+          className="absolute left-3 top-1/2 -translate-y-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          ◀
+        </button>
+        <button
+          type="button"
+          onClick={() => handleDirectionalNavigation('right')}
+          disabled={!canNavigateRight}
+          aria-label={forwardLocked ? 'Next horizontal slide locked by instructor' : 'Next horizontal slide'}
+          className="absolute right-3 top-1/2 -translate-y-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          ▶
+        </button>
+        <button
+          type="button"
+          onClick={() => handleDirectionalNavigation('up')}
+          disabled={!canNavigateUp}
+          aria-label="Previous vertical slide"
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          ▲
+        </button>
+        <button
+          type="button"
+          onClick={() => handleDirectionalNavigation('down')}
+          disabled={!canNavigateDown}
+          aria-label={forwardLocked ? 'Next vertical slide locked by instructor' : 'Next vertical slide'}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 px-3 py-2 rounded-full border border-gray-300 bg-white/85 text-gray-700 shadow hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          ▼
+        </button>
       </div>
     </div>
   )

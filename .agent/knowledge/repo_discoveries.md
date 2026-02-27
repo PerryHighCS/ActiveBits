@@ -16,6 +16,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-02-27
 - Area: activities
+- Discovery: SyncDeck manager/student directional navigation is now host-overlaid on iframe edges (left/right/up/down) and driven by iframe `reveal-sync` `state/ready` payloads (`indices` + `capabilities.canNavigateBack/canNavigateForward`) rather than hardcoded deck assumptions.
+- Why it matters: Navigation controls can be reused across decks without per-presentation edits, and student forward controls now disable at the effective sync boundary unless the student has opted out by backtracking.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: If reveal iframe protocol expands directional capability flags (`canNavigateLeft/Right/Up/Down`), wire those into button visibility to refine per-axis disable states beyond current back/forward capability fallback.
+- Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
 - Discovery: SyncDeck manager instructor updates now relay to other instructors by default, and each manager has a local toolbar sync toggle (`🔗`) that disables both outbound instructor broadcasts and inbound instructor state application while still keeping the connection active for session metadata (for example student presence).
 - Why it matters: Multiple instructors stay in lockstep by default, and any instructor can temporarily navigate independently without disrupting student/instructor shared state until they re-enable sync.
 - Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
@@ -188,4 +196,28 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: Prevents duplicate URL-policy drift across client parsers and keeps hook dependency arrays both correct and lint-clean when async helpers are referenced from effects.
 - Evidence: `client/src/components/common/urlValidationUtils.ts`; `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/sessionRouterUtils.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.test.ts`
 - Follow-up action: Reuse `urlValidationUtils.ts` for future client-side URL validation instead of re-implementing `new URL(...)` checks in feature files.
+- Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
+- Discovery: SyncDeck overlay navigation now treats instructor arrows as sync-unrestricted controls while student arrows remain constrained by reveal capabilities and instructor boundary lock (`forwardLocked`).
+- Why it matters: Instructors can always advance/rewind the deck without being blocked by synchronous student restrictions, but students still cannot navigate ahead of the instructor boundary.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep future navigation-lock updates role-aware (manager vs student) so synchronization rules do not regress instructor controls.
+- Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
+- Discovery: SyncDeck index extraction now accepts `reveal-sync` `action: "ready"` envelopes in both manager and student clients, not only `state`, so first-message index snapshots are retained.
+- Why it matters: Some decks publish navigation indices in the initial ready handshake; ignoring that message keeps overlay arrows disabled until a later state update (or indefinitely if none arrives).
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep reveal-sync parsing helpers action-tolerant when payload schema matches, and add tests whenever new actions can carry `indices`.
+- Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
+- Discovery: SyncDeck now supports `payload.navigation` from `reveal-sync` `ready`/`state` messages: `canGoBack`/`canGoForward` are mapped to host navigation booleans and `navigation.current` is used as an indices fallback when top-level `indices` is absent.
+- Why it matters: Host arrow controls now stay usable with the updated iframe schema where navigation readiness is emitted under `navigation`, including vertical index tracking from `navigation.current.v`.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: When schema fields move between payload objects, keep dual-read fallbacks (`capabilities` + `navigation`) until all decks are migrated.
 - Owner: Codex
