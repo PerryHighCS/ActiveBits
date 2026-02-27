@@ -23,8 +23,8 @@ Before making changes, read these files when relevant:
 3. Add or update tests for the code you change, even if nobody asked.
 4. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
 5. All API endpoints must include proper error handling and logging.
-7. Use structured logging for all server-side events.
-6. Never expose, log, or commit secrets, API keys, or other sensitive information.
+6. Use structured logging for all server-side events.
+7. Never expose, log, or commit secrets, API keys, or other sensitive information.
 
 ## Preflight Checklist
 
