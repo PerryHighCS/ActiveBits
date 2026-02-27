@@ -848,8 +848,6 @@ const SyncDeckManager: FC = () => {
   const [presentationUrl, setPresentationUrl] = useState(() => {
     const params = new URLSearchParams(location.search)
     const initial = params.get('presentationUrl') ?? ''
-    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-    console.log('[SYNCDECK-DEBUG] initial presentationUrl from URL params:', JSON.stringify(initial), '| raw search:', location.search)
     return initial
   })
   const [isStartingSession, setIsStartingSession] = useState(false)
@@ -1157,8 +1155,6 @@ const SyncDeckManager: FC = () => {
 
         const payload = (await response.json()) as SessionResponsePayload
         const existingPresentationUrl = payload.session?.data?.presentationUrl
-        // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-        console.log('[SYNCDECK-DEBUG] loadExistingPresentation: session.data.presentationUrl =', JSON.stringify(existingPresentationUrl), '| validates:', typeof existingPresentationUrl === 'string' && validatePresentationUrl(existingPresentationUrl))
         if (typeof existingPresentationUrl !== 'string' || !validatePresentationUrl(existingPresentationUrl)) {
           return
         }
@@ -1249,30 +1245,11 @@ const SyncDeckManager: FC = () => {
               ? payload.persistentUrlHash
               : null
 
-          // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-          console.log(
-            '[SYNCDECK-DEBUG] loadInstructorPasscode response:',
-            '| raw persistentPresentationUrl:', JSON.stringify(payload.persistentPresentationUrl),
-            '| validates:', typeof payload.persistentPresentationUrl === 'string' && validatePresentationUrl(payload.persistentPresentationUrl),
-            '| persistentUrlHash:', JSON.stringify(payload.persistentUrlHash),
-            '| queryUrlHash:', JSON.stringify(queryUrlHash),
-          )
-
           if (persistentPresentationUrl) {
             setPresentationUrl((current) => {
               const normalizedCurrent = current.trim()
               const shouldKeepCurrent = validatePresentationUrl(normalizedCurrent)
               const nextPresentationUrl = shouldKeepCurrent ? normalizedCurrent : persistentPresentationUrl
-              // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-              console.log(
-                '[SYNCDECK-DEBUG] setPresentationUrl from passcode API:',
-                '| current =',
-                JSON.stringify(current),
-                '| currentValid =',
-                shouldKeepCurrent,
-                '| next =',
-                JSON.stringify(nextPresentationUrl),
-              )
               return nextPresentationUrl
             })
           }
@@ -1497,8 +1474,6 @@ const SyncDeckManager: FC = () => {
     if (!sessionId) return
 
     const normalizedUrl = presentationUrl.trim()
-    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-    console.log('[SYNCDECK-DEBUG] startSession called:', '| presentationUrl:', JSON.stringify(presentationUrl), '| normalizedUrl:', JSON.stringify(normalizedUrl), '| validates:', validatePresentationUrl(normalizedUrl), '| automatic:', automaticStart, '| urlHash:', JSON.stringify(urlHash))
     if (!validatePresentationUrl(normalizedUrl)) {
       setStartError('Presentation URL must be a valid http(s) URL')
       setStartSuccess(null)

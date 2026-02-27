@@ -754,8 +754,6 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const selectedOptions = isPlainObject(matchingEntry.selectedOptions) ? matchingEntry.selectedOptions : {}
-    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-    console.log('[SYNCDECK-DEBUG] instructor-passcode: cookie selectedOptions.presentationUrl =', JSON.stringify(selectedOptions.presentationUrl), '| urlHash =', JSON.stringify(selectedOptions.urlHash))
     const persistentPresentationUrl = normalizePersistentPresentationUrl(selectedOptions.presentationUrl)
     const candidateUrlHash =
       typeof selectedOptions.urlHash === 'string' && selectedOptions.urlHash.trim().length > 0
@@ -765,8 +763,6 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       candidateUrlHash && persistentPresentationUrl && verifyUrlHash(persistentHash, persistentPresentationUrl, candidateUrlHash)
         ? candidateUrlHash
         : (persistentPresentationUrl ? computeUrlHash(persistentHash, persistentPresentationUrl) : null)
-    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-    console.log('[SYNCDECK-DEBUG] instructor-passcode: returning persistentPresentationUrl =', JSON.stringify(persistentPresentationUrl), '| persistentUrlHash =', JSON.stringify(persistentUrlHash))
 
     res.json({
       instructorPasscode: session.data.instructorPasscode,
@@ -907,8 +903,6 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const instructorPasscode = readStringField(req.body, 'instructorPasscode')
     const urlHash = readStringField(req.body, 'urlHash')
     const persistentHashFromClient = readStringField(req.body, 'persistentHash')
-    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-    console.log('[SYNCDECK-DEBUG] configure: received presentationUrl =', JSON.stringify(presentationUrl), '| urlHash =', JSON.stringify(urlHash), '| validates:', presentationUrl != null && validatePresentationUrl(presentationUrl))
     if (
       !presentationUrl ||
       !validatePresentationUrl(presentationUrl) ||
