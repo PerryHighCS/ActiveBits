@@ -246,6 +246,7 @@ void test('normalizePersistentPresentationUrl decodes encoded and double-encoded
   assert.equal(normalizePersistentPresentationUrl(url), url)
   assert.equal(normalizePersistentPresentationUrl(encodeURIComponent(url)), url)
   assert.equal(normalizePersistentPresentationUrl(encodeURIComponent(encodeURIComponent(url))), url)
+  assert.equal(normalizePersistentPresentationUrl(encodeURIComponent(encodeURIComponent(encodeURIComponent(url)))), url)
 })
 
 void test('getPersistentSelectedOptionsFromSearchForActivity normalizes encoded syncdeck presentationUrl fallback', () => {
