@@ -860,6 +860,7 @@ const SyncDeckManager: FC = () => {
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
   const [instructorConnectionState, setInstructorConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [instructorConnectionTooltip, setInstructorConnectionTooltip] = useState('Not connected to sync server')
+  const [isInstructorSyncEnabled, setIsInstructorSyncEnabled] = useState(true)
   const [connectedStudentCount, setConnectedStudentCount] = useState(0)
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
@@ -890,6 +891,7 @@ const SyncDeckManager: FC = () => {
   const hasSeenInstructorIframeReadySignalRef = useRef(false)
   const suppressOutboundStateUntilRestoreRef = useRef(false)
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearRestoreSuppressionTimeout = useCallback((): void => {
@@ -926,6 +928,10 @@ const SyncDeckManager: FC = () => {
       return null
     }
   }, [presentationUrl])
+
+  useEffect(() => {
+    isInstructorSyncEnabledRef.current = isInstructorSyncEnabled
+  }, [isInstructorSyncEnabled])
 
   const requestChalkboardStateFromInstructor = useCallback((): void => {
     const targetWindow = presentationIframeRef.current?.contentWindow
@@ -1024,6 +1030,10 @@ const SyncDeckManager: FC = () => {
           const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage
           const statePayload = extractSyncDeckStatePayload(message)
           if (statePayload != null) {
+            if (!isInstructorSyncEnabledRef.current) {
+              return
+            }
+
             const drawingToolMode = parseDrawingToolModePayload(statePayload)
             if (drawingToolMode) {
               setIsChalkboardOpen(drawingToolMode === 'chalkboard')
@@ -1312,6 +1322,10 @@ const SyncDeckManager: FC = () => {
   }
 
   const relayInstructorPayload = (payload: unknown): void => {
+    if (!isInstructorSyncEnabledRef.current) {
+      return
+    }
+
     const socket = instructorSocketRef.current
     if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
       return
@@ -1401,6 +1415,12 @@ const SyncDeckManager: FC = () => {
   }
 
   const handleForceSyncStudents = (): void => {
+    if (!isInstructorSyncEnabledRef.current) {
+      setStartError('Enable instructor sync before forcing student sync.')
+      setStartSuccess(null)
+      return
+    }
+
     const socket = instructorSocketRef.current
     if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
       setStartError('Cannot force sync while disconnected from sync server.')
@@ -1450,6 +1470,21 @@ const SyncDeckManager: FC = () => {
     setStartError(null)
     setStartSuccess('Force sync sent. Students are syncing to your current position.')
   }
+
+  const toggleInstructorSync = useCallback((): void => {
+    const nextEnabled = !isInstructorSyncEnabledRef.current
+    setIsInstructorSyncEnabled(nextEnabled)
+    setStartError(null)
+
+    if (nextEnabled) {
+      setStartSuccess('Instructor sync enabled.')
+      disconnectInstructorWs()
+      connectInstructorWs()
+      return
+    }
+
+    setStartSuccess('Instructor sync disabled. Local navigation is no longer broadcast.')
+  }, [connectInstructorWs, disconnectInstructorWs])
 
   const handlePresentationIframeLoad = useCallback((): void => {
     const targetWindow = presentationIframeRef.current?.contentWindow
@@ -1712,6 +1747,10 @@ const SyncDeckManager: FC = () => {
 
       try {
         const envelope = parseRevealSyncEnvelope(event.data)
+        if (!isInstructorSyncEnabledRef.current) {
+          return
+        }
+
         const chalkboardRelayCommand = toChalkboardRelayCommand(event.data)
         if (chalkboardRelayCommand != null) {
           const relayWithFallback = applyChalkboardSnapshotFallback(
@@ -1900,11 +1939,25 @@ const SyncDeckManager: FC = () => {
             </button>
             <button
               type="button"
+              onClick={toggleInstructorSync}
+              className={`ml-2 px-2 py-1 rounded border text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed ${
+                isInstructorSyncEnabled
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              title={isInstructorSyncEnabled ? 'Disable instructor sync' : 'Enable instructor sync'}
+              aria-label={isInstructorSyncEnabled ? 'Disable instructor sync' : 'Enable instructor sync'}
+              disabled={isConfigurePanelOpen}
+            >
+              🔗
+            </button>
+            <button
+              type="button"
               onClick={handleForceSyncStudents}
               className="ml-2 px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Force sync students to current position"
               aria-label="Force sync students to current position"
-              disabled={isConfigurePanelOpen || instructorConnectionState !== 'connected'}
+              disabled={isConfigurePanelOpen || instructorConnectionState !== 'connected' || !isInstructorSyncEnabled}
             >
               📍
             </button>

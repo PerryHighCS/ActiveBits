@@ -408,6 +408,65 @@ void test('syncdeck websocket relays instructor updates to students in session',
   assert.deepEqual(updatedSession.lastInstructorStatePayload, { type: 'slidechanged', payload: { h: 3, v: 1, f: 0 } })
 })
 
+void test('syncdeck websocket relays instructor updates to other instructors in session', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const primaryInstructorSocket = new MockSocket()
+  const peerInstructorSocket = new MockSocket()
+  ws.wss.clients.add(primaryInstructorSocket)
+  ws.wss.clients.add(peerInstructorSocket)
+
+  handler?.(
+    primaryInstructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+      instructorPasscode: 'teacher-pass',
+    }),
+    ws.wss,
+  )
+  handler?.(
+    peerInstructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+      instructorPasscode: 'teacher-pass',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const initialPrimaryMessageCount = primaryInstructorSocket.sent.length
+  const initialPeerMessageCount = peerInstructorSocket.sent.length
+
+  primaryInstructorSocket.emit(
+    'message',
+    JSON.stringify({
+      type: 'syncdeck-state-update',
+      payload: { type: 'slidechanged', payload: { h: 4, v: 0, f: 0 } },
+    }),
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(primaryInstructorSocket.sent.length, initialPrimaryMessageCount)
+  assert.ok(peerInstructorSocket.sent.length > initialPeerMessageCount)
+
+  const deliveredToPeer = peerInstructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
+  const latestDelivered = deliveredToPeer[deliveredToPeer.length - 1]
+  assert.deepEqual(
+    latestDelivered?.payload,
+    { type: 'slidechanged', payload: { h: 4, v: 0, f: 0 } },
+  )
+})
+
 void test('syncdeck websocket replays buffered chalkboard snapshot and delta to student on connect', async () => {
   const app = createMockApp()
   const ws = createMockWs()

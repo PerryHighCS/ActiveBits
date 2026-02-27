@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-02-27
+- Area: activities
+- Discovery: SyncDeck manager instructor updates now relay to other instructors by default, and each manager has a local toolbar sync toggle (`🔗`) that disables both outbound instructor broadcasts and inbound instructor state application while still keeping the connection active for session metadata (for example student presence).
+- Why it matters: Multiple instructors stay in lockstep by default, and any instructor can temporarily navigate independently without disrupting student/instructor shared state until they re-enable sync.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: If instructors request independent viewing with read-only follow indicators, extend the toggle into explicit sync modes (follow-only, broadcast-only, fully detached) rather than introducing activity-specific behavior in shared modules.
+- Owner: Codex
+
+- Date: 2026-02-27
 - Area: client
 - Discovery: SyncDeck persistent teacher auth from `WaitingRoom` must send `selectedOptions` parsed from the permalink query (including decode-normalized `presentationUrl` for encoded/double-encoded values), and manager passcode hydration should replace invalid current `presentationUrl` state with the validated cookie-backed `persistentPresentationUrl`.
 - Why it matters: Without `selectedOptions` in waiting-room auth, the refreshed `persistent_sessions` cookie loses `presentationUrl/urlHash`, making `/api/syncdeck/:sessionId/instructor-passcode` return null recovery fields; if query bootstrap is percent-encoded, manager state can remain invalid and block configure/start.

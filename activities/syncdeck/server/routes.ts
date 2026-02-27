@@ -1057,7 +1057,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         await sessions.set(session.id, session)
 
         for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
-          if (peer.sessionId !== session.id || peer.isInstructor || peer === client) {
+          if (peer.sessionId !== session.id || peer === client) {
             continue
           }
           sendSyncDeckState(peer, message.payload ?? null)
