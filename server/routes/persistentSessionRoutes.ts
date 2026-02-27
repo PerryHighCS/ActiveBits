@@ -257,9 +257,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const existingEntry = existingIndex >= 0 ? sessionEntries[existingIndex] : undefined
     const existingSelectedOptions = toSelectedOptions(existingEntry?.selectedOptions)
 
-    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-    console.log('[SYNCDECK-DEBUG] authenticate: activityName =', activityName, '| bodySelectedOptions =', JSON.stringify(bodySelectedOptions), '| existingSelectedOptions =', JSON.stringify(existingSelectedOptions), '| will use:', Object.keys(existingSelectedOptions).length > 0 ? 'existing' : 'body')
-
     if (existingIndex !== -1) {
       sessionEntries.splice(existingIndex, 1)
     }
@@ -274,15 +271,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       // params submitted during teacher authentication on a new device.
       selectedOptions: finalSelectedOptions,
     })
-    // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-    console.log(
-      '[SYNCDECK-DEBUG] authenticate: cookieKey =',
-      cookieKey,
-      '| existingIndex =',
-      existingIndex,
-      '| finalSelectedOptions =',
-      JSON.stringify(finalSelectedOptions),
-    )
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
     }

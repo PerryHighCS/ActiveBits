@@ -155,8 +155,6 @@ export function buildTeacherManagePathFromSession(
   queryString: string,
   sessionPresentationUrl: string | null,
 ): string {
-  // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-  console.log('[SYNCDECK-DEBUG] buildTeacherManagePathFromSession: sessionPresentationUrl =', JSON.stringify(sessionPresentationUrl))
   if (activityName !== 'syncdeck' || !sessionPresentationUrl) {
     return buildPersistentTeacherManagePath(activityName, sessionId, queryString)
   }
@@ -164,8 +162,6 @@ export function buildTeacherManagePathFromSession(
   const query = new URLSearchParams()
   query.set('presentationUrl', sessionPresentationUrl)
   const path = `/manage/${activityName}/${sessionId}?${query.toString()}`
-  // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-  console.log('[SYNCDECK-DEBUG] buildTeacherManagePathFromSession: built path =', path)
   return path
 }
 

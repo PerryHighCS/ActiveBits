@@ -150,16 +150,6 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
         getActivity(activityName)?.deepLinkOptions,
         activityName,
       )
-      // [SYNCDECK-DEBUG] Remove after diagnosing URL-encoding bug
-      console.log(
-        '[SYNCDECK-DEBUG] waiting-room authenticate submit:',
-        '| activityName =',
-        activityName,
-        '| raw search =',
-        queryString,
-        '| selectedOptions =',
-        JSON.stringify(selectedOptions),
-      )
 
       const authenticateResponse = await fetch(buildPersistentAuthenticateApiUrl(), {
         method: 'POST',
