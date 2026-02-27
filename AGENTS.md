@@ -25,7 +25,7 @@ Before making changes, read these files when relevant:
 5. All API endpoints must include proper error handling and logging.
 6. Use structured logging for all server-side events.
 7. Never expose, log, or commit secrets, API keys, or other sensitive information.
-8. Plans should be iterative and include checklists that must be updated as tasks are created and completed.
+8. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
  
 ## Preflight Checklist
 
@@ -116,3 +116,4 @@ If a discovery does not fit an existing knowledge file, create a new `.agent/kno
 1. Relevant tests pass.
 2. Documentation is updated for any workflow/runtime/build change.
 3. Notes are recorded in the appropriate log files.
+4. If following a plan, appropriate step(s) are marked as complete.
