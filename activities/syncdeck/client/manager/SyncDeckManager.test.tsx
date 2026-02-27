@@ -324,6 +324,32 @@ void test('buildRestoreCommandFromPayload preserves state indices from top-level
   })
 })
 
+void test('buildRestoreCommandFromPayload converts ready navigation.current payload into setState command', () => {
+  const restored = buildRestoreCommandFromPayload({
+    type: 'reveal-sync',
+    version: '1.1.0',
+    action: 'ready',
+    payload: {
+      navigation: {
+        current: { h: 6, v: 2, f: 0 },
+      },
+    },
+  }) as {
+    version?: unknown
+    action?: unknown
+    payload?: { name?: unknown; payload?: { state?: unknown } }
+  }
+
+  assert.equal(restored.version, '1.1.0')
+  assert.equal(restored.action, 'command')
+  assert.equal(restored.payload?.name, 'setState')
+  assert.deepEqual(restored.payload?.payload?.state, {
+    indexh: 6,
+    indexv: 2,
+    indexf: 0,
+  })
+})
+
 void test('includePausedInStateEnvelope prefers explicit fallback over stale payload paused value', () => {
   const updated = includePausedInStateEnvelope(
     {

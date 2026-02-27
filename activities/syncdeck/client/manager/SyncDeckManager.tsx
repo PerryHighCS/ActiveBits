@@ -728,13 +728,14 @@ export function buildRestoreCommandFromPayload(payload: unknown): unknown {
     return payload
   }
 
-  if (envelope.action !== 'state' || !isPlainObject(envelope.payload)) {
+  if ((envelope.action !== 'state' && envelope.action !== 'ready') || !isPlainObject(envelope.payload)) {
     return payload
   }
 
   const statePayload = envelope.payload as {
     revealState?: unknown
     indices?: { h?: unknown; v?: unknown; f?: unknown }
+    navigation?: unknown
     indexh?: unknown
     indexv?: unknown
     indexf?: unknown
@@ -742,6 +743,9 @@ export function buildRestoreCommandFromPayload(payload: unknown): unknown {
 
   const revealState = isPlainObject(statePayload.revealState) ? statePayload.revealState : null
   const indices = normalizeIndices(statePayload.indices)
+    ?? (isPlainObject(statePayload.navigation)
+      ? normalizeIndices((statePayload.navigation as { current?: unknown }).current)
+      : null)
     ?? extractIndicesFromRevealStateObject(revealState)
     ?? extractIndicesFromRevealStateObject(statePayload)
   if (!indices) {

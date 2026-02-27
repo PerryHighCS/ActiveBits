@@ -216,6 +216,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-02-27
 - Area: activities
+- Discovery: SyncDeck manager restore conversion now treats restorable `reveal-sync` `ready` envelopes like `state` by translating `indices` or `navigation.current` into a `command/setState` restore before restore suppression is armed.
+- Why it matters: Without this alignment, a `ready` message could contribute indices to suppression tracking while being posted back to the iframe unchanged, causing outbound state to be dropped until timeout with no actual restore applied.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Keep `extractIndicesFromRevealPayload()` and `buildRestoreCommandFromPayload()` behavior in sync whenever new inbound reveal actions become restorable.
+- Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
 - Discovery: SyncDeck no longer exports unused `extractNavigationCapabilities()` helpers from the manager or student clients; dormant host-navigation parsing was removed because the shipped shells do not render overlay arrow controls that consume those values.
 - Why it matters: Keeps the SyncDeck client modules aligned with actual runtime behavior, removes duplicated parser code, and avoids implying a supported host-navigation API surface that is not part of the shipped UI.
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
