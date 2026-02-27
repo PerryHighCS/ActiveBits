@@ -240,7 +240,7 @@ void test('getPersistentSelectedOptionsFromSearchForActivity preserves syncdeck 
   })
 })
 
-void test('normalizePersistentPresentationUrl decodes encoded and double-encoded syncdeck permalink URLs', () => {
+void test('normalizePersistentPresentationUrl decodes encoded and up to triple-encoded syncdeck permalink URLs', () => {
   const url = 'https://slides.example/deck'
 
   assert.equal(normalizePersistentPresentationUrl(url), url)
