@@ -1,8 +1,6 @@
 # Video Sync Activity Plan
 
-This plan replaces the earlier idea of putting video synchronization directly into presentation files loaded by SyncDeck.
-
-The new direction is to build a standalone ActiveBits activity for synchronized video playback. Presentation embedding is explicitly out of scope for this phase and should be tracked as future work under the SyncDeck embedded-activities plan in [`.agent/plans/syncdeck.md`](/workspaces/ActiveBits/.agent/plans/syncdeck.md).
+This plan is to build a standalone ActiveBits activity for synchronized video playback. Presentation embedding is explicitly out of scope for this phase and should be tracked as future work under the SyncDeck embedded-activities plan in [`.agent/plans/syncdeck.md`](/workspaces/ActiveBits/.agent/plans/syncdeck.md).
 
 ## Goal
 
