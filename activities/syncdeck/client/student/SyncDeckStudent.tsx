@@ -34,6 +34,8 @@ interface RevealCommandPayload {
 }
 
 interface RevealSyncStatePayload {
+  capabilities?: unknown
+  navigation?: unknown
   overview?: unknown
   storyboardDisplayed?: unknown
   open?: unknown
@@ -45,6 +47,7 @@ interface RevealSyncStatePayload {
 
 interface RevealStateIndicesPayload {
   indices?: unknown
+  navigation?: unknown
   studentBoundary?: unknown
 }
 
@@ -255,7 +258,7 @@ export function toRevealBoundaryCommandMessage(
   return null
 }
 
-function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: number; v: number; f: number } | null {
+export function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: number; v: number; f: number } | null {
   if (!isPlainObject(rawPayload)) {
     return null
   }
@@ -294,12 +297,15 @@ function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: number;
     }
   }
 
-  if (message.action !== 'state') {
+  if (message.action !== 'state' && message.action !== 'ready') {
     return null
   }
 
   const payload = message.payload as RevealStateIndicesPayload
   return normalizeIndices(payload.indices)
+    ?? (isPlainObject(payload.navigation)
+      ? normalizeIndices((payload.navigation as { current?: unknown }).current)
+      : null)
 }
 
 function computeBoundaryDetails(

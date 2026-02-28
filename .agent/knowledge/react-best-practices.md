@@ -172,6 +172,26 @@ Ensure interactive elements have proper semantics:
 <div onClick={handler}>Click me</div>
 ```
 
+### Toggle Buttons Need `aria-pressed`
+
+Stateful on/off buttons should expose pressed state explicitly:
+
+```tsx
+<button
+  type="button"
+  aria-pressed={isEnabled}
+  aria-label={isEnabled ? 'Disable feature' : 'Enable feature'}
+  onClick={toggleFeature}
+>
+  Toggle
+</button>
+```
+
+**Rationale:** Changing the label alone does not reliably communicate toggle state to assistive technologies; `aria-pressed` makes the control's current state explicit.
+
+**Evidence:**
+- `activities/syncdeck/client/manager/SyncDeckManager.tsx` - instructor sync toggle
+
 ## State Management Patterns
 
 ### Update Local State Before Guarding Network Calls

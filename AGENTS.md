@@ -22,10 +22,11 @@ Before making changes, read these files when relevant:
 2. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
 3. Add or update tests for the code you change, even if nobody asked.
 4. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
-5. All API endpoints must include proper error handling and logging.
-6. Use structured logging for all server-side events.
-7. Never expose, log, or commit secrets, API keys, or other sensitive information.
-8. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
+5. Frontend controls must include appropriate accessibility semantics for their role and state. Use native elements when possible, and add relevant attributes such as `aria-label`, `aria-labelledby`, `aria-describedby`, `aria-controls`, `aria-expanded`, `aria-pressed`, `aria-selected`, and `disabled` when the control behavior requires them.
+6. All API endpoints must include proper error handling and logging.
+7. Use structured logging for all server-side events.
+8. Never expose, log, or commit secrets, API keys, or other sensitive information.
+9. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
  
 ## Preflight Checklist
 
@@ -60,6 +61,13 @@ Run these minimum checks based on scope:
 
 1. Backend/runtime imports must be directly runtime-resolvable. Do not rely on bundler-only features for runtime-critical code paths unless runtime support is explicitly configured.
 2. Keep cross-workspace import boundaries explicit (prefer package/export boundaries over deep ad-hoc paths).
+
+## Frontend Accessibility
+
+1. Prefer semantic HTML elements that already expose the correct accessibility role and keyboard behavior.
+2. Treat visual-only state as insufficient. If a control has expanded/collapsed, pressed, selected, active, disabled, invalid, or busy state, expose that state with the appropriate native or ARIA attribute.
+3. Icon-only controls must have an accessible name.
+4. When creating or changing custom interactive components, verify keyboard interaction and screen-reader semantics along with visual behavior.
 
 ## Activity Containment Policy
 

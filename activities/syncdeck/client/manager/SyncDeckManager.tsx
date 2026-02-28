@@ -1,5 +1,6 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
+import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
@@ -44,6 +45,7 @@ interface RevealCommandPayload {
 
 interface RevealStatePayload {
   indices?: unknown
+  navigation?: unknown
   revealState?: unknown
   indexh?: unknown
   indexv?: unknown
@@ -60,7 +62,6 @@ interface RevealSyncEnvelope {
 }
 
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
-
 interface RelayCommandPayloadEnvelope {
   name?: unknown
   payload?: unknown
@@ -69,6 +70,8 @@ interface RelayCommandPayloadEnvelope {
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
 interface RevealSyncStatePayload {
+  capabilities?: unknown
+  navigation?: unknown
   overview?: unknown
   paused?: unknown
   storyboardDisplayed?: unknown
@@ -420,6 +423,28 @@ function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; 
   return a.f - b.f
 }
 
+export function evaluateRestoreSuppressionForOutboundState(params: {
+  suppressOutboundUntilRestore: boolean
+  restoreTargetIndices: { h: number; v: number; f: number } | null
+  instructorIndices: { h: number; v: number; f: number } | null
+}): { shouldDrop: boolean; shouldRelease: boolean } {
+  if (!params.suppressOutboundUntilRestore) {
+    return { shouldDrop: false, shouldRelease: false }
+  }
+
+  const hasReachedRestoreTarget =
+    params.restoreTargetIndices != null &&
+    params.instructorIndices != null &&
+    compareIndices(params.instructorIndices, params.restoreTargetIndices) >= 0
+
+  if (!hasReachedRestoreTarget) {
+    return { shouldDrop: true, shouldRelease: false }
+  }
+
+  // Drop the first outbound state that confirms restore completion to avoid instructor-to-instructor echo.
+  return { shouldDrop: true, shouldRelease: true }
+}
+
 function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: number; v: number; f: number } {
   return {
     h: indices.h,
@@ -704,13 +729,14 @@ export function buildRestoreCommandFromPayload(payload: unknown): unknown {
     return payload
   }
 
-  if (envelope.action !== 'state' || !isPlainObject(envelope.payload)) {
+  if ((envelope.action !== 'state' && envelope.action !== 'ready') || !isPlainObject(envelope.payload)) {
     return payload
   }
 
   const statePayload = envelope.payload as {
     revealState?: unknown
     indices?: { h?: unknown; v?: unknown; f?: unknown }
+    navigation?: unknown
     indexh?: unknown
     indexv?: unknown
     indexf?: unknown
@@ -718,6 +744,9 @@ export function buildRestoreCommandFromPayload(payload: unknown): unknown {
 
   const revealState = isPlainObject(statePayload.revealState) ? statePayload.revealState : null
   const indices = normalizeIndices(statePayload.indices)
+    ?? (isPlainObject(statePayload.navigation)
+      ? normalizeIndices((statePayload.navigation as { current?: unknown }).current)
+      : null)
     ?? extractIndicesFromRevealStateObject(revealState)
     ?? extractIndicesFromRevealStateObject(statePayload)
   if (!indices) {
@@ -786,12 +815,15 @@ export function extractIndicesFromRevealPayload(payload: unknown): { h: number; 
     return null
   }
 
-  if (message.action !== 'state') {
+  if (message.action !== 'state' && message.action !== 'ready') {
     return null
   }
 
   const messagePayload = message.payload as RevealStatePayload | undefined
   return normalizeIndices(messagePayload?.indices)
+    ?? (isPlainObject(messagePayload?.navigation)
+      ? normalizeIndices((messagePayload.navigation as { current?: unknown }).current)
+      : null)
     ?? extractIndicesFromRevealStateObject(messagePayload?.revealState)
     ?? extractIndicesFromRevealStateObject(messagePayload)
 }
@@ -860,6 +892,7 @@ const SyncDeckManager: FC = () => {
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
   const [instructorConnectionState, setInstructorConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [instructorConnectionTooltip, setInstructorConnectionTooltip] = useState('Not connected to sync server')
+  const [isInstructorSyncEnabled, setIsInstructorSyncEnabled] = useState(true)
   const [connectedStudentCount, setConnectedStudentCount] = useState(0)
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
@@ -890,6 +923,7 @@ const SyncDeckManager: FC = () => {
   const hasSeenInstructorIframeReadySignalRef = useRef(false)
   const suppressOutboundStateUntilRestoreRef = useRef(false)
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearRestoreSuppressionTimeout = useCallback((): void => {
@@ -926,6 +960,10 @@ const SyncDeckManager: FC = () => {
       return null
     }
   }, [presentationUrl])
+
+  useEffect(() => {
+    isInstructorSyncEnabledRef.current = isInstructorSyncEnabled
+  }, [isInstructorSyncEnabled])
 
   const requestChalkboardStateFromInstructor = useCallback((): void => {
     const targetWindow = presentationIframeRef.current?.contentWindow
@@ -1024,6 +1062,10 @@ const SyncDeckManager: FC = () => {
           const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage
           const statePayload = extractSyncDeckStatePayload(message)
           if (statePayload != null) {
+            if (!isInstructorSyncEnabledRef.current) {
+              return
+            }
+
             const drawingToolMode = parseDrawingToolModePayload(statePayload)
             if (drawingToolMode) {
               setIsChalkboardOpen(drawingToolMode === 'chalkboard')
@@ -1312,6 +1354,10 @@ const SyncDeckManager: FC = () => {
   }
 
   const relayInstructorPayload = (payload: unknown): void => {
+    if (!isInstructorSyncEnabledRef.current) {
+      return
+    }
+
     const socket = instructorSocketRef.current
     if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
       return
@@ -1401,6 +1447,12 @@ const SyncDeckManager: FC = () => {
   }
 
   const handleForceSyncStudents = (): void => {
+    if (!isInstructorSyncEnabledRef.current) {
+      setStartError('Enable instructor sync before forcing student sync.')
+      setStartSuccess(null)
+      return
+    }
+
     const socket = instructorSocketRef.current
     if (!socket || socket.readyState !== WS_OPEN_READY_STATE) {
       setStartError('Cannot force sync while disconnected from sync server.')
@@ -1450,6 +1502,22 @@ const SyncDeckManager: FC = () => {
     setStartError(null)
     setStartSuccess('Force sync sent. Students are syncing to your current position.')
   }
+
+  const toggleInstructorSync = useCallback((): void => {
+    const nextEnabled = !isInstructorSyncEnabledRef.current
+    isInstructorSyncEnabledRef.current = nextEnabled
+    setIsInstructorSyncEnabled(nextEnabled)
+    setStartError(null)
+
+    if (nextEnabled) {
+      setStartSuccess('Instructor sync enabled.')
+      disconnectInstructorWs()
+      connectInstructorWs()
+      return
+    }
+
+    setStartSuccess('Instructor sync disabled. Local presentation updates are no longer sent or applied across instructors.')
+  }, [connectInstructorWs, disconnectInstructorWs])
 
   const handlePresentationIframeLoad = useCallback((): void => {
     const targetWindow = presentationIframeRef.current?.contentWindow
@@ -1712,6 +1780,10 @@ const SyncDeckManager: FC = () => {
 
       try {
         const envelope = parseRevealSyncEnvelope(event.data)
+        if (!isInstructorSyncEnabledRef.current) {
+          return
+        }
+
         const chalkboardRelayCommand = toChalkboardRelayCommand(event.data)
         if (chalkboardRelayCommand != null) {
           const relayWithFallback = applyChalkboardSnapshotFallback(
@@ -1746,18 +1818,19 @@ const SyncDeckManager: FC = () => {
           lastInstructorIndicesRef.current = instructorIndices
         }
 
-        if (envelope?.type === 'reveal-sync' && envelope.action === 'state' && suppressOutboundStateUntilRestoreRef.current) {
-          const restoreTargetIndices = restoreTargetIndicesRef.current
-          const hasReachedRestoreTarget =
-            restoreTargetIndices != null &&
-            instructorIndices != null &&
-            compareIndices(instructorIndices, restoreTargetIndices) >= 0
+        if (envelope?.type === 'reveal-sync' && envelope.action === 'state') {
+          const restoreSuppression = evaluateRestoreSuppressionForOutboundState({
+            suppressOutboundUntilRestore: suppressOutboundStateUntilRestoreRef.current,
+            restoreTargetIndices: restoreTargetIndicesRef.current,
+            instructorIndices,
+          })
 
-          if (!hasReachedRestoreTarget) {
+          if (restoreSuppression.shouldRelease) {
+            releaseRestoreSuppression()
+          }
+          if (restoreSuppression.shouldDrop) {
             return
           }
-
-          releaseRestoreSuppression()
         }
 
         if (envelope?.type === 'reveal-sync' && isPlainObject(envelope.payload)) {
@@ -1830,6 +1903,10 @@ const SyncDeckManager: FC = () => {
           )
         }
 
+        if (!shouldRelayRevealSyncPayloadToSession(sanitizedPayload)) {
+          return
+        }
+
         socket.send(
           JSON.stringify({
             type: 'syncdeck-state-update',
@@ -1900,11 +1977,26 @@ const SyncDeckManager: FC = () => {
             </button>
             <button
               type="button"
+              onClick={toggleInstructorSync}
+              aria-pressed={isInstructorSyncEnabled}
+              className={`ml-2 px-2 py-1 rounded border text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed ${
+                isInstructorSyncEnabled
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              title={isInstructorSyncEnabled ? 'Disable instructor sync' : 'Enable instructor sync'}
+              aria-label={isInstructorSyncEnabled ? 'Disable instructor sync' : 'Enable instructor sync'}
+              disabled={isConfigurePanelOpen}
+            >
+              🔗
+            </button>
+            <button
+              type="button"
               onClick={handleForceSyncStudents}
               className="ml-2 px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Force sync students to current position"
               aria-label="Force sync students to current position"
-              disabled={isConfigurePanelOpen || instructorConnectionState !== 'connected'}
+              disabled={isConfigurePanelOpen || instructorConnectionState !== 'connected' || !isInstructorSyncEnabled}
             >
               📍
             </button>

@@ -1,6 +1,6 @@
 # Reveal Iframe Sync Message Schema
 
-This document defines the `postMessage` protocol used by `js/reveal-iframe-sync.js`.
+This document defines the `postMessage` protocol used by `reveal-iframe-sync.js`.
 
 ## Envelope (all messages)
 
@@ -288,6 +288,13 @@ Sent on init (if `autoAnnounceReady`) and when role changes.
       "canNavigateForward": false
     },
     "studentBoundary": { "h": 2, "v": 0, "f": 0 },
+    "navigation": {
+      "current": { "h": 2, "v": 0, "f": 0 },
+      "minIndices": null,
+      "maxIndices": { "h": 2, "v": 0, "f": 0 },
+      "canGoBack": true,
+      "canGoForward": false
+    },
     "revealState": {},
     "indices": { "h": 2, "v": 0, "f": 0 },
     "paused": false,
@@ -297,6 +304,13 @@ Sent on init (if `autoAnnounceReady`) and when role changes.
 ```
 
 `overview` reflects whether the **custom storyboard strip** is currently open — not Reveal's native grid overview (which is always suppressed). `true` = strip is visible.
+
+`navigation` provides host-ready arrow state derived from both Reveal's local route availability and SyncDeck boundary enforcement:
+- `current`: current slide indices in the iframe.
+- `minIndices`: effective lower bound (usually `null`; equals boundary when back nav is disallowed).
+- `maxIndices`: effective upper bound (boundary when forward nav is restricted).
+- `canGoBack`: final boolean for enabling/disabling a host "previous" arrow.
+- `canGoForward`: final boolean for enabling/disabling a host "next" arrow.
 
 ### `state`
 
@@ -313,6 +327,13 @@ Sent by **any role** on: slide change, fragment shown/hidden, pause, resume, ove
       "canNavigateForward": true
     },
     "studentBoundary": { "h": 5, "v": 0, "f": 0 },
+    "navigation": {
+      "current": { "h": 4, "v": 0, "f": 1 },
+      "minIndices": null,
+      "maxIndices": null,
+      "canGoBack": true,
+      "canGoForward": true
+    },
     "revealState": {},
     "indices": { "h": 4, "v": 0, "f": 1 },
     "paused": false,

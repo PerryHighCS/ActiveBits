@@ -16,6 +16,7 @@ import { toChalkboardRelayCommand } from './SyncDeckManager.js'
 import { extractIndicesFromRevealPayload } from './SyncDeckManager.js'
 import { buildRestoreCommandFromPayload } from './SyncDeckManager.js'
 import { applyChalkboardSnapshotFallback } from './SyncDeckManager.js'
+import { evaluateRestoreSuppressionForOutboundState } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -43,6 +44,8 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /Copy Join URL/i)
   assert.match(html, /End Session/i)
   assert.match(html, /Force sync students to current position/i)
+  assert.match(html, /Disable instructor sync/i)
+  assert.match(html, /aria-pressed="true"/i)
   assert.match(html, /Pause presentation/i)
   assert.match(html, /Toggle chalkboard screen/i)
   assert.match(html, /Toggle pen overlay/i)
@@ -91,6 +94,36 @@ void test('buildForceSyncBoundaryCommandMessage emits setStudentBoundary sync co
       syncToBoundary: true,
     },
   })
+})
+
+void test('evaluateRestoreSuppressionForOutboundState keeps outbound state when suppression is inactive', () => {
+  const result = evaluateRestoreSuppressionForOutboundState({
+    suppressOutboundUntilRestore: false,
+    restoreTargetIndices: { h: 3, v: 0, f: 0 },
+    instructorIndices: { h: 3, v: 0, f: 0 },
+  })
+
+  assert.deepEqual(result, { shouldDrop: false, shouldRelease: false })
+})
+
+void test('evaluateRestoreSuppressionForOutboundState drops outbound state before reaching restore target', () => {
+  const result = evaluateRestoreSuppressionForOutboundState({
+    suppressOutboundUntilRestore: true,
+    restoreTargetIndices: { h: 3, v: 0, f: 0 },
+    instructorIndices: { h: 2, v: 0, f: 0 },
+  })
+
+  assert.deepEqual(result, { shouldDrop: true, shouldRelease: false })
+})
+
+void test('evaluateRestoreSuppressionForOutboundState drops and releases when reaching restore target', () => {
+  const result = evaluateRestoreSuppressionForOutboundState({
+    suppressOutboundUntilRestore: true,
+    restoreTargetIndices: { h: 3, v: 0, f: 0 },
+    instructorIndices: { h: 3, v: 0, f: 0 },
+  })
+
+  assert.deepEqual(result, { shouldDrop: true, shouldRelease: true })
 })
 
 void test('buildClearBoundaryCommandMessage emits clearBoundary command', () => {
@@ -225,6 +258,32 @@ void test('extractIndicesFromRevealPayload reads indices from setState command p
   assert.deepEqual(indices, { h: 5, v: 0, f: 0 })
 })
 
+void test('extractIndicesFromRevealPayload reads indices from ready payload', () => {
+  const indices = extractIndicesFromRevealPayload({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      indices: { h: 2, v: 1, f: 0 },
+    },
+  })
+
+  assert.deepEqual(indices, { h: 2, v: 1, f: 0 })
+})
+
+void test('extractIndicesFromRevealPayload reads indices from ready navigation.current payload', () => {
+  const indices = extractIndicesFromRevealPayload({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      navigation: {
+        current: { h: 6, v: 2, f: 0 },
+      },
+    },
+  })
+
+  assert.deepEqual(indices, { h: 6, v: 2, f: 0 })
+})
+
 void test('buildRestoreCommandFromPayload converts legacy slidechanged payload into setState command', () => {
   const restored = buildRestoreCommandFromPayload({
     type: 'slidechanged',
@@ -262,6 +321,32 @@ void test('buildRestoreCommandFromPayload preserves state indices from top-level
     indexv: 2,
     indexf: 0,
     paused: true,
+  })
+})
+
+void test('buildRestoreCommandFromPayload converts ready navigation.current payload into setState command', () => {
+  const restored = buildRestoreCommandFromPayload({
+    type: 'reveal-sync',
+    version: '1.1.0',
+    action: 'ready',
+    payload: {
+      navigation: {
+        current: { h: 6, v: 2, f: 0 },
+      },
+    },
+  }) as {
+    version?: unknown
+    action?: unknown
+    payload?: { name?: unknown; payload?: { state?: unknown } }
+  }
+
+  assert.equal(restored.version, '1.1.0')
+  assert.equal(restored.action, 'command')
+  assert.equal(restored.payload?.name, 'setState')
+  assert.deepEqual(restored.payload?.payload?.state, {
+    indexh: 6,
+    indexv: 2,
+    indexf: 0,
   })
 })
 
