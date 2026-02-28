@@ -27,6 +27,7 @@ Before making changes, read these files when relevant:
 7. Use structured logging for all server-side events.
 8. Never expose, log, or commit secrets, API keys, or other sensitive information.
 9. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
+ 
 ## Preflight Checklist
 
 Before making code changes:
