@@ -224,6 +224,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-02-27
 - Area: activities
+- Discovery: SyncDeck manager no longer relays outbound `reveal-sync` `ready` envelopes to the sync server; only meaningful state-bearing updates should drive cross-instructor synchronization.
+- Why it matters: Initial iframe `ready` messages often report default indices before a pending restore is applied, and broadcasting them can make peer instructors jump backward by restoring from stale startup coordinates.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/shared/revealSyncRelayPolicy.ts`; `activities/syncdeck/client/shared/revealSyncRelayPolicy.test.ts`
+- Follow-up action: If a future multi-instructor feature genuinely needs `ready` propagation, add an explicit opt-in relay path instead of falling back to generic outbound state relay.
+- Owner: Codex
+
+- Date: 2026-02-27
+- Area: activities
 - Discovery: SyncDeck no longer exports unused `extractNavigationCapabilities()` helpers from the manager or student clients; dormant host-navigation parsing was removed because the shipped shells do not render overlay arrow controls that consume those values.
 - Why it matters: Keeps the SyncDeck client modules aligned with actual runtime behavior, removes duplicated parser code, and avoids implying a supported host-navigation API surface that is not part of the shipped UI.
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`

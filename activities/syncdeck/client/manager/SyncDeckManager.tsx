@@ -1,5 +1,6 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
+import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
@@ -1900,6 +1901,10 @@ const SyncDeckManager: FC = () => {
               payload: pausedStatePayload,
             }),
           )
+        }
+
+        if (!shouldRelayRevealSyncPayloadToSession(sanitizedPayload)) {
+          return
         }
 
         socket.send(
