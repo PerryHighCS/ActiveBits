@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-02-28
+- Area: activities
+- Discovery: The new `video-sync` activity uses a versioned websocket envelope (`version`, `activity`, `sessionId`, `type`, `timestamp`, `payload`) for all realtime traffic (`state-snapshot`, `state-update`, `heartbeat`, `telemetry-update`, `error`) so message parsing remains forward-compatible as payload shapes evolve.
+- Why it matters: Activity clients can validate a stable outer contract while adding new message types or payload fields without brittle string/shape checks tied to one message body format.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/protocol.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: Reuse this envelope shape for future realtime activities and consider extracting a shared typed helper in `types/` if multiple activities adopt the same protocol wrapper.
+- Owner: Codex
+
 - Date: 2026-03-16
 - Area: tooling
 - Discovery: Both devcontainer profiles should treat `.devcontainer/setup-dev.sh` as the single source of truth for npm bootstrapping, with each `postCreateCommand` delegating version enforcement to that script before running workspace installs.
