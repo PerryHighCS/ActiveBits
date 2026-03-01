@@ -403,11 +403,15 @@ export function resolveRecoveredPresentationUrl(
   userAgent?: string | null,
 ): string {
   const normalizedCurrent = currentValue.trim()
-  if (validatePresentationUrl(normalizedCurrent, hostProtocol, userAgent) || recoveredValue == null) {
+  const normalizedRecovered = recoveredValue?.trim() ?? ''
+  if (
+    validatePresentationUrl(normalizedCurrent, hostProtocol, userAgent)
+    || normalizedRecovered.length === 0
+  ) {
     return normalizedCurrent
   }
 
-  return recoveredValue
+  return normalizedRecovered
 }
 
 function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {

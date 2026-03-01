@@ -107,6 +107,14 @@ void test('resolveRecoveredPresentationUrl preserves incompatible recovered URLs
     'http://slides.example/deck',
   )
   assert.equal(
+    resolveRecoveredPresentationUrl('', '  http://slides.example/deck  ', 'https:'),
+    'http://slides.example/deck',
+  )
+  assert.equal(
+    resolveRecoveredPresentationUrl('', '   ', 'https:'),
+    '',
+  )
+  assert.equal(
     resolveRecoveredPresentationUrl('https://slides.example/current', 'http://slides.example/deck', 'https:'),
     'https://slides.example/current',
   )
