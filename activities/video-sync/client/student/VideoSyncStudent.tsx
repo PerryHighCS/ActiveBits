@@ -105,12 +105,26 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     }
   }, [isSoloMode])
 
-  const reportEvent = useCallback(async (eventType: 'autoplay-blocked' | 'unsync' | 'sync-correction', driftSec?: number, correctionResult?: 'success' | 'failed'): Promise<void> => {
+  const reportEvent = useCallback(async (
+    eventType: 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'load-failure',
+    options?: {
+      driftSec?: number
+      correctionResult?: 'success' | 'failed'
+      errorCode?: string
+      errorMessage?: string
+    },
+  ): Promise<void> => {
     if (!sessionId || isSoloMode) return
     await fetch(`/api/video-sync/${sessionId}/event`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: eventType, driftSec, correctionResult }),
+      body: JSON.stringify({
+        type: eventType,
+        driftSec: options?.driftSec,
+        correctionResult: options?.correctionResult,
+        errorCode: options?.errorCode,
+        errorMessage: options?.errorMessage,
+      }),
     })
   }, [sessionId, isSoloMode])
 
@@ -145,8 +159,8 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
         if (now - lastUnsyncReportAtRef.current >= 10_000) {
           lastUnsyncReportAtRef.current = now
-          void reportEvent('unsync', driftSec)
-          void reportEvent('sync-correction', driftSec, 'success')
+          void reportEvent('unsync', { driftSec })
+          void reportEvent('sync-correction', { driftSec, correctionResult: 'success' })
         }
       }
     }
@@ -224,7 +238,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           height: '100%',
           host: 'https://www.youtube-nocookie.com',
           playerVars: {
-            controls: 1,
+            controls: isSoloMode ? 1 : 0,
             rel: 0,
             modestbranding: 1,
           },
@@ -237,6 +251,13 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
             onError: () => {
               if (cancelled) return
               setErrorMessage('YouTube player failed to load for this video.')
+              if (!isSoloMode) {
+                void reportEvent('load-failure', {
+                  correctionResult: 'failed',
+                  errorCode: 'PLAYER_LOAD_FAILED',
+                  errorMessage: 'YouTube player failed to load in synchronized student view',
+                })
+              }
             },
           },
         })
@@ -406,12 +427,8 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         <section className="border rounded p-4 space-y-2" aria-labelledby="video-sync-student-status">
           <h2 id="video-sync-student-status" className="text-xl font-semibold">Synchronized student view</h2>
           <p className="text-sm text-gray-700">
-            Playback is instructor-controlled in synchronized mode. Use the report buttons if your local player is blocked or noticeably out of sync.
+            Playback is instructor-controlled in synchronized mode.
           </p>
-          <div className="flex gap-2">
-            <Button onClick={() => void reportEvent('autoplay-blocked')}>Report autoplay blocked</Button>
-            <Button onClick={() => void reportEvent('unsync', displayPosition - state.positionSec)}>Report out of sync</Button>
-          </div>
           {autoplayBlocked && (
             <div className="border border-amber-300 bg-amber-50 rounded p-3 text-sm">
               Browser blocked autoplay. Use click-to-start and follow the classroom display until playback starts.
@@ -426,7 +443,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       <section className="border rounded p-4" aria-labelledby="video-sync-player">
         <h2 id="video-sync-player" className="text-xl font-semibold mb-2">Player</h2>
         {state.videoId ? (
-          <div className="w-full aspect-video rounded border overflow-hidden">
+          <div className={`w-full rounded border overflow-hidden bg-black ${isSoloMode ? 'aspect-video' : 'h-[calc(100vh-13rem)] min-h-[420px]'}`}>
             <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync player" />
           </div>
         ) : (

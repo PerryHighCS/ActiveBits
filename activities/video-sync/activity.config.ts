@@ -11,6 +11,9 @@ const videoSyncConfig: ActivityConfig = {
     description: 'Practice with YouTube videos independently at your own pace',
     buttonText: 'Copy Video Sync Solo Link',
   },
+  manageLayout: {
+    expandShell: true,
+  },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }

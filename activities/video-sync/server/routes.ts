@@ -5,7 +5,7 @@ import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 
 type VideoSyncRole = 'manager' | 'student'
 type VideoSyncCommandType = 'play' | 'pause' | 'seek'
-type VideoSyncEventType = 'autoplay-blocked' | 'unsync' | 'sync-correction'
+type VideoSyncEventType = 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'load-failure'
 
 interface VideoSyncState {
   provider: 'youtube'
@@ -447,7 +447,7 @@ function isCommandType(value: unknown): value is VideoSyncCommandType {
 }
 
 function isEventType(value: unknown): value is VideoSyncEventType {
-  return value === 'autoplay-blocked' || value === 'unsync' || value === 'sync-correction'
+  return value === 'autoplay-blocked' || value === 'unsync' || value === 'sync-correction' || value === 'load-failure'
 }
 
 export default function setupVideoSyncRoutes(
@@ -605,17 +605,25 @@ export default function setupVideoSyncRoutes(
     const currentPosition = computeCurrentPositionSec(data.state, now)
 
     if (body.type === 'play') {
+      const requested = typeof body.positionSec === 'number' && Number.isFinite(body.positionSec)
+        ? clampSeconds(body.positionSec)
+        : currentPosition
+      const clamped = data.state.stopSec != null ? Math.min(requested, data.state.stopSec) : requested
       data.state = {
         ...data.state,
-        positionSec: currentPosition,
+        positionSec: clamped,
         isPlaying: true,
         updatedBy: 'manager',
         serverTimestampMs: now,
       }
     } else if (body.type === 'pause') {
+      const requested = typeof body.positionSec === 'number' && Number.isFinite(body.positionSec)
+        ? clampSeconds(body.positionSec)
+        : currentPosition
+      const clamped = data.state.stopSec != null ? Math.min(requested, data.state.stopSec) : requested
       data.state = {
         ...data.state,
-        positionSec: currentPosition,
+        positionSec: clamped,
         isPlaying: false,
         updatedBy: 'manager',
         serverTimestampMs: now,
@@ -663,7 +671,7 @@ export default function setupVideoSyncRoutes(
 
     const body = isPlainObject(req.body) ? (req.body as EventBody) : {}
     if (!isEventType(body.type)) {
-      res.status(400).json({ error: 'INVALID_EVENT', message: 'type must be autoplay-blocked, unsync, or sync-correction' })
+      res.status(400).json({ error: 'INVALID_EVENT', message: 'type must be autoplay-blocked, unsync, sync-correction, or load-failure' })
       return
     }
 
@@ -684,6 +692,10 @@ export default function setupVideoSyncRoutes(
       const correction = body.correctionResult
       data.telemetry.sync.lastCorrectionResult =
         correction === 'success' || correction === 'failed' ? correction : 'attempted'
+    }
+
+    if (body.type === 'load-failure') {
+      data.telemetry.sync.lastCorrectionResult = 'failed'
     }
 
     if (typeof body.errorCode === 'string' || typeof body.errorMessage === 'string') {

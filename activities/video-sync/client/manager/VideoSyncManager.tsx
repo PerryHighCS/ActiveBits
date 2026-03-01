@@ -32,6 +32,13 @@ interface ConfigResponse {
   }
 }
 
+interface CommandResponse {
+  data?: {
+    state?: VideoSyncState
+    telemetry?: VideoSyncTelemetry
+  }
+}
+
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   connections: { activeCount: 0 },
   autoplay: { blockedCount: 0 },
@@ -63,7 +70,7 @@ export default function VideoSyncManager() {
   const [telemetry, setTelemetry] = useState<VideoSyncTelemetry>(EMPTY_TELEMETRY)
   const [sourceUrlInput, setSourceUrlInput] = useState('')
   const [stopSecInput, setStopSecInput] = useState('')
-  const [seekSecInput, setSeekSecInput] = useState('0')
+  const [setupMode, setSetupMode] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [playerReady, setPlayerReady] = useState(false)
 
@@ -71,12 +78,82 @@ export default function VideoSyncManager() {
   const playerRef = useRef<YoutubePlayerLike | null>(null)
   const youtubeRef = useRef<YoutubeNamespace | null>(null)
   const loadedVideoIdRef = useRef<string | null>(null)
+  const latestStateRef = useRef<VideoSyncState>(DEFAULT_STATE)
+  const suppressPlayerEventsRef = useRef(false)
+  const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    latestStateRef.current = state
+  }, [state])
+
+  const setSuppressPlayerEventsForWindow = useCallback((ms = 450): void => {
+    suppressPlayerEventsRef.current = true
+    if (suppressPlayerEventsTimeoutRef.current != null) {
+      window.clearTimeout(suppressPlayerEventsTimeoutRef.current)
+    }
+
+    suppressPlayerEventsTimeoutRef.current = window.setTimeout(() => {
+      suppressPlayerEventsRef.current = false
+      suppressPlayerEventsTimeoutRef.current = null
+    }, ms)
+  }, [])
+
+  const clearPlayerEventSuppression = useCallback(() => {
+    suppressPlayerEventsRef.current = false
+    if (suppressPlayerEventsTimeoutRef.current != null) {
+      window.clearTimeout(suppressPlayerEventsTimeoutRef.current)
+      suppressPlayerEventsTimeoutRef.current = null
+    }
+  }, [])
+
+  const sendCommand = useCallback(async (
+    command: 'play' | 'pause' | 'seek',
+    options?: { positionSec?: number; reportErrors?: boolean },
+  ): Promise<void> => {
+    if (!sessionId) return
+
+    const payload: Record<string, unknown> = { type: command }
+    if (typeof options?.positionSec === 'number' && Number.isFinite(options.positionSec)) {
+      payload.positionSec = clampNumber(options.positionSec)
+    }
+
+    try {
+      const response = await fetch(`/api/video-sync/${sessionId}/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        const failure = (await response.json()) as { message?: string }
+        throw new Error(failure.message ?? 'Failed to send command')
+      }
+
+      const updated = (await response.json()) as CommandResponse
+      if (updated.data?.state) {
+        setState(updated.data.state)
+      }
+      if (updated.data?.telemetry) {
+        setTelemetry(updated.data.telemetry)
+      }
+      setErrorMessage(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send command'
+      if (options?.reportErrors === false) {
+        console.error('Video sync command failed:', message)
+      } else {
+        setErrorMessage(message)
+      }
+    }
+  }, [sessionId])
 
   const applyStateToPlayer = useCallback((nextState: VideoSyncState) => {
     const player = playerRef.current
     if (!player || !nextState.videoId) {
       return
     }
+
+    setSuppressPlayerEventsForWindow()
 
     const desiredPositionSec = computeDesiredPositionSec(nextState)
 
@@ -104,7 +181,7 @@ export default function VideoSyncManager() {
     } else {
       player.pauseVideo()
     }
-  }, [])
+  }, [setSuppressPlayerEventsForWindow])
 
   const fetchSession = useCallback(async () => {
     if (!sessionId) return
@@ -118,6 +195,7 @@ export default function VideoSyncManager() {
       const data = (await response.json()) as SessionResponse
       if (data.data?.state) {
         setState(data.data.state)
+        setSetupMode(data.data.state.videoId.length === 0)
       }
       if (data.data?.telemetry) {
         setTelemetry(data.data.telemetry)
@@ -164,7 +242,16 @@ export default function VideoSyncManager() {
   }, [])
 
   useEffect(() => {
-    if (!playerContainerRef.current) {
+    if (setupMode) {
+      setPlayerReady(false)
+      loadedVideoIdRef.current = null
+      playerRef.current?.destroy()
+      playerRef.current = null
+      clearPlayerEventSuppression()
+      return
+    }
+
+    if (!playerContainerRef.current || playerRef.current) {
       return
     }
 
@@ -189,7 +276,22 @@ export default function VideoSyncManager() {
             onReady: () => {
               if (cancelled) return
               setPlayerReady(true)
-              applyStateToPlayer(state)
+              applyStateToPlayer(latestStateRef.current)
+            },
+            onStateChange: (event) => {
+              if (cancelled || suppressPlayerEventsRef.current) {
+                return
+              }
+
+              const target = event.target
+              const playerPosition = clampNumber(target.getCurrentTime())
+              const states = resolveYoutubePlayerState(youtubeRef.current)
+
+              if (event.data === states.PLAYING) {
+                void sendCommand('play', { positionSec: playerPosition, reportErrors: false })
+              } else if (event.data === states.PAUSED) {
+                void sendCommand('pause', { positionSec: playerPosition, reportErrors: false })
+              }
             },
             onError: () => {
               if (cancelled) return
@@ -214,8 +316,9 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = null
       playerRef.current?.destroy()
       playerRef.current = null
+      clearPlayerEventSuppression()
     }
-  }, [applyStateToPlayer, state.videoId])
+  }, [applyStateToPlayer, clearPlayerEventSuppression, sendCommand, setupMode])
 
   useEffect(() => {
     setStopSecInput(state.stopSec == null ? '' : String(state.stopSec))
@@ -268,6 +371,7 @@ export default function VideoSyncManager() {
       const updated = (await response.json()) as ConfigResponse
       if (updated.data?.state) {
         setState(updated.data.state)
+        setSetupMode(updated.data.state.videoId.length === 0)
       }
       if (updated.data?.telemetry) {
         setTelemetry(updated.data.telemetry)
@@ -279,35 +383,17 @@ export default function VideoSyncManager() {
     }
   }
 
-  const sendCommand = async (command: 'play' | 'pause' | 'seek'): Promise<void> => {
-    if (!sessionId) return
-
-    const payload: Record<string, unknown> = { type: command }
-    if (command === 'seek') {
-      payload.positionSec = clampNumber(Number(seekSecInput))
-    }
-
-    try {
-      const response = await fetch(`/api/video-sync/${sessionId}/command`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!response.ok) {
-        const failure = (await response.json()) as { message?: string }
-        throw new Error(failure.message ?? 'Failed to send command')
-      }
-      setErrorMessage(null)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to send command'
-      setErrorMessage(message)
-    }
-  }
-
   const handleEndSession = async (): Promise<void> => {
     if (!sessionId) return
     await fetch(`/api/session/${sessionId}`, { method: 'DELETE' })
     void navigate('/manage')
+  }
+
+  const openSetupMode = (): void => {
+    setSetupMode(true)
+    if (state.videoId.length > 0) {
+      setSourceUrlInput(`https://www.youtube.com/watch?v=${state.videoId}&start=${Math.floor(state.startSec)}`)
+    }
   }
 
   const displayPosition = useMemo(() => computeDesiredPositionSec(state), [state])
@@ -327,7 +413,9 @@ export default function VideoSyncManager() {
       )}
 
       <section className="border rounded p-4 space-y-3" aria-labelledby="video-sync-config-heading">
-        <h2 id="video-sync-config-heading" className="text-xl font-semibold">Video configuration</h2>
+        <h2 id="video-sync-config-heading" className="text-xl font-semibold">
+          {setupMode ? 'Step 1: Configure video source' : 'Video source'}
+        </h2>
         <label className="block">
           <span className="block mb-1 font-medium">YouTube URL</span>
           <input
@@ -353,63 +441,47 @@ export default function VideoSyncManager() {
           />
         </label>
 
-        <Button onClick={() => void saveConfig()}>Save video settings</Button>
-      </section>
-
-      <section className="border rounded p-4 space-y-3" aria-labelledby="video-sync-controls-heading">
-        <h2 id="video-sync-controls-heading" className="text-xl font-semibold">Playback controls</h2>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => void sendCommand('play')}>Play</Button>
-          <Button onClick={() => void sendCommand('pause')}>Pause</Button>
-        </div>
-
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="block max-w-xs">
-            <span className="block mb-1 font-medium">Seek to (seconds)</span>
-            <input
-              className="border rounded p-2 w-full"
-              type="number"
-              min={0}
-              step="0.1"
-              value={seekSecInput}
-              onChange={(event) => setSeekSecInput(event.target.value)}
-              aria-label="Seek time in seconds"
-            />
-          </label>
-          <Button onClick={() => void sendCommand('seek')}>Seek</Button>
-        </div>
-
-        <div className="text-sm text-gray-700" aria-live="polite">
-          <div>Video ID: {state.videoId || 'Not configured'}</div>
-          <div>Playing: {state.isPlaying ? 'Yes' : 'No'}</div>
-          <div>Current position: {displayPosition.toFixed(2)}s</div>
-          <div>Start: {state.startSec.toFixed(2)}s</div>
-          <div>Stop: {state.stopSec != null ? `${state.stopSec.toFixed(2)}s` : 'Not set'}</div>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => void saveConfig()}>
+            {setupMode ? 'Start instructor view' : 'Save video settings'}
+          </Button>
+          {!setupMode && (
+            <Button onClick={openSetupMode}>Change video</Button>
+          )}
         </div>
       </section>
 
-      <section className="border rounded p-4 space-y-2" aria-labelledby="video-sync-telemetry-heading">
-        <h2 id="video-sync-telemetry-heading" className="text-xl font-semibold">Sync telemetry</h2>
-        <div className="text-sm">
-          <div>Active connections: {telemetry.connections.activeCount}</div>
-          <div>Autoplay blocked: {telemetry.autoplay.blockedCount}</div>
-          <div>Unsync events: {telemetry.sync.unsyncEvents}</div>
-          <div>Last drift: {telemetry.sync.lastDriftSec != null ? `${telemetry.sync.lastDriftSec.toFixed(2)}s` : 'n/a'}</div>
-          <div>Last correction: {telemetry.sync.lastCorrectionResult}</div>
-          <div>Last error: {telemetry.error.code ? `${telemetry.error.code}: ${telemetry.error.message ?? ''}` : 'none'}</div>
-        </div>
-      </section>
+      {!setupMode && (
+        <>
+          <section className="border rounded p-4" aria-labelledby="video-sync-preview-heading">
+            <h2 id="video-sync-preview-heading" className="text-xl font-semibold mb-2">Instructor video view</h2>
+            {state.videoId ? (
+              <div className="w-full h-[calc(100vh-18rem)] min-h-[420px] rounded border overflow-hidden bg-black">
+                <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync manager preview" />
+              </div>
+            ) : (
+              <p className="text-sm text-gray-700">Configure a YouTube URL to preview the synchronized video.</p>
+            )}
+            <p className="text-sm text-gray-700 mt-2" aria-live="polite">
+              Use the built-in video controls for play/pause/seek. Student views follow automatically.
+            </p>
+          </section>
 
-      <section className="border rounded p-4" aria-labelledby="video-sync-preview-heading">
-        <h2 id="video-sync-preview-heading" className="text-xl font-semibold mb-2">Video preview</h2>
-        {state.videoId ? (
-          <div className="w-full aspect-video rounded border overflow-hidden">
-            <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync manager preview" />
-          </div>
-        ) : (
-          <p className="text-sm text-gray-700">Configure a YouTube URL to preview the synchronized video.</p>
-        )}
-      </section>
+          <section className="border rounded p-4 space-y-2" aria-labelledby="video-sync-status-heading">
+            <h2 id="video-sync-status-heading" className="text-xl font-semibold">Session status</h2>
+            <div className="text-sm text-gray-700">
+              <div>Video ID: {state.videoId || 'Not configured'}</div>
+              <div>Playing: {state.isPlaying ? 'Yes' : 'No'}</div>
+              <div>Current position: {displayPosition.toFixed(2)}s</div>
+              <div>Start: {state.startSec.toFixed(2)}s</div>
+              <div>Stop: {state.stopSec != null ? `${state.stopSec.toFixed(2)}s` : 'Not set'}</div>
+              <div>Active connections: {telemetry.connections.activeCount}</div>
+              <div>Autoplay blocked: {telemetry.autoplay.blockedCount}</div>
+              <div>Unsync events: {telemetry.sync.unsyncEvents}</div>
+            </div>
+          </section>
+        </>
+      )}
     </div>
   )
 }
