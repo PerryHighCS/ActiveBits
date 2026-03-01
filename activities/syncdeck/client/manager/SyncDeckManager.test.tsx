@@ -78,6 +78,14 @@ void test('validatePresentationUrl rejects empty and whitespace-only values', ()
   assert.equal(validatePresentationUrl('https://slides.example/deck'), true)
   assert.equal(validatePresentationUrl('http://slides.example/deck', 'https:'), false)
   assert.equal(validatePresentationUrl('http://127.0.0.1:5500/deck', 'https:'), true)
+  assert.equal(
+    validatePresentationUrl(
+      'http://127.0.0.1:5500/deck',
+      'https:',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+    ),
+    false,
+  )
 })
 
 void test('shouldReopenConfigurePanel only reopens from the closed invalid state', () => {

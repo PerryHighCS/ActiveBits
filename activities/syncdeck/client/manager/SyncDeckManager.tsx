@@ -1,6 +1,8 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
-import { getPresentationUrlValidationError } from '../shared/presentationUrlCompatibility.js'
+import {
+  getStudentPresentationCompatibilityError,
+} from '../shared/presentationUrlCompatibility.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -374,8 +376,12 @@ function buildSyncDeckChalkboardOpenKey(sessionId: string): string {
   return `${SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX}${sessionId}`
 }
 
-export function validatePresentationUrl(value: string, hostProtocol?: string | null): boolean {
-  return value.trim().length > 0 && getPresentationUrlValidationError(value, hostProtocol) == null
+export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
+  return value.trim().length > 0 && getStudentPresentationCompatibilityError({
+    value,
+    hostProtocol,
+    userAgent,
+  }) == null
 }
 
 export function shouldReopenConfigurePanel(isConfigurePanelOpen: boolean, presentationUrlError: string | null): boolean {
@@ -1025,17 +1031,19 @@ const SyncDeckManager: FC = () => {
   const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
   const urlHash = queryUrlHash ?? persistentUrlHashFallback
   const hostProtocol = typeof window !== 'undefined' ? window.location.protocol : null
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : null
   const presentationUrlError = useMemo(() => {
     const normalizedUrl = presentationUrl.trim()
     if (normalizedUrl.length === 0) {
       return 'Presentation URL is required'
     }
 
-    return getPresentationUrlValidationError(
-      normalizedUrl,
+    return getStudentPresentationCompatibilityError({
+      value: normalizedUrl,
       hostProtocol,
-    )
-  }, [hostProtocol, presentationUrl])
+      userAgent,
+    })
+  }, [hostProtocol, presentationUrl, userAgent])
 
   useEffect(() => {
     if (shouldReopenConfigurePanel(isConfigurePanelOpen, presentationUrlError)) {
@@ -1217,7 +1225,7 @@ const SyncDeckManager: FC = () => {
 
         const payload = (await response.json()) as SessionResponsePayload
         const existingPresentationUrl = payload.session?.data?.presentationUrl
-        if (typeof existingPresentationUrl !== 'string' || !validatePresentationUrl(existingPresentationUrl, hostProtocol)) {
+        if (typeof existingPresentationUrl !== 'string' || !validatePresentationUrl(existingPresentationUrl, hostProtocol, userAgent)) {
           return
         }
 
@@ -1237,7 +1245,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId])
+  }, [hostProtocol, sessionId, userAgent])
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -1300,7 +1308,7 @@ const SyncDeckManager: FC = () => {
         if (!isCancelled) {
           const persistentPresentationUrl =
             typeof payload.persistentPresentationUrl === 'string'
-            && validatePresentationUrl(payload.persistentPresentationUrl, hostProtocol)
+            && validatePresentationUrl(payload.persistentPresentationUrl, hostProtocol, userAgent)
               ? payload.persistentPresentationUrl
               : null
           const persistentUrlHash =
@@ -1311,7 +1319,7 @@ const SyncDeckManager: FC = () => {
           if (persistentPresentationUrl) {
             setPresentationUrl((current) => {
               const normalizedCurrent = current.trim()
-              const shouldKeepCurrent = validatePresentationUrl(normalizedCurrent, hostProtocol)
+              const shouldKeepCurrent = validatePresentationUrl(normalizedCurrent, hostProtocol, userAgent)
               const nextPresentationUrl = shouldKeepCurrent ? normalizedCurrent : persistentPresentationUrl
               return nextPresentationUrl
             })
@@ -1338,7 +1346,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId, queryUrlHash])
+  }, [hostProtocol, sessionId, queryUrlHash, userAgent])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
@@ -1569,10 +1577,11 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    const validationError = getPresentationUrlValidationError(
-      normalizedUrl,
-      typeof window !== 'undefined' ? window.location.protocol : null,
-    )
+    const validationError = getStudentPresentationCompatibilityError({
+      value: normalizedUrl,
+      hostProtocol,
+      userAgent,
+    })
     if (validationError != null) {
       setStartError(validationError)
       setStartSuccess(null)
@@ -1669,6 +1678,8 @@ const SyncDeckManager: FC = () => {
   }, [
     sessionId,
     presentationUrl,
+    hostProtocol,
+    userAgent,
     isPasscodeReady,
     instructorPasscode,
     urlHash,
@@ -1688,7 +1699,7 @@ const SyncDeckManager: FC = () => {
     }
 
     const normalizedUrl = presentationUrl.trim()
-    if (!validatePresentationUrl(normalizedUrl, hostProtocol)) {
+    if (!validatePresentationUrl(normalizedUrl, hostProtocol, userAgent)) {
       return
     }
 
@@ -1704,6 +1715,7 @@ const SyncDeckManager: FC = () => {
     isConfigurePanelOpen,
     presentationUrl,
     hostProtocol,
+    userAgent,
     isPasscodeReady,
     instructorPasscode,
     isStartingSession,
@@ -2188,7 +2200,7 @@ const SyncDeckManager: FC = () => {
               </div>
             )}
 
-            {!isConfigurePanelOpen && !presentationUrlError && validatePresentationUrl(presentationUrl, hostProtocol) && (
+            {!isConfigurePanelOpen && !presentationUrlError && validatePresentationUrl(presentationUrl, hostProtocol, userAgent) && (
               <div className="w-full h-full min-h-0 bg-white overflow-hidden">
                 <iframe
                   ref={presentationIframeRef}

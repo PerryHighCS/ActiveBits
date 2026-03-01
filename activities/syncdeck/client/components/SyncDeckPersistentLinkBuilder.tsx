@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import Button from '@src/components/ui/Button'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
-import { getPresentationUrlValidationError } from '../shared/presentationUrlCompatibility.js'
+import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 
 interface PersistentLinkCreateResponse {
   error?: string
@@ -33,10 +33,11 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, onCreated }:
   const presentationUrlError =
     normalizedPresentationUrl.length === 0
       ? 'Presentation URL is required'
-      : getPresentationUrlValidationError(
-        normalizedPresentationUrl,
-        typeof window !== 'undefined' ? window.location.protocol : null,
-      )
+      : getStudentPresentationCompatibilityError({
+        value: normalizedPresentationUrl,
+        hostProtocol: typeof window !== 'undefined' ? window.location.protocol : null,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      })
   const canSubmit = normalizedTeacherCode.length >= MIN_TEACHER_CODE_LENGTH && !presentationUrlError
 
   const showGenerateAnyway =
