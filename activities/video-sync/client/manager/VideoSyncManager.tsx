@@ -16,6 +16,7 @@ import {
   type YoutubeNamespace,
   type YoutubePlayerLike,
 } from '../youtubeIframeApi'
+import { parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
 
 interface SessionResponse {
   id?: string
@@ -72,6 +73,7 @@ export default function VideoSyncManager() {
   const [telemetry, setTelemetry] = useState<VideoSyncTelemetry>(EMPTY_TELEMETRY)
   const [sourceUrlInput, setSourceUrlInput] = useState('')
   const [stopSecInput, setStopSecInput] = useState('')
+  const [hasStopTime, setHasStopTime] = useState(false)
   const [setupMode, setSetupMode] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [playerReady, setPlayerReady] = useState(false)
@@ -324,6 +326,7 @@ export default function VideoSyncManager() {
 
   useEffect(() => {
     setStopSecInput(state.stopSec == null ? '' : String(state.stopSec))
+    setHasStopTime(state.stopSec != null)
   }, [state.stopSec])
 
   useEffect(() => {
@@ -354,7 +357,16 @@ export default function VideoSyncManager() {
   const saveConfig = async (): Promise<void> => {
     if (!sessionId) return
 
-    const stopSecValue = stopSecInput.trim().length === 0 ? null : Number(stopSecInput)
+    let stopSecValue: number | null = null
+    if (hasStopTime) {
+      const parsedStopSec = parseYouTubeTimestampSeconds(stopSecInput)
+      if (parsedStopSec == null) {
+        setErrorMessage('End time must be a valid number of seconds or h/m/s value like 1m23s.')
+        return
+      }
+      stopSecValue = parsedStopSec
+    }
+
     try {
       const response = await fetch(`/api/video-sync/${sessionId}/session`, {
         method: 'PATCH',
@@ -391,13 +403,6 @@ export default function VideoSyncManager() {
     void navigate('/manage')
   }
 
-  const openSetupMode = (): void => {
-    setSetupMode(true)
-    if (state.videoId.length > 0) {
-      setSourceUrlInput(`https://www.youtube.com/watch?v=${state.videoId}&start=${Math.floor(state.startSec)}`)
-    }
-  }
-
   const displayPosition = useMemo(() => computeDesiredPositionSec(state), [state])
 
   if (setupMode) {
@@ -424,23 +429,41 @@ export default function VideoSyncManager() {
               type="url"
               value={sourceUrlInput}
               onChange={(event) => setSourceUrlInput(event.target.value)}
-              placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
+              placeholder="https://www.youtube.com/watch?v=...&t=1m23s or https://youtu.be/..."
               aria-label="YouTube URL"
             />
+            <span className="mt-1 block text-sm text-gray-600">
+              Shared URLs can include `t`, `start`, and `end` timestamps like `1m23s`.
+            </span>
           </label>
 
-          <label className="block max-w-xs">
-            <span className="block mb-1 font-medium">Advisory stop time (seconds)</span>
+          <label className="flex items-center gap-2">
             <input
-              className="border rounded p-2 w-full"
-              type="number"
-              min={0}
-              step="0.1"
-              value={stopSecInput}
-              onChange={(event) => setStopSecInput(event.target.value)}
-              aria-label="Stop time in seconds"
+              type="checkbox"
+              checked={hasStopTime}
+              onChange={(event) => setHasStopTime(event.target.checked)}
+              aria-controls="video-sync-stop-time"
+              aria-expanded={hasStopTime}
             />
+            <span className="font-medium">Set advisory end time</span>
           </label>
+
+          {hasStopTime ? (
+            <label id="video-sync-stop-time" className="block max-w-xs">
+              <span className="block mb-1 font-medium">Advisory end time</span>
+              <input
+                className="border rounded p-2 w-full"
+                type="text"
+                value={stopSecInput}
+                onChange={(event) => setStopSecInput(event.target.value)}
+                placeholder="2m10s or 130"
+                aria-label="Advisory end time"
+              />
+              <span className="mt-1 block text-sm text-gray-600">
+                Accepts seconds or `h/m/s` format.
+              </span>
+            </label>
+          ) : null}
 
           <Button onClick={() => void saveConfig()}>Start instructor view</Button>
         </section>
@@ -457,7 +480,6 @@ export default function VideoSyncManager() {
             <span className="text-gray-300 truncate">Session: {sessionId ?? '—'}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button onClick={openSetupMode}>Change video</Button>
             <Button onClick={() => void handleEndSession()}>End session</Button>
           </div>
         </div>
