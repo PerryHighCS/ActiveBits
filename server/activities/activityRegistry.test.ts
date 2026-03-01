@@ -20,6 +20,7 @@ let testImportCounter = 0
 const EXPECTED_ACTIVITIES = [
   'algorithm-demo',
   'syncdeck',
+  'video-sync',
   'java-string-practice',
   'java-format-practice',
   'python-list-practice',

@@ -14,6 +14,30 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-01
+- Area: activities
+- Discovery: `video-sync` student view now keeps an opaque overlay above the embedded YouTube player until instructor playback has actually started (`state.isPlaying` or synced position advancing past `startSec`), which hides the initial YouTube spinner/loading state from students.
+- Why it matters: Students see a consistent classroom-ready waiting state instead of a distracting/ambiguous player spinner before the teacher presses play, while synchronized playback behavior remains unchanged once playback begins.
+- Evidence: `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/student/VideoSyncStudent.test.ts`
+- Follow-up action: If instructors need manual reveal controls independent of playback state, add an explicit session-level reveal flag in the video-sync protocol instead of inferring from position/play status.
+- Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: `video-sync` telemetry now treats unsync as per-student live state (`sync.unsyncedStudents`) instead of a cumulative incident counter; student clients send a stable `studentId` with `unsync` and `sync-correction` events, and the server keeps a per-session unsynced-student map with stale-entry pruning.
+- Why it matters: The instructor HUD can display “currently unsynced students” in real time, which is actionable during class playback, and stale tabs no longer keep the count inflated indefinitely.
+- Evidence: `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: If class sessions need stronger identity guarantees across reconnects, consider deriving/validating student identity from session auth rather than client-generated IDs.
+- Owner: Codex
+
+- Date: 2026-02-28
+- Area: activities
+- Discovery: The new `video-sync` activity uses a versioned websocket envelope (`version`, `activity`, `sessionId`, `type`, `timestamp`, `payload`) for all realtime traffic (`state-snapshot`, `state-update`, `heartbeat`, `telemetry-update`, `error`) so message parsing remains forward-compatible as payload shapes evolve.
+- Why it matters: Activity clients can validate a stable outer contract while adding new message types or payload fields without brittle string/shape checks tied to one message body format.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/protocol.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: Reuse this envelope shape for future realtime activities and consider extracting a shared typed helper in `types/` if multiple activities adopt the same protocol wrapper.
+- Owner: Codex
+
 - Date: 2026-02-27
 - Area: docs
 - Discovery: Repository instructions now explicitly require frontend controls to include appropriate accessibility semantics and state attributes, with examples such as `aria-pressed`, `aria-expanded`, accessible names for icon-only controls, and preference for native interactive elements.
