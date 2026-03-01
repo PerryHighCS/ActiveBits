@@ -377,8 +377,8 @@ export function validatePresentationUrl(value: string): boolean {
   return value.trim().length > 0 && getPresentationUrlValidationError(value, null) == null
 }
 
-export function shouldShowConfigurePanel(isConfigurePanelOpen: boolean, presentationUrlError: string | null): boolean {
-  return isConfigurePanelOpen || presentationUrlError != null
+export function shouldReopenConfigurePanel(isConfigurePanelOpen: boolean, presentationUrlError: string | null): boolean {
+  return presentationUrlError != null && !isConfigurePanelOpen
 }
 
 function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {
@@ -1034,10 +1034,15 @@ const SyncDeckManager: FC = () => {
       typeof window !== 'undefined' ? window.location.protocol : null,
     )
   }, [presentationUrl])
-  const isConfigurePanelVisible = shouldShowConfigurePanel(isConfigurePanelOpen, presentationUrlError)
+
+  useEffect(() => {
+    if (shouldReopenConfigurePanel(isConfigurePanelOpen, presentationUrlError)) {
+      setIsConfigurePanelOpen(true)
+    }
+  }, [presentationUrlError, isConfigurePanelOpen])
 
   const buildInstructorWsUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelVisible) {
+    if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelOpen) {
       return null
     }
 
@@ -1048,12 +1053,12 @@ const SyncDeckManager: FC = () => {
       instructorPasscode,
     })
     return `${protocol}//${window.location.host}/ws/syncdeck?${params.toString()}`
-  }, [sessionId, instructorPasscode, isConfigurePanelVisible])
+  }, [sessionId, instructorPasscode, isConfigurePanelOpen])
 
   const { connect: connectInstructorWs, disconnect: disconnectInstructorWs, socketRef: instructorSocketRef } =
     useResilientWebSocket({
       buildUrl: buildInstructorWsUrl,
-      shouldReconnect: Boolean(sessionId && instructorPasscode && !isConfigurePanelVisible),
+      shouldReconnect: Boolean(sessionId && instructorPasscode && !isConfigurePanelOpen),
       onOpen: () => {
         if (disconnectStatusTimeoutRef.current != null) {
           clearTimeout(disconnectStatusTimeoutRef.current)
@@ -1675,7 +1680,7 @@ const SyncDeckManager: FC = () => {
   }
 
   useEffect(() => {
-    if (hasAutoStarted || !sessionId || !isConfigurePanelVisible) {
+    if (hasAutoStarted || !sessionId || !isConfigurePanelOpen) {
       return
     }
 
@@ -1693,7 +1698,7 @@ const SyncDeckManager: FC = () => {
   }, [
     hasAutoStarted,
     sessionId,
-    isConfigurePanelVisible,
+    isConfigurePanelOpen,
     presentationUrl,
     isPasscodeReady,
     instructorPasscode,
@@ -1702,7 +1707,7 @@ const SyncDeckManager: FC = () => {
   ])
 
   useEffect(() => {
-    if (isConfigurePanelVisible || !sessionId || !instructorPasscode) {
+    if (isConfigurePanelOpen || !sessionId || !instructorPasscode) {
       if (disconnectStatusTimeoutRef.current != null) {
         clearTimeout(disconnectStatusTimeoutRef.current)
         disconnectStatusTimeoutRef.current = null
@@ -1717,7 +1722,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       disconnectInstructorWs()
     }
-  }, [isConfigurePanelVisible, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
+  }, [isConfigurePanelOpen, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
 
   useEffect(
     () => () => {
@@ -1729,7 +1734,7 @@ const SyncDeckManager: FC = () => {
   )
 
   useEffect(() => {
-    if (isConfigurePanelVisible) {
+    if (isConfigurePanelOpen) {
       return
     }
 
@@ -1980,7 +1985,7 @@ const SyncDeckManager: FC = () => {
     confirmStartForUrl === normalizedPresentationUrl
 
   return (
-    <div className={isConfigurePanelVisible ? 'min-h-screen flex flex-col' : 'h-screen flex flex-col overflow-hidden'}>
+    <div className={isConfigurePanelOpen ? 'min-h-screen flex flex-col' : 'h-screen flex flex-col overflow-hidden'}>
       <div className="sticky top-0 z-20 bg-white border-b border-gray-200 w-full">
         <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center min-w-0">
@@ -2009,7 +2014,7 @@ const SyncDeckManager: FC = () => {
               }`}
               title={isInstructorSyncEnabled ? 'Disable instructor sync' : 'Enable instructor sync'}
               aria-label={isInstructorSyncEnabled ? 'Disable instructor sync' : 'Enable instructor sync'}
-              disabled={isConfigurePanelVisible}
+              disabled={isConfigurePanelOpen}
             >
               🔗
             </button>
@@ -2019,7 +2024,7 @@ const SyncDeckManager: FC = () => {
               className="ml-2 px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Force sync students to current position"
               aria-label="Force sync students to current position"
-              disabled={isConfigurePanelVisible || instructorConnectionState !== 'connected' || !isInstructorSyncEnabled}
+              disabled={isConfigurePanelOpen || instructorConnectionState !== 'connected' || !isInstructorSyncEnabled}
             >
               📍
             </button>
@@ -2033,7 +2038,7 @@ const SyncDeckManager: FC = () => {
               }`}
               title={isPresentationPaused ? 'Resume presentation' : 'Pause presentation'}
               aria-label={isPresentationPaused ? 'Resume presentation' : 'Pause presentation'}
-              disabled={isConfigurePanelVisible}
+              disabled={isConfigurePanelOpen}
             >
               ⬛
             </button>
@@ -2047,7 +2052,7 @@ const SyncDeckManager: FC = () => {
               }`}
               title="Toggle chalkboard screen"
               aria-label="Toggle chalkboard screen"
-              disabled={isConfigurePanelVisible}
+              disabled={isConfigurePanelOpen}
             >
               🖍️
             </button>
@@ -2061,7 +2066,7 @@ const SyncDeckManager: FC = () => {
               }`}
               title="Toggle pen overlay"
               aria-label="Toggle pen overlay"
-              disabled={isConfigurePanelVisible}
+              disabled={isConfigurePanelOpen}
             >
               ✏️
             </button>
@@ -2111,8 +2116,8 @@ const SyncDeckManager: FC = () => {
 
       <div className="flex-1 min-h-0 flex">
         <div className="flex-1 min-w-0 min-h-0">
-          <div className={isConfigurePanelVisible ? 'p-6 max-w-4xl mx-auto space-y-3 w-full' : 'h-full min-h-0 w-full'}>
-            {isConfigurePanelVisible ? (
+          <div className={isConfigurePanelOpen ? 'p-6 max-w-4xl mx-auto space-y-3 w-full' : 'h-full min-h-0 w-full'}>
+            {isConfigurePanelOpen ? (
               <form onSubmit={handleStartSession} className="bg-white border border-gray-200 rounded p-4 space-y-3">
                 <h2 className="text-lg font-semibold text-gray-800">Configure Presentation</h2>
                 <label className="block text-sm text-gray-700">
@@ -2167,13 +2172,13 @@ const SyncDeckManager: FC = () => {
               </form>
               ) : null}
 
-            {!isConfigurePanelVisible && presentationUrlError && (
+            {!isConfigurePanelOpen && presentationUrlError && (
               <div className="p-6">
                 <p className="text-sm text-red-600">{presentationUrlError}</p>
               </div>
             )}
 
-            {!isConfigurePanelVisible && !presentationUrlError && validatePresentationUrl(presentationUrl) && (
+            {!isConfigurePanelOpen && !presentationUrlError && validatePresentationUrl(presentationUrl) && (
               <div className="w-full h-full min-h-0 bg-white overflow-hidden">
                 <iframe
                   ref={presentationIframeRef}
