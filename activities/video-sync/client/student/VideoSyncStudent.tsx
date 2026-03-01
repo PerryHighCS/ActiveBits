@@ -41,6 +41,18 @@ const DEFAULT_STATE: VideoSyncState = {
   serverTimestampMs: Date.now(),
 }
 
+export function hasInstructorPlaybackStarted(state: VideoSyncState): boolean {
+  if (!state.videoId) {
+    return false
+  }
+
+  if (state.isPlaying) {
+    return true
+  }
+
+  return state.positionSec > state.startSec
+}
+
 function clampNumber(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0
 }
@@ -92,6 +104,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [playerReady, setPlayerReady] = useState(false)
+  const [hasStartedInstructorPlayback, setHasStartedInstructorPlayback] = useState(false)
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -317,6 +330,22 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   }, [playerReady, state, isSoloMode, applyStateToPlayer])
 
   useEffect(() => {
+    if (isSoloMode) {
+      setHasStartedInstructorPlayback(false)
+      return
+    }
+
+    if (!state.videoId) {
+      setHasStartedInstructorPlayback(false)
+      return
+    }
+
+    if (hasInstructorPlaybackStarted(state)) {
+      setHasStartedInstructorPlayback(true)
+    }
+  }, [isSoloMode, state])
+
+  useEffect(() => {
     if (!sessionId || isSoloMode) return undefined
 
     const loadSession = async () => {
@@ -451,6 +480,17 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           onClick={handleStudentOverlayPointer}
           onKeyDown={handleStudentOverlayKeyDown}
         />
+
+        {state.videoId && !hasStartedInstructorPlayback && (
+          <div
+            className="absolute inset-0 z-15 flex items-center justify-center bg-black"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <p className="text-sm text-gray-300">Waiting for instructor to start the video.</p>
+          </div>
+        )}
 
         {errorMessage && (
           <div className="absolute top-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-105 border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
