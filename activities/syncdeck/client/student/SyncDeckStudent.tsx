@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
+import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 
 interface SessionResponsePayload {
   session?: {
@@ -700,6 +701,16 @@ const SyncDeckStudent: FC = () => {
       return null
     }
   }, [presentationUrl])
+  const presentationUrlError = useMemo(
+    () => (presentationUrl
+      ? getStudentPresentationCompatibilityError({
+        value: presentationUrl,
+        hostProtocol: typeof window !== 'undefined' ? window.location.protocol : null,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      })
+      : null),
+    [presentationUrl],
+  )
 
   const getIframeRuntimeOrigin = useCallback((): string | null => {
     try {
@@ -973,7 +984,7 @@ const SyncDeckStudent: FC = () => {
   const { connect: connectStudentWs, disconnect: disconnectStudentWs, socketRef: studentSocketRef } =
     useResilientWebSocket({
       buildUrl: buildStudentWsUrl,
-      shouldReconnect: Boolean(sessionId && presentationUrl),
+      shouldReconnect: Boolean(sessionId && presentationUrl && !presentationUrlError),
       onOpen: () => {
         setConnectionState('connected')
         setStatusMessage('Connected. Waiting for instructor sync…')
@@ -1081,7 +1092,7 @@ const SyncDeckStudent: FC = () => {
   }, [sessionId, isWaitingForConfiguration])
 
   useEffect(() => {
-    if (!sessionId || !presentationUrl || registeredStudentName.trim().length === 0) {
+    if (!sessionId || !presentationUrl || presentationUrlError || registeredStudentName.trim().length === 0) {
       disconnectStudentWs()
       return undefined
     }
@@ -1090,7 +1101,7 @@ const SyncDeckStudent: FC = () => {
     return () => {
       disconnectStudentWs()
     }
-  }, [sessionId, presentationUrl, registeredStudentName, registeredStudentId, connectStudentWs, disconnectStudentWs])
+  }, [sessionId, presentationUrl, presentationUrlError, registeredStudentName, registeredStudentId, connectStudentWs, disconnectStudentWs])
 
   const handleNameSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -1204,11 +1215,11 @@ const SyncDeckStudent: FC = () => {
     )
   }
 
-  if (error || !presentationUrl) {
+  if (error || presentationUrlError || !presentationUrl) {
     return (
       <div className="p-6 max-w-3xl mx-auto space-y-3">
         <h1 className="text-2xl font-bold">SyncDeck</h1>
-        <p className="text-sm text-gray-700">{error || 'Session unavailable.'}</p>
+        <p className="text-sm text-gray-700">{error || presentationUrlError || 'Session unavailable.'}</p>
       </div>
     )
   }

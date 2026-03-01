@@ -17,6 +17,10 @@ import { extractIndicesFromRevealPayload } from './SyncDeckManager.js'
 import { buildRestoreCommandFromPayload } from './SyncDeckManager.js'
 import { applyChalkboardSnapshotFallback } from './SyncDeckManager.js'
 import { evaluateRestoreSuppressionForOutboundState } from './SyncDeckManager.js'
+import { validatePresentationUrl } from './SyncDeckManager.js'
+import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
+import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
+import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -51,6 +55,10 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /Toggle pen overlay/i)
   assert.match(html, /Configure Presentation/i)
   assert.match(html, /Presentation URL/i)
+  assert.match(html, /Presentation URL is required/i)
+  assert.match(html, /aria-invalid="true"/i)
+  assert.match(html, /aria-describedby="syncdeck-presentation-url-error"/i)
+  assert.match(html, /id="syncdeck-presentation-url-error"/i)
   assert.match(html, /Start Session/i)
 })
 
@@ -64,6 +72,52 @@ void test('SyncDeckManager pre-fills presentation URL from query params', () => 
   )
 
   assert.match(html, /value="https:\/\/slides\.example\/deck"/i)
+})
+
+void test('validatePresentationUrl rejects empty and whitespace-only values', () => {
+  assert.equal(validatePresentationUrl(''), false)
+  assert.equal(validatePresentationUrl('   '), false)
+  assert.equal(validatePresentationUrl('https://slides.example/deck'), true)
+  assert.equal(validatePresentationUrl('http://slides.example/deck', 'https:'), false)
+  assert.equal(validatePresentationUrl('http://127.0.0.1:5500/deck', 'https:'), true)
+  assert.equal(
+    validatePresentationUrl(
+      'http://127.0.0.1:5500/deck',
+      'https:',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+    ),
+    false,
+  )
+})
+
+void test('shouldReopenConfigurePanel only reopens from the closed invalid state', () => {
+  assert.equal(shouldReopenConfigurePanel(false, 'Presentation URL must use https://'), true)
+  assert.equal(shouldReopenConfigurePanel(true, 'Presentation URL must use https://'), false)
+  assert.equal(shouldReopenConfigurePanel(false, null), false)
+})
+
+void test('shouldAutoActivatePresentationUrl rejects incompatible stored URLs without dropping them', () => {
+  assert.equal(shouldAutoActivatePresentationUrl('https://slides.example/deck', 'https:'), true)
+  assert.equal(shouldAutoActivatePresentationUrl('http://slides.example/deck', 'https:'), false)
+})
+
+void test('resolveRecoveredPresentationUrl preserves incompatible recovered URLs for editing', () => {
+  assert.equal(
+    resolveRecoveredPresentationUrl('', 'http://slides.example/deck', 'https:'),
+    'http://slides.example/deck',
+  )
+  assert.equal(
+    resolveRecoveredPresentationUrl('', '  http://slides.example/deck  ', 'https:'),
+    'http://slides.example/deck',
+  )
+  assert.equal(
+    resolveRecoveredPresentationUrl('', '   ', 'https:'),
+    '',
+  )
+  assert.equal(
+    resolveRecoveredPresentationUrl('https://slides.example/current', 'http://slides.example/deck', 'https:'),
+    'https://slides.example/current',
+  )
 })
 
 void test('buildInstructorRoleCommandMessage emits setRole instructor command', () => {

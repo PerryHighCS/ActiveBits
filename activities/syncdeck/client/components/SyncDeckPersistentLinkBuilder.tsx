@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import Button from '@src/components/ui/Button'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
+import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 
 interface PersistentLinkCreateResponse {
   error?: string
@@ -10,15 +11,6 @@ interface PersistentLinkCreateResponse {
 }
 
 const MIN_TEACHER_CODE_LENGTH = 6
-
-function isValidHttpUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value)
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
-  } catch {
-    return false
-  }
-}
 
 function getWindowOrigin(): string {
   return typeof window !== 'undefined' ? window.location.origin : ''
@@ -41,9 +33,11 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, onCreated }:
   const presentationUrlError =
     normalizedPresentationUrl.length === 0
       ? 'Presentation URL is required'
-      : isValidHttpUrl(normalizedPresentationUrl)
-        ? null
-        : 'Presentation URL must be a valid http(s) URL'
+      : getStudentPresentationCompatibilityError({
+        value: normalizedPresentationUrl,
+        hostProtocol: typeof window !== 'undefined' ? window.location.protocol : null,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      })
   const canSubmit = normalizedTeacherCode.length >= MIN_TEACHER_CODE_LENGTH && !presentationUrlError
 
   const showGenerateAnyway =
@@ -230,4 +224,3 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, onCreated }:
     </form>
   )
 }
-
