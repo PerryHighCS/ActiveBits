@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
+import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 
 interface SessionResponsePayload {
   session?: {
@@ -53,7 +54,7 @@ interface RevealStateIndicesPayload {
 
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
-const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
+const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
   if (a.h !== b.h) return a.h - b.h
@@ -65,8 +66,38 @@ function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: 
   return {
     h: indices.h,
     v: indices.v,
-    f: SLIDE_END_FRAGMENT_INDEX,
+    f: CANONICAL_BOUNDARY_FRAGMENT_INDEX,
   }
+}
+
+function isWithinReleasedVerticalStack(
+  indices: { h: number; v: number; f: number },
+  boundary: { h: number; v: number; f: number },
+): boolean {
+  return indices.h === boundary.h && indices.v > boundary.v
+}
+
+function hasExceededReleasedBoundary(
+  indices: { h: number; v: number; f: number },
+  boundary: { h: number; v: number; f: number },
+): boolean {
+  if (isWithinReleasedVerticalStack(indices, boundary)) {
+    return false
+  }
+
+  if (indices.h !== boundary.h) {
+    return indices.h > boundary.h
+  }
+
+  if (indices.v !== boundary.v) {
+    return indices.v > boundary.v
+  }
+
+  if (boundary.f === CANONICAL_BOUNDARY_FRAGMENT_INDEX) {
+    return false
+  }
+
+  return indices.f > boundary.f
 }
 
 function resolveEffectiveBoundary(
@@ -80,7 +111,7 @@ function resolveEffectiveBoundary(
     return instructorIndices
   }
 
-  return compareIndices(instructorIndices, setBoundary) >= 0 ? instructorIndices : setBoundary
+  return hasExceededReleasedBoundary(instructorIndices, setBoundary) ? instructorIndices : setBoundary
 }
 
 interface RevealCommandMessage {
@@ -197,7 +228,7 @@ function shouldSnapBackToBoundary(
     return true
   }
 
-  return compareIndices(studentIndices, boundary) > 0
+  return hasExceededReleasedBoundary(studentIndices, boundary)
 }
 
 function buildSetStudentBoundaryCommand(
@@ -700,6 +731,16 @@ const SyncDeckStudent: FC = () => {
       return null
     }
   }, [presentationUrl])
+  const presentationUrlError = useMemo(
+    () => (presentationUrl
+      ? getStudentPresentationCompatibilityError({
+        value: presentationUrl,
+        hostProtocol: typeof window !== 'undefined' ? window.location.protocol : null,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      })
+      : null),
+    [presentationUrl],
+  )
 
   const getIframeRuntimeOrigin = useCallback((): string | null => {
     try {
@@ -973,7 +1014,7 @@ const SyncDeckStudent: FC = () => {
   const { connect: connectStudentWs, disconnect: disconnectStudentWs, socketRef: studentSocketRef } =
     useResilientWebSocket({
       buildUrl: buildStudentWsUrl,
-      shouldReconnect: Boolean(sessionId && presentationUrl),
+      shouldReconnect: Boolean(sessionId && presentationUrl && !presentationUrlError),
       onOpen: () => {
         setConnectionState('connected')
         setStatusMessage('Connected. Waiting for instructor sync…')
@@ -1081,7 +1122,7 @@ const SyncDeckStudent: FC = () => {
   }, [sessionId, isWaitingForConfiguration])
 
   useEffect(() => {
-    if (!sessionId || !presentationUrl || registeredStudentName.trim().length === 0) {
+    if (!sessionId || !presentationUrl || presentationUrlError || registeredStudentName.trim().length === 0) {
       disconnectStudentWs()
       return undefined
     }
@@ -1090,7 +1131,7 @@ const SyncDeckStudent: FC = () => {
     return () => {
       disconnectStudentWs()
     }
-  }, [sessionId, presentationUrl, registeredStudentName, registeredStudentId, connectStudentWs, disconnectStudentWs])
+  }, [sessionId, presentationUrl, presentationUrlError, registeredStudentName, registeredStudentId, connectStudentWs, disconnectStudentWs])
 
   const handleNameSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -1204,11 +1245,11 @@ const SyncDeckStudent: FC = () => {
     )
   }
 
-  if (error || !presentationUrl) {
+  if (error || presentationUrlError || !presentationUrl) {
     return (
       <div className="p-6 max-w-3xl mx-auto space-y-3">
         <h1 className="text-2xl font-bold">SyncDeck</h1>
-        <p className="text-sm text-gray-700">{error || 'Session unavailable.'}</p>
+        <p className="text-sm text-gray-700">{error || presentationUrlError || 'Session unavailable.'}</p>
       </div>
     )
   }

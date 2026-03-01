@@ -1,5 +1,8 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
+import {
+  getStudentPresentationCompatibilityError,
+} from '../shared/presentationUrlCompatibility.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -9,8 +12,9 @@ const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
 const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
-const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
+const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
+const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
 
 interface SessionResponsePayload {
   session?: {
@@ -372,13 +376,42 @@ function buildSyncDeckChalkboardOpenKey(sessionId: string): string {
   return `${SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX}${sessionId}`
 }
 
-function validatePresentationUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value)
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
-  } catch {
-    return false
+export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
+  return value.trim().length > 0 && getStudentPresentationCompatibilityError({
+    value,
+    hostProtocol,
+    userAgent,
+  }) == null
+}
+
+export function shouldReopenConfigurePanel(isConfigurePanelOpen: boolean, presentationUrlError: string | null): boolean {
+  return presentationUrlError != null && !isConfigurePanelOpen
+}
+
+export function shouldAutoActivatePresentationUrl(
+  value: string,
+  hostProtocol?: string | null,
+  userAgent?: string | null,
+): boolean {
+  return validatePresentationUrl(value, hostProtocol, userAgent)
+}
+
+export function resolveRecoveredPresentationUrl(
+  currentValue: string,
+  recoveredValue: string | null,
+  hostProtocol?: string | null,
+  userAgent?: string | null,
+): string {
+  const normalizedCurrent = currentValue.trim()
+  const normalizedRecovered = recoveredValue?.trim() ?? ''
+  if (
+    validatePresentationUrl(normalizedCurrent, hostProtocol, userAgent)
+    || normalizedRecovered.length === 0
+  ) {
+    return normalizedCurrent
   }
+
+  return normalizedRecovered
 }
 
 function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {
@@ -449,8 +482,61 @@ function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: 
   return {
     h: indices.h,
     v: indices.v,
-    f: SLIDE_END_FRAGMENT_INDEX,
+    f: CANONICAL_BOUNDARY_FRAGMENT_INDEX,
   }
+}
+
+function isWithinReleasedVerticalStack(
+  indices: { h: number; v: number; f: number },
+  explicitBoundary: { h: number; v: number; f: number },
+): boolean {
+  return indices.h === explicitBoundary.h && indices.v > explicitBoundary.v
+}
+
+function isAtOrBehindExplicitBoundary(
+  instructorIndices: { h: number; v: number; f: number },
+  explicitBoundary: { h: number; v: number; f: number },
+): boolean {
+  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
+    return false
+  }
+
+  if (instructorIndices.h !== explicitBoundary.h) {
+    return instructorIndices.h < explicitBoundary.h
+  }
+
+  if (instructorIndices.v !== explicitBoundary.v) {
+    return instructorIndices.v < explicitBoundary.v
+  }
+
+  if (explicitBoundary.f === CANONICAL_BOUNDARY_FRAGMENT_INDEX) {
+    return true
+  }
+
+  return instructorIndices.f <= explicitBoundary.f
+}
+
+function hasExceededExplicitBoundary(
+  instructorIndices: { h: number; v: number; f: number },
+  explicitBoundary: { h: number; v: number; f: number },
+): boolean {
+  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
+    return false
+  }
+
+  if (instructorIndices.h !== explicitBoundary.h) {
+    return instructorIndices.h > explicitBoundary.h
+  }
+
+  if (instructorIndices.v !== explicitBoundary.v) {
+    return instructorIndices.v > explicitBoundary.v
+  }
+
+  if (explicitBoundary.f === CANONICAL_BOUNDARY_FRAGMENT_INDEX) {
+    return false
+  }
+
+  return instructorIndices.f > explicitBoundary.f
 }
 
 function extractIndicesFromRevealStateObject(value: unknown): { h: number; v: number; f: number } | null {
@@ -494,7 +580,18 @@ export function shouldSuppressInstructorStateBroadcast(
     return false
   }
 
-  return compareIndices(instructorIndices, explicitBoundary) <= 0
+  return isAtOrBehindExplicitBoundary(instructorIndices, explicitBoundary)
+}
+
+export function shouldClearExplicitBoundary(
+  instructorIndices: { h: number; v: number; f: number } | null,
+  explicitBoundary: { h: number; v: number; f: number } | null,
+): boolean {
+  if (!instructorIndices || !explicitBoundary) {
+    return false
+  }
+
+  return hasExceededExplicitBoundary(instructorIndices, explicitBoundary)
 }
 
 export function buildBoundaryClearedPayload(
@@ -1021,6 +1118,29 @@ const SyncDeckManager: FC = () => {
     [presentationOrigin],
   )
 
+  const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
+  const urlHash = queryUrlHash ?? persistentUrlHashFallback
+  const hostProtocol = typeof window !== 'undefined' ? window.location.protocol : null
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : null
+  const presentationUrlError = useMemo(() => {
+    const normalizedUrl = presentationUrl.trim()
+    if (normalizedUrl.length === 0) {
+      return 'Presentation URL is required'
+    }
+
+    return getStudentPresentationCompatibilityError({
+      value: normalizedUrl,
+      hostProtocol,
+      userAgent,
+    })
+  }, [hostProtocol, presentationUrl, userAgent])
+
+  useEffect(() => {
+    if (shouldReopenConfigurePanel(isConfigurePanelOpen, presentationUrlError)) {
+      setIsConfigurePanelOpen(true)
+    }
+  }, [presentationUrlError, isConfigurePanelOpen])
+
   const buildInstructorWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelOpen) {
       return null
@@ -1165,8 +1285,6 @@ const SyncDeckManager: FC = () => {
     })
 
   const studentJoinUrl = sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
-  const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
-  const urlHash = queryUrlHash ?? persistentUrlHashFallback
 
   useEffect(() => {
     const normalizedUrl = presentationUrl.trim()
@@ -1197,15 +1315,21 @@ const SyncDeckManager: FC = () => {
 
         const payload = (await response.json()) as SessionResponsePayload
         const existingPresentationUrl = payload.session?.data?.presentationUrl
-        if (typeof existingPresentationUrl !== 'string' || !validatePresentationUrl(existingPresentationUrl)) {
+        if (typeof existingPresentationUrl !== 'string') {
           return
         }
 
         if (!isCancelled) {
           setPresentationUrl(existingPresentationUrl)
-          setIsConfigurePanelOpen(false)
-          setStartSuccess('Presentation loaded. Session is ready.')
-          setStartError(null)
+          if (shouldAutoActivatePresentationUrl(existingPresentationUrl, hostProtocol, userAgent)) {
+            setIsConfigurePanelOpen(false)
+            setStartSuccess('Presentation loaded. Session is ready.')
+            setStartError(null)
+          } else {
+            setIsConfigurePanelOpen(true)
+            setStartSuccess(null)
+            setStartError(null)
+          }
         }
       } catch {
         return
@@ -1217,7 +1341,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [sessionId])
+  }, [hostProtocol, sessionId, userAgent])
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -1279,8 +1403,9 @@ const SyncDeckManager: FC = () => {
 
         if (!isCancelled) {
           const persistentPresentationUrl =
-            typeof payload.persistentPresentationUrl === 'string' && validatePresentationUrl(payload.persistentPresentationUrl)
-              ? payload.persistentPresentationUrl
+            typeof payload.persistentPresentationUrl === 'string'
+            && payload.persistentPresentationUrl.trim().length > 0
+              ? payload.persistentPresentationUrl.trim()
               : null
           const persistentUrlHash =
             typeof payload.persistentUrlHash === 'string' && payload.persistentUrlHash.trim().length > 0
@@ -1289,10 +1414,7 @@ const SyncDeckManager: FC = () => {
 
           if (persistentPresentationUrl) {
             setPresentationUrl((current) => {
-              const normalizedCurrent = current.trim()
-              const shouldKeepCurrent = validatePresentationUrl(normalizedCurrent)
-              const nextPresentationUrl = shouldKeepCurrent ? normalizedCurrent : persistentPresentationUrl
-              return nextPresentationUrl
+              return resolveRecoveredPresentationUrl(current, persistentPresentationUrl, hostProtocol, userAgent)
             })
           }
           if (!queryUrlHash) {
@@ -1317,7 +1439,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [sessionId, queryUrlHash])
+  }, [hostProtocol, sessionId, queryUrlHash, userAgent])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
@@ -1542,8 +1664,19 @@ const SyncDeckManager: FC = () => {
     if (!sessionId) return
 
     const normalizedUrl = presentationUrl.trim()
-    if (!validatePresentationUrl(normalizedUrl)) {
-      setStartError('Presentation URL must be a valid http(s) URL')
+    if (normalizedUrl.length === 0) {
+      setStartError('Presentation URL is required')
+      setStartSuccess(null)
+      return
+    }
+
+    const validationError = getStudentPresentationCompatibilityError({
+      value: normalizedUrl,
+      hostProtocol,
+      userAgent,
+    })
+    if (validationError != null) {
+      setStartError(validationError)
       setStartSuccess(null)
       return
     }
@@ -1638,6 +1771,8 @@ const SyncDeckManager: FC = () => {
   }, [
     sessionId,
     presentationUrl,
+    hostProtocol,
+    userAgent,
     isPasscodeReady,
     instructorPasscode,
     urlHash,
@@ -1657,7 +1792,7 @@ const SyncDeckManager: FC = () => {
     }
 
     const normalizedUrl = presentationUrl.trim()
-    if (!validatePresentationUrl(normalizedUrl)) {
+    if (!validatePresentationUrl(normalizedUrl, hostProtocol, userAgent)) {
       return
     }
 
@@ -1672,6 +1807,8 @@ const SyncDeckManager: FC = () => {
     sessionId,
     isConfigurePanelOpen,
     presentationUrl,
+    hostProtocol,
+    userAgent,
     isPasscodeReady,
     instructorPasscode,
     isStartingSession,
@@ -1854,16 +1991,19 @@ const SyncDeckManager: FC = () => {
         if (
           envelope?.type === 'reveal-sync' &&
           envelope.action === 'state' &&
-          lastInstructorIndicesRef.current != null &&
-          explicitBoundaryRef.current != null &&
-          compareIndices(lastInstructorIndicesRef.current, explicitBoundaryRef.current) > 0
+          shouldClearExplicitBoundary(lastInstructorIndicesRef.current, explicitBoundaryRef.current)
         ) {
+          const instructorIndicesAtClear = lastInstructorIndicesRef.current
+          if (!instructorIndicesAtClear) {
+            return
+          }
+
           const targetWindow = presentationIframeRef.current?.contentWindow
           if (targetWindow && presentationOrigin) {
             targetWindow.postMessage(buildClearBoundaryCommandMessage(), presentationOrigin)
           }
 
-          const boundaryClearedPayload = buildBoundaryClearedPayload(lastInstructorIndicesRef.current)
+          const boundaryClearedPayload = buildBoundaryClearedPayload(instructorIndicesAtClear)
           try {
             socket.send(
               JSON.stringify({
@@ -2098,15 +2238,24 @@ const SyncDeckManager: FC = () => {
                     type="url"
                     value={presentationUrl}
                     onChange={(event) => setPresentationUrl(event.target.value)}
-                    className="w-full border-2 border-gray-300 rounded px-3 py-2"
+                    aria-invalid={presentationUrlError != null}
+                    aria-describedby={presentationUrlError ? PRESENTATION_URL_ERROR_ID : undefined}
+                    className={`w-full border-2 rounded px-3 py-2 ${
+                      presentationUrlError ? 'border-red-400' : 'border-gray-300'
+                    }`}
                     placeholder="https://slides.example.com/deck"
                     required
                   />
                 </label>
+                {presentationUrlError ? (
+                  <p id={PRESENTATION_URL_ERROR_ID} className="text-sm text-red-600">
+                    {presentationUrlError}
+                  </p>
+                ) : null}
                 <button
                   type="submit"
                   className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                  disabled={isStartingSession || !isPasscodeReady || isPreflightChecking}
+                  disabled={isStartingSession || !isPasscodeReady || isPreflightChecking || presentationUrlError != null}
                 >
                   {isPreflightChecking
                     ? 'Validating…'
@@ -2141,7 +2290,13 @@ const SyncDeckManager: FC = () => {
               </form>
               ) : null}
 
-            {!isConfigurePanelOpen && validatePresentationUrl(presentationUrl) && (
+            {!isConfigurePanelOpen && presentationUrlError && (
+              <div className="p-6">
+                <p className="text-sm text-red-600">{presentationUrlError}</p>
+              </div>
+            )}
+
+            {!isConfigurePanelOpen && !presentationUrlError && validatePresentationUrl(presentationUrl, hostProtocol, userAgent) && (
               <div className="w-full h-full min-h-0 bg-white overflow-hidden">
                 <iframe
                   ref={presentationIframeRef}

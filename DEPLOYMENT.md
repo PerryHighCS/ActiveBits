@@ -226,6 +226,10 @@ When a new deployment is triggered:
 - **Cause**: `VALKEY_URL` missing or misconfigured; container cannot reach Valkey
 - **Fix**: Verify `VALKEY_URL` (use internal URL on Render), check Valkey instance health; confirm `/api/status` shows `mode: valkey` and Valkey `ping: PONG`
 
+**Symptoms**: SyncDeck student view reports blocked insecure content or `postMessage` target-origin errors against an HTTP presentation URL
+- **Cause**: ActiveBits is running on HTTPS, but the configured presentation URL is an HTTP origin that the browser does not treat as loopback-secure. Browsers block those mixed-content iframes, so the deck never loads in the student iframe.
+- **Fix**: For normal hosted decks, serve the presentation over HTTPS as well. Loopback testing URLs such as `http://localhost` and `http://127.0.0.1` may work in some browsers, but non-loopback HTTP origins will not.
+
 **Symptoms**: High Valkey latency
 - **Cause**: Valkey instance in different region or overloaded
 - **Fix**: Move Valkey to same region, upgrade plan, or reduce TTL/cache flush frequency

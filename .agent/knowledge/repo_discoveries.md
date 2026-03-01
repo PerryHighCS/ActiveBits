@@ -38,6 +38,13 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Reuse this envelope shape for future realtime activities and consider extracting a shared typed helper in `types/` if multiple activities adopt the same protocol wrapper.
 - Owner: Codex
 
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck presentation URLs must be scheme-compatible with the ActiveBits host page. When ActiveBits is loaded over HTTPS, configuring or joining a SyncDeck session with an `http://...` presentation URL causes mixed-content blocking, the iframe stays on an `about:blank` parent-origin window, and subsequent `postMessage(..., "http://...")` calls fail in the student view.
+- Why it matters: The symptom can look like a `postMessage` protocol bug, but the root cause is browser mixed-content policy. SyncDeck client validation now blocks that configuration early and shows an explicit error instead of trying to sync a blocked iframe.
+- Evidence: `activities/syncdeck/client/shared/presentationUrlCompatibility.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`; `activities/syncdeck/client/shared/presentationUrlCompatibility.test.ts`
+- Follow-up action: For local deck testing from production/staging ActiveBits, prefer an HTTPS dev tunnel or host the presentation over HTTPS. Loopback URLs such as `http://127.0.0.1` may work from `https://...` ActiveBits pages in Chromium-based browsers, but Safari blocks them, and non-loopback HTTP origins will still fail mixed-content checks.
+- Owner: Codex
 - Date: 2026-02-27
 - Area: docs
 - Discovery: Repository instructions now explicitly require frontend controls to include appropriate accessibility semantics and state attributes, with examples such as `aria-pressed`, `aria-expanded`, accessible names for icon-only controls, and preference for native interactive elements.
@@ -300,6 +307,13 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: Manager websocket auth cannot be tightened safely in isolation yet, because rejecting unauthenticated manager sockets would break the current workflow and there is no server-issued credential flow for normal manager entry.
 - Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/activity.config.ts`
 - Follow-up action: If Video Sync needs manager-only websocket authorization, introduce a real manager credential flow first; a future join-code-based manager entry is the likely place to lock this down without breaking multi-manager use.
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck released-stack boundary comparisons must treat same-horizontal vertical child-slide movement as still inside the released region; only moving to a later horizontal slide should clear/supersede the explicit boundary, and student snapback logic must not pull `h`-matching lower child slides back to `v = 0`.
+- Why it matters: Full `h/v/f` boundary comparisons caused manager relay logic to clear boundaries and student boundary sync to snap lower-stack students back to the top child when an instructor moved down and back up within an already released vertical stack.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: When adjusting SyncDeck release logic, keep reconnect boundary restoration intact but preserve horizontal-only released-stack semantics for explicit boundary clear/snap decisions.
 - Owner: Codex
 
 - Date: 2026-03-01
@@ -308,4 +322,19 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: This is the HTTP analogue of the unauthenticated manager websocket role assumption: students or anyone who can guess/obtain the sessionId can currently grief playback unless a broader manager-auth mechanism is added.
 - Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`
 - Follow-up action: Treat manager authorization as a single cross-cutting gap for Video Sync; when a real manager credential flow is introduced, apply it consistently to both websocket role elevation and command/config HTTP endpoints.
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck presentation preflight should accept the iframe's origin-validated `reveal-sync` `ready` startup message as a successful validation signal in addition to `pong`.
+- Why it matters: Some regression/manual decks announce `ready` on init but do not answer the host ping with `pong`, and `pong`-only validation incorrectly blocks otherwise compatible SyncDeck presentations.
+- Evidence: `activities/syncdeck/client/shared/presentationPreflight.ts`; `activities/syncdeck/client/shared/presentationPreflight.test.ts`
+- Follow-up action: Keep preflight strict on `origin`/`source`, but treat standard startup handshake messages as sufficient proof that the reveal-sync bridge is alive.
+- Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck host/student boundary canonicalization now uses the documented end-of-slide sentinel `f: -1` and boundary-specific comparison helpers instead of `Number.MAX_SAFE_INTEGER`.
+- Why it matters: The old sentinel leaked an internal comparison hack into boundary payloads and drifted from the reveal-sync schema; using `f: -1` keeps wire semantics aligned while still preserving “end of boundary slide” behavior in suppression and snapback logic.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: If the iframe starts exposing explicit fragment-count metadata in state payloads, revisit boundary comparison helpers and remove the remaining sentinel semantics entirely.
 - Owner: Codex
