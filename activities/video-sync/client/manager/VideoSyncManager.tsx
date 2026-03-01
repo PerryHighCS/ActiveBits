@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import Button from '@src/components/ui/Button'
@@ -9,6 +9,13 @@ import {
   type VideoSyncTelemetry,
   type VideoSyncWsEnvelope,
 } from '../protocol'
+import { computeDesiredPositionSec, shouldCorrectDrift } from '../syncMath'
+import {
+  loadYoutubeIframeApi,
+  resolveYoutubePlayerState,
+  type YoutubeNamespace,
+  type YoutubePlayerLike,
+} from '../youtubeIframeApi'
 
 interface SessionResponse {
   id?: string
@@ -44,44 +51,8 @@ const DEFAULT_STATE: VideoSyncState = {
   serverTimestampMs: Date.now(),
 }
 
-function clampNumber(value: number, min = 0): number {
-  return Number.isFinite(value) ? Math.max(min, value) : min
-}
-
-function getDisplayPositionSec(state: VideoSyncState): number {
-  if (!state.isPlaying) {
-    return clampNumber(state.positionSec)
-  }
-
-  const elapsedSec = Math.max(0, (Date.now() - state.serverTimestampMs) / 1000)
-  const current = clampNumber(state.positionSec + elapsedSec)
-
-  if (state.stopSec != null) {
-    return Math.min(current, state.stopSec)
-  }
-
-  return current
-}
-
-function getEmbedUrl(state: VideoSyncState): string {
-  if (!state.videoId) {
-    return ''
-  }
-
-  const start = Math.floor(Math.max(state.startSec, 0))
-  const params = new URLSearchParams({
-    start: String(start),
-    controls: '1',
-    rel: '0',
-    modestbranding: '1',
-  })
-
-  if (state.isPlaying) {
-    params.set('autoplay', '1')
-    params.set('mute', '1')
-  }
-
-  return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(state.videoId)}?${params.toString()}`
+function clampNumber(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
 export default function VideoSyncManager() {
@@ -94,6 +65,46 @@ export default function VideoSyncManager() {
   const [stopSecInput, setStopSecInput] = useState('')
   const [seekSecInput, setSeekSecInput] = useState('0')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [playerReady, setPlayerReady] = useState(false)
+
+  const playerContainerRef = useRef<HTMLDivElement | null>(null)
+  const playerRef = useRef<YoutubePlayerLike | null>(null)
+  const youtubeRef = useRef<YoutubeNamespace | null>(null)
+  const loadedVideoIdRef = useRef<string | null>(null)
+
+  const applyStateToPlayer = useCallback((nextState: VideoSyncState) => {
+    const player = playerRef.current
+    if (!player || !nextState.videoId) {
+      return
+    }
+
+    const desiredPositionSec = computeDesiredPositionSec(nextState)
+
+    if (loadedVideoIdRef.current !== nextState.videoId) {
+      player.cueVideoById({
+        videoId: nextState.videoId,
+        startSeconds: desiredPositionSec,
+        endSeconds: nextState.stopSec ?? undefined,
+      })
+      loadedVideoIdRef.current = nextState.videoId
+    } else {
+      const currentTimeSec = player.getCurrentTime()
+      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, 0.75)) {
+        player.seekTo(desiredPositionSec, true)
+      }
+    }
+
+    const { PLAYING } = resolveYoutubePlayerState(youtubeRef.current)
+    const playerState = player.getPlayerState()
+
+    if (nextState.isPlaying) {
+      if (playerState !== PLAYING) {
+        player.playVideo()
+      }
+    } else {
+      player.pauseVideo()
+    }
+  }, [])
 
   const fetchSession = useCallback(async () => {
     if (!sessionId) return
@@ -151,6 +162,69 @@ export default function VideoSyncManager() {
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (!playerContainerRef.current) {
+      return
+    }
+
+    let cancelled = false
+
+    const initializePlayer = async (): Promise<void> => {
+      try {
+        const youtube = await loadYoutubeIframeApi()
+        if (cancelled || !playerContainerRef.current) return
+
+        youtubeRef.current = youtube
+        const player = new youtube.Player(playerContainerRef.current, {
+          width: '100%',
+          height: '100%',
+          host: 'https://www.youtube-nocookie.com',
+          playerVars: {
+            controls: 1,
+            rel: 0,
+            modestbranding: 1,
+          },
+          events: {
+            onReady: () => {
+              if (cancelled) return
+              setPlayerReady(true)
+              applyStateToPlayer(state)
+            },
+            onError: () => {
+              if (cancelled) return
+              setErrorMessage('YouTube player failed to load. Try a different video URL.')
+            },
+          },
+        })
+
+        playerRef.current = player
+      } catch {
+        if (!cancelled) {
+          setErrorMessage('Unable to initialize YouTube player.')
+        }
+      }
+    }
+
+    void initializePlayer()
+
+    return () => {
+      cancelled = true
+      setPlayerReady(false)
+      loadedVideoIdRef.current = null
+      playerRef.current?.destroy()
+      playerRef.current = null
+    }
+  }, [applyStateToPlayer, state.videoId])
+
+  useEffect(() => {
+    setStopSecInput(state.stopSec == null ? '' : String(state.stopSec))
+  }, [state.stopSec])
+
+  useEffect(() => {
+    if (!playerReady) return
+    applyStateToPlayer(state)
+  }, [playerReady, state, applyStateToPlayer])
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
@@ -236,8 +310,7 @@ export default function VideoSyncManager() {
     void navigate('/manage')
   }
 
-  const displayPosition = useMemo(() => getDisplayPositionSec(state), [state])
-  const embedUrl = useMemo(() => getEmbedUrl(state), [state])
+  const displayPosition = useMemo(() => computeDesiredPositionSec(state), [state])
 
   return (
     <div className="w-full max-w-6xl mx-auto p-4 space-y-4">
@@ -329,14 +402,10 @@ export default function VideoSyncManager() {
 
       <section className="border rounded p-4" aria-labelledby="video-sync-preview-heading">
         <h2 id="video-sync-preview-heading" className="text-xl font-semibold mb-2">Video preview</h2>
-        {embedUrl ? (
-          <iframe
-            title="Video Sync manager preview"
-            src={embedUrl}
-            allow="autoplay; encrypted-media; picture-in-picture"
-            allowFullScreen
-            className="w-full aspect-video rounded border"
-          />
+        {state.videoId ? (
+          <div className="w-full aspect-video rounded border overflow-hidden">
+            <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync manager preview" />
+          </div>
         ) : (
           <p className="text-sm text-gray-700">Configure a YouTube URL to preview the synchronized video.</p>
         )}
