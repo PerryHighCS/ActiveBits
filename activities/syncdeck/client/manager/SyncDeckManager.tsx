@@ -953,7 +953,7 @@ export function attachInstructorIndicesToBoundaryChangePayload(
   }
 }
 
-export function buildForceSyncBoundaryCommandMessage(indices: { h: number; v: number; f: number }): Record<string, unknown> {
+export function buildForceSyncToInstructorCommandMessage(indices: { h: number; v: number; f: number }): Record<string, unknown> {
   return buildRevealCommandMessage('syncToInstructor', {
     state: {
       indexh: indices.h,
@@ -1599,7 +1599,7 @@ const SyncDeckManager: FC = () => {
         socket.send(
           JSON.stringify({
             type: 'syncdeck-state-update',
-            payload: buildForceSyncBoundaryCommandMessage(currentInstructorIndices),
+            payload: buildForceSyncToInstructorCommandMessage(currentInstructorIndices),
           }),
         )
         setStartError(null)
