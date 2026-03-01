@@ -12,6 +12,7 @@ const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
 const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
+const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
 
 interface SessionResponsePayload {
   session?: {
@@ -2126,6 +2127,8 @@ const SyncDeckManager: FC = () => {
                     type="url"
                     value={presentationUrl}
                     onChange={(event) => setPresentationUrl(event.target.value)}
+                    aria-invalid={presentationUrlError != null}
+                    aria-describedby={presentationUrlError ? PRESENTATION_URL_ERROR_ID : undefined}
                     className={`w-full border-2 rounded px-3 py-2 ${
                       presentationUrlError ? 'border-red-400' : 'border-gray-300'
                     }`}
@@ -2133,7 +2136,11 @@ const SyncDeckManager: FC = () => {
                     required
                   />
                 </label>
-                {presentationUrlError ? <p className="text-sm text-red-600">{presentationUrlError}</p> : null}
+                {presentationUrlError ? (
+                  <p id={PRESENTATION_URL_ERROR_ID} className="text-sm text-red-600">
+                    {presentationUrlError}
+                  </p>
+                ) : null}
                 <button
                   type="submit"
                   className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"

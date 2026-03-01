@@ -54,6 +54,9 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /Configure Presentation/i)
   assert.match(html, /Presentation URL/i)
   assert.match(html, /Presentation URL is required/i)
+  assert.match(html, /aria-invalid="true"/i)
+  assert.match(html, /aria-describedby="syncdeck-presentation-url-error"/i)
+  assert.match(html, /id="syncdeck-presentation-url-error"/i)
   assert.match(html, /Start Session/i)
 })
 
