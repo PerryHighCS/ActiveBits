@@ -1,5 +1,6 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
+import { getPresentationUrlValidationError } from '../shared/presentationUrlCompatibility.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -373,12 +374,7 @@ function buildSyncDeckChalkboardOpenKey(sessionId: string): string {
 }
 
 function validatePresentationUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value)
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
-  } catch {
-    return false
-  }
+  return getPresentationUrlValidationError(value, null) == null
 }
 
 function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {
@@ -1167,6 +1163,17 @@ const SyncDeckManager: FC = () => {
   const studentJoinUrl = sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
   const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
   const urlHash = queryUrlHash ?? persistentUrlHashFallback
+  const presentationUrlError = useMemo(() => {
+    const normalizedUrl = presentationUrl.trim()
+    if (normalizedUrl.length === 0) {
+      return null
+    }
+
+    return getPresentationUrlValidationError(
+      normalizedUrl,
+      typeof window !== 'undefined' ? window.location.protocol : null,
+    )
+  }, [presentationUrl])
 
   useEffect(() => {
     const normalizedUrl = presentationUrl.trim()
@@ -1542,8 +1549,18 @@ const SyncDeckManager: FC = () => {
     if (!sessionId) return
 
     const normalizedUrl = presentationUrl.trim()
-    if (!validatePresentationUrl(normalizedUrl)) {
-      setStartError('Presentation URL must be a valid http(s) URL')
+    if (normalizedUrl.length === 0) {
+      setStartError('Presentation URL is required')
+      setStartSuccess(null)
+      return
+    }
+
+    const validationError = getPresentationUrlValidationError(
+      normalizedUrl,
+      typeof window !== 'undefined' ? window.location.protocol : null,
+    )
+    if (validationError != null) {
+      setStartError(validationError)
       setStartSuccess(null)
       return
     }
@@ -2098,15 +2115,18 @@ const SyncDeckManager: FC = () => {
                     type="url"
                     value={presentationUrl}
                     onChange={(event) => setPresentationUrl(event.target.value)}
-                    className="w-full border-2 border-gray-300 rounded px-3 py-2"
+                    className={`w-full border-2 rounded px-3 py-2 ${
+                      presentationUrlError ? 'border-red-400' : 'border-gray-300'
+                    }`}
                     placeholder="https://slides.example.com/deck"
                     required
                   />
                 </label>
+                {presentationUrlError ? <p className="text-sm text-red-600">{presentationUrlError}</p> : null}
                 <button
                   type="submit"
                   className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                  disabled={isStartingSession || !isPasscodeReady || isPreflightChecking}
+                  disabled={isStartingSession || !isPasscodeReady || isPreflightChecking || presentationUrlError != null}
                 >
                   {isPreflightChecking
                     ? 'Validating…'
@@ -2141,7 +2161,13 @@ const SyncDeckManager: FC = () => {
               </form>
               ) : null}
 
-            {!isConfigurePanelOpen && validatePresentationUrl(presentationUrl) && (
+            {!isConfigurePanelOpen && presentationUrlError && (
+              <div className="p-6">
+                <p className="text-sm text-red-600">{presentationUrlError}</p>
+              </div>
+            )}
+
+            {!isConfigurePanelOpen && !presentationUrlError && validatePresentationUrl(presentationUrl) && (
               <div className="w-full h-full min-h-0 bg-white overflow-hidden">
                 <iframe
                   ref={presentationIframeRef}

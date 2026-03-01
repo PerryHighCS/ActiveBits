@@ -11,6 +11,7 @@ import { resolveIframePostMessageTargetOrigin } from './SyncDeckStudent.js'
 import { shouldSuppressForwardInstructorSync } from './SyncDeckStudent.js'
 import { shouldResetBacktrackOptOutByMaxPosition } from './SyncDeckStudent.js'
 import { extractIndicesFromRevealStateMessage } from './SyncDeckStudent.js'
+import { MIXED_CONTENT_PRESENTATION_ERROR } from '../shared/presentationUrlCompatibility.js'
 
 void test('SyncDeckStudent renders join guidance copy', () => {
   const html = renderToStaticMarkup(
@@ -86,6 +87,12 @@ void test('resolveIframePostMessageTargetOrigin prefers iframe runtime origin an
     }),
     null,
   )
+})
+
+void test('mixed-content presentation warning explains blocked http student iframe on https hosts', () => {
+  assert.match(MIXED_CONTENT_PRESENTATION_ERROR, /https/i)
+  assert.match(MIXED_CONTENT_PRESENTATION_ERROR, /http:\/\//i)
+  assert.match(MIXED_CONTENT_PRESENTATION_ERROR, /student view/i)
 })
 
 void test('toRevealCommandMessage ignores studentBoundaryChanged messages', () => {
