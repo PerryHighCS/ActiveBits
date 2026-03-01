@@ -25,7 +25,7 @@ export interface VideoSyncTelemetry {
     blockedCount: number
   }
   sync: {
-    unsyncEvents: number
+    unsyncedStudents: number
     lastDriftSec: number | null
     lastCorrectionResult: 'none' | 'attempted' | 'success' | 'failed'
   }

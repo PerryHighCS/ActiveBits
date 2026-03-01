@@ -27,7 +27,7 @@ interface VideoSyncTelemetry {
     blockedCount: number
   }
   sync: {
-    unsyncEvents: number
+    unsyncedStudents: number
     lastDriftSec: number | null
     lastCorrectionResult: 'none' | 'attempted' | 'success' | 'failed'
   }
@@ -94,6 +94,7 @@ interface ConfigBody {
 
 interface EventBody {
   type?: unknown
+  studentId?: unknown
   driftSec?: unknown
   correctionResult?: unknown
   errorCode?: unknown
@@ -107,10 +108,12 @@ interface ParsedVideoSource {
 }
 
 const HEARTBEAT_INTERVAL_MS = 3000
+const UNSYNC_STALE_MS = 20_000
 const WS_OPEN_READY_STATE = 1
 const provider = 'youtube'
 const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
+const unsyncedStudentsBySession = new Map<string, Map<string, number>>()
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -205,7 +208,7 @@ function createDefaultTelemetry(): VideoSyncTelemetry {
   return {
     connections: { activeCount: 0 },
     autoplay: { blockedCount: 0 },
-    sync: { unsyncEvents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
+    sync: { unsyncedStudents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
     error: { code: null, message: null },
   }
 }
@@ -256,7 +259,7 @@ function normalizeTelemetry(raw: unknown): VideoSyncTelemetry {
       blockedCount: Math.max(0, Math.floor(toFiniteNumber(autoplay.blockedCount, 0))),
     },
     sync: {
-      unsyncEvents: Math.max(0, Math.floor(toFiniteNumber(sync.unsyncEvents, 0))),
+      unsyncedStudents: Math.max(0, Math.floor(toFiniteNumber(sync.unsyncedStudents, 0))),
       lastDriftSec,
       lastCorrectionResult: correctionResult,
     },
@@ -264,6 +267,55 @@ function normalizeTelemetry(raw: unknown): VideoSyncTelemetry {
       code: typeof error.code === 'string' ? error.code : null,
       message: typeof error.message === 'string' ? error.message : null,
     },
+  }
+}
+
+function normalizeStudentId(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > 128) return null
+  return trimmed
+}
+
+function refreshUnsyncedStudentsCount(data: VideoSyncSessionData, sessionId: string, nowMs = Date.now()): void {
+  const studentMap = unsyncedStudentsBySession.get(sessionId)
+  if (!studentMap) {
+    data.telemetry.sync.unsyncedStudents = 0
+    return
+  }
+
+  for (const [studentId, timestampMs] of studentMap.entries()) {
+    if (nowMs - timestampMs > UNSYNC_STALE_MS) {
+      studentMap.delete(studentId)
+    }
+  }
+
+  if (studentMap.size === 0) {
+    unsyncedStudentsBySession.delete(sessionId)
+    data.telemetry.sync.unsyncedStudents = 0
+    return
+  }
+
+  data.telemetry.sync.unsyncedStudents = studentMap.size
+}
+
+function markStudentUnsynced(sessionId: string, studentId: string, nowMs = Date.now()): void {
+  const existing = unsyncedStudentsBySession.get(sessionId)
+  if (existing) {
+    existing.set(studentId, nowMs)
+    return
+  }
+
+  unsyncedStudentsBySession.set(sessionId, new Map([[studentId, nowMs]]))
+}
+
+function clearStudentUnsynced(sessionId: string, studentId: string): void {
+  const existing = unsyncedStudentsBySession.get(sessionId)
+  if (!existing) return
+
+  existing.delete(studentId)
+  if (existing.size === 0) {
+    unsyncedStudentsBySession.delete(sessionId)
   }
 }
 
@@ -363,6 +415,7 @@ function removeSubscriber(sessionId: string, socket: VideoSyncSocket): void {
 function updateConnectionTelemetry(data: VideoSyncSessionData, sessionId: string): void {
   const sockets = subscribersBySession.get(sessionId)
   data.telemetry.connections.activeCount = sockets?.size ?? 0
+  refreshUnsyncedStudentsCount(data, sessionId)
 }
 
 async function broadcastEnvelope(
@@ -396,6 +449,7 @@ function stopHeartbeat(sessionId: string): void {
   if (!existing) return
   clearInterval(existing)
   heartbeatTimers.delete(sessionId)
+  unsyncedStudentsBySession.delete(sessionId)
 }
 
 function ensureHeartbeat(
@@ -681,8 +735,12 @@ export default function setupVideoSyncRoutes(
       data.telemetry.autoplay.blockedCount += 1
     }
 
+    const studentId = normalizeStudentId(body.studentId)
+
     if (body.type === 'unsync') {
-      data.telemetry.sync.unsyncEvents += 1
+      if (studentId) {
+        markStudentUnsynced(sessionId, studentId)
+      }
       data.telemetry.sync.lastDriftSec =
         typeof body.driftSec === 'number' && Number.isFinite(body.driftSec) ? body.driftSec : data.telemetry.sync.lastDriftSec
       data.telemetry.sync.lastCorrectionResult = 'attempted'
@@ -690,6 +748,9 @@ export default function setupVideoSyncRoutes(
 
     if (body.type === 'sync-correction') {
       const correction = body.correctionResult
+      if (studentId && correction === 'success') {
+        clearStudentUnsynced(sessionId, studentId)
+      }
       data.telemetry.sync.lastCorrectionResult =
         correction === 'success' || correction === 'failed' ? correction : 'attempted'
     }

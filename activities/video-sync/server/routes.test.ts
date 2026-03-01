@@ -112,7 +112,7 @@ function createVideoSyncSession(id: string): SessionRecord {
       telemetry: {
         connections: { activeCount: 0 },
         autoplay: { blockedCount: 0 },
-        sync: { unsyncEvents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
+        sync: { unsyncedStudents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
         error: { code: null, message: null },
       },
     },
@@ -241,4 +241,41 @@ void test('command route updates playback and emits extensible envelope', async 
   assert.equal(message.activity, 'video-sync')
   assert.equal(message.sessionId, 's1')
   assert.equal(message.type, 'state-update')
+})
+
+void test('event route tracks current unsynced student count', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof handler, 'function')
+
+  const unsyncResponse = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'unsync', studentId: 'student-a', driftSec: 1.2 },
+    },
+    unsyncResponse,
+  )
+
+  assert.equal(unsyncResponse.statusCode, 200)
+  const unsyncTelemetry = (unsyncResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry
+  assert.equal(unsyncTelemetry.sync.unsyncedStudents, 1)
+
+  const correctionResponse = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'sync-correction', studentId: 'student-a', correctionResult: 'success' },
+    },
+    correctionResponse,
+  )
+
+  assert.equal(correctionResponse.statusCode, 200)
+  const correctionTelemetry = (correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry
+  assert.equal(correctionTelemetry.sync.unsyncedStudents, 0)
 })

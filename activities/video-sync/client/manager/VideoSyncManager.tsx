@@ -42,9 +42,11 @@ interface CommandResponse {
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   connections: { activeCount: 0 },
   autoplay: { blockedCount: 0 },
-  sync: { unsyncEvents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
+  sync: { unsyncedStudents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
   error: { code: null, message: null },
 }
+
+const SYNC_DRIFT_TOLERANCE_SEC = 0.2
 
 const DEFAULT_STATE: VideoSyncState = {
   provider: 'youtube',
@@ -166,7 +168,7 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = nextState.videoId
     } else {
       const currentTimeSec = player.getCurrentTime()
-      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, 0.75)) {
+      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, SYNC_DRIFT_TOLERANCE_SEC)) {
         player.seekTo(desiredPositionSec, true)
       }
     }
@@ -484,7 +486,7 @@ export default function VideoSyncManager() {
         <span>Playing: {state.isPlaying ? 'Yes' : 'No'}</span>
         <span>Position: {displayPosition.toFixed(2)}s</span>
         <span>Connections: {telemetry.connections.activeCount}</span>
-        <span>Unsync: {telemetry.sync.unsyncEvents}</span>
+        <span>Unsynced students: {telemetry.sync.unsyncedStudents}</span>
       </div>
     </div>
   )
