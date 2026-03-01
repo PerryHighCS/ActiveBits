@@ -287,24 +287,34 @@ Suggested persistence key pattern:
 | Cross-browser autoplay variance | Some browser/device combinations may still require manual start more often than expected despite fallback UX | Activity implementer | During Phase 3 hardening |
 | Classroom network jitter spikes | Temporary local network issues can increase unsync event frequency and telemetry noise | Activity implementer + dashboard owner | During Phase 3 hardening |
 
+## Progress Snapshot (2026-03-01)
+
+- Completed: activity scaffold (`activity.config.ts`, client entry, manager/student views, server routes)
+- Completed: normalized synchronized session state + solo local-state model
+- Completed: websocket envelope contract (`version`, `activity`, `sessionId`, `type`, `timestamp`, `payload`) and heartbeat strategy
+- Completed: manager controls (configure, play, pause, seek), student synchronized view, and solo self-paced flow
+- Completed: autoplay-block fallback prompt and telemetry event reporting path
+- Completed: activity-specific tests + repo-wide validation gate (`npm test`)
+- Remaining: explicit cross-browser `youtube-nocookie.com` compatibility sign-off in target runtime environments
+
 ## Checklist
 
-- [ ] Confirm the final activity id and display name for the new synchronized video activity
-- [ ] Finalize YouTube v1 source policy (`youtube.com/watch`, `youtu.be`, start + optional stop)
+- [x] Confirm the final activity id and display name for the new synchronized video activity
+- [x] Finalize YouTube v1 source policy (`youtube.com/watch`, `youtu.be`, start + optional stop)
 - [ ] Validate `youtube-nocookie.com` compatibility in target runtime environments
-- [ ] Create `activities/video-sync/` with config, client entry, and server entry
-- [ ] Set `soloMode: true` and define `soloModeMeta` labels in activity config
-- [ ] Define normalized session state for synchronized video playback
-- [ ] Define synchronized role/permission behavior and separate solo local-state behavior
-- [ ] Implement instructor session creation/configuration flow
-- [ ] Implement manager playback controls
-- [ ] Implement student synchronized playback view
-- [ ] Implement student self-paced solo mode flow with local persistence
-- [ ] Implement event-driven sync + heartbeat strategy with `0.75s` drift correction target
-- [ ] Implement autoplay-block fallback behavior for late joins
-- [ ] Add manager dashboard reporting for connections, errors, and unsync events
-- [ ] Add activity-specific tests for server routes, normalization, and client sync behavior
-- [ ] Run appropriate workspace checks and full repo validation as needed
+- [x] Create `activities/video-sync/` with config, client entry, and server entry
+- [x] Set `soloMode: true` and define `soloModeMeta` labels in activity config
+- [x] Define normalized session state for synchronized video playback
+- [x] Define synchronized role/permission behavior and separate solo local-state behavior
+- [x] Implement instructor session creation/configuration flow
+- [x] Implement manager playback controls
+- [x] Implement student synchronized playback view
+- [x] Implement student self-paced solo mode flow with local persistence
+- [x] Implement event-driven sync + heartbeat strategy with `0.75s` drift correction target
+- [x] Implement autoplay-block fallback behavior for late joins
+- [x] Add manager dashboard reporting for connections, errors, and unsync events
+- [x] Add activity-specific tests for server routes, normalization, and client sync behavior
+- [x] Run appropriate workspace checks and full repo validation as needed
 - [ ] Revisit SyncDeck embedding only after the embedded-activities future plan is ready
 
 ## Future Work

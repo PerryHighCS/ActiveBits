@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
@@ -6,6 +6,13 @@ import {
   parseVideoSyncEnvelope,
   type VideoSyncState,
 } from '../protocol'
+import { computeDesiredPositionSec, shouldCorrectDrift } from '../syncMath'
+import {
+  loadYoutubeIframeApi,
+  resolveYoutubePlayerState,
+  type YoutubeNamespace,
+  type YoutubePlayerLike,
+} from '../youtubeIframeApi'
 
 interface VideoSyncStudentProps {
   sessionData?: {
@@ -33,43 +40,8 @@ const DEFAULT_STATE: VideoSyncState = {
   serverTimestampMs: Date.now(),
 }
 
-function clampNumber(value: number, min = 0): number {
-  return Number.isFinite(value) ? Math.max(min, value) : min
-}
-
-function getDisplayPositionSec(state: VideoSyncState): number {
-  if (!state.isPlaying) {
-    return clampNumber(state.positionSec)
-  }
-
-  const elapsedSec = Math.max(0, (Date.now() - state.serverTimestampMs) / 1000)
-  const current = clampNumber(state.positionSec + elapsedSec)
-
-  if (state.stopSec != null) {
-    return Math.min(current, state.stopSec)
-  }
-
-  return current
-}
-
-function getEmbedUrl(state: VideoSyncState): string {
-  if (!state.videoId) {
-    return ''
-  }
-
-  const params = new URLSearchParams({
-    start: String(Math.floor(Math.max(state.startSec, 0))),
-    controls: '1',
-    rel: '0',
-    modestbranding: '1',
-  })
-
-  if (state.isPlaying) {
-    params.set('autoplay', '1')
-    params.set('mute', '1')
-  }
-
-  return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(state.videoId)}?${params.toString()}`
+function clampNumber(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
 function parseYouTubeVideoId(urlValue: string): { videoId: string | null; startSec: number; stopSec: number | null } {
@@ -108,6 +80,15 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const [state, setState] = useState<VideoSyncState>(DEFAULT_STATE)
   const [sourceUrlInput, setSourceUrlInput] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false)
+  const [playerReady, setPlayerReady] = useState(false)
+
+  const playerContainerRef = useRef<HTMLDivElement | null>(null)
+  const playerRef = useRef<YoutubePlayerLike | null>(null)
+  const youtubeRef = useRef<YoutubeNamespace | null>(null)
+  const loadedVideoIdRef = useRef<string | null>(null)
+  const lastUnsyncReportAtRef = useRef(0)
+  const autoplayCheckTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!isSoloMode || typeof window === 'undefined') return
@@ -124,6 +105,77 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     }
   }, [isSoloMode])
 
+  const reportEvent = useCallback(async (eventType: 'autoplay-blocked' | 'unsync' | 'sync-correction', driftSec?: number, correctionResult?: 'success' | 'failed'): Promise<void> => {
+    if (!sessionId || isSoloMode) return
+    await fetch(`/api/video-sync/${sessionId}/event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: eventType, driftSec, correctionResult }),
+    })
+  }, [sessionId, isSoloMode])
+
+  const applyStateToPlayer = useCallback((nextState: VideoSyncState, source: 'sync' | 'solo') => {
+    const player = playerRef.current
+    if (!player || !nextState.videoId) return
+
+    const desiredPositionSec = computeDesiredPositionSec(nextState)
+    const now = Date.now()
+
+    if (loadedVideoIdRef.current !== nextState.videoId) {
+      if (source === 'sync') {
+        player.loadVideoById({
+          videoId: nextState.videoId,
+          startSeconds: desiredPositionSec,
+          endSeconds: nextState.stopSec ?? undefined,
+        })
+      } else {
+        player.cueVideoById({
+          videoId: nextState.videoId,
+          startSeconds: desiredPositionSec,
+          endSeconds: nextState.stopSec ?? undefined,
+        })
+      }
+      loadedVideoIdRef.current = nextState.videoId
+    } else {
+      const currentTimeSec = player.getCurrentTime()
+      const driftSec = Math.abs(currentTimeSec - desiredPositionSec)
+
+      if (source === 'sync' && shouldCorrectDrift(currentTimeSec, desiredPositionSec, 0.75)) {
+        player.seekTo(desiredPositionSec, true)
+
+        if (now - lastUnsyncReportAtRef.current >= 10_000) {
+          lastUnsyncReportAtRef.current = now
+          void reportEvent('unsync', driftSec)
+          void reportEvent('sync-correction', driftSec, 'success')
+        }
+      }
+    }
+
+    const { PLAYING } = resolveYoutubePlayerState(youtubeRef.current)
+    if (nextState.isPlaying) {
+      player.playVideo()
+
+      if (autoplayCheckTimerRef.current != null) {
+        window.clearTimeout(autoplayCheckTimerRef.current)
+      }
+
+      autoplayCheckTimerRef.current = window.setTimeout(() => {
+        const stateValue = player.getPlayerState()
+        if (stateValue !== PLAYING) {
+          setAutoplayBlocked(true)
+          if (source === 'sync') {
+            void reportEvent('autoplay-blocked')
+          }
+        } else {
+          setAutoplayBlocked(false)
+        }
+      }, 1200)
+    } else {
+      player.pauseVideo()
+      setAutoplayBlocked(false)
+    }
+  }, [reportEvent])
+
   const buildWsUrl = useCallback(() => {
     if (!sessionId || isSoloMode || typeof window === 'undefined') return null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -136,7 +188,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     attachSessionEndedHandler,
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
-      if (envelope?.sessionId !== sessionId) return
+      if (!envelope || envelope.sessionId !== sessionId) return
 
       if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
         const payload = envelope.payload as { state?: VideoSyncState }
@@ -153,6 +205,69 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       }
     },
   })
+
+  useEffect(() => {
+    if (!playerContainerRef.current) {
+      return
+    }
+
+    let cancelled = false
+
+    const initializePlayer = async (): Promise<void> => {
+      try {
+        const youtube = await loadYoutubeIframeApi()
+        if (cancelled || !playerContainerRef.current) return
+
+        youtubeRef.current = youtube
+        const player = new youtube.Player(playerContainerRef.current, {
+          width: '100%',
+          height: '100%',
+          host: 'https://www.youtube-nocookie.com',
+          playerVars: {
+            controls: 1,
+            rel: 0,
+            modestbranding: 1,
+          },
+          events: {
+            onReady: () => {
+              if (cancelled) return
+              setPlayerReady(true)
+              applyStateToPlayer(state, isSoloMode ? 'solo' : 'sync')
+            },
+            onError: () => {
+              if (cancelled) return
+              setErrorMessage('YouTube player failed to load for this video.')
+            },
+          },
+        })
+
+        playerRef.current = player
+      } catch {
+        if (!cancelled) {
+          setErrorMessage('Unable to initialize YouTube player.')
+        }
+      }
+    }
+
+    void initializePlayer()
+
+    return () => {
+      cancelled = true
+      setPlayerReady(false)
+      loadedVideoIdRef.current = null
+      if (autoplayCheckTimerRef.current != null) {
+        window.clearTimeout(autoplayCheckTimerRef.current)
+        autoplayCheckTimerRef.current = null
+      }
+      playerRef.current?.destroy()
+      playerRef.current = null
+    }
+  }, [applyStateToPlayer, isSoloMode, state.videoId])
+
+  useEffect(() => {
+    if (!playerReady) return
+    applyStateToPlayer(state, isSoloMode ? 'solo' : 'sync')
+  }, [playerReady, state, isSoloMode, applyStateToPlayer])
 
   useEffect(() => {
     if (!sessionId || isSoloMode) return undefined
@@ -202,6 +317,9 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
     setState(next)
     persistSoloState(next)
+    if (playerReady) {
+      applyStateToPlayer(next, 'solo')
+    }
     setErrorMessage(null)
   }
 
@@ -209,7 +327,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     if (!isSoloMode) return
 
     const now = Date.now()
-    const currentPosition = getDisplayPositionSec(state)
+    const currentPosition = computeDesiredPositionSec(state)
     const next: VideoSyncState =
       type === 'play'
         ? {
@@ -237,19 +355,19 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
     setState(next)
     persistSoloState(next)
+    if (playerReady) {
+      applyStateToPlayer(next, 'solo')
+    }
   }
 
-  const reportEvent = async (eventType: 'autoplay-blocked' | 'unsync', driftSec?: number): Promise<void> => {
-    if (!sessionId || isSoloMode) return
-    await fetch(`/api/video-sync/${sessionId}/event`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: eventType, driftSec }),
-    })
-  }
+  const displayPosition = useMemo(() => computeDesiredPositionSec(state), [state])
 
-  const embedUrl = useMemo(() => getEmbedUrl(state), [state])
-  const displayPosition = useMemo(() => getDisplayPositionSec(state), [state])
+  const retryAutoplay = (): void => {
+    const player = playerRef.current
+    if (!player) return
+    player.playVideo()
+    setAutoplayBlocked(false)
+  }
 
   return (
     <div className="w-full max-w-5xl mx-auto p-4 space-y-4">
@@ -294,19 +412,23 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
             <Button onClick={() => void reportEvent('autoplay-blocked')}>Report autoplay blocked</Button>
             <Button onClick={() => void reportEvent('unsync', displayPosition - state.positionSec)}>Report out of sync</Button>
           </div>
+          {autoplayBlocked && (
+            <div className="border border-amber-300 bg-amber-50 rounded p-3 text-sm">
+              Browser blocked autoplay. Use click-to-start and follow the classroom display until playback starts.
+              <div className="mt-2">
+                <Button onClick={retryAutoplay}>Click to start playback</Button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
       <section className="border rounded p-4" aria-labelledby="video-sync-player">
         <h2 id="video-sync-player" className="text-xl font-semibold mb-2">Player</h2>
-        {embedUrl ? (
-          <iframe
-            title="Video Sync player"
-            src={embedUrl}
-            allow="autoplay; encrypted-media; picture-in-picture"
-            allowFullScreen
-            className="w-full aspect-video rounded border"
-          />
+        {state.videoId ? (
+          <div className="w-full aspect-video rounded border overflow-hidden">
+            <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync player" />
+          </div>
         ) : (
           <p className="text-sm text-gray-700">No video selected yet.</p>
         )}
