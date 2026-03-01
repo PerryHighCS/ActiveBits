@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
-import { getPresentationUrlValidationError } from '../shared/presentationUrlCompatibility.js'
+import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 
 interface SessionResponsePayload {
   session?: {
@@ -516,7 +516,12 @@ function extractStoryboardDisplayed(data: unknown): boolean | null {
 }
 
 function validatePresentationUrl(value: string): boolean {
-  return getPresentationUrlValidationError(value, null) == null
+  try {
+    const parsed = new URL(value)
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
+  } catch {
+    return false
+  }
 }
 
 function parseDrawingToolModePayload(payload: unknown): SyncDeckDrawingToolMode | null {
@@ -698,10 +703,11 @@ const SyncDeckStudent: FC = () => {
   }, [presentationUrl])
   const presentationUrlError = useMemo(
     () => (presentationUrl
-      ? getPresentationUrlValidationError(
-        presentationUrl,
-        typeof window !== 'undefined' ? window.location.protocol : null,
-      )
+      ? getStudentPresentationCompatibilityError({
+        value: presentationUrl,
+        hostProtocol: typeof window !== 'undefined' ? window.location.protocol : null,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      })
       : null),
     [presentationUrl],
   )
