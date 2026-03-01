@@ -92,7 +92,7 @@ void test('resolveIframePostMessageTargetOrigin prefers iframe runtime origin an
 void test('mixed-content presentation warning explains blocked http student iframe on https hosts', () => {
   assert.match(MIXED_CONTENT_PRESENTATION_ERROR, /https/i)
   assert.match(MIXED_CONTENT_PRESENTATION_ERROR, /http:\/\//i)
-  assert.match(MIXED_CONTENT_PRESENTATION_ERROR, /student view/i)
+  assert.match(MIXED_CONTENT_PRESENTATION_ERROR, /SyncDeck presentation iframes/i)
 })
 
 void test('toRevealCommandMessage ignores studentBoundaryChanged messages', () => {

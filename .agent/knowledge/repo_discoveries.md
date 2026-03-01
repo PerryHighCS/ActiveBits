@@ -19,7 +19,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: SyncDeck presentation URLs must be scheme-compatible with the ActiveBits host page. When ActiveBits is loaded over HTTPS, configuring or joining a SyncDeck session with an `http://...` presentation URL causes mixed-content blocking, the iframe stays on an `about:blank` parent-origin window, and subsequent `postMessage(..., "http://...")` calls fail in the student view.
 - Why it matters: The symptom can look like a `postMessage` protocol bug, but the root cause is browser mixed-content policy. SyncDeck client validation now blocks that configuration early and shows an explicit error instead of trying to sync a blocked iframe.
 - Evidence: `activities/syncdeck/client/shared/presentationUrlCompatibility.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`; `activities/syncdeck/client/shared/presentationUrlCompatibility.test.ts`
-- Follow-up action: For local deck testing from production/staging ActiveBits, use an HTTPS dev tunnel or host the presentation over HTTPS; plain `http://127.0.0.1` embeds will not work from `https://...` ActiveBits pages.
+- Follow-up action: For local deck testing from production/staging ActiveBits, prefer an HTTPS dev tunnel or host the presentation over HTTPS. Loopback URLs such as `http://127.0.0.1` may work from `https://...` ActiveBits pages in Chromium-based browsers, but Safari blocks them, and non-loopback HTTP origins will still fail mixed-content checks.
 - Owner: Codex
 - Date: 2026-02-27
 - Area: docs

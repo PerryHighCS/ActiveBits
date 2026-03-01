@@ -1,7 +1,7 @@
 export const MIXED_CONTENT_PRESENTATION_ERROR =
-  'Presentation URL must use https:// when ActiveBits is running over HTTPS. Browsers block http:// presentation iframes in the student view.'
+  'Presentation URL must use https:// when ActiveBits is running over HTTPS. Browsers block non-loopback http:// SyncDeck presentation iframes on HTTPS ActiveBits pages.'
 export const SAFARI_LOOPBACK_PRESENTATION_ERROR =
-  'Safari blocks http://localhost and http://127.0.0.1 SyncDeck presentations from an HTTPS ActiveBits page. Use Chrome for localhost testing or serve the presentation over HTTPS.'
+  'Safari blocks http:// loopback-host SyncDeck presentations (localhost, 127.0.0.1, or ::1) from an HTTPS ActiveBits page. Use an HTTPS presentation URL or test in a Chromium-based browser.'
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalizedHostname = hostname.trim().toLowerCase()
