@@ -136,17 +136,20 @@ void test('buildInstructorRoleCommandMessage emits setRole instructor command', 
   })
 })
 
-void test('buildForceSyncBoundaryCommandMessage emits setStudentBoundary sync command', () => {
+void test('buildForceSyncBoundaryCommandMessage emits syncToInstructor command', () => {
   const message = buildForceSyncBoundaryCommandMessage({ h: 5, v: 1, f: 0 })
 
   assert.equal(message.type, 'reveal-sync')
   assert.equal(message.action, 'command')
   assert.equal(message.role, 'instructor')
   assert.deepEqual(message.payload, {
-    name: 'setStudentBoundary',
+    name: 'syncToInstructor',
     payload: {
-      indices: { h: 5, v: 1, f: 0 },
-      syncToBoundary: true,
+      state: {
+        indexh: 5,
+        indexv: 1,
+        indexf: 0,
+      },
     },
   })
 })

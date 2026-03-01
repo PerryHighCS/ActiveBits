@@ -129,6 +129,7 @@ interface RevealCommandMessage {
 }
 
 const WS_OPEN_READY_STATE = 1
+const REVEAL_SYNC_PROTOCOL_VERSION = '2.0.0'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -210,7 +211,7 @@ function buildBoundaryCommandEnvelope(
 ): RevealCommandMessage {
   return {
     type: 'reveal-sync',
-    version: typeof message.version === 'string' ? message.version : '1.0.0',
+    version: typeof message.version === 'string' ? message.version : REVEAL_SYNC_PROTOCOL_VERSION,
     action: 'command',
     deckId: typeof message.deckId === 'string' ? message.deckId : null,
     role: 'instructor',
@@ -220,20 +221,53 @@ function buildBoundaryCommandEnvelope(
   }
 }
 
-function shouldSnapBackToBoundary(
-  studentIndices: { h: number; v: number; f: number } | null,
-  boundary: { h: number; v: number; f: number },
-): boolean {
-  if (!studentIndices) {
-    return true
+function buildInstructorStatePayload(
+  payload: Record<string, unknown>,
+  fallbackIndices: { h: number; v: number; f: number } | null = null,
+): Record<string, unknown> | null {
+  const revealState = isPlainObject(payload.revealState) ? payload.revealState : null
+  const indices = normalizeIndices(payload.indices)
+    ?? normalizeIndices(revealState)
+    ?? normalizeIndices(payload)
+    ?? fallbackIndices
+
+  if (!indices) {
+    return null
   }
 
-  return hasExceededReleasedBoundary(studentIndices, boundary)
+  const pausedFromPayload = typeof payload.paused === 'boolean' ? payload.paused : null
+  const pausedFromRevealState =
+    typeof (revealState as { paused?: unknown } | null)?.paused === 'boolean'
+      ? ((revealState as { paused?: unknown }).paused as boolean)
+      : null
+  const pausedState = pausedFromPayload ?? pausedFromRevealState
+
+  return {
+    ...(revealState ?? {}),
+    indexh: indices.h,
+    indexv: indices.v,
+    indexf: indices.f,
+    ...(typeof pausedState === 'boolean' ? { paused: pausedState } : {}),
+  }
+}
+
+function buildSyncToInstructorCommand(
+  message: RevealSyncEnvelope,
+  payload: Record<string, unknown>,
+  fallbackIndices: { h: number; v: number; f: number } | null = null,
+): RevealCommandMessage | null {
+  const state = buildInstructorStatePayload(payload, fallbackIndices)
+  if (!state) {
+    return null
+  }
+
+  return buildBoundaryCommandEnvelope(message, 'syncToInstructor', {
+    state,
+  })
 }
 
 function buildSetStudentBoundaryCommand(
   message: RevealSyncEnvelope,
-  studentIndices: { h: number; v: number; f: number } | null = null,
   fallbackInstructorIndices: { h: number; v: number; f: number } | null = null,
 ): RevealCommandMessage | null {
   const role = message.role
@@ -254,15 +288,18 @@ function buildSetStudentBoundaryCommand(
     return null
   }
 
+  if (!setBoundary && instructorIndices) {
+    return buildSyncToInstructorCommand(message, payload as Record<string, unknown>, instructorIndices)
+  }
+
   return buildBoundaryCommandEnvelope(message, 'setStudentBoundary', {
     indices: effectiveBoundary,
-    syncToBoundary: shouldSnapBackToBoundary(studentIndices, effectiveBoundary),
   })
 }
 
 export function toRevealBoundaryCommandMessage(
   rawPayload: unknown,
-  studentIndices: { h: number; v: number; f: number } | null = null,
+  _studentIndices: { h: number; v: number; f: number } | null = null,
   fallbackInstructorIndices: { h: number; v: number; f: number } | null = null,
 ): RevealCommandMessage | null {
   if (!isPlainObject(rawPayload)) {
@@ -275,7 +312,7 @@ export function toRevealBoundaryCommandMessage(
   }
 
   if (message.action === 'state') {
-    return buildSetStudentBoundaryCommand(message, studentIndices, fallbackInstructorIndices)
+    return buildSetStudentBoundaryCommand(message, fallbackInstructorIndices)
   }
 
   if (message.action === 'studentBoundaryChanged') {
@@ -283,7 +320,7 @@ export function toRevealBoundaryCommandMessage(
       return null
     }
 
-    return buildSetStudentBoundaryCommand(message, studentIndices, fallbackInstructorIndices)
+    return buildSetStudentBoundaryCommand(message, fallbackInstructorIndices)
   }
 
   return null
@@ -341,13 +378,11 @@ export function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: 
 
 function computeBoundaryDetails(
   rawPayload: unknown,
-  studentIndices: { h: number; v: number; f: number } | null,
   fallbackInstructorIndices: { h: number; v: number; f: number } | null,
 ): {
   instructorIndices: { h: number; v: number; f: number } | null
   setBoundary: { h: number; v: number; f: number } | null
   effectiveBoundary: { h: number; v: number; f: number } | null
-  syncToBoundary: boolean
 } | null {
   if (!isPlainObject(rawPayload)) {
     return null
@@ -368,7 +403,6 @@ function computeBoundaryDetails(
     instructorIndices,
     setBoundary,
     effectiveBoundary,
-    syncToBoundary: effectiveBoundary ? shouldSnapBackToBoundary(studentIndices, effectiveBoundary) : false,
   }
 }
 
@@ -417,25 +451,14 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
     paused?: unknown
   }
 
-  const revealState = isPlainObject(statePayload.revealState) ? statePayload.revealState : null
-  const indices = isPlainObject(statePayload.indices) ? statePayload.indices : null
-  const pausedFromPayload = typeof statePayload.paused === 'boolean' ? statePayload.paused : null
-  const pausedFromRevealState =
-    typeof (revealState as { paused?: unknown } | null)?.paused === 'boolean'
-      ? ((revealState as { paused?: unknown }).paused as boolean)
-      : null
-  const pausedState = pausedFromPayload ?? pausedFromRevealState
-  const mergedState = {
-    ...(revealState ?? {}),
-    indexh: typeof indices?.h === 'number' ? indices.h : (revealState as { indexh?: unknown } | null)?.indexh ?? 0,
-    indexv: typeof indices?.v === 'number' ? indices.v : (revealState as { indexv?: unknown } | null)?.indexv ?? 0,
-    indexf: typeof indices?.f === 'number' ? indices.f : (revealState as { indexf?: unknown } | null)?.indexf ?? 0,
-    ...(typeof pausedState === 'boolean' ? { paused: pausedState } : {}),
+  const mergedState = buildInstructorStatePayload(statePayload)
+  if (!mergedState) {
+    return null
   }
 
   return {
     type: 'reveal-sync',
-    version: typeof message.version === 'string' ? message.version : '1.0.0',
+    version: typeof message.version === 'string' ? message.version : REVEAL_SYNC_PROTOCOL_VERSION,
     action: 'command',
     deckId: typeof message.deckId === 'string' ? message.deckId : null,
     role: 'instructor',
@@ -453,7 +476,7 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
 function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {
   return {
     type: 'reveal-sync',
-    version: '1.0.0',
+    version: REVEAL_SYNC_PROTOCOL_VERSION,
     action: 'command',
     source: 'activebits-syncdeck-host',
     role: 'student',
@@ -645,12 +668,22 @@ function isForceSyncBoundaryCommand(rawPayload: unknown): boolean {
 
   const payload = message.payload as {
     name?: unknown
-    payload?: {
-      syncToBoundary?: unknown
-    }
   }
 
-  return payload.name === 'setStudentBoundary' && payload.payload?.syncToBoundary === true
+  return payload.name === 'syncToInstructor'
+}
+
+function isSyncToInstructorCommand(rawPayload: unknown): boolean {
+  if (!isPlainObject(rawPayload)) {
+    return false
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  if (message.type !== 'reveal-sync' || message.action !== 'command' || !isPlainObject(message.payload)) {
+    return false
+  }
+
+  return (message.payload as { name?: unknown }).name === 'syncToInstructor'
 }
 
 export function shouldSuppressForwardInstructorSync(
@@ -866,7 +899,6 @@ const SyncDeckStudent: FC = () => {
 
         const boundaryDetails = computeBoundaryDetails(
           parsed.payload,
-          localStudentIndicesRef.current,
           lastInstructorIndicesRef.current,
         )
         lastEffectiveMaxPositionRef.current = boundaryDetails?.effectiveBoundary ?? null
@@ -891,11 +923,12 @@ const SyncDeckStudent: FC = () => {
         }
 
         const revealCommand = toRevealCommandMessage(parsed.payload)
+        const boundaryAlreadyAppliedInstructorState = boundaryCommand != null && isSyncToInstructorCommand(boundaryCommand)
         if (revealCommand == null) {
           if (boundaryCommand == null) {
             return
           }
-        } else {
+        } else if (!boundaryAlreadyAppliedInstructorState) {
           const incomingInstructorIndices = extractIndicesFromRevealStateMessage(parsed.payload)
           const suppressForwardSync = shouldSuppressForwardInstructorSync(
             studentBacktrackOptOutRef.current,
@@ -931,7 +964,7 @@ const SyncDeckStudent: FC = () => {
     }
 
     const revealCommand = toRevealCommandMessage(payload)
-    if (revealCommand != null) {
+    if (revealCommand != null && !isSyncToInstructorCommand(boundaryCommand)) {
       sendPayloadToIframe(revealCommand)
     }
   }, [sendPayloadToIframe])

@@ -105,7 +105,7 @@ const WS_OPEN_READY_STATE = 1
 const SYNCDECK_WS_UPDATE_TYPE = 'syncdeck-state-update'
 const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
-const REVEAL_SYNC_PROTOCOL_VERSION = '1.1.0'
+const REVEAL_SYNC_PROTOCOL_VERSION = '2.0.0'
 const MAX_CHALKBOARD_DELTA_STROKES = 200
 
 type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'

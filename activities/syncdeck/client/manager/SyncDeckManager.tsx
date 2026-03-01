@@ -15,6 +15,7 @@ const DISCONNECTED_STATUS_DELAY_MS = 250
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
+const REVEAL_SYNC_PROTOCOL_VERSION = '2.0.0'
 
 interface SessionResponsePayload {
   session?: {
@@ -417,7 +418,7 @@ export function resolveRecoveredPresentationUrl(
 function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {
   return {
     type: 'reveal-sync',
-    version: '1.0.0',
+    version: REVEAL_SYNC_PROTOCOL_VERSION,
     action: 'command',
     source: 'activebits-syncdeck-host',
     role: 'instructor',
@@ -599,7 +600,7 @@ export function buildBoundaryClearedPayload(
 ): Record<string, unknown> {
   return {
     type: 'reveal-sync',
-    version: '1.0.0',
+    version: REVEAL_SYNC_PROTOCOL_VERSION,
     action: 'studentBoundaryChanged',
     source: 'activebits-syncdeck-host',
     role: 'instructor',
@@ -687,7 +688,7 @@ export function toChalkboardRelayCommand(rawPayload: unknown): Record<string, un
   if (envelope?.type === 'reveal-sync' && envelope.action === 'command' && commandName) {
     return {
       type: 'reveal-sync',
-      version: typeof envelope.version === 'string' ? envelope.version : '1.0.0',
+      version: typeof envelope.version === 'string' ? envelope.version : REVEAL_SYNC_PROTOCOL_VERSION,
       action: 'command',
       source: 'activebits-syncdeck-host',
       role: 'instructor',
@@ -711,7 +712,7 @@ export function toChalkboardRelayCommand(rawPayload: unknown): Record<string, un
 
   return {
     type: 'reveal-sync',
-    version: typeof envelope?.version === 'string' ? envelope.version : '1.0.0',
+    version: typeof envelope?.version === 'string' ? envelope.version : REVEAL_SYNC_PROTOCOL_VERSION,
     action: 'command',
     source: 'activebits-syncdeck-host',
     role: 'instructor',
@@ -748,7 +749,7 @@ function buildChalkboardStateRelayWithStorage(storage: string, template: unknown
   const envelope = parseRevealSyncEnvelope(template)
   return {
     type: 'reveal-sync',
-    version: typeof envelope?.version === 'string' ? envelope.version : '1.0.0',
+    version: typeof envelope?.version === 'string' ? envelope.version : REVEAL_SYNC_PROTOCOL_VERSION,
     action: 'command',
     source: 'activebits-syncdeck-host',
     role: 'instructor',
@@ -798,7 +799,7 @@ export function buildRestoreCommandFromPayload(payload: unknown): unknown {
 
       return {
         type: 'reveal-sync',
-        version: '1.0.0',
+        version: REVEAL_SYNC_PROTOCOL_VERSION,
         action: 'command',
         source: 'activebits-syncdeck-host',
         role: 'instructor',
@@ -861,7 +862,7 @@ export function buildRestoreCommandFromPayload(payload: unknown): unknown {
 
   return {
     type: 'reveal-sync',
-    version: typeof envelope.version === 'string' ? envelope.version : '1.0.0',
+    version: typeof envelope.version === 'string' ? envelope.version : REVEAL_SYNC_PROTOCOL_VERSION,
     action: 'command',
     source: 'activebits-syncdeck-host',
     role: 'instructor',
@@ -953,9 +954,12 @@ export function attachInstructorIndicesToBoundaryChangePayload(
 }
 
 export function buildForceSyncBoundaryCommandMessage(indices: { h: number; v: number; f: number }): Record<string, unknown> {
-  return buildRevealCommandMessage('setStudentBoundary', {
-    indices,
-    syncToBoundary: true,
+  return buildRevealCommandMessage('syncToInstructor', {
+    state: {
+      indexh: indices.h,
+      indexv: indices.v,
+      indexf: indices.f,
+    },
   })
 }
 
@@ -1611,7 +1615,7 @@ const SyncDeckManager: FC = () => {
     targetWindow.postMessage(
       {
         type: 'reveal-sync',
-        version: '1.0.0',
+        version: REVEAL_SYNC_PROTOCOL_VERSION,
         action: 'requestState',
         source: 'activebits-syncdeck-host',
         role: 'instructor',
