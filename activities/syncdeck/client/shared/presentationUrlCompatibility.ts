@@ -13,31 +13,53 @@ export function isLoopbackHostname(hostname: string): boolean {
   )
 }
 
+function parseValidatedPresentationUrl(
+  value: string,
+  hostProtocol?: string | null,
+): { parsedUrl: URL | null; validationError: string | null } {
+  const normalizedValue = value.trim()
+  if (normalizedValue.length === 0) {
+    return {
+      parsedUrl: null,
+      validationError: null,
+    }
+  }
+
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(normalizedValue)
+  } catch {
+    return {
+      parsedUrl: null,
+      validationError: 'Presentation URL must be a valid http(s) URL',
+    }
+  }
+
+  if ((parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') || parsedUrl.hostname.length === 0) {
+    return {
+      parsedUrl: null,
+      validationError: 'Presentation URL must be a valid http(s) URL',
+    }
+  }
+
+  if (hostProtocol === 'https:' && parsedUrl.protocol !== 'https:' && !isLoopbackHostname(parsedUrl.hostname)) {
+    return {
+      parsedUrl: null,
+      validationError: MIXED_CONTENT_PRESENTATION_ERROR,
+    }
+  }
+
+  return {
+    parsedUrl,
+    validationError: null,
+  }
+}
+
 export function getPresentationUrlValidationError(
   value: string,
   hostProtocol?: string | null,
 ): string | null {
-  const normalizedValue = value.trim()
-  if (normalizedValue.length === 0) {
-    return null
-  }
-
-  let parsed: URL
-  try {
-    parsed = new URL(normalizedValue)
-  } catch {
-    return 'Presentation URL must be a valid http(s) URL'
-  }
-
-  if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.hostname.length === 0) {
-    return 'Presentation URL must be a valid http(s) URL'
-  }
-
-  if (hostProtocol === 'https:' && parsed.protocol !== 'https:' && !isLoopbackHostname(parsed.hostname)) {
-    return MIXED_CONTENT_PRESENTATION_ERROR
-  }
-
-  return null
+  return parseValidatedPresentationUrl(value, hostProtocol).validationError
 }
 
 function isLikelySafari(userAgent: string): boolean {
@@ -63,28 +85,20 @@ export function getStudentPresentationCompatibilityError(params: {
   hostProtocol?: string | null
   userAgent?: string | null
 }): string | null {
-  const validationError = getPresentationUrlValidationError(params.value, params.hostProtocol)
+  const { parsedUrl, validationError } = parseValidatedPresentationUrl(params.value, params.hostProtocol)
   if (validationError != null) {
     return validationError
   }
 
-  const normalizedValue = params.value.trim()
-  if (normalizedValue.length === 0) {
+  if (parsedUrl == null) {
     return null
-  }
-
-  let parsed: URL
-  try {
-    parsed = new URL(normalizedValue)
-  } catch {
-    return 'Presentation URL must be a valid http(s) URL'
   }
 
   const userAgent = typeof params.userAgent === 'string' ? params.userAgent : ''
   if (
     params.hostProtocol === 'https:' &&
-    parsed.protocol === 'http:' &&
-    isLoopbackHostname(parsed.hostname) &&
+    parsedUrl.protocol === 'http:' &&
+    isLoopbackHostname(parsedUrl.hostname) &&
     isLikelySafari(userAgent)
   ) {
     return SAFARI_LOOPBACK_PRESENTATION_ERROR
