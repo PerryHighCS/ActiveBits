@@ -155,6 +155,7 @@ When scaling to multiple instances:
 2. **Pub/Sub**: Already configured via Valkey for cross-instance broadcasts
 3. **Cache Coordination**: Each instance maintains its own keepalive cache; pub/sub handles consistency
 4. **Persistent Sessions**: Shared via Valkey; waiters are instance-local
+5. **Teacher/manager cookies**: Keep the `persistent_sessions` httpOnly cookie path and same-site behavior intact, since activities such as SyncDeck and Video Sync recover manager credentials from a teacher-validated persistent-session cookie after redirects into `/manage/...`
 
 **To scale horizontally**:
 1. Go to **Settings** → **Scaling**

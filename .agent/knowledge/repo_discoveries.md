@@ -303,10 +303,10 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-01
 - Area: activities
-- Discovery: Video Sync does not currently have a general manager-auth flow for join-code sessions or multi-manager websocket access; outside the permalink waiting-room/passcode path, `role=manager` is a known trust assumption rather than an enforced security boundary.
-- Why it matters: Manager websocket auth cannot be tightened safely in isolation yet, because rejecting unauthenticated manager sockets would break the current workflow and there is no server-issued credential flow for normal manager entry.
-- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/activity.config.ts`
-- Follow-up action: If Video Sync needs manager-only websocket authorization, introduce a real manager credential flow first; a future join-code-based manager entry is the likely place to lock this down without breaking multi-manager use.
+- Discovery: Video Sync manager auth now follows the same session-scoped instructor passcode pattern as SyncDeck: temporary sessions return an `instructorPasscode` captured via `createSessionBootstrap`, manager websocket/config/command routes require that passcode, and persistent permalink sessions recover it through a teacher-cookie-validated `/api/video-sync/:sessionId/instructor-passcode` route instead of trusting `role=manager`.
+- Why it matters: Manager authority is now derived from server-issued session credentials plus persistent-session teacher-cookie validation, so students cannot self-upgrade by picking `role=manager` or calling manager HTTP endpoints with only a `sessionId`.
+- Evidence: `activities/video-sync/activity.config.ts`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: If Video Sync later needs finer-grained multi-manager entry, layer it on top of the same instructor-passcode/session bootstrap contract rather than reintroducing client-declared manager roles.
 
 - Date: 2026-03-01
 - Area: activities
@@ -318,10 +318,10 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-01
 - Area: activities
-- Discovery: Video Sync playback/control endpoints (`/api/video-sync/:sessionId/command` and config patch flow) are likewise unauthenticated today; possession of the sessionId is effectively enough to issue manager-style state changes.
-- Why it matters: This is the HTTP analogue of the unauthenticated manager websocket role assumption: students or anyone who can guess/obtain the sessionId can currently grief playback unless a broader manager-auth mechanism is added.
-- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`
-- Follow-up action: Treat manager authorization as a single cross-cutting gap for Video Sync; when a real manager credential flow is introduced, apply it consistently to both websocket role elevation and command/config HTTP endpoints.
+- Discovery: Video Sync now uses one manager-authorization boundary across websocket and HTTP surfaces: the same `instructorPasscode` gates `role=manager` websocket connections and the session config/playback command endpoints, while student telemetry events remain open.
+- Why it matters: This avoids drifting into partially protected manager behavior where one control surface is secured but another still trusts session possession.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`
+- Follow-up action: Keep future manager-only endpoints on the same passcode requirement unless the activity adopts a stronger signed-token/session identity model.
 
 - Date: 2026-03-01
 - Area: activities

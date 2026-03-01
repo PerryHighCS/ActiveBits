@@ -86,8 +86,14 @@ function installIframeReadyBridge(): void {
   }
 }
 
-function ensureScriptTag(): void {
-  if (document.getElementById(YOUTUBE_IFRAME_API_SCRIPT_ID)) {
+function removeScriptTag(): void {
+  document.getElementById(YOUTUBE_IFRAME_API_SCRIPT_ID)?.remove()
+}
+
+function ensureScriptTag(onError: () => void): void {
+  const existing = document.getElementById(YOUTUBE_IFRAME_API_SCRIPT_ID)
+  if (existing instanceof HTMLScriptElement) {
+    existing.onerror = onError
     return
   }
 
@@ -95,7 +101,12 @@ function ensureScriptTag(): void {
   script.id = YOUTUBE_IFRAME_API_SCRIPT_ID
   script.src = YOUTUBE_IFRAME_API_SRC
   script.async = true
+  script.onerror = onError
   document.head.appendChild(script)
+}
+
+function resetApiLoadState(): void {
+  apiLoadPromise = null
 }
 
 export async function loadYoutubeIframeApi(): Promise<YoutubeNamespace> {
@@ -109,27 +120,60 @@ export async function loadYoutubeIframeApi(): Promise<YoutubeNamespace> {
   }
 
   apiLoadPromise = new Promise<YoutubeNamespace>((resolve, reject) => {
+    let settled = false
+
+    const callbacks = ensureReadyCallbackQueue()
+    let finalizeRef: (() => void) | null = null
+
+    const finishReject = (error: Error) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      window.clearTimeout(timeoutId)
+      resetApiLoadState()
+      removeScriptTag()
+      if (finalizeRef) {
+        const index = callbacks.indexOf(finalizeRef)
+        if (index >= 0) {
+          callbacks.splice(index, 1)
+        }
+      }
+      reject(error)
+    }
+
     const timeoutId = window.setTimeout(() => {
-      reject(new Error('YouTube IFrame API did not initialize within timeout'))
+      finishReject(new Error('YouTube IFrame API did not initialize within timeout'))
     }, 10_000)
 
     const finalize = () => {
+      if (settled) {
+        return
+      }
       const namespace = resolveYoutubeNamespace()
       if (!namespace) {
         return
       }
 
+      settled = true
       window.clearTimeout(timeoutId)
       resolve(namespace)
     }
+    finalizeRef = finalize
 
-    ensureReadyCallbackQueue().push(finalize)
+    callbacks.push(finalize)
     installIframeReadyBridge()
-    ensureScriptTag()
+    ensureScriptTag(() => {
+      finishReject(new Error('YouTube IFrame API script failed to load'))
+    })
     finalize()
   })
 
   return apiLoadPromise
+}
+
+export function resetYoutubeIframeApiForTests(): void {
+  resetApiLoadState()
 }
 
 export function resolveYoutubePlayerState(namespace: YoutubeNamespace | null): {
