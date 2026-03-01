@@ -132,6 +132,12 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     const player = playerRef.current
     if (!player || !nextState.videoId) return
 
+    if (source === 'sync') {
+      player.mute()
+    } else {
+      player.unMute()
+    }
+
     const desiredPositionSec = computeDesiredPositionSec(nextState)
     const now = Date.now()
 
@@ -246,6 +252,9 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
             onReady: () => {
               if (cancelled) return
               setPlayerReady(true)
+              if (!isSoloMode) {
+                player.mute()
+              }
               applyStateToPlayer(state, isSoloMode ? 'solo' : 'sync')
             },
             onError: () => {
@@ -386,12 +395,46 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const retryAutoplay = (): void => {
     const player = playerRef.current
     if (!player) return
+    if (!isSoloMode) {
+      player.mute()
+    }
     player.playVideo()
     setAutoplayBlocked(false)
   }
 
+  if (!isSoloMode) {
+    return (
+      <div className="fixed inset-0 z-30 bg-black">
+        {state.videoId ? (
+          <div className="absolute inset-0 w-full h-full bg-black">
+            <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync player" />
+          </div>
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-300">
+            Waiting for instructor to configure the video.
+          </div>
+        )}
+
+        {errorMessage && (
+          <div className="absolute top-4 left-4 right-4 md:left-auto md:right-4 md:w-105 border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
+            {errorMessage}
+          </div>
+        )}
+
+        {autoplayBlocked && (
+          <div className="absolute bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-105 border border-amber-300 bg-amber-50 rounded p-3 text-sm text-amber-900">
+            Browser blocked autoplay. Click once to start, then follow the classroom display.
+            <div className="mt-2">
+              <Button onClick={retryAutoplay}>Click to start playback</Button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
-    <div className="w-full max-w-5xl mx-auto p-4 space-y-4">
+    <div className="w-full p-4 space-y-4">
       <h1 className="text-2xl font-bold">Video Sync</h1>
 
       {errorMessage && (
@@ -423,27 +466,10 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         </section>
       )}
 
-      {!isSoloMode && (
-        <section className="border rounded p-4 space-y-2" aria-labelledby="video-sync-student-status">
-          <h2 id="video-sync-student-status" className="text-xl font-semibold">Synchronized student view</h2>
-          <p className="text-sm text-gray-700">
-            Playback is instructor-controlled in synchronized mode.
-          </p>
-          {autoplayBlocked && (
-            <div className="border border-amber-300 bg-amber-50 rounded p-3 text-sm">
-              Browser blocked autoplay. Use click-to-start and follow the classroom display until playback starts.
-              <div className="mt-2">
-                <Button onClick={retryAutoplay}>Click to start playback</Button>
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
       <section className="border rounded p-4" aria-labelledby="video-sync-player">
         <h2 id="video-sync-player" className="text-xl font-semibold mb-2">Player</h2>
         {state.videoId ? (
-          <div className={`w-full rounded border overflow-hidden bg-black ${isSoloMode ? 'aspect-video' : 'h-[calc(100vh-13rem)] min-h-[420px]'}`}>
+          <div className="w-full rounded border overflow-hidden bg-black aspect-video">
             <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync player" />
           </div>
         ) : (

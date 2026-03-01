@@ -398,90 +398,94 @@ export default function VideoSyncManager() {
 
   const displayPosition = useMemo(() => computeDesiredPositionSec(state), [state])
 
+  if (setupMode) {
+    return (
+      <div className="w-full p-4 space-y-4">
+        <SessionHeader
+          activityName="Video Sync"
+          sessionId={sessionId}
+          onEndSession={handleEndSession}
+        />
+
+        {errorMessage && (
+          <div className="border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
+            {errorMessage}
+          </div>
+        )}
+
+        <section className="max-w-2xl border rounded p-4 space-y-3" aria-labelledby="video-sync-config-heading">
+          <h2 id="video-sync-config-heading" className="text-xl font-semibold">Step 1: Configure video source</h2>
+          <label className="block">
+            <span className="block mb-1 font-medium">YouTube URL</span>
+            <input
+              className="border rounded p-2 w-full"
+              type="url"
+              value={sourceUrlInput}
+              onChange={(event) => setSourceUrlInput(event.target.value)}
+              placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
+              aria-label="YouTube URL"
+            />
+          </label>
+
+          <label className="block max-w-xs">
+            <span className="block mb-1 font-medium">Advisory stop time (seconds)</span>
+            <input
+              className="border rounded p-2 w-full"
+              type="number"
+              min={0}
+              step="0.1"
+              value={stopSecInput}
+              onChange={(event) => setStopSecInput(event.target.value)}
+              aria-label="Stop time in seconds"
+            />
+          </label>
+
+          <Button onClick={() => void saveConfig()}>Start instructor view</Button>
+        </section>
+      </div>
+    )
+  }
+
   return (
-    <div className="w-full max-w-6xl mx-auto p-4 space-y-4">
-      <SessionHeader
-        activityName="Video Sync"
-        sessionId={sessionId}
-        onEndSession={handleEndSession}
-      />
+    <div className="fixed inset-0 z-30 bg-black text-white">
+      <div className="absolute top-0 left-0 right-0 z-20 px-3 py-2 bg-black/80 border-b border-white/10">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <div className="min-w-0 flex items-center gap-3">
+            <span className="font-semibold whitespace-nowrap">Video Sync Instructor</span>
+            <span className="text-gray-300 truncate">Session: {sessionId ?? '—'}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button onClick={openSetupMode}>Change video</Button>
+            <Button onClick={() => void handleEndSession()}>End session</Button>
+          </div>
+        </div>
+      </div>
 
       {errorMessage && (
-        <div className="border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
+        <div className="absolute top-20 right-4 z-20 w-[min(28rem,calc(100vw-2rem))] border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
           {errorMessage}
         </div>
       )}
 
-      <section className="border rounded p-4 space-y-3" aria-labelledby="video-sync-config-heading">
-        <h2 id="video-sync-config-heading" className="text-xl font-semibold">
-          {setupMode ? 'Step 1: Configure video source' : 'Video source'}
-        </h2>
-        <label className="block">
-          <span className="block mb-1 font-medium">YouTube URL</span>
-          <input
-            className="border rounded p-2 w-full"
-            type="url"
-            value={sourceUrlInput}
-            onChange={(event) => setSourceUrlInput(event.target.value)}
-            placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
-            aria-label="YouTube URL"
-          />
-        </label>
+      <div className="absolute inset-0 w-full h-full bg-black">
+        {state.videoId ? (
+          <div className="w-full h-full">
+            <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync manager preview" />
+          </div>
+        ) : (
+          <div className="h-full flex items-center justify-center text-sm text-gray-300">
+            Configure a YouTube URL to preview the synchronized video.
+          </div>
+        )}
+      </div>
 
-        <label className="block max-w-xs">
-          <span className="block mb-1 font-medium">Advisory stop time (seconds)</span>
-          <input
-            className="border rounded p-2 w-full"
-            type="number"
-            min={0}
-            step="0.1"
-            value={stopSecInput}
-            onChange={(event) => setStopSecInput(event.target.value)}
-            aria-label="Stop time in seconds"
-          />
-        </label>
-
-        <div className="flex items-center gap-2">
-          <Button onClick={() => void saveConfig()}>
-            {setupMode ? 'Start instructor view' : 'Save video settings'}
-          </Button>
-          {!setupMode && (
-            <Button onClick={openSetupMode}>Change video</Button>
-          )}
-        </div>
-      </section>
-
-      {!setupMode && (
-        <>
-          <section className="border rounded p-4" aria-labelledby="video-sync-preview-heading">
-            <h2 id="video-sync-preview-heading" className="text-xl font-semibold mb-2">Instructor video view</h2>
-            {state.videoId ? (
-              <div className="w-full h-[calc(100vh-18rem)] min-h-[420px] rounded border overflow-hidden bg-black">
-                <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync manager preview" />
-              </div>
-            ) : (
-              <p className="text-sm text-gray-700">Configure a YouTube URL to preview the synchronized video.</p>
-            )}
-            <p className="text-sm text-gray-700 mt-2" aria-live="polite">
-              Use the built-in video controls for play/pause/seek. Student views follow automatically.
-            </p>
-          </section>
-
-          <section className="border rounded p-4 space-y-2" aria-labelledby="video-sync-status-heading">
-            <h2 id="video-sync-status-heading" className="text-xl font-semibold">Session status</h2>
-            <div className="text-sm text-gray-700">
-              <div>Video ID: {state.videoId || 'Not configured'}</div>
-              <div>Playing: {state.isPlaying ? 'Yes' : 'No'}</div>
-              <div>Current position: {displayPosition.toFixed(2)}s</div>
-              <div>Start: {state.startSec.toFixed(2)}s</div>
-              <div>Stop: {state.stopSec != null ? `${state.stopSec.toFixed(2)}s` : 'Not set'}</div>
-              <div>Active connections: {telemetry.connections.activeCount}</div>
-              <div>Autoplay blocked: {telemetry.autoplay.blockedCount}</div>
-              <div>Unsync events: {telemetry.sync.unsyncEvents}</div>
-            </div>
-          </section>
-        </>
-      )}
+      <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-2 bg-black/80 border-t border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-200" aria-live="polite">
+        <span>Video: {state.videoId || 'Not configured'}</span>
+        <span>Playing: {state.isPlaying ? 'Yes' : 'No'}</span>
+        <span>Position: {displayPosition.toFixed(2)}s</span>
+        <span>Connections: {telemetry.connections.activeCount}</span>
+        <span>Unsync: {telemetry.sync.unsyncEvents}</span>
+      </div>
     </div>
   )
 }
