@@ -285,3 +285,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/shared/presentationPreflight.ts`; `activities/syncdeck/client/shared/presentationPreflight.test.ts`
 - Follow-up action: Keep preflight strict on `origin`/`source`, but treat standard startup handshake messages as sufficient proof that the reveal-sync bridge is alive.
 - Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck host/student boundary canonicalization now uses the documented end-of-slide sentinel `f: -1` and boundary-specific comparison helpers instead of `Number.MAX_SAFE_INTEGER`.
+- Why it matters: The old sentinel leaked an internal comparison hack into boundary payloads and drifted from the reveal-sync schema; using `f: -1` keeps wire semantics aligned while still preserving “end of boundary slide” behavior in suppression and snapback logic.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: If the iframe starts exposing explicit fragment-count metadata in state payloads, revisit boundary comparison helpers and remove the remaining sentinel semantics entirely.
+- Owner: Codex

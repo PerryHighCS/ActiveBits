@@ -9,7 +9,7 @@ const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
 const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
-const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
+const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 
 interface SessionResponsePayload {
@@ -449,7 +449,7 @@ function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: 
   return {
     h: indices.h,
     v: indices.v,
-    f: SLIDE_END_FRAGMENT_INDEX,
+    f: CANONICAL_BOUNDARY_FRAGMENT_INDEX,
   }
 }
 
@@ -458,6 +458,52 @@ function isWithinReleasedVerticalStack(
   explicitBoundary: { h: number; v: number; f: number },
 ): boolean {
   return indices.h === explicitBoundary.h && indices.v > explicitBoundary.v
+}
+
+function isAtOrBehindExplicitBoundary(
+  instructorIndices: { h: number; v: number; f: number },
+  explicitBoundary: { h: number; v: number; f: number },
+): boolean {
+  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
+    return false
+  }
+
+  if (instructorIndices.h !== explicitBoundary.h) {
+    return instructorIndices.h < explicitBoundary.h
+  }
+
+  if (instructorIndices.v !== explicitBoundary.v) {
+    return instructorIndices.v < explicitBoundary.v
+  }
+
+  if (explicitBoundary.f === CANONICAL_BOUNDARY_FRAGMENT_INDEX) {
+    return true
+  }
+
+  return instructorIndices.f <= explicitBoundary.f
+}
+
+function hasExceededExplicitBoundary(
+  instructorIndices: { h: number; v: number; f: number },
+  explicitBoundary: { h: number; v: number; f: number },
+): boolean {
+  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
+    return false
+  }
+
+  if (instructorIndices.h !== explicitBoundary.h) {
+    return instructorIndices.h > explicitBoundary.h
+  }
+
+  if (instructorIndices.v !== explicitBoundary.v) {
+    return instructorIndices.v > explicitBoundary.v
+  }
+
+  if (explicitBoundary.f === CANONICAL_BOUNDARY_FRAGMENT_INDEX) {
+    return false
+  }
+
+  return instructorIndices.f > explicitBoundary.f
 }
 
 function extractIndicesFromRevealStateObject(value: unknown): { h: number; v: number; f: number } | null {
@@ -501,11 +547,7 @@ export function shouldSuppressInstructorStateBroadcast(
     return false
   }
 
-  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
-    return false
-  }
-
-  return compareIndices(instructorIndices, explicitBoundary) <= 0
+  return isAtOrBehindExplicitBoundary(instructorIndices, explicitBoundary)
 }
 
 export function shouldClearExplicitBoundary(
@@ -516,11 +558,7 @@ export function shouldClearExplicitBoundary(
     return false
   }
 
-  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
-    return false
-  }
-
-  return compareIndices(instructorIndices, explicitBoundary) > 0
+  return hasExceededExplicitBoundary(instructorIndices, explicitBoundary)
 }
 
 export function buildBoundaryClearedPayload(

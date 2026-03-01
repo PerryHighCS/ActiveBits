@@ -53,7 +53,7 @@ interface RevealStateIndicesPayload {
 
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
-const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
+const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
   if (a.h !== b.h) return a.h - b.h
@@ -65,7 +65,7 @@ function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: 
   return {
     h: indices.h,
     v: indices.v,
-    f: SLIDE_END_FRAGMENT_INDEX,
+    f: CANONICAL_BOUNDARY_FRAGMENT_INDEX,
   }
 }
 
@@ -84,7 +84,19 @@ function hasExceededReleasedBoundary(
     return false
   }
 
-  return compareIndices(indices, boundary) > 0
+  if (indices.h !== boundary.h) {
+    return indices.h > boundary.h
+  }
+
+  if (indices.v !== boundary.v) {
+    return indices.v > boundary.v
+  }
+
+  if (boundary.f === CANONICAL_BOUNDARY_FRAGMENT_INDEX) {
+    return false
+  }
+
+  return indices.f > boundary.f
 }
 
 function resolveEffectiveBoundary(
