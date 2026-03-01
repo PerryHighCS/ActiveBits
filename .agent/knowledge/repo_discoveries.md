@@ -30,6 +30,22 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: If class sessions need stronger identity guarantees across reconnects, consider deriving/validating student identity from session auth rather than client-generated IDs.
 - Owner: Codex
 
+- Date: 2026-03-01
+- Area: activities
+- Discovery: Video Sync does not currently have a general manager-auth flow for join-code sessions or multi-manager websocket access; outside the permalink waiting-room/passcode path, `role=manager` is a known trust assumption rather than an enforced security boundary.
+- Why it matters: Manager websocket auth cannot be tightened safely in isolation yet, because rejecting unauthenticated manager sockets would break the current workflow and there is no server-issued credential flow for normal manager entry.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/activity.config.ts`
+- Follow-up action: If Video Sync needs manager-only websocket authorization, introduce a real manager credential flow first; a future join-code-based manager entry is the likely place to lock this down without breaking multi-manager use.
+- Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: Video Sync playback/control endpoints (`/api/video-sync/:sessionId/command` and config patch flow) are likewise unauthenticated today; possession of the sessionId is effectively enough to issue manager-style state changes.
+- Why it matters: This is the HTTP analogue of the unauthenticated manager websocket role assumption: students or anyone who can guess/obtain the sessionId can currently grief playback unless a broader manager-auth mechanism is added.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`
+- Follow-up action: Treat manager authorization as a single cross-cutting gap for Video Sync; when a real manager credential flow is introduced, apply it consistently to both websocket role elevation and command/config HTTP endpoints.
+- Owner: Codex
+
 - Date: 2026-02-28
 - Area: activities
 - Discovery: The new `video-sync` activity uses a versioned websocket envelope (`version`, `activity`, `sessionId`, `type`, `timestamp`, `payload`) for all realtime traffic (`state-snapshot`, `state-update`, `heartbeat`, `telemetry-update`, `error`) so message parsing remains forward-compatible as payload shapes evolve.

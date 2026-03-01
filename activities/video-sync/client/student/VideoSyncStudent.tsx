@@ -13,6 +13,7 @@ import {
   type YoutubeNamespace,
   type YoutubePlayerLike,
 } from '../youtubeIframeApi'
+import { parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
 
 interface VideoSyncStudentProps {
   sessionData?: {
@@ -53,10 +54,6 @@ export function hasInstructorPlaybackStarted(state: VideoSyncState): boolean {
   return state.positionSec > state.startSec
 }
 
-function clampNumber(value: number): number {
-  return Number.isFinite(value) ? Math.max(0, value) : 0
-}
-
 function createStudentClientId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -66,7 +63,7 @@ function createStudentClientId(): string {
   return `student-${Date.now()}-${random}`
 }
 
-function parseYouTubeVideoId(urlValue: string): { videoId: string | null; startSec: number; stopSec: number | null } {
+export function parseYouTubeVideoId(urlValue: string): { videoId: string | null; startSec: number; stopSec: number | null } {
   try {
     const url = new URL(urlValue)
     const host = url.hostname.toLowerCase()
@@ -85,13 +82,17 @@ function parseYouTubeVideoId(urlValue: string): { videoId: string | null; startS
     const startRaw = url.searchParams.get('start') ?? url.searchParams.get('t')
     const stopRaw = url.searchParams.get('end')
 
-    const startSec = startRaw ? clampNumber(Number.parseFloat(startRaw)) : 0
-    const stopParsed = stopRaw == null || stopRaw.length === 0 ? null : clampNumber(Number.parseFloat(stopRaw))
+    const startSec = parseYouTubeTimestampSeconds(startRaw) ?? 0
+    const stopParsed = parseYouTubeTimestampSeconds(stopRaw)
 
     return { videoId, startSec, stopSec: stopParsed }
   } catch {
     return { videoId: null, startSec: 0, stopSec: null }
   }
+}
+
+export function shouldBlockStudentOverlayKey(key: string): boolean {
+  return key !== 'Tab' && key !== 'Escape'
 }
 
 export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps) {
@@ -455,6 +456,10 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   }
 
   const handleStudentOverlayKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (!shouldBlockStudentOverlayKey(event.key)) {
+      return
+    }
+
     event.preventDefault()
     event.stopPropagation()
   }
@@ -483,7 +488,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
         {state.videoId && !hasStartedInstructorPlayback && (
           <div
-            className="absolute inset-0 z-15 flex items-center justify-center bg-black"
+            className="absolute inset-0 z-20 flex items-center justify-center bg-black"
             role="status"
             aria-live="polite"
             aria-atomic="true"
@@ -493,13 +498,13 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         )}
 
         {errorMessage && (
-          <div className="absolute top-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-105 border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
+          <div className="absolute top-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-[26.25rem] border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
             {errorMessage}
           </div>
         )}
 
         {autoplayBlocked && (
-          <div className="absolute bottom-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-105 border border-amber-300 bg-amber-50 rounded p-3 text-sm text-amber-900">
+          <div className="absolute bottom-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-[26.25rem] border border-amber-300 bg-amber-50 rounded p-3 text-sm text-amber-900">
             Browser blocked autoplay. Click once to start, then follow the classroom display.
             <div className="mt-2">
               <Button onClick={retryAutoplay}>Click to start playback</Button>

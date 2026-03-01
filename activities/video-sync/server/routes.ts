@@ -107,6 +107,10 @@ interface ParsedVideoSource {
   stopSec: number | null
 }
 
+type ParsedVideoSourceResult =
+  | { ok: true; source: ParsedVideoSource }
+  | { ok: false; reason: 'invalid-url' | 'invalid-video-id' | 'invalid-time-range' }
+
 const HEARTBEAT_INTERVAL_MS = 3000
 const UNSYNC_STALE_MS = 20_000
 const WS_OPEN_READY_STATE = 1
@@ -148,12 +152,12 @@ function parseTimestampSeconds(value: string | null): number | null {
   return clampSeconds(total)
 }
 
-function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): ParsedVideoSource | null {
+function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): ParsedVideoSourceResult {
   let parsedUrl: URL
   try {
     parsedUrl = new URL(sourceUrl)
   } catch {
-    return null
+    return { ok: false, reason: 'invalid-url' }
   }
 
   const host = parsedUrl.hostname.toLowerCase()
@@ -172,7 +176,7 @@ function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): Par
   }
 
   if (!videoId) {
-    return null
+    return { ok: false, reason: 'invalid-video-id' }
   }
 
   const startFromUrl = parseTimestampSeconds(parsedUrl.searchParams.get('start') ?? parsedUrl.searchParams.get('t')) ?? 0
@@ -180,13 +184,16 @@ function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): Par
   const stopSec = stopOverride ?? stopFromUrl
 
   if (stopSec != null && stopSec <= startFromUrl) {
-    return null
+    return { ok: false, reason: 'invalid-time-range' }
   }
 
   return {
-    videoId,
-    startSec: startFromUrl,
-    stopSec,
+    ok: true,
+    source: {
+      videoId,
+      startSec: startFromUrl,
+      stopSec,
+    },
   }
 }
 
@@ -427,6 +434,7 @@ async function broadcastEnvelope(
   if (sessions.publishBroadcast) {
     try {
       await sessions.publishBroadcast(`session:${sessionId}:broadcast`, envelope as unknown as Record<string, unknown>)
+      return
     } catch (error) {
       console.error('Failed to publish video-sync broadcast:', error)
     }
@@ -482,7 +490,9 @@ function ensureHeartbeat(
         telemetry: data.telemetry,
       })
       await broadcastEnvelope(sessions, ws, sessionId, envelope)
-    })()
+    })().catch((error: unknown) => {
+      console.error(`Video sync heartbeat failed for session ${sessionId}:`, error)
+    })
   }, HEARTBEAT_INTERVAL_MS)
 
   heartbeatTimers.set(sessionId, timer)
@@ -567,6 +577,16 @@ export default function setupVideoSyncRoutes(
     }
 
     const data = ensureVideoSyncSessionData(session)
+    if (data.state.videoId.length > 0) {
+      data.telemetry.error = {
+        code: 'CONFIG_LOCKED',
+        message: 'Video source is already configured for this session.',
+      }
+      await sessions.set(session.id, session)
+      res.status(409).json({ error: 'CONFIG_LOCKED', message: data.telemetry.error.message })
+      return
+    }
+
     const body = isPlainObject(req.body) ? (req.body as ConfigBody) : {}
 
     if (typeof body.sourceUrl !== 'string' || body.sourceUrl.trim().length === 0) {
@@ -597,7 +617,17 @@ export default function setupVideoSyncRoutes(
     }
 
     const parsedSource = parseYouTubeSource(body.sourceUrl.trim(), stopOverride)
-    if (!parsedSource) {
+    if (!parsedSource.ok) {
+      if (parsedSource.reason === 'invalid-time-range') {
+        data.telemetry.error = {
+          code: 'INVALID_TIME_RANGE',
+          message: 'stopSec must be greater than startSec and both must be >= 0.',
+        }
+        await sessions.set(session.id, session)
+        res.status(400).json({ error: 'INVALID_TIME_RANGE', message: data.telemetry.error.message })
+        return
+      }
+
       data.telemetry.error = {
         code: 'INVALID_VIDEO_ID',
         message: 'Could not determine a valid YouTube video id from sourceUrl.',
@@ -611,10 +641,10 @@ export default function setupVideoSyncRoutes(
     data.state = {
       ...data.state,
       provider,
-      videoId: parsedSource.videoId,
-      startSec: parsedSource.startSec,
-      stopSec: parsedSource.stopSec,
-      positionSec: parsedSource.startSec,
+      videoId: parsedSource.source.videoId,
+      startSec: parsedSource.source.startSec,
+      stopSec: parsedSource.source.stopSec,
+      positionSec: parsedSource.source.startSec,
       isPlaying: false,
       playbackRate: 1,
       updatedBy: 'manager',

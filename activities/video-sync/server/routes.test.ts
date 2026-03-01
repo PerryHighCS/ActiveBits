@@ -69,6 +69,21 @@ function createMockWs() {
   }
 }
 
+function createSocketRecorder(sessionId: string) {
+  const delivered: string[] = []
+
+  return {
+    socket: {
+      readyState: 1,
+      sessionId,
+      send(payload: string) {
+        delivered.push(payload)
+      },
+    },
+    delivered,
+  }
+}
+
 function createSessionStore(initial: Record<string, SessionRecord>) {
   const store = { ...initial }
   const published: Array<{ channel: string; message: Record<string, unknown> }> = []
@@ -171,6 +186,32 @@ void test('session patch rejects unsupported url', async () => {
   })
 })
 
+void test('session patch returns invalid time range when stop time is before parsed start time', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 20 },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    error: 'INVALID_TIME_RANGE',
+    message: 'stopSec must be greater than startSec and both must be >= 0.',
+  })
+})
+
 void test('session patch normalizes youtube source and publishes extensible envelope', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -208,6 +249,97 @@ void test('session patch normalizes youtube source and publishes extensible enve
   assert.equal(typeof message.timestamp, 'number')
   assert.equal(message.version, '1')
   assert.equal(typeof message.payload, 'object')
+})
+
+void test('session patch rejects reconfiguration after a video is already set', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  ;(session.data as { state: { videoId: string; startSec: number; stopSec: number | null } }).state.videoId = 'existing123'
+  ;(session.data as { state: { videoId: string; startSec: number; stopSec: number | null } }).state.startSec = 15
+  ;(session.data as { state: { videoId: string; startSec: number; stopSec: number | null } }).state.stopSec = 45
+  const storeState = createSessionStore({ s1: session })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 409)
+  assert.deepEqual(res.body, {
+    error: 'CONFIG_LOCKED',
+    message: 'Video source is already configured for this session.',
+  })
+})
+
+void test('session patch publishes through broadcast channel without direct local websocket send when pubsub is available', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const recorder = createSocketRecorder('s1')
+  ws.wss.clients.add(recorder.socket)
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(storeState.published.length, 1)
+  assert.deepEqual(recorder.delivered, [])
+})
+
+void test('session patch falls back to direct local websocket send when pubsub publish is unavailable', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const recorder = createSocketRecorder('s1')
+  ws.wss.clients.add(recorder.socket)
+
+  const sessionsWithoutPublish = {
+    get: storeState.sessions.get,
+    set: storeState.sessions.set,
+    subscribeToBroadcast: storeState.sessions.subscribeToBroadcast,
+  }
+
+  setupVideoSyncRoutes(app, sessionsWithoutPublish, ws as unknown as WsRouter)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(storeState.published.length, 0)
+  assert.equal(recorder.delivered.length, 1)
+  const payload = JSON.parse(recorder.delivered[0] ?? '{}') as { type?: unknown; sessionId?: unknown }
+  assert.equal(payload.type, 'state-update')
+  assert.equal(payload.sessionId, 's1')
 })
 
 void test('command route updates playback and emits extensible envelope', async () => {
