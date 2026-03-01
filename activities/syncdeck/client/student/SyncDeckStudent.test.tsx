@@ -323,6 +323,25 @@ void test('toRevealBoundaryCommandMessage maps state payload studentBoundary to 
   })
 })
 
+void test('toRevealBoundaryCommandMessage keeps released stack boundary canonical during same-h vertical movement', () => {
+  const result = toRevealBoundaryCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    role: 'instructor',
+    payload: {
+      studentBoundary: { h: 7, v: 0, f: 0 },
+      indices: { h: 7, v: 1, f: 0 },
+    },
+  })
+
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown } })?.payload?.indices, {
+    h: 7,
+    v: 0,
+    f: Number.MAX_SAFE_INTEGER,
+  })
+})
+
 void test('toRevealBoundaryCommandMessage uses instructor indices when set boundary is behind', () => {
   const result = toRevealBoundaryCommandMessage({
     type: 'reveal-sync',
@@ -360,6 +379,27 @@ void test('toRevealBoundaryCommandMessage sets syncToBoundary when student is be
   assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
     indices: { h: 2, v: 0, f: 0 },
     syncToBoundary: true,
+  })
+})
+
+void test('toRevealBoundaryCommandMessage does not snap lower child slide back to top of released stack', () => {
+  const result = toRevealBoundaryCommandMessage(
+    {
+      type: 'reveal-sync',
+      version: '1.0.0',
+      action: 'state',
+      role: 'instructor',
+      payload: {
+        studentBoundary: { h: 4, v: 0, f: 0 },
+        indices: { h: 4, v: 0, f: 0 },
+      },
+    },
+    { h: 4, v: 1, f: 0 },
+  )
+
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
+    indices: { h: 4, v: 0, f: Number.MAX_SAFE_INTEGER },
+    syncToBoundary: false,
   })
 })
 

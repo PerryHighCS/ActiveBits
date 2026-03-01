@@ -453,6 +453,13 @@ function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: 
   }
 }
 
+function isWithinReleasedVerticalStack(
+  indices: { h: number; v: number; f: number },
+  explicitBoundary: { h: number; v: number; f: number },
+): boolean {
+  return indices.h === explicitBoundary.h && indices.v > explicitBoundary.v
+}
+
 function extractIndicesFromRevealStateObject(value: unknown): { h: number; v: number; f: number } | null {
   if (!isPlainObject(value)) {
     return null
@@ -494,7 +501,26 @@ export function shouldSuppressInstructorStateBroadcast(
     return false
   }
 
+  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
+    return false
+  }
+
   return compareIndices(instructorIndices, explicitBoundary) <= 0
+}
+
+export function shouldClearExplicitBoundary(
+  instructorIndices: { h: number; v: number; f: number } | null,
+  explicitBoundary: { h: number; v: number; f: number } | null,
+): boolean {
+  if (!instructorIndices || !explicitBoundary) {
+    return false
+  }
+
+  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
+    return false
+  }
+
+  return compareIndices(instructorIndices, explicitBoundary) > 0
 }
 
 export function buildBoundaryClearedPayload(
@@ -1854,16 +1880,19 @@ const SyncDeckManager: FC = () => {
         if (
           envelope?.type === 'reveal-sync' &&
           envelope.action === 'state' &&
-          lastInstructorIndicesRef.current != null &&
-          explicitBoundaryRef.current != null &&
-          compareIndices(lastInstructorIndicesRef.current, explicitBoundaryRef.current) > 0
+          shouldClearExplicitBoundary(lastInstructorIndicesRef.current, explicitBoundaryRef.current)
         ) {
+          const instructorIndicesAtClear = lastInstructorIndicesRef.current
+          if (!instructorIndicesAtClear) {
+            return
+          }
+
           const targetWindow = presentationIframeRef.current?.contentWindow
           if (targetWindow && presentationOrigin) {
             targetWindow.postMessage(buildClearBoundaryCommandMessage(), presentationOrigin)
           }
 
-          const boundaryClearedPayload = buildBoundaryClearedPayload(lastInstructorIndicesRef.current)
+          const boundaryClearedPayload = buildBoundaryClearedPayload(instructorIndicesAtClear)
           try {
             socket.send(
               JSON.stringify({

@@ -69,6 +69,24 @@ function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: 
   }
 }
 
+function isWithinReleasedVerticalStack(
+  indices: { h: number; v: number; f: number },
+  boundary: { h: number; v: number; f: number },
+): boolean {
+  return indices.h === boundary.h && indices.v > boundary.v
+}
+
+function hasExceededReleasedBoundary(
+  indices: { h: number; v: number; f: number },
+  boundary: { h: number; v: number; f: number },
+): boolean {
+  if (isWithinReleasedVerticalStack(indices, boundary)) {
+    return false
+  }
+
+  return compareIndices(indices, boundary) > 0
+}
+
 function resolveEffectiveBoundary(
   instructorIndices: { h: number; v: number; f: number } | null,
   setBoundary: { h: number; v: number; f: number } | null,
@@ -80,7 +98,7 @@ function resolveEffectiveBoundary(
     return instructorIndices
   }
 
-  return compareIndices(instructorIndices, setBoundary) >= 0 ? instructorIndices : setBoundary
+  return hasExceededReleasedBoundary(instructorIndices, setBoundary) ? instructorIndices : setBoundary
 }
 
 interface RevealCommandMessage {
@@ -197,7 +215,7 @@ function shouldSnapBackToBoundary(
     return true
   }
 
-  return compareIndices(studentIndices, boundary) > 0
+  return hasExceededReleasedBoundary(studentIndices, boundary)
 }
 
 function buildSetStudentBoundaryCommand(

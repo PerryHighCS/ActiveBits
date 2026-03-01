@@ -79,7 +79,10 @@ export async function runSyncDeckPresentationPreflight(
         return
       }
 
-      if (envelope.action === 'pong') {
+      const payload = envelope != null && typeof envelope === 'object' ? (envelope as { payload?: unknown }).payload : undefined
+      const pongOk = payload != null && typeof payload === 'object' && (payload as { ok?: unknown }).ok === true
+
+      if (envelope.action === 'ready' || (envelope.action === 'pong' && pongOk)) {
         finalize({ valid: true, warning: null })
       }
     }
