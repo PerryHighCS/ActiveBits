@@ -14,6 +14,14 @@ const videoSyncConfig: ActivityConfig = {
   manageLayout: {
     expandShell: true,
   },
+  createSessionBootstrap: {
+    sessionStorage: [
+      {
+        keyPrefix: 'video_sync_instructor_',
+        responseField: 'instructorPasscode',
+      },
+    ],
+  },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }

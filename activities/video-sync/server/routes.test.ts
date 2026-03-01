@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import {
+  cleanupPersistentSession,
+  generatePersistentHash,
+  getOrCreateActivePersistentSession,
+  initializePersistentStorage,
+  startPersistentSession,
+} from 'activebits-server/core/persistentSessions.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import setupVideoSyncRoutes from './routes.js'
 
-type RouteHandler = (req: { params: Record<string, string>; body?: unknown }, res: MockResponse) => Promise<void> | void
+type RouteHandler = (
+  req: { params: Record<string, string>; body?: unknown; cookies?: Record<string, unknown> },
+  res: MockResponse,
+) => Promise<void> | void
 
 interface MockResponse {
   statusCode: number
@@ -69,6 +79,49 @@ function createMockWs() {
   }
 }
 
+function createMockSocket() {
+  const sent: string[] = []
+  const handlers: Record<string, Array<() => void>> = {
+    close: [],
+    error: [],
+  }
+  let closed: { code?: number; reason?: string } | null = null
+
+  return {
+    sent,
+    get closed() {
+      return closed
+    },
+    emit(event: 'close' | 'error') {
+      const listeners = handlers[event]
+      if (!listeners) {
+        throw new Error(`Unknown mock socket event: ${event}`)
+      }
+      for (const listener of listeners) {
+        listener()
+      }
+    },
+    socket: {
+      readyState: 1,
+      sessionId: null,
+      videoSyncRole: null,
+      on(event: 'close' | 'error', handler: () => void) {
+        const listeners = handlers[event]
+        if (!listeners) {
+          throw new Error(`Unknown mock socket event: ${event}`)
+        }
+        listeners.push(handler)
+      },
+      send(payload: string) {
+        sent.push(payload)
+      },
+      close(code?: number, reason?: string) {
+        closed = { code, reason }
+      },
+    },
+  }
+}
+
 function createSocketRecorder(sessionId: string) {
   const delivered: string[] = []
 
@@ -87,10 +140,12 @@ function createSocketRecorder(sessionId: string) {
 function createSessionStore(initial: Record<string, SessionRecord>) {
   const store = { ...initial }
   const published: Array<{ channel: string; message: Record<string, unknown> }> = []
+  const subscriptions: string[] = []
 
   return {
     store,
     published,
+    subscriptions,
     sessions: {
       async get(id: string) {
         return store[id] ?? null
@@ -101,18 +156,21 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
       async publishBroadcast(channel: string, message: Record<string, unknown>) {
         published.push({ channel, message })
       },
-      subscribeToBroadcast() {},
+      subscribeToBroadcast(channel: string) {
+        subscriptions.push(channel)
+      },
     },
   }
 }
 
-function createVideoSyncSession(id: string): SessionRecord {
+function createVideoSyncSession(id: string, instructorPasscode = 'teacher-pass'): SessionRecord {
   return {
     id,
     type: 'video-sync',
     created: Date.now(),
     lastActivity: Date.now(),
     data: {
+      instructorPasscode,
       state: {
         provider: 'youtube',
         videoId: '',
@@ -148,19 +206,23 @@ void test('create route initializes video-sync session', async () => {
   await handler?.({ params: {} }, res)
 
   assert.equal(res.statusCode, 200)
-  const createdId = (res.body as { id?: string }).id
+  const createdBody = res.body as { id?: string; instructorPasscode?: string }
+  const createdId = createdBody.id
   assert.equal(typeof createdId, 'string')
   assert.ok(createdId)
+  assert.equal(typeof createdBody.instructorPasscode, 'string')
+  assert.equal(createdBody.instructorPasscode?.length, 32)
 
   const created = storeState.store[createdId as string]
   assert.equal(created?.type, 'video-sync')
   const createdData = created?.data as Record<string, unknown>
+  assert.equal(createdData.instructorPasscode, createdBody.instructorPasscode)
   const state = createdData.state as Record<string, unknown>
   assert.equal(state.provider, 'youtube')
   assert.equal(state.videoId, '')
 })
 
-void test('session patch rejects unsupported url', async () => {
+void test('session patch returns invalid video id for non-YouTube host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
@@ -174,7 +236,59 @@ void test('session patch rejects unsupported url', async () => {
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://vimeo.com/1234' },
+      body: { sourceUrl: 'https://vimeo.com/1234', instructorPasscode: 'teacher-pass' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    error: 'INVALID_VIDEO_ID',
+    message: 'Could not determine a valid YouTube video id from sourceUrl.',
+  })
+})
+
+void test('session patch returns invalid source url for malformed url input', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'not a url', instructorPasscode: 'teacher-pass' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    error: 'INVALID_SOURCE_URL',
+    message: 'Only youtube.com/watch and youtu.be URLs are supported in v1.',
+  })
+})
+
+void test('session patch returns invalid video id for YouTube url without a usable id', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://www.youtube.com/watch?list=abc123', instructorPasscode: 'teacher-pass' },
     },
     res,
   )
@@ -200,7 +314,7 @@ void test('session patch returns invalid time range when stop time is before par
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 20 },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 20, instructorPasscode: 'teacher-pass' },
     },
     res,
   )
@@ -226,7 +340,7 @@ void test('session patch normalizes youtube source and publishes extensible enve
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: 'teacher-pass' },
     },
     res,
   )
@@ -251,6 +365,33 @@ void test('session patch normalizes youtube source and publishes extensible enve
   assert.equal(typeof message.payload, 'object')
 })
 
+void test('session patch ignores partially numeric timestamp query values', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=83abc', instructorPasscode: 'teacher-pass' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  const state = updated.state as Record<string, unknown>
+  assert.equal(state.startSec, 0)
+  assert.equal(state.positionSec, 0)
+})
+
 void test('session patch rejects reconfiguration after a video is already set', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -269,7 +410,7 @@ void test('session patch rejects reconfiguration after a video is already set', 
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: 'teacher-pass' },
     },
     res,
   )
@@ -297,7 +438,7 @@ void test('session patch publishes through broadcast channel without direct loca
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: 'teacher-pass' },
     },
     res,
   )
@@ -329,7 +470,7 @@ void test('session patch falls back to direct local websocket send when pubsub p
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120 },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: 'teacher-pass' },
     },
     res,
   )
@@ -356,7 +497,7 @@ void test('command route updates playback and emits extensible envelope', async 
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { type: 'play' },
+      body: { type: 'play', instructorPasscode: 'teacher-pass' },
     },
     res,
   )
@@ -373,6 +514,227 @@ void test('command route updates playback and emits extensible envelope', async 
   assert.equal(message.activity, 'video-sync')
   assert.equal(message.sessionId, 's1')
   assert.equal(message.type, 'state-update')
+})
+
+void test('session patch rejects requests without a valid instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, {
+    error: 'FORBIDDEN',
+    message: 'Valid instructorPasscode is required',
+  })
+})
+
+void test('command route rejects requests without a valid instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'play' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, {
+    error: 'FORBIDDEN',
+    message: 'Valid instructorPasscode is required',
+  })
+})
+
+void test('instructor-passcode route returns passcode for persistent teacher cookie', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', 'teacher-passcode-1') })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      cookies: {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `video-sync:${hash}`,
+            teacherCode,
+          },
+        ]),
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { instructorPasscode: 'teacher-passcode-1' })
+  await cleanupPersistentSession(hash)
+})
+
+void test('manager websocket rejects connections without a valid instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 's1',
+    role: 'manager',
+  }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(recorder.closed, { code: 1008, reason: 'Forbidden' })
+  assert.deepEqual(recorder.sent, [])
+})
+
+void test('manager websocket accepts connections with a valid instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', 'teacher-pass') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 's1',
+    role: 'manager',
+    instructorPasscode: 'teacher-pass',
+  }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(recorder.closed, null)
+  assert.equal(recorder.sent.length, 1)
+  const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { role?: string } }
+  assert.equal(payload.type, 'state-snapshot')
+  assert.equal(payload.payload?.role, 'manager')
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
+void test('invalid websocket session is rejected before subscription side effects are created', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 'missing-session',
+    role: 'student',
+  }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(storeState.subscriptions, [])
+  assert.equal(storeState.published.length, 0)
+  assert.equal(recorder.sent.length, 1)
+  const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { code?: string } }
+  assert.equal(payload.type, 'error')
+  assert.equal(payload.payload?.code, 'NOT_FOUND')
+  assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
+})
+
+void test('heartbeat stops and closes subscribers when the backing session disappears', async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const clearedTimers: unknown[] = []
+  const timerToken = { id: 'heartbeat-token' }
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((timer: ReturnType<typeof setInterval> | undefined) => {
+    clearedTimers.push(timer)
+  }) as unknown) as typeof clearInterval
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+    const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+    setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({
+      sessionId: 's1',
+      role: 'student',
+    }))
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const runHeartbeat = heartbeatState.callback
+    assert.equal(typeof runHeartbeat, 'function')
+    assert.equal(recorder.closed, null)
+
+    delete storeState.store.s1
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
+    assert.deepEqual(clearedTimers, [timerToken])
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+  }
 })
 
 void test('event route tracks current unsynced student count', async () => {

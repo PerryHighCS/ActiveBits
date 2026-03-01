@@ -40,6 +40,10 @@ interface CommandResponse {
   }
 }
 
+interface InstructorPasscodeResponse {
+  instructorPasscode?: unknown
+}
+
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   connections: { activeCount: 0 },
   autoplay: { blockedCount: 0 },
@@ -65,6 +69,10 @@ function clampNumber(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
+function buildVideoSyncPasscodeKey(sessionId: string): string {
+  return `video_sync_instructor_${sessionId}`
+}
+
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -77,6 +85,8 @@ export default function VideoSyncManager() {
   const [setupMode, setSetupMode] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [playerReady, setPlayerReady] = useState(false)
+  const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
+  const [isPasscodeReady, setIsPasscodeReady] = useState(false)
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -115,11 +125,18 @@ export default function VideoSyncManager() {
     options?: { positionSec?: number; reportErrors?: boolean },
   ): Promise<void> => {
     if (!sessionId) return
+    if (!instructorPasscode) {
+      if (options?.reportErrors !== false) {
+        setErrorMessage('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')
+      }
+      return
+    }
 
     const payload: Record<string, unknown> = { type: command }
     if (typeof options?.positionSec === 'number' && Number.isFinite(options.positionSec)) {
       payload.positionSec = clampNumber(options.positionSec)
     }
+    payload.instructorPasscode = instructorPasscode
 
     try {
       const response = await fetch(`/api/video-sync/${sessionId}/command`, {
@@ -149,7 +166,7 @@ export default function VideoSyncManager() {
         setErrorMessage(message)
       }
     }
-  }, [sessionId])
+  }, [instructorPasscode, sessionId])
 
   const applyStateToPlayer = useCallback((nextState: VideoSyncState) => {
     const player = playerRef.current
@@ -212,9 +229,70 @@ export default function VideoSyncManager() {
   }, [sessionId])
 
   const buildWsUrl = useCallback(() => {
-    if (!sessionId || typeof window === 'undefined') return null
+    if (!sessionId || !instructorPasscode || typeof window === 'undefined') return null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${protocol}//${window.location.host}/ws/video-sync?sessionId=${encodeURIComponent(sessionId)}&role=manager`
+    return `${protocol}//${window.location.host}/ws/video-sync?sessionId=${encodeURIComponent(sessionId)}&role=manager&instructorPasscode=${encodeURIComponent(instructorPasscode)}`
+  }, [instructorPasscode, sessionId])
+
+  useEffect(() => {
+    if (!sessionId || typeof window === 'undefined') {
+      setInstructorPasscode(null)
+      setIsPasscodeReady(true)
+      return
+    }
+
+    let isCancelled = false
+
+    const loadInstructorPasscode = async (): Promise<void> => {
+      const stored = window.sessionStorage.getItem(buildVideoSyncPasscodeKey(sessionId))
+      if (stored) {
+        if (!isCancelled) {
+          setInstructorPasscode(stored)
+          setIsPasscodeReady(true)
+        }
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/video-sync/${sessionId}/instructor-passcode`, {
+          credentials: 'include',
+        })
+        if (!response.ok) {
+          if (!isCancelled) {
+            setInstructorPasscode(null)
+          }
+          return
+        }
+
+        const payload = (await response.json()) as InstructorPasscodeResponse
+        if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
+          window.sessionStorage.setItem(buildVideoSyncPasscodeKey(sessionId), payload.instructorPasscode)
+          if (!isCancelled) {
+            setInstructorPasscode(payload.instructorPasscode)
+          }
+          return
+        }
+
+        if (!isCancelled) {
+          setInstructorPasscode(null)
+        }
+      } catch {
+        if (!isCancelled) {
+          setInstructorPasscode(null)
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsPasscodeReady(true)
+        }
+      }
+    }
+
+    setIsPasscodeReady(false)
+    void loadInstructorPasscode()
+
+    return () => {
+      isCancelled = true
+    }
   }, [sessionId])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
@@ -336,7 +414,7 @@ export default function VideoSyncManager() {
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: Boolean(sessionId),
+    shouldReconnect: Boolean(sessionId && instructorPasscode && isPasscodeReady),
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
       if (!envelope || envelope.sessionId !== sessionId) return
@@ -350,12 +428,22 @@ export default function VideoSyncManager() {
   useEffect(() => {
     if (!sessionId) return undefined
     void fetchSession()
-    connect()
+    if (isPasscodeReady && instructorPasscode) {
+      connect()
+    }
     return () => disconnect()
-  }, [sessionId, fetchSession, connect, disconnect])
+  }, [sessionId, fetchSession, connect, disconnect, instructorPasscode, isPasscodeReady])
 
   const saveConfig = async (): Promise<void> => {
     if (!sessionId) return
+    if (!isPasscodeReady) {
+      setErrorMessage('Loading instructor credentials...')
+      return
+    }
+    if (!instructorPasscode) {
+      setErrorMessage('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')
+      return
+    }
 
     let stopSecValue: number | null = null
     if (hasStopTime) {
@@ -372,6 +460,7 @@ export default function VideoSyncManager() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          instructorPasscode,
           sourceUrl: sourceUrlInput,
           stopSec: stopSecValue,
         }),
@@ -393,7 +482,7 @@ export default function VideoSyncManager() {
       setErrorMessage(null)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save video config'
-      setErrorMessage(message)
+        setErrorMessage(message)
     }
   }
 
@@ -465,7 +554,9 @@ export default function VideoSyncManager() {
             </label>
           ) : null}
 
-          <Button onClick={() => void saveConfig()}>Start instructor view</Button>
+          <Button disabled={!isPasscodeReady} onClick={() => void saveConfig()}>
+            {isPasscodeReady ? 'Start instructor view' : 'Loading instructor access...'}
+          </Button>
         </section>
       </div>
     )

@@ -751,10 +751,26 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-01
 - Area: activities
+- Discovery: Video Sync manager auth now follows the same session-scoped instructor passcode pattern as SyncDeck: temporary sessions return an `instructorPasscode` captured via `createSessionBootstrap`, manager websocket/config/command routes require that passcode, and persistent permalink sessions recover it through a teacher-cookie-validated `/api/video-sync/:sessionId/instructor-passcode` route instead of trusting `role=manager`.
+- Why it matters: Manager authority is now derived from server-issued session credentials plus persistent-session teacher-cookie validation, so students cannot self-upgrade by picking `role=manager` or calling manager HTTP endpoints with only a `sessionId`.
+- Evidence: `activities/video-sync/activity.config.ts`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: If Video Sync later needs finer-grained multi-manager entry, layer it on top of the same instructor-passcode/session bootstrap contract rather than reintroducing client-declared manager roles.
+- Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
 - Discovery: SyncDeck released-stack boundary comparisons must treat same-horizontal vertical child-slide movement as still inside the released region; only moving to a later horizontal slide should clear/supersede the explicit boundary, and student snapback logic must not pull `h`-matching lower child slides back to `v = 0`.
 - Why it matters: Full `h/v/f` boundary comparisons caused manager relay logic to clear boundaries and student boundary sync to snap lower-stack students back to the top child when an instructor moved down and back up within an already released vertical stack.
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
 - Follow-up action: When adjusting SyncDeck release logic, keep reconnect boundary restoration intact but preserve horizontal-only released-stack semantics for explicit boundary clear/snap decisions.
+- Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: Video Sync now uses one manager-authorization boundary across websocket and HTTP surfaces: the same `instructorPasscode` gates `role=manager` websocket connections and the session config/playback command endpoints, while student telemetry events remain open.
+- Why it matters: This avoids drifting into partially protected manager behavior where one control surface is secured but another still trusts session possession.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`
+- Follow-up action: Keep future manager-only endpoints on the same passcode requirement unless the activity adopts a stronger signed-token/session identity model.
 - Owner: Codex
 
 - Date: 2026-03-01
