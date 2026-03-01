@@ -388,6 +388,28 @@ export function shouldReopenConfigurePanel(isConfigurePanelOpen: boolean, presen
   return presentationUrlError != null && !isConfigurePanelOpen
 }
 
+export function shouldAutoActivatePresentationUrl(
+  value: string,
+  hostProtocol?: string | null,
+  userAgent?: string | null,
+): boolean {
+  return validatePresentationUrl(value, hostProtocol, userAgent)
+}
+
+export function resolveRecoveredPresentationUrl(
+  currentValue: string,
+  recoveredValue: string | null,
+  hostProtocol?: string | null,
+  userAgent?: string | null,
+): string {
+  const normalizedCurrent = currentValue.trim()
+  if (validatePresentationUrl(normalizedCurrent, hostProtocol, userAgent) || recoveredValue == null) {
+    return normalizedCurrent
+  }
+
+  return recoveredValue
+}
+
 function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {
   return {
     type: 'reveal-sync',
@@ -1225,15 +1247,21 @@ const SyncDeckManager: FC = () => {
 
         const payload = (await response.json()) as SessionResponsePayload
         const existingPresentationUrl = payload.session?.data?.presentationUrl
-        if (typeof existingPresentationUrl !== 'string' || !validatePresentationUrl(existingPresentationUrl, hostProtocol, userAgent)) {
+        if (typeof existingPresentationUrl !== 'string') {
           return
         }
 
         if (!isCancelled) {
           setPresentationUrl(existingPresentationUrl)
-          setIsConfigurePanelOpen(false)
-          setStartSuccess('Presentation loaded. Session is ready.')
-          setStartError(null)
+          if (shouldAutoActivatePresentationUrl(existingPresentationUrl, hostProtocol, userAgent)) {
+            setIsConfigurePanelOpen(false)
+            setStartSuccess('Presentation loaded. Session is ready.')
+            setStartError(null)
+          } else {
+            setIsConfigurePanelOpen(true)
+            setStartSuccess(null)
+            setStartError(null)
+          }
         }
       } catch {
         return
@@ -1308,8 +1336,8 @@ const SyncDeckManager: FC = () => {
         if (!isCancelled) {
           const persistentPresentationUrl =
             typeof payload.persistentPresentationUrl === 'string'
-            && validatePresentationUrl(payload.persistentPresentationUrl, hostProtocol, userAgent)
-              ? payload.persistentPresentationUrl
+            && payload.persistentPresentationUrl.trim().length > 0
+              ? payload.persistentPresentationUrl.trim()
               : null
           const persistentUrlHash =
             typeof payload.persistentUrlHash === 'string' && payload.persistentUrlHash.trim().length > 0
@@ -1318,10 +1346,7 @@ const SyncDeckManager: FC = () => {
 
           if (persistentPresentationUrl) {
             setPresentationUrl((current) => {
-              const normalizedCurrent = current.trim()
-              const shouldKeepCurrent = validatePresentationUrl(normalizedCurrent, hostProtocol, userAgent)
-              const nextPresentationUrl = shouldKeepCurrent ? normalizedCurrent : persistentPresentationUrl
-              return nextPresentationUrl
+              return resolveRecoveredPresentationUrl(current, persistentPresentationUrl, hostProtocol, userAgent)
             })
           }
           if (!queryUrlHash) {

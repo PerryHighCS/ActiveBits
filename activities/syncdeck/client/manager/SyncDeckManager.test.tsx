@@ -19,6 +19,8 @@ import { applyChalkboardSnapshotFallback } from './SyncDeckManager.js'
 import { evaluateRestoreSuppressionForOutboundState } from './SyncDeckManager.js'
 import { validatePresentationUrl } from './SyncDeckManager.js'
 import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
+import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
+import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -92,6 +94,22 @@ void test('shouldReopenConfigurePanel only reopens from the closed invalid state
   assert.equal(shouldReopenConfigurePanel(false, 'Presentation URL must use https://'), true)
   assert.equal(shouldReopenConfigurePanel(true, 'Presentation URL must use https://'), false)
   assert.equal(shouldReopenConfigurePanel(false, null), false)
+})
+
+void test('shouldAutoActivatePresentationUrl rejects incompatible stored URLs without dropping them', () => {
+  assert.equal(shouldAutoActivatePresentationUrl('https://slides.example/deck', 'https:'), true)
+  assert.equal(shouldAutoActivatePresentationUrl('http://slides.example/deck', 'https:'), false)
+})
+
+void test('resolveRecoveredPresentationUrl preserves incompatible recovered URLs for editing', () => {
+  assert.equal(
+    resolveRecoveredPresentationUrl('', 'http://slides.example/deck', 'https:'),
+    'http://slides.example/deck',
+  )
+  assert.equal(
+    resolveRecoveredPresentationUrl('https://slides.example/current', 'http://slides.example/deck', 'https:'),
+    'https://slides.example/current',
+  )
 })
 
 void test('buildInstructorRoleCommandMessage emits setRole instructor command', () => {
