@@ -373,8 +373,8 @@ function buildSyncDeckChalkboardOpenKey(sessionId: string): string {
   return `${SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX}${sessionId}`
 }
 
-function validatePresentationUrl(value: string): boolean {
-  return getPresentationUrlValidationError(value, null) == null
+export function validatePresentationUrl(value: string): boolean {
+  return value.trim().length > 0 && getPresentationUrlValidationError(value, null) == null
 }
 
 function buildRevealCommandMessage(name: string, payload: RevealCommandPayload): Record<string, unknown> {

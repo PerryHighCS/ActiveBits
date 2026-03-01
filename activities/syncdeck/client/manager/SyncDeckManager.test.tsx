@@ -17,6 +17,7 @@ import { extractIndicesFromRevealPayload } from './SyncDeckManager.js'
 import { buildRestoreCommandFromPayload } from './SyncDeckManager.js'
 import { applyChalkboardSnapshotFallback } from './SyncDeckManager.js'
 import { evaluateRestoreSuppressionForOutboundState } from './SyncDeckManager.js'
+import { validatePresentationUrl } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -64,6 +65,12 @@ void test('SyncDeckManager pre-fills presentation URL from query params', () => 
   )
 
   assert.match(html, /value="https:\/\/slides\.example\/deck"/i)
+})
+
+void test('validatePresentationUrl rejects empty and whitespace-only values', () => {
+  assert.equal(validatePresentationUrl(''), false)
+  assert.equal(validatePresentationUrl('   '), false)
+  assert.equal(validatePresentationUrl('https://slides.example/deck'), true)
 })
 
 void test('buildInstructorRoleCommandMessage emits setRole instructor command', () => {
