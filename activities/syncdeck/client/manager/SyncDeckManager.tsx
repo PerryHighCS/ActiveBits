@@ -1026,7 +1026,7 @@ const SyncDeckManager: FC = () => {
   const presentationUrlError = useMemo(() => {
     const normalizedUrl = presentationUrl.trim()
     if (normalizedUrl.length === 0) {
-      return null
+      return 'Presentation URL is required'
     }
 
     return getPresentationUrlValidationError(

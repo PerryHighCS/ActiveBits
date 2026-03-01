@@ -53,6 +53,7 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /Toggle pen overlay/i)
   assert.match(html, /Configure Presentation/i)
   assert.match(html, /Presentation URL/i)
+  assert.match(html, /Presentation URL is required/i)
   assert.match(html, /Start Session/i)
 })
 
