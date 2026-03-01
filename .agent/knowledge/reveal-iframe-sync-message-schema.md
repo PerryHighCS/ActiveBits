@@ -120,7 +120,8 @@ Allows a student to move forward up to the specified boundary, even if instructo
 {
   "name": "allowStudentForwardTo",
   "payload": {
-    "indices": { "h": 8, "v": 0, "f": 0 },
+    "indices": { "h": 8, "v": 0, "f": -1 },
+    "releaseStartH": 3,
     "syncToBoundary": false
   }
 }
@@ -129,10 +130,14 @@ Allows a student to move forward up to the specified boundary, even if instructo
 Notes:
 - Once an explicit boundary is set, instructor sync commands (`setState`, `slide`, `next`, `prev`) no longer auto-advance the boundary. Only a new `allowStudentForwardTo` / `setStudentBoundary` call will change it.
 - If the student is already **past** the new boundary when it is received, they are immediately rubber-banded back to it.
+- Boundary enforcement remains horizontally canonicalized for stored `studentBoundary` status (`{ h, v: 0, f: -1 }`), but the runtime may retain the requested `f` as an exact same-slide lock target when the student is on the top-level boundary slide (`v = 0`) so they do not reveal additional fragments ahead of the instructor at boundary `h`.
+- Vertical child-slide movement inside a released stack remains locally navigable at the boundary `h` position. Fragment progression on the top-level boundary slide (`v = 0`) is instead tied to the instructor's exact released fragment position.
+- Exception: when the boundary is pulled back behind a student and the host is intentionally snapping that student back to the instructor's exact current position, the runtime may temporarily retain the requested `v` / `f` as an exact lock target so the student cannot continue fragments independently after the pullback. This exact lock applies only to that snap-back case; normal released-region enforcement remains horizontal-only.
 - Navigation enforcement (preventing forward travel) applies only when role is `student`.
-- When sent to an **instructor** iframe, the boundary is stored and shown as a visual marker in the storyboard strip (display only — the instructor can still navigate freely). A `studentBoundaryChanged` message is still emitted with `role: "instructor"`.
-- With default plugin settings (`studentCanNavigateBack: true`, `studentCanNavigateForward: false`), student can move backward and forward only up to the granted boundary.
+- When sent to an **instructor** iframe, the boundary is stored and shown as a visual marker in the storyboard strip together with the released-range highlight (display only — the instructor can still navigate freely). A `studentBoundaryChanged` message is still emitted with `role: "instructor"`.
+- With default plugin settings (`studentCanNavigateBack: true`, `studentCanNavigateForward: false`), student forward progress is limited to the granted instructor `h.f` boundary. Local movement within a released vertical stack may still remain available through `canGoUp` / `canGoDown`.
 - `syncToBoundary: true` also jumps the student immediately to that location (ignored for instructor role).
+- `releaseStartH` (optional number) lets the host explicitly declare the horizontal start of the released region used for emitted `releasedRegion` status. When omitted, the iframe falls back to its local current `h` when the boundary is applied.
 
 #### `setStudentBoundary` (explicit alias)
 
@@ -140,7 +145,8 @@ Notes:
 {
   "name": "setStudentBoundary",
   "payload": {
-    "indices": { "h": 5, "v": 0, "f": 0 },
+    "indices": { "h": 5, "v": 0, "f": -1 },
+    "releaseStartH": 2,
     "syncToBoundary": true
   }
 }
@@ -287,16 +293,21 @@ Sent on init (if `autoAnnounceReady`) and when role changes.
       "canNavigateBack": true,
       "canNavigateForward": false
     },
-    "studentBoundary": { "h": 2, "v": 0, "f": 0 },
+    "studentBoundary": { "h": 2, "v": 0, "f": -1 },
+    "releasedRegion": { "startH": 0, "endH": 2 },
     "navigation": {
-      "current": { "h": 2, "v": 0, "f": 0 },
+      "current": { "h": 2, "v": 0, "f": -1 },
       "minIndices": null,
-      "maxIndices": { "h": 2, "v": 0, "f": 0 },
+      "maxIndices": { "h": 2, "v": 0, "f": -1 },
       "canGoBack": true,
-      "canGoForward": false
+      "canGoForward": false,
+      "canGoLeft": true,
+      "canGoRight": false,
+      "canGoUp": false,
+      "canGoDown": true
     },
     "revealState": {},
-    "indices": { "h": 2, "v": 0, "f": 0 },
+    "indices": { "h": 2, "v": 0, "f": -1 },
     "paused": false,
     "overview": false
   }
@@ -309,8 +320,12 @@ Sent on init (if `autoAnnounceReady`) and when role changes.
 - `current`: current slide indices in the iframe.
 - `minIndices`: effective lower bound (usually `null`; equals boundary when back nav is disallowed).
 - `maxIndices`: effective upper bound (boundary when forward nav is restricted).
-- `canGoBack`: final boolean for enabling/disabling a host "previous" arrow.
-- `canGoForward`: final boolean for enabling/disabling a host "next" arrow.
+- `canGoBack`: final boolean for allowed backward movement from the current position. This may include fragment rewind and vertical stack ascent when those are valid local moves.
+- `canGoForward`: final boolean for forward progress along the released instructor boundary, interpreted as `h.f`. It means the student is still behind the currently released horizontal/fragment position and may advance toward it. It does not mean vertical descent within the current stack is available.
+- `canGoLeft` / `canGoRight`: strictly horizontal movement availability for left/right arrows, host controls, and horizontal swipe gestures. These exclude fragment progression and vertical stack movement.
+- `canGoUp` / `canGoDown`: vertical stack movement availability inside the current horizontal position after SyncDeck back/forward policy is applied. These are independent of `canGoForward`; a student may be unable to advance further along `h.f` while still being allowed to move locally within a released vertical stack.
+
+`releasedRegion` is the stored instructor/storyboard-facing horizontal min/max range between the release start `h` captured when the boundary was granted/applied and the current boundary `h`. It does not automatically recompute from the viewer's current slide position on every status emission. It is primarily used to highlight the active released range in the storyboard.
 
 ### `state`
 
@@ -326,13 +341,18 @@ Sent by **any role** on: slide change, fragment shown/hidden, pause, resume, ove
       "canNavigateBack": true,
       "canNavigateForward": true
     },
-    "studentBoundary": { "h": 5, "v": 0, "f": 0 },
+    "studentBoundary": { "h": 5, "v": 0, "f": -1 },
+    "releasedRegion": { "startH": 4, "endH": 5 },
     "navigation": {
       "current": { "h": 4, "v": 0, "f": 1 },
       "minIndices": null,
       "maxIndices": null,
       "canGoBack": true,
-      "canGoForward": true
+      "canGoForward": true,
+      "canGoLeft": true,
+      "canGoRight": true,
+      "canGoUp": false,
+      "canGoDown": false
     },
     "revealState": {},
     "indices": { "h": 4, "v": 0, "f": 1 },
@@ -344,9 +364,11 @@ Sent by **any role** on: slide change, fragment shown/hidden, pause, resume, ove
 
 `overview` reflects whether the **custom storyboard strip** is currently open (`true` = strip is visible).
 
-`studentBoundary` — `null` until a boundary has been established; `{ h, v, f }` once set. Non-null for **both student and instructor** roles once a boundary is in effect. For instructors this reflects the boundary currently displayed in the storyboard strip. Cleared to `null` when `clearBoundary` command is received.
+`studentBoundary` — defaults to the title-slide boundary `{ h: 0, v: 0, f: -1 }` when an iframe is promoted to `student`, so status is non-null from startup even before the instructor has progressed. For instructors it remains `null` until an explicit boundary is set. After `clearBoundary`, the value becomes `null` until the next instructor-follow capture or explicit boundary command establishes a new one. When non-null, this reflects the canonical stored boundary for students and the boundary marker currently shown in the instructor storyboard strip. The stored boundary is normalized to `{ h, v: 0, f: -1 }`, while effective forward permission on the top-level slide at that `h` (`v = 0`) may be further refined by the instructor's currently released fragment `f`.
 
 `boundaryIsLocal` — `true` when this iframe set the boundary itself (via the storyboard ⚑ button) rather than receiving it from the host. The storyboard uses this to skip forward-navigation restrictions for the acting instructor even if their role hasn't been upgraded to `"instructor"` yet.
+
+Storyboard note: `reveal-storyboard.js` now renders vertical stacks as grouped horizontal entries with child-slide buttons so the active child slide remains visible while the boundary and released region still operate on the parent horizontal `h`.
 
 ### `roleChanged`
 
@@ -366,7 +388,7 @@ Emitted after `allowStudentForwardTo` / `setStudentBoundary` is applied, or when
   "action": "studentBoundaryChanged",
   "payload": {
     "reason": "allowStudentForwardTo",
-    "studentBoundary": { "h": 8, "v": 0, "f": 0 }
+    "studentBoundary": { "h": 8, "v": 0, "f": -1 }
   }
 }
 ```
