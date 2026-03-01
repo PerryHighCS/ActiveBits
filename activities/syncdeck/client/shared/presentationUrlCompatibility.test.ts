@@ -38,6 +38,11 @@ void test('getPresentationUrlValidationError allows loopback ip http presentatio
     getPresentationUrlValidationError('http://127.0.0.1:5500/deck.html', 'https:'),
     null,
   )
+
+  assert.equal(
+    getPresentationUrlValidationError('http://[::1]:5500/deck.html', 'https:'),
+    null,
+  )
 })
 
 void test('getPresentationUrlValidationError allows https presentations on https hosts', () => {
@@ -51,6 +56,16 @@ void test('getStudentPresentationCompatibilityError rejects Safari loopback http
   assert.equal(
     getStudentPresentationCompatibilityError({
       value: 'http://localhost:5500/deck.html',
+      hostProtocol: 'https:',
+      userAgent:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+    }),
+    SAFARI_LOOPBACK_PRESENTATION_ERROR,
+  )
+
+  assert.equal(
+    getStudentPresentationCompatibilityError({
+      value: 'http://[::1]:5500/deck.html',
       hostProtocol: 'https:',
       userAgent:
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',

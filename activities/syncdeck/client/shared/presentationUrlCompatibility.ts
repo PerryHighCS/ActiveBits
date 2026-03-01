@@ -4,11 +4,10 @@ export const SAFARI_LOOPBACK_PRESENTATION_ERROR =
   'Safari blocks http:// loopback-host SyncDeck presentations (localhost, 127.0.0.1, or ::1) from an HTTPS ActiveBits page. Use an HTTPS presentation URL or test in a Chromium-based browser.'
 
 export function isLoopbackHostname(hostname: string): boolean {
-  const normalizedHostname = hostname.trim().toLowerCase()
+  const normalizedHostname = hostname.trim().toLowerCase().replace(/^\[(.*)\]$/, '$1')
   return (
     normalizedHostname === 'localhost' ||
     normalizedHostname === '127.0.0.1' ||
-    normalizedHostname === '[::1]' ||
     normalizedHostname === '::1'
   )
 }
