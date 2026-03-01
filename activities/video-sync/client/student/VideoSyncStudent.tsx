@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
@@ -27,6 +27,7 @@ interface SessionResponse {
 }
 
 const SOLO_STORAGE_KEY = 'video-sync-solo-state-solo-video-sync'
+const SYNC_DRIFT_TOLERANCE_SEC = 0.2
 
 const DEFAULT_STATE: VideoSyncState = {
   provider: 'youtube',
@@ -42,6 +43,15 @@ const DEFAULT_STATE: VideoSyncState = {
 
 function clampNumber(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
+function createStudentClientId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  const random = Math.random().toString(36).slice(2)
+  return `student-${Date.now()}-${random}`
 }
 
 function parseYouTubeVideoId(urlValue: string): { videoId: string | null; startSec: number; stopSec: number | null } {
@@ -88,7 +98,9 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const youtubeRef = useRef<YoutubeNamespace | null>(null)
   const loadedVideoIdRef = useRef<string | null>(null)
   const lastUnsyncReportAtRef = useRef(0)
+  const isLocallyUnsyncedRef = useRef(false)
   const autoplayCheckTimerRef = useRef<number | null>(null)
+  const studentClientIdRef = useRef(createStudentClientId())
 
   useEffect(() => {
     if (!isSoloMode || typeof window === 'undefined') return
@@ -120,6 +132,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         type: eventType,
+        studentId: studentClientIdRef.current,
         driftSec: options?.driftSec,
         correctionResult: options?.correctionResult,
         errorCode: options?.errorCode,
@@ -160,14 +173,18 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       const currentTimeSec = player.getCurrentTime()
       const driftSec = Math.abs(currentTimeSec - desiredPositionSec)
 
-      if (source === 'sync' && shouldCorrectDrift(currentTimeSec, desiredPositionSec, 0.75)) {
+      if (source === 'sync' && shouldCorrectDrift(currentTimeSec, desiredPositionSec, SYNC_DRIFT_TOLERANCE_SEC)) {
+        const wasUnsynced = isLocallyUnsyncedRef.current
         player.seekTo(desiredPositionSec, true)
+        isLocallyUnsyncedRef.current = true
 
-        if (now - lastUnsyncReportAtRef.current >= 10_000) {
+        if (!wasUnsynced || now - lastUnsyncReportAtRef.current >= 10_000) {
           lastUnsyncReportAtRef.current = now
           void reportEvent('unsync', { driftSec })
-          void reportEvent('sync-correction', { driftSec, correctionResult: 'success' })
         }
+      } else if (source === 'sync' && isLocallyUnsyncedRef.current) {
+        isLocallyUnsyncedRef.current = false
+        void reportEvent('sync-correction', { driftSec, correctionResult: 'success' })
       }
     }
 
@@ -402,6 +419,17 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     setAutoplayBlocked(false)
   }
 
+  const handleStudentOverlayPointer = (event: MouseEvent<HTMLDivElement>): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.focus()
+  }
+
+  const handleStudentOverlayKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
   if (!isSoloMode) {
     return (
       <div className="fixed inset-0 z-30 bg-black">
@@ -415,14 +443,23 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           </div>
         )}
 
+        <div
+          className="absolute inset-0 z-10 bg-transparent"
+          tabIndex={0}
+          aria-label="Synchronized playback is managed by the instructor"
+          onMouseDown={handleStudentOverlayPointer}
+          onClick={handleStudentOverlayPointer}
+          onKeyDown={handleStudentOverlayKeyDown}
+        />
+
         {errorMessage && (
-          <div className="absolute top-4 left-4 right-4 md:left-auto md:right-4 md:w-105 border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
+          <div className="absolute top-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-105 border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
             {errorMessage}
           </div>
         )}
 
         {autoplayBlocked && (
-          <div className="absolute bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-105 border border-amber-300 bg-amber-50 rounded p-3 text-sm text-amber-900">
+          <div className="absolute bottom-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-105 border border-amber-300 bg-amber-50 rounded p-3 text-sm text-amber-900">
             Browser blocked autoplay. Click once to start, then follow the classroom display.
             <div className="mt-2">
               <Button onClick={retryAutoplay}>Click to start playback</Button>
