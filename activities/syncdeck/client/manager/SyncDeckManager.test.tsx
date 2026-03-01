@@ -8,6 +8,7 @@ import { buildForceSyncBoundaryCommandMessage } from './SyncDeckManager.js'
 import { buildClearBoundaryCommandMessage } from './SyncDeckManager.js'
 import { attachInstructorIndicesToBoundaryChangePayload } from './SyncDeckManager.js'
 import { shouldSuppressInstructorStateBroadcast } from './SyncDeckManager.js'
+import { shouldClearExplicitBoundary } from './SyncDeckManager.js'
 import { buildBoundaryClearedPayload } from './SyncDeckManager.js'
 import { extractSyncDeckStatePayload } from './SyncDeckManager.js'
 import { includePausedInStateEnvelope } from './SyncDeckManager.js'
@@ -222,16 +223,16 @@ void test('attachInstructorIndicesToBoundaryChangePayload adds instructor indice
 void test('shouldSuppressInstructorStateBroadcast suppresses when instructor is behind explicit boundary', () => {
   const suppress = shouldSuppressInstructorStateBroadcast(
     { h: 2, v: 0, f: 0 },
-    { h: 3, v: 0, f: Number.MAX_SAFE_INTEGER },
+    { h: 3, v: 0, f: -1 },
   )
 
   assert.equal(suppress, true)
 })
 
-void test('shouldSuppressInstructorStateBroadcast suppresses when instructor is exactly at explicit boundary', () => {
+void test('shouldSuppressInstructorStateBroadcast suppresses anywhere on canonical boundary slide', () => {
   const suppress = shouldSuppressInstructorStateBroadcast(
-    { h: 3, v: 0, f: Number.MAX_SAFE_INTEGER },
-    { h: 3, v: 0, f: Number.MAX_SAFE_INTEGER },
+    { h: 3, v: 0, f: 2 },
+    { h: 3, v: 0, f: -1 },
   )
 
   assert.equal(suppress, true)
@@ -240,10 +241,37 @@ void test('shouldSuppressInstructorStateBroadcast suppresses when instructor is 
 void test('shouldSuppressInstructorStateBroadcast allows when instructor moves beyond explicit boundary', () => {
   const suppress = shouldSuppressInstructorStateBroadcast(
     { h: 4, v: 0, f: 0 },
-    { h: 3, v: 0, f: Number.MAX_SAFE_INTEGER },
+    { h: 3, v: 0, f: -1 },
   )
 
   assert.equal(suppress, false)
+})
+
+void test('shouldSuppressInstructorStateBroadcast allows vertical movement within released stack', () => {
+  const suppress = shouldSuppressInstructorStateBroadcast(
+    { h: 3, v: 1, f: 0 },
+    { h: 3, v: 0, f: -1 },
+  )
+
+  assert.equal(suppress, false)
+})
+
+void test('shouldClearExplicitBoundary ignores vertical movement within released stack', () => {
+  const clearBoundary = shouldClearExplicitBoundary(
+    { h: 3, v: 1, f: 0 },
+    { h: 3, v: 0, f: -1 },
+  )
+
+  assert.equal(clearBoundary, false)
+})
+
+void test('shouldClearExplicitBoundary clears when instructor advances past released horizontal boundary', () => {
+  const clearBoundary = shouldClearExplicitBoundary(
+    { h: 4, v: 0, f: 0 },
+    { h: 3, v: 0, f: -1 },
+  )
+
+  assert.equal(clearBoundary, true)
 })
 
 void test('buildBoundaryClearedPayload emits studentBoundaryChanged clear with instructor indices', () => {

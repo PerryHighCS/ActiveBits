@@ -302,7 +302,7 @@ void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged to setStud
     payload: {
       name: 'setStudentBoundary',
       payload: {
-        indices: { h: 3, v: 1, f: Number.MAX_SAFE_INTEGER },
+        indices: { h: 3, v: 1, f: -1 },
         syncToBoundary: true,
       },
     },
@@ -326,7 +326,26 @@ void test('toRevealBoundaryCommandMessage maps state payload studentBoundary to 
   assert.deepEqual((result?.payload as { payload?: { indices?: unknown } })?.payload?.indices, {
     h: 7,
     v: 0,
-    f: Number.MAX_SAFE_INTEGER,
+    f: -1,
+  })
+})
+
+void test('toRevealBoundaryCommandMessage keeps released stack boundary canonical during same-h vertical movement', () => {
+  const result = toRevealBoundaryCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    role: 'instructor',
+    payload: {
+      studentBoundary: { h: 7, v: 0, f: 0 },
+      indices: { h: 7, v: 1, f: 0 },
+    },
+  })
+
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown } })?.payload?.indices, {
+    h: 7,
+    v: 0,
+    f: -1,
   })
 })
 
@@ -367,6 +386,27 @@ void test('toRevealBoundaryCommandMessage sets syncToBoundary when student is be
   assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
     indices: { h: 2, v: 0, f: 0 },
     syncToBoundary: true,
+  })
+})
+
+void test('toRevealBoundaryCommandMessage does not snap lower child slide back to top of released stack', () => {
+  const result = toRevealBoundaryCommandMessage(
+    {
+      type: 'reveal-sync',
+      version: '1.0.0',
+      action: 'state',
+      role: 'instructor',
+      payload: {
+        studentBoundary: { h: 4, v: 0, f: 0 },
+        indices: { h: 4, v: 0, f: 0 },
+      },
+    },
+    { h: 4, v: 1, f: 0 },
+  )
+
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
+    indices: { h: 4, v: 0, f: -1 },
+    syncToBoundary: false,
   })
 })
 

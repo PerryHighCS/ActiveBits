@@ -12,7 +12,7 @@ const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
 const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
-const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
+const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
 
@@ -482,8 +482,61 @@ function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: 
   return {
     h: indices.h,
     v: indices.v,
-    f: SLIDE_END_FRAGMENT_INDEX,
+    f: CANONICAL_BOUNDARY_FRAGMENT_INDEX,
   }
+}
+
+function isWithinReleasedVerticalStack(
+  indices: { h: number; v: number; f: number },
+  explicitBoundary: { h: number; v: number; f: number },
+): boolean {
+  return indices.h === explicitBoundary.h && indices.v > explicitBoundary.v
+}
+
+function isAtOrBehindExplicitBoundary(
+  instructorIndices: { h: number; v: number; f: number },
+  explicitBoundary: { h: number; v: number; f: number },
+): boolean {
+  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
+    return false
+  }
+
+  if (instructorIndices.h !== explicitBoundary.h) {
+    return instructorIndices.h < explicitBoundary.h
+  }
+
+  if (instructorIndices.v !== explicitBoundary.v) {
+    return instructorIndices.v < explicitBoundary.v
+  }
+
+  if (explicitBoundary.f === CANONICAL_BOUNDARY_FRAGMENT_INDEX) {
+    return true
+  }
+
+  return instructorIndices.f <= explicitBoundary.f
+}
+
+function hasExceededExplicitBoundary(
+  instructorIndices: { h: number; v: number; f: number },
+  explicitBoundary: { h: number; v: number; f: number },
+): boolean {
+  if (isWithinReleasedVerticalStack(instructorIndices, explicitBoundary)) {
+    return false
+  }
+
+  if (instructorIndices.h !== explicitBoundary.h) {
+    return instructorIndices.h > explicitBoundary.h
+  }
+
+  if (instructorIndices.v !== explicitBoundary.v) {
+    return instructorIndices.v > explicitBoundary.v
+  }
+
+  if (explicitBoundary.f === CANONICAL_BOUNDARY_FRAGMENT_INDEX) {
+    return false
+  }
+
+  return instructorIndices.f > explicitBoundary.f
 }
 
 function extractIndicesFromRevealStateObject(value: unknown): { h: number; v: number; f: number } | null {
@@ -527,7 +580,18 @@ export function shouldSuppressInstructorStateBroadcast(
     return false
   }
 
-  return compareIndices(instructorIndices, explicitBoundary) <= 0
+  return isAtOrBehindExplicitBoundary(instructorIndices, explicitBoundary)
+}
+
+export function shouldClearExplicitBoundary(
+  instructorIndices: { h: number; v: number; f: number } | null,
+  explicitBoundary: { h: number; v: number; f: number } | null,
+): boolean {
+  if (!instructorIndices || !explicitBoundary) {
+    return false
+  }
+
+  return hasExceededExplicitBoundary(instructorIndices, explicitBoundary)
 }
 
 export function buildBoundaryClearedPayload(
@@ -1927,16 +1991,19 @@ const SyncDeckManager: FC = () => {
         if (
           envelope?.type === 'reveal-sync' &&
           envelope.action === 'state' &&
-          lastInstructorIndicesRef.current != null &&
-          explicitBoundaryRef.current != null &&
-          compareIndices(lastInstructorIndicesRef.current, explicitBoundaryRef.current) > 0
+          shouldClearExplicitBoundary(lastInstructorIndicesRef.current, explicitBoundaryRef.current)
         ) {
+          const instructorIndicesAtClear = lastInstructorIndicesRef.current
+          if (!instructorIndicesAtClear) {
+            return
+          }
+
           const targetWindow = presentationIframeRef.current?.contentWindow
           if (targetWindow && presentationOrigin) {
             targetWindow.postMessage(buildClearBoundaryCommandMessage(), presentationOrigin)
           }
 
-          const boundaryClearedPayload = buildBoundaryClearedPayload(lastInstructorIndicesRef.current)
+          const boundaryClearedPayload = buildBoundaryClearedPayload(instructorIndicesAtClear)
           try {
             socket.send(
               JSON.stringify({

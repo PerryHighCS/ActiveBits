@@ -54,7 +54,7 @@ interface RevealStateIndicesPayload {
 
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
-const SLIDE_END_FRAGMENT_INDEX = Number.MAX_SAFE_INTEGER
+const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
   if (a.h !== b.h) return a.h - b.h
@@ -66,8 +66,38 @@ function toSlideEndBoundary(indices: { h: number; v: number; f: number }): { h: 
   return {
     h: indices.h,
     v: indices.v,
-    f: SLIDE_END_FRAGMENT_INDEX,
+    f: CANONICAL_BOUNDARY_FRAGMENT_INDEX,
   }
+}
+
+function isWithinReleasedVerticalStack(
+  indices: { h: number; v: number; f: number },
+  boundary: { h: number; v: number; f: number },
+): boolean {
+  return indices.h === boundary.h && indices.v > boundary.v
+}
+
+function hasExceededReleasedBoundary(
+  indices: { h: number; v: number; f: number },
+  boundary: { h: number; v: number; f: number },
+): boolean {
+  if (isWithinReleasedVerticalStack(indices, boundary)) {
+    return false
+  }
+
+  if (indices.h !== boundary.h) {
+    return indices.h > boundary.h
+  }
+
+  if (indices.v !== boundary.v) {
+    return indices.v > boundary.v
+  }
+
+  if (boundary.f === CANONICAL_BOUNDARY_FRAGMENT_INDEX) {
+    return false
+  }
+
+  return indices.f > boundary.f
 }
 
 function resolveEffectiveBoundary(
@@ -81,7 +111,7 @@ function resolveEffectiveBoundary(
     return instructorIndices
   }
 
-  return compareIndices(instructorIndices, setBoundary) >= 0 ? instructorIndices : setBoundary
+  return hasExceededReleasedBoundary(instructorIndices, setBoundary) ? instructorIndices : setBoundary
 }
 
 interface RevealCommandMessage {
@@ -198,7 +228,7 @@ function shouldSnapBackToBoundary(
     return true
   }
 
-  return compareIndices(studentIndices, boundary) > 0
+  return hasExceededReleasedBoundary(studentIndices, boundary)
 }
 
 function buildSetStudentBoundaryCommand(

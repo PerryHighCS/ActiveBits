@@ -276,3 +276,27 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
 - Follow-up action: Keep host shell focused on sync/session controls; add navigation affordances in deck content/plugins if needed.
 - Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck released-stack boundary comparisons must treat same-horizontal vertical child-slide movement as still inside the released region; only moving to a later horizontal slide should clear/supersede the explicit boundary, and student snapback logic must not pull `h`-matching lower child slides back to `v = 0`.
+- Why it matters: Full `h/v/f` boundary comparisons caused manager relay logic to clear boundaries and student boundary sync to snap lower-stack students back to the top child when an instructor moved down and back up within an already released vertical stack.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: When adjusting SyncDeck release logic, keep reconnect boundary restoration intact but preserve horizontal-only released-stack semantics for explicit boundary clear/snap decisions.
+- Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck presentation preflight should accept the iframe's origin-validated `reveal-sync` `ready` startup message as a successful validation signal in addition to `pong`.
+- Why it matters: Some regression/manual decks announce `ready` on init but do not answer the host ping with `pong`, and `pong`-only validation incorrectly blocks otherwise compatible SyncDeck presentations.
+- Evidence: `activities/syncdeck/client/shared/presentationPreflight.ts`; `activities/syncdeck/client/shared/presentationPreflight.test.ts`
+- Follow-up action: Keep preflight strict on `origin`/`source`, but treat standard startup handshake messages as sufficient proof that the reveal-sync bridge is alive.
+- Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck host/student boundary canonicalization now uses the documented end-of-slide sentinel `f: -1` and boundary-specific comparison helpers instead of `Number.MAX_SAFE_INTEGER`.
+- Why it matters: The old sentinel leaked an internal comparison hack into boundary payloads and drifted from the reveal-sync schema; using `f: -1` keeps wire semantics aligned while still preserving “end of boundary slide” behavior in suppression and snapback logic.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: If the iframe starts exposing explicit fragment-count metadata in state payloads, revisit boundary comparison helpers and remove the remaining sentinel semantics entirely.
+- Owner: Codex
