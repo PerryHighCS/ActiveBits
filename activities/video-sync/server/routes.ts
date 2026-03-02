@@ -45,6 +45,11 @@ interface VideoSyncSessionData extends Record<string, unknown> {
   telemetry: VideoSyncTelemetry
 }
 
+interface PublicVideoSyncSessionData {
+  state: VideoSyncState
+  telemetry: VideoSyncTelemetry
+}
+
 interface VideoSyncSession extends SessionRecord {
   type?: string
   data: VideoSyncSessionData
@@ -120,9 +125,12 @@ type ParsedVideoSourceResult =
 const HEARTBEAT_INTERVAL_MS = 3000
 const UNSYNC_STALE_MS = 20_000
 const WS_OPEN_READY_STATE = 1
+const MAX_TELEMETRY_ERROR_CODE_LENGTH = 64
+const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
 const provider = 'youtube'
 const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
+const heartbeatInFlightBySession = new Map<string, boolean>()
 const unsyncedStudentsBySession = new Map<string, Map<string, number>>()
 
 interface CookieSessionEntry {
@@ -346,6 +354,15 @@ function normalizeStudentId(value: unknown): string | null {
   return trimmed
 }
 
+function normalizeTelemetryErrorField(value: unknown, maxLength: number): string | null {
+  if (typeof value !== 'string') return null
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return null
+
+  return trimmed.slice(0, maxLength)
+}
+
 function refreshUnsyncedStudentsCount(data: VideoSyncSessionData, sessionId: string, nowMs = Date.now()): void {
   const studentMap = unsyncedStudentsBySession.get(sessionId)
   if (!studentMap) {
@@ -405,6 +422,13 @@ function ensureVideoSyncSessionData(session: SessionRecord): VideoSyncSessionDat
 
   session.data = normalized
   return normalized
+}
+
+function toPublicSessionData(data: VideoSyncSessionData): PublicVideoSyncSessionData {
+  return {
+    state: data.state,
+    telemetry: data.telemetry,
+  }
 }
 
 registerSessionNormalizer('video-sync', (session) => {
@@ -523,6 +547,7 @@ function stopHeartbeat(sessionId: string): void {
   if (!existing) return
   clearInterval(existing)
   heartbeatTimers.delete(sessionId)
+  heartbeatInFlightBySession.delete(sessionId)
   unsyncedStudentsBySession.delete(sessionId)
 }
 
@@ -554,29 +579,43 @@ function ensureHeartbeat(
 
   const timer = setInterval(() => {
     void (async () => {
-      const sockets = subscribersBySession.get(sessionId)
-      if (!sockets || sockets.size === 0) {
-        stopHeartbeat(sessionId)
+      if (heartbeatInFlightBySession.get(sessionId) === true) {
         return
       }
 
-      const session = await getVideoSyncSession(sessions, sessionId)
-      if (!session) {
-        closeSubscribersForMissingSession(sessionId)
-        stopHeartbeat(sessionId)
-        return
+      heartbeatInFlightBySession.set(sessionId, true)
+
+      try {
+        const sockets = subscribersBySession.get(sessionId)
+        if (!sockets || sockets.size === 0) {
+          stopHeartbeat(sessionId)
+          return
+        }
+
+        const session = await getVideoSyncSession(sessions, sessionId)
+        if (!session) {
+          closeSubscribersForMissingSession(sessionId)
+          stopHeartbeat(sessionId)
+          return
+        }
+
+        const data = ensureVideoSyncSessionData(session)
+        data.state = applyStopIfReached(data.state)
+        updateConnectionTelemetry(data, sessionId)
+        await sessions.set(session.id, session)
+
+        const envelope = createEnvelope(sessionId, 'heartbeat', {
+          state: data.state,
+          telemetry: data.telemetry,
+        })
+        await broadcastEnvelope(sessions, ws, sessionId, envelope)
+      } finally {
+        if (heartbeatTimers.has(sessionId)) {
+          heartbeatInFlightBySession.set(sessionId, false)
+        } else {
+          heartbeatInFlightBySession.delete(sessionId)
+        }
       }
-
-      const data = ensureVideoSyncSessionData(session)
-      data.state = applyStopIfReached(data.state)
-      updateConnectionTelemetry(data, sessionId)
-      await sessions.set(session.id, session)
-
-      const envelope = createEnvelope(sessionId, 'heartbeat', {
-        state: data.state,
-        telemetry: data.telemetry,
-      })
-      await broadcastEnvelope(sessions, ws, sessionId, envelope)
     })().catch((error: unknown) => {
       console.error(`Video sync heartbeat failed for session ${sessionId}:`, error)
     })
@@ -691,7 +730,7 @@ export default function setupVideoSyncRoutes(
     res.json({
       id: session.id,
       type: session.type,
-      data,
+      data: toPublicSessionData(data),
     })
   })
 
@@ -943,10 +982,15 @@ export default function setupVideoSyncRoutes(
       data.telemetry.sync.lastCorrectionResult = 'failed'
     }
 
-    if (typeof body.errorCode === 'string' || typeof body.errorMessage === 'string') {
-      data.telemetry.error = {
-        code: typeof body.errorCode === 'string' ? body.errorCode : null,
-        message: typeof body.errorMessage === 'string' ? body.errorMessage : null,
+    if (body.type === 'load-failure') {
+      const errorCode = normalizeTelemetryErrorField(body.errorCode, MAX_TELEMETRY_ERROR_CODE_LENGTH)
+      const errorMessage = normalizeTelemetryErrorField(body.errorMessage, MAX_TELEMETRY_ERROR_MESSAGE_LENGTH)
+
+      if (errorCode != null || errorMessage != null) {
+        data.telemetry.error = {
+          code: errorCode,
+          message: errorMessage,
+        }
       }
     }
 

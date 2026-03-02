@@ -222,6 +222,38 @@ void test('create route initializes video-sync session', async () => {
   assert.equal(state.videoId, '')
 })
 
+void test('session get route redacts instructor-only fields from public payload', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', 'secret-passcode') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const payload = res.body as {
+    id?: string
+    type?: string
+    data?: Record<string, unknown>
+  }
+  assert.equal(payload.id, 's1')
+  assert.equal(payload.type, 'video-sync')
+  assert.ok(payload.data)
+  assert.equal(typeof payload.data?.state, 'object')
+  assert.equal(typeof payload.data?.telemetry, 'object')
+  assert.equal('instructorPasscode' in (payload.data ?? {}), false)
+})
+
 void test('session patch returns invalid video id for non-YouTube host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -737,6 +769,83 @@ void test('heartbeat stops and closes subscribers when the backing session disap
   }
 })
 
+void test('heartbeat skips overlapping ticks while a previous tick is still in flight', async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'heartbeat-token-overlap' }
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((_timer: ReturnType<typeof setInterval> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearInterval
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+    const session = createVideoSyncSession('s1')
+    const storeState = createSessionStore({ s1: session })
+
+    const slowSetState: { resolve: (() => void) | null } = { resolve: null }
+    let setCalls = 0
+    const initialPublishedCount = () => storeState.published.length
+    const sessionsWithSlowSet = {
+      ...storeState.sessions,
+      async set(id: string, updatedSession: SessionRecord) {
+        setCalls += 1
+        if (setCalls === 1) {
+          return storeState.sessions.set(id, updatedSession)
+        }
+        await new Promise<void>((resolve) => {
+          slowSetState.resolve = resolve
+        })
+        return storeState.sessions.set(id, updatedSession)
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessionsWithSlowSet, ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({
+      sessionId: 's1',
+      role: 'student',
+    }))
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const runHeartbeat = heartbeatState.callback
+    assert.equal(typeof runHeartbeat, 'function')
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+
+    const publishedBeforeHeartbeat = initialPublishedCount()
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(setCalls, 2)
+
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(setCalls, 2)
+
+    const releaseHeartbeatSet = slowSetState.resolve
+    if (releaseHeartbeatSet == null) {
+      throw new Error('Expected stalled heartbeat set() to register a resolver')
+    }
+    releaseHeartbeatSet()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(storeState.published.length, publishedBeforeHeartbeat + 1)
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+  }
+})
+
 void test('event route tracks current unsynced student count', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -772,4 +881,65 @@ void test('event route tracks current unsynced student count', async () => {
   assert.equal(correctionResponse.statusCode, 200)
   const correctionTelemetry = (correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry
   assert.equal(correctionTelemetry.sync.unsyncedStudents, 0)
+})
+
+void test('event route ignores telemetry.error writes outside load-failure events', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof handler, 'function')
+
+  const response = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        type: 'unsync',
+        studentId: 'student-a',
+        errorCode: 'PLAYER_BROKEN',
+        errorMessage: 'student should not be able to overwrite persisted error state',
+      },
+    },
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  const telemetry = (response.body as { telemetry: { error: { code: string | null; message: string | null } } }).telemetry
+  assert.deepEqual(telemetry.error, { code: null, message: null })
+})
+
+void test('event route clamps load-failure telemetry.error fields before persisting', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof handler, 'function')
+
+  const longCode = `  ${'C'.repeat(80)}  `
+  const longMessage = `  ${'M'.repeat(300)}  `
+
+  const response = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        type: 'load-failure',
+        errorCode: longCode,
+        errorMessage: longMessage,
+      },
+    },
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  const telemetry = (response.body as { telemetry: { error: { code: string | null; message: string | null } } }).telemetry
+  assert.equal(telemetry.error.code, 'C'.repeat(64))
+  assert.equal(telemetry.error.message, 'M'.repeat(256))
 })
