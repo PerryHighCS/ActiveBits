@@ -95,6 +95,38 @@ export function shouldBlockStudentOverlayKey(key: string): boolean {
   return key !== 'Tab' && key !== 'Escape'
 }
 
+export async function reportVideoSyncStudentEvent(params: {
+  sessionId: string | null
+  isSoloMode: boolean
+  studentId: string
+  eventType: 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'load-failure'
+  driftSec?: number
+  correctionResult?: 'success' | 'failed'
+  errorCode?: string
+  errorMessage?: string
+}): Promise<void> {
+  if (!params.sessionId || params.isSoloMode) {
+    return
+  }
+
+  try {
+    await fetch(`/api/video-sync/${params.sessionId}/event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: params.eventType,
+        studentId: params.studentId,
+        driftSec: params.driftSec,
+        correctionResult: params.correctionResult,
+        errorCode: params.errorCode,
+        errorMessage: params.errorMessage,
+      }),
+    })
+  } catch {
+    // Telemetry failures should not affect student playback UX.
+  }
+}
+
 export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps) {
   const sessionId = sessionData?.sessionId ?? null
   const isSoloMode = sessionId?.startsWith('solo-') ?? false
@@ -140,18 +172,15 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       errorMessage?: string
     },
   ): Promise<void> => {
-    if (!sessionId || isSoloMode) return
-    await fetch(`/api/video-sync/${sessionId}/event`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: eventType,
-        studentId: studentClientIdRef.current,
-        driftSec: options?.driftSec,
-        correctionResult: options?.correctionResult,
-        errorCode: options?.errorCode,
-        errorMessage: options?.errorMessage,
-      }),
+    await reportVideoSyncStudentEvent({
+      sessionId,
+      isSoloMode,
+      studentId: studentClientIdRef.current,
+      eventType,
+      driftSec: options?.driftSec,
+      correctionResult: options?.correctionResult,
+      errorCode: options?.errorCode,
+      errorMessage: options?.errorMessage,
     })
   }, [sessionId, isSoloMode])
 

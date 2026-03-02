@@ -124,6 +124,7 @@ type ParsedVideoSourceResult =
 
 const HEARTBEAT_INTERVAL_MS = 3000
 const UNSYNC_STALE_MS = 20_000
+const MAX_UNSYNCED_STUDENTS_PER_SESSION = 200
 const WS_OPEN_READY_STATE = 1
 const MAX_TELEMETRY_ERROR_CODE_LENGTH = 64
 const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
@@ -201,6 +202,10 @@ function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): Par
   const host = parsedUrl.hostname.toLowerCase()
   const isYouTubeHost = host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com'
   const isShortHost = host === 'youtu.be' || host === 'www.youtu.be'
+
+  if (!isYouTubeHost && !isShortHost) {
+    return { ok: false, reason: 'invalid-url' }
+  }
 
   let videoId: string | null = null
   if (isYouTubeHost && parsedUrl.pathname === '/watch') {
@@ -363,6 +368,14 @@ function normalizeTelemetryErrorField(value: unknown, maxLength: number): string
   return trimmed.slice(0, maxLength)
 }
 
+function pruneStaleUnsyncedStudents(studentMap: Map<string, number>, nowMs = Date.now()): void {
+  for (const [studentId, timestampMs] of studentMap.entries()) {
+    if (nowMs - timestampMs > UNSYNC_STALE_MS) {
+      studentMap.delete(studentId)
+    }
+  }
+}
+
 function refreshUnsyncedStudentsCount(data: VideoSyncSessionData, sessionId: string, nowMs = Date.now()): void {
   const studentMap = unsyncedStudentsBySession.get(sessionId)
   if (!studentMap) {
@@ -370,11 +383,7 @@ function refreshUnsyncedStudentsCount(data: VideoSyncSessionData, sessionId: str
     return
   }
 
-  for (const [studentId, timestampMs] of studentMap.entries()) {
-    if (nowMs - timestampMs > UNSYNC_STALE_MS) {
-      studentMap.delete(studentId)
-    }
-  }
+  pruneStaleUnsyncedStudents(studentMap, nowMs)
 
   if (studentMap.size === 0) {
     unsyncedStudentsBySession.delete(sessionId)
@@ -388,6 +397,10 @@ function refreshUnsyncedStudentsCount(data: VideoSyncSessionData, sessionId: str
 function markStudentUnsynced(sessionId: string, studentId: string, nowMs = Date.now()): void {
   const existing = unsyncedStudentsBySession.get(sessionId)
   if (existing) {
+    pruneStaleUnsyncedStudents(existing, nowMs)
+    if (!existing.has(studentId) && existing.size >= MAX_UNSYNCED_STUDENTS_PER_SESSION) {
+      return
+    }
     existing.set(studentId, nowMs)
     return
   }
