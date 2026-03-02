@@ -1038,8 +1038,13 @@ export default function setupVideoSyncRoutes(
           code: 'NOT_FOUND',
           message: 'Session not found',
         })
-        typedSocket.send(JSON.stringify(errorEnvelope))
-        typedSocket.close(1008, 'Session not found')
+        try {
+          if (typedSocket.readyState === WS_OPEN_READY_STATE) {
+            typedSocket.send(JSON.stringify(errorEnvelope))
+          }
+        } finally {
+          typedSocket.close(1008, 'Session not found')
+        }
         return
       }
 

@@ -42,6 +42,37 @@ const DEFAULT_STATE: VideoSyncState = {
   serverTimestampMs: Date.now(),
 }
 
+function clampNonNegativeNumber(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback
+  }
+
+  return Math.max(0, value)
+}
+
+export function normalizeVideoSyncState(value: unknown, fallbackState: VideoSyncState = DEFAULT_STATE): VideoSyncState {
+  const source = value != null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+
+  const stopSec =
+    typeof source.stopSec === 'number' && Number.isFinite(source.stopSec)
+      ? Math.max(0, source.stopSec)
+      : null
+
+  return {
+    provider: 'youtube',
+    videoId: typeof source.videoId === 'string' ? source.videoId : fallbackState.videoId,
+    startSec: clampNonNegativeNumber(source.startSec, fallbackState.startSec),
+    stopSec,
+    positionSec: clampNonNegativeNumber(source.positionSec, fallbackState.positionSec),
+    isPlaying: source.isPlaying === true,
+    playbackRate: 1,
+    updatedBy: source.updatedBy === 'manager' ? 'manager' : 'system',
+    serverTimestampMs: clampNonNegativeNumber(source.serverTimestampMs, fallbackState.serverTimestampMs),
+  }
+}
+
 export function hasInstructorPlaybackStarted(state: VideoSyncState): boolean {
   if (!state.videoId) {
     return false
@@ -63,6 +94,19 @@ function createStudentClientId(): string {
   return `student-${Date.now()}-${random}`
 }
 
+function normalizeYouTubeVideoId(value: string | null): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  return /^[A-Za-z0-9_-]{6,}$/.test(trimmed) ? trimmed : null
+}
+
 export function parseYouTubeVideoId(urlValue: string): { videoId: string | null; startSec: number; stopSec: number | null } {
   try {
     const url = new URL(urlValue)
@@ -72,11 +116,10 @@ export function parseYouTubeVideoId(urlValue: string): { videoId: string | null;
 
     let videoId: string | null = null
     if (isYoutube && url.pathname === '/watch') {
-      const value = url.searchParams.get('v')
-      videoId = typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+      videoId = normalizeYouTubeVideoId(url.searchParams.get('v'))
     } else if (isShort) {
-      const value = url.pathname.slice(1)
-      videoId = value.trim().length > 0 ? value.trim() : null
+      const [firstSegment] = url.pathname.split('/').filter((segment) => segment.trim().length > 0)
+      videoId = normalizeYouTubeVideoId(firstSegment ?? null)
     }
 
     const startRaw = url.searchParams.get('start') ?? url.searchParams.get('t')
@@ -153,11 +196,8 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     try {
       const stored = localStorage.getItem(SOLO_STORAGE_KEY)
       if (!stored) return
-      const parsed = JSON.parse(stored) as Partial<VideoSyncState>
-      setState({
-        ...DEFAULT_STATE,
-        ...parsed,
-      })
+      const parsed = JSON.parse(stored) as unknown
+      setState(normalizeVideoSyncState(parsed, DEFAULT_STATE))
     } catch {
       setState(DEFAULT_STATE)
     }

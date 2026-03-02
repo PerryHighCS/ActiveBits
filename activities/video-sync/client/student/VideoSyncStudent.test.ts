@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
+import { normalizeVideoSyncState } from './VideoSyncStudent.js'
 import { parseYouTubeVideoId } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
@@ -59,6 +60,32 @@ void test('hasInstructorPlaybackStarted is false before playback begins', () => 
   )
 })
 
+void test('normalizeVideoSyncState sanitizes malformed persisted solo state values', () => {
+  const normalized = normalizeVideoSyncState({
+    provider: 'vimeo',
+    videoId: 42,
+    startSec: '12',
+    stopSec: '30',
+    positionSec: -5,
+    isPlaying: 'yes',
+    playbackRate: 2,
+    updatedBy: 'manager',
+    serverTimestampMs: 'oops',
+  }, BASE_STATE)
+
+  assert.deepEqual(normalized, {
+    provider: 'youtube',
+    videoId: '',
+    startSec: 0,
+    stopSec: null,
+    positionSec: 0,
+    isPlaying: false,
+    playbackRate: 1,
+    updatedBy: 'manager',
+    serverTimestampMs: 0,
+  })
+})
+
 void test('parseYouTubeVideoId parses numeric start and end query params', () => {
   assert.deepEqual(
     parseYouTubeVideoId('https://www.youtube.com/watch?v=abc123&t=83&end=120'),
@@ -77,6 +104,20 @@ void test('parseYouTubeVideoId parses hour-minute-second timestamp shorthand', (
   assert.deepEqual(
     parseYouTubeVideoId('https://youtu.be/abc123?t=1h2m3s'),
     { videoId: 'abc123', startSec: 3723, stopSec: null },
+  )
+})
+
+void test('parseYouTubeVideoId uses only the first youtu.be path segment', () => {
+  assert.deepEqual(
+    parseYouTubeVideoId('https://youtu.be/abc123/extra-segment?t=45'),
+    { videoId: 'abc123', startSec: 45, stopSec: null },
+  )
+})
+
+void test('parseYouTubeVideoId rejects malformed short-url ids with invalid characters', () => {
+  assert.deepEqual(
+    parseYouTubeVideoId('https://youtu.be/abc$123'),
+    { videoId: null, startSec: 0, stopSec: null },
   )
 })
 
