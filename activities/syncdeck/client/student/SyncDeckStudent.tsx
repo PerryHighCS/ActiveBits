@@ -466,11 +466,7 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
     return null
   }
 
-  const statePayload = message.payload as {
-    revealState?: unknown
-    indices?: { h?: unknown; v?: unknown; f?: unknown }
-    paused?: unknown
-  }
+  const statePayload = message.payload as Record<string, unknown>
 
   const mergedState = buildInstructorStatePayload(statePayload)
   if (!mergedState) {
