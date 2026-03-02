@@ -251,19 +251,8 @@ function buildInstructorStatePayload(
   }
 }
 
-function buildSyncToInstructorCommand(
-  message: RevealSyncEnvelope,
-  payload: Record<string, unknown>,
-  fallbackIndices: { h: number; v: number; f: number } | null = null,
-): RevealCommandMessage | null {
-  const state = buildInstructorStatePayload(payload, fallbackIndices)
-  if (!state) {
-    return null
-  }
-
-  return buildBoundaryCommandEnvelope(message, 'syncToInstructor', {
-    state,
-  })
+function buildClearBoundaryCommand(message: RevealSyncEnvelope): RevealCommandMessage {
+  return buildBoundaryCommandEnvelope(message, 'clearBoundary')
 }
 
 function buildSetStudentBoundaryCommand(
@@ -288,8 +277,12 @@ function buildSetStudentBoundaryCommand(
     return null
   }
 
-  if (!setBoundary && instructorIndices) {
-    return buildSyncToInstructorCommand(message, payload as Record<string, unknown>, instructorIndices)
+  if (!setBoundary) {
+    if (message.action === 'studentBoundaryChanged') {
+      return buildClearBoundaryCommand(message)
+    }
+
+    return null
   }
 
   return buildBoundaryCommandEnvelope(message, 'setStudentBoundary', {
