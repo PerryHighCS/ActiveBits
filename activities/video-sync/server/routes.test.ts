@@ -254,7 +254,7 @@ void test('session get route redacts instructor-only fields from public payload'
   assert.equal('instructorPasscode' in (payload.data ?? {}), false)
 })
 
-void test('session patch returns invalid video id for non-YouTube host', async () => {
+void test('session patch returns invalid source url for unsupported non-YouTube host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
@@ -275,8 +275,8 @@ void test('session patch returns invalid video id for non-YouTube host', async (
 
   assert.equal(res.statusCode, 400)
   assert.deepEqual(res.body, {
-    error: 'INVALID_VIDEO_ID',
-    message: 'Could not determine a valid YouTube video id from sourceUrl.',
+    error: 'INVALID_SOURCE_URL',
+    message: 'Only youtube.com/watch and youtu.be URLs are supported in v1.',
   })
 })
 
@@ -881,6 +881,33 @@ void test('event route tracks current unsynced student count', async () => {
   assert.equal(correctionResponse.statusCode, 200)
   const correctionTelemetry = (correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry
   assert.equal(correctionTelemetry.sync.unsyncedStudents, 0)
+})
+
+void test('event route caps distinct unsynced student ids per session', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof handler, 'function')
+
+  let lastResponse = createResponse()
+  for (let index = 0; index < 205; index += 1) {
+    lastResponse = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+        body: { type: 'unsync', studentId: `student-${index}`, driftSec: 0.5 },
+      },
+      lastResponse,
+    )
+    assert.equal(lastResponse.statusCode, 200)
+  }
+
+  const telemetry = (lastResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry
+  assert.equal(telemetry.sync.unsyncedStudents, 200)
 })
 
 void test('event route ignores telemetry.error writes outside load-failure events', async () => {

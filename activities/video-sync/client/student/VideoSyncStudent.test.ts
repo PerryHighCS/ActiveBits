@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { parseYouTubeVideoId } from './VideoSyncStudent.js'
+import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
 
@@ -95,4 +96,29 @@ void test('shouldBlockStudentOverlayKey blocks other playback-related keys', () 
   assert.equal(shouldBlockStudentOverlayKey(' '), true)
   assert.equal(shouldBlockStudentOverlayKey('ArrowRight'), true)
   assert.equal(shouldBlockStudentOverlayKey('k'), true)
+})
+
+void test('reportVideoSyncStudentEvent swallows fetch failures so telemetry does not reject outward', async () => {
+  const originalFetch = globalThis.fetch
+  let fetchCalls = 0
+
+  globalThis.fetch = (async () => {
+    fetchCalls += 1
+    throw new Error('[TEST] simulated telemetry network failure')
+  }) as typeof fetch
+
+  try {
+    await assert.doesNotReject(async () => {
+      await reportVideoSyncStudentEvent({
+        sessionId: 's1',
+        isSoloMode: false,
+        studentId: 'student-1',
+        eventType: 'load-failure',
+        errorCode: 'YT_LOAD_FAILED',
+      })
+    })
+    assert.equal(fetchCalls, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
