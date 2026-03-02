@@ -162,6 +162,44 @@ void test('toRevealCommandMessage preserves paused state from payload', () => {
   })
 })
 
+void test('toRevealCommandMessage accepts revealState indexh/indexv/indexf without payload.indices', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    payload: {
+      revealState: { indexh: 6, indexv: 2, indexf: 1 },
+    },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'setState')
+  assert.deepEqual((result?.payload as { payload?: { state?: unknown } })?.payload?.state, {
+    indexh: 6,
+    indexv: 2,
+    indexf: 1,
+  })
+})
+
+void test('toRevealCommandMessage accepts top-level indexh/indexv/indexf without payload.indices', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    payload: {
+      indexh: 5,
+      indexv: 1,
+      indexf: 3,
+    },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'setState')
+  assert.deepEqual((result?.payload as { payload?: { state?: unknown } })?.payload?.state, {
+    indexh: 5,
+    indexv: 1,
+    indexf: 3,
+  })
+})
+
 void test('toRevealCommandMessage maps paused action to setState paused command', () => {
   const result = toRevealCommandMessage({
     type: 'reveal-sync',

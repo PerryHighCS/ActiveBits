@@ -203,6 +203,35 @@ function normalizeIndices(value: unknown): { h: number; v: number; f: number } |
   }
 }
 
+function extractIndicesFromRevealStateObject(value: unknown): { h: number; v: number; f: number } | null {
+  const normalized = normalizeIndices(value)
+  if (normalized) {
+    return normalized
+  }
+
+  if (!isPlainObject(value)) {
+    return null
+  }
+
+  const indexh = value.indexh
+  const indexv = value.indexv
+  const indexf = value.indexf
+
+  if (typeof indexh !== 'number' || !Number.isFinite(indexh)) {
+    return null
+  }
+
+  if (typeof indexv !== 'number' || !Number.isFinite(indexv)) {
+    return null
+  }
+
+  return {
+    h: indexh,
+    v: indexv,
+    f: typeof indexf === 'number' && Number.isFinite(indexf) ? indexf : 0,
+  }
+}
+
 function buildBoundaryCommandEnvelope(
   message: RevealSyncEnvelope,
   name: string,
@@ -225,9 +254,9 @@ function buildInstructorStatePayload(
   fallbackIndices: { h: number; v: number; f: number } | null = null,
 ): Record<string, unknown> | null {
   const revealState = isPlainObject(payload.revealState) ? payload.revealState : null
-  const indices = normalizeIndices(payload.indices)
-    ?? normalizeIndices(revealState)
-    ?? normalizeIndices(payload)
+  const indices = extractIndicesFromRevealStateObject(payload.indices)
+    ?? extractIndicesFromRevealStateObject(revealState)
+    ?? extractIndicesFromRevealStateObject(payload)
     ?? fallbackIndices
 
   if (!indices) {
@@ -897,12 +926,11 @@ const SyncDeckStudent: FC = () => {
         }
 
         const revealCommand = toRevealCommandMessage(parsed.payload)
-        const boundaryAlreadyAppliedInstructorState = boundaryCommand != null && isSyncToInstructorCommand(boundaryCommand)
         if (revealCommand == null) {
           if (boundaryCommand == null) {
             return
           }
-        } else if (!boundaryAlreadyAppliedInstructorState) {
+        } else {
           const incomingInstructorIndices = extractIndicesFromRevealStateMessage(parsed.payload)
           const suppressForwardSync = shouldSuppressForwardInstructorSync(
             studentBacktrackOptOutRef.current,
@@ -937,7 +965,7 @@ const SyncDeckStudent: FC = () => {
     }
 
     const revealCommand = toRevealCommandMessage(payload)
-    if (revealCommand != null && !isSyncToInstructorCommand(boundaryCommand)) {
+    if (revealCommand != null) {
       sendPayloadToIframe(revealCommand)
     }
   }, [sendPayloadToIframe])
