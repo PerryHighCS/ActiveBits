@@ -254,7 +254,9 @@ function buildInstructorStatePayload(
   fallbackIndices: { h: number; v: number; f: number } | null = null,
 ): Record<string, unknown> | null {
   const revealState = isPlainObject(payload.revealState) ? payload.revealState : null
+  const navigation = isPlainObject(payload.navigation) ? payload.navigation : null
   const indices = extractIndicesFromRevealStateObject(payload.indices)
+    ?? extractIndicesFromRevealStateObject(navigation?.current)
     ?? extractIndicesFromRevealStateObject(revealState)
     ?? extractIndicesFromRevealStateObject(payload)
     ?? fallbackIndices

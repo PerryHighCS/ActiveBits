@@ -200,6 +200,26 @@ void test('toRevealCommandMessage accepts top-level indexh/indexv/indexf without
   })
 })
 
+void test('toRevealCommandMessage accepts navigation.current indices without payload.indices', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    payload: {
+      navigation: {
+        current: { h: 8, v: 2, f: 1 },
+      },
+    },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'setState')
+  assert.deepEqual((result?.payload as { payload?: { state?: unknown } })?.payload?.state, {
+    indexh: 8,
+    indexv: 2,
+    indexf: 1,
+  })
+})
+
 void test('toRevealCommandMessage maps paused action to setState paused command', () => {
   const result = toRevealCommandMessage({
     type: 'reveal-sync',
