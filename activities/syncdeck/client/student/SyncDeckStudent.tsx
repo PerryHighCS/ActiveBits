@@ -269,19 +269,20 @@ function buildSetStudentBoundaryCommand(
     return null
   }
 
-  const instructorIndices = normalizeIndices(payload.indices) ?? fallbackInstructorIndices
   const rawSetBoundary = normalizeIndices(payload.studentBoundary)
   const setBoundary = rawSetBoundary ? toSlideEndBoundary(rawSetBoundary) : null
-  const effectiveBoundary = resolveEffectiveBoundary(instructorIndices, setBoundary)
-  if (!effectiveBoundary) {
-    return null
-  }
 
   if (!setBoundary) {
     if (message.action === 'studentBoundaryChanged') {
       return buildClearBoundaryCommand(message)
     }
 
+    return null
+  }
+
+  const instructorIndices = normalizeIndices(payload.indices) ?? fallbackInstructorIndices
+  const effectiveBoundary = resolveEffectiveBoundary(instructorIndices, setBoundary)
+  if (!effectiveBoundary) {
     return null
   }
 
@@ -649,23 +650,6 @@ function getStoredStudentId(sessionId: string): string {
   return typeof stored === 'string' ? stored.trim() : ''
 }
 
-function isForceSyncBoundaryCommand(rawPayload: unknown): boolean {
-  if (!isPlainObject(rawPayload)) {
-    return false
-  }
-
-  const message = rawPayload as RevealSyncEnvelope
-  if (message.type !== 'reveal-sync' || message.action !== 'command' || !isPlainObject(message.payload)) {
-    return false
-  }
-
-  const payload = message.payload as {
-    name?: unknown
-  }
-
-  return payload.name === 'syncToInstructor'
-}
-
 function isSyncToInstructorCommand(rawPayload: unknown): boolean {
   if (!isPlainObject(rawPayload)) {
     return false
@@ -886,7 +870,7 @@ const SyncDeckStudent: FC = () => {
           lastInstructorIndicesRef.current = instructorIndices
         }
 
-        if (isForceSyncBoundaryCommand(parsed.payload) && studentBacktrackOptOutRef.current) {
+        if (isSyncToInstructorCommand(parsed.payload) && studentBacktrackOptOutRef.current) {
           setBacktrackOptOut(false)
         }
 

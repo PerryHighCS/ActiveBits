@@ -453,6 +453,22 @@ void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged null paylo
   assert.equal((result?.payload as { payload?: unknown })?.payload, undefined)
 })
 
+void test('toRevealBoundaryCommandMessage clears boundary without instructor indices when studentBoundaryChanged payload is null', () => {
+  const result = toRevealBoundaryCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'studentBoundaryChanged',
+    role: 'instructor',
+    payload: {
+      reason: 'instructorSet',
+      studentBoundary: null,
+    },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'clearBoundary')
+  assert.equal((result?.payload as { payload?: unknown })?.payload, undefined)
+})
+
 void test('extractIndicesFromRevealStateMessage reads indices from ready payload', () => {
   const indices = extractIndicesFromRevealStateMessage({
     type: 'reveal-sync',
