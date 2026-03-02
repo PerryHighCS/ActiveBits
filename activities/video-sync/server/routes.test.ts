@@ -718,6 +718,31 @@ void test('invalid websocket session is rejected before subscription side effect
   assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
 })
 
+void test('invalid websocket session still closes when sending the not-found envelope throws', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({})
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  recorder.socket.send = () => {
+    throw new Error('[TEST] simulated socket send failure')
+  }
+
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 'missing-session',
+    role: 'student',
+  }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
+})
+
 void test('heartbeat stops and closes subscribers when the backing session disappears', async () => {
   const originalSetInterval = globalThis.setInterval
   const originalClearInterval = globalThis.clearInterval
