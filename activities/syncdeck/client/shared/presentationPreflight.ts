@@ -1,3 +1,5 @@
+import { REVEAL_SYNC_PROTOCOL_VERSION } from '../../shared/revealSyncProtocol.js'
+
 export interface SyncDeckPreflightResult {
   valid: boolean
   warning: string | null
@@ -92,7 +94,7 @@ export async function runSyncDeckPresentationPreflight(
         iframe.contentWindow?.postMessage(
           {
             type: 'reveal-sync',
-            version: '1.0.0',
+            version: REVEAL_SYNC_PROTOCOL_VERSION,
             action: 'command',
             source: 'activebits-syncdeck-host',
             role: 'instructor',

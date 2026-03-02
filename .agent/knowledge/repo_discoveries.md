@@ -300,3 +300,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
 - Follow-up action: If the iframe starts exposing explicit fragment-count metadata in state payloads, revisit boundary comparison helpers and remove the remaining sentinel semantics entirely.
 - Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck now treats `syncToInstructor` as the host-side “snap to instructor and resume follow mode” command; explicit boundary relays remain `setStudentBoundary`, but host-generated snapback paths no longer send deprecated `syncToBoundary` flags on boundary commands.
+- Why it matters: This keeps SyncDeck aligned with the updated reveal-sync protocol, avoids using boundary-setting commands as a hidden force-sync mechanism, and prevents duplicate `setState` relays when the student iframe can apply the instructor sync atomically in one command.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
+- Follow-up action: Keep future SyncDeck host relay changes split between explicit boundary grants (`setStudentBoundary`), boundary clears (`clearBoundary`), and explicit user-driven snap commands (`syncToInstructor`) instead of inferring snap-to-instructor from ordinary `state` payloads with `studentBoundary: null`.
+- Owner: Codex
