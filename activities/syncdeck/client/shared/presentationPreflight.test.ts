@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { runSyncDeckPresentationPreflight } from './presentationPreflight.js'
+import { REVEAL_SYNC_PROTOCOL_VERSION } from '../../shared/revealSyncProtocol.js'
 
 type MessageListener = (event: MessageEvent) => void
 type IframeListener = () => void
@@ -142,6 +143,7 @@ void test('runSyncDeckPresentationPreflight accepts ready handshake from present
     assert.equal(dom.appendedNodes.length, 1)
     assert.equal(dom.iframe.attributes.sandbox, 'allow-scripts allow-same-origin')
     assert.equal(dom.iframe.contentWindow.postMessageCalls.length, 1)
+    assert.equal((dom.iframe.contentWindow.postMessageCalls[0]?.message as { version?: unknown })?.version, REVEAL_SYNC_PROTOCOL_VERSION)
     assert.equal((dom.iframe.contentWindow.postMessageCalls[0]?.message as { payload?: { name?: unknown } })?.payload?.name, 'ping')
     assert.equal(dom.iframe.removed, true)
   } finally {

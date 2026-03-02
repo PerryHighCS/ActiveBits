@@ -1,0 +1,1 @@
+export const REVEAL_SYNC_PROTOCOL_VERSION = '2.0.0'

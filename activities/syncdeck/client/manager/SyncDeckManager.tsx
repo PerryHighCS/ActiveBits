@@ -4,6 +4,7 @@ import {
   getStudentPresentationCompatibilityError,
 } from '../shared/presentationUrlCompatibility.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
+import { REVEAL_SYNC_PROTOCOL_VERSION } from '../../shared/revealSyncProtocol.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
@@ -15,8 +16,6 @@ const DISCONNECTED_STATUS_DELAY_MS = 250
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
-const REVEAL_SYNC_PROTOCOL_VERSION = '2.0.0'
-
 interface SessionResponsePayload {
   session?: {
     data?: {

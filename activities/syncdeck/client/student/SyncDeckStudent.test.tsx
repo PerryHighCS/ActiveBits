@@ -379,7 +379,6 @@ void test('toRevealBoundaryCommandMessage ignores state payload with cleared bou
         indices: { h: 2, v: 0, f: 0 },
       },
     },
-    { h: 4, v: 0, f: 0 },
   )
 
   assert.equal(result, null)
@@ -445,7 +444,6 @@ void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged null paylo
         studentBoundary: null,
       },
     },
-    { h: 3, v: 0, f: 0 },
     { h: 2, v: 0, f: 0 },
   )
 

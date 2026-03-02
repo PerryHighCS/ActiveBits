@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEv
 import { useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
+import { REVEAL_SYNC_PROTOCOL_VERSION } from '../../shared/revealSyncProtocol.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 
@@ -129,8 +130,6 @@ interface RevealCommandMessage {
 }
 
 const WS_OPEN_READY_STATE = 1
-const REVEAL_SYNC_PROTOCOL_VERSION = '2.0.0'
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -293,7 +292,6 @@ function buildSetStudentBoundaryCommand(
 
 export function toRevealBoundaryCommandMessage(
   rawPayload: unknown,
-  _studentIndices: { h: number; v: number; f: number } | null = null,
   fallbackInstructorIndices: { h: number; v: number; f: number } | null = null,
 ): RevealCommandMessage | null {
   if (!isPlainObject(rawPayload)) {
@@ -892,7 +890,6 @@ const SyncDeckStudent: FC = () => {
 
         const boundaryCommand = toRevealBoundaryCommandMessage(
           parsed.payload,
-          localStudentIndicesRef.current,
           lastInstructorIndicesRef.current,
         )
         if (boundaryCommand != null) {
@@ -933,7 +930,6 @@ const SyncDeckStudent: FC = () => {
 
     const boundaryCommand = toRevealBoundaryCommandMessage(
       payload,
-      localStudentIndicesRef.current,
       lastInstructorIndicesRef.current,
     )
     if (boundaryCommand != null) {
