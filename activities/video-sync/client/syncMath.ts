@@ -1,6 +1,6 @@
 import type { VideoSyncState } from './protocol.js'
 
-export const DEFAULT_DRIFT_TOLERANCE_SEC = 0.75
+export const DEFAULT_DRIFT_TOLERANCE_SEC = 0.2
 
 export function clampPositionSec(value: number): number {
   if (!Number.isFinite(value)) {

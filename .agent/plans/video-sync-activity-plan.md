@@ -56,7 +56,7 @@ Expected runtime model:
 - Instructor can provide and update the video source for a session using standard `youtube.com/watch` and `youtu.be` URLs
 - Instructor can set start and stop timestamps (stop is advisory, not hard-enforced)
 - Instructor can play, pause, and seek the shared video
-- Students follow instructor playback state with drift correction target of `0.75s` tolerance
+- Students follow instructor playback state with drift correction target of `0.2s` tolerance
 - Late-joining students receive the current synchronized state
 - Late-joining students auto-seek and attempt autoplay; if autoplay is blocked, they receive a click-to-start fallback and can rely on the classroom display
 - Session reload/reconnect restores enough state to resume synchronization
@@ -238,7 +238,7 @@ Suggested persistence key pattern:
 
 ### Phase 3: Synchronization hardening
 - Add reconnect/late-join recovery behavior
-- Handle seek/play/pause edge cases and `0.75s` drift tolerance correction behavior
+- Handle seek/play/pause edge cases and `0.2s` drift tolerance correction behavior
 - Add validation and structured logging for synchronization failures
 - Verify behavior under temporary disconnections and refreshes
 - Add manager dashboard visibility for connections, errors, and unsync events
@@ -252,7 +252,7 @@ Suggested persistence key pattern:
 | Start/stop timestamp behavior | Timestamp parsing for `t/start/end`, `stopSec > startSec` validation | Session state includes advisory `stopSec`; update route enforces bounds | Playback reaches stop and auto-pauses without hard lockout |
 | Instructor play/pause/seek synchronization | Command reducer updates canonical state and timestamps | Command endpoint emits websocket update + heartbeat continuity | Manager controls are reflected on students with expected timing |
 | Student restrictions in synchronized mode | Authorization helper rejects student commands | Command route returns `FORBIDDEN_COMMAND` for student actor in synchronized mode | Student UI controls disabled in synchronized mode |
-| Late join/reconnect recovery | Drift calculator and catch-up logic with `0.75s` threshold | Join flow receives latest state snapshot and heartbeat updates | Late student joins, auto-seeks; autoplay-block path shows click-to-start fallback |
+| Late join/reconnect recovery | Drift calculator and catch-up logic with `0.2s` threshold | Join flow receives latest state snapshot and heartbeat updates | Late student joins, auto-seeks; autoplay-block path shows click-to-start fallback |
 | Validation and error handling | Schema/validator tests for invalid URL/time/command payloads | Routes return deterministic error codes/messages | Manager sees actionable error state in dashboard |
 | Telemetry visibility | Event formatter emits structured payloads for connection/error/unsync | Server logs and manager feed include expected event categories | Manager dashboard shows connection count and sync health changes |
 
@@ -285,7 +285,7 @@ Suggested persistence key pattern:
 - [x] Implement instructor session creation/configuration flow
 - [x] Implement manager playback controls
 - [x] Implement student synchronized playback view
-- [x] Implement event-driven sync + heartbeat strategy with `0.75s` drift correction target
+- [x] Implement event-driven sync + heartbeat strategy with `0.2s` drift correction target
 - [x] Implement autoplay-block fallback behavior for late joins
 - [x] Add manager dashboard reporting for connections, errors, and unsync events
 - [x] Add activity-specific tests for server routes, normalization, and client sync behavior

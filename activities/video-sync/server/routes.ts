@@ -134,6 +134,7 @@ const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
 const heartbeatInFlightBySession = new Map<string, boolean>()
 const unsyncedStudentsBySession = new Map<string, Map<string, number>>()
+const unsyncedStudentPruneTimersBySession = new Map<string, ReturnType<typeof setTimeout>>()
 
 interface CookieSessionEntry {
   key: string
@@ -394,6 +395,21 @@ function pruneStaleUnsyncedStudents(studentMap: Map<string, number>, nowMs = Dat
   }
 }
 
+function clearUnsyncedStudentPruneTimer(sessionId: string): void {
+  const existing = unsyncedStudentPruneTimersBySession.get(sessionId)
+  if (!existing) {
+    return
+  }
+
+  clearTimeout(existing)
+  unsyncedStudentPruneTimersBySession.delete(sessionId)
+}
+
+function clearUnsyncedStudentState(sessionId: string): void {
+  clearUnsyncedStudentPruneTimer(sessionId)
+  unsyncedStudentsBySession.delete(sessionId)
+}
+
 function refreshUnsyncedStudentsCount(data: VideoSyncSessionData, sessionId: string, nowMs = Date.now()): void {
   const studentMap = unsyncedStudentsBySession.get(sessionId)
   if (!studentMap) {
@@ -432,8 +448,71 @@ function clearStudentUnsynced(sessionId: string, studentId: string): void {
 
   existing.delete(studentId)
   if (existing.size === 0) {
-    unsyncedStudentsBySession.delete(sessionId)
+    clearUnsyncedStudentState(sessionId)
   }
+}
+
+function getNextUnsyncedStudentPruneDelay(sessionId: string, nowMs = Date.now()): number | null {
+  const studentMap = unsyncedStudentsBySession.get(sessionId)
+  if (!studentMap || studentMap.size === 0) {
+    return null
+  }
+
+  let minDelayMs = Number.POSITIVE_INFINITY
+  for (const timestampMs of studentMap.values()) {
+    const delayMs = Math.max(0, timestampMs + UNSYNC_STALE_MS - nowMs)
+    minDelayMs = Math.min(minDelayMs, delayMs)
+  }
+
+  return Number.isFinite(minDelayMs) ? minDelayMs : null
+}
+
+function scheduleUnsyncedStudentsPrune(
+  sessions: Pick<VideoSyncSessionStore, 'get' | 'set'>,
+  sessionId: string,
+  nowMs = Date.now(),
+): void {
+  clearUnsyncedStudentPruneTimer(sessionId)
+
+  const delayMs = getNextUnsyncedStudentPruneDelay(sessionId, nowMs)
+  if (delayMs == null) {
+    return
+  }
+
+  const timer = setTimeout(() => {
+    unsyncedStudentPruneTimersBySession.delete(sessionId)
+    void (async () => {
+      const studentMap = unsyncedStudentsBySession.get(sessionId)
+      if (!studentMap) {
+        return
+      }
+
+      const pruneNowMs = Date.now()
+      pruneStaleUnsyncedStudents(studentMap, pruneNowMs)
+
+      const session = await getVideoSyncSession(sessions, sessionId)
+      if (!session) {
+        clearUnsyncedStudentState(sessionId)
+        return
+      }
+
+      const data = ensureVideoSyncSessionData(session)
+      const previousCount = data.telemetry.sync.unsyncedStudents
+      refreshUnsyncedStudentsCount(data, sessionId, pruneNowMs)
+
+      if (data.telemetry.sync.unsyncedStudents !== previousCount) {
+        await sessions.set(session.id, session)
+      }
+
+      if ((unsyncedStudentsBySession.get(sessionId)?.size ?? 0) > 0) {
+        scheduleUnsyncedStudentsPrune(sessions, sessionId, pruneNowMs)
+      }
+    })().catch((error: unknown) => {
+      console.error(`Failed to prune stale video-sync unsynced students for session ${sessionId}:`, error)
+    })
+  }, delayMs)
+
+  unsyncedStudentPruneTimersBySession.set(sessionId, timer)
 }
 
 function ensureVideoSyncSessionData(session: SessionRecord): VideoSyncSessionData {
@@ -575,11 +654,12 @@ async function broadcastEnvelope(
 
 function stopHeartbeat(sessionId: string): void {
   const existing = heartbeatTimers.get(sessionId)
-  if (!existing) return
-  clearInterval(existing)
+  if (existing) {
+    clearInterval(existing)
+  }
   heartbeatTimers.delete(sessionId)
   heartbeatInFlightBySession.delete(sessionId)
-  unsyncedStudentsBySession.delete(sessionId)
+  clearUnsyncedStudentState(sessionId)
 }
 
 function closeSubscribersForMissingSession(sessionId: string): void {
@@ -994,6 +1074,7 @@ export default function setupVideoSyncRoutes(
     if (body.type === 'unsync') {
       if (studentId) {
         markStudentUnsynced(sessionId, studentId)
+        scheduleUnsyncedStudentsPrune(sessions, sessionId)
       }
       data.telemetry.sync.lastDriftSec =
         typeof body.driftSec === 'number' && Number.isFinite(body.driftSec) ? body.driftSec : data.telemetry.sync.lastDriftSec
@@ -1004,6 +1085,7 @@ export default function setupVideoSyncRoutes(
       const correction = body.correctionResult
       if (studentId && correction === 'success') {
         clearStudentUnsynced(sessionId, studentId)
+        scheduleUnsyncedStudentsPrune(sessions, sessionId)
       }
       data.telemetry.sync.lastCorrectionResult =
         correction === 'success' || correction === 'failed' ? correction : 'attempted'
