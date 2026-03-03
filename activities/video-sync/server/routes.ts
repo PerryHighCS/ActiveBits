@@ -903,14 +903,33 @@ export default function setupVideoSyncRoutes(
     }
 
     const data = ensureVideoSyncSessionData(session)
-    data.state = applyStopIfReached(data.state)
-    updateConnectionTelemetry(data, sessionId)
-    await sessions.set(session.id, session)
+    const projectedState = applyStopIfReached(data.state)
+    const projectedTelemetry = cloneTelemetry(data.telemetry)
+    updateConnectionTelemetry(
+      {
+        ...data,
+        state: projectedState,
+        telemetry: projectedTelemetry,
+      },
+      sessionId,
+    )
+
+    if (
+      shouldPersistHeartbeatState(data.state, projectedState) ||
+      shouldPersistHeartbeatTelemetry(data.telemetry, projectedTelemetry)
+    ) {
+      data.state = projectedState
+      data.telemetry = projectedTelemetry
+      await sessions.set(session.id, session)
+    }
 
     res.json({
       id: session.id,
       type: session.type,
-      data: toPublicSessionData(data),
+      data: {
+        state: projectedState,
+        telemetry: projectedTelemetry,
+      },
     })
   })
 

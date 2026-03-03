@@ -54,7 +54,7 @@ Expected runtime model:
 ## Functional Requirements
 
 - Instructor can provide and update the video source for a session using standard `youtube.com/watch` and `youtu.be` URLs
-- Instructor can set start and stop timestamps (stop is advisory, not hard-enforced)
+- Instructor can set start and stop timestamps, with `stopSec` enforced as the session playback boundary
 - Instructor can play, pause, and seek the shared video
 - Students follow instructor playback state with drift correction target of `0.2s` tolerance
 - Late-joining students receive the current synchronized state
@@ -62,7 +62,7 @@ Expected runtime model:
 - Session reload/reconnect restores enough state to resume synchronization
 - Student playback control is disabled in synchronized sessions
 - Server-side validation rejects invalid session state and malformed configuration requests
-- Manager dashboard surfaces connection status, synchronization errors, and unsync events
+- Manager dashboard surfaces connection status, synchronization errors, and current unsynced-student sync health
 
 ## Design Notes
 
@@ -71,7 +71,7 @@ Expected runtime model:
 - Keep student controls constrained to the intended classroom model; synchronized sessions are instructor-only controlled
 - Restrict initial source support to YouTube URLs (`youtube.com/watch`, `youtu.be`) and normalize to `videoId`, `startSec`, and optional `stopSec`
 - Use YouTube privacy-enhanced embed domain (`youtube-nocookie.com`) unless platform constraints prove incompatible
-- Treat configured stop time as advisory UX behavior (auto-pause when reached) rather than a hard server-enforced boundary
+- Treat configured stop time as a server-authoritative playback boundary: commands clamp to `stopSec` and playback auto-pauses when the boundary is reached
 
 ## YouTube v1 Provider Policy
 
@@ -86,11 +86,11 @@ Expected runtime model:
 
 - Embed domain: default to `youtube-nocookie.com`; if critical player API incompatibility is observed in target environments, fall back to standard YouTube embed domain behind an activity-level compatibility switch
 - Embed fallback trigger: treat repeated player-init failure (`onReady` missing after 8s timeout) or missing essential state-change events in two consecutive load attempts as compatibility failure and switch to standard YouTube embed domain for that session
-- Autoplay behavior on late join: auto-seek and attempt autoplay; if blocked, show click-to-start prompt and keep sync telemetry reporting unsynced/autoplay-blocked status to manager dashboard
-- Stop timestamp semantics: advisory `stopSec` triggers local auto-pause when playback reaches threshold; no hard server enforcement and no seek lockout
+- Autoplay behavior on late join: auto-seek and attempt autoplay; if blocked, show click-to-start prompt and keep telemetry reporting autoplay-blocked status plus current sync-health state to the manager dashboard
+- Stop timestamp semantics: `stopSec` is enforced by the server as the maximum playback position, and playback auto-pauses when projected state reaches it
 - Heartbeat cadence: websocket event-driven updates plus heartbeat every `3000ms`
-- Unsync reporting threshold: report unsync when absolute drift exceeds `2.0s` for two consecutive heartbeat intervals; include correction attempt outcome in telemetry
-- Telemetry schema default: manager dashboard consumes `connections.activeCount`, `autoplay.blockedCount`, `sync.unsyncEvents`, `sync.lastDriftSec`, `sync.lastCorrectionResult`, and latest `error.code/error.message`
+- Unsync reporting behavior: student clients correct drift when it exceeds the `0.2s` tolerance, report `unsync` opportunistically when they first enter an unsynced state, and throttle repeated unsync reports to at most once every `10000ms` while still unsynced
+- Telemetry schema default: manager dashboard consumes `connections.activeCount`, `autoplay.blockedCount`, `sync.unsyncedStudents`, `sync.lastDriftSec`, `sync.lastCorrectionResult`, and latest `error.code/error.message`
 - Future embedded/asynchronous mode note: if Video Sync is later exposed inside another activity shell, that mode must be explicitly gated by a yet-to-be-defined capability flag or launch contract rather than reusing the removed solo-mode path
 
 ## API / Protocol Contract (Draft)
@@ -241,7 +241,7 @@ Suggested persistence key pattern:
 - Handle seek/play/pause edge cases and `0.2s` drift tolerance correction behavior
 - Add validation and structured logging for synchronization failures
 - Verify behavior under temporary disconnections and refreshes
-- Add manager dashboard visibility for connections, errors, and unsync events
+- Add manager dashboard visibility for connections, errors, and current sync-health state
 - Exit criteria: reconnect and late join behavior validated; telemetry visible to manager for key failure states
 
 ## Test Matrix (Mapped to Requirements)
@@ -249,19 +249,19 @@ Suggested persistence key pattern:
 | Requirement | Unit Tests | Integration Tests | E2E/Scenario Tests |
 | --- | --- | --- | --- |
 | YouTube URL input and normalization | URL parser accepts `youtube.com/watch` + `youtu.be`; rejects unsupported hosts and malformed ids | Config route persists normalized `videoId/startSec/stopSec` | Manager enters URL and sees normalized playback start |
-| Start/stop timestamp behavior | Timestamp parsing for `t/start/end`, `stopSec > startSec` validation | Session state includes advisory `stopSec`; update route enforces bounds | Playback reaches stop and auto-pauses without hard lockout |
+| Start/stop timestamp behavior | Timestamp parsing for `t/start/end`, `stopSec > startSec` validation | Session state includes enforced `stopSec`; update route clamps commands and enforces bounds | Playback reaches stop, auto-pauses, and rejects progression past the boundary |
 | Instructor play/pause/seek synchronization | Command reducer updates canonical state and timestamps | Command endpoint emits websocket update + heartbeat continuity | Manager controls are reflected on students with expected timing |
 | Student restrictions in synchronized mode | Authorization helper rejects student commands | Command route returns `FORBIDDEN_COMMAND` for student actor in synchronized mode | Student UI controls disabled in synchronized mode |
 | Late join/reconnect recovery | Drift calculator and catch-up logic with `0.2s` threshold | Join flow receives latest state snapshot and heartbeat updates | Late student joins, auto-seeks; autoplay-block path shows click-to-start fallback |
 | Validation and error handling | Schema/validator tests for invalid URL/time/command payloads | Routes return deterministic error codes/messages | Manager sees actionable error state in dashboard |
-| Telemetry visibility | Event formatter emits structured payloads for connection/error/unsync | Server logs and manager feed include expected event categories | Manager dashboard shows connection count and sync health changes |
+| Telemetry visibility | Event formatter emits structured payloads for connection/error/unsync | Server logs and manager feed include expected telemetry fields and event reasons | Manager dashboard shows connection count and current sync health changes |
 
 ## Risks / Open Questions
 
 | Topic | Risk or Question | Owner | Decision Deadline |
 | --- | --- | --- | --- |
 | Cross-browser autoplay variance | Some browser/device combinations may still require manual start more often than expected despite fallback UX | Activity implementer | During Phase 3 hardening |
-| Classroom network jitter spikes | Temporary local network issues can increase unsync event frequency and telemetry noise | Activity implementer + dashboard owner | During Phase 3 hardening |
+| Classroom network jitter spikes | Temporary local network issues can increase opportunistic unsync reports and sync-health churn | Activity implementer + dashboard owner | During Phase 3 hardening |
 
 ## Progress Snapshot (2026-03-01)
 
@@ -287,7 +287,7 @@ Suggested persistence key pattern:
 - [x] Implement student synchronized playback view
 - [x] Implement event-driven sync + heartbeat strategy with `0.2s` drift correction target
 - [x] Implement autoplay-block fallback behavior for late joins
-- [x] Add manager dashboard reporting for connections, errors, and unsync events
+- [x] Add manager dashboard reporting for connections, errors, and current sync-health state
 - [x] Add activity-specific tests for server routes, normalization, and client sync behavior
 - [x] Run appropriate workspace checks and full repo validation as needed
 - [ ] Revisit SyncDeck embedding only after the embedded-activities future plan is ready
