@@ -354,3 +354,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
 - Follow-up action: If the iframe starts exposing explicit fragment-count metadata in state payloads, revisit boundary comparison helpers and remove the remaining sentinel semantics entirely.
 - Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: Activity client entry modules that import sibling manager/student files under the `activities` workspace should use explicit `.js` specifiers for relative ESM imports, even when the source files are `.ts`/`.tsx`.
+- Why it matters: `node --test` with `tsx` resolves these activity entry imports at runtime using Node ESM semantics, so extensionless relative specifiers can fail while `.js` specifiers match the emitted/runtime module shape used elsewhere in the repo.
+- Evidence: `activities/video-sync/client/index.ts`; `activities/syncdeck/client/index.tsx`; `activities/algorithm-demo/client/index.tsx`; `activities/package.json`
+- Follow-up action: When adding or updating `activities/*/client/index.ts` or `.tsx`, mirror the existing `.js` import pattern for sibling manager/student modules and keep activity-scoped tests in the validation path.
+- Owner: Codex

@@ -5,14 +5,14 @@ import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
   parseVideoSyncEnvelope,
   type VideoSyncState,
-} from '../protocol'
-import { computeDesiredPositionSec, shouldCorrectDrift } from '../syncMath'
+} from '../protocol.js'
+import { computeDesiredPositionSec, shouldCorrectDrift } from '../syncMath.js'
 import {
   loadYoutubeIframeApi,
   resolveYoutubePlayerState,
   type YoutubeNamespace,
   type YoutubePlayerLike,
-} from '../youtubeIframeApi'
+} from '../youtubeIframeApi.js'
 import { parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
 
 interface VideoSyncStudentProps {
@@ -25,6 +25,13 @@ interface SessionResponse {
   data?: {
     state?: VideoSyncState
   }
+}
+
+export function shouldInitializeYoutubePlayer(
+  container: HTMLDivElement | null,
+  existingPlayer: YoutubePlayerLike | null,
+): boolean {
+  return container != null && existingPlayer == null
 }
 
 const SOLO_STORAGE_KEY = 'video-sync-solo-state-solo-video-sync'
@@ -104,7 +111,7 @@ function normalizeYouTubeVideoId(value: string | null): string | null {
     return null
   }
 
-  return /^[A-Za-z0-9_-]{6,}$/.test(trimmed) ? trimmed : null
+  return /^[A-Za-z0-9_-]{11}$/.test(trimmed) ? trimmed : null
 }
 
 const BLOCKED_STUDENT_OVERLAY_KEYS = new Set<string>([
@@ -355,7 +362,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   })
 
   useEffect(() => {
-    if (!playerContainerRef.current) {
+    if (!shouldInitializeYoutubePlayer(playerContainerRef.current, playerRef.current)) {
       return
     }
 
@@ -383,7 +390,6 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
               if (!isSoloMode) {
                 player.mute()
               }
-              applyStateToPlayer(state, isSoloMode ? 'solo' : 'sync')
             },
             onError: () => {
               if (cancelled) return
@@ -420,7 +426,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       playerRef.current?.destroy()
       playerRef.current = null
     }
-  }, [applyStateToPlayer, isSoloMode, state.videoId])
+  }, [isSoloMode, reportEvent])
 
   useEffect(() => {
     if (!playerReady) return

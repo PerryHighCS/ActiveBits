@@ -798,6 +798,58 @@ void test('manager websocket accepts connections with a valid instructor passcod
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
+void test('websocket cleanup runs only once when error is followed by close', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 's1',
+    role: 'student',
+  }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const initialPublishedCount = storeState.published.length
+  const initialSetData = storeState.store.s1?.data as {
+    telemetry: {
+      connections: { activeCount: number }
+    }
+  }
+  assert.equal(initialSetData.telemetry.connections.activeCount, 1)
+
+  recorder.emit('error')
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const finalData = storeState.store.s1?.data as {
+    telemetry: {
+      connections: { activeCount: number }
+    }
+  }
+  assert.equal(finalData.telemetry.connections.activeCount, 0)
+  assert.equal(storeState.published.length, initialPublishedCount + 1)
+
+  const disconnectEnvelope = storeState.published.at(-1)?.message as {
+    type?: string
+    payload?: {
+      reason?: string
+      telemetry?: {
+        connections?: { activeCount?: number }
+      }
+    }
+  }
+  assert.equal(disconnectEnvelope.type, 'telemetry-update')
+  assert.equal(disconnectEnvelope.payload?.reason, 'connection-change')
+  assert.equal(disconnectEnvelope.payload?.telemetry?.connections?.activeCount, 0)
+})
+
 void test('invalid websocket session is rejected before subscription side effects are created', async () => {
   const app = createMockApp()
   const ws = createMockWs()

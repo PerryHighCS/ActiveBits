@@ -4,8 +4,10 @@ import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { normalizeVideoSyncState } from './VideoSyncStudent.js'
 import { parseYouTubeVideoId } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
+import { shouldInitializeYoutubePlayer } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
+import type { YoutubePlayerLike } from '../youtubeIframeApi.js'
 
 const BASE_STATE: VideoSyncState = {
   provider: 'youtube',
@@ -88,29 +90,29 @@ void test('normalizeVideoSyncState sanitizes malformed persisted solo state valu
 
 void test('parseYouTubeVideoId parses numeric start and end query params', () => {
   assert.deepEqual(
-    parseYouTubeVideoId('https://www.youtube.com/watch?v=abc123&t=83&end=120'),
-    { videoId: 'abc123', startSec: 83, stopSec: 120 },
+    parseYouTubeVideoId('https://www.youtube.com/watch?v=abc123def45&t=83&end=120'),
+    { videoId: 'abc123def45', startSec: 83, stopSec: 120 },
   )
 })
 
 void test('parseYouTubeVideoId parses YouTube timestamp shorthand for start time', () => {
   assert.deepEqual(
-    parseYouTubeVideoId('https://www.youtube.com/watch?v=abc123&t=1m23s'),
-    { videoId: 'abc123', startSec: 83, stopSec: null },
+    parseYouTubeVideoId('https://www.youtube.com/watch?v=abc123def45&t=1m23s'),
+    { videoId: 'abc123def45', startSec: 83, stopSec: null },
   )
 })
 
 void test('parseYouTubeVideoId parses hour-minute-second timestamp shorthand', () => {
   assert.deepEqual(
-    parseYouTubeVideoId('https://youtu.be/abc123?t=1h2m3s'),
-    { videoId: 'abc123', startSec: 3723, stopSec: null },
+    parseYouTubeVideoId('https://youtu.be/abc123def45?t=1h2m3s'),
+    { videoId: 'abc123def45', startSec: 3723, stopSec: null },
   )
 })
 
 void test('parseYouTubeVideoId uses only the first youtu.be path segment', () => {
   assert.deepEqual(
-    parseYouTubeVideoId('https://youtu.be/abc123/extra-segment?t=45'),
-    { videoId: 'abc123', startSec: 45, stopSec: null },
+    parseYouTubeVideoId('https://youtu.be/abc123def45/extra-segment?t=45'),
+    { videoId: 'abc123def45', startSec: 45, stopSec: null },
   )
 })
 
@@ -121,11 +123,27 @@ void test('parseYouTubeVideoId rejects malformed short-url ids with invalid char
   )
 })
 
+void test('parseYouTubeVideoId rejects short ids that do not match YouTube standard length', () => {
+  assert.deepEqual(
+    parseYouTubeVideoId('https://www.youtube.com/watch?v=abc123'),
+    { videoId: null, startSec: 0, stopSec: null },
+  )
+})
+
 void test('parseYouTubeVideoId parses shorthand stop time', () => {
   assert.deepEqual(
-    parseYouTubeVideoId('https://www.youtube.com/watch?v=abc123&start=30&end=2m10s'),
-    { videoId: 'abc123', startSec: 30, stopSec: 130 },
+    parseYouTubeVideoId('https://www.youtube.com/watch?v=abc123def45&start=30&end=2m10s'),
+    { videoId: 'abc123def45', startSec: 30, stopSec: 130 },
   )
+})
+
+void test('shouldInitializeYoutubePlayer only allows first-time setup when a container exists', () => {
+  const container = {} as HTMLDivElement
+  const existingPlayer = {} as YoutubePlayerLike
+
+  assert.equal(shouldInitializeYoutubePlayer(null, null), false)
+  assert.equal(shouldInitializeYoutubePlayer(container, existingPlayer), false)
+  assert.equal(shouldInitializeYoutubePlayer(container, null), true)
 })
 
 void test('shouldBlockStudentOverlayKey allows Tab and Escape so focus is not trapped', () => {
