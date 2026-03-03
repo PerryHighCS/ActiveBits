@@ -1133,6 +1133,65 @@ void test('event route tracks current unsynced student count', async () => {
   assert.equal(correctionTelemetry.sync.unsyncedStudents, 0)
 })
 
+void test('event route prunes stale unsynced students without a follow-up heartbeat or session read', async () => {
+  const originalDateNow = Date.now
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+  const timerState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'unsync-prune-token' }
+  let nowMs = 1_000
+
+  Date.now = () => nowMs
+  globalThis.setTimeout = (((callback: TimerHandler) => {
+    timerState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setTimeout>
+  }) as unknown) as typeof setTimeout
+  globalThis.clearTimeout = (((_timer: ReturnType<typeof setTimeout> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearTimeout
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+    setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+    const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+    assert.equal(typeof handler, 'function')
+
+    const unsyncResponse = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+        body: { type: 'unsync', studentId: 'student-a', driftSec: 1.2 },
+      },
+      unsyncResponse,
+    )
+
+    assert.equal(unsyncResponse.statusCode, 200)
+    assert.equal((unsyncResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 1)
+    assert.equal(typeof timerState.callback, 'function')
+
+    nowMs += 20_001
+    timerState.callback?.()
+    await new Promise((resolve) => originalSetTimeout(resolve, 0))
+
+    const persisted = storeState.store.s1?.data as {
+      telemetry?: {
+        sync?: {
+          unsyncedStudents?: number
+        }
+      }
+    }
+    assert.equal(persisted.telemetry?.sync?.unsyncedStudents, 0)
+  } finally {
+    Date.now = originalDateNow
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  }
+})
+
 void test('event route caps distinct unsynced student ids per session', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter

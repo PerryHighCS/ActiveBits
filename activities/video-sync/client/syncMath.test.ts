@@ -43,6 +43,6 @@ void test('computeDesiredPositionSec honors stopSec cap', () => {
 })
 
 void test('shouldCorrectDrift compares against tolerance threshold', () => {
-  assert.equal(shouldCorrectDrift(10, 10.6, DEFAULT_DRIFT_TOLERANCE_SEC), false)
-  assert.equal(shouldCorrectDrift(10, 10.9, DEFAULT_DRIFT_TOLERANCE_SEC), true)
+  assert.equal(shouldCorrectDrift(10, 10.1, DEFAULT_DRIFT_TOLERANCE_SEC), false)
+  assert.equal(shouldCorrectDrift(10, 10.3, DEFAULT_DRIFT_TOLERANCE_SEC), true)
 })

@@ -9,7 +9,11 @@ import {
   type VideoSyncTelemetry,
   type VideoSyncWsEnvelope,
 } from '../protocol.js'
-import { computeDesiredPositionSec, shouldCorrectDrift } from '../syncMath.js'
+import {
+  computeDesiredPositionSec,
+  DEFAULT_DRIFT_TOLERANCE_SEC,
+  shouldCorrectDrift,
+} from '../syncMath.js'
 import {
   loadYoutubeIframeApi,
   resolveYoutubePlayerState,
@@ -50,8 +54,6 @@ const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   sync: { unsyncedStudents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
   error: { code: null, message: null },
 }
-
-const SYNC_DRIFT_TOLERANCE_SEC = 0.2
 
 const DEFAULT_STATE: VideoSyncState = {
   provider: 'youtube',
@@ -187,7 +189,7 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = nextState.videoId
     } else {
       const currentTimeSec = player.getCurrentTime()
-      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, SYNC_DRIFT_TOLERANCE_SEC)) {
+      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, DEFAULT_DRIFT_TOLERANCE_SEC)) {
         player.seekTo(desiredPositionSec, true)
       }
     }
@@ -534,19 +536,19 @@ export default function VideoSyncManager() {
               aria-controls="video-sync-stop-time"
               aria-expanded={hasStopTime}
             />
-            <span className="font-medium">Set advisory end time</span>
+            <span className="font-medium">Set stop time</span>
           </label>
 
           {hasStopTime ? (
             <label id="video-sync-stop-time" className="block max-w-xs">
-              <span className="block mb-1 font-medium">Advisory end time</span>
+              <span className="block mb-1 font-medium">Stop at</span>
               <input
                 className="border rounded p-2 w-full"
                 type="text"
                 value={stopSecInput}
                 onChange={(event) => setStopSecInput(event.target.value)}
                 placeholder="2m10s or 130"
-                aria-label="Advisory end time"
+                aria-label="Stop at"
               />
               <span className="mt-1 block text-sm text-gray-600">
                 Accepts seconds or `h/m/s` format.

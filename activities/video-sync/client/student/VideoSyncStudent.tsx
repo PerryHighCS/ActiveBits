@@ -6,7 +6,11 @@ import {
   parseVideoSyncEnvelope,
   type VideoSyncState,
 } from '../protocol.js'
-import { computeDesiredPositionSec, shouldCorrectDrift } from '../syncMath.js'
+import {
+  computeDesiredPositionSec,
+  DEFAULT_DRIFT_TOLERANCE_SEC,
+  shouldCorrectDrift,
+} from '../syncMath.js'
 import {
   loadYoutubeIframeApi,
   resolveYoutubePlayerState,
@@ -32,8 +36,6 @@ export function shouldInitializeYoutubePlayer(
 ): boolean {
   return container != null && existingPlayer == null
 }
-
-const SYNC_DRIFT_TOLERANCE_SEC = 0.2
 
 const DEFAULT_STATE: VideoSyncState = {
   provider: 'youtube',
@@ -190,7 +192,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       const currentTimeSec = player.getCurrentTime()
       const driftSec = Math.abs(currentTimeSec - desiredPositionSec)
 
-      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, SYNC_DRIFT_TOLERANCE_SEC)) {
+      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, DEFAULT_DRIFT_TOLERANCE_SEC)) {
         const wasUnsynced = isLocallyUnsyncedRef.current
         player.seekTo(desiredPositionSec, true)
         isLocallyUnsyncedRef.current = true
