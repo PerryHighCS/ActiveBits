@@ -482,7 +482,7 @@ export default function VideoSyncManager() {
       setErrorMessage(null)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save video config'
-        setErrorMessage(message)
+      setErrorMessage(message)
     }
   }
 
