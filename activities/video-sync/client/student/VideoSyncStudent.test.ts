@@ -4,6 +4,7 @@ import { clearAutoplayCheckTimer } from './VideoSyncStudent.js'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
 import { resetUnsyncedPlaybackTelemetry } from './VideoSyncStudent.js'
+import { syncLoadedVideoSource } from './VideoSyncStudent.js'
 import { shouldInitializeYoutubePlayer } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
@@ -82,6 +83,59 @@ void test('resetUnsyncedPlaybackTelemetry clears local unsync tracking state', (
 
   assert.equal(isLocallyUnsyncedRef.current, false)
   assert.equal(lastUnsyncReportAtRef.current, 0)
+})
+
+void test('syncLoadedVideoSource cues a paused synced video without autoplaying', () => {
+  const loadCalls: Array<{ videoId: string; startSeconds?: number; endSeconds?: number }> = []
+  const cueCalls: Array<{ videoId: string; startSeconds?: number; endSeconds?: number }> = []
+  const player = {
+    loadVideoById(options: { videoId: string; startSeconds?: number; endSeconds?: number }) {
+      loadCalls.push(options)
+    },
+    cueVideoById(options: { videoId: string; startSeconds?: number; endSeconds?: number }) {
+      cueCalls.push(options)
+    },
+  } as YoutubePlayerLike
+
+  syncLoadedVideoSource(player, {
+    ...BASE_STATE,
+    videoId: 'abcdefghijk',
+    stopSec: 42,
+    isPlaying: false,
+  }, 12)
+
+  assert.deepEqual(loadCalls, [])
+  assert.deepEqual(cueCalls, [{
+    videoId: 'abcdefghijk',
+    startSeconds: 12,
+    endSeconds: 42,
+  }])
+})
+
+void test('syncLoadedVideoSource loads a playing synced video for immediate playback', () => {
+  const loadCalls: Array<{ videoId: string; startSeconds?: number; endSeconds?: number }> = []
+  const cueCalls: Array<{ videoId: string; startSeconds?: number; endSeconds?: number }> = []
+  const player = {
+    loadVideoById(options: { videoId: string; startSeconds?: number; endSeconds?: number }) {
+      loadCalls.push(options)
+    },
+    cueVideoById(options: { videoId: string; startSeconds?: number; endSeconds?: number }) {
+      cueCalls.push(options)
+    },
+  } as YoutubePlayerLike
+
+  syncLoadedVideoSource(player, {
+    ...BASE_STATE,
+    videoId: 'abcdefghijk',
+    isPlaying: true,
+  }, 18)
+
+  assert.deepEqual(cueCalls, [])
+  assert.deepEqual(loadCalls, [{
+    videoId: 'abcdefghijk',
+    startSeconds: 18,
+    endSeconds: undefined,
+  }])
 })
 
 void test('clearAutoplayCheckTimer clears the pending autoplay timeout ref', () => {
