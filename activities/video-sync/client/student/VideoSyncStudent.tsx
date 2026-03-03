@@ -102,6 +102,14 @@ export function shouldBlockStudentOverlayKey(key: string): boolean {
   return BLOCKED_STUDENT_OVERLAY_KEYS.has(key)
 }
 
+export function resetUnsyncedPlaybackTelemetry(params: {
+  isLocallyUnsyncedRef: { current: boolean }
+  lastUnsyncReportAtRef: { current: number }
+}): void {
+  params.isLocallyUnsyncedRef.current = false
+  params.lastUnsyncReportAtRef.current = 0
+}
+
 export async function reportVideoSyncStudentEvent(params: {
   sessionId: string | null
   studentId: string
@@ -182,6 +190,10 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     const now = Date.now()
 
     if (loadedVideoIdRef.current !== nextState.videoId) {
+      resetUnsyncedPlaybackTelemetry({
+        isLocallyUnsyncedRef,
+        lastUnsyncReportAtRef,
+      })
       player.loadVideoById({
         videoId: nextState.videoId,
         startSeconds: desiredPositionSec,
@@ -314,6 +326,10 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       cancelled = true
       setPlayerReady(false)
       loadedVideoIdRef.current = null
+      resetUnsyncedPlaybackTelemetry({
+        isLocallyUnsyncedRef,
+        lastUnsyncReportAtRef,
+      })
       if (autoplayCheckTimerRef.current != null) {
         window.clearTimeout(autoplayCheckTimerRef.current)
         autoplayCheckTimerRef.current = null

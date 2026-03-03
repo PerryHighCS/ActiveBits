@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
+import { resetUnsyncedPlaybackTelemetry } from './VideoSyncStudent.js'
 import { shouldInitializeYoutubePlayer } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
@@ -67,6 +68,19 @@ void test('shouldInitializeYoutubePlayer only allows first-time setup when a con
   assert.equal(shouldInitializeYoutubePlayer(null, null), false)
   assert.equal(shouldInitializeYoutubePlayer(container, existingPlayer), false)
   assert.equal(shouldInitializeYoutubePlayer(container, null), true)
+})
+
+void test('resetUnsyncedPlaybackTelemetry clears local unsync tracking state', () => {
+  const isLocallyUnsyncedRef = { current: true }
+  const lastUnsyncReportAtRef = { current: 12_345 }
+
+  resetUnsyncedPlaybackTelemetry({
+    isLocallyUnsyncedRef,
+    lastUnsyncReportAtRef,
+  })
+
+  assert.equal(isLocallyUnsyncedRef.current, false)
+  assert.equal(lastUnsyncReportAtRef.current, 0)
 })
 
 void test('shouldBlockStudentOverlayKey allows Tab and Escape so focus is not trapped', () => {
