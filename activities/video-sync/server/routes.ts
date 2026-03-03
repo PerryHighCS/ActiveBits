@@ -314,6 +314,12 @@ function normalizeState(raw: unknown): VideoSyncState {
   const normalizedStop = typeof stopCandidate === 'number' && Number.isFinite(stopCandidate)
     ? clampSeconds(stopCandidate)
     : null
+  const normalizedServerTimestampMs =
+    typeof source.serverTimestampMs === 'number' &&
+    Number.isFinite(source.serverTimestampMs) &&
+    source.serverTimestampMs > 0
+      ? source.serverTimestampMs
+      : Date.now()
 
   return {
     provider,
@@ -324,7 +330,7 @@ function normalizeState(raw: unknown): VideoSyncState {
     isPlaying: source.isPlaying === true,
     playbackRate: 1,
     updatedBy: source.updatedBy === 'manager' ? 'manager' : 'system',
-    serverTimestampMs: toFiniteNumber(source.serverTimestampMs, Date.now()),
+    serverTimestampMs: normalizedServerTimestampMs,
   }
 }
 
@@ -1118,9 +1124,6 @@ export default function setupVideoSyncRoutes(
 
     if (body.type === 'load-failure') {
       data.telemetry.sync.lastCorrectionResult = 'failed'
-    }
-
-    if (body.type === 'load-failure') {
       const errorCode = normalizeTelemetryErrorField(body.errorCode, MAX_TELEMETRY_ERROR_CODE_LENGTH)
       const errorMessage = normalizeTelemetryErrorField(body.errorMessage, MAX_TELEMETRY_ERROR_MESSAGE_LENGTH)
 
@@ -1155,6 +1158,41 @@ export default function setupVideoSyncRoutes(
     }
 
     const typedSocket = socket as VideoSyncSocket
+    let cleanedUp = false
+    const handleSocketClosed = () => {
+      if (cleanedUp) {
+        return
+      }
+      cleanedUp = true
+
+      removeSubscriber(sessionId, typedSocket)
+      void (async () => {
+        const currentSession = await getVideoSyncSession(sessions, sessionId)
+        if (!currentSession) {
+          stopHeartbeat(sessionId)
+          return
+        }
+
+        const currentData = ensureVideoSyncSessionData(currentSession)
+        updateConnectionTelemetry(currentData, sessionId)
+        await sessions.set(currentSession.id, currentSession)
+
+        const disconnectTelemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
+          telemetry: currentData.telemetry,
+          reason: 'connection-change',
+        })
+        await broadcastEnvelope(sessions, ws, sessionId, disconnectTelemetryUpdate)
+
+        if ((subscribersBySession.get(sessionId)?.size ?? 0) === 0) {
+          stopHeartbeat(sessionId)
+        }
+      })().catch((error: unknown) => {
+        console.error('Failed to clean up closed video-sync socket:', error)
+      })
+    }
+
+    socket.on('close', handleSocketClosed)
+    socket.on('error', handleSocketClosed)
 
     ;(async () => {
       const session = await getVideoSyncSession(sessions, sessionId)
@@ -1184,6 +1222,11 @@ export default function setupVideoSyncRoutes(
       typedSocket.sessionId = sessionId
       typedSocket.videoSyncRole = role
 
+      if (cleanedUp || typedSocket.readyState !== WS_OPEN_READY_STATE) {
+        handleSocketClosed()
+        return
+      }
+
       ensureBroadcastSubscription(sessionId)
       upsertSubscriber(sessionId, typedSocket)
       ensureHeartbeat(sessions, ws, sessionId)
@@ -1208,41 +1251,6 @@ export default function setupVideoSyncRoutes(
         reason: 'connection-change',
       })
       await broadcastEnvelope(sessions, ws, sessionId, telemetryUpdate)
-      let cleanedUp = false
-      const handleSocketClosed = () => {
-        if (cleanedUp) {
-          return
-        }
-        cleanedUp = true
-
-        removeSubscriber(sessionId, typedSocket)
-        void (async () => {
-          const currentSession = await getVideoSyncSession(sessions, sessionId)
-          if (!currentSession) {
-            stopHeartbeat(sessionId)
-            return
-          }
-
-          const currentData = ensureVideoSyncSessionData(currentSession)
-          updateConnectionTelemetry(currentData, sessionId)
-          await sessions.set(currentSession.id, currentSession)
-
-          const disconnectTelemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
-            telemetry: currentData.telemetry,
-            reason: 'connection-change',
-          })
-          await broadcastEnvelope(sessions, ws, sessionId, disconnectTelemetryUpdate)
-
-          if ((subscribersBySession.get(sessionId)?.size ?? 0) === 0) {
-            stopHeartbeat(sessionId)
-          }
-        })().catch((error: unknown) => {
-          console.error('Failed to clean up closed video-sync socket:', error)
-        })
-      }
-
-      socket.on('close', handleSocketClosed)
-      socket.on('error', handleSocketClosed)
     })().catch((error: unknown) => {
       console.error('Failed to send initial video-sync snapshot:', error)
     })
