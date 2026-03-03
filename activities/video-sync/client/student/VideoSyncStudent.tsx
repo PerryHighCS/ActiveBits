@@ -107,6 +107,34 @@ function normalizeYouTubeVideoId(value: string | null): string | null {
   return /^[A-Za-z0-9_-]{6,}$/.test(trimmed) ? trimmed : null
 }
 
+const BLOCKED_STUDENT_OVERLAY_KEYS = new Set<string>([
+  ' ',
+  'k',
+  'j',
+  'l',
+  'm',
+  'f',
+  'c',
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+  '0',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '8',
+  '9',
+])
+
 export function parseYouTubeVideoId(urlValue: string): { videoId: string | null; startSec: number; stopSec: number | null } {
   try {
     const url = new URL(urlValue)
@@ -135,7 +163,7 @@ export function parseYouTubeVideoId(urlValue: string): { videoId: string | null;
 }
 
 export function shouldBlockStudentOverlayKey(key: string): boolean {
-  return key !== 'Tab' && key !== 'Escape'
+  return BLOCKED_STUDENT_OVERLAY_KEYS.has(key)
 }
 
 export async function reportVideoSyncStudentEvent(params: {

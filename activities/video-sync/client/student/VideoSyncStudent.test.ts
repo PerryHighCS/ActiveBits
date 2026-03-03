@@ -139,6 +139,12 @@ void test('shouldBlockStudentOverlayKey blocks other playback-related keys', () 
   assert.equal(shouldBlockStudentOverlayKey('k'), true)
 })
 
+void test('shouldBlockStudentOverlayKey allows non-media keys to preserve keyboard navigation', () => {
+  assert.equal(shouldBlockStudentOverlayKey('a'), false)
+  assert.equal(shouldBlockStudentOverlayKey('Enter'), false)
+  assert.equal(shouldBlockStudentOverlayKey('F6'), false)
+})
+
 void test('reportVideoSyncStudentEvent swallows fetch failures so telemetry does not reject outward', async () => {
   const originalFetch = globalThis.fetch
   let fetchCalls = 0
