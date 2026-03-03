@@ -129,6 +129,8 @@ const WS_OPEN_READY_STATE = 1
 const MAX_TELEMETRY_ERROR_CODE_LENGTH = 64
 const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/
+const INSTRUCTOR_PASSCODE_LENGTH = 32
+const INSTRUCTOR_PASSCODE_PATTERN = /^[a-f0-9]{32}$/i
 const provider = 'youtube'
 const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
@@ -149,7 +151,32 @@ function createInstructorPasscode(): string {
   return randomBytes(16).toString('hex')
 }
 
+function normalizeInstructorPasscode(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  if (
+    normalized.length !== INSTRUCTOR_PASSCODE_LENGTH ||
+    !INSTRUCTOR_PASSCODE_PATTERN.test(normalized)
+  ) {
+    return null
+  }
+
+  return normalized
+}
+
 function verifyInstructorPasscode(expected: string, candidate: string): boolean {
+  if (
+    expected.length !== INSTRUCTOR_PASSCODE_LENGTH ||
+    !INSTRUCTOR_PASSCODE_PATTERN.test(expected) ||
+    candidate.length !== INSTRUCTOR_PASSCODE_LENGTH ||
+    !INSTRUCTOR_PASSCODE_PATTERN.test(candidate)
+  ) {
+    return false
+  }
+
   const expectedBuffer = Buffer.from(expected)
   const candidateBuffer = Buffer.from(candidate)
 
@@ -754,12 +781,11 @@ function isEventType(value: unknown): value is VideoSyncEventType {
 }
 
 function readInstructorPasscode(body: unknown): string | null {
-  if (!isPlainObject(body) || typeof body.instructorPasscode !== 'string') {
+  if (!isPlainObject(body)) {
     return null
   }
 
-  const normalized = body.instructorPasscode.trim()
-  return normalized.length > 0 ? normalized : null
+  return normalizeInstructorPasscode(body.instructorPasscode)
 }
 
 export default function setupVideoSyncRoutes(
@@ -1124,7 +1150,7 @@ export default function setupVideoSyncRoutes(
   ws.register('/ws/video-sync', (socket, query) => {
     const sessionId = query.get('sessionId')
     const roleParam = query.get('role')
-    const instructorPasscode = query.get('instructorPasscode')
+    const instructorPasscode = normalizeInstructorPasscode(query.get('instructorPasscode'))
 
     if (!sessionId) {
       socket.close(1008, 'Missing sessionId')
