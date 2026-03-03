@@ -1,4 +1,4 @@
-import type { VideoSyncState } from './protocol'
+import type { VideoSyncState } from './protocol.js'
 
 export const DEFAULT_DRIFT_TOLERANCE_SEC = 0.75
 
