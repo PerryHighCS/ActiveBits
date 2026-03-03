@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import type { VideoSyncState } from './protocol.js'
 import {
   clampPositionSec,
   computeDesiredPositionSec,
-  shouldCorrectDrift,
   DEFAULT_DRIFT_TOLERANCE_SEC,
-} from './syncMath'
-import type { VideoSyncState } from './protocol'
+  shouldCorrectDrift,
+} from './syncMath.js'
 
 function createState(overrides: Partial<VideoSyncState> = {}): VideoSyncState {
   return {
