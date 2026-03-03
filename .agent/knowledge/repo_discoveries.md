@@ -30,6 +30,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: If additional browser/player shortcuts need suppression, extend `BLOCKED_STUDENT_OVERLAY_KEYS` with explicit keys and add matching tests rather than broad default blocking.
 - Owner: Codex
 
+- Date: 2026-03-03
+- Area: activities
+- Discovery: Activity client entry modules that import sibling manager/student files under the `activities` workspace should use explicit `.js` specifiers for relative ESM imports, even when the source files are `.ts`/`.tsx`.
+- Why it matters: `node --test` with `tsx` resolves these activity entry imports at runtime using Node ESM semantics, so extensionless relative specifiers can fail while `.js` specifiers match the emitted/runtime module shape used elsewhere in the repo.
+- Evidence: `activities/video-sync/client/index.ts`; `activities/syncdeck/client/index.tsx`; `activities/algorithm-demo/client/index.tsx`; `activities/package.json`
+- Follow-up action: When adding or updating `activities/*/client/index.ts` or `.tsx`, mirror the existing `.js` import pattern for sibling manager/student modules and keep activity-scoped tests in the validation path.
+- Owner: Codex
+
 - Date: 2026-03-01
 - Area: activities
 - Discovery: `video-sync` student view now keeps an opaque overlay above the embedded YouTube player until instructor playback has actually started (`state.isPlaying` or synced position advancing past `startSec`), which hides the initial YouTube spinner/loading state from students.

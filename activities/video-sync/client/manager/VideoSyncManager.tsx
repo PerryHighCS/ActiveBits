@@ -1,21 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   parseVideoSyncEnvelope,
   type VideoSyncState,
   type VideoSyncTelemetry,
   type VideoSyncWsEnvelope,
-} from '../protocol'
-import { computeDesiredPositionSec, shouldCorrectDrift } from '../syncMath'
+} from '../protocol.js'
+import { computeDesiredPositionSec, shouldCorrectDrift } from '../syncMath.js'
 import {
   loadYoutubeIframeApi,
   resolveYoutubePlayerState,
   type YoutubeNamespace,
   type YoutubePlayerLike,
-} from '../youtubeIframeApi'
+} from '../youtubeIframeApi.js'
 import { parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
 
 interface SessionResponse {

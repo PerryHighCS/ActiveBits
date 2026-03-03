@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react'
 import type { ActivityClientModule } from '../../../types/activity.js'
-import VideoSyncManager from './manager/VideoSyncManager'
-import VideoSyncStudent from './student/VideoSyncStudent'
+import VideoSyncManager from './manager/VideoSyncManager.js'
+import VideoSyncStudent from './student/VideoSyncStudent.js'
 
 const videoSyncActivity: ActivityClientModule = {
   ManagerComponent: VideoSyncManager as ComponentType<unknown>,

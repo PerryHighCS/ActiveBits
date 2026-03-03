@@ -1101,7 +1101,13 @@ export default function setupVideoSyncRoutes(
         reason: 'connection-change',
       })
       await broadcastEnvelope(sessions, ws, sessionId, telemetryUpdate)
+      let cleanedUp = false
       const handleSocketClosed = () => {
+        if (cleanedUp) {
+          return
+        }
+        cleanedUp = true
+
         removeSubscriber(sessionId, typedSocket)
         void (async () => {
           const currentSession = await getVideoSyncSession(sessions, sessionId)
