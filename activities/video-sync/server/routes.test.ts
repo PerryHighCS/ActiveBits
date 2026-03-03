@@ -11,6 +11,9 @@ import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import setupVideoSyncRoutes from './routes.js'
 
+const TEST_INSTRUCTOR_PASSCODE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const ALT_TEST_INSTRUCTOR_PASSCODE = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
 type RouteHandler = (
   req: { params: Record<string, string>; body?: unknown; cookies?: Record<string, unknown> },
   res: MockResponse,
@@ -163,7 +166,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
   }
 }
 
-function createVideoSyncSession(id: string, instructorPasscode = 'teacher-pass'): SessionRecord {
+function createVideoSyncSession(id: string, instructorPasscode = TEST_INSTRUCTOR_PASSCODE): SessionRecord {
   return {
     id,
     type: 'video-sync',
@@ -357,7 +360,7 @@ void test('session patch returns invalid source url for unsupported non-YouTube 
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://vimeo.com/1234', instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://vimeo.com/1234', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -383,7 +386,7 @@ void test('session patch returns invalid source url for malformed url input', as
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'not a url', instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'not a url', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -409,7 +412,7 @@ void test('session patch returns invalid video id for YouTube url without a usab
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://www.youtube.com/watch?list=abc123', instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://www.youtube.com/watch?list=abc123', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -435,7 +438,7 @@ void test('session patch accepts youtu.be urls with extra path segments by using
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ/extra-segment?t=45', instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ/extra-segment?t=45', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -461,7 +464,7 @@ void test('session patch returns invalid video id for malformed youtu.be ids', a
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgX$Q', instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgX$Q', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -487,7 +490,7 @@ void test('session patch returns invalid time range when stop time is before par
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 20, instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 20, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -513,7 +516,7 @@ void test('session patch returns invalid stopSec when stopSec is not numeric', a
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: '120', instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: '120', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -539,7 +542,7 @@ void test('session patch normalizes youtube source and publishes extensible enve
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -581,7 +584,7 @@ void test('session patch ignores partially numeric timestamp query values', asyn
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=83abc', instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=83abc', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -608,7 +611,7 @@ void test('session patch falls back to valid t param when start param is malform
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?start=oops&t=1m23s', instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?start=oops&t=1m23s', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -639,7 +642,7 @@ void test('session patch rejects reconfiguration after a video is already set', 
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -667,7 +670,7 @@ void test('session patch publishes through broadcast channel without direct loca
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -699,7 +702,7 @@ void test('session patch falls back to direct local websocket send when pubsub p
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: 'teacher-pass' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -726,7 +729,7 @@ void test('command route updates playback and emits extensible envelope', async 
   await handler?.(
     {
       params: { sessionId: 's1' },
-      body: { type: 'play', instructorPasscode: 'teacher-pass' },
+      body: { type: 'play', instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
     },
     res,
   )
@@ -800,12 +803,38 @@ void test('command route rejects requests without a valid instructor passcode', 
   })
 })
 
+void test('command route rejects oversized instructor passcodes before verification', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/command']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'play', instructorPasscode: 'a'.repeat(10_000) },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, {
+    error: 'FORBIDDEN',
+    message: 'Valid instructorPasscode is required',
+  })
+})
+
 void test('instructor-passcode route returns passcode for persistent teacher cookie', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', 'teacher-passcode-1') })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
   const teacherCode = 'persistent-teacher-code'
   const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
   await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
@@ -837,7 +866,7 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
   )
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, { instructorPasscode: 'teacher-passcode-1' })
+  assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
   await cleanupPersistentSession(hash)
 })
 
@@ -863,10 +892,10 @@ void test('manager websocket rejects connections without a valid instructor pass
   assert.deepEqual(recorder.sent, [])
 })
 
-void test('manager websocket accepts connections with a valid instructor passcode', async () => {
+void test('manager websocket rejects oversized instructor passcodes before verification', async () => {
   const app = createMockApp()
   const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', 'teacher-pass') })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
 
   setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
 
@@ -877,7 +906,30 @@ void test('manager websocket accepts connections with a valid instructor passcod
   handler?.(recorder.socket, new URLSearchParams({
     sessionId: 's1',
     role: 'manager',
-    instructorPasscode: 'teacher-pass',
+    instructorPasscode: 'a'.repeat(10_000),
+  }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(recorder.closed, { code: 1008, reason: 'Forbidden' })
+  assert.deepEqual(recorder.sent, [])
+})
+
+void test('manager websocket accepts connections with a valid instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 's1',
+    role: 'manager',
+    instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
   }))
 
   await new Promise((resolve) => setTimeout(resolve, 0))
