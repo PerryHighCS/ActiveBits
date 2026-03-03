@@ -156,6 +156,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
       async set(id: string, session: SessionRecord) {
         store[id] = session
       },
+      valkeyStore: {} as Record<string, unknown>,
       async publishBroadcast(channel: string, message: Record<string, unknown>) {
         published.push({ channel, message })
       },
@@ -970,6 +971,42 @@ void test('session patch falls back to direct local websocket send when pubsub p
   }
 
   setupVideoSyncRoutes(app, sessionsWithoutPublish, ws as unknown as WsRouter)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(storeState.published.length, 0)
+  assert.equal(recorder.delivered.length, 1)
+  const payload = JSON.parse(recorder.delivered[0] ?? '{}') as { type?: unknown; sessionId?: unknown }
+  assert.equal(payload.type, 'state-update')
+  assert.equal(payload.sessionId, 's1')
+})
+
+void test('session patch falls back to direct local websocket send when publishBroadcast exists without a real pubsub backend', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const recorder = createSocketRecorder('s1')
+  ws.wss.clients.add(recorder.socket)
+
+  const sessionsWithNoOpPublish = {
+    get: storeState.sessions.get,
+    set: storeState.sessions.set,
+    publishBroadcast: storeState.sessions.publishBroadcast,
+    subscribeToBroadcast: storeState.sessions.subscribeToBroadcast,
+  }
+
+  setupVideoSyncRoutes(app, sessionsWithNoOpPublish, ws as unknown as WsRouter)
 
   const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
   assert.equal(typeof handler, 'function')

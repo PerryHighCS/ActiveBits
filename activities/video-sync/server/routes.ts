@@ -58,6 +58,7 @@ interface VideoSyncSession extends SessionRecord {
 interface VideoSyncSessionStore extends Pick<SessionStore, 'get' | 'set'> {
   publishBroadcast?: (channel: string, message: Record<string, unknown>) => Promise<void>
   subscribeToBroadcast?: (channel: string, handler: (message: unknown) => void) => void
+  valkeyStore?: unknown
 }
 
 interface RouteRequest {
@@ -685,7 +686,7 @@ async function broadcastEnvelope(
   sessionId: string,
   envelope: VideoSyncWsMessageEnvelope,
 ): Promise<void> {
-  if (sessions.publishBroadcast) {
+  if (sessions.publishBroadcast && sessions.valkeyStore != null) {
     try {
       await sessions.publishBroadcast(`session:${sessionId}:broadcast`, envelope as unknown as Record<string, unknown>)
       return
