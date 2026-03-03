@@ -1,6 +1,6 @@
 # Video Sync Activity Plan
 
-This plan is to build a standalone ActiveBits activity for synchronized video playback. Presentation embedding is explicitly out of scope for this phase and should be tracked as future work under the SyncDeck embedded-activities plan in [`.agent/plans/syncdeck.md`](/workspaces/ActiveBits/.agent/plans/syncdeck.md).
+This plan is to build a standalone ActiveBits activity for synchronized video playback. Presentation embedding is explicitly out of scope for this phase and should be tracked as future work under the SyncDeck embedded-activities plan in [`.agent/plans/syncdeck.md`](/workspaces/ActiveBits/.agent/plans/syncdeck.md). Future embedded activity support is expected to include asynchronous playback behavior, but the gating mechanism for enabling that mode is not yet specified.
 
 ## Goal
 
@@ -11,7 +11,6 @@ Create a new activity, tentatively `video-sync`, that lets an instructor control
 In scope for this plan:
 - Add a new self-contained activity under `activities/video-sync/`
 - Support instructor-led synchronization for play, pause, seek, and playback position updates
-- Support solo mode for student self-paced practice with no teacher-managed session orchestration
 - Provide manager and student views that work within the standard ActiveBits session model
 - Keep activity state and protocol activity-specific rather than coupling it to SyncDeck presentation internals
 - Use TypeScript for new or modified application code
@@ -44,16 +43,13 @@ Expected runtime model:
 - Session stores normalized video state such as source URL, current time, paused/playing state, last sync timestamp, and any access restrictions
 - Students join the normal ActiveBits session URL and receive the synchronized playback state
 - Instructor actions broadcast updated state through activity-owned APIs and websocket/session update paths
-- Solo mode is separate and student self-paced (`/solo/video-sync` style flow) with no live classroom session dependency
 
 ## Activity Config Alignment (per Adding Activities)
 
 - Define metadata in `activities/video-sync/activity.config.ts` as source of truth (id/name/description/color/soloMode/clientEntry/serverEntry)
-- Set `soloMode: true` so the activity appears in Solo Bits
-- Optionally set `soloModeMeta` labels for dashboard and join-page clarity
+- Keep `soloMode: false` until a concrete gated embedded or asynchronous playback mode is designed
 - Keep the client entry side-effect free and export `ManagerComponent`, `StudentComponent`, and `footerContent`
 - For synchronized classroom mode, keep manager/student session behavior in the regular activity flow
-- For solo mode, follow self-paced semantics (no teacher orchestration and no requirement for synchronized classroom session transport)
 
 ## Functional Requirements
 
@@ -64,7 +60,7 @@ Expected runtime model:
 - Late-joining students receive the current synchronized state
 - Late-joining students auto-seek and attempt autoplay; if autoplay is blocked, they receive a click-to-start fallback and can rely on the classroom display
 - Session reload/reconnect restores enough state to resume synchronization
-- Student playback control is disabled in synchronized sessions and enabled in solo mode
+- Student playback control is disabled in synchronized sessions
 - Server-side validation rejects invalid session state and malformed configuration requests
 - Manager dashboard surfaces connection status, synchronization errors, and unsync events
 
@@ -72,8 +68,7 @@ Expected runtime model:
 
 - Prefer a simple activity-specific synchronization contract over extending the Reveal iframe message schema
 - Register a session normalizer for `video-sync` so persisted sessions recover safely after restart or cache reload
-- Keep student controls constrained to the intended classroom model; synchronized sessions are instructor-only controlled, with solo mode as the explicit exception
-- Keep student controls constrained to the intended classroom model; synchronized sessions are instructor-only controlled, while solo mode is student self-paced without teacher orchestration
+- Keep student controls constrained to the intended classroom model; synchronized sessions are instructor-only controlled
 - Restrict initial source support to YouTube URLs (`youtube.com/watch`, `youtu.be`) and normalize to `videoId`, `startSec`, and optional `stopSec`
 - Use YouTube privacy-enhanced embed domain (`youtube-nocookie.com`) unless platform constraints prove incompatible
 - Treat configured stop time as advisory UX behavior (auto-pause when reached) rather than a hard server-enforced boundary
@@ -95,16 +90,14 @@ Expected runtime model:
 - Stop timestamp semantics: advisory `stopSec` triggers local auto-pause when playback reaches threshold; no hard server enforcement and no seek lockout
 - Heartbeat cadence: websocket event-driven updates plus heartbeat every `3000ms`
 - Unsync reporting threshold: report unsync when absolute drift exceeds `2.0s` for two consecutive heartbeat intervals; include correction attempt outcome in telemetry
-- Solo mode product definition: student self-paced mode with no teacher-managed classroom session dependency; synchronized session APIs are not required for solo-only operation
 - Telemetry schema default: manager dashboard consumes `connections.activeCount`, `autoplay.blockedCount`, `sync.unsyncEvents`, `sync.lastDriftSec`, `sync.lastCorrectionResult`, and latest `error.code/error.message`
+- Future embedded/asynchronous mode note: if Video Sync is later exposed inside another activity shell, that mode must be explicitly gated by a yet-to-be-defined capability flag or launch contract rather than reusing the removed solo-mode path
 
 ## API / Protocol Contract (Draft)
 
 This section defines a minimal activity-specific contract for v1.
 
-Synchronized classroom mode and solo mode are intentionally separate:
-- Synchronized mode uses server session state + websocket updates.
-- Solo mode is self-paced and does not require the synchronized session protocol.
+Synchronized classroom mode uses server session state + websocket updates.
 
 ### Canonical Session State
 
@@ -223,23 +216,8 @@ Other commands:
 }
 ```
 
-### Solo Mode Local State (example)
-
-```ts
-type VideoSyncSoloState = {
-	provider: 'youtube';
-	videoId: string;
-	startSec: number;
-	stopSec?: number;
-	positionSec: number;
-	isPlaying: boolean;
-	playbackRate: 1;
-	updatedAtMs: number;
-};
-```
-
 Suggested persistence key pattern:
-- `video-sync-solo-state-solo-video-sync`
+- None. Video Sync currently has no standalone local-only mode.
 
 ## Implementation Phases
 
@@ -248,16 +226,15 @@ Suggested persistence key pattern:
 - Define manager-to-server configuration/update endpoints
 - Define server-to-student synchronization payloads
 - Use event-driven websocket broadcast plus periodic heartbeat updates
-- Define authorization rules for synchronized mode control and separate solo-mode local behavior
-- Exit criteria: validated synchronized state schema + endpoint contracts + role control rules documented and testable; solo-mode local-state contract documented
+- Define authorization rules for synchronized mode control
+- Exit criteria: validated synchronized state schema + endpoint contracts + role control rules documented and testable
 
 ### Phase 2: Minimal vertical slice
 - Scaffold the new activity
 - Build a manager UI for configuring the video and basic playback controls
 - Build a student UI that renders the synchronized player
-- Build student self-paced solo mode flow aligned with Solo Bits behavior
 - Add tests covering session creation, validation, normalization, and state updates
-- Exit criteria: manager can configure YouTube source/start/stop and students receive synchronized playback updates; solo mode works without teacher session orchestration
+- Exit criteria: manager can configure YouTube source/start/stop and students receive synchronized playback updates
 
 ### Phase 3: Synchronization hardening
 - Add reconnect/late-join recovery behavior
@@ -275,7 +252,6 @@ Suggested persistence key pattern:
 | Start/stop timestamp behavior | Timestamp parsing for `t/start/end`, `stopSec > startSec` validation | Session state includes advisory `stopSec`; update route enforces bounds | Playback reaches stop and auto-pauses without hard lockout |
 | Instructor play/pause/seek synchronization | Command reducer updates canonical state and timestamps | Command endpoint emits websocket update + heartbeat continuity | Manager controls are reflected on students with expected timing |
 | Student restrictions in synchronized mode | Authorization helper rejects student commands | Command route returns `FORBIDDEN_COMMAND` for student actor in synchronized mode | Student UI controls disabled in synchronized mode |
-| Solo mode behavior | Solo state store validates local shape and defaults | Solo route loads without synchronized session API dependencies | Student opens solo link and plays self-paced video with local persistence |
 | Late join/reconnect recovery | Drift calculator and catch-up logic with `0.75s` threshold | Join flow receives latest state snapshot and heartbeat updates | Late student joins, auto-seeks; autoplay-block path shows click-to-start fallback |
 | Validation and error handling | Schema/validator tests for invalid URL/time/command payloads | Routes return deterministic error codes/messages | Manager sees actionable error state in dashboard |
 | Telemetry visibility | Event formatter emits structured payloads for connection/error/unsync | Server logs and manager feed include expected event categories | Manager dashboard shows connection count and sync health changes |
@@ -290,9 +266,9 @@ Suggested persistence key pattern:
 ## Progress Snapshot (2026-03-01)
 
 - Completed: activity scaffold (`activity.config.ts`, client entry, manager/student views, server routes)
-- Completed: normalized synchronized session state + solo local-state model
+- Completed: normalized synchronized session state model
 - Completed: websocket envelope contract (`version`, `activity`, `sessionId`, `type`, `timestamp`, `payload`) and heartbeat strategy
-- Completed: manager controls (configure, play, pause, seek), student synchronized view, and solo self-paced flow
+- Completed: manager controls (configure, play, pause, seek) and student synchronized view
 - Completed: autoplay-block fallback prompt and telemetry event reporting path
 - Completed: activity-specific tests + repo-wide validation gate (`npm test`)
 - Remaining: explicit cross-browser `youtube-nocookie.com` compatibility sign-off in target runtime environments
@@ -303,26 +279,29 @@ Suggested persistence key pattern:
 - [x] Finalize YouTube v1 source policy (`youtube.com/watch`, `youtu.be`, start + optional stop)
 - [ ] Validate `youtube-nocookie.com` compatibility in target runtime environments
 - [x] Create `activities/video-sync/` with config, client entry, and server entry
-- [x] Set `soloMode: true` and define `soloModeMeta` labels in activity config
+- [x] Keep `soloMode: false` while Video Sync is synchronized-session-only
 - [x] Define normalized session state for synchronized video playback
-- [x] Define synchronized role/permission behavior and separate solo local-state behavior
+- [x] Define synchronized role/permission behavior
 - [x] Implement instructor session creation/configuration flow
 - [x] Implement manager playback controls
 - [x] Implement student synchronized playback view
-- [x] Implement student self-paced solo mode flow with local persistence
 - [x] Implement event-driven sync + heartbeat strategy with `0.75s` drift correction target
 - [x] Implement autoplay-block fallback behavior for late joins
 - [x] Add manager dashboard reporting for connections, errors, and unsync events
 - [x] Add activity-specific tests for server routes, normalization, and client sync behavior
 - [x] Run appropriate workspace checks and full repo validation as needed
 - [ ] Revisit SyncDeck embedding only after the embedded-activities future plan is ready
+- [ ] Define the gating mechanism for future embedded/asynchronous playback support before reintroducing any non-session-based launch mode
 
 ## Future Work
 
 Future embedding work should not be designed ad hoc in this activity plan. When ActiveBits is ready to support embedded activities inside presentations, continue in the SyncDeck embedded-activities planning track at [`.agent/plans/syncdeck.md`](/workspaces/ActiveBits/.agent/plans/syncdeck.md).
 
+That future work is expected to include embedded activity support with asynchronous playback, but it must be introduced behind an explicit gate that has not yet been defined.
+
 That later work can address:
 - how a SyncDeck slide launches `video-sync`
+- how an embedding shell explicitly enables asynchronous playback support
 - how parent and child sessions link together
 - how connected students claim seats in the embedded activity
 - how instructor ownership/arbitration works

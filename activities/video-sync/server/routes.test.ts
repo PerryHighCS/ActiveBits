@@ -303,6 +303,46 @@ void test('session get route normalizes oversized persisted telemetry.error fiel
   assert.equal(persisted.telemetry?.error?.message, 'M'.repeat(256))
 })
 
+void test('session get route clears malformed persisted video ids during normalization', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  ;(session.data as { state: { videoId: string; startSec: number; positionSec: number } }).state.videoId = 'bad-id'
+  ;(session.data as { state: { videoId: string; startSec: number; positionSec: number } }).state.startSec = 12
+  ;(session.data as { state: { videoId: string; startSec: number; positionSec: number } }).state.positionSec = 18
+  const storeState = createSessionStore({ s1: session })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const payload = res.body as {
+    data?: {
+      state?: {
+        videoId?: string
+      }
+    }
+  }
+  assert.equal(payload.data?.state?.videoId, '')
+
+  const persisted = storeState.store.s1?.data as {
+    state?: {
+      videoId?: string
+    }
+  }
+  assert.equal(persisted.state?.videoId, '')
+})
+
 void test('session patch returns invalid source url for unsupported non-YouTube host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -456,6 +496,32 @@ void test('session patch returns invalid time range when stop time is before par
   assert.deepEqual(res.body, {
     error: 'INVALID_TIME_RANGE',
     message: 'stopSec must be greater than startSec and both must be >= 0.',
+  })
+})
+
+void test('session patch returns invalid stopSec when stopSec is not numeric', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: '120', instructorPasscode: 'teacher-pass' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    error: 'INVALID_STOP_SEC',
+    message: 'stopSec must be a finite number of seconds or omitted.',
   })
 })
 
