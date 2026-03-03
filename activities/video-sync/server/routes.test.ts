@@ -976,6 +976,56 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
   await cleanupPersistentSession(hash)
 })
 
+void test('instructor-passcode route ignores malformed persistent teacher cookie without logging', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  assert.equal(typeof handler, 'function')
+
+  const originalConsoleError = console.error
+  let consoleErrorCalls = 0
+  console.error = () => {
+    consoleErrorCalls += 1
+  }
+
+  try {
+    const res = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+        cookies: {
+          persistent_sessions: '{not-json',
+        },
+      },
+      res,
+    )
+
+    assert.equal(res.statusCode, 403)
+    assert.deepEqual(res.body, {
+      error: 'FORBIDDEN',
+      message: 'Instructor credential recovery is not available for this session',
+    })
+    assert.equal(consoleErrorCalls, 0)
+  } finally {
+    console.error = originalConsoleError
+    await cleanupPersistentSession(hash)
+  }
+})
+
 void test('manager websocket rejects connections without a valid instructor passcode', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -1219,7 +1269,7 @@ void test('invalid websocket session still closes when sending the not-found env
   assert.deepEqual(recorder.closed, { code: 1008, reason: 'Session not found' })
 })
 
-void test('heartbeat stops and closes subscribers when the backing session disappears', async () => {
+void test('heartbeat stops and closes subscribers when the backing session disappears', { concurrency: false }, async () => {
   const originalSetInterval = globalThis.setInterval
   const originalClearInterval = globalThis.clearInterval
   const heartbeatState: { callback: (() => void) | null } = { callback: null }
@@ -1270,7 +1320,7 @@ void test('heartbeat stops and closes subscribers when the backing session disap
   }
 })
 
-void test('heartbeat skips overlapping ticks while a previous tick is still in flight', async () => {
+void test('heartbeat skips overlapping ticks while a previous tick is still in flight', { concurrency: false }, async () => {
   const originalSetInterval = globalThis.setInterval
   const originalClearInterval = globalThis.clearInterval
   const heartbeatState: { callback: (() => void) | null } = { callback: null }
@@ -1290,24 +1340,26 @@ void test('heartbeat skips overlapping ticks while a previous tick is still in f
     const session = createVideoSyncSession('s1')
     const storeState = createSessionStore({ s1: session })
 
-    const slowSetState: { resolve: (() => void) | null } = { resolve: null }
-    let setCalls = 0
+    const slowPublishState: { resolve: (() => void) | null } = { resolve: null }
+    let publishCalls = 0
     const initialPublishedCount = () => storeState.published.length
-    const sessionsWithSlowSet = {
+    const sessionsWithSlowBroadcast = {
       ...storeState.sessions,
-      async set(id: string, updatedSession: SessionRecord) {
-        setCalls += 1
-        if (setCalls === 1) {
-          return storeState.sessions.set(id, updatedSession)
+      async publishBroadcast(channel: string, message: Record<string, unknown>) {
+        publishCalls += 1
+        if (publishCalls === 1) {
+          return storeState.sessions.publishBroadcast?.(channel, message)
         }
-        await new Promise<void>((resolve) => {
-          slowSetState.resolve = resolve
-        })
-        return storeState.sessions.set(id, updatedSession)
+        if (publishCalls === 2) {
+          await new Promise<void>((resolve) => {
+            slowPublishState.resolve = resolve
+          })
+        }
+        return storeState.sessions.publishBroadcast?.(channel, message)
       },
     }
 
-    setupVideoSyncRoutes(app, sessionsWithSlowSet, ws as unknown as WsRouter)
+    setupVideoSyncRoutes(app, sessionsWithSlowBroadcast, ws as unknown as WsRouter)
 
     const handler = ws.registered['/ws/video-sync']
     assert.equal(typeof handler, 'function')
@@ -1328,22 +1380,236 @@ void test('heartbeat skips overlapping ticks while a previous tick is still in f
     const publishedBeforeHeartbeat = initialPublishedCount()
     runHeartbeat()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.equal(setCalls, 2)
+    assert.equal(publishCalls, 2)
 
     runHeartbeat()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.equal(setCalls, 2)
+    assert.equal(publishCalls, 2)
 
-    const releaseHeartbeatSet = slowSetState.resolve
-    if (releaseHeartbeatSet == null) {
-      throw new Error('Expected stalled heartbeat set() to register a resolver')
+    const releaseHeartbeatBroadcast = slowPublishState.resolve
+    if (releaseHeartbeatBroadcast == null) {
+      throw new Error('Expected stalled heartbeat broadcast to register a resolver')
     }
-    releaseHeartbeatSet()
+    releaseHeartbeatBroadcast()
     await new Promise((resolve) => setTimeout(resolve, 0))
     assert.equal(storeState.published.length, publishedBeforeHeartbeat + 1)
+
+    recorder.emit('close')
+    await new Promise((resolve) => setTimeout(resolve, 0))
   } finally {
     globalThis.setInterval = originalSetInterval
     globalThis.clearInterval = originalClearInterval
+  }
+})
+
+void test('heartbeat broadcasts projected playback without persisting transient timestamps', { concurrency: false }, async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const originalDateNow = Date.now
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'heartbeat-token-projected' }
+  let nowMs = 10_000
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((_timer: ReturnType<typeof setInterval> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearInterval
+  Date.now = () => nowMs
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+    const session = createVideoSyncSession('s1')
+    ;(session.data as {
+      state: {
+        provider: 'youtube'
+        videoId: string
+        startSec: number
+        stopSec: number | null
+        positionSec: number
+        isPlaying: boolean
+        playbackRate: 1
+        updatedBy: 'manager' | 'system'
+        serverTimestampMs: number
+      }
+    }).state = {
+      provider: 'youtube',
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 30,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1,
+      updatedBy: 'manager',
+      serverTimestampMs: nowMs,
+    }
+    const storeState = createSessionStore({ s1: session })
+    let setCalls = 0
+    const sessionsWithTrackedSet = {
+      ...storeState.sessions,
+      async set(id: string, updatedSession: SessionRecord) {
+        setCalls += 1
+        return storeState.sessions.set(id, updatedSession)
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({
+      sessionId: 's1',
+      role: 'student',
+    }))
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(setCalls, 1)
+
+    nowMs += 3_000
+    const runHeartbeat = heartbeatState.callback
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.equal(setCalls, 1)
+    const heartbeatEnvelope = storeState.published.at(-1)?.message as {
+      type?: string
+      payload?: {
+        state?: {
+          positionSec?: number
+          serverTimestampMs?: number
+          isPlaying?: boolean
+        }
+      }
+    }
+    assert.equal(heartbeatEnvelope.type, 'heartbeat')
+    assert.equal(heartbeatEnvelope.payload?.state?.positionSec, 8)
+    assert.equal(heartbeatEnvelope.payload?.state?.serverTimestampMs, 13_000)
+    assert.equal(heartbeatEnvelope.payload?.state?.isPlaying, true)
+
+    const persistedState = (storeState.store.s1?.data as {
+      state: {
+        positionSec: number
+        serverTimestampMs: number
+        isPlaying: boolean
+      }
+    }).state
+    assert.equal(persistedState.positionSec, 5)
+    assert.equal(persistedState.serverTimestampMs, 10_000)
+    assert.equal(persistedState.isPlaying, true)
+
+    recorder.emit('close')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+    Date.now = originalDateNow
+  }
+})
+
+void test('heartbeat persists the session when playback reaches stopSec', { concurrency: false }, async () => {
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const originalDateNow = Date.now
+  const heartbeatState: { callback: (() => void) | null } = { callback: null }
+  const timerToken = { id: 'heartbeat-token-stop' }
+  let nowMs = 20_000
+
+  globalThis.setInterval = (((callback: TimerHandler) => {
+    heartbeatState.callback = callback as () => void
+    return timerToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((_timer: ReturnType<typeof setInterval> | undefined) => {
+    // no-op for this test
+  }) as unknown) as typeof clearInterval
+  Date.now = () => nowMs
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+    const session = createVideoSyncSession('s1')
+    ;(session.data as {
+      state: {
+        provider: 'youtube'
+        videoId: string
+        startSec: number
+        stopSec: number | null
+        positionSec: number
+        isPlaying: boolean
+        playbackRate: 1
+        updatedBy: 'manager' | 'system'
+        serverTimestampMs: number
+      }
+    }).state = {
+      provider: 'youtube',
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 6,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1,
+      updatedBy: 'manager',
+      serverTimestampMs: nowMs,
+    }
+    const storeState = createSessionStore({ s1: session })
+    let setCalls = 0
+    const sessionsWithTrackedSet = {
+      ...storeState.sessions,
+      async set(id: string, updatedSession: SessionRecord) {
+        setCalls += 1
+        return storeState.sessions.set(id, updatedSession)
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws as unknown as WsRouter)
+
+    const handler = ws.registered['/ws/video-sync']
+    assert.equal(typeof handler, 'function')
+
+    const recorder = createMockSocket()
+    handler?.(recorder.socket, new URLSearchParams({
+      sessionId: 's1',
+      role: 'student',
+    }))
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(setCalls, 1)
+
+    nowMs += 2_000
+    const runHeartbeat = heartbeatState.callback
+    if (runHeartbeat == null) {
+      throw new Error('Expected heartbeat callback to be registered')
+    }
+
+    runHeartbeat()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.equal(setCalls, 2)
+    const persistedState = (storeState.store.s1?.data as {
+      state: {
+        positionSec: number
+        serverTimestampMs: number
+        isPlaying: boolean
+      }
+    }).state
+    assert.equal(persistedState.positionSec, 6)
+    assert.equal(persistedState.serverTimestampMs, 22_000)
+    assert.equal(persistedState.isPlaying, false)
+
+    recorder.emit('close')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+    Date.now = originalDateNow
   }
 })
 
@@ -1384,7 +1650,7 @@ void test('event route tracks current unsynced student count', async () => {
   assert.equal(correctionTelemetry.sync.unsyncedStudents, 0)
 })
 
-void test('event route prunes stale unsynced students without a follow-up heartbeat or session read', async () => {
+void test('event route prunes stale unsynced students without a follow-up heartbeat or session read', { concurrency: false }, async () => {
   const originalDateNow = Date.now
   const originalSetTimeout = globalThis.setTimeout
   const originalClearTimeout = globalThis.clearTimeout
