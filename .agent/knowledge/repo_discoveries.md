@@ -14,6 +14,22 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-03
+- Area: activities
+- Discovery: `video-sync` server-side `parseYouTubeSource` now normalizes YouTube IDs with a strict 11-character pattern (`[A-Za-z0-9_-]{11}`), and short URLs (`youtu.be/...`) use only the first non-empty path segment as the candidate ID.
+- Why it matters: Prevents persisting malformed IDs (for example IDs containing invalid characters or extra path suffixes) while still accepting share links like `https://youtu.be/<id>/extra` by extracting just `<id>`.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: Keep client and server ID-validation behavior aligned if future URL formats are added.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: `video-sync` student overlay keyboard filtering now blocks only known YouTube/media-control keys (space, transport letters, arrows, paging/home-end, and digits) instead of every key except `Tab`/`Escape`.
+- Why it matters: The focusable full-screen overlay still suppresses accidental player control keys but no longer swallows unrelated keyboard navigation/assistive shortcuts while focused.
+- Evidence: `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/student/VideoSyncStudent.test.ts`
+- Follow-up action: If additional browser/player shortcuts need suppression, extend `BLOCKED_STUDENT_OVERLAY_KEYS` with explicit keys and add matching tests rather than broad default blocking.
+- Owner: Codex
+
 - Date: 2026-03-01
 - Area: activities
 - Discovery: `video-sync` student view now keeps an opaque overlay above the embedded YouTube player until instructor playback has actually started (`state.isPlaying` or synced position advancing past `startSec`), which hides the initial YouTube spinner/loading state from students.

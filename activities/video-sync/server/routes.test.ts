@@ -254,6 +254,55 @@ void test('session get route redacts instructor-only fields from public payload'
   assert.equal('instructorPasscode' in (payload.data ?? {}), false)
 })
 
+void test('session get route normalizes oversized persisted telemetry.error fields', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  ;(session.data as { telemetry: { error: { code: string; message: string } } }).telemetry.error = {
+    code: `  ${'C'.repeat(90)}  `,
+    message: `  ${'M'.repeat(300)}  `,
+  }
+  const storeState = createSessionStore({ s1: session })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const payload = res.body as {
+    data?: {
+      telemetry?: {
+        error?: {
+          code?: string | null
+          message?: string | null
+        }
+      }
+    }
+  }
+  assert.equal(payload.data?.telemetry?.error?.code, 'C'.repeat(64))
+  assert.equal(payload.data?.telemetry?.error?.message, 'M'.repeat(256))
+
+  const persisted = storeState.store.s1?.data as {
+    telemetry?: {
+      error?: {
+        code?: string | null
+        message?: string | null
+      }
+    }
+  }
+  assert.equal(persisted.telemetry?.error?.code, 'C'.repeat(64))
+  assert.equal(persisted.telemetry?.error?.message, 'M'.repeat(256))
+})
+
 void test('session patch returns invalid source url for unsupported non-YouTube host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -332,6 +381,58 @@ void test('session patch returns invalid video id for YouTube url without a usab
   })
 })
 
+void test('session patch accepts youtu.be urls with extra path segments by using only the first segment', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ/extra-segment?t=45', instructorPasscode: 'teacher-pass' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  const state = updated.state as Record<string, unknown>
+  assert.equal(state.videoId, 'dQw4w9WgXcQ')
+  assert.equal(state.startSec, 45)
+})
+
+void test('session patch returns invalid video id for malformed youtu.be ids', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgX$Q', instructorPasscode: 'teacher-pass' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    error: 'INVALID_VIDEO_ID',
+    message: 'Could not determine a valid YouTube video id from sourceUrl.',
+  })
+})
+
 void test('session patch returns invalid time range when stop time is before parsed start time', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -378,6 +479,9 @@ void test('session patch normalizes youtube source and publishes extensible enve
   )
 
   assert.equal(res.statusCode, 200)
+  const patchResponse = res.body as { success?: boolean; data?: Record<string, unknown> }
+  assert.equal(patchResponse.success, true)
+  assert.equal('instructorPasscode' in (patchResponse.data ?? {}), false)
 
   const updated = storeState.store.s1?.data as Record<string, unknown>
   const state = updated.state as Record<string, unknown>
@@ -535,6 +639,9 @@ void test('command route updates playback and emits extensible envelope', async 
   )
 
   assert.equal(res.statusCode, 200)
+  const commandResponse = res.body as { success?: boolean; data?: Record<string, unknown> }
+  assert.equal(commandResponse.success, true)
+  assert.equal('instructorPasscode' in (commandResponse.data ?? {}), false)
 
   const updated = storeState.store.s1?.data as Record<string, unknown>
   const state = updated.state as Record<string, unknown>

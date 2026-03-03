@@ -128,6 +128,7 @@ const MAX_UNSYNCED_STUDENTS_PER_SESSION = 200
 const WS_OPEN_READY_STATE = 1
 const MAX_TELEMETRY_ERROR_CODE_LENGTH = 64
 const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
+const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/
 const provider = 'youtube'
 const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
@@ -191,6 +192,19 @@ function parseTimestampSeconds(value: string | null): number | null {
   return clampSeconds(total)
 }
 
+function normalizeYouTubeVideoId(value: string | null): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  return YOUTUBE_VIDEO_ID_PATTERN.test(trimmed) ? trimmed : null
+}
+
 function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): ParsedVideoSourceResult {
   let parsedUrl: URL
   try {
@@ -209,13 +223,14 @@ function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): Par
 
   let videoId: string | null = null
   if (isYouTubeHost && parsedUrl.pathname === '/watch') {
-    const raw = parsedUrl.searchParams.get('v')
-    videoId = typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null
+    videoId = normalizeYouTubeVideoId(parsedUrl.searchParams.get('v'))
   }
 
   if (isShortHost) {
-    const raw = parsedUrl.pathname.slice(1).trim()
-    videoId = raw.length > 0 ? raw : null
+    const [firstSegment] = parsedUrl.pathname
+      .split('/')
+      .filter((segment) => segment.trim().length > 0)
+    videoId = normalizeYouTubeVideoId(firstSegment ?? null)
   }
 
   if (!videoId) {
@@ -301,6 +316,9 @@ function normalizeTelemetry(raw: unknown): VideoSyncTelemetry {
       ? sync.lastCorrectionResult
       : 'none'
 
+  const normalizedErrorCode = normalizeTelemetryErrorField(error.code, MAX_TELEMETRY_ERROR_CODE_LENGTH)
+  const normalizedErrorMessage = normalizeTelemetryErrorField(error.message, MAX_TELEMETRY_ERROR_MESSAGE_LENGTH)
+
   return {
     connections: {
       activeCount: Math.max(0, Math.floor(toFiniteNumber(connections.activeCount, 0))),
@@ -314,8 +332,8 @@ function normalizeTelemetry(raw: unknown): VideoSyncTelemetry {
       lastCorrectionResult: correctionResult,
     },
     error: {
-      code: typeof error.code === 'string' ? error.code : null,
-      message: typeof error.message === 'string' ? error.message : null,
+      code: normalizedErrorCode,
+      message: normalizedErrorMessage,
     },
   }
 }
@@ -862,7 +880,7 @@ export default function setupVideoSyncRoutes(
     })
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
-    res.json({ success: true, data })
+    res.json({ success: true, data: toPublicSessionData(data) })
   })
 
   app.post('/api/video-sync/:sessionId/command', async (req, res) => {
@@ -943,7 +961,7 @@ export default function setupVideoSyncRoutes(
     })
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
-    res.json({ success: true, data })
+    res.json({ success: true, data: toPublicSessionData(data) })
   })
 
   app.post('/api/video-sync/:sessionId/event', async (req, res) => {
