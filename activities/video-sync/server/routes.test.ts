@@ -454,7 +454,7 @@ void test('session get route replaces non-positive persisted server timestamps d
 
 void test('session get route returns projected playback without persisting ordinary reads', async () => {
   const originalDateNow = Date.now
-  let nowMs = 12_000
+  const nowMs = 12_000
   Date.now = () => nowMs
 
   try {
@@ -539,7 +539,7 @@ void test('session get route returns projected playback without persisting ordin
 
 void test('session get route persists the session when projected playback reaches stopSec', async () => {
   const originalDateNow = Date.now
-  let nowMs = 12_000
+  const nowMs = 12_000
   Date.now = () => nowMs
 
   try {
