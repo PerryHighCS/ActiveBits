@@ -287,7 +287,7 @@ function normalizeState(raw: unknown): VideoSyncState {
 
   return {
     provider,
-    videoId: typeof source.videoId === 'string' ? source.videoId : '',
+    videoId: normalizeYouTubeVideoId(typeof source.videoId === 'string' ? source.videoId : null) ?? '',
     startSec: clampSeconds(toFiniteNumber(source.startSec, 0)),
     stopSec: normalizedStop,
     positionSec: clampSeconds(toFiniteNumber(source.positionSec, 0)),
@@ -816,11 +816,11 @@ export default function setupVideoSyncRoutes(
 
     if (Number.isNaN(stopOverride)) {
       data.telemetry.error = {
-        code: 'INVALID_TIME_RANGE',
-        message: 'stopSec must be greater than startSec and both must be >= 0.',
+        code: 'INVALID_STOP_SEC',
+        message: 'stopSec must be a finite number of seconds or omitted.',
       }
       await sessions.set(session.id, session)
-      res.status(400).json({ error: 'INVALID_TIME_RANGE', message: data.telemetry.error.message })
+      res.status(400).json({ error: 'INVALID_STOP_SEC', message: data.telemetry.error.message })
       return
     }
 

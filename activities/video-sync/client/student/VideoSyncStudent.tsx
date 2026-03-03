@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import {
   parseVideoSyncEnvelope,
   type VideoSyncState,
@@ -13,7 +13,6 @@ import {
   type YoutubeNamespace,
   type YoutubePlayerLike,
 } from '../youtubeIframeApi.js'
-import { parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
 
 interface VideoSyncStudentProps {
   sessionData?: {
@@ -34,7 +33,6 @@ export function shouldInitializeYoutubePlayer(
   return container != null && existingPlayer == null
 }
 
-const SOLO_STORAGE_KEY = 'video-sync-solo-state-solo-video-sync'
 const SYNC_DRIFT_TOLERANCE_SEC = 0.2
 
 const DEFAULT_STATE: VideoSyncState = {
@@ -47,37 +45,6 @@ const DEFAULT_STATE: VideoSyncState = {
   playbackRate: 1,
   updatedBy: 'system',
   serverTimestampMs: Date.now(),
-}
-
-function clampNonNegativeNumber(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return fallback
-  }
-
-  return Math.max(0, value)
-}
-
-export function normalizeVideoSyncState(value: unknown, fallbackState: VideoSyncState = DEFAULT_STATE): VideoSyncState {
-  const source = value != null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-
-  const stopSec =
-    typeof source.stopSec === 'number' && Number.isFinite(source.stopSec)
-      ? Math.max(0, source.stopSec)
-      : null
-
-  return {
-    provider: 'youtube',
-    videoId: typeof source.videoId === 'string' ? source.videoId : fallbackState.videoId,
-    startSec: clampNonNegativeNumber(source.startSec, fallbackState.startSec),
-    stopSec,
-    positionSec: clampNonNegativeNumber(source.positionSec, fallbackState.positionSec),
-    isPlaying: source.isPlaying === true,
-    playbackRate: 1,
-    updatedBy: source.updatedBy === 'manager' ? 'manager' : 'system',
-    serverTimestampMs: clampNonNegativeNumber(source.serverTimestampMs, fallbackState.serverTimestampMs),
-  }
 }
 
 export function hasInstructorPlaybackStarted(state: VideoSyncState): boolean {
@@ -99,19 +66,6 @@ function createStudentClientId(): string {
 
   const random = Math.random().toString(36).slice(2)
   return `student-${Date.now()}-${random}`
-}
-
-function normalizeYouTubeVideoId(value: string | null): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const trimmed = value.trim()
-  if (trimmed.length === 0) {
-    return null
-  }
-
-  return /^[A-Za-z0-9_-]{11}$/.test(trimmed) ? trimmed : null
 }
 
 const BLOCKED_STUDENT_OVERLAY_KEYS = new Set<string>([
@@ -142,40 +96,12 @@ const BLOCKED_STUDENT_OVERLAY_KEYS = new Set<string>([
   '9',
 ])
 
-export function parseYouTubeVideoId(urlValue: string): { videoId: string | null; startSec: number; stopSec: number | null } {
-  try {
-    const url = new URL(urlValue)
-    const host = url.hostname.toLowerCase()
-    const isYoutube = host === 'youtube.com' || host === 'www.youtube.com' || host === 'm.youtube.com'
-    const isShort = host === 'youtu.be' || host === 'www.youtu.be'
-
-    let videoId: string | null = null
-    if (isYoutube && url.pathname === '/watch') {
-      videoId = normalizeYouTubeVideoId(url.searchParams.get('v'))
-    } else if (isShort) {
-      const [firstSegment] = url.pathname.split('/').filter((segment) => segment.trim().length > 0)
-      videoId = normalizeYouTubeVideoId(firstSegment ?? null)
-    }
-
-    const startRaw = url.searchParams.get('start') ?? url.searchParams.get('t')
-    const stopRaw = url.searchParams.get('end')
-
-    const startSec = parseYouTubeTimestampSeconds(startRaw) ?? 0
-    const stopParsed = parseYouTubeTimestampSeconds(stopRaw)
-
-    return { videoId, startSec, stopSec: stopParsed }
-  } catch {
-    return { videoId: null, startSec: 0, stopSec: null }
-  }
-}
-
 export function shouldBlockStudentOverlayKey(key: string): boolean {
   return BLOCKED_STUDENT_OVERLAY_KEYS.has(key)
 }
 
 export async function reportVideoSyncStudentEvent(params: {
   sessionId: string | null
-  isSoloMode: boolean
   studentId: string
   eventType: 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'load-failure'
   driftSec?: number
@@ -183,7 +109,7 @@ export async function reportVideoSyncStudentEvent(params: {
   errorCode?: string
   errorMessage?: string
 }): Promise<void> {
-  if (!params.sessionId || params.isSoloMode) {
+  if (!params.sessionId) {
     return
   }
 
@@ -207,11 +133,9 @@ export async function reportVideoSyncStudentEvent(params: {
 
 export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps) {
   const sessionId = sessionData?.sessionId ?? null
-  const isSoloMode = sessionId?.startsWith('solo-') ?? false
   const attachSessionEndedHandler = useSessionEndedHandler()
 
   const [state, setState] = useState<VideoSyncState>(DEFAULT_STATE)
-  const [sourceUrlInput, setSourceUrlInput] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [playerReady, setPlayerReady] = useState(false)
@@ -226,18 +150,6 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const autoplayCheckTimerRef = useRef<number | null>(null)
   const studentClientIdRef = useRef(createStudentClientId())
 
-  useEffect(() => {
-    if (!isSoloMode || typeof window === 'undefined') return
-    try {
-      const stored = localStorage.getItem(SOLO_STORAGE_KEY)
-      if (!stored) return
-      const parsed = JSON.parse(stored) as unknown
-      setState(normalizeVideoSyncState(parsed, DEFAULT_STATE))
-    } catch {
-      setState(DEFAULT_STATE)
-    }
-  }, [isSoloMode])
-
   const reportEvent = useCallback(async (
     eventType: 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'load-failure',
     options?: {
@@ -249,7 +161,6 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   ): Promise<void> => {
     await reportVideoSyncStudentEvent({
       sessionId,
-      isSoloMode,
       studentId: studentClientIdRef.current,
       eventType,
       driftSec: options?.driftSec,
@@ -257,41 +168,29 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       errorCode: options?.errorCode,
       errorMessage: options?.errorMessage,
     })
-  }, [sessionId, isSoloMode])
+  }, [sessionId])
 
-  const applyStateToPlayer = useCallback((nextState: VideoSyncState, source: 'sync' | 'solo') => {
+  const applyStateToPlayer = useCallback((nextState: VideoSyncState) => {
     const player = playerRef.current
     if (!player || !nextState.videoId) return
 
-    if (source === 'sync') {
-      player.mute()
-    } else {
-      player.unMute()
-    }
+    player.mute()
 
     const desiredPositionSec = computeDesiredPositionSec(nextState)
     const now = Date.now()
 
     if (loadedVideoIdRef.current !== nextState.videoId) {
-      if (source === 'sync') {
-        player.loadVideoById({
-          videoId: nextState.videoId,
-          startSeconds: desiredPositionSec,
-          endSeconds: nextState.stopSec ?? undefined,
-        })
-      } else {
-        player.cueVideoById({
-          videoId: nextState.videoId,
-          startSeconds: desiredPositionSec,
-          endSeconds: nextState.stopSec ?? undefined,
-        })
-      }
+      player.loadVideoById({
+        videoId: nextState.videoId,
+        startSeconds: desiredPositionSec,
+        endSeconds: nextState.stopSec ?? undefined,
+      })
       loadedVideoIdRef.current = nextState.videoId
     } else {
       const currentTimeSec = player.getCurrentTime()
       const driftSec = Math.abs(currentTimeSec - desiredPositionSec)
 
-      if (source === 'sync' && shouldCorrectDrift(currentTimeSec, desiredPositionSec, SYNC_DRIFT_TOLERANCE_SEC)) {
+      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, SYNC_DRIFT_TOLERANCE_SEC)) {
         const wasUnsynced = isLocallyUnsyncedRef.current
         player.seekTo(desiredPositionSec, true)
         isLocallyUnsyncedRef.current = true
@@ -300,7 +199,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           lastUnsyncReportAtRef.current = now
           void reportEvent('unsync', { driftSec })
         }
-      } else if (source === 'sync' && isLocallyUnsyncedRef.current) {
+      } else if (isLocallyUnsyncedRef.current) {
         isLocallyUnsyncedRef.current = false
         void reportEvent('sync-correction', { driftSec, correctionResult: 'success' })
       }
@@ -318,9 +217,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         const stateValue = player.getPlayerState()
         if (stateValue !== PLAYING) {
           setAutoplayBlocked(true)
-          if (source === 'sync') {
-            void reportEvent('autoplay-blocked')
-          }
+          void reportEvent('autoplay-blocked')
         } else {
           setAutoplayBlocked(false)
         }
@@ -332,14 +229,14 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   }, [reportEvent])
 
   const buildWsUrl = useCallback(() => {
-    if (!sessionId || isSoloMode || typeof window === 'undefined') return null
+    if (!sessionId || typeof window === 'undefined') return null
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${protocol}//${window.location.host}/ws/video-sync?sessionId=${encodeURIComponent(sessionId)}&role=student`
-  }, [sessionId, isSoloMode])
+  }, [sessionId])
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: !isSoloMode && Boolean(sessionId),
+    shouldReconnect: Boolean(sessionId),
     attachSessionEndedHandler,
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
@@ -379,7 +276,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           height: '100%',
           host: 'https://www.youtube-nocookie.com',
           playerVars: {
-            controls: isSoloMode ? 1 : 0,
+            controls: 0,
             rel: 0,
             modestbranding: 1,
           },
@@ -387,20 +284,16 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
             onReady: () => {
               if (cancelled) return
               setPlayerReady(true)
-              if (!isSoloMode) {
-                player.mute()
-              }
+              player.mute()
             },
             onError: () => {
               if (cancelled) return
               setErrorMessage('YouTube player failed to load for this video.')
-              if (!isSoloMode) {
-                void reportEvent('load-failure', {
-                  correctionResult: 'failed',
-                  errorCode: 'PLAYER_LOAD_FAILED',
-                  errorMessage: 'YouTube player failed to load in synchronized student view',
-                })
-              }
+              void reportEvent('load-failure', {
+                correctionResult: 'failed',
+                errorCode: 'PLAYER_LOAD_FAILED',
+                errorMessage: 'YouTube player failed to load in synchronized student view',
+              })
             },
           },
         })
@@ -426,19 +319,14 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       playerRef.current?.destroy()
       playerRef.current = null
     }
-  }, [isSoloMode, reportEvent])
+  }, [reportEvent])
 
   useEffect(() => {
     if (!playerReady) return
-    applyStateToPlayer(state, isSoloMode ? 'solo' : 'sync')
-  }, [playerReady, state, isSoloMode, applyStateToPlayer])
+    applyStateToPlayer(state)
+  }, [playerReady, state, applyStateToPlayer])
 
   useEffect(() => {
-    if (isSoloMode) {
-      setHasStartedInstructorPlayback(false)
-      return
-    }
-
     if (!state.videoId) {
       setHasStartedInstructorPlayback(false)
       return
@@ -447,10 +335,10 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     if (hasInstructorPlaybackStarted(state)) {
       setHasStartedInstructorPlayback(true)
     }
-  }, [isSoloMode, state])
+  }, [state])
 
   useEffect(() => {
-    if (!sessionId || isSoloMode) return undefined
+    if (!sessionId) return undefined
 
     const loadSession = async () => {
       try {
@@ -469,85 +357,12 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     connect()
 
     return () => disconnect()
-  }, [sessionId, isSoloMode, connect, disconnect])
-
-  const persistSoloState = useCallback((next: VideoSyncState) => {
-    if (!isSoloMode || typeof window === 'undefined') return
-    localStorage.setItem(SOLO_STORAGE_KEY, JSON.stringify(next))
-  }, [isSoloMode])
-
-  const applySoloSource = (): void => {
-    const parsed = parseYouTubeVideoId(sourceUrlInput)
-    if (!parsed.videoId) {
-      setErrorMessage('Enter a valid youtube.com/watch or youtu.be URL')
-      return
-    }
-
-    const next: VideoSyncState = {
-      ...state,
-      provider: 'youtube',
-      videoId: parsed.videoId,
-      startSec: parsed.startSec,
-      stopSec: parsed.stopSec,
-      positionSec: parsed.startSec,
-      isPlaying: false,
-      updatedBy: 'system',
-      serverTimestampMs: Date.now(),
-    }
-
-    setState(next)
-    persistSoloState(next)
-    if (playerReady) {
-      applyStateToPlayer(next, 'solo')
-    }
-    setErrorMessage(null)
-  }
-
-  const updateSoloPlayback = (type: 'play' | 'pause' | 'seek-start') => {
-    if (!isSoloMode) return
-
-    const now = Date.now()
-    const currentPosition = computeDesiredPositionSec(state)
-    const next: VideoSyncState =
-      type === 'play'
-        ? {
-        ...state,
-        positionSec: currentPosition,
-        isPlaying: true,
-        updatedBy: 'system',
-        serverTimestampMs: now,
-      }
-        : type === 'pause'
-          ? {
-        ...state,
-        positionSec: currentPosition,
-        isPlaying: false,
-        updatedBy: 'system',
-        serverTimestampMs: now,
-      }
-          : {
-        ...state,
-        positionSec: state.startSec,
-        isPlaying: false,
-        updatedBy: 'system',
-        serverTimestampMs: now,
-      }
-
-    setState(next)
-    persistSoloState(next)
-    if (playerReady) {
-      applyStateToPlayer(next, 'solo')
-    }
-  }
-
-  const displayPosition = useMemo(() => computeDesiredPositionSec(state), [state])
+  }, [sessionId, connect, disconnect])
 
   const retryAutoplay = (): void => {
     const player = playerRef.current
     if (!player) return
-    if (!isSoloMode) {
-      player.mute()
-    }
+    player.mute()
     player.playVideo()
     setAutoplayBlocked(false)
   }
@@ -567,107 +382,52 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     event.stopPropagation()
   }
 
-  if (!isSoloMode) {
-    return (
-      <div className="fixed inset-0 z-30 bg-black">
-        {state.videoId ? (
-          <div className="absolute inset-0 w-full h-full bg-black">
-            <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync player" />
-          </div>
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-300">
-            Waiting for instructor to configure the video.
-          </div>
-        )}
-
-        <div
-          className="absolute inset-0 z-10 bg-transparent"
-          tabIndex={0}
-          aria-label="Synchronized playback is managed by the instructor"
-          onMouseDown={handleStudentOverlayPointer}
-          onClick={handleStudentOverlayPointer}
-          onKeyDown={handleStudentOverlayKeyDown}
-        />
-
-        {state.videoId && !hasStartedInstructorPlayback && (
-          <div
-            className="absolute inset-0 z-20 flex items-center justify-center bg-black"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <p className="text-sm text-gray-300">Waiting for instructor to start the video.</p>
-          </div>
-        )}
-
-        {errorMessage && (
-          <div className="absolute top-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-[26.25rem] border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
-            {errorMessage}
-          </div>
-        )}
-
-        {autoplayBlocked && (
-          <div className="absolute bottom-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-[26.25rem] border border-amber-300 bg-amber-50 rounded p-3 text-sm text-amber-900">
-            Browser blocked autoplay. Click once to start, then follow the classroom display.
-            <div className="mt-2">
-              <Button onClick={retryAutoplay}>Click to start playback</Button>
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
   return (
-    <div className="w-full p-4 space-y-4">
-      <h1 className="text-2xl font-bold">Video Sync</h1>
+    <div className="fixed inset-0 z-30 bg-black">
+      {state.videoId ? (
+        <div className="absolute inset-0 w-full h-full bg-black">
+          <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync player" />
+        </div>
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-300">
+          Waiting for instructor to configure the video.
+        </div>
+      )}
+
+      <div
+        className="absolute inset-0 z-10 bg-transparent"
+        tabIndex={0}
+        aria-label="Synchronized playback is managed by the instructor"
+        onMouseDown={handleStudentOverlayPointer}
+        onClick={handleStudentOverlayPointer}
+        onKeyDown={handleStudentOverlayKeyDown}
+      />
+
+      {state.videoId && !hasStartedInstructorPlayback && (
+        <div
+          className="absolute inset-0 z-20 flex items-center justify-center bg-black"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <p className="text-sm text-gray-300">Waiting for instructor to start the video.</p>
+        </div>
+      )}
 
       {errorMessage && (
-        <div className="border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
+        <div className="absolute top-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-[26.25rem] border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
           {errorMessage}
         </div>
       )}
 
-      {isSoloMode && (
-        <section className="border rounded p-4 space-y-3" aria-labelledby="video-sync-solo-config">
-          <h2 id="video-sync-solo-config" className="text-xl font-semibold">Solo setup</h2>
-          <label className="block">
-            <span className="block mb-1 font-medium">YouTube URL</span>
-            <input
-              className="border rounded p-2 w-full"
-              type="url"
-              value={sourceUrlInput}
-              onChange={(event) => setSourceUrlInput(event.target.value)}
-              placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
-              aria-label="YouTube URL"
-            />
-          </label>
-          <Button onClick={applySoloSource}>Load video</Button>
-          <div className="flex gap-2">
-            <Button onClick={() => updateSoloPlayback('play')} disabled={!state.videoId}>Play</Button>
-            <Button onClick={() => updateSoloPlayback('pause')} disabled={!state.videoId}>Pause</Button>
-            <Button onClick={() => updateSoloPlayback('seek-start')} disabled={!state.videoId}>Restart at start</Button>
+      {autoplayBlocked && (
+        <div className="absolute bottom-4 left-4 right-4 z-20 md:left-auto md:right-4 md:w-[26.25rem] border border-amber-300 bg-amber-50 rounded p-3 text-sm text-amber-900">
+          Browser blocked autoplay. Click once to start, then follow the classroom display.
+          <div className="mt-2">
+            <Button onClick={retryAutoplay}>Click to start playback</Button>
           </div>
-        </section>
-      )}
-
-      <section className="border rounded p-4" aria-labelledby="video-sync-player">
-        <h2 id="video-sync-player" className="text-xl font-semibold mb-2">Player</h2>
-        {state.videoId ? (
-          <div className="w-full rounded border overflow-hidden bg-black aspect-video">
-            <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync player" />
-          </div>
-        ) : (
-          <p className="text-sm text-gray-700">No video selected yet.</p>
-        )}
-        <div className="mt-3 text-sm text-gray-700" aria-live="polite">
-          <div>Video ID: {state.videoId || 'Not configured'}</div>
-          <div>Playing: {state.isPlaying ? 'Yes' : 'No'}</div>
-          <div>Position: {displayPosition.toFixed(2)}s</div>
-          <div>Start: {state.startSec.toFixed(2)}s</div>
-          <div>Stop: {state.stopSec != null ? `${state.stopSec.toFixed(2)}s` : 'Not set'}</div>
         </div>
-      </section>
+      )}
     </div>
   )
 }
