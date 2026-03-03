@@ -164,7 +164,7 @@ function normalizeInstructorPasscode(value: unknown): string | null {
     return null
   }
 
-  return normalized
+  return normalized.toLowerCase()
 }
 
 function verifyInstructorPasscode(expected: string, candidate: string): boolean {

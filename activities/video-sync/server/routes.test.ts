@@ -287,6 +287,33 @@ void test('session get route regenerates malformed persisted instructor passcode
   assert.notEqual(persisted.instructorPasscode, 'legacy-passcode')
 })
 
+void test('session get route canonicalizes persisted instructor passcodes to lowercase', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  ;(session.data as { instructorPasscode: string }).instructorPasscode = TEST_INSTRUCTOR_PASSCODE.toUpperCase()
+  const storeState = createSessionStore({ s1: session })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const persisted = storeState.store.s1?.data as {
+    instructorPasscode?: string
+  }
+  assert.equal(persisted.instructorPasscode, TEST_INSTRUCTOR_PASSCODE)
+})
+
 void test('session get route normalizes oversized persisted telemetry.error fields', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -1018,6 +1045,31 @@ void test('manager websocket accepts connections with a valid instructor passcod
   const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { role?: string } }
   assert.equal(payload.type, 'state-snapshot')
   assert.equal(payload.payload?.role, 'manager')
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
+void test('manager websocket accepts uppercase instructor passcodes by canonicalizing hex casing', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 's1',
+    role: 'manager',
+    instructorPasscode: TEST_INSTRUCTOR_PASSCODE.toUpperCase(),
+  }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(recorder.closed, null)
+  assert.equal(recorder.sent.length, 1)
   recorder.emit('close')
   await new Promise((resolve) => setTimeout(resolve, 0))
 })

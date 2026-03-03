@@ -110,6 +110,25 @@ export function resetUnsyncedPlaybackTelemetry(params: {
   params.lastUnsyncReportAtRef.current = 0
 }
 
+export function syncLoadedVideoSource(
+  player: YoutubePlayerLike,
+  nextState: VideoSyncState,
+  desiredPositionSec: number,
+): void {
+  const sourceOptions = {
+    videoId: nextState.videoId,
+    startSeconds: desiredPositionSec,
+    endSeconds: nextState.stopSec ?? undefined,
+  }
+
+  if (nextState.isPlaying) {
+    player.loadVideoById(sourceOptions)
+    return
+  }
+
+  player.cueVideoById(sourceOptions)
+}
+
 export function clearAutoplayCheckTimer(autoplayCheckTimerRef: { current: number | null }): void {
   if (autoplayCheckTimerRef.current != null) {
     window.clearTimeout(autoplayCheckTimerRef.current)
@@ -201,11 +220,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         isLocallyUnsyncedRef,
         lastUnsyncReportAtRef,
       })
-      player.loadVideoById({
-        videoId: nextState.videoId,
-        startSeconds: desiredPositionSec,
-        endSeconds: nextState.stopSec ?? undefined,
-      })
+      syncLoadedVideoSource(player, nextState, desiredPositionSec)
       loadedVideoIdRef.current = nextState.videoId
     } else {
       const currentTimeSec = player.getCurrentTime()
