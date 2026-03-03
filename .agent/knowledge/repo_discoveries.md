@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-03
+- Area: activities
+- Discovery: The Resonance embedded-activity plan now targets the same versioned websocket envelope shape as `video-sync`: `version`, `activity`, `sessionId`, `type`, `timestamp`, and `payload`, while keeping activity-specific namespacing in the `type` field (for example `resonance:session-state`).
+- Why it matters: Future embeddable activities should converge on one outer message wrapper for shared-socket routing and forward compatibility instead of inventing per-activity envelope formats.
+- Evidence: `.agent/plans/resonance.md`; `activities/video-sync/client/protocol.ts`
+- Follow-up action: Reuse this outer envelope for future embedded-activity protocol plans unless a shared cross-activity transport spec supersedes it.
+- Owner: Codex
+
 - Date: 2026-03-01
 - Area: activities
 - Discovery: SyncDeck presentation URLs must be scheme-compatible with the ActiveBits host page. When ActiveBits is loaded over HTTPS, configuring or joining a SyncDeck session with an `http://...` presentation URL causes mixed-content blocking, the iframe stays on an `about:blank` parent-origin window, and subsequent `postMessage(..., "http://...")` calls fail in the student view.

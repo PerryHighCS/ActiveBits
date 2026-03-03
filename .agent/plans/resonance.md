@@ -7,9 +7,11 @@ embedded activity inside presentations (e.g. SyncDeck). The instructor poses que
 student responses in real time, annotates them privately, and can share selected answers
 anonymously with the class. Students can react to shared answers with emoji.
 
-Because Resonance is intended as an embeddable activity, all WebSocket messages use a
-`resonance:` prefix and carry complete self-contained payloads so they can be demultiplexed
-from a shared socket in a future embedding architecture.
+Because Resonance is intended as an embeddable activity, all WebSocket messages use the same
+versioned outer envelope shape as `video-sync` (`version`, `activity`, `sessionId`, `type`,
+`timestamp`, `payload`). Resonance-specific message kinds still use a `resonance:` prefix in
+their `type` field, and payloads remain self-contained so they can be demultiplexed from a
+shared socket in a future embedding architecture.
 
 Resonance is the first activity to generate a structured **report**. The reporting contract is
 designed generically so future activities—and a future combined-session report—can follow the
@@ -142,7 +144,20 @@ Registration follows the same REST + WS pattern as SyncDeck:
 3. Student connects to WS with `?sessionId=...&studentId=...`.
 
 ### Message Namespacing
-All outbound/inbound WS message `type` fields use the `resonance:` prefix so future
+All outbound/inbound WS messages use this outer envelope:
+
+```ts
+{
+  version: '1'
+  activity: 'resonance'
+  sessionId: string
+  type: string
+  timestamp: number
+  payload: unknown
+}
+```
+
+Within that envelope, Resonance-specific `type` values use the `resonance:` prefix so future
 multiplexing can route messages to the correct activity without parsing payload content.
 
 ### Correct-Answer Reveal
@@ -251,7 +266,21 @@ types/report.ts     # Generic reporting contract
 
 ## WebSocket Message Protocol
 
-All messages: `{ type: string; payload: unknown }`.
+All messages use this envelope:
+
+```ts
+{
+  version: '1'
+  activity: 'resonance'
+  sessionId: string
+  type: string
+  timestamp: number
+  payload: unknown
+}
+```
+
+`type` remains the semantic message discriminator listed below, and `payload` carries the
+message-specific body.
 
 ### Server → All Clients
 
