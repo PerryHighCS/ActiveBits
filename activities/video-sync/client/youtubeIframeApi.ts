@@ -58,6 +58,7 @@ declare global {
 }
 
 let apiLoadPromise: Promise<YoutubeNamespace> | null = null
+let iframeReadyBridgeInstalled = false
 
 function resolveYoutubeNamespace(): YoutubeNamespace | null {
   return window.YT?.Player ? window.YT : null
@@ -72,6 +73,11 @@ function ensureReadyCallbackQueue(): Array<() => void> {
 }
 
 function installIframeReadyBridge(): void {
+  if (iframeReadyBridgeInstalled) {
+    return
+  }
+
+  iframeReadyBridgeInstalled = true
   const previous = window.onYouTubeIframeAPIReady
   window.onYouTubeIframeAPIReady = () => {
     if (typeof previous === 'function') {
@@ -174,6 +180,7 @@ export async function loadYoutubeIframeApi(): Promise<YoutubeNamespace> {
 
 export function resetYoutubeIframeApiForTests(): void {
   resetApiLoadState()
+  iframeReadyBridgeInstalled = false
 }
 
 export function resolveYoutubePlayerState(namespace: YoutubeNamespace | null): {
