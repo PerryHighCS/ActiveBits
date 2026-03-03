@@ -238,7 +238,9 @@ function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): Par
     return { ok: false, reason: 'invalid-video-id' }
   }
 
-  const startFromUrl = parseTimestampSeconds(parsedUrl.searchParams.get('start') ?? parsedUrl.searchParams.get('t')) ?? 0
+  const startFromStartParam = parseTimestampSeconds(parsedUrl.searchParams.get('start'))
+  const startFromTParam = parseTimestampSeconds(parsedUrl.searchParams.get('t'))
+  const startFromUrl = startFromStartParam ?? startFromTParam ?? 0
   const stopFromUrl = parseTimestampSeconds(parsedUrl.searchParams.get('end'))
   const stopSec = stopOverride ?? stopFromUrl
 

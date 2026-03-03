@@ -594,6 +594,33 @@ void test('session patch ignores partially numeric timestamp query values', asyn
   assert.equal(state.positionSec, 0)
 })
 
+void test('session patch falls back to valid t param when start param is malformed', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?start=oops&t=1m23s', instructorPasscode: 'teacher-pass' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  const state = updated.state as Record<string, unknown>
+  assert.equal(state.startSec, 83)
+  assert.equal(state.positionSec, 83)
+})
+
 void test('session patch rejects reconfiguration after a video is already set', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter

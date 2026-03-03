@@ -159,3 +159,30 @@ void test('loadYoutubeIframeApi clears cached promise after timeout so callers c
     mockDom.restore()
   }
 })
+
+void test('loadYoutubeIframeApi does not stack iframe ready wrappers across retries', async () => {
+  const mockDom = installMockDom()
+
+  try {
+    let previousReadyCalls = 0
+    mockDom.windowMock.onYouTubeIframeAPIReady = () => {
+      previousReadyCalls += 1
+    }
+
+    const firstLoadPromise = loadYoutubeIframeApi()
+    mockDom.scripts[0]?.onerror?.(new Event('error'))
+    await assert.rejects(firstLoadPromise, /failed to load/)
+
+    const secondLoadPromise = loadYoutubeIframeApi()
+    mockDom.windowMock.YT = {
+      Player: class MockPlayer {} as unknown as YoutubeNamespace['Player'],
+    }
+    mockDom.windowMock.onYouTubeIframeAPIReady?.()
+
+    const namespace = await secondLoadPromise
+    assert.equal(namespace, mockDom.windowMock.YT)
+    assert.equal(previousReadyCalls, 1)
+  } finally {
+    mockDom.restore()
+  }
+})
