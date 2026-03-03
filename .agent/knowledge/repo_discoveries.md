@@ -16,6 +16,30 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-03
 - Area: activities
+- Discovery: `video-sync` treats `stopSec` as a server-authoritative playback boundary, not an advisory client-only hint. Server command handling clamps play/pause/seek positions to `stopSec`, heartbeat projection caps playback at that boundary, and state persistence auto-pauses once the stop point is reached.
+- Why it matters: Planning/docs language that describes stop time as merely advisory is incorrect and can lead to regressions if future contributors remove the server-side enforcement that currently keeps manager and student playback bounded consistently.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `.agent/plans/video-sync-activity-plan.md`
+- Follow-up action: Keep plan/docs/tests aligned with the enforced-stop behavior unless the product decision explicitly changes to allow seeking or playback beyond `stopSec`.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: `video-sync` drift correction and telemetry are keyed to a `0.2s` tolerance and current sync-health state, not a cumulative unsync-event threshold. Student clients report `unsync` when drift first exceeds tolerance, throttle repeated unsync reports to once per 10 seconds while still unsynced, and the manager consumes `sync.unsyncedStudents`, `sync.lastDriftSec`, and `sync.lastCorrectionResult`.
+- Why it matters: Plan language that describes unsync reporting as a two-heartbeat `2.0s` threshold or expects `sync.unsyncEvents` no longer matches the shipped protocol and can mislead future telemetry or dashboard changes.
+- Evidence: `activities/video-sync/client/syncMath.ts`; `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/protocol.ts`; `activities/video-sync/server/routes.ts`; `.agent/plans/video-sync-activity-plan.md`
+- Follow-up action: Keep plan/docs aligned with the opportunistic, throttled `unsync` reporting model unless the telemetry contract is intentionally redesigned.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: `GET /api/video-sync/:sessionId/session` now returns projected playback state without persisting on ordinary reads. It only calls `sessions.set(...)` when the read causes a durable transition, such as auto-pausing at `stopSec` or changing telemetry counts.
+- Why it matters: Frequent polling/reconnects no longer create avoidable Valkey or session-store write churn, while clients still receive current projected playback and durable stop-boundary enforcement remains persisted when reached.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: Preserve this read-path write policy if additional session-read telemetry or projection logic is added later.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
 - Discovery: `video-sync` server-side `parseYouTubeSource` now normalizes YouTube IDs with a strict 11-character pattern (`[A-Za-z0-9_-]{11}`), and short URLs (`youtu.be/...`) use only the first non-empty path segment as the candidate ID.
 - Why it matters: Prevents persisting malformed IDs (for example IDs containing invalid characters or extra path suffixes) while still accepting share links like `https://youtu.be/<id>/extra` by extracting just `<id>`.
 - Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`

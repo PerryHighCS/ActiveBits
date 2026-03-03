@@ -452,6 +452,176 @@ void test('session get route replaces non-positive persisted server timestamps d
   }
 })
 
+void test('session get route returns projected playback without persisting ordinary reads', async () => {
+  const originalDateNow = Date.now
+  let nowMs = 12_000
+  Date.now = () => nowMs
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    const session = createVideoSyncSession('s1')
+    ;(session.data as {
+      state: {
+        provider: 'youtube'
+        videoId: string
+        startSec: number
+        stopSec: number | null
+        positionSec: number
+        isPlaying: boolean
+        playbackRate: 1
+        updatedBy: 'manager' | 'system'
+        serverTimestampMs: number
+      }
+    }).state = {
+      provider: 'youtube',
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: null,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1,
+      updatedBy: 'manager',
+      serverTimestampMs: 10_000,
+    }
+    const storeState = createSessionStore({ s1: session })
+    let setCalls = 0
+    const sessionsWithTrackedSet = {
+      ...storeState.sessions,
+      async set(id: string, updatedSession: SessionRecord) {
+        setCalls += 1
+        return storeState.sessions.set(id, updatedSession)
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
+
+    const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+    assert.equal(typeof handler, 'function')
+
+    const res = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+      },
+      res,
+    )
+
+    assert.equal(res.statusCode, 200)
+    const payload = res.body as {
+      data?: {
+        state?: {
+          positionSec?: number
+          serverTimestampMs?: number
+          isPlaying?: boolean
+        }
+      }
+    }
+    assert.equal(payload.data?.state?.positionSec, 7)
+    assert.equal(payload.data?.state?.serverTimestampMs, 12_000)
+    assert.equal(payload.data?.state?.isPlaying, true)
+    assert.equal(setCalls, 0)
+
+    const persisted = storeState.store.s1?.data as {
+      state?: {
+        positionSec?: number
+        serverTimestampMs?: number
+        isPlaying?: boolean
+      }
+    }
+    assert.equal(persisted.state?.positionSec, 5)
+    assert.equal(persisted.state?.serverTimestampMs, 10_000)
+    assert.equal(persisted.state?.isPlaying, true)
+  } finally {
+    Date.now = originalDateNow
+  }
+})
+
+void test('session get route persists the session when projected playback reaches stopSec', async () => {
+  const originalDateNow = Date.now
+  let nowMs = 12_000
+  Date.now = () => nowMs
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    const session = createVideoSyncSession('s1')
+    ;(session.data as {
+      state: {
+        provider: 'youtube'
+        videoId: string
+        startSec: number
+        stopSec: number | null
+        positionSec: number
+        isPlaying: boolean
+        playbackRate: 1
+        updatedBy: 'manager' | 'system'
+        serverTimestampMs: number
+      }
+    }).state = {
+      provider: 'youtube',
+      videoId: 'dQw4w9WgXcQ',
+      startSec: 0,
+      stopSec: 6,
+      positionSec: 5,
+      isPlaying: true,
+      playbackRate: 1,
+      updatedBy: 'manager',
+      serverTimestampMs: 10_000,
+    }
+    const storeState = createSessionStore({ s1: session })
+    let setCalls = 0
+    const sessionsWithTrackedSet = {
+      ...storeState.sessions,
+      async set(id: string, updatedSession: SessionRecord) {
+        setCalls += 1
+        return storeState.sessions.set(id, updatedSession)
+      },
+    }
+
+    setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
+
+    const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+    assert.equal(typeof handler, 'function')
+
+    const res = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+      },
+      res,
+    )
+
+    assert.equal(res.statusCode, 200)
+    const payload = res.body as {
+      data?: {
+        state?: {
+          positionSec?: number
+          serverTimestampMs?: number
+          isPlaying?: boolean
+        }
+      }
+    }
+    assert.equal(payload.data?.state?.positionSec, 6)
+    assert.equal(payload.data?.state?.serverTimestampMs, 12_000)
+    assert.equal(payload.data?.state?.isPlaying, false)
+    assert.equal(setCalls, 1)
+
+    const persisted = storeState.store.s1?.data as {
+      state?: {
+        positionSec?: number
+        serverTimestampMs?: number
+        isPlaying?: boolean
+      }
+    }
+    assert.equal(persisted.state?.positionSec, 6)
+    assert.equal(persisted.state?.serverTimestampMs, 12_000)
+    assert.equal(persisted.state?.isPlaying, false)
+  } finally {
+    Date.now = originalDateNow
+  }
+})
+
 void test('session patch returns invalid source url for unsupported non-YouTube host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
