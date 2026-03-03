@@ -44,6 +44,55 @@ same interface.
 
 ## Architecture Decisions
 
+### Activity Reporting Config Flag
+
+A new optional `reporting` field is added to `ActivityConfig` (in `types/activity.ts`) and
+validated in `types/activityConfigSchema.ts`. It is an object so individual capabilities can
+be opted into independently and new modes can be added without a breaking schema change.
+
+```typescript
+// types/activity.ts (addition to ActivityConfig)
+reporting?: {
+  /** Activity can generate a standalone report from instructor-managed sessions */
+  standalone?: boolean
+  /** Activity can contribute a report section when embedded inside another activity */
+  embedded?: boolean
+  /** Solo-mode sessions can generate reports (future) */
+  solo?: boolean
+}
+```
+
+Usage in the manager UI: the **Report** tab is shown only when `reporting.standalone` is
+`true`. The `ActivityHtmlReportSection` function is registered per-activity alongside the
+React component (future combined-report assembler checks `reporting.embedded`).
+
+Resonance sets `reporting: { standalone: true }`.
+
+### Server-Side HTML Generation – Why Not React/Vite SSR
+
+`react-dom/server`'s `renderToStaticMarkup` runs in Node.js without Next.js or Vite. However,
+two constraints make it a poor fit for self-contained HTML reports in this codebase:
+
+1. **React is not a server dependency.** The server's `package.json` does not include
+   `react` or `react-dom`, and its `tsconfig.json` targets `NodeNext` with no JSX/DOM libs.
+   Adding React solely for report rendering would be a disproportionate dependency.
+
+2. **Tailwind v4 CSS lives only inside the Vite pipeline.** The project uses
+   `@tailwindcss/vite`, which generates CSS at Vite build time. A server-rendered React
+   component would emit class names with no corresponding styles — the generated HTML would
+   not be self-contained without a separate CSS extraction build step.
+
+**Decision:** The server HTML renderer (`server/reportRenderer.ts`) uses plain TypeScript
+template-string functions, not React. It embeds its own minimal inline CSS block scoped to
+the report. Data-processing logic (tallies, response grouping, summary calculations) is
+extracted into `shared/reportUtils.ts` and imported by both the server renderer and the
+React in-app component, preventing duplication without coupling the rendering approaches.
+
+This does not preclude using React SSR in the future — if a report component with inline
+`style=` props (no Tailwind) is written, `renderToStaticMarkup` can be dropped in as the
+generator for that component. The `ActivityHtmlReportSection` contract accepts any
+implementation.
+
 ### Instructor Authentication – Two Flows
 
 Resonance follows the same two-flow passcode pattern as SyncDeck.
@@ -118,9 +167,35 @@ The instructor can still annotate individual responses (star/flag/emoji) at any 
 annotations are private and unrelated to the share-results action.
 
 ### Reporting Contract
-A new shared file `types/report.ts` defines `ActivityReportMeta`, `ActivityReportSegment<T>`,
-and the component interface for embeddable report sections. Resonance implements
-`ResonanceReportData` as the first concrete segment type.
+
+A new shared file `types/report.ts` defines the two-layer reporting contract:
+
+**Layer 1 – In-app React view:**
+`ActivityReportSectionProps<TData>` is the props interface for an activity-owned React component
+that renders inside the manager's **Report** tab. It uses the app's normal styling (Tailwind).
+
+**Layer 2 – Self-contained HTML export:**
+`ActivityHtmlReportSection<TData>` is a function type that takes an `ActivityReportSegment<TData>`
+and returns a plain HTML string fragment (a `<section>` block, no `<html>`/`<head>`/`<body>`).
+The fragment must be entirely self-contained: all styles must be inline or inside a `<style>`
+block scoped to the fragment; no external stylesheets, no CDN fonts, no runtime JS.
+
+A top-level report assembler (future cross-activity use) collects fragments from multiple
+activities, injects a shared CSS reset and document shell, and produces one `<!DOCTYPE html>`
+file. For Resonance's standalone download, the server wraps its own fragment in the full shell.
+
+The `ResonanceReportData` JSON is embedded verbatim in a `<script>` tag at the top of the
+document so the file is self-describing even if opened in a context where the HTML markup
+is not rendered (e.g., extracted by a script).
+
+**HTML report generation is server-side** (`server/reportRenderer.ts`) using template strings,
+not React (see "Server-Side HTML Generation" decision above). The server has authoritative
+access to all session data including instructor annotations. Shared data-processing logic
+(tallies, grouping, summaries) lives in `shared/reportUtils.ts` and is imported by both
+the server renderer and the in-app React component. The endpoint streams the assembled HTML
+directly (`Content-Type: text/html; Content-Disposition: attachment; filename="resonance-report.html"`).
+
+Resonance implements `ResonanceReportData` as the first concrete segment type.
 
 ---
 
@@ -132,16 +207,22 @@ activities/resonance/
 ├── shared/
 │   ├── types.ts              # All shared TypeScript types (questions, responses, etc.)
 │   ├── emojiSet.ts           # Curated emoji list used by picker
-│   └── reportTypes.ts        # Resonance-specific ResonanceReportData type
+│   ├── reportTypes.ts        # Resonance-specific ResonanceReportData type
+│   └── reportUtils.ts        # Pure data-processing functions shared by server renderer
+│                             #   and in-app React component (tallies, grouping, summaries)
 ├── client/
 │   ├── index.tsx
 │   ├── manager/
 │   │   ├── ResonanceManager.tsx                # Manager shell + WS + passcode bootstrap
-│   │   ├── QuestionBuilder.tsx                 # Build/edit question set pre-session
+│   │   ├── QuestionBuilder.tsx                 # Build/edit/upload question set; includes
+│   │   │                                       #   "Create Persistent Link" button
 │   │   ├── QuestionCard.tsx                    # Single question editor card
+│   │   ├── CreatePersistentLinkModal.tsx       # Teacher-code entry + link generation from
+│   │   │                                       #   current question set (used in manager)
 │   │   ├── ResponseViewer.tsx                  # Live responses per active question
 │   │   ├── ResponseCard.tsx                    # Single response + annotation controls
-│   │   └── ResonancePersistentLinkBuilder.tsx  # Custom link builder with encrypted questions
+│   │   └── ResonancePersistentLinkBuilder.tsx  # Dashboard "Make Permanent Link" modal:
+│   │                                           #   upload JSON only → generate link
 │   ├── student/
 │   │   ├── ResonanceStudent.tsx          # Student shell + name registration + WS
 │   │   ├── NameEntryForm.tsx             # Name prompt before joining
@@ -156,7 +237,9 @@ activities/resonance/
 │       └── useResonanceSession.ts        # WS lifecycle + message dispatch hook
 └── server/
     ├── routes.ts                         # API endpoints + WS handler
-    └── questionCrypto.ts                 # AES-256-GCM encrypt/decrypt for question sets
+    ├── questionCrypto.ts                 # AES-256-GCM encrypt/decrypt for question sets
+    └── reportRenderer.ts                 # Self-contained HTML report generator
+                                          #   implements ActivityHtmlReportSection<ResonanceReportData>
 ```
 
 New shared type file at repo root:
@@ -309,10 +392,24 @@ export interface ActivityReportSegment<TData = unknown> {
   data: TData
 }
 
-/** Props for an activity-owned embeddable report section component */
+/** Props for an activity-owned React component rendered in the manager Report tab */
 export interface ActivityReportSectionProps<TData = unknown> {
   segment: ActivityReportSegment<TData>
 }
+
+/**
+ * Function an activity implements to produce a self-contained HTML fragment.
+ * Rules:
+ *  - Return a single root element (e.g. <section>), not a full document.
+ *  - All styles must be inside an inline <style> block or style attributes.
+ *  - No external URLs (no CDN, no web fonts, no external images).
+ *  - No runtime JS required to render the content; JS is optional and must be inline.
+ *  - The raw segment data should be embedded as a JSON literal in a <script> block
+ *    at the start of the fragment so the file is self-describing.
+ */
+export type ActivityHtmlReportSection<TData = unknown> = (
+  segment: ActivityReportSegment<TData>,
+) => string
 ```
 
 Resonance-specific report data (`activities/resonance/shared/reportTypes.ts`):
@@ -337,7 +434,7 @@ export interface ResonanceReportData {
 | `POST` | `/api/resonance/generate-link` | — | Encrypt question set + create persistent link; returns `{ hash, url }` |
 | `GET` | `/api/resonance/:sessionId/state` | — | Student-safe session state snapshot |
 | `GET` | `/api/resonance/:sessionId/responses` | instructor passcode | All responses with names + annotations |
-| `GET` | `/api/resonance/:sessionId/report` | instructor passcode | Full report data payload |
+| `GET` | `/api/resonance/:sessionId/report` | instructor passcode | Self-contained HTML report (`text/html`; `Content-Disposition: attachment; filename="resonance-report.html"`); data embedded inline |
 
 WS endpoint: `/ws/resonance?sessionId=...` (instructor adds `&role=instructor&instructorPasscode=...`)
 
@@ -372,17 +469,21 @@ the server strips `isCorrect` from all options before sending the question set.
 ## Implementation Checklist
 
 ### Phase 1 – Foundation
+- [ ] Add `reporting?: { standalone?: boolean; embedded?: boolean; solo?: boolean }` to
+      `ActivityConfig` in `types/activity.ts`
+- [ ] Add `reporting` schema validation to `types/activityConfigSchema.ts`
 - [ ] Create `activities/resonance/` directory skeleton
 - [ ] Write `shared/types.ts` with all domain types (incl. `StudentQuestion`, `ResponseWithName`,
       both snapshot types)
 - [ ] Write `shared/emojiSet.ts` with curated emoji array
 - [ ] Write `shared/reportTypes.ts` with `ResonanceReportData`
 - [ ] Write `types/report.ts` with generic reporting contract
-- [ ] Create `activity.config.ts` with `isDev: true` initially and
+      (`ActivityReportSegment`, `ActivityReportSectionProps`, `ActivityHtmlReportSection`)
+- [ ] Create `activity.config.ts` with `isDev: true`, `reporting: { standalone: true }`, and
       `createSessionBootstrap.sessionStorage` for instructor passcode
 - [ ] Create stub `server/routes.ts` (session create only, no WS yet)
 - [ ] Create stub `client/index.tsx` with placeholder components
-- [ ] Note: `resonance` stays out of `EXPECTED_ACTIVITIES` until Phase 8 (covered by `isDev`)
+- [ ] Note: `resonance` stays out of `EXPECTED_ACTIVITIES` until Phase 9 (covered by `isDev`)
 
 ### Phase 2 – Question Crypto (Server)
 - [ ] Write `server/questionCrypto.ts`:
@@ -435,9 +536,11 @@ the server strips `isCorrect` from all options before sending the question set.
   - [ ] `SessionHeader` integration
   - [ ] `useResonanceSession` hook wiring
 - [ ] `QuestionCard.tsx` – edit question text, type selector, MCQ option list with isCorrect toggle
-- [ ] `QuestionBuilder.tsx` – ordered list of `QuestionCard`s, add question button
-- [ ] Download question set as JSON (plaintext, for local backup)
-- [ ] Upload question set from JSON (file input, validate against types)
+- [ ] `QuestionBuilder.tsx`:
+  - [ ] Ordered list of `QuestionCard`s with add/remove buttons
+  - [ ] Upload question set from JSON (file input, validate against `Question[]` schema)
+  - [ ] Download current question set as JSON (plaintext, for local backup)
+  - [ ] "Create Persistent Link" button (disabled when list is empty; opens `CreatePersistentLinkModal`)
 
 ### Phase 5 – Student Answering Flow
 - [ ] `NameEntryForm.tsx` – name input; POST to register-student; store `studentId`+`name` in sessionStorage
@@ -474,20 +577,66 @@ the server strips `isCorrect` from all options before sending the question set.
       tracked in component state; server authoritative via `resonance:reaction-updated`)
 
 ### Phase 8 – Reporting
-- [ ] `ResonanceReport.tsx` – implements `ActivityReportSectionProps<ResonanceReportData>`
+
+**In-app React view (`ResonanceReport.tsx`):**
+- [ ] Implements `ActivityReportSectionProps<ResonanceReportData>` (Tailwind styles, live data)
   - [ ] Per-question section header with response count
   - [ ] MCQ section: option tally + percentage bar; correct option highlighted if results were shared
   - [ ] Free-response section: response list with instructor annotations (star/flag/emoji)
-  - [ ] Reveal section per question: shared responses with reaction counts; correct answer noted if applicable
-- [ ] **Report** tab in manager renders `ResonanceReport` from live session data
-- [ ] Download JSON report button (downloads the `ResonanceReportData` object)
-- [ ] Document reporting contract in `.agent/knowledge/data-contracts.md`
+  - [ ] Reveal section per question: shared responses with reaction counts; correct answer noted
+- [ ] **Report** tab in manager renders `ResonanceReport` using data from WS session state
+      (tab visible because `activity.config.ts` sets `reporting.standalone: true`)
+
+**Shared data utilities (`shared/reportUtils.ts`):**
+- [ ] `tallyCounts(responses, question)` – option-count map for MCQ, used by both renderer and React component
+- [ ] `groupResponsesByQuestion(responses)` – `Record<questionId, ResponseWithName[]>`
+- [ ] Unit tests for all utility functions
+
+**Self-contained HTML report (`server/reportRenderer.ts`):**
+- [ ] Implements `ActivityHtmlReportSection<ResonanceReportData>`
+- [ ] Uses `shared/reportUtils.ts` for data processing; no React dependency
+- [ ] Produces a `<section>` HTML fragment containing:
+  - [ ] `<script>const RESONANCE_REPORT = /* JSON literal */;</script>` at the top
+  - [ ] `<style>` block with all report styles using plain CSS (no Tailwind, no external sheets)
+  - [ ] Static HTML markup for all questions, responses, MCQ tallies, reveals, and annotations
+  - [ ] Emoji annotations rendered as text characters (no image/CDN dependency)
+- [ ] `GET /api/resonance/:sessionId/report` assembles the fragment into a full
+      `<!DOCTYPE html>` document (with a shared CSS reset inline) and serves it as
+      `text/html; Content-Disposition: attachment; filename="resonance-report.html"`
+- [ ] "Download Report" button in the **Report** tab triggers this endpoint
+- [ ] Unit tests: `reportRenderer.ts` produces valid HTML with embedded JSON for a known dataset;
+      no `http://` or `https://` URLs appear in the output
+- [ ] Document reporting contract and self-contained HTML rules in `.agent/knowledge/data-contracts.md`
 
 ### Phase 9 – Persistent Links & Deep Linking
+
+There are two separate entry points for creating a persistent link, each for a different
+instructor workflow:
+
+**A. Dashboard "Make Permanent Link" modal (`ResonancePersistentLinkBuilder`):**
+Used when the instructor has not yet started a session. They upload an existing JSON file.
+
 - [ ] `ResonancePersistentLinkBuilder.tsx`:
-  - [ ] Shows uploaded/built question set summary
-  - [ ] POST to `/api/resonance/generate-link` with question set + teacher code
-  - [ ] Displays resulting URL on success
+  - [ ] JSON file upload input (no question builder UI here)
+  - [ ] Parse and validate uploaded file against `Question[]` schema; show error on invalid file
+  - [ ] Show question count summary after valid upload
+  - [ ] Teacher code input
+  - [ ] POST to `/api/resonance/generate-link` with parsed questions + teacher code
+  - [ ] Display resulting URL on success
+
+**B. Manager "Create Persistent Link" button (`CreatePersistentLinkModal`):**
+Used from within an active ad-hoc session. The instructor has already built or uploaded
+questions in the **Build** tab and wants to save the current question set as a persistent link.
+
+- [ ] `CreatePersistentLinkModal.tsx`:
+  - [ ] Triggered by a "Create Persistent Link" button in the **Build** tab of `ResonanceManager`
+  - [ ] Shows a summary of the current session's question set (read-only)
+  - [ ] Teacher code input
+  - [ ] POST to `/api/resonance/generate-link` with the current session's question set + teacher code
+  - [ ] Display resulting URL on success
+- [ ] "Create Persistent Link" button in `QuestionBuilder.tsx` (disabled when question list is empty)
+
+**Shared backend:**
 - [ ] Update `activity.config.ts`:
   - [ ] `manageDashboard.customPersistentLinkBuilder: true`
   - [ ] `isDev: false`
