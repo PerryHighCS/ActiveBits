@@ -257,6 +257,36 @@ void test('session get route redacts instructor-only fields from public payload'
   assert.equal('instructorPasscode' in (payload.data ?? {}), false)
 })
 
+void test('session get route regenerates malformed persisted instructor passcodes', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  ;(session.data as { instructorPasscode: string }).instructorPasscode = 'legacy-passcode'
+  const storeState = createSessionStore({ s1: session })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const persisted = storeState.store.s1?.data as {
+    instructorPasscode?: string
+  }
+  assert.equal(typeof persisted.instructorPasscode, 'string')
+  assert.equal(persisted.instructorPasscode?.length, 32)
+  assert.match(persisted.instructorPasscode ?? '', /^[a-f0-9]{32}$/)
+  assert.notEqual(persisted.instructorPasscode, 'legacy-passcode')
+})
+
 void test('session get route normalizes oversized persisted telemetry.error fields', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter

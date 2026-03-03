@@ -551,10 +551,7 @@ function ensureVideoSyncSessionData(session: SessionRecord): VideoSyncSessionDat
 
   const normalized: VideoSyncSessionData = {
     ...rawData,
-    instructorPasscode:
-      typeof rawData.instructorPasscode === 'string' && rawData.instructorPasscode.length > 0
-        ? rawData.instructorPasscode
-        : createInstructorPasscode(),
+    instructorPasscode: normalizeInstructorPasscode(rawData.instructorPasscode) ?? createInstructorPasscode(),
     state,
     telemetry,
   }

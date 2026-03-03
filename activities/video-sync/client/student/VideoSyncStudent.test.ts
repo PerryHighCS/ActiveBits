@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { clearAutoplayCheckTimer } from './VideoSyncStudent.js'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
 import { resetUnsyncedPlaybackTelemetry } from './VideoSyncStudent.js'
@@ -81,6 +82,33 @@ void test('resetUnsyncedPlaybackTelemetry clears local unsync tracking state', (
 
   assert.equal(isLocallyUnsyncedRef.current, false)
   assert.equal(lastUnsyncReportAtRef.current, 0)
+})
+
+void test('clearAutoplayCheckTimer clears the pending autoplay timeout ref', () => {
+  const originalWindow = globalThis.window
+  const clearedTimeouts: number[] = []
+
+  Object.assign(globalThis, {
+    window: {
+      clearTimeout(timeoutId: number) {
+        clearedTimeouts.push(timeoutId)
+      },
+    },
+  })
+
+  try {
+    const autoplayCheckTimerRef = { current: 42 }
+    clearAutoplayCheckTimer(autoplayCheckTimerRef)
+
+    assert.deepEqual(clearedTimeouts, [42])
+    assert.equal(autoplayCheckTimerRef.current, null)
+  } finally {
+    if (originalWindow === undefined) {
+      Reflect.deleteProperty(globalThis, 'window')
+    } else {
+      Object.assign(globalThis, { window: originalWindow })
+    }
+  }
 })
 
 void test('shouldBlockStudentOverlayKey allows Tab and Escape so focus is not trapped', () => {

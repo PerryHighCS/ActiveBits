@@ -48,6 +48,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
+function isVideoSyncMessageType(value: unknown): value is VideoSyncMessageType {
+  return (
+    value === 'state-snapshot' ||
+    value === 'state-update' ||
+    value === 'heartbeat' ||
+    value === 'telemetry-update' ||
+    value === 'error'
+  )
+}
+
 export function parseVideoSyncEnvelope(raw: unknown): VideoSyncWsEnvelope | null {
   if (typeof raw !== 'string') return null
 
@@ -64,7 +74,12 @@ export function parseVideoSyncEnvelope(raw: unknown): VideoSyncWsEnvelope | null
     return null
   }
 
-  if (typeof parsed.sessionId !== 'string' || typeof parsed.type !== 'string' || typeof parsed.timestamp !== 'number') {
+  if (
+    typeof parsed.sessionId !== 'string' ||
+    !isVideoSyncMessageType(parsed.type) ||
+    typeof parsed.timestamp !== 'number' ||
+    !Number.isFinite(parsed.timestamp)
+  ) {
     return null
   }
 
@@ -72,7 +87,7 @@ export function parseVideoSyncEnvelope(raw: unknown): VideoSyncWsEnvelope | null
     version: '1',
     activity: 'video-sync',
     sessionId: parsed.sessionId,
-    type: parsed.type as VideoSyncMessageType,
+    type: parsed.type,
     timestamp: parsed.timestamp,
     payload: parsed.payload,
   }

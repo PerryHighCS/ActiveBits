@@ -110,6 +110,13 @@ export function resetUnsyncedPlaybackTelemetry(params: {
   params.lastUnsyncReportAtRef.current = 0
 }
 
+export function clearAutoplayCheckTimer(autoplayCheckTimerRef: { current: number | null }): void {
+  if (autoplayCheckTimerRef.current != null) {
+    window.clearTimeout(autoplayCheckTimerRef.current)
+    autoplayCheckTimerRef.current = null
+  }
+}
+
 export async function reportVideoSyncStudentEvent(params: {
   sessionId: string | null
   studentId: string
@@ -222,10 +229,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     const { PLAYING } = resolveYoutubePlayerState(youtubeRef.current)
     if (nextState.isPlaying) {
       player.playVideo()
-
-      if (autoplayCheckTimerRef.current != null) {
-        window.clearTimeout(autoplayCheckTimerRef.current)
-      }
+      clearAutoplayCheckTimer(autoplayCheckTimerRef)
 
       autoplayCheckTimerRef.current = window.setTimeout(() => {
         const stateValue = player.getPlayerState()
@@ -237,6 +241,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         }
       }, 1200)
     } else {
+      clearAutoplayCheckTimer(autoplayCheckTimerRef)
       player.pauseVideo()
       setAutoplayBlocked(false)
     }
@@ -330,10 +335,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         isLocallyUnsyncedRef,
         lastUnsyncReportAtRef,
       })
-      if (autoplayCheckTimerRef.current != null) {
-        window.clearTimeout(autoplayCheckTimerRef.current)
-        autoplayCheckTimerRef.current = null
-      }
+      clearAutoplayCheckTimer(autoplayCheckTimerRef)
       playerRef.current?.destroy()
       playerRef.current = null
     }
