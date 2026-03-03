@@ -382,8 +382,7 @@ function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry
   let parsedCookie: unknown
   try {
     parsedCookie = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue
-  } catch (error) {
-    console.error('Failed to parse persistent_sessions cookie for video-sync auth:', error)
+  } catch {
     return []
   }
 
@@ -603,6 +602,29 @@ function applyStopIfReached(state: VideoSyncState, nowMs = Date.now()): VideoSyn
   }
 }
 
+function cloneTelemetry(telemetry: VideoSyncTelemetry): VideoSyncTelemetry {
+  return {
+    connections: { ...telemetry.connections },
+    autoplay: { ...telemetry.autoplay },
+    sync: { ...telemetry.sync },
+    error: { ...telemetry.error },
+  }
+}
+
+function shouldPersistHeartbeatState(previous: VideoSyncState, next: VideoSyncState): boolean {
+  return previous.isPlaying && !next.isPlaying
+}
+
+function shouldPersistHeartbeatTelemetry(
+  previous: VideoSyncTelemetry,
+  next: VideoSyncTelemetry,
+): boolean {
+  return (
+    previous.connections.activeCount !== next.connections.activeCount ||
+    previous.sync.unsyncedStudents !== next.sync.unsyncedStudents
+  )
+}
+
 function createEnvelope<TPayload>(
   sessionId: string,
   type: VideoSyncWsMessageEnvelope<TPayload>['type'],
@@ -743,13 +765,29 @@ function ensureHeartbeat(
         }
 
         const data = ensureVideoSyncSessionData(session)
-        data.state = applyStopIfReached(data.state)
-        updateConnectionTelemetry(data, sessionId)
-        await sessions.set(session.id, session)
+        const heartbeatState = applyStopIfReached(data.state)
+        const heartbeatTelemetry = cloneTelemetry(data.telemetry)
+        updateConnectionTelemetry(
+          {
+            ...data,
+            state: heartbeatState,
+            telemetry: heartbeatTelemetry,
+          },
+          sessionId,
+        )
+
+        if (
+          shouldPersistHeartbeatState(data.state, heartbeatState) ||
+          shouldPersistHeartbeatTelemetry(data.telemetry, heartbeatTelemetry)
+        ) {
+          data.state = heartbeatState
+          data.telemetry = heartbeatTelemetry
+          await sessions.set(session.id, session)
+        }
 
         const envelope = createEnvelope(sessionId, 'heartbeat', {
-          state: data.state,
-          telemetry: data.telemetry,
+          state: heartbeatState,
+          telemetry: heartbeatTelemetry,
         })
         await broadcastEnvelope(sessions, ws, sessionId, envelope)
       } finally {
