@@ -376,6 +376,55 @@ void test('session get route clears malformed persisted video ids during normali
   assert.equal(persisted.state?.videoId, '')
 })
 
+void test('session get route replaces non-positive persisted server timestamps during normalization', async () => {
+  const originalDateNow = Date.now
+  Date.now = () => 50_000
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs() as unknown as WsRouter
+    const session = createVideoSyncSession('s1')
+    ;(session.data as {
+      state: {
+        serverTimestampMs: number
+      }
+    }).state.serverTimestampMs = -1
+    const storeState = createSessionStore({ s1: session })
+
+    setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+    const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+    assert.equal(typeof handler, 'function')
+
+    const res = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+      },
+      res,
+    )
+
+    assert.equal(res.statusCode, 200)
+    const payload = res.body as {
+      data?: {
+        state?: {
+          serverTimestampMs?: number
+        }
+      }
+    }
+    assert.equal(payload.data?.state?.serverTimestampMs, 50_000)
+
+    const persisted = storeState.store.s1?.data as {
+      state?: {
+        serverTimestampMs?: number
+      }
+    }
+    assert.equal(persisted.state?.serverTimestampMs, 50_000)
+  } finally {
+    Date.now = originalDateNow
+  }
+})
+
 void test('session patch returns invalid source url for unsupported non-YouTube host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
@@ -973,6 +1022,47 @@ void test('manager websocket accepts connections with a valid instructor passcod
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
+void test('websocket close during async initialization does not leave a stale subscriber', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  let releaseSessionGate!: () => void
+  const sessionGetGate = new Promise<void>((resolve) => {
+    releaseSessionGate = resolve
+  })
+  const originalGet = storeState.sessions.get
+
+  storeState.sessions.get = async (id: string) => {
+    await sessionGetGate
+    return originalGet(id)
+  }
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 's1',
+    role: 'student',
+  }))
+
+  recorder.emit('close')
+  releaseSessionGate()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(storeState.subscriptions, [])
+  assert.deepEqual(recorder.sent, [])
+
+  const persisted = storeState.store.s1?.data as {
+    telemetry: {
+      connections: { activeCount: number }
+    }
+  }
+  assert.equal(persisted.telemetry.connections.activeCount, 0)
+})
+
 void test('websocket cleanup runs only once when error is followed by close', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -1384,7 +1474,13 @@ void test('event route clamps load-failure telemetry.error fields before persist
   )
 
   assert.equal(response.statusCode, 200)
-  const telemetry = (response.body as { telemetry: { error: { code: string | null; message: string | null } } }).telemetry
+  const telemetry = (response.body as {
+    telemetry: {
+      error: { code: string | null; message: string | null }
+      sync: { lastCorrectionResult: string }
+    }
+  }).telemetry
   assert.equal(telemetry.error.code, 'C'.repeat(64))
   assert.equal(telemetry.error.message, 'M'.repeat(256))
+  assert.equal(telemetry.sync.lastCorrectionResult, 'failed')
 })
