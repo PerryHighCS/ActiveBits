@@ -109,6 +109,14 @@ export default {
       timeoutMs: 4000,
     },
   },
+  createSessionBootstrap: { // optional: persist create-session response fields for manager entry
+    sessionStorage: [
+      {
+        keyPrefix: 'my_activity_instructor_',
+        responseField: 'instructorPasscode',
+      },
+    ],
+  },
   manageDashboard: { // optional shared dashboard hints/capabilities
     customPersistentLinkBuilder: true, // activity-owned persistent-link UI in dashboard modal
   },
@@ -202,6 +210,7 @@ Sessions are stored in-memory with a TTL (time-to-live). Each session has:
 Permanent sessions use HMAC-SHA256 authentication:
 - **Hash Format**: 20 characters of `salt(8 hex) + hmac(12 hex)` derived from `activityName|hashedTeacherCode|salt`
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
+- **Activity Manager Credentials**: Activities that expose manager-only controls should derive any session-scoped manager credential from create-session bootstrap data and/or teacher-cookie-validated recovery routes instead of trusting a client-selected websocket/API role
 - **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
 - **Query Parameters**: Activities can use URL query params for deep linking (e.g., `/activity/algorithm-demo/abc123?algorithm=merge-sort`)
   - Server passes all query params to activities via `queryParams` object

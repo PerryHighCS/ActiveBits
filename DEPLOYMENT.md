@@ -155,6 +155,8 @@ When scaling to multiple instances:
 2. **Pub/Sub**: Already configured via Valkey for cross-instance broadcasts
 3. **Cache Coordination**: Each instance maintains its own keepalive cache; pub/sub handles consistency
 4. **Persistent Sessions**: Shared via Valkey; waiters are instance-local
+5. **Teacher/manager cookies**: Keep the `persistent_sessions` httpOnly cookie path and same-site behavior intact, since activities such as SyncDeck and Video Sync recover manager credentials from a teacher-validated persistent-session cookie after redirects into `/manage/...`
+6. **Video Sync unsynced-student telemetry**: In Valkey mode, `video-sync` stores per-session unsynced-student timestamps in a Valkey-backed key (with short TTL pruning) so `telemetry.sync.unsyncedStudents` stays coherent when `/api/video-sync/:sessionId/event` requests land on different instances. In in-memory mode this telemetry remains single-instance only, which is acceptable for local/dev deployments.
 
 **To scale horizontally**:
 1. Go to **Settings** → **Scaling**
@@ -225,6 +227,10 @@ When a new deployment is triggered:
 **Symptoms**: Status dashboard shows "not using Valkey" unexpectedly
 - **Cause**: `VALKEY_URL` missing or misconfigured; container cannot reach Valkey
 - **Fix**: Verify `VALKEY_URL` (use internal URL on Render), check Valkey instance health; confirm `/api/status` shows `mode: valkey` and Valkey `ping: PONG`
+
+**Symptoms**: SyncDeck student view reports blocked insecure content or `postMessage` target-origin errors against an HTTP presentation URL
+- **Cause**: ActiveBits is running on HTTPS, but the configured presentation URL is an HTTP origin that the browser does not treat as loopback-secure. Browsers block those mixed-content iframes, so the deck never loads in the student iframe.
+- **Fix**: For normal hosted decks, serve the presentation over HTTPS as well. Loopback testing URLs such as `http://localhost` and `http://127.0.0.1` may work in some browsers, but non-loopback HTTP origins will not.
 
 **Symptoms**: High Valkey latency
 - **Cause**: Valkey instance in different region or overloaded

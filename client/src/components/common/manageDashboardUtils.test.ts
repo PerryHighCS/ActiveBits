@@ -5,6 +5,7 @@ import {
   buildPersistentSessionKey,
   buildQueryString,
   buildSoloLink,
+  consumeCreateSessionBootstrapPayload,
   describeSelectedOptions,
   initializeDeepLinkOptions,
   normalizeSelectedOptions,
@@ -12,6 +13,7 @@ import {
   parseDeepLinkGenerator,
   persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkOptions,
+  storeCreateSessionBootstrapPayload,
   validateDeepLinkSelection,
 } from './manageDashboardUtils'
 
@@ -304,6 +306,68 @@ void test('persistCreateSessionBootstrapToSessionStorage ignores sessionStorage 
       configurable: true,
       writable: true,
     })
+  }
+})
+
+void test('storeCreateSessionBootstrapPayload keeps a same-tab bootstrap payload until first consume', () => {
+  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
+    id: 'session-123',
+    instructorPasscode: 'teacher-passcode',
+  })
+
+  assert.deepEqual(
+    consumeCreateSessionBootstrapPayload('video-sync', 'session-123'),
+    {
+      id: 'session-123',
+      instructorPasscode: 'teacher-passcode',
+    },
+  )
+  assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
+})
+
+void test('storeCreateSessionBootstrapPayload expires abandoned same-tab payloads after a short TTL', () => {
+  const createdAtMs = 1_000
+
+  storeCreateSessionBootstrapPayload(
+    'video-sync',
+    'session-expiring',
+    {
+      id: 'session-expiring',
+      instructorPasscode: 'teacher-passcode',
+    },
+    createdAtMs,
+  )
+
+  assert.equal(
+    consumeCreateSessionBootstrapPayload('video-sync', 'session-expiring', createdAtMs + 5 * 60 * 1000 + 1),
+    null,
+  )
+})
+
+void test('storeCreateSessionBootstrapPayload evicts oldest abandoned entries when the same-tab cache is full', () => {
+  for (let index = 0; index <= 100; index += 1) {
+    storeCreateSessionBootstrapPayload(
+      'video-sync',
+      `session-${index}`,
+      {
+        id: `session-${index}`,
+        instructorPasscode: `teacher-passcode-${index}`,
+      },
+      index,
+    )
+  }
+
+  assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-0', 101), null)
+  assert.deepEqual(
+    consumeCreateSessionBootstrapPayload('video-sync', 'session-100', 101),
+    {
+      id: 'session-100',
+      instructorPasscode: 'teacher-passcode-100',
+    },
+  )
+
+  for (let index = 1; index < 100; index += 1) {
+    consumeCreateSessionBootstrapPayload('video-sync', `session-${index}`, 101)
   }
 })
 
