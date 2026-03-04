@@ -13,6 +13,7 @@ import {
   parseManagerStopTimeInput,
   readBootstrapInstructorPasscode,
   readBootstrapSourceUrl,
+  resolveBootstrapInstructorPasscode,
   sanitizeManagerApiErrorMessage,
   shouldCorrectManagerPlaybackDrift,
   shouldApplyManagerStateUpdate,
@@ -60,6 +61,40 @@ void test('readBootstrapInstructorPasscode works with consumed same-tab bootstra
       createSessionPayload: consumeCreateSessionBootstrapPayload('video-sync', 'session-123') ?? undefined,
     }),
     'teacher-passcode',
+  )
+})
+
+void test('resolveBootstrapInstructorPasscode clears history state only for navigation bootstrap payloads', () => {
+  assert.deepEqual(
+    resolveBootstrapInstructorPasscode({
+      locationState: {
+        createSessionPayload: {
+          instructorPasscode: 'teacher-passcode',
+        },
+      },
+      sessionId: 'session-123',
+    }),
+    {
+      instructorPasscode: 'teacher-passcode',
+      shouldClearLocationState: true,
+    },
+  )
+})
+
+void test('resolveBootstrapInstructorPasscode preserves same-tab bootstrap payloads without navigation cleanup', () => {
+  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
+    instructorPasscode: 'teacher-passcode',
+  })
+
+  assert.deepEqual(
+    resolveBootstrapInstructorPasscode({
+      locationState: null,
+      sessionId: 'session-123',
+    }),
+    {
+      instructorPasscode: 'teacher-passcode',
+      shouldClearLocationState: false,
+    },
   )
 })
 

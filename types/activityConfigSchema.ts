@@ -201,6 +201,25 @@ function parseCreateSessionBootstrapSessionStorage(
   })
 }
 
+function parseCreateSessionBootstrapHistoryState(
+  raw: unknown,
+  context: string,
+): string[] | undefined {
+  if (raw == null) {
+    return undefined
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(`${context}: "historyState" must be an array when provided`)
+  }
+
+  return raw.map((entry, index) => {
+    if (typeof entry !== 'string' || entry.trim().length === 0) {
+      throw new Error(`${context}.historyState[${index}] must be a non-empty string`)
+    }
+    return entry.trim()
+  })
+}
+
 function parseCreateSessionBootstrap(raw: unknown, context: string): ActivityCreateSessionBootstrapConfig | undefined {
   if (raw == null) {
     return undefined
@@ -210,8 +229,10 @@ function parseCreateSessionBootstrap(raw: unknown, context: string): ActivityCre
   }
 
   const sessionStorage = parseCreateSessionBootstrapSessionStorage(raw.sessionStorage, `${context}.createSessionBootstrap`)
+  const historyState = parseCreateSessionBootstrapHistoryState(raw.historyState, `${context}.createSessionBootstrap`)
   return {
     ...(sessionStorage !== undefined ? { sessionStorage } : {}),
+    ...(historyState !== undefined ? { historyState } : {}),
   }
 }
 

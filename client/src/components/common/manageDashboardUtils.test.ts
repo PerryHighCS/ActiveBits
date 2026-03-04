@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildCreateSessionBootstrapHistoryState,
   buildPersistentLinkUrl,
   buildPersistentSessionKey,
   buildQueryString,
@@ -211,11 +212,13 @@ void test('parseCreateSessionBootstrap validates sessionStorage bootstrap metada
         { keyPrefix: '  ', responseField: 'ignored' },
         { keyPrefix: 'x_', responseField: '' },
       ],
+      historyState: [' instructorPasscode ', '', 42],
     }),
     {
       sessionStorage: [
         { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
       ],
+      historyState: ['instructorPasscode'],
     },
   )
 })
@@ -369,6 +372,42 @@ void test('storeCreateSessionBootstrapPayload evicts oldest abandoned entries wh
   for (let index = 1; index < 100; index += 1) {
     consumeCreateSessionBootstrapPayload('video-sync', `session-${index}`, 101)
   }
+})
+
+void test('buildCreateSessionBootstrapHistoryState keeps only declared history-state fields', () => {
+  assert.deepEqual(
+    buildCreateSessionBootstrapHistoryState(
+      {
+        historyState: ['instructorPasscode'],
+        sessionStorage: [
+          { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
+        ],
+      },
+      {
+        id: 'session-123',
+        instructorPasscode: 'teacher-passcode',
+        extraSecret: 'do-not-forward',
+      },
+    ),
+    {
+      instructorPasscode: 'teacher-passcode',
+    },
+  )
+
+  assert.equal(
+    buildCreateSessionBootstrapHistoryState(
+      {
+        sessionStorage: [
+          { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
+        ],
+      },
+      {
+        id: 'session-123',
+        instructorPasscode: 'teacher-passcode',
+      },
+    ),
+    null,
+  )
 })
 
 void test('buildPersistentLinkUrl appends query only for legacy or append-query mode', () => {
