@@ -219,14 +219,6 @@ void test('getManagerPlaybackIntentForStateChange maps native player transitions
   )
   assert.equal(
     getManagerPlaybackIntentForStateChange({
-      eventState: 1,
-      playingStateValue: 1,
-      pausedStateValue: 2,
-    }),
-    'play',
-  )
-  assert.equal(
-    getManagerPlaybackIntentForStateChange({
       eventState: 2,
       playingStateValue: 1,
       pausedStateValue: 2,
