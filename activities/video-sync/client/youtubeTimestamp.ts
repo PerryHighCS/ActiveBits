@@ -20,3 +20,25 @@ export function parseYouTubeTimestampSeconds(value: string | null): number | nul
 
   return clampSeconds(hours * 3600 + minutes * 60 + seconds)
 }
+
+export function parseYouTubeStartSecondsFromUrl(sourceUrl: string): number | null {
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(sourceUrl)
+  } catch {
+    return null
+  }
+
+  const host = parsedUrl.hostname.toLowerCase()
+  const isYouTubeHost = host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com'
+  const isShortHost = host === 'youtu.be' || host === 'www.youtu.be'
+
+  if (!isYouTubeHost && !isShortHost) {
+    return null
+  }
+
+  const startFromStartParam = parseYouTubeTimestampSeconds(parsedUrl.searchParams.get('start'))
+  const startFromTParam = parseYouTubeTimestampSeconds(parsedUrl.searchParams.get('t'))
+
+  return startFromStartParam ?? startFromTParam ?? 0
+}

@@ -6,6 +6,7 @@ import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
 import { resetUnsyncedPlaybackTelemetry } from './VideoSyncStudent.js'
 import { shouldCorrectStudentPlaybackDrift } from './VideoSyncStudent.js'
+import { shouldRunAutoplayCheck } from './VideoSyncStudent.js'
 import { syncLoadedVideoSource } from './VideoSyncStudent.js'
 import { shouldInitializeYoutubePlayer } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
@@ -205,6 +206,15 @@ void test('clearAutoplayCheckTimer clears the pending autoplay timeout ref', () 
       Object.assign(globalThis, { window: originalWindow })
     }
   }
+})
+
+void test('shouldRunAutoplayCheck only reads autoplay state for the current player instance', () => {
+  const scheduledPlayer = {} as YoutubePlayerLike
+  const replacementPlayer = {} as YoutubePlayerLike
+
+  assert.equal(shouldRunAutoplayCheck(scheduledPlayer, scheduledPlayer), true)
+  assert.equal(shouldRunAutoplayCheck(null, scheduledPlayer), false)
+  assert.equal(shouldRunAutoplayCheck(replacementPlayer, scheduledPlayer), false)
 })
 
 void test('shouldBlockStudentOverlayKey allows Tab and Escape so focus is not trapped', () => {
