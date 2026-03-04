@@ -4,6 +4,7 @@ import { clearAutoplayCheckTimer } from './VideoSyncStudent.js'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
 import { resetUnsyncedPlaybackTelemetry } from './VideoSyncStudent.js'
+import { shouldCorrectStudentPlaybackDrift } from './VideoSyncStudent.js'
 import { syncLoadedVideoSource } from './VideoSyncStudent.js'
 import { shouldInitializeYoutubePlayer } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
@@ -67,9 +68,10 @@ void test('shouldInitializeYoutubePlayer only allows first-time setup when a con
   const container = {} as HTMLDivElement
   const existingPlayer = {} as YoutubePlayerLike
 
-  assert.equal(shouldInitializeYoutubePlayer(null, null), false)
-  assert.equal(shouldInitializeYoutubePlayer(container, existingPlayer), false)
-  assert.equal(shouldInitializeYoutubePlayer(container, null), true)
+  assert.equal(shouldInitializeYoutubePlayer('', null, null), false)
+  assert.equal(shouldInitializeYoutubePlayer('', container, null), false)
+  assert.equal(shouldInitializeYoutubePlayer('abcdefghijk', container, existingPlayer), false)
+  assert.equal(shouldInitializeYoutubePlayer('abcdefghijk', container, null), true)
 })
 
 void test('resetUnsyncedPlaybackTelemetry clears local unsync tracking state', () => {
@@ -83,6 +85,12 @@ void test('resetUnsyncedPlaybackTelemetry clears local unsync tracking state', (
 
   assert.equal(isLocallyUnsyncedRef.current, false)
   assert.equal(lastUnsyncReportAtRef.current, 0)
+})
+
+void test('shouldCorrectStudentPlaybackDrift is lenient while synced playback is actively running', () => {
+  assert.equal(shouldCorrectStudentPlaybackDrift(10, 10.4, true), false)
+  assert.equal(shouldCorrectStudentPlaybackDrift(10, 10.6, true), true)
+  assert.equal(shouldCorrectStudentPlaybackDrift(10, 10.3, false), true)
 })
 
 void test('syncLoadedVideoSource cues a paused synced video without autoplaying', () => {
