@@ -7,6 +7,7 @@ import {
   type VideoSyncState,
 } from '../protocol.js'
 import {
+  computeDriftSec,
   computeDesiredPositionSec,
   DEFAULT_DRIFT_TOLERANCE_SEC,
   shouldCorrectDrift,
@@ -224,7 +225,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       loadedVideoIdRef.current = nextState.videoId
     } else {
       const currentTimeSec = player.getCurrentTime()
-      const driftSec = Math.abs(currentTimeSec - desiredPositionSec)
+      const driftSec = computeDriftSec(currentTimeSec, desiredPositionSec)
 
       if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, DEFAULT_DRIFT_TOLERANCE_SEC)) {
         const wasUnsynced = isLocallyUnsyncedRef.current

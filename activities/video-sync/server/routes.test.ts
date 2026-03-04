@@ -2078,6 +2078,50 @@ void test('event and session routes share unsynced student telemetry across simu
   assert.equal((correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 0)
 })
 
+void test('event route reuses Valkey unsynced count returned by mutation scripts', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const valkeyStore = createMockVideoSyncValkeyStore()
+  const evalScripts: string[] = []
+  const originalEval = valkeyStore.client.eval.bind(valkeyStore.client)
+  valkeyStore.client.eval = (async (script: string, numKeys: number, ...args: Array<string | number>) => {
+    evalScripts.push(script)
+    return originalEval(script, numKeys, ...args)
+  }) as typeof valkeyStore.client.eval
+
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') }, { valkeyStore })
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const eventHandler = app.handlers.post['/api/video-sync/:sessionId/event']
+  const sessionHandler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof eventHandler, 'function')
+  assert.equal(typeof sessionHandler, 'function')
+
+  const unsyncResponse = createResponse()
+  await eventHandler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'unsync', studentId: 'student-a', driftSec: 1.2 },
+    },
+    unsyncResponse,
+  )
+
+  assert.equal(unsyncResponse.statusCode, 200)
+  assert.equal(evalScripts.filter((script) => script.includes('video-sync-unsynced-upsert')).length, 1)
+  assert.equal(evalScripts.filter((script) => script.includes('video-sync-unsynced-count')).length, 0)
+
+  const sessionResponse = createResponse()
+  await sessionHandler?.(
+    {
+      params: { sessionId: 's1' },
+    },
+    sessionResponse,
+  )
+
+  assert.equal(sessionResponse.statusCode, 200)
+  assert.equal(evalScripts.filter((script) => script.includes('video-sync-unsynced-count')).length, 1)
+})
+
 void test('event route prunes stale unsynced students without a follow-up heartbeat or session read', { concurrency: false }, async () => {
   const originalDateNow = Date.now
   const originalSetTimeout = globalThis.setTimeout

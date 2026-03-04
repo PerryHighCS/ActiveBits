@@ -16,6 +16,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-04
 - Area: activities
+- Discovery: In `video-sync`, Valkey-backed `unsync` and successful `sync-correction` event handlers should reuse the count returned by the upsert/clear Lua scripts instead of immediately issuing a second count-script `EVAL`; the standalone count script is still the source of truth for heartbeats, session reads, and stale-entry pruning.
+- Why it matters: Event requests are the hot path for drift telemetry. Reusing the mutation-script return value cuts redundant Valkey work roughly in half for those events while preserving cross-instance correctness and leaving periodic/read refresh paths intact.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: If other activity-local Valkey telemetry paths add mutation scripts with deterministic counts, prefer threading those counts through response/persistence code before adding separate recount calls.
+- Owner: Codex
+
+- Date: 2026-03-04
+- Area: activities
 - Discovery: In Valkey mode, `video-sync` no longer keeps unsynced-student telemetry purely in process. The server stores per-session unsynced-student timestamps in a short-lived Valkey-backed key, and reads/prunes that shared key when computing `telemetry.sync.unsyncedStudents`; the in-memory map/timer path is now only the fallback for non-Valkey development mode.
 - Why it matters: In horizontally scaled deployments, `/api/video-sync/:sessionId/event` requests can hit different instances. Without shared storage, `sync.unsyncedStudents` oscillates or resets incorrectly; with the Valkey-backed key, the manager sees a cross-instance coherent count.
 - Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `DEPLOYMENT.md`
