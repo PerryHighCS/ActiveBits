@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import SyncDeckManager from './SyncDeckManager.js'
 import { buildInstructorRoleCommandMessage } from './SyncDeckManager.js'
-import { buildForceSyncBoundaryCommandMessage } from './SyncDeckManager.js'
+import { buildForceSyncToInstructorCommandMessage } from './SyncDeckManager.js'
 import { buildClearBoundaryCommandMessage } from './SyncDeckManager.js'
 import { attachInstructorIndicesToBoundaryChangePayload } from './SyncDeckManager.js'
 import { shouldSuppressInstructorStateBroadcast } from './SyncDeckManager.js'
@@ -136,17 +136,20 @@ void test('buildInstructorRoleCommandMessage emits setRole instructor command', 
   })
 })
 
-void test('buildForceSyncBoundaryCommandMessage emits setStudentBoundary sync command', () => {
-  const message = buildForceSyncBoundaryCommandMessage({ h: 5, v: 1, f: 0 })
+void test('buildForceSyncToInstructorCommandMessage emits syncToInstructor command', () => {
+  const message = buildForceSyncToInstructorCommandMessage({ h: 5, v: 1, f: 0 })
 
   assert.equal(message.type, 'reveal-sync')
   assert.equal(message.action, 'command')
   assert.equal(message.role, 'instructor')
   assert.deepEqual(message.payload, {
-    name: 'setStudentBoundary',
+    name: 'syncToInstructor',
     payload: {
-      indices: { h: 5, v: 1, f: 0 },
-      syncToBoundary: true,
+      state: {
+        indexh: 5,
+        indexv: 1,
+        indexf: 0,
+      },
     },
   })
 })

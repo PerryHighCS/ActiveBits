@@ -7,7 +7,7 @@ This document defines the `postMessage` protocol used by `reveal-iframe-sync.js`
 ```json
 {
   "type": "reveal-sync",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "action": "ready",
   "deckId": "2d-arrays",
   "role": "student",
@@ -60,6 +60,7 @@ Use `action: "command"` with a command payload.
 - `allowStudentForwardTo`
 - `setStudentBoundary` (alias for explicit boundary set)
 - `clearBoundary` — removes explicit boundary; student reverts to "follow instructor" mode (boundary auto-captures from next sync)
+- `syncToInstructor` — clears any explicit boundary, applies the supplied instructor state, and resumes follow-instructor mode in one command
 - `toggleOverview` — opens/closes the custom storyboard strip (does **not** activate Reveal's built-in grid overview)
 - `showOverview` — opens the custom storyboard strip
 - `hideOverview` — closes the custom storyboard strip
@@ -121,8 +122,7 @@ Allows a student to move forward up to the specified boundary, even if instructo
   "name": "allowStudentForwardTo",
   "payload": {
     "indices": { "h": 8, "v": 0, "f": -1 },
-    "releaseStartH": 3,
-    "syncToBoundary": false
+    "releaseStartH": 3
   }
 }
 ```
@@ -136,8 +136,8 @@ Notes:
 - Navigation enforcement (preventing forward travel) applies only when role is `student`.
 - When sent to an **instructor** iframe, the boundary is stored and shown as a visual marker in the storyboard strip together with the released-range highlight (display only — the instructor can still navigate freely). A `studentBoundaryChanged` message is still emitted with `role: "instructor"`.
 - With default plugin settings (`studentCanNavigateBack: true`, `studentCanNavigateForward: false`), student forward progress is limited to the granted instructor `h.f` boundary. Local movement within a released vertical stack may still remain available through `canGoUp` / `canGoDown`.
-- `syncToBoundary: true` also jumps the student immediately to that location (ignored for instructor role).
 - `releaseStartH` (optional number) lets the host explicitly declare the horizontal start of the released region used for emitted `releasedRegion` status. When omitted, the iframe falls back to its local current `h` when the boundary is applied.
+- To snap the student directly to the instructor's current location, use `syncToInstructor` instead of boundary-setting commands.
 
 #### `setStudentBoundary` (explicit alias)
 
@@ -146,8 +146,7 @@ Notes:
   "name": "setStudentBoundary",
   "payload": {
     "indices": { "h": 5, "v": 0, "f": -1 },
-    "releaseStartH": 2,
-    "syncToBoundary": true
+    "releaseStartH": 2
   }
 }
 ```
@@ -169,6 +168,25 @@ studentIframe.postMessage({ type: 'reveal-sync', action: 'command',
 studentIframe.postMessage({ type: 'reveal-sync', action: 'command',
   payload: { name: 'setState', payload: { state: instructorState } } }, '*');
 ```
+
+#### `syncToInstructor`
+
+Atomically snaps a student back to the instructor's supplied Reveal state and re-enters follow-instructor mode. This is the single-command form of the `clearBoundary` + `setState` host pattern above.
+
+```json
+{
+  "name": "syncToInstructor",
+  "payload": {
+    "state": { "indexh": 3, "indexv": 0, "indexf": 1 }
+  }
+}
+```
+
+Notes:
+- For `student` role, any explicit boundary is cleared first without emitting an intermediate `studentBoundaryChanged: null` message.
+- The provided `state` is then applied using the same student sync logic as `setState`, including same-`h` stack preservation and overview-to-storyboard routing.
+- After the sync lands, follow-instructor capture immediately re-establishes the student's boundary at the synced instructor position.
+- For `instructor` or `standalone` roles, this behaves like `setState`.
 
 #### `toggleOverview` / `showOverview` / `hideOverview`
 
@@ -535,7 +553,7 @@ function isCompatibleProtocol(hostVersion, messageVersion) {
 }
 
 // Usage in message handler
-const HOST_SYNC_PROTOCOL = '1.1.0';
+const HOST_SYNC_PROTOCOL = '2.0.0';
 if (!isCompatibleProtocol(HOST_SYNC_PROTOCOL, data.version)) {
   // Ignore message or request iframe reload/update
   return;

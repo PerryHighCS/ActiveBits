@@ -8,6 +8,7 @@ import {
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
+import { REVEAL_SYNC_PROTOCOL_VERSION } from '../shared/revealSyncProtocol.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -105,7 +106,6 @@ const WS_OPEN_READY_STATE = 1
 const SYNCDECK_WS_UPDATE_TYPE = 'syncdeck-state-update'
 const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
-const REVEAL_SYNC_PROTOCOL_VERSION = '1.1.0'
 const MAX_CHALKBOARD_DELTA_STROKES = 200
 
 type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'

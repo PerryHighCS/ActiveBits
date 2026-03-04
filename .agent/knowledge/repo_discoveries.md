@@ -417,4 +417,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: `node --test` with `tsx` resolves these activity entry imports at runtime using Node ESM semantics, so extensionless relative specifiers can fail while `.js` specifiers match the emitted/runtime module shape used elsewhere in the repo.
 - Evidence: `activities/video-sync/client/index.ts`; `activities/syncdeck/client/index.tsx`; `activities/algorithm-demo/client/index.tsx`; `activities/package.json`
 - Follow-up action: When adding or updating `activities/*/client/index.ts` or `.tsx`, mirror the existing `.js` import pattern for sibling manager/student modules and keep activity-scoped tests in the validation path.
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: SyncDeck now treats `syncToInstructor` as the host-side “snap to instructor and resume follow mode” command; explicit boundary relays remain `setStudentBoundary`, but host-generated snapback paths no longer send deprecated `syncToBoundary` flags on boundary commands.
+- Why it matters: This keeps SyncDeck aligned with the updated reveal-sync protocol, avoids using boundary-setting commands as a hidden force-sync mechanism, and prevents duplicate `setState` relays when the student iframe can apply the instructor sync atomically in one command.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
+- Follow-up action: Keep future SyncDeck host relay changes split between explicit boundary grants (`setStudentBoundary`), boundary clears (`clearBoundary`), and explicit user-driven snap commands (`syncToInstructor`) instead of inferring snap-to-instructor from ordinary `state` payloads with `studentBoundary: null`.
 - Owner: Codex

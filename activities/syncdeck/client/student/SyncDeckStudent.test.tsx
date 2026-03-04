@@ -181,6 +181,64 @@ void test('toRevealCommandMessage preserves paused state from payload', () => {
   })
 })
 
+void test('toRevealCommandMessage accepts revealState indexh/indexv/indexf without payload.indices', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    payload: {
+      revealState: { indexh: 6, indexv: 2, indexf: 1 },
+    },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'setState')
+  assert.deepEqual((result?.payload as { payload?: { state?: unknown } })?.payload?.state, {
+    indexh: 6,
+    indexv: 2,
+    indexf: 1,
+  })
+})
+
+void test('toRevealCommandMessage accepts top-level indexh/indexv/indexf without payload.indices', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    payload: {
+      indexh: 5,
+      indexv: 1,
+      indexf: 3,
+    },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'setState')
+  assert.deepEqual((result?.payload as { payload?: { state?: unknown } })?.payload?.state, {
+    indexh: 5,
+    indexv: 1,
+    indexf: 3,
+  })
+})
+
+void test('toRevealCommandMessage accepts navigation.current indices without payload.indices', () => {
+  const result = toRevealCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    payload: {
+      navigation: {
+        current: { h: 8, v: 2, f: 1 },
+      },
+    },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'setState')
+  assert.deepEqual((result?.payload as { payload?: { state?: unknown } })?.payload?.state, {
+    indexh: 8,
+    indexv: 2,
+    indexf: 1,
+  })
+})
+
 void test('toRevealCommandMessage maps paused action to setState paused command', () => {
   const result = toRevealCommandMessage({
     type: 'reveal-sync',
@@ -322,7 +380,6 @@ void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged to setStud
       name: 'setStudentBoundary',
       payload: {
         indices: { h: 3, v: 1, f: -1 },
-        syncToBoundary: true,
       },
     },
   })
@@ -387,7 +444,7 @@ void test('toRevealBoundaryCommandMessage uses instructor indices when set bound
   })
 })
 
-void test('toRevealBoundaryCommandMessage sets syncToBoundary when student is beyond new max boundary', () => {
+void test('toRevealBoundaryCommandMessage ignores state payload with cleared boundary so setState can preserve same-stack student position', () => {
   const result = toRevealBoundaryCommandMessage(
     {
       type: 'reveal-sync',
@@ -399,13 +456,9 @@ void test('toRevealBoundaryCommandMessage sets syncToBoundary when student is be
         indices: { h: 2, v: 0, f: 0 },
       },
     },
-    { h: 4, v: 0, f: 0 },
   )
 
-  assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
-    indices: { h: 2, v: 0, f: 0 },
-    syncToBoundary: true,
-  })
+  assert.equal(result, null)
 })
 
 void test('toRevealBoundaryCommandMessage does not snap lower child slide back to top of released stack', () => {
@@ -423,9 +476,8 @@ void test('toRevealBoundaryCommandMessage does not snap lower child slide back t
     { h: 4, v: 1, f: 0 },
   )
 
-  assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
+  assert.deepEqual((result?.payload as { payload?: { indices?: unknown } })?.payload, {
     indices: { h: 4, v: 0, f: -1 },
-    syncToBoundary: false,
   })
 })
 
@@ -442,7 +494,7 @@ void test('toRevealBoundaryCommandMessage ignores non-instructor role payloads',
   assert.equal(result, null)
 })
 
-void test('toRevealBoundaryCommandMessage maps state payload with null boundary to instructor-position setStudentBoundary', () => {
+void test('toRevealBoundaryCommandMessage ignores state payload with null boundary', () => {
   const result = toRevealBoundaryCommandMessage({
     type: 'reveal-sync',
     version: '1.0.0',
@@ -454,14 +506,10 @@ void test('toRevealBoundaryCommandMessage maps state payload with null boundary 
     },
   })
 
-  assert.equal((result?.payload as { name?: string })?.name, 'setStudentBoundary')
-  assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
-    indices: { h: 2, v: 0, f: 0 },
-    syncToBoundary: true,
-  })
+  assert.equal(result, null)
 })
 
-void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged null payload to fallback instructor boundary', () => {
+void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged null payload to clearBoundary', () => {
   const result = toRevealBoundaryCommandMessage(
     {
       type: 'reveal-sync',
@@ -473,15 +521,27 @@ void test('toRevealBoundaryCommandMessage maps studentBoundaryChanged null paylo
         studentBoundary: null,
       },
     },
-    { h: 3, v: 0, f: 0 },
     { h: 2, v: 0, f: 0 },
   )
 
-  assert.equal((result?.payload as { name?: string })?.name, 'setStudentBoundary')
-  assert.deepEqual((result?.payload as { payload?: { indices?: unknown; syncToBoundary?: unknown } })?.payload, {
-    indices: { h: 2, v: 0, f: 0 },
-    syncToBoundary: true,
+  assert.equal((result?.payload as { name?: string })?.name, 'clearBoundary')
+  assert.equal((result?.payload as { payload?: unknown })?.payload, undefined)
+})
+
+void test('toRevealBoundaryCommandMessage clears boundary without instructor indices when studentBoundaryChanged payload is null', () => {
+  const result = toRevealBoundaryCommandMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'studentBoundaryChanged',
+    role: 'instructor',
+    payload: {
+      reason: 'instructorSet',
+      studentBoundary: null,
+    },
   })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'clearBoundary')
+  assert.equal((result?.payload as { payload?: unknown })?.payload, undefined)
 })
 
 void test('extractIndicesFromRevealStateMessage reads indices from ready payload', () => {
