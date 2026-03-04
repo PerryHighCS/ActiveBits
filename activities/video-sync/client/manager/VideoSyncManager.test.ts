@@ -7,6 +7,7 @@ import {
 import {
   autoConfigureBootstrapSource,
   clearManagerPlayerLoadError,
+  getManagerPlaybackIntentForStateChange,
   readBootstrapInstructorPasscode,
   readBootstrapSourceUrl,
   shouldCorrectManagerPlaybackDrift,
@@ -190,4 +191,39 @@ void test('shouldCorrectManagerPlaybackDrift is lenient while instructor playbac
   assert.equal(shouldCorrectManagerPlaybackDrift(10, 11.2, true), false)
   assert.equal(shouldCorrectManagerPlaybackDrift(10, 12.3, true), true)
   assert.equal(shouldCorrectManagerPlaybackDrift(10, 10.3, false), true)
+})
+
+void test('getManagerPlaybackIntentForStateChange maps native player transitions to local playback intent', () => {
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 1,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    'play',
+  )
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 1,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    'play',
+  )
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 2,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    'pause',
+  )
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 99,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    null,
+  )
 })
