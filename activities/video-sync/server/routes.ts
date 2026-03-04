@@ -58,7 +58,11 @@ interface VideoSyncSession extends SessionRecord {
 interface VideoSyncSessionStore extends Pick<SessionStore, 'get' | 'set'> {
   publishBroadcast?: (channel: string, message: Record<string, unknown>) => Promise<void>
   subscribeToBroadcast?: (channel: string, handler: (message: unknown) => void) => void
-  valkeyStore?: unknown
+  valkeyStore?: {
+    client: {
+      eval(script: string, numKeys: number, ...args: Array<string | number>): Promise<unknown>
+    }
+  }
 }
 
 interface RouteRequest {
@@ -132,6 +136,8 @@ const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/
 const INSTRUCTOR_PASSCODE_LENGTH = 32
 const INSTRUCTOR_PASSCODE_PATTERN = /^[a-f0-9]{32}$/i
+const UNSYNCED_STUDENTS_KEY_PREFIX = 'video-sync:unsynced:'
+const UNSYNCED_STUDENTS_KEY_TTL_MS = UNSYNC_STALE_MS + 1_000
 const provider = 'youtube'
 const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
@@ -422,6 +428,144 @@ function normalizeTelemetryErrorField(value: unknown, maxLength: number): string
   return trimmed.slice(0, maxLength)
 }
 
+function normalizeDriftSec(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null
+  }
+
+  return clampSeconds(Math.abs(value))
+}
+
+function getUnsyncedStudentsKey(sessionId: string): string {
+  return `${UNSYNCED_STUDENTS_KEY_PREFIX}${sessionId}`
+}
+
+const UPSERT_UNSYNCED_STUDENT_LUA = `
+-- video-sync-unsynced-upsert
+local key = KEYS[1]
+local studentId = ARGV[1]
+local nowMs = tonumber(ARGV[2])
+local staleMs = tonumber(ARGV[3])
+local maxStudents = tonumber(ARGV[4])
+local ttlMs = tonumber(ARGV[5])
+local data = redis.call('GET', key)
+local state = data and cjson.decode(data) or {}
+local count = 0
+
+for id, timestamp in pairs(state) do
+  if nowMs - tonumber(timestamp) > staleMs then
+    state[id] = nil
+  else
+    count = count + 1
+  end
+end
+
+if state[studentId] == nil and count >= maxStudents then
+  if count == 0 then
+    redis.call('DEL', key)
+  else
+    redis.call('SET', key, cjson.encode(state), 'PX', ttlMs)
+  end
+  return count
+end
+
+if state[studentId] == nil then
+  count = count + 1
+end
+state[studentId] = nowMs
+redis.call('SET', key, cjson.encode(state), 'PX', ttlMs)
+return count
+`
+
+const CLEAR_UNSYNCED_STUDENT_LUA = `
+-- video-sync-unsynced-clear
+local key = KEYS[1]
+local studentId = ARGV[1]
+local nowMs = tonumber(ARGV[2])
+local staleMs = tonumber(ARGV[3])
+local ttlMs = tonumber(ARGV[4])
+local data = redis.call('GET', key)
+if not data then
+  return 0
+end
+
+local state = cjson.decode(data)
+local count = 0
+
+for id, timestamp in pairs(state) do
+  if nowMs - tonumber(timestamp) > staleMs then
+    state[id] = nil
+  end
+end
+
+state[studentId] = nil
+
+for _id, _timestamp in pairs(state) do
+  count = count + 1
+end
+
+if count == 0 then
+  redis.call('DEL', key)
+else
+  redis.call('SET', key, cjson.encode(state), 'PX', ttlMs)
+end
+
+return count
+`
+
+const COUNT_UNSYNCED_STUDENTS_LUA = `
+-- video-sync-unsynced-count
+local key = KEYS[1]
+local nowMs = tonumber(ARGV[1])
+local staleMs = tonumber(ARGV[2])
+local ttlMs = tonumber(ARGV[3])
+local data = redis.call('GET', key)
+if not data then
+  return 0
+end
+
+local state = cjson.decode(data)
+local count = 0
+
+for id, timestamp in pairs(state) do
+  if nowMs - tonumber(timestamp) > staleMs then
+    state[id] = nil
+  else
+    count = count + 1
+  end
+end
+
+if count == 0 then
+  redis.call('DEL', key)
+else
+  redis.call('SET', key, cjson.encode(state), 'PX', ttlMs)
+end
+
+return count
+`
+
+async function runValkeyUnsyncedStudentCount(
+  sessions: VideoSyncSessionStore,
+  sessionId: string,
+  script: string,
+  args: Array<string | number>,
+): Promise<number> {
+  if (sessions.valkeyStore == null) {
+    return 0
+  }
+
+  const result = await sessions.valkeyStore.client.eval(
+    script,
+    1,
+    getUnsyncedStudentsKey(sessionId),
+    ...args,
+  )
+
+  return typeof result === 'number' && Number.isFinite(result)
+    ? Math.max(0, Math.floor(result))
+    : 0
+}
+
 function pruneStaleUnsyncedStudents(studentMap: Map<string, number>, nowMs = Date.now()): void {
   for (const [studentId, timestampMs] of studentMap.entries()) {
     if (nowMs - timestampMs > UNSYNC_STALE_MS) {
@@ -445,7 +589,22 @@ function clearUnsyncedStudentState(sessionId: string): void {
   unsyncedStudentsBySession.delete(sessionId)
 }
 
-function refreshUnsyncedStudentsCount(data: VideoSyncSessionData, sessionId: string, nowMs = Date.now()): void {
+async function refreshUnsyncedStudentsCount(
+  sessions: VideoSyncSessionStore,
+  data: VideoSyncSessionData,
+  sessionId: string,
+  nowMs = Date.now(),
+): Promise<void> {
+  if (sessions.valkeyStore != null) {
+    data.telemetry.sync.unsyncedStudents = await runValkeyUnsyncedStudentCount(
+      sessions,
+      sessionId,
+      COUNT_UNSYNCED_STUDENTS_LUA,
+      [nowMs, UNSYNC_STALE_MS, UNSYNCED_STUDENTS_KEY_TTL_MS],
+    )
+    return
+  }
+
   const studentMap = unsyncedStudentsBySession.get(sessionId)
   if (!studentMap) {
     data.telemetry.sync.unsyncedStudents = 0
@@ -463,7 +622,22 @@ function refreshUnsyncedStudentsCount(data: VideoSyncSessionData, sessionId: str
   data.telemetry.sync.unsyncedStudents = studentMap.size
 }
 
-function markStudentUnsynced(sessionId: string, studentId: string, nowMs = Date.now()): void {
+async function markStudentUnsynced(
+  sessions: VideoSyncSessionStore,
+  sessionId: string,
+  studentId: string,
+  nowMs = Date.now(),
+): Promise<void> {
+  if (sessions.valkeyStore != null) {
+    await runValkeyUnsyncedStudentCount(
+      sessions,
+      sessionId,
+      UPSERT_UNSYNCED_STUDENT_LUA,
+      [studentId, nowMs, UNSYNC_STALE_MS, MAX_UNSYNCED_STUDENTS_PER_SESSION, UNSYNCED_STUDENTS_KEY_TTL_MS],
+    )
+    return
+  }
+
   const existing = unsyncedStudentsBySession.get(sessionId)
   if (existing) {
     pruneStaleUnsyncedStudents(existing, nowMs)
@@ -477,7 +651,22 @@ function markStudentUnsynced(sessionId: string, studentId: string, nowMs = Date.
   unsyncedStudentsBySession.set(sessionId, new Map([[studentId, nowMs]]))
 }
 
-function clearStudentUnsynced(sessionId: string, studentId: string): void {
+async function clearStudentUnsynced(
+  sessions: VideoSyncSessionStore,
+  sessionId: string,
+  studentId: string,
+  nowMs = Date.now(),
+): Promise<void> {
+  if (sessions.valkeyStore != null) {
+    await runValkeyUnsyncedStudentCount(
+      sessions,
+      sessionId,
+      CLEAR_UNSYNCED_STUDENT_LUA,
+      [studentId, nowMs, UNSYNC_STALE_MS, UNSYNCED_STUDENTS_KEY_TTL_MS],
+    )
+    return
+  }
+
   const existing = unsyncedStudentsBySession.get(sessionId)
   if (!existing) return
 
@@ -533,7 +722,7 @@ function scheduleUnsyncedStudentsPrune(
 
       const data = ensureVideoSyncSessionData(session)
       const previousCount = data.telemetry.sync.unsyncedStudents
-      refreshUnsyncedStudentsCount(data, sessionId, pruneNowMs)
+      await refreshUnsyncedStudentsCount(sessions as VideoSyncSessionStore, data, sessionId, pruneNowMs)
 
       if (data.telemetry.sync.unsyncedStudents !== previousCount) {
         await sessions.set(session.id, session)
@@ -674,10 +863,14 @@ function removeSubscriber(sessionId: string, socket: VideoSyncSocket): void {
   }
 }
 
-function updateConnectionTelemetry(data: VideoSyncSessionData, sessionId: string): void {
+async function updateConnectionTelemetry(
+  sessions: VideoSyncSessionStore,
+  data: VideoSyncSessionData,
+  sessionId: string,
+): Promise<void> {
   const sockets = subscribersBySession.get(sessionId)
   data.telemetry.connections.activeCount = sockets?.size ?? 0
-  refreshUnsyncedStudentsCount(data, sessionId)
+  await refreshUnsyncedStudentsCount(sessions, data, sessionId)
 }
 
 async function broadcastEnvelope(
@@ -768,7 +961,8 @@ function ensureHeartbeat(
         const data = ensureVideoSyncSessionData(session)
         const heartbeatState = applyStopIfReached(data.state)
         const heartbeatTelemetry = cloneTelemetry(data.telemetry)
-        updateConnectionTelemetry(
+        await updateConnectionTelemetry(
+          sessions,
           {
             ...data,
             state: heartbeatState,
@@ -906,7 +1100,8 @@ export default function setupVideoSyncRoutes(
     const data = ensureVideoSyncSessionData(session)
     const projectedState = applyStopIfReached(data.state)
     const projectedTelemetry = cloneTelemetry(data.telemetry)
-    updateConnectionTelemetry(
+    await updateConnectionTelemetry(
+      sessions,
       {
         ...data,
         state: projectedState,
@@ -1038,7 +1233,7 @@ export default function setupVideoSyncRoutes(
       serverTimestampMs: now,
     }
     data.telemetry.error = { code: null, message: null }
-    updateConnectionTelemetry(data, sessionId)
+    await updateConnectionTelemetry(sessions, data, sessionId)
 
     await sessions.set(session.id, session)
 
@@ -1120,7 +1315,7 @@ export default function setupVideoSyncRoutes(
     }
 
     data.state = applyStopIfReached(data.state, now)
-    updateConnectionTelemetry(data, sessionId)
+    await updateConnectionTelemetry(sessions, data, sessionId)
     await sessions.set(session.id, session)
 
     const envelope = createEnvelope(sessionId, 'state-update', {
@@ -1162,19 +1357,24 @@ export default function setupVideoSyncRoutes(
 
     if (body.type === 'unsync') {
       if (studentId) {
-        markStudentUnsynced(sessionId, studentId)
-        scheduleUnsyncedStudentsPrune(sessions, sessionId)
+        await markStudentUnsynced(sessions, sessionId, studentId)
+        if (sessions.valkeyStore == null) {
+          scheduleUnsyncedStudentsPrune(sessions, sessionId)
+        }
       }
+      const normalizedDriftSec = normalizeDriftSec(body.driftSec)
       data.telemetry.sync.lastDriftSec =
-        typeof body.driftSec === 'number' && Number.isFinite(body.driftSec) ? body.driftSec : data.telemetry.sync.lastDriftSec
+        normalizedDriftSec ?? data.telemetry.sync.lastDriftSec
       data.telemetry.sync.lastCorrectionResult = 'attempted'
     }
 
     if (body.type === 'sync-correction') {
       const correction = body.correctionResult
       if (studentId && correction === 'success') {
-        clearStudentUnsynced(sessionId, studentId)
-        scheduleUnsyncedStudentsPrune(sessions, sessionId)
+        await clearStudentUnsynced(sessions, sessionId, studentId)
+        if (sessions.valkeyStore == null) {
+          scheduleUnsyncedStudentsPrune(sessions, sessionId)
+        }
       }
       data.telemetry.sync.lastCorrectionResult =
         correction === 'success' || correction === 'failed' ? correction : 'attempted'
@@ -1193,7 +1393,7 @@ export default function setupVideoSyncRoutes(
       }
     }
 
-    updateConnectionTelemetry(data, sessionId)
+    await updateConnectionTelemetry(sessions, data, sessionId)
     await sessions.set(session.id, session)
 
     const envelope = createEnvelope(sessionId, 'telemetry-update', {
@@ -1232,7 +1432,7 @@ export default function setupVideoSyncRoutes(
         }
 
         const currentData = ensureVideoSyncSessionData(currentSession)
-        updateConnectionTelemetry(currentData, sessionId)
+        await updateConnectionTelemetry(sessions, currentData, sessionId)
         await sessions.set(currentSession.id, currentSession)
 
         const disconnectTelemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
@@ -1291,7 +1491,7 @@ export default function setupVideoSyncRoutes(
 
       const data = ensureVideoSyncSessionData(session)
       data.state = applyStopIfReached(data.state)
-      updateConnectionTelemetry(data, sessionId)
+      await updateConnectionTelemetry(sessions, data, sessionId)
       await sessions.set(session.id, session)
 
       const snapshot = createEnvelope(sessionId, 'state-snapshot', {

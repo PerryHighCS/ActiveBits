@@ -140,8 +140,130 @@ function createSocketRecorder(sessionId: string) {
   }
 }
 
-function createSessionStore(initial: Record<string, SessionRecord>) {
-  const store = { ...initial }
+function createMockVideoSyncValkeyStore() {
+  const entries = new Map<string, { value: string; expiresAt: number }>()
+
+  const readState = (key: string, nowMs: number): Record<string, number> => {
+    const entry = entries.get(key)
+    if (!entry) {
+      return {}
+    }
+
+    if (entry.expiresAt <= nowMs) {
+      entries.delete(key)
+      return {}
+    }
+
+    try {
+      const parsed = JSON.parse(entry.value) as Record<string, unknown>
+      const normalized: Record<string, number> = {}
+      for (const [studentId, timestamp] of Object.entries(parsed)) {
+        if (typeof timestamp === 'number' && Number.isFinite(timestamp)) {
+          normalized[studentId] = timestamp
+        }
+      }
+      return normalized
+    } catch {
+      entries.delete(key)
+      return {}
+    }
+  }
+
+  const writeState = (key: string, state: Record<string, number>, ttlMs: number, nowMs: number): void => {
+    if (Object.keys(state).length === 0) {
+      entries.delete(key)
+      return
+    }
+
+    entries.set(key, {
+      value: JSON.stringify(state),
+      expiresAt: nowMs + ttlMs,
+    })
+  }
+
+  return {
+    client: {
+      async eval(script: string, numKeys: number, ...args: Array<string | number>) {
+        assert.equal(numKeys, 1)
+        const [keyArg, ...rawArgs] = args
+        const key = String(keyArg)
+
+        if (script.includes('video-sync-unsynced-upsert')) {
+          const [studentIdArg, nowArg, staleArg, maxArg, ttlArg] = rawArgs
+          const studentId = String(studentIdArg)
+          const nowMs = Number(nowArg)
+          const staleMs = Number(staleArg)
+          const maxStudents = Number(maxArg)
+          const ttlMs = Number(ttlArg)
+          const state = readState(key, nowMs)
+
+          for (const [existingStudentId, timestamp] of Object.entries(state)) {
+            if (nowMs - timestamp > staleMs) {
+              delete state[existingStudentId]
+            }
+          }
+
+          const currentCount = Object.keys(state).length
+          if (!(studentId in state) && currentCount >= maxStudents) {
+            writeState(key, state, ttlMs, nowMs)
+            return currentCount
+          }
+
+          state[studentId] = nowMs
+          writeState(key, state, ttlMs, nowMs)
+          return Object.keys(state).length
+        }
+
+        if (script.includes('video-sync-unsynced-clear')) {
+          const [studentIdArg, nowArg, staleArg, ttlArg] = rawArgs
+          const studentId = String(studentIdArg)
+          const nowMs = Number(nowArg)
+          const staleMs = Number(staleArg)
+          const ttlMs = Number(ttlArg)
+          const state = readState(key, nowMs)
+
+          for (const [existingStudentId, timestamp] of Object.entries(state)) {
+            if (nowMs - timestamp > staleMs) {
+              delete state[existingStudentId]
+            }
+          }
+
+          delete state[studentId]
+          writeState(key, state, ttlMs, nowMs)
+          return Object.keys(state).length
+        }
+
+        if (script.includes('video-sync-unsynced-count')) {
+          const [nowArg, staleArg, ttlArg] = rawArgs
+          const nowMs = Number(nowArg)
+          const staleMs = Number(staleArg)
+          const ttlMs = Number(ttlArg)
+          const state = readState(key, nowMs)
+
+          for (const [existingStudentId, timestamp] of Object.entries(state)) {
+            if (nowMs - timestamp > staleMs) {
+              delete state[existingStudentId]
+            }
+          }
+
+          writeState(key, state, ttlMs, nowMs)
+          return Object.keys(state).length
+        }
+
+        throw new Error(`[TEST] unexpected mock valkey eval script: ${script.slice(0, 48)}`)
+      },
+    },
+  }
+}
+
+function createSessionStore(
+  initial: Record<string, SessionRecord>,
+  options: {
+    sharedStore?: Record<string, SessionRecord>
+    valkeyStore?: { client: { eval(script: string, numKeys: number, ...args: Array<string | number>): Promise<unknown> } }
+  } = {},
+) {
+  const store = options.sharedStore ?? { ...initial }
   const published: Array<{ channel: string; message: Record<string, unknown> }> = []
   const subscriptions: string[] = []
 
@@ -156,7 +278,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
       async set(id: string, session: SessionRecord) {
         store[id] = session
       },
-      valkeyStore: {} as Record<string, unknown>,
+      ...(options.valkeyStore ? { valkeyStore: options.valkeyStore } : {}),
       async publishBroadcast(channel: string, message: Record<string, unknown>) {
         published.push({ channel, message })
       },
@@ -808,7 +930,7 @@ void test('session patch returns invalid stopSec when stopSec is not numeric', a
 void test('session patch normalizes youtube source and publishes extensible envelope', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') }, { valkeyStore: createMockVideoSyncValkeyStore() })
 
   setupVideoSyncRoutes(app, storeState.sessions, ws)
 
@@ -934,7 +1056,7 @@ void test('session patch rejects reconfiguration after a video is already set', 
 void test('session patch publishes through broadcast channel without direct local websocket send when pubsub is available', async () => {
   const app = createMockApp()
   const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') }, { valkeyStore: createMockVideoSyncValkeyStore() })
   const recorder = createSocketRecorder('s1')
   ws.wss.clients.add(recorder.socket)
 
@@ -1031,7 +1153,7 @@ void test('session patch falls back to direct local websocket send when publishB
 void test('command route updates playback and emits extensible envelope', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') }, { valkeyStore: createMockVideoSyncValkeyStore() })
 
   setupVideoSyncRoutes(app, storeState.sessions, ws)
 
@@ -1375,7 +1497,7 @@ void test('websocket close during async initialization does not leave a stale su
 void test('websocket cleanup runs only once when error is followed by close', async () => {
   const app = createMockApp()
   const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') }, { valkeyStore: createMockVideoSyncValkeyStore() })
 
   setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
 
@@ -1545,7 +1667,7 @@ void test('heartbeat skips overlapping ticks while a previous tick is still in f
     const app = createMockApp()
     const ws = createMockWs()
     const session = createVideoSyncSession('s1')
-    const storeState = createSessionStore({ s1: session })
+    const storeState = createSessionStore({ s1: session }, { valkeyStore: createMockVideoSyncValkeyStore() })
 
     const slowPublishState: { resolve: (() => void) | null } = { resolve: null }
     let publishCalls = 0
@@ -1653,7 +1775,7 @@ void test('heartbeat broadcasts projected playback without persisting transient 
       updatedBy: 'manager',
       serverTimestampMs: nowMs,
     }
-    const storeState = createSessionStore({ s1: session })
+    const storeState = createSessionStore({ s1: session }, { valkeyStore: createMockVideoSyncValkeyStore() })
     let setCalls = 0
     const sessionsWithTrackedSet = {
       ...storeState.sessions,
@@ -1855,6 +1977,105 @@ void test('event route tracks current unsynced student count', async () => {
   assert.equal(correctionResponse.statusCode, 200)
   const correctionTelemetry = (correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry
   assert.equal(correctionTelemetry.sync.unsyncedStudents, 0)
+})
+
+void test('event route stores lastDriftSec as a non-negative magnitude', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/event']
+  assert.equal(typeof handler, 'function')
+
+  const response = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'unsync', studentId: 'student-a', driftSec: -1.25 },
+    },
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  const telemetry = (response.body as {
+    telemetry: {
+      sync: {
+        lastDriftSec: number | null
+      }
+    }
+  }).telemetry
+  assert.equal(telemetry.sync.lastDriftSec, 1.25)
+
+  const persisted = storeState.store.s1?.data as {
+    telemetry?: {
+      sync?: {
+        lastDriftSec?: number | null
+      }
+    }
+  }
+  assert.equal(persisted.telemetry?.sync?.lastDriftSec, 1.25)
+})
+
+void test('event and session routes share unsynced student telemetry across simulated instances when valkeyStore is available', async () => {
+  const sharedSessionStore = { s1: createVideoSyncSession('s1') }
+  const sharedValkeyStore = createMockVideoSyncValkeyStore()
+
+  const appA = createMockApp()
+  const appB = createMockApp()
+  const wsA = createMockWs() as unknown as WsRouter
+  const wsB = createMockWs() as unknown as WsRouter
+  const instanceA = createSessionStore({}, { sharedStore: sharedSessionStore, valkeyStore: sharedValkeyStore })
+  const instanceB = createSessionStore({}, { sharedStore: sharedSessionStore, valkeyStore: sharedValkeyStore })
+
+  setupVideoSyncRoutes(appA, instanceA.sessions, wsA)
+  setupVideoSyncRoutes(appB, instanceB.sessions, wsB)
+
+  const eventHandlerA = appA.handlers.post['/api/video-sync/:sessionId/event']
+  const eventHandlerB = appB.handlers.post['/api/video-sync/:sessionId/event']
+  const sessionHandlerB = appB.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof eventHandlerA, 'function')
+  assert.equal(typeof eventHandlerB, 'function')
+  assert.equal(typeof sessionHandlerB, 'function')
+
+  const unsyncResponse = createResponse()
+  await eventHandlerA?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'unsync', studentId: 'student-a', driftSec: 1.2 },
+    },
+    unsyncResponse,
+  )
+
+  assert.equal(unsyncResponse.statusCode, 200)
+  assert.equal((unsyncResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 1)
+
+  const sessionResponse = createResponse()
+  await sessionHandlerB?.(
+    {
+      params: { sessionId: 's1' },
+    },
+    sessionResponse,
+  )
+
+  assert.equal(sessionResponse.statusCode, 200)
+  assert.equal(
+    (sessionResponse.body as { data?: { telemetry?: { sync?: { unsyncedStudents?: number } } } }).data?.telemetry?.sync?.unsyncedStudents,
+    1,
+  )
+
+  const correctionResponse = createResponse()
+  await eventHandlerB?.(
+    {
+      params: { sessionId: 's1' },
+      body: { type: 'sync-correction', studentId: 'student-a', correctionResult: 'success' },
+    },
+    correctionResponse,
+  )
+
+  assert.equal(correctionResponse.statusCode, 200)
+  assert.equal((correctionResponse.body as { telemetry: { sync: { unsyncedStudents: number } } }).telemetry.sync.unsyncedStudents, 0)
 })
 
 void test('event route prunes stale unsynced students without a follow-up heartbeat or session read', { concurrency: false }, async () => {

@@ -156,6 +156,7 @@ When scaling to multiple instances:
 3. **Cache Coordination**: Each instance maintains its own keepalive cache; pub/sub handles consistency
 4. **Persistent Sessions**: Shared via Valkey; waiters are instance-local
 5. **Teacher/manager cookies**: Keep the `persistent_sessions` httpOnly cookie path and same-site behavior intact, since activities such as SyncDeck and Video Sync recover manager credentials from a teacher-validated persistent-session cookie after redirects into `/manage/...`
+6. **Video Sync unsynced-student telemetry**: In Valkey mode, `video-sync` stores per-session unsynced-student timestamps in a Valkey-backed key (with short TTL pruning) so `telemetry.sync.unsyncedStudents` stays coherent when `/api/video-sync/:sessionId/event` requests land on different instances. In in-memory mode this telemetry remains single-instance only, which is acceptable for local/dev deployments.
 
 **To scale horizontally**:
 1. Go to **Settings** → **Scaling**
