@@ -6,7 +6,9 @@ import {
 } from '@src/components/common/manageDashboardUtils'
 import {
   autoConfigureBootstrapSource,
+  buildManagerWsUrl,
   clearManagerPlayerLoadError,
+  createManagerWsAuthMessage,
   getManagerPlaybackIntentForStateChange,
   parseManagerStopTimeInput,
   readBootstrapInstructorPasscode,
@@ -72,6 +74,31 @@ void test('readBootstrapSourceUrl ignores missing or empty query params', () => 
   assert.equal(readBootstrapSourceUrl(''), null)
   assert.equal(readBootstrapSourceUrl('?sourceUrl='), null)
   assert.equal(readBootstrapSourceUrl('?other=value'), null)
+})
+
+void test('buildManagerWsUrl omits instructor credentials from the websocket URL', () => {
+  assert.equal(
+    buildManagerWsUrl({
+      sessionId: 'session-123',
+      location: {
+        protocol: 'https:',
+        host: 'bits.example.test',
+      },
+    }),
+    'wss://bits.example.test/ws/video-sync?sessionId=session-123&role=manager',
+  )
+})
+
+void test('createManagerWsAuthMessage serializes the post-connect auth payload', () => {
+  assert.equal(
+    createManagerWsAuthMessage('teacher-passcode'),
+    JSON.stringify({
+      type: 'authenticate',
+      instructorPasscode: 'teacher-passcode',
+    }),
+  )
+  assert.equal(createManagerWsAuthMessage(''), null)
+  assert.equal(createManagerWsAuthMessage(null), null)
 })
 
 void test('shouldAutoStartBootstrapSource requires setup mode, source url, and ready credentials', () => {

@@ -112,6 +112,29 @@ export function readBootstrapSourceUrl(search: string): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
+export function buildManagerWsUrl(params: {
+  sessionId: string | null | undefined
+  location: Pick<Location, 'protocol' | 'host'> | null | undefined
+}): string | null {
+  if (!params.sessionId || params.location == null) {
+    return null
+  }
+
+  const protocol = params.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${params.location.host}/ws/video-sync?sessionId=${encodeURIComponent(params.sessionId)}&role=manager`
+}
+
+export function createManagerWsAuthMessage(instructorPasscode: string | null | undefined): string | null {
+  if (typeof instructorPasscode !== 'string' || instructorPasscode.length === 0) {
+    return null
+  }
+
+  return JSON.stringify({
+    type: 'authenticate',
+    instructorPasscode,
+  })
+}
+
 export function shouldAutoStartBootstrapSource(params: {
   setupMode: boolean
   bootstrapSourceUrl: string | null
@@ -464,10 +487,12 @@ export default function VideoSyncManager() {
   }, [sessionId])
 
   const buildWsUrl = useCallback(() => {
-    if (!sessionId || !instructorPasscode || typeof window === 'undefined') return null
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${protocol}//${window.location.host}/ws/video-sync?sessionId=${encodeURIComponent(sessionId)}&role=manager&instructorPasscode=${encodeURIComponent(instructorPasscode)}`
-  }, [instructorPasscode, sessionId])
+    if (typeof window === 'undefined') return null
+    return buildManagerWsUrl({
+      sessionId,
+      location: window.location,
+    })
+  }, [sessionId])
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -688,6 +713,14 @@ export default function VideoSyncManager() {
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: Boolean(sessionId && instructorPasscode && isPasscodeReady),
+    onOpen: (_event, ws) => {
+      const authMessage = createManagerWsAuthMessage(instructorPasscode)
+      if (!authMessage) {
+        return
+      }
+
+      ws.send(authMessage)
+    },
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
       if (!envelope || envelope.sessionId !== sessionId) return

@@ -16,6 +16,24 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 ## Notes
 
 - Date: 2026-03-04
+- Area: syncdeck instructor websocket authentication
+- Threat or risk: `syncdeck` previously put `instructorPasscode` in the instructor websocket query string, which exposes the credential to URL logging in proxies, access logs, and observability tooling.
+- Control or mitigation: The instructor client now connects to `/ws/syncdeck` with only `sessionId` and `role=instructor`, then sends a one-shot websocket `authenticate` message with the passcode after the socket opens; the server waits for that auth message before marking the socket as an instructor or replaying instructor-only state.
+- Residual risk: The passcode still exists in live client memory and in websocket frame payloads. If stronger protection is needed, move to an httpOnly cookie or short-lived server-issued websocket token.
+- Validation (test/review/path): `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.ts`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`.
+- Follow-up action: Keep `syncdeck` aligned with `video-sync` if either websocket auth flow is hardened further, so manager activities do not diverge back to query-string secrets.
+- Owner: Codex
+
+- Date: 2026-03-04
+- Area: video-sync manager websocket authentication
+- Threat or risk: Putting `instructorPasscode` in the manager websocket query string exposes a session credential to request URL logging in proxies, access logs, and observability tooling even though it never appears in the browser address bar.
+- Control or mitigation: The manager client now connects to `/ws/video-sync` with only `sessionId` and `role=manager`, then sends a one-shot websocket `authenticate` message containing the passcode after the socket opens; the server ignores URL-based manager passcodes and verifies the post-connect auth message before subscribing the socket or sending manager state.
+- Residual risk: The passcode still exists in live client memory and travels in websocket message payloads, so raw websocket frame capture at the edge would still reveal it. If stronger protection is needed later, prefer an httpOnly cookie or short-lived server-issued websocket token over long-lived shared secrets.
+- Validation (test/review/path): `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`; `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`.
+- Follow-up action: If other manager-only websocket activities use query-string secrets, move them to the same post-connect auth or cookie-backed pattern.
+- Owner: Codex
+
+- Date: 2026-03-04
 - Area: video-sync manager bootstrap
 - Observation: Temporary `video-sync` sessions now recover the create-session `instructorPasscode` from a same-tab in-memory bootstrap map when router navigation state is unavailable. The payload is consumed once and never written to Web Storage for this fallback path.
 - Why it matters: This restores ad hoc teacher startup without reintroducing the broader XSS exposure of persisting the passcode in `sessionStorage` across the tab lifetime.

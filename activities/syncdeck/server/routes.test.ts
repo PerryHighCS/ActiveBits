@@ -173,7 +173,7 @@ class MockSocket implements ActiveBitsWebSocket {
   readyState = 1
   sent: string[] = []
   closeCalls: Array<{ code?: number; reason?: string }> = []
-  private listeners = new Map<string, Array<(...args: unknown[]) => void>>()
+  private listeners = new Map<string, Array<{ listener: (...args: unknown[]) => void; once: boolean }>>()
 
   send(data: string): void {
     this.sent.push(data)
@@ -181,12 +181,14 @@ class MockSocket implements ActiveBitsWebSocket {
 
   on(event: string, listener: (...args: unknown[]) => void): void {
     const existing = this.listeners.get(event) ?? []
-    existing.push(listener)
+    existing.push({ listener, once: false })
     this.listeners.set(event, existing)
   }
 
   once(event: string, listener: (...args: unknown[]) => void): void {
-    this.on(event, listener)
+    const existing = this.listeners.get(event) ?? []
+    existing.push({ listener, once: true })
+    this.listeners.set(event, existing)
   }
 
   close(code?: number, reason?: string): void {
@@ -203,10 +205,21 @@ class MockSocket implements ActiveBitsWebSocket {
 
   emit(event: string, ...args: unknown[]): void {
     const handlers = this.listeners.get(event) ?? []
+    this.listeners.set(event, handlers.filter((entry) => !entry.once))
     for (const handler of handlers) {
-      handler(...args)
+      handler.listener(...args)
     }
   }
+}
+
+function emitInstructorAuth(socket: MockSocket, instructorPasscode: string): void {
+  socket.emit(
+    'message',
+    JSON.stringify({
+      type: 'authenticate',
+      instructorPasscode,
+    }),
+  )
 }
 
 function computeUrlHash(persistentHash: string, presentationUrl: string): string {
@@ -291,10 +304,10 @@ void test('syncdeck websocket sends latest state snapshot to instructor on conne
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
@@ -341,10 +354,10 @@ void test('syncdeck websocket sends latest position snapshot to instructor when 
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
@@ -379,10 +392,10 @@ void test('syncdeck websocket relays instructor updates to students in session',
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
   handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
   await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -429,19 +442,19 @@ void test('syncdeck websocket relays instructor updates to other instructors in 
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(primaryInstructorSocket, 'teacher-pass')
   handler?.(
     peerInstructorSocket,
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(peerInstructorSocket, 'teacher-pass')
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const initialPrimaryMessageCount = primaryInstructorSocket.sent.length
@@ -573,10 +586,10 @@ void test('syncdeck websocket replays buffered chalkboard snapshot and delta to 
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
@@ -680,10 +693,10 @@ void test('syncdeck websocket updates and clears chalkboard buffer from instruct
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   instructorSocket.emit(
@@ -811,10 +824,10 @@ void test('syncdeck websocket persists drawing tool mode updates from instructor
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   instructorSocket.emit(
@@ -854,10 +867,10 @@ void test('syncdeck websocket broadcasts student presence count to instructor', 
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
 
   handler?.(
     studentSocket,
@@ -933,10 +946,10 @@ void test('syncdeck session normalization filters malformed persisted students a
     new URLSearchParams({
       sessionId: 's1',
       role: 'instructor',
-      instructorPasscode: 'teacher-pass',
     }),
     ws.wss,
   )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   assert.equal(instructorSocket.closeCalls.length, 0)
