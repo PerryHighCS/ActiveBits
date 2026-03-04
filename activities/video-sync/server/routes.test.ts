@@ -84,9 +84,10 @@ function createMockWs() {
 
 function createMockSocket() {
   const sent: string[] = []
-  const handlers: Record<string, Array<() => void>> = {
+  const handlers: Record<string, Array<{ listener: (...args: unknown[]) => void; once: boolean }>> = {
     close: [],
     error: [],
+    message: [],
   }
   let closed: { code?: number; reason?: string } | null = null
 
@@ -95,25 +96,35 @@ function createMockSocket() {
     get closed() {
       return closed
     },
-    emit(event: 'close' | 'error') {
+    emit(event: 'close' | 'error' | 'message', ...args: unknown[]) {
       const listeners = handlers[event]
       if (!listeners) {
         throw new Error(`Unknown mock socket event: ${event}`)
       }
-      for (const listener of listeners) {
-        listener()
+
+      const toRun = [...listeners]
+      handlers[event] = listeners.filter((entry) => !entry.once)
+      for (const entry of toRun) {
+        entry.listener(...args)
       }
     },
     socket: {
       readyState: 1,
       sessionId: null,
       videoSyncRole: null,
-      on(event: 'close' | 'error', handler: () => void) {
+      on(event: 'close' | 'error' | 'message', handler: (...args: unknown[]) => void) {
         const listeners = handlers[event]
         if (!listeners) {
           throw new Error(`Unknown mock socket event: ${event}`)
         }
-        listeners.push(handler)
+        listeners.push({ listener: handler, once: false })
+      },
+      once(event: 'close' | 'error' | 'message', handler: (...args: unknown[]) => void) {
+        const listeners = handlers[event]
+        if (!listeners) {
+          throw new Error(`Unknown mock socket event: ${event}`)
+        }
+        listeners.push({ listener: handler, once: true })
       },
       send(payload: string) {
         sent.push(payload)
@@ -1136,12 +1147,23 @@ void test('session patch publishes through broadcast channel without direct loca
   assert.deepEqual(recorder.delivered, [])
 })
 
-void test('session patch falls back to direct local websocket send when pubsub publish is unavailable', async () => {
+void test('session patch falls back to direct local websocket send when pubsub publish is unavailable', { concurrency: false }, async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
-  const recorder = createSocketRecorder('s1')
-  ws.wss.clients.add(recorder.socket)
+  const subscriber = createMockSocket()
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const heartbeatToken = { id: 'video-sync-test-heartbeat-no-publish' }
+
+  globalThis.setInterval = (((callback: TimerHandler, _delay?: number, ...args: unknown[]) => {
+    void callback
+    void args
+    return heartbeatToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((timer: ReturnType<typeof setInterval> | number | undefined) => {
+    void timer
+  }) as unknown) as typeof clearInterval
 
   const sessionsWithoutPublish = {
     get: storeState.sessions.get,
@@ -1149,34 +1171,58 @@ void test('session patch falls back to direct local websocket send when pubsub p
     subscribeToBroadcast: storeState.sessions.subscribeToBroadcast,
   }
 
-  setupVideoSyncRoutes(app, sessionsWithoutPublish, ws as unknown as WsRouter)
+  try {
+    setupVideoSyncRoutes(app, sessionsWithoutPublish, ws as unknown as WsRouter)
+    const websocketHandler = ws.registered['/ws/video-sync']
+    assert.equal(typeof websocketHandler, 'function')
+    websocketHandler?.(subscriber.socket, new URLSearchParams(`sessionId=s1&role=student`))
+    await new Promise((resolve) => setImmediate(resolve))
+    subscriber.sent.length = 0
 
-  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
-  assert.equal(typeof handler, 'function')
+    const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+    assert.equal(typeof handler, 'function')
 
-  const res = createResponse()
-  await handler?.(
-    {
-      params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
-    },
-    res,
-  )
+    const res = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+        body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      },
+      res,
+    )
 
-  assert.equal(res.statusCode, 200)
-  assert.equal(storeState.published.length, 0)
-  assert.equal(recorder.delivered.length, 1)
-  const payload = JSON.parse(recorder.delivered[0] ?? '{}') as { type?: unknown; sessionId?: unknown }
-  assert.equal(payload.type, 'state-update')
-  assert.equal(payload.sessionId, 's1')
+    assert.equal(res.statusCode, 200)
+    assert.equal(storeState.published.length, 0)
+    assert.equal(subscriber.sent.length, 1)
+    const payload = JSON.parse(subscriber.sent[0] ?? '{}') as { type?: unknown; sessionId?: unknown }
+    assert.equal(payload.type, 'state-update')
+    assert.equal(payload.sessionId, 's1')
+
+    subscriber.emit('close')
+    await new Promise((resolve) => setImmediate(resolve))
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+  }
 })
 
-void test('session patch falls back to direct local websocket send when publishBroadcast exists without a real pubsub backend', async () => {
+void test('session patch falls back to direct local websocket send when publishBroadcast exists without a real pubsub backend', { concurrency: false }, async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
-  const recorder = createSocketRecorder('s1')
-  ws.wss.clients.add(recorder.socket)
+  const subscriber = createMockSocket()
+  const originalSetInterval = globalThis.setInterval
+  const originalClearInterval = globalThis.clearInterval
+  const heartbeatToken = { id: 'video-sync-test-heartbeat' }
+
+  globalThis.setInterval = (((callback: TimerHandler, _delay?: number, ...args: unknown[]) => {
+    void callback
+    void args
+    return heartbeatToken as unknown as ReturnType<typeof setInterval>
+  }) as unknown) as typeof setInterval
+  globalThis.clearInterval = (((timer: ReturnType<typeof setInterval> | number | undefined) => {
+    void timer
+  }) as unknown) as typeof clearInterval
 
   const sessionsWithNoOpPublish = {
     get: storeState.sessions.get,
@@ -1185,26 +1231,39 @@ void test('session patch falls back to direct local websocket send when publishB
     subscribeToBroadcast: storeState.sessions.subscribeToBroadcast,
   }
 
-  setupVideoSyncRoutes(app, sessionsWithNoOpPublish, ws as unknown as WsRouter)
+  try {
+    setupVideoSyncRoutes(app, sessionsWithNoOpPublish, ws as unknown as WsRouter)
+    const websocketHandler = ws.registered['/ws/video-sync']
+    assert.equal(typeof websocketHandler, 'function')
+    websocketHandler?.(subscriber.socket, new URLSearchParams(`sessionId=s1&role=student`))
+    await new Promise((resolve) => setImmediate(resolve))
+    subscriber.sent.length = 0
 
-  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
-  assert.equal(typeof handler, 'function')
+    const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+    assert.equal(typeof handler, 'function')
 
-  const res = createResponse()
-  await handler?.(
-    {
-      params: { sessionId: 's1' },
-      body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
-    },
-    res,
-  )
+    const res = createResponse()
+    await handler?.(
+      {
+        params: { sessionId: 's1' },
+        body: { sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43', stopSec: 120, instructorPasscode: TEST_INSTRUCTOR_PASSCODE },
+      },
+      res,
+    )
 
-  assert.equal(res.statusCode, 200)
-  assert.equal(storeState.published.length, 0)
-  assert.equal(recorder.delivered.length, 1)
-  const payload = JSON.parse(recorder.delivered[0] ?? '{}') as { type?: unknown; sessionId?: unknown }
-  assert.equal(payload.type, 'state-update')
-  assert.equal(payload.sessionId, 's1')
+    assert.equal(res.statusCode, 200)
+    assert.equal(storeState.published.length, 0)
+    assert.equal(subscriber.sent.length, 1)
+    const payload = JSON.parse(subscriber.sent[0] ?? '{}') as { type?: unknown; sessionId?: unknown }
+    assert.equal(payload.type, 'state-update')
+    assert.equal(payload.sessionId, 's1')
+
+    subscriber.emit('close')
+    await new Promise((resolve) => setImmediate(resolve))
+  } finally {
+    globalThis.setInterval = originalSetInterval
+    globalThis.clearInterval = originalClearInterval
+  }
 })
 
 void test('command route updates playback and emits extensible envelope', async () => {
@@ -1492,6 +1551,9 @@ void test('manager websocket rejects connections without a valid instructor pass
     sessionId: 's1',
     role: 'manager',
   }))
+  recorder.emit('message', JSON.stringify({
+    type: 'authenticate',
+  }))
 
   await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1513,6 +1575,9 @@ void test('manager websocket rejects oversized instructor passcodes before verif
   handler?.(recorder.socket, new URLSearchParams({
     sessionId: 's1',
     role: 'manager',
+  }))
+  recorder.emit('message', JSON.stringify({
+    type: 'authenticate',
     instructorPasscode: 'a'.repeat(10_000),
   }))
 
@@ -1536,16 +1601,22 @@ void test('manager websocket accepts connections with a valid instructor passcod
   handler?.(recorder.socket, new URLSearchParams({
     sessionId: 's1',
     role: 'manager',
+  }))
+  recorder.emit('message', JSON.stringify({
+    type: 'authenticate',
     instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
   }))
 
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   assert.equal(recorder.closed, null)
-  assert.equal(recorder.sent.length, 1)
+  assert.equal(recorder.sent.length, 2)
   const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { role?: string } }
   assert.equal(payload.type, 'state-snapshot')
   assert.equal(payload.payload?.role, 'manager')
+  const telemetryEnvelope = JSON.parse(recorder.sent[1] ?? '{}') as { type?: string; payload?: { reason?: string } }
+  assert.equal(telemetryEnvelope.type, 'telemetry-update')
+  assert.equal(telemetryEnvelope.payload?.reason, 'connection-change')
   recorder.emit('close')
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
@@ -1564,13 +1635,16 @@ void test('manager websocket accepts uppercase instructor passcodes by canonical
   handler?.(recorder.socket, new URLSearchParams({
     sessionId: 's1',
     role: 'manager',
+  }))
+  recorder.emit('message', JSON.stringify({
+    type: 'authenticate',
     instructorPasscode: TEST_INSTRUCTOR_PASSCODE.toUpperCase(),
   }))
 
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   assert.equal(recorder.closed, null)
-  assert.equal(recorder.sent.length, 1)
+  assert.equal(recorder.sent.length, 2)
   recorder.emit('close')
   await new Promise((resolve) => setTimeout(resolve, 0))
 })

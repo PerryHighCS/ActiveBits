@@ -110,6 +110,12 @@ interface SyncDeckSocket extends ActiveBitsWebSocket {
 interface SyncDeckWsMessage {
   type?: unknown
   payload?: unknown
+  instructorPasscode?: unknown
+}
+
+interface SyncDeckInstructorAuthMessage {
+  type: 'authenticate'
+  instructorPasscode: string
 }
 
 const WS_OPEN_READY_STATE = 1
@@ -591,6 +597,18 @@ function parseWsMessage(raw: unknown): SyncDeckWsMessage | null {
   }
 }
 
+function parseInstructorAuthMessage(raw: unknown): SyncDeckInstructorAuthMessage | null {
+  const message = parseWsMessage(raw)
+  if (!message || message.type !== 'authenticate' || typeof message.instructorPasscode !== 'string') {
+    return null
+  }
+
+  return {
+    type: 'authenticate',
+    instructorPasscode: message.instructorPasscode,
+  }
+}
+
 function sendSyncDeckState(socket: ActiveBitsWebSocket, payload: unknown): void {
   if (socket.readyState !== WS_OPEN_READY_STATE) {
     return
@@ -1059,7 +1077,28 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const role = query.get('role')
-    const instructorPasscode = query.get('instructorPasscode')
+    const instructorAuthMessagePromise = role === 'instructor'
+      ? new Promise<unknown | null>((resolve) => {
+        let settled = false
+        const settle = (value: unknown | null) => {
+          if (settled) {
+            return
+          }
+          settled = true
+          resolve(value)
+        }
+
+        socket.once('message', (raw: unknown) => {
+          settle(raw)
+        })
+        socket.once('close', () => {
+          settle(null)
+        })
+        socket.once('error', () => {
+          settle(null)
+        })
+      })
+      : null
 
     ;(async () => {
       const session = asSyncDeckSession(await sessions.get(sessionId))
@@ -1069,7 +1108,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
 
       if (role === 'instructor') {
-        if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+        const rawAuthMessage = await instructorAuthMessagePromise
+        const authMessage = parseInstructorAuthMessage(rawAuthMessage)
+        if (!authMessage || !verifyInstructorPasscode(session.data.instructorPasscode, authMessage.instructorPasscode)) {
           socket.close(1008, 'forbidden')
           return
         }

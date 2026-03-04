@@ -97,6 +97,11 @@ interface VideoSyncSocket extends ActiveBitsWebSocket {
   videoSyncRole?: VideoSyncRole
 }
 
+interface VideoSyncManagerAuthMessage {
+  type: 'authenticate'
+  instructorPasscode: string
+}
+
 interface CommandBody {
   instructorPasscode?: unknown
   type?: unknown
@@ -435,6 +440,43 @@ function normalizeDriftSec(value: unknown): number | null {
   }
 
   return clampSeconds(Math.abs(value))
+}
+
+function parseManagerAuthMessage(raw: unknown): VideoSyncManagerAuthMessage | null {
+  let text: string | null = null
+
+  if (typeof raw === 'string') {
+    text = raw
+  } else if (Buffer.isBuffer(raw)) {
+    text = raw.toString('utf8')
+  } else if (raw instanceof ArrayBuffer) {
+    text = Buffer.from(raw).toString('utf8')
+  }
+
+  if (text == null) {
+    return null
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return null
+  }
+
+  if (!isPlainObject(parsed) || parsed.type !== 'authenticate') {
+    return null
+  }
+
+  const instructorPasscode = normalizeInstructorPasscode(parsed.instructorPasscode)
+  if (instructorPasscode == null) {
+    return null
+  }
+
+  return {
+    type: 'authenticate',
+    instructorPasscode,
+  }
 }
 
 function getUnsyncedStudentsKey(sessionId: string): string {
@@ -929,9 +971,15 @@ async function broadcastEnvelope(
     }
   }
 
+  void ws
   const encoded = JSON.stringify(envelope)
-  for (const client of ws.wss.clients) {
-    if (client.readyState === WS_OPEN_READY_STATE && client.sessionId === sessionId) {
+  const subscribers = subscribersBySession.get(sessionId)
+  if (!subscribers || subscribers.size === 0) {
+    return
+  }
+
+  for (const client of subscribers) {
+    if (client.readyState === WS_OPEN_READY_STATE) {
       try {
         client.send(encoded)
       } catch {
@@ -1459,7 +1507,6 @@ export default function setupVideoSyncRoutes(
   ws.register('/ws/video-sync', (socket, query) => {
     const sessionId = query.get('sessionId')
     const roleParam = query.get('role')
-    const instructorPasscode = normalizeInstructorPasscode(query.get('instructorPasscode'))
 
     if (!sessionId) {
       socket.close(1008, 'Missing sessionId')
@@ -1467,6 +1514,28 @@ export default function setupVideoSyncRoutes(
     }
 
     const typedSocket = socket as VideoSyncSocket
+    const managerAuthMessagePromise = roleParam === 'manager'
+      ? new Promise<unknown | null>((resolve) => {
+        let settled = false
+        const settle = (value: unknown | null) => {
+          if (settled) {
+            return
+          }
+          settled = true
+          resolve(value)
+        }
+
+        typedSocket.once('message', (raw: unknown) => {
+          settle(raw)
+        })
+        typedSocket.once('close', () => {
+          settle(null)
+        })
+        typedSocket.once('error', () => {
+          settle(null)
+        })
+      })
+      : null
     let cleanedUp = false
     const handleSocketClosed = () => {
       if (cleanedUp) {
@@ -1521,7 +1590,14 @@ export default function setupVideoSyncRoutes(
       }
 
       if (roleParam === 'manager') {
-        if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+        const rawAuthMessage = await managerAuthMessagePromise
+        if (cleanedUp || typedSocket.readyState !== WS_OPEN_READY_STATE) {
+          handleSocketClosed()
+          return
+        }
+
+        const authMessage = parseManagerAuthMessage(rawAuthMessage)
+        if (!authMessage || !verifyInstructorPasscode(session.data.instructorPasscode, authMessage.instructorPasscode)) {
           typedSocket.close(1008, 'Forbidden')
           return
         }
