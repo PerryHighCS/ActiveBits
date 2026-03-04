@@ -16,6 +16,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-04
 - Area: activities
+- Discovery: `video-sync` students intentionally keep a blackout overlay until the instructor has explicitly started playback. A session with a configured `videoId` but `isPlaying === false` and `positionSec === startSec` is still considered "not started", so permanent-link bootstrap flows must send an initial `play` transition instead of only saving config.
+- Why it matters: Configuring the video source alone is not enough to let students see playback. Flows that promise "jump straight into the video" need to move the shared state past the pre-start gate or students will remain stuck on the waiting overlay.
+- Evidence: `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`
+- Follow-up action: Keep permanent-link/bootstrap flows aligned with the student start gate, and if the product ever wants students to see a cued-but-paused frame instead, change `hasInstructorPlaybackStarted(...)` deliberately rather than assuming config is sufficient.
+- Owner: Codex
+
+- Date: 2026-03-04
+- Area: activities
 - Discovery: `video-sync` read-path session normalization is persistence-worthy when it repairs malformed stored data. `GET /api/video-sync/:sessionId/session` should call `sessions.set(...)` if normalization changed persisted fields such as `instructorPasscode`, `state.videoId`, `state.serverTimestampMs`, or truncated telemetry error fields, even when playback projection and connection telemetry did not otherwise require a write.
 - Why it matters: In Valkey mode, `sessions.get()` returns a deserialized copy, so normalization fixes are lost unless the route explicitly persists them. Without this, malformed sessions can remain broken indefinitely and every read repeats the same repair work.
 - Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`

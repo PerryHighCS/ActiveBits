@@ -6,16 +6,15 @@ const videoSyncConfig: ActivityConfig = {
   description: 'Synchronized YouTube playback for whole-class instruction',
   color: 'rose',
   soloMode: false,
+  deepLinkOptions: {
+    sourceUrl: {
+      label: 'YouTube URL',
+      type: 'text',
+      validator: 'url',
+    },
+  },
   manageLayout: {
     expandShell: true,
-  },
-  createSessionBootstrap: {
-    sessionStorage: [
-      {
-        keyPrefix: 'video_sync_instructor_',
-        responseField: 'instructorPasscode',
-      },
-    ],
   },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',

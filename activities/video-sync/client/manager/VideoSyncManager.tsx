@@ -1,8 +1,9 @@
 import SessionHeader from '@src/components/common/SessionHeader'
+import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   parseVideoSyncEnvelope,
   type VideoSyncState,
@@ -48,6 +49,17 @@ interface InstructorPasscodeResponse {
   instructorPasscode?: unknown
 }
 
+interface ManagerLocationState {
+  createSessionPayload?: {
+    instructorPasscode?: unknown
+  }
+}
+
+type AutoStartStatus = 'idle' | 'starting' | 'failed'
+
+const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
+const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
+
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   connections: { activeCount: 0 },
   autoplay: { blockedCount: 0 },
@@ -71,13 +83,80 @@ function clampNumber(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
-function buildVideoSyncPasscodeKey(sessionId: string): string {
-  return `video_sync_instructor_${sessionId}`
+export function readBootstrapInstructorPasscode(locationState: unknown): string | null {
+  if (
+    locationState == null ||
+    typeof locationState !== 'object' ||
+    Array.isArray(locationState)
+  ) {
+    return null
+  }
+
+  const state = locationState as ManagerLocationState
+  const value = state.createSessionPayload?.instructorPasscode
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+export function readBootstrapSourceUrl(search: string): string | null {
+  const value = new URLSearchParams(search).get('sourceUrl')
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export function shouldAutoStartBootstrapSource(params: {
+  setupMode: boolean
+  bootstrapSourceUrl: string | null
+  isPasscodeReady: boolean
+  instructorPasscode: string | null
+  autoStartStatus: AutoStartStatus
+}): boolean {
+  return (
+    params.setupMode &&
+    params.bootstrapSourceUrl != null &&
+    params.autoStartStatus !== 'failed' &&
+    params.isPasscodeReady &&
+    params.instructorPasscode != null
+  )
+}
+
+export async function autoConfigureBootstrapSource(params: {
+  bootstrapSourceUrl: string
+  saveConfig: (sourceUrl: string) => Promise<boolean>
+}): Promise<boolean> {
+  return params.saveConfig(params.bootstrapSourceUrl)
+}
+
+export function clearManagerPlayerLoadError(message: string | null): string | null {
+  return message === YOUTUBE_MANAGER_LOAD_ERROR ? null : message
+}
+
+export function shouldApplyManagerStateUpdate(
+  currentState: VideoSyncState,
+  nextState: VideoSyncState,
+): boolean {
+  return !(currentState.videoId.length > 0 && nextState.videoId.length === 0)
+}
+
+export function shouldCorrectManagerPlaybackDrift(
+  playerPositionSec: number,
+  desiredPositionSec: number,
+  isPlaying: boolean,
+): boolean {
+  return shouldCorrectDrift(
+    playerPositionSec,
+    desiredPositionSec,
+    isPlaying ? MANAGER_PLAYING_DRIFT_TOLERANCE_SEC : DEFAULT_DRIFT_TOLERANCE_SEC,
+  )
 }
 
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [state, setState] = useState<VideoSyncState>(DEFAULT_STATE)
   const [telemetry, setTelemetry] = useState<VideoSyncTelemetry>(EMPTY_TELEMETRY)
@@ -89,6 +168,7 @@ export default function VideoSyncManager() {
   const [playerReady, setPlayerReady] = useState(false)
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
+  const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -97,10 +177,23 @@ export default function VideoSyncManager() {
   const latestStateRef = useRef<VideoSyncState>(DEFAULT_STATE)
   const suppressPlayerEventsRef = useRef(false)
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
+  const autoStartAttemptKeyRef = useRef<string | null>(null)
+  const bootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
 
   useEffect(() => {
     latestStateRef.current = state
   }, [state])
+
+  const applyManagerStateUpdate = useCallback((nextState: VideoSyncState): void => {
+    setState((currentState) => {
+      if (!shouldApplyManagerStateUpdate(currentState, nextState)) {
+        return currentState
+      }
+
+      setSetupMode(nextState.videoId.length === 0)
+      return nextState
+    })
+  }, [])
 
   const setSuppressPlayerEventsForWindow = useCallback((ms = 450): void => {
     suppressPlayerEventsRef.current = true
@@ -125,13 +218,15 @@ export default function VideoSyncManager() {
   const sendCommand = useCallback(async (
     command: 'play' | 'pause' | 'seek',
     options?: { positionSec?: number; reportErrors?: boolean },
-  ): Promise<void> => {
-    if (!sessionId) return
+  ): Promise<boolean> => {
+    if (!sessionId) {
+      return false
+    }
     if (!instructorPasscode) {
       if (options?.reportErrors !== false) {
         setErrorMessage('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')
       }
-      return
+      return false
     }
 
     const payload: Record<string, unknown> = { type: command }
@@ -160,6 +255,7 @@ export default function VideoSyncManager() {
         setTelemetry(updated.data.telemetry)
       }
       setErrorMessage(null)
+      return true
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send command'
       if (options?.reportErrors === false) {
@@ -167,6 +263,7 @@ export default function VideoSyncManager() {
       } else {
         setErrorMessage(message)
       }
+      return false
     }
   }, [instructorPasscode, sessionId])
 
@@ -189,7 +286,7 @@ export default function VideoSyncManager() {
       loadedVideoIdRef.current = nextState.videoId
     } else {
       const currentTimeSec = player.getCurrentTime()
-      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, DEFAULT_DRIFT_TOLERANCE_SEC)) {
+      if (shouldCorrectManagerPlaybackDrift(currentTimeSec, desiredPositionSec, nextState.isPlaying)) {
         player.seekTo(desiredPositionSec, true)
       }
     }
@@ -217,8 +314,7 @@ export default function VideoSyncManager() {
 
       const data = (await response.json()) as SessionResponse
       if (data.data?.state) {
-        setState(data.data.state)
-        setSetupMode(data.data.state.videoId.length === 0)
+        applyManagerStateUpdate(data.data.state)
       }
       if (data.data?.telemetry) {
         setTelemetry(data.data.telemetry)
@@ -246,10 +342,17 @@ export default function VideoSyncManager() {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      const stored = window.sessionStorage.getItem(buildVideoSyncPasscodeKey(sessionId))
-      if (stored) {
+      const bootstrapped = readBootstrapInstructorPasscode(location.state)
+        ?? readBootstrapInstructorPasscode({
+          createSessionPayload: consumeCreateSessionBootstrapPayload('video-sync', sessionId) ?? undefined,
+        })
+      if (bootstrapped) {
+        void navigate(location.pathname + location.search, {
+          replace: true,
+          state: null,
+        })
         if (!isCancelled) {
-          setInstructorPasscode(stored)
+          setInstructorPasscode(bootstrapped)
           setIsPasscodeReady(true)
         }
         return
@@ -268,7 +371,6 @@ export default function VideoSyncManager() {
 
         const payload = (await response.json()) as InstructorPasscodeResponse
         if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
-          window.sessionStorage.setItem(buildVideoSyncPasscodeKey(sessionId), payload.instructorPasscode)
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
@@ -295,13 +397,13 @@ export default function VideoSyncManager() {
     return () => {
       isCancelled = true
     }
-  }, [sessionId])
+  }, [location.pathname, location.search, location.state, navigate, sessionId])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
       const payload = envelope.payload as { state?: VideoSyncState; telemetry?: VideoSyncTelemetry }
       if (payload.state) {
-        setState(payload.state)
+        applyManagerStateUpdate(payload.state)
       }
       if (payload.telemetry) {
         setTelemetry(payload.telemetry)
@@ -360,12 +462,15 @@ export default function VideoSyncManager() {
             onReady: () => {
               if (cancelled) return
               setPlayerReady(true)
+              setErrorMessage((current) => clearManagerPlayerLoadError(current))
               applyStateToPlayer(latestStateRef.current)
             },
             onStateChange: (event) => {
               if (cancelled || suppressPlayerEventsRef.current) {
                 return
               }
+
+              setErrorMessage((current) => clearManagerPlayerLoadError(current))
 
               const target = event.target
               const playerPosition = clampNumber(target.getCurrentTime())
@@ -379,7 +484,7 @@ export default function VideoSyncManager() {
             },
             onError: () => {
               if (cancelled) return
-              setErrorMessage('YouTube player failed to load. Try a different video URL.')
+              setErrorMessage(YOUTUBE_MANAGER_LOAD_ERROR)
             },
           },
         })
@@ -414,6 +519,19 @@ export default function VideoSyncManager() {
     applyStateToPlayer(state)
   }, [playerReady, state, applyStateToPlayer])
 
+  useEffect(() => {
+    if (!setupMode) {
+      return
+    }
+
+    const bootstrappedSourceUrl = readBootstrapSourceUrl(location.search)
+    if (!bootstrappedSourceUrl) {
+      return
+    }
+
+    setSourceUrlInput((current) => (current.trim().length > 0 ? current : bootstrappedSourceUrl))
+  }, [location.search, setupMode])
+
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: Boolean(sessionId && instructorPasscode && isPasscodeReady),
@@ -436,23 +554,27 @@ export default function VideoSyncManager() {
     return () => disconnect()
   }, [sessionId, fetchSession, connect, disconnect, instructorPasscode, isPasscodeReady])
 
-  const saveConfig = async (): Promise<void> => {
-    if (!sessionId) return
+  const saveConfigWithValues = useCallback(async (
+    sourceUrlValue: string,
+    stopTimeEnabled: boolean,
+    stopSecTextValue: string,
+  ): Promise<boolean> => {
+    if (!sessionId) return false
     if (!isPasscodeReady) {
       setErrorMessage('Loading instructor credentials...')
-      return
+      return false
     }
     if (!instructorPasscode) {
       setErrorMessage('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')
-      return
+      return false
     }
 
     let stopSecValue: number | null = null
-    if (hasStopTime) {
-      const parsedStopSec = parseYouTubeTimestampSeconds(stopSecInput)
+    if (stopTimeEnabled) {
+      const parsedStopSec = parseYouTubeTimestampSeconds(stopSecTextValue)
       if (parsedStopSec == null) {
         setErrorMessage('End time must be a valid number of seconds or h/m/s value like 1m23s.')
-        return
+        return false
       }
       stopSecValue = parsedStopSec
     }
@@ -463,7 +585,7 @@ export default function VideoSyncManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           instructorPasscode,
-          sourceUrl: sourceUrlInput,
+          sourceUrl: sourceUrlValue,
           stopSec: stopSecValue,
         }),
       })
@@ -475,18 +597,86 @@ export default function VideoSyncManager() {
 
       const updated = (await response.json()) as ConfigResponse
       if (updated.data?.state) {
-        setState(updated.data.state)
-        setSetupMode(updated.data.state.videoId.length === 0)
+        applyManagerStateUpdate(updated.data.state)
       }
       if (updated.data?.telemetry) {
         setTelemetry(updated.data.telemetry)
       }
       setErrorMessage(null)
+      return true
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save video config'
       setErrorMessage(message)
+      return false
     }
-  }
+  }, [applyManagerStateUpdate, hasStopTime, instructorPasscode, isPasscodeReady, sessionId])
+
+  const saveConfig = useCallback(async (): Promise<void> => {
+    await saveConfigWithValues(sourceUrlInput, hasStopTime, stopSecInput)
+  }, [hasStopTime, saveConfigWithValues, sourceUrlInput, stopSecInput])
+
+  useEffect(() => {
+    autoStartAttemptKeyRef.current = null
+    setAutoStartStatus('idle')
+  }, [bootstrapSourceUrl, sessionId])
+
+  useEffect(() => {
+    if (!setupMode || !bootstrapSourceUrl) {
+      return
+    }
+
+    setSourceUrlInput((current) => (current.trim().length > 0 ? current : bootstrapSourceUrl))
+  }, [bootstrapSourceUrl, setupMode])
+
+  useEffect(() => {
+    if (!setupMode || !bootstrapSourceUrl) {
+      return
+    }
+
+    if (!isPasscodeReady) {
+      setAutoStartStatus('starting')
+      return
+    }
+
+    if (!instructorPasscode) {
+      setAutoStartStatus('failed')
+      return
+    }
+
+    if (!shouldAutoStartBootstrapSource({
+      setupMode,
+      bootstrapSourceUrl,
+      isPasscodeReady,
+      instructorPasscode,
+      autoStartStatus,
+    })) {
+      return
+    }
+
+    const attemptKey = `${sessionId ?? ''}:${bootstrapSourceUrl}`
+    if (autoStartAttemptKeyRef.current === attemptKey) {
+      return
+    }
+
+    autoStartAttemptKeyRef.current = attemptKey
+    setAutoStartStatus('starting')
+
+    void (async () => {
+      const ok = await autoConfigureBootstrapSource({
+        bootstrapSourceUrl,
+        saveConfig: async (sourceUrl) => saveConfigWithValues(sourceUrl, false, ''),
+      })
+      setAutoStartStatus(ok ? 'idle' : 'failed')
+    })()
+  }, [
+    autoStartStatus,
+    bootstrapSourceUrl,
+    instructorPasscode,
+    isPasscodeReady,
+    saveConfigWithValues,
+    sessionId,
+    setupMode,
+  ])
 
   const handleEndSession = async (): Promise<void> => {
     if (!sessionId) return
@@ -497,6 +687,8 @@ export default function VideoSyncManager() {
   const displayPosition = useMemo(() => computeDesiredPositionSec(state), [state])
 
   if (setupMode) {
+    const shouldShowAutoStartSplash = bootstrapSourceUrl != null && autoStartStatus !== 'failed'
+
     return (
       <div className="w-full p-4 space-y-4">
         <SessionHeader
@@ -511,55 +703,65 @@ export default function VideoSyncManager() {
           </div>
         )}
 
-        <section className="max-w-2xl border rounded p-4 space-y-3" aria-labelledby="video-sync-config-heading">
-          <h2 id="video-sync-config-heading" className="text-xl font-semibold">Step 1: Configure video source</h2>
-          <label className="block">
-            <span className="block mb-1 font-medium">YouTube URL</span>
-            <input
-              className="border rounded p-2 w-full"
-              type="url"
-              value={sourceUrlInput}
-              onChange={(event) => setSourceUrlInput(event.target.value)}
-              placeholder="https://www.youtube.com/watch?v=...&t=1m23s or https://youtu.be/..."
-              aria-label="YouTube URL"
-            />
-            <span className="mt-1 block text-sm text-gray-600">
-              Shared URLs can include `t`, `start`, and `end` timestamps like `1m23s`.
-            </span>
-          </label>
-
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={hasStopTime}
-              onChange={(event) => setHasStopTime(event.target.checked)}
-              aria-controls="video-sync-stop-time"
-              aria-expanded={hasStopTime}
-            />
-            <span className="font-medium">Set stop time</span>
-          </label>
-
-          {hasStopTime ? (
-            <label id="video-sync-stop-time" className="block max-w-xs">
-              <span className="block mb-1 font-medium">Stop at</span>
+        {shouldShowAutoStartSplash ? (
+          <section className="max-w-2xl border rounded p-4 space-y-3" aria-labelledby="video-sync-autostart-heading">
+            <h2 id="video-sync-autostart-heading" className="text-xl font-semibold">Preparing instructor view…</h2>
+            <p className="text-gray-700">
+              Loading the configured YouTube video from your permanent link and moving directly into the instructor view.
+            </p>
+            <p className="text-sm text-gray-600 break-all">{bootstrapSourceUrl}</p>
+          </section>
+        ) : (
+          <section className="max-w-2xl border rounded p-4 space-y-3" aria-labelledby="video-sync-config-heading">
+            <h2 id="video-sync-config-heading" className="text-xl font-semibold">Step 1: Configure video source</h2>
+            <label className="block">
+              <span className="block mb-1 font-medium">YouTube URL</span>
               <input
                 className="border rounded p-2 w-full"
-                type="text"
-                value={stopSecInput}
-                onChange={(event) => setStopSecInput(event.target.value)}
-                placeholder="2m10s or 130"
-                aria-label="Stop at"
+                type="url"
+                value={sourceUrlInput}
+                onChange={(event) => setSourceUrlInput(event.target.value)}
+                placeholder="https://www.youtube.com/watch?v=...&t=1m23s or https://youtu.be/..."
+                aria-label="YouTube URL"
               />
               <span className="mt-1 block text-sm text-gray-600">
-                Accepts seconds or `h/m/s` format.
+                Shared URLs can include `t`, `start`, and `end` timestamps like `1m23s`.
               </span>
             </label>
-          ) : null}
 
-          <Button disabled={!isPasscodeReady} onClick={() => void saveConfig()}>
-            {isPasscodeReady ? 'Start instructor view' : 'Loading instructor access...'}
-          </Button>
-        </section>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={hasStopTime}
+                onChange={(event) => setHasStopTime(event.target.checked)}
+                aria-controls="video-sync-stop-time"
+                aria-expanded={hasStopTime}
+              />
+              <span className="font-medium">Set stop time</span>
+            </label>
+
+            {hasStopTime ? (
+              <label id="video-sync-stop-time" className="block max-w-xs">
+                <span className="block mb-1 font-medium">Stop at</span>
+                <input
+                  className="border rounded p-2 w-full"
+                  type="text"
+                  value={stopSecInput}
+                  onChange={(event) => setStopSecInput(event.target.value)}
+                  placeholder="2m10s or 130"
+                  aria-label="Stop at"
+                />
+                <span className="mt-1 block text-sm text-gray-600">
+                  Accepts seconds or `h/m/s` format.
+                </span>
+              </label>
+            ) : null}
+
+            <Button disabled={!isPasscodeReady} onClick={() => void saveConfig()}>
+              {isPasscodeReady ? 'Start instructor view' : 'Loading instructor access...'}
+            </Button>
+          </section>
+        )}
       </div>
     )
   }

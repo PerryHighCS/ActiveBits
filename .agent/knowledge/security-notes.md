@@ -24,6 +24,23 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Follow-up action: Keep any future privileged devcontainer changes opt-in, and document the specific local tool class that requires them instead of broadening the default container.
 - Owner: Codex
 
+- Date: 2026-03-04
+- Area: video-sync manager bootstrap
+- Observation: Temporary `video-sync` sessions now recover the create-session `instructorPasscode` from a same-tab in-memory bootstrap map when router navigation state is unavailable. The payload is consumed once and never written to Web Storage for this fallback path.
+- Why it matters: This restores ad hoc teacher startup without reintroducing the broader XSS exposure of persisting the passcode in `sessionStorage` across the tab lifetime.
+- Evidence: `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/video-sync/client/manager/VideoSyncManager.tsx`
+- Follow-up action: If cross-reload recovery is needed for non-persistent sessions, add an explicit server-issued recovery mechanism rather than expanding Web Storage use.
+- Owner: Codex
+
+- Date: 2026-03-04
+- Area: video-sync manager credential bootstrap
+- Threat or risk: Persisting the manager `instructorPasscode` in `sessionStorage` leaves a 32-byte session credential available to any same-origin JavaScript, so an XSS bug could recover and replay it long after the initial create redirect.
+- Control or mitigation: `video-sync` now treats the create-session passcode as a one-time router-state bootstrap consumed on first manager mount and immediately removed from navigation state; subsequent recovery uses the teacher-cookie-authenticated `/api/video-sync/:sessionId/instructor-passcode` endpoint instead of browser storage.
+- Residual risk: The passcode remains present in live React state while the manager page is open and still travels in manager-authenticated requests/WebSocket URLs. Temporary non-persistent sessions also no longer survive a full-page reload with manager credentials intact unless another authenticated recovery path is added.
+- Validation (test/review/path): `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/video-sync/activity.config.ts`.
+- Follow-up action: If preserving manager control across full reloads for temporary sessions becomes a requirement, prefer an httpOnly server-issued recovery cookie or short-lived recovery token over reintroducing Web Storage.
+- Owner: Codex
+
 - Date: 2026-03-03
 - Area: video-sync persistent teacher-cookie parsing
 - Threat or risk: The `persistent_sessions` cookie is client-controlled input, so logging JSON parse failures at error level lets attackers generate noisy server log spam without affecting authorization.

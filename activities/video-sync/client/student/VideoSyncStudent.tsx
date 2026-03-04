@@ -31,11 +31,14 @@ interface SessionResponse {
   }
 }
 
+const STUDENT_PLAYING_DRIFT_TOLERANCE_SEC = 0.5
+
 export function shouldInitializeYoutubePlayer(
+  videoId: string,
   container: HTMLDivElement | null,
   existingPlayer: YoutubePlayerLike | null,
 ): boolean {
-  return container != null && existingPlayer == null
+  return videoId.length > 0 && container != null && existingPlayer == null
 }
 
 const DEFAULT_STATE: VideoSyncState = {
@@ -137,6 +140,18 @@ export function clearAutoplayCheckTimer(autoplayCheckTimerRef: { current: number
   }
 }
 
+export function shouldCorrectStudentPlaybackDrift(
+  playerPositionSec: number,
+  desiredPositionSec: number,
+  isPlaying: boolean,
+): boolean {
+  return shouldCorrectDrift(
+    playerPositionSec,
+    desiredPositionSec,
+    isPlaying ? STUDENT_PLAYING_DRIFT_TOLERANCE_SEC : DEFAULT_DRIFT_TOLERANCE_SEC,
+  )
+}
+
 export async function reportVideoSyncStudentEvent(params: {
   sessionId: string | null
   studentId: string
@@ -227,7 +242,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       const currentTimeSec = player.getCurrentTime()
       const driftSec = computeDriftSec(currentTimeSec, desiredPositionSec)
 
-      if (shouldCorrectDrift(currentTimeSec, desiredPositionSec, DEFAULT_DRIFT_TOLERANCE_SEC)) {
+      if (shouldCorrectStudentPlaybackDrift(currentTimeSec, desiredPositionSec, nextState.isPlaying)) {
         const wasUnsynced = isLocallyUnsyncedRef.current
         player.seekTo(desiredPositionSec, true)
         isLocallyUnsyncedRef.current = true
@@ -294,7 +309,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   })
 
   useEffect(() => {
-    if (!shouldInitializeYoutubePlayer(playerContainerRef.current, playerRef.current)) {
+    if (!shouldInitializeYoutubePlayer(state.videoId, playerContainerRef.current, playerRef.current)) {
       return
     }
 
@@ -355,7 +370,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       playerRef.current?.destroy()
       playerRef.current = null
     }
-  }, [reportEvent])
+  }, [reportEvent, state.videoId])
 
   useEffect(() => {
     if (!playerReady) return

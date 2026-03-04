@@ -55,6 +55,8 @@ export interface ManageDashboardUtilityLike {
   description?: string
 }
 
+const createSessionBootstrapPayloads = new Map<string, Record<string, unknown>>()
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -157,6 +159,24 @@ export function persistCreateSessionBootstrapToSessionStorage(
       console.warn('[ManageDashboard] Failed to persist create-session bootstrap data to sessionStorage:', error)
     }
   }
+}
+
+export function storeCreateSessionBootstrapPayload(
+  activityId: string,
+  sessionId: string,
+  payload: Record<string, unknown>,
+): void {
+  createSessionBootstrapPayloads.set(`${activityId}:${sessionId}`, payload)
+}
+
+export function consumeCreateSessionBootstrapPayload(
+  activityId: string,
+  sessionId: string,
+): Record<string, unknown> | null {
+  const key = `${activityId}:${sessionId}`
+  const payload = createSessionBootstrapPayloads.get(key) ?? null
+  createSessionBootstrapPayloads.delete(key)
+  return payload
 }
 
 export function parseDeepLinkOptions(rawDeepLinkOptions: unknown): DeepLinkOptions {

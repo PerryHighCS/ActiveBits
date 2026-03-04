@@ -9,6 +9,9 @@ import {
   buildPersistentLinkUrl,
   buildManageDashboardUtilityUrl,
   buildPersistentSessionKey,
+  buildQueryString,
+  buildSoloLink,
+  storeCreateSessionBootstrapPayload,
   describeSelectedOptions,
   filterPersistentEntryPolicyOptionsForActivity,
   initializeDeepLinkOptions,
@@ -192,8 +195,13 @@ export default function ManageDashboard() {
       }
 
       persistCreateSessionBootstrapToSessionStorage(getActivityById(activityId)?.createSessionBootstrap, payload.id, payload)
+      storeCreateSessionBootstrapPayload(activityId, payload.id, payload)
 
-      void navigate(`/manage/${activityId}/${payload.id}`)
+      void navigate(`/manage/${activityId}/${payload.id}`, {
+        state: {
+          createSessionPayload: payload,
+        },
+      })
     } catch (createError) {
       console.error(createError)
       setSessionError('Could not create session. Please try again.')

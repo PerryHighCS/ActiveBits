@@ -6,6 +6,7 @@ import {
   buildPersistentSessionKey,
   buildQueryString,
   buildSoloLink,
+  consumeCreateSessionBootstrapPayload,
   describeSelectedOptions,
   filterPersistentEntryPolicyOptionsForActivity,
   initializeDeepLinkOptions,
@@ -15,6 +16,7 @@ import {
   parseDeepLinkGenerator,
   persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkOptions,
+  storeCreateSessionBootstrapPayload,
   validateDeepLinkSelection,
 } from './manageDashboardUtils'
 
@@ -341,6 +343,22 @@ void test('persistCreateSessionBootstrapToSessionStorage ignores sessionStorage 
       writable: true,
     })
   }
+})
+
+void test('storeCreateSessionBootstrapPayload keeps a same-tab bootstrap payload until first consume', () => {
+  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
+    id: 'session-123',
+    instructorPasscode: 'teacher-passcode',
+  })
+
+  assert.deepEqual(
+    consumeCreateSessionBootstrapPayload('video-sync', 'session-123'),
+    {
+      id: 'session-123',
+      instructorPasscode: 'teacher-passcode',
+    },
+  )
+  assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
 })
 
 void test('buildPersistentLinkUrl appends query only for legacy or append-query mode', () => {
