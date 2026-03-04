@@ -3,7 +3,9 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import {
+  parseVideoSyncErrorMessagePayload,
   parseVideoSyncEnvelope,
+  parseVideoSyncStateMessagePayload,
   type VideoSyncState,
 } from '../protocol.js'
 import {
@@ -149,6 +151,13 @@ export function clearAutoplayCheckTimer(autoplayCheckTimerRef: { current: number
     window.clearTimeout(autoplayCheckTimerRef.current)
     autoplayCheckTimerRef.current = null
   }
+}
+
+export function shouldRunAutoplayCheck(
+  currentPlayer: YoutubePlayerLike | null,
+  scheduledPlayer: YoutubePlayerLike,
+): boolean {
+  return currentPlayer === scheduledPlayer
 }
 
 export function shouldCorrectStudentPlaybackDrift(
@@ -316,6 +325,10 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       clearAutoplayCheckTimer(autoplayCheckTimerRef)
 
       autoplayCheckTimerRef.current = window.setTimeout(() => {
+        if (!shouldRunAutoplayCheck(playerRef.current, player)) {
+          return
+        }
+
         const stateValue = player.getPlayerState()
         if (stateValue !== PLAYING) {
           setAutoplayBlocked(true)
@@ -347,15 +360,15 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       if (!envelope || envelope.sessionId !== sessionId) return
 
       if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
-        const payload = envelope.payload as { state?: VideoSyncState }
-        if (payload.state) {
+        const payload = parseVideoSyncStateMessagePayload(envelope.payload)
+        if (payload?.state) {
           setState(payload.state)
         }
       }
 
       if (envelope.type === 'error') {
-        const payload = envelope.payload as { message?: string }
-        if (typeof payload.message === 'string' && payload.message.length > 0) {
+        const payload = parseVideoSyncErrorMessagePayload(envelope.payload)
+        if (typeof payload?.message === 'string' && payload.message.length > 0) {
           setErrorMessage(payload.message)
         }
       }

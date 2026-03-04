@@ -44,8 +44,134 @@ export interface VideoSyncWsEnvelope<TPayload = unknown> {
   payload: TPayload
 }
 
+export interface VideoSyncStateMessagePayload {
+  state?: VideoSyncState
+  telemetry?: VideoSyncTelemetry
+}
+
+export interface VideoSyncTelemetryMessagePayload {
+  telemetry?: VideoSyncTelemetry
+}
+
+export interface VideoSyncErrorMessagePayload {
+  message?: string
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isNullableFiniteNumber(value: unknown): value is number | null {
+  return value === null || isFiniteNumber(value)
+}
+
+export function isVideoSyncState(value: unknown): value is VideoSyncState {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    value.provider === 'youtube' &&
+    typeof value.videoId === 'string' &&
+    isFiniteNumber(value.startSec) &&
+    isNullableFiniteNumber(value.stopSec) &&
+    isFiniteNumber(value.positionSec) &&
+    typeof value.isPlaying === 'boolean' &&
+    value.playbackRate === 1 &&
+    (value.updatedBy === 'manager' || value.updatedBy === 'system') &&
+    isFiniteNumber(value.serverTimestampMs)
+  )
+}
+
+export function isVideoSyncTelemetry(value: unknown): value is VideoSyncTelemetry {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  if (!isRecord(value.connections) || !isFiniteNumber(value.connections.activeCount)) {
+    return false
+  }
+
+  if (!isRecord(value.autoplay) || !isFiniteNumber(value.autoplay.blockedCount)) {
+    return false
+  }
+
+  if (!isRecord(value.sync)) {
+    return false
+  }
+
+  if (
+    !isFiniteNumber(value.sync.unsyncedStudents) ||
+    !isNullableFiniteNumber(value.sync.lastDriftSec) ||
+    (
+      value.sync.lastCorrectionResult !== 'none' &&
+      value.sync.lastCorrectionResult !== 'attempted' &&
+      value.sync.lastCorrectionResult !== 'success' &&
+      value.sync.lastCorrectionResult !== 'failed'
+    )
+  ) {
+    return false
+  }
+
+  if (!isRecord(value.error)) {
+    return false
+  }
+
+  return (
+    (value.error.code === null || typeof value.error.code === 'string') &&
+    (value.error.message === null || typeof value.error.message === 'string')
+  )
+}
+
+export function parseVideoSyncStateMessagePayload(payload: unknown): VideoSyncStateMessagePayload | null {
+  if (!isRecord(payload)) {
+    return null
+  }
+
+  if ('state' in payload && payload.state !== undefined && !isVideoSyncState(payload.state)) {
+    return null
+  }
+
+  if ('telemetry' in payload && payload.telemetry !== undefined && !isVideoSyncTelemetry(payload.telemetry)) {
+    return null
+  }
+
+  return {
+    state: isVideoSyncState(payload.state) ? payload.state : undefined,
+    telemetry: isVideoSyncTelemetry(payload.telemetry) ? payload.telemetry : undefined,
+  }
+}
+
+export function parseVideoSyncTelemetryMessagePayload(payload: unknown): VideoSyncTelemetryMessagePayload | null {
+  if (!isRecord(payload)) {
+    return null
+  }
+
+  if ('telemetry' in payload && payload.telemetry !== undefined && !isVideoSyncTelemetry(payload.telemetry)) {
+    return null
+  }
+
+  return {
+    telemetry: isVideoSyncTelemetry(payload.telemetry) ? payload.telemetry : undefined,
+  }
+}
+
+export function parseVideoSyncErrorMessagePayload(payload: unknown): VideoSyncErrorMessagePayload | null {
+  if (!isRecord(payload)) {
+    return null
+  }
+
+  if ('message' in payload && payload.message !== undefined && typeof payload.message !== 'string') {
+    return null
+  }
+
+  return {
+    message: typeof payload.message === 'string' ? payload.message : undefined,
+  }
 }
 
 function isVideoSyncMessageType(value: unknown): value is VideoSyncMessageType {

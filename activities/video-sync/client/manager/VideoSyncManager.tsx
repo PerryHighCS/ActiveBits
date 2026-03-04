@@ -5,7 +5,10 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
+  parseVideoSyncErrorMessagePayload,
   parseVideoSyncEnvelope,
+  parseVideoSyncStateMessagePayload,
+  parseVideoSyncTelemetryMessagePayload,
   type VideoSyncState,
   type VideoSyncTelemetry,
   type VideoSyncWsEnvelope,
@@ -21,7 +24,7 @@ import {
   type YoutubeNamespace,
   type YoutubePlayerLike,
 } from '../youtubeIframeApi.js'
-import { parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
+import { parseYouTubeStartSecondsFromUrl, parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
 
 interface SessionResponse {
   id?: string
@@ -60,6 +63,7 @@ type AutoStartStatus = 'idle' | 'starting' | 'failed'
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
+const MAX_MANAGER_API_ERROR_MESSAGE_LENGTH = 160
 
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   connections: { activeCount: 0 },
@@ -135,6 +139,26 @@ export function clearManagerPlayerLoadError(message: string | null): string | nu
   return message === YOUTUBE_MANAGER_LOAD_ERROR ? null : message
 }
 
+export function sanitizeManagerApiErrorMessage(
+  message: unknown,
+  fallback: string,
+): string {
+  if (typeof message !== 'string') {
+    return fallback
+  }
+
+  const trimmed = message.trim()
+  if (trimmed.length === 0) {
+    return fallback
+  }
+
+  if (trimmed.length <= MAX_MANAGER_API_ERROR_MESSAGE_LENGTH) {
+    return trimmed
+  }
+
+  return `${trimmed.slice(0, MAX_MANAGER_API_ERROR_MESSAGE_LENGTH - 1).trimEnd()}…`
+}
+
 export function shouldApplyManagerStateUpdate(
   currentState: VideoSyncState,
   nextState: VideoSyncState,
@@ -168,6 +192,34 @@ export function getManagerPlaybackIntentForStateChange(params: {
   }
 
   return null
+}
+
+export function parseManagerStopTimeInput(params: {
+  sourceUrl: string
+  stopTimeEnabled: boolean
+  stopSecText: string
+}): { stopSecValue: number | null; errorMessage: string | null } {
+  if (!params.stopTimeEnabled) {
+    return { stopSecValue: null, errorMessage: null }
+  }
+
+  const stopSecValue = parseYouTubeTimestampSeconds(params.stopSecText)
+  if (stopSecValue == null) {
+    return {
+      stopSecValue: null,
+      errorMessage: 'End time must be a valid number of seconds or h/m/s value like 1m23s.',
+    }
+  }
+
+  const startSecValue = parseYouTubeStartSecondsFromUrl(params.sourceUrl.trim())
+  if (startSecValue != null && stopSecValue <= startSecValue) {
+    return {
+      stopSecValue,
+      errorMessage: 'End time must be greater than the YouTube URL start time.',
+    }
+  }
+
+  return { stopSecValue, errorMessage: null }
 }
 
 export default function VideoSyncManager() {
@@ -273,7 +325,7 @@ export default function VideoSyncManager() {
 
       if (!response.ok) {
         const failure = (await response.json()) as { message?: string }
-        throw new Error(failure.message ?? 'Failed to send command')
+        throw new Error(sanitizeManagerApiErrorMessage(failure.message, 'Failed to send command'))
       }
 
       const updated = (await response.json()) as CommandResponse
@@ -486,27 +538,27 @@ export default function VideoSyncManager() {
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
-      const payload = envelope.payload as { state?: VideoSyncState; telemetry?: VideoSyncTelemetry }
-      if (payload.state) {
+      const payload = parseVideoSyncStateMessagePayload(envelope.payload)
+      if (payload?.state) {
         applyManagerStateUpdate(payload.state)
       }
-      if (payload.telemetry) {
+      if (payload?.telemetry) {
         setTelemetry(payload.telemetry)
       }
       return
     }
 
     if (envelope.type === 'telemetry-update') {
-      const payload = envelope.payload as { telemetry?: VideoSyncTelemetry }
-      if (payload.telemetry) {
+      const payload = parseVideoSyncTelemetryMessagePayload(envelope.payload)
+      if (payload?.telemetry) {
         setTelemetry(payload.telemetry)
       }
       return
     }
 
     if (envelope.type === 'error') {
-      const payload = envelope.payload as { message?: string }
-      if (typeof payload.message === 'string' && payload.message.length > 0) {
+      const payload = parseVideoSyncErrorMessagePayload(envelope.payload)
+      if (typeof payload?.message === 'string' && payload.message.length > 0) {
         setErrorMessage(payload.message)
       }
     }
@@ -670,15 +722,16 @@ export default function VideoSyncManager() {
       return false
     }
 
-    let stopSecValue: number | null = null
-    if (stopTimeEnabled) {
-      const parsedStopSec = parseYouTubeTimestampSeconds(stopSecTextValue)
-      if (parsedStopSec == null) {
-        setErrorMessage('End time must be a valid number of seconds or h/m/s value like 1m23s.')
-        return false
-      }
-      stopSecValue = parsedStopSec
+    const parsedStopTimeInput = parseManagerStopTimeInput({
+      sourceUrl: sourceUrlValue,
+      stopTimeEnabled,
+      stopSecText: stopSecTextValue,
+    })
+    if (parsedStopTimeInput.errorMessage) {
+      setErrorMessage(parsedStopTimeInput.errorMessage)
+      return false
     }
+    const stopSecValue = parsedStopTimeInput.stopSecValue
 
     try {
       const response = await fetch(`/api/video-sync/${sessionId}/session`, {
@@ -693,7 +746,7 @@ export default function VideoSyncManager() {
 
       if (!response.ok) {
         const failure = (await response.json()) as { message?: string }
-        throw new Error(failure.message ?? 'Failed to save video config')
+        throw new Error(sanitizeManagerApiErrorMessage(failure.message, 'Failed to save video config'))
       }
 
       const updated = (await response.json()) as ConfigResponse
@@ -710,7 +763,7 @@ export default function VideoSyncManager() {
       setErrorMessage(message)
       return false
     }
-  }, [applyManagerStateUpdate, hasStopTime, instructorPasscode, isPasscodeReady, sessionId])
+  }, [applyManagerStateUpdate, instructorPasscode, isPasscodeReady, sessionId])
 
   const saveConfig = useCallback(async (): Promise<void> => {
     await saveConfigWithValues(sourceUrlInput, hasStopTime, stopSecInput)

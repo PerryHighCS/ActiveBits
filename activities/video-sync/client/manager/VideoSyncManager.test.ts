@@ -8,8 +8,10 @@ import {
   autoConfigureBootstrapSource,
   clearManagerPlayerLoadError,
   getManagerPlaybackIntentForStateChange,
+  parseManagerStopTimeInput,
   readBootstrapInstructorPasscode,
   readBootstrapSourceUrl,
+  sanitizeManagerApiErrorMessage,
   shouldCorrectManagerPlaybackDrift,
   shouldApplyManagerStateUpdate,
   shouldAutoStartBootstrapSource,
@@ -160,6 +162,19 @@ void test('clearManagerPlayerLoadError only dismisses the transient YouTube load
   assert.equal(clearManagerPlayerLoadError(null), null)
 })
 
+void test('sanitizeManagerApiErrorMessage falls back for non-string or empty values', () => {
+  assert.equal(sanitizeManagerApiErrorMessage(null, 'fallback'), 'fallback')
+  assert.equal(sanitizeManagerApiErrorMessage('   ', 'fallback'), 'fallback')
+})
+
+void test('sanitizeManagerApiErrorMessage trims and truncates long server messages', () => {
+  assert.equal(sanitizeManagerApiErrorMessage('  server said no  ', 'fallback'), 'server said no')
+  assert.equal(
+    sanitizeManagerApiErrorMessage('x'.repeat(200), 'fallback'),
+    `${'x'.repeat(159)}…`,
+  )
+})
+
 void test('shouldApplyManagerStateUpdate ignores empty late updates after a video is configured', () => {
   assert.equal(
     shouldApplyManagerStateUpdate(
@@ -225,5 +240,58 @@ void test('getManagerPlaybackIntentForStateChange maps native player transitions
       pausedStateValue: 2,
     }),
     null,
+  )
+})
+
+void test('parseManagerStopTimeInput rejects invalid stop values before saving config', () => {
+  assert.deepEqual(
+    parseManagerStopTimeInput({
+      sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+      stopTimeEnabled: true,
+      stopSecText: 'oops',
+    }),
+    {
+      stopSecValue: null,
+      errorMessage: 'End time must be a valid number of seconds or h/m/s value like 1m23s.',
+    },
+  )
+})
+
+void test('parseManagerStopTimeInput rejects stop values at or before the URL start time', () => {
+  assert.deepEqual(
+    parseManagerStopTimeInput({
+      sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+      stopTimeEnabled: true,
+      stopSecText: '43',
+    }),
+    {
+      stopSecValue: 43,
+      errorMessage: 'End time must be greater than the YouTube URL start time.',
+    },
+  )
+})
+
+void test('parseManagerStopTimeInput allows valid ranges and defers unsupported URLs to the server', () => {
+  assert.deepEqual(
+    parseManagerStopTimeInput({
+      sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+      stopTimeEnabled: true,
+      stopSecText: '44',
+    }),
+    {
+      stopSecValue: 44,
+      errorMessage: null,
+    },
+  )
+  assert.deepEqual(
+    parseManagerStopTimeInput({
+      sourceUrl: 'not a url',
+      stopTimeEnabled: true,
+      stopSecText: '44',
+    }),
+    {
+      stopSecValue: 44,
+      errorMessage: null,
+    },
   )
 })
