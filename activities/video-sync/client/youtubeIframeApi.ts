@@ -81,7 +81,11 @@ function installIframeReadyBridge(): void {
   const previous = window.onYouTubeIframeAPIReady
   window.onYouTubeIframeAPIReady = () => {
     if (typeof previous === 'function') {
-      previous()
+      try {
+        previous()
+      } catch (error) {
+        console.error('Existing YouTube iframe ready handler failed:', error)
+      }
     }
 
     const callbacks = ensureReadyCallbackQueue()

@@ -256,6 +256,10 @@ function createMockVideoSyncValkeyStore() {
   }
 }
 
+function cloneSessionRecord(session: SessionRecord): SessionRecord {
+  return structuredClone(session)
+}
+
 function createSessionStore(
   initial: Record<string, SessionRecord>,
   options: {
@@ -273,10 +277,11 @@ function createSessionStore(
     subscriptions,
     sessions: {
       async get(id: string) {
-        return store[id] ?? null
+        const session = store[id]
+        return session ? cloneSessionRecord(session) : null
       },
       async set(id: string, session: SessionRecord) {
-        store[id] = session
+        store[id] = cloneSessionRecord(session)
       },
       ...(options.valkeyStore ? { valkeyStore: options.valkeyStore } : {}),
       async publishBroadcast(channel: string, message: Record<string, unknown>) {
@@ -386,8 +391,16 @@ void test('session get route regenerates malformed persisted instructor passcode
   const session = createVideoSyncSession('s1')
   ;(session.data as { instructorPasscode: string }).instructorPasscode = 'legacy-passcode'
   const storeState = createSessionStore({ s1: session })
+  let setCalls = 0
+  const sessionsWithTrackedSet = {
+    ...storeState.sessions,
+    async set(id: string, updatedSession: SessionRecord) {
+      setCalls += 1
+      return storeState.sessions.set(id, updatedSession)
+    },
+  }
 
-  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
 
   const handler = app.handlers.get['/api/video-sync/:sessionId/session']
   assert.equal(typeof handler, 'function')
@@ -401,6 +414,14 @@ void test('session get route regenerates malformed persisted instructor passcode
   )
 
   assert.equal(res.statusCode, 200)
+  const payload = res.body as {
+    data?: {
+      instructorPasscode?: string
+    }
+  }
+  assert.equal('instructorPasscode' in (payload.data ?? {}), false)
+  assert.equal(setCalls, 1)
+
   const persisted = storeState.store.s1?.data as {
     instructorPasscode?: string
   }
@@ -416,8 +437,16 @@ void test('session get route canonicalizes persisted instructor passcodes to low
   const session = createVideoSyncSession('s1')
   ;(session.data as { instructorPasscode: string }).instructorPasscode = TEST_INSTRUCTOR_PASSCODE.toUpperCase()
   const storeState = createSessionStore({ s1: session })
+  let setCalls = 0
+  const sessionsWithTrackedSet = {
+    ...storeState.sessions,
+    async set(id: string, updatedSession: SessionRecord) {
+      setCalls += 1
+      return storeState.sessions.set(id, updatedSession)
+    },
+  }
 
-  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
 
   const handler = app.handlers.get['/api/video-sync/:sessionId/session']
   assert.equal(typeof handler, 'function')
@@ -431,6 +460,7 @@ void test('session get route canonicalizes persisted instructor passcodes to low
   )
 
   assert.equal(res.statusCode, 200)
+  assert.equal(setCalls, 1)
   const persisted = storeState.store.s1?.data as {
     instructorPasscode?: string
   }
@@ -446,8 +476,16 @@ void test('session get route normalizes oversized persisted telemetry.error fiel
     message: `  ${'M'.repeat(300)}  `,
   }
   const storeState = createSessionStore({ s1: session })
+  let setCalls = 0
+  const sessionsWithTrackedSet = {
+    ...storeState.sessions,
+    async set(id: string, updatedSession: SessionRecord) {
+      setCalls += 1
+      return storeState.sessions.set(id, updatedSession)
+    },
+  }
 
-  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
 
   const handler = app.handlers.get['/api/video-sync/:sessionId/session']
   assert.equal(typeof handler, 'function')
@@ -473,6 +511,7 @@ void test('session get route normalizes oversized persisted telemetry.error fiel
   }
   assert.equal(payload.data?.telemetry?.error?.code, 'C'.repeat(64))
   assert.equal(payload.data?.telemetry?.error?.message, 'M'.repeat(256))
+  assert.equal(setCalls, 1)
 
   const persisted = storeState.store.s1?.data as {
     telemetry?: {
@@ -494,8 +533,16 @@ void test('session get route clears malformed persisted video ids during normali
   ;(session.data as { state: { videoId: string; startSec: number; positionSec: number } }).state.startSec = 12
   ;(session.data as { state: { videoId: string; startSec: number; positionSec: number } }).state.positionSec = 18
   const storeState = createSessionStore({ s1: session })
+  let setCalls = 0
+  const sessionsWithTrackedSet = {
+    ...storeState.sessions,
+    async set(id: string, updatedSession: SessionRecord) {
+      setCalls += 1
+      return storeState.sessions.set(id, updatedSession)
+    },
+  }
 
-  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
 
   const handler = app.handlers.get['/api/video-sync/:sessionId/session']
   assert.equal(typeof handler, 'function')
@@ -517,6 +564,7 @@ void test('session get route clears malformed persisted video ids during normali
     }
   }
   assert.equal(payload.data?.state?.videoId, '')
+  assert.equal(setCalls, 1)
 
   const persisted = storeState.store.s1?.data as {
     state?: {
@@ -540,8 +588,16 @@ void test('session get route replaces non-positive persisted server timestamps d
       }
     }).state.serverTimestampMs = -1
     const storeState = createSessionStore({ s1: session })
+    let setCalls = 0
+    const sessionsWithTrackedSet = {
+      ...storeState.sessions,
+      async set(id: string, updatedSession: SessionRecord) {
+        setCalls += 1
+        return storeState.sessions.set(id, updatedSession)
+      },
+    }
 
-    setupVideoSyncRoutes(app, storeState.sessions, ws)
+    setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
 
     const handler = app.handlers.get['/api/video-sync/:sessionId/session']
     assert.equal(typeof handler, 'function')
@@ -563,6 +619,7 @@ void test('session get route replaces non-positive persisted server timestamps d
       }
     }
     assert.equal(payload.data?.state?.serverTimestampMs, 50_000)
+    assert.equal(setCalls, 1)
 
     const persisted = storeState.store.s1?.data as {
       state?: {

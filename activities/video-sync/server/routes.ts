@@ -3,6 +3,7 @@ import { registerSessionNormalizer } from 'activebits-server/core/sessionNormali
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { findHashBySessionId, verifyTeacherCodeWithHash } from 'activebits-server/core/persistentSessions.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 
 type VideoSyncRole = 'manager' | 'student'
@@ -741,8 +742,12 @@ function scheduleUnsyncedStudentsPrune(
   unsyncedStudentPruneTimersBySession.set(sessionId, timer)
 }
 
-function ensureVideoSyncSessionData(session: SessionRecord): VideoSyncSessionData {
-  const rawData = isPlainObject(session.data) ? session.data : {}
+function normalizeVideoSyncSessionData(session: SessionRecord): {
+  data: VideoSyncSessionData
+  changed: boolean
+} {
+  const previousData = session.data
+  const rawData = isPlainObject(previousData) ? previousData : {}
   const state = normalizeState(rawData.state)
   const telemetry = normalizeTelemetry(rawData.telemetry)
 
@@ -753,8 +758,16 @@ function ensureVideoSyncSessionData(session: SessionRecord): VideoSyncSessionDat
     telemetry,
   }
 
+  const changed = !isPlainObject(previousData) || !isDeepStrictEqual(previousData, normalized)
   session.data = normalized
-  return normalized
+  return {
+    data: normalized,
+    changed,
+  }
+}
+
+function ensureVideoSyncSessionData(session: SessionRecord): VideoSyncSessionData {
+  return normalizeVideoSyncSessionData(session).data
 }
 
 function toPublicSessionData(data: VideoSyncSessionData): PublicVideoSyncSessionData {
@@ -836,13 +849,30 @@ async function getVideoSyncSession(
   sessions: Pick<VideoSyncSessionStore, 'get'>,
   sessionId: string,
 ): Promise<VideoSyncSession | null> {
+  const result = await getVideoSyncSessionWithNormalization(sessions, sessionId)
+  return result.session
+}
+
+async function getVideoSyncSessionWithNormalization(
+  sessions: Pick<VideoSyncSessionStore, 'get'>,
+  sessionId: string,
+): Promise<{
+  session: VideoSyncSession | null
+  didNormalizeSessionData: boolean
+}> {
   const session = await sessions.get(sessionId)
   if (!session || session.type !== 'video-sync') {
-    return null
+    return {
+      session: null,
+      didNormalizeSessionData: false,
+    }
   }
 
-  ensureVideoSyncSessionData(session)
-  return session as VideoSyncSession
+  const { changed: didNormalizeSessionData } = normalizeVideoSyncSessionData(session)
+  return {
+    session: session as VideoSyncSession,
+    didNormalizeSessionData,
+  }
 }
 
 function upsertSubscriber(sessionId: string, socket: VideoSyncSocket): void {
@@ -1099,7 +1129,10 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const session = await getVideoSyncSession(sessions, sessionId)
+    const {
+      session,
+      didNormalizeSessionData,
+    } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
@@ -1119,6 +1152,7 @@ export default function setupVideoSyncRoutes(
     )
 
     if (
+      didNormalizeSessionData ||
       shouldPersistHeartbeatState(data.state, projectedState) ||
       shouldPersistHeartbeatTelemetry(data.telemetry, projectedTelemetry)
     ) {
