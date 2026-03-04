@@ -1327,6 +1327,14 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
+  let setCalls = 0
+  const sessionsWithTrackedSet = {
+    ...storeState.sessions,
+    async set(id: string, updatedSession: SessionRecord) {
+      setCalls += 1
+      return storeState.sessions.set(id, updatedSession)
+    },
+  }
   const teacherCode = 'persistent-teacher-code'
   const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
   await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
@@ -1336,7 +1344,7 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
     send() {},
   })
 
-  setupVideoSyncRoutes(app, storeState.sessions, ws)
+  setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
 
   const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
   assert.equal(typeof handler, 'function')
@@ -1359,6 +1367,63 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
+  assert.equal(setCalls, 0)
+  await cleanupPersistentSession(hash)
+})
+
+void test('instructor-passcode route persists normalized session data when recovery reads repair malformed fields', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  ;(session.data as { instructorPasscode: string }).instructorPasscode = 'legacy-passcode'
+  const storeState = createSessionStore({ s1: session })
+  let setCalls = 0
+  const sessionsWithTrackedSet = {
+    ...storeState.sessions,
+    async set(id: string, updatedSession: SessionRecord) {
+      setCalls += 1
+      return storeState.sessions.set(id, updatedSession)
+    },
+  }
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  setupVideoSyncRoutes(app, sessionsWithTrackedSet, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      cookies: {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `video-sync:${hash}`,
+            teacherCode,
+          },
+        ]),
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(setCalls, 1)
+  assert.equal(typeof (res.body as { instructorPasscode?: unknown }).instructorPasscode, 'string')
+  const persisted = storeState.store.s1?.data as { instructorPasscode?: string }
+  assert.equal(persisted.instructorPasscode?.length, 32)
+  assert.match(persisted.instructorPasscode ?? '', /^[a-f0-9]{32}$/)
+  assert.notEqual(persisted.instructorPasscode, 'legacy-passcode')
   await cleanupPersistentSession(hash)
 })
 

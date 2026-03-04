@@ -858,19 +858,22 @@ async function getVideoSyncSessionWithNormalization(
   sessionId: string,
 ): Promise<{
   session: VideoSyncSession | null
+  data: VideoSyncSessionData | null
   didNormalizeSessionData: boolean
 }> {
   const session = await sessions.get(sessionId)
   if (!session || session.type !== 'video-sync') {
     return {
       session: null,
+      data: null,
       didNormalizeSessionData: false,
     }
   }
 
-  const { changed: didNormalizeSessionData } = normalizeVideoSyncSessionData(session)
+  const { data, changed: didNormalizeSessionData } = normalizeVideoSyncSessionData(session)
   return {
     session: session as VideoSyncSession,
+    data,
     didNormalizeSessionData,
   }
 }
@@ -989,14 +992,13 @@ function ensureHeartbeat(
           return
         }
 
-        const session = await getVideoSyncSession(sessions, sessionId)
-        if (!session) {
+        const { session, data } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
+        if (!session || !data) {
           closeSubscribersForMissingSession(sessionId)
           stopHeartbeat(sessionId)
           return
         }
 
-        const data = ensureVideoSyncSessionData(session)
         const heartbeatState = applyStopIfReached(data.state)
         const heartbeatTelemetry = cloneTelemetry(data.telemetry)
         await updateConnectionTelemetry(
@@ -1093,8 +1095,12 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const session = await getVideoSyncSession(sessions, sessionId)
-    if (!session) {
+    const {
+      session,
+      data,
+      didNormalizeSessionData,
+    } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
+    if (!session || !data) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
     }
@@ -1118,8 +1124,10 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    await sessions.set(session.id, session)
-    res.json({ instructorPasscode: session.data.instructorPasscode })
+    if (didNormalizeSessionData) {
+      await sessions.set(session.id, session)
+    }
+    res.json({ instructorPasscode: data.instructorPasscode })
   })
 
   app.get('/api/video-sync/:sessionId/session', async (req, res) => {
@@ -1131,14 +1139,14 @@ export default function setupVideoSyncRoutes(
 
     const {
       session,
+      data,
       didNormalizeSessionData,
     } = await getVideoSyncSessionWithNormalization(sessions, sessionId)
-    if (!session) {
+    if (!session || !data) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
       return
     }
 
-    const data = ensureVideoSyncSessionData(session)
     const projectedState = applyStopIfReached(data.state)
     const projectedTelemetry = cloneTelemetry(data.telemetry)
     await updateConnectionTelemetry(
