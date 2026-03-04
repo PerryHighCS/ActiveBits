@@ -9,6 +9,8 @@ import {
   buildPersistentSessionKey,
   buildQueryString,
   buildSoloLink,
+  storeCreateSessionBootstrapPayload,
+  buildCreateSessionBootstrapHistoryState,
   describeSelectedOptions,
   initializeDeepLinkOptions,
   normalizeSelectedOptions,
@@ -177,9 +179,23 @@ export default function ManageDashboard() {
         throw new Error('Failed to create session')
       }
 
-      persistCreateSessionBootstrapToSessionStorage(getActivityById(activityId)?.createSessionBootstrap, payload.id, payload)
+      const createSessionBootstrap = getActivityById(activityId)?.createSessionBootstrap
+      const historyStatePayload = buildCreateSessionBootstrapHistoryState(createSessionBootstrap, payload)
 
-      void navigate(`/manage/${activityId}/${payload.id}`)
+      persistCreateSessionBootstrapToSessionStorage(createSessionBootstrap, payload.id, payload)
+      if (historyStatePayload) {
+        storeCreateSessionBootstrapPayload(activityId, payload.id, historyStatePayload)
+      }
+
+      void navigate(`/manage/${activityId}/${payload.id}`, {
+        ...(historyStatePayload
+          ? {
+            state: {
+              createSessionPayload: historyStatePayload,
+            },
+          }
+          : {}),
+      })
     } catch (createError) {
       console.error(createError)
       setSessionError('Could not create session. Please try again.')

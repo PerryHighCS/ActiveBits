@@ -37,11 +37,22 @@ export interface CreateSessionBootstrapSessionStorageEntry {
 
 export interface CreateSessionBootstrapConfig {
   sessionStorage: CreateSessionBootstrapSessionStorageEntry[]
+  historyState?: string[]
 }
 
 export type DeepLinkOptions = Record<string, DeepLinkOption>
 export type DeepLinkSelection = Record<string, string>
 export type DeepLinkValidationErrors = Record<string, string>
+
+const CREATE_SESSION_BOOTSTRAP_TTL_MS = 5 * 60 * 1000
+const MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS = 100
+
+interface CreateSessionBootstrapPayloadEntry {
+  payload: Record<string, unknown>
+  createdAtMs: number
+}
+
+const createSessionBootstrapPayloads = new Map<string, CreateSessionBootstrapPayloadEntry>()
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -112,11 +123,21 @@ export function parseCreateSessionBootstrap(rawCreateSessionBootstrap: unknown):
     }))
     .filter((entry) => entry.keyPrefix.length > 0 && entry.responseField.length > 0)
 
-  if (sessionStorage.length === 0) {
+  const historyState = Array.isArray(rawCreateSessionBootstrap.historyState)
+    ? rawCreateSessionBootstrap.historyState
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+    : []
+
+  if (sessionStorage.length === 0 && historyState.length === 0) {
     return null
   }
 
-  return { sessionStorage }
+  return {
+    sessionStorage,
+    ...(historyState.length > 0 ? { historyState } : {}),
+  }
 }
 
 export function persistCreateSessionBootstrapToSessionStorage(
@@ -144,6 +165,73 @@ export function persistCreateSessionBootstrapToSessionStorage(
     } catch (error) {
       console.warn('[ManageDashboard] Failed to persist create-session bootstrap data to sessionStorage:', error)
     }
+  }
+}
+
+export function storeCreateSessionBootstrapPayload(
+  activityId: string,
+  sessionId: string,
+  payload: Record<string, unknown>,
+  nowMs = Date.now(),
+): void {
+  pruneCreateSessionBootstrapPayloads(nowMs)
+  createSessionBootstrapPayloads.set(`${activityId}:${sessionId}`, {
+    payload,
+    createdAtMs: nowMs,
+  })
+  pruneCreateSessionBootstrapPayloads(nowMs)
+}
+
+export function consumeCreateSessionBootstrapPayload(
+  activityId: string,
+  sessionId: string,
+  nowMs = Date.now(),
+): Record<string, unknown> | null {
+  const key = `${activityId}:${sessionId}`
+  const entry = createSessionBootstrapPayloads.get(key) ?? null
+  if (entry && nowMs - entry.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+    createSessionBootstrapPayloads.delete(key)
+    return null
+  }
+
+  const payload = entry?.payload ?? null
+  createSessionBootstrapPayloads.delete(key)
+  return payload
+}
+
+export function buildCreateSessionBootstrapHistoryState(
+  rawCreateSessionBootstrap: unknown,
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const createSessionBootstrap = parseCreateSessionBootstrap(rawCreateSessionBootstrap)
+  if (!createSessionBootstrap?.historyState || createSessionBootstrap.historyState.length === 0) {
+    return null
+  }
+
+  const historyStatePayload = createSessionBootstrap.historyState.reduce<Record<string, unknown>>((accumulator, field) => {
+    if (field in payload) {
+      accumulator[field] = payload[field]
+    }
+    return accumulator
+  }, {})
+
+  return Object.keys(historyStatePayload).length > 0 ? historyStatePayload : null
+}
+
+function pruneCreateSessionBootstrapPayloads(nowMs: number): void {
+  for (const [key, entry] of createSessionBootstrapPayloads.entries()) {
+    if (nowMs - entry.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+      createSessionBootstrapPayloads.delete(key)
+    }
+  }
+
+  while (createSessionBootstrapPayloads.size > MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS) {
+    const oldestKey = createSessionBootstrapPayloads.keys().next().value
+    if (typeof oldestKey !== 'string') {
+      break
+    }
+
+    createSessionBootstrapPayloads.delete(oldestKey)
   }
 }
 

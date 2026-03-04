@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-03
+- Surface: internal module
+- Contract: `activities/video-sync` treats a valid YouTube video ID as exactly 11 URL-safe characters (`[A-Za-z0-9_-]{11}`) in both client-side URL parsing and server-side source validation.
+- Compatibility constraints: Solo-mode parsing, managed session configuration, and shared URL parsing helpers should reject shorter IDs the same way; any intentional divergence would need explicit documentation because it changes behavior between solo and teacher-managed flows.
+- Validation rules: `parseYouTubeVideoId()` and the server `normalizeYouTubeVideoId()` path should only accept 11-character IDs and return `null`/`invalid-video-id` for shorter or malformed values.
+- Evidence (schema/tests/path): `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/student/VideoSyncStudent.test.ts`; `activities/video-sync/server/routes.ts`
+- Follow-up action: Reuse the same 11-character rule in any future client-side Video Sync URL validation helpers instead of introducing activity-local regex variants.
+- Owner: Codex
+
 - Date: 2026-02-23
 - Surface: REST
 - Contract: Activity-specific deep-link URL generation contract for SyncDeck uses `POST /api/syncdeck/generate-url` with request body `{ activityName: 'syncdeck', teacherCode: string, selectedOptions: { presentationUrl?: string } }` and returns `{ hash: string, url: string }` where `url` is the authoritative persistent activity URL including validated query params (`presentationUrl`) plus integrity metadata (`urlHash`).

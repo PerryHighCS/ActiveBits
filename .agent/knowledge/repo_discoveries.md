@@ -14,6 +14,102 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-04
+- Area: activities
+- Discovery: `video-sync` students intentionally keep a blackout overlay until the instructor has explicitly started playback. A session with a configured `videoId` but `isPlaying === false` and `positionSec === startSec` is still considered "not started", so permanent-link bootstrap flows must send an initial `play` transition instead of only saving config.
+- Why it matters: Configuring the video source alone is not enough to let students see playback. Flows that promise "jump straight into the video" need to move the shared state past the pre-start gate or students will remain stuck on the waiting overlay.
+- Evidence: `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`
+- Follow-up action: Keep permanent-link/bootstrap flows aligned with the student start gate, and if the product ever wants students to see a cued-but-paused frame instead, change `hasInstructorPlaybackStarted(...)` deliberately rather than assuming config is sufficient.
+- Owner: Codex
+
+- Date: 2026-03-04
+- Area: activities
+- Discovery: `video-sync` read-path session normalization is persistence-worthy when it repairs malformed stored data. `GET /api/video-sync/:sessionId/session` should call `sessions.set(...)` if normalization changed persisted fields such as `instructorPasscode`, `state.videoId`, `state.serverTimestampMs`, or truncated telemetry error fields, even when playback projection and connection telemetry did not otherwise require a write.
+- Why it matters: In Valkey mode, `sessions.get()` returns a deserialized copy, so normalization fixes are lost unless the route explicitly persists them. Without this, malformed sessions can remain broken indefinitely and every read repeats the same repair work.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: When adding new persisted `video-sync` fields, include them in normalization-change expectations and keep the read-path persistence tests aligned with that contract.
+- Owner: Codex
+
+- Date: 2026-03-04
+- Area: activities
+- Discovery: In `video-sync`, Valkey-backed `unsync` and successful `sync-correction` event handlers should reuse the count returned by the upsert/clear Lua scripts instead of immediately issuing a second count-script `EVAL`; the standalone count script is still the source of truth for heartbeats, session reads, and stale-entry pruning.
+- Why it matters: Event requests are the hot path for drift telemetry. Reusing the mutation-script return value cuts redundant Valkey work roughly in half for those events while preserving cross-instance correctness and leaving periodic/read refresh paths intact.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: If other activity-local Valkey telemetry paths add mutation scripts with deterministic counts, prefer threading those counts through response/persistence code before adding separate recount calls.
+- Owner: Codex
+
+- Date: 2026-03-04
+- Area: activities
+- Discovery: In Valkey mode, `video-sync` no longer keeps unsynced-student telemetry purely in process. The server stores per-session unsynced-student timestamps in a short-lived Valkey-backed key, and reads/prunes that shared key when computing `telemetry.sync.unsyncedStudents`; the in-memory map/timer path is now only the fallback for non-Valkey development mode.
+- Why it matters: In horizontally scaled deployments, `/api/video-sync/:sessionId/event` requests can hit different instances. Without shared storage, `sync.unsyncedStudents` oscillates or resets incorrectly; with the Valkey-backed key, the manager sees a cross-instance coherent count.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `DEPLOYMENT.md`
+- Follow-up action: If `video-sync` needs stronger cross-instance telemetry guarantees later, consider moving the unsynced-student key handling into a shared helper or adding explicit compare-and-swap semantics for other activity-local Valkey state.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: `video-sync` treats `stopSec` as a server-authoritative playback boundary, not an advisory client-only hint. Server command handling clamps play/pause/seek positions to `stopSec`, heartbeat projection caps playback at that boundary, and state persistence auto-pauses once the stop point is reached.
+- Why it matters: Planning/docs language that describes stop time as merely advisory is incorrect and can lead to regressions if future contributors remove the server-side enforcement that currently keeps manager and student playback bounded consistently.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `.agent/plans/video-sync-activity-plan.md`
+- Follow-up action: Keep plan/docs/tests aligned with the enforced-stop behavior unless the product decision explicitly changes to allow seeking or playback beyond `stopSec`.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: `video-sync` drift correction and telemetry are keyed to a `0.2s` tolerance and current sync-health state, not a cumulative unsync-event threshold. Student clients report `unsync` when drift first exceeds tolerance, throttle repeated unsync reports to once per 10 seconds while still unsynced, and the manager consumes `sync.unsyncedStudents`, `sync.lastDriftSec`, and `sync.lastCorrectionResult`.
+- Why it matters: Plan language that describes unsync reporting as a two-heartbeat `2.0s` threshold or expects `sync.unsyncEvents` no longer matches the shipped protocol and can mislead future telemetry or dashboard changes.
+- Evidence: `activities/video-sync/client/syncMath.ts`; `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/protocol.ts`; `activities/video-sync/server/routes.ts`; `.agent/plans/video-sync-activity-plan.md`
+- Follow-up action: Keep plan/docs aligned with the opportunistic, throttled `unsync` reporting model unless the telemetry contract is intentionally redesigned.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: `GET /api/video-sync/:sessionId/session` now returns projected playback state without persisting on ordinary reads. It only calls `sessions.set(...)` when the read causes a durable transition, such as auto-pausing at `stopSec` or changing telemetry counts.
+- Why it matters: Frequent polling/reconnects no longer create avoidable Valkey or session-store write churn, while clients still receive current projected playback and durable stop-boundary enforcement remains persisted when reached.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: Preserve this read-path write policy if additional session-read telemetry or projection logic is added later.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: `video-sync` server-side `parseYouTubeSource` now normalizes YouTube IDs with a strict 11-character pattern (`[A-Za-z0-9_-]{11}`), and short URLs (`youtu.be/...`) use only the first non-empty path segment as the candidate ID.
+- Why it matters: Prevents persisting malformed IDs (for example IDs containing invalid characters or extra path suffixes) while still accepting share links like `https://youtu.be/<id>/extra` by extracting just `<id>`.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: Keep client and server ID-validation behavior aligned if future URL formats are added.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: `video-sync` student overlay keyboard filtering now blocks only known YouTube/media-control keys (space, transport letters, arrows, paging/home-end, and digits) instead of every key except `Tab`/`Escape`.
+- Why it matters: The focusable full-screen overlay still suppresses accidental player control keys but no longer swallows unrelated keyboard navigation/assistive shortcuts while focused.
+- Evidence: `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/student/VideoSyncStudent.test.ts`
+- Follow-up action: If additional browser/player shortcuts need suppression, extend `BLOCKED_STUDENT_OVERLAY_KEYS` with explicit keys and add matching tests rather than broad default blocking.
+- Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: `video-sync` student view now keeps an opaque overlay above the embedded YouTube player until instructor playback has actually started (`state.isPlaying` or synced position advancing past `startSec`), which hides the initial YouTube spinner/loading state from students.
+- Why it matters: Students see a consistent classroom-ready waiting state instead of a distracting/ambiguous player spinner before the teacher presses play, while synchronized playback behavior remains unchanged once playback begins.
+- Evidence: `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/student/VideoSyncStudent.test.ts`
+- Follow-up action: If instructors need manual reveal controls independent of playback state, add an explicit session-level reveal flag in the video-sync protocol instead of inferring from position/play status.
+- Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: `video-sync` telemetry now treats unsync as per-student live state (`sync.unsyncedStudents`) instead of a cumulative incident counter; student clients send a stable `studentId` with `unsync` and `sync-correction` events, and the server keeps a per-session unsynced-student map with stale-entry pruning.
+- Why it matters: The instructor HUD can display “currently unsynced students” in real time, which is actionable during class playback, and stale tabs no longer keep the count inflated indefinitely.
+- Evidence: `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: If class sessions need stronger identity guarantees across reconnects, consider deriving/validating student identity from session auth rather than client-generated IDs.
+- Owner: Codex
+
+- Date: 2026-02-28
+- Area: activities
+- Discovery: The new `video-sync` activity uses a versioned websocket envelope (`version`, `activity`, `sessionId`, `type`, `timestamp`, `payload`) for all realtime traffic (`state-snapshot`, `state-update`, `heartbeat`, `telemetry-update`, `error`) so message parsing remains forward-compatible as payload shapes evolve.
+- Why it matters: Activity clients can validate a stable outer contract while adding new message types or payload fields without brittle string/shape checks tied to one message body format.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/protocol.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: Reuse this envelope shape for future realtime activities and consider extracting a shared typed helper in `types/` if multiple activities adopt the same protocol wrapper.
+- Owner: Codex
+
 - Date: 2026-03-01
 - Area: activities
 - Discovery: SyncDeck presentation URLs must be scheme-compatible with the ActiveBits host page. When ActiveBits is loaded over HTTPS, configuring or joining a SyncDeck session with an `http://...` presentation URL causes mixed-content blocking, the iframe stays on an `about:blank` parent-origin window, and subsequent `postMessage(..., "http://...")` calls fail in the student view.
@@ -279,11 +375,25 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-01
 - Area: activities
+- Discovery: Video Sync manager auth now follows the same session-scoped instructor passcode pattern as SyncDeck: temporary sessions return an `instructorPasscode` captured via `createSessionBootstrap`, manager websocket/config/command routes require that passcode, and persistent permalink sessions recover it through a teacher-cookie-validated `/api/video-sync/:sessionId/instructor-passcode` route instead of trusting `role=manager`.
+- Why it matters: Manager authority is now derived from server-issued session credentials plus persistent-session teacher-cookie validation, so students cannot self-upgrade by picking `role=manager` or calling manager HTTP endpoints with only a `sessionId`.
+- Evidence: `activities/video-sync/activity.config.ts`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: If Video Sync later needs finer-grained multi-manager entry, layer it on top of the same instructor-passcode/session bootstrap contract rather than reintroducing client-declared manager roles.
+
+- Date: 2026-03-01
+- Area: activities
 - Discovery: SyncDeck released-stack boundary comparisons must treat same-horizontal vertical child-slide movement as still inside the released region; only moving to a later horizontal slide should clear/supersede the explicit boundary, and student snapback logic must not pull `h`-matching lower child slides back to `v = 0`.
 - Why it matters: Full `h/v/f` boundary comparisons caused manager relay logic to clear boundaries and student boundary sync to snap lower-stack students back to the top child when an instructor moved down and back up within an already released vertical stack.
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
 - Follow-up action: When adjusting SyncDeck release logic, keep reconnect boundary restoration intact but preserve horizontal-only released-stack semantics for explicit boundary clear/snap decisions.
 - Owner: Codex
+
+- Date: 2026-03-01
+- Area: activities
+- Discovery: Video Sync now uses one manager-authorization boundary across websocket and HTTP surfaces: the same `instructorPasscode` gates `role=manager` websocket connections and the session config/playback command endpoints, while student telemetry events remain open.
+- Why it matters: This avoids drifting into partially protected manager behavior where one control surface is secured but another still trusts session possession.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`
+- Follow-up action: Keep future manager-only endpoints on the same passcode requirement unless the activity adopts a stronger signed-token/session identity model.
 
 - Date: 2026-03-01
 - Area: activities
@@ -300,6 +410,13 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
 - Follow-up action: If the iframe starts exposing explicit fragment-count metadata in state payloads, revisit boundary comparison helpers and remove the remaining sentinel semantics entirely.
 - Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: Activity client entry modules that import sibling manager/student files under the `activities` workspace should use explicit `.js` specifiers for relative ESM imports, even when the source files are `.ts`/`.tsx`.
+- Why it matters: `node --test` with `tsx` resolves these activity entry imports at runtime using Node ESM semantics, so extensionless relative specifiers can fail while `.js` specifiers match the emitted/runtime module shape used elsewhere in the repo.
+- Evidence: `activities/video-sync/client/index.ts`; `activities/syncdeck/client/index.tsx`; `activities/algorithm-demo/client/index.tsx`; `activities/package.json`
+- Follow-up action: When adding or updating `activities/*/client/index.ts` or `.tsx`, mirror the existing `.js` import pattern for sibling manager/student modules and keep activity-scoped tests in the validation path.
 
 - Date: 2026-03-01
 - Area: activities
