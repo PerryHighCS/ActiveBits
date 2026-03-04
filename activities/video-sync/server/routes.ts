@@ -627,28 +627,28 @@ async function markStudentUnsynced(
   sessionId: string,
   studentId: string,
   nowMs = Date.now(),
-): Promise<void> {
+): Promise<number> {
   if (sessions.valkeyStore != null) {
-    await runValkeyUnsyncedStudentCount(
+    return runValkeyUnsyncedStudentCount(
       sessions,
       sessionId,
       UPSERT_UNSYNCED_STUDENT_LUA,
       [studentId, nowMs, UNSYNC_STALE_MS, MAX_UNSYNCED_STUDENTS_PER_SESSION, UNSYNCED_STUDENTS_KEY_TTL_MS],
     )
-    return
   }
 
   const existing = unsyncedStudentsBySession.get(sessionId)
   if (existing) {
     pruneStaleUnsyncedStudents(existing, nowMs)
     if (!existing.has(studentId) && existing.size >= MAX_UNSYNCED_STUDENTS_PER_SESSION) {
-      return
+      return existing.size
     }
     existing.set(studentId, nowMs)
-    return
+    return existing.size
   }
 
   unsyncedStudentsBySession.set(sessionId, new Map([[studentId, nowMs]]))
+  return 1
 }
 
 async function clearStudentUnsynced(
@@ -656,24 +656,26 @@ async function clearStudentUnsynced(
   sessionId: string,
   studentId: string,
   nowMs = Date.now(),
-): Promise<void> {
+): Promise<number> {
   if (sessions.valkeyStore != null) {
-    await runValkeyUnsyncedStudentCount(
+    return runValkeyUnsyncedStudentCount(
       sessions,
       sessionId,
       CLEAR_UNSYNCED_STUDENT_LUA,
       [studentId, nowMs, UNSYNC_STALE_MS, UNSYNCED_STUDENTS_KEY_TTL_MS],
     )
-    return
   }
 
   const existing = unsyncedStudentsBySession.get(sessionId)
-  if (!existing) return
+  if (!existing) return 0
 
   existing.delete(studentId)
   if (existing.size === 0) {
     clearUnsyncedStudentState(sessionId)
+    return 0
   }
+
+  return existing.size
 }
 
 function getNextUnsyncedStudentPruneDelay(sessionId: string, nowMs = Date.now()): number | null {
@@ -867,9 +869,15 @@ async function updateConnectionTelemetry(
   sessions: VideoSyncSessionStore,
   data: VideoSyncSessionData,
   sessionId: string,
+  unsyncedStudentsCount?: number,
 ): Promise<void> {
   const sockets = subscribersBySession.get(sessionId)
   data.telemetry.connections.activeCount = sockets?.size ?? 0
+  if (typeof unsyncedStudentsCount === 'number' && Number.isFinite(unsyncedStudentsCount)) {
+    data.telemetry.sync.unsyncedStudents = Math.max(0, Math.floor(unsyncedStudentsCount))
+    return
+  }
+
   await refreshUnsyncedStudentsCount(sessions, data, sessionId)
 }
 
@@ -1348,6 +1356,7 @@ export default function setupVideoSyncRoutes(
     }
 
     const data = ensureVideoSyncSessionData(session)
+    let unsyncedStudentsCount: number | undefined
 
     if (body.type === 'autoplay-blocked') {
       data.telemetry.autoplay.blockedCount += 1
@@ -1357,7 +1366,7 @@ export default function setupVideoSyncRoutes(
 
     if (body.type === 'unsync') {
       if (studentId) {
-        await markStudentUnsynced(sessions, sessionId, studentId)
+        unsyncedStudentsCount = await markStudentUnsynced(sessions, sessionId, studentId)
         if (sessions.valkeyStore == null) {
           scheduleUnsyncedStudentsPrune(sessions, sessionId)
         }
@@ -1371,7 +1380,7 @@ export default function setupVideoSyncRoutes(
     if (body.type === 'sync-correction') {
       const correction = body.correctionResult
       if (studentId && correction === 'success') {
-        await clearStudentUnsynced(sessions, sessionId, studentId)
+        unsyncedStudentsCount = await clearStudentUnsynced(sessions, sessionId, studentId)
         if (sessions.valkeyStore == null) {
           scheduleUnsyncedStudentsPrune(sessions, sessionId)
         }
@@ -1393,7 +1402,7 @@ export default function setupVideoSyncRoutes(
       }
     }
 
-    await updateConnectionTelemetry(sessions, data, sessionId)
+    await updateConnectionTelemetry(sessions, data, sessionId, unsyncedStudentsCount)
     await sessions.set(session.id, session)
 
     const envelope = createEnvelope(sessionId, 'telemetry-update', {

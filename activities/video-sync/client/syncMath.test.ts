@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { VideoSyncState } from './protocol.js'
 import {
   clampPositionSec,
+  computeDriftSec,
   computeDesiredPositionSec,
   DEFAULT_DRIFT_TOLERANCE_SEC,
   shouldCorrectDrift,
@@ -45,4 +46,10 @@ void test('computeDesiredPositionSec honors stopSec cap', () => {
 void test('shouldCorrectDrift compares against tolerance threshold', () => {
   assert.equal(shouldCorrectDrift(10, 10.1, DEFAULT_DRIFT_TOLERANCE_SEC), false)
   assert.equal(shouldCorrectDrift(10, 10.3, DEFAULT_DRIFT_TOLERANCE_SEC), true)
+})
+
+void test('computeDriftSec returns a finite drift for non-finite player positions', () => {
+  assert.equal(computeDriftSec(Number.NaN, 12), 12)
+  assert.equal(computeDriftSec(Number.POSITIVE_INFINITY, 12), 12)
+  assert.equal(computeDriftSec(8, Number.NaN), 8)
 })
