@@ -59,6 +59,7 @@ type AutoStartStatus = 'idle' | 'starting' | 'failed'
 
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
+const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
 
 const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   connections: { activeCount: 0 },
@@ -153,6 +154,22 @@ export function shouldCorrectManagerPlaybackDrift(
   )
 }
 
+export function getManagerPlaybackIntentForStateChange(params: {
+  eventState: number
+  playingStateValue: number
+  pausedStateValue: number
+}): 'play' | 'pause' | null {
+  if (params.eventState === params.playingStateValue) {
+    return 'play'
+  }
+
+  if (params.eventState === params.pausedStateValue) {
+    return 'pause'
+  }
+
+  return null
+}
+
 export default function VideoSyncManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -175,6 +192,10 @@ export default function VideoSyncManager() {
   const youtubeRef = useRef<YoutubeNamespace | null>(null)
   const loadedVideoIdRef = useRef<string | null>(null)
   const latestStateRef = useRef<VideoSyncState>(DEFAULT_STATE)
+  const desiredPlaybackIntentRef = useRef<'play' | 'pause' | null>(null)
+  const desiredPlaybackPositionRef = useRef<number | null>(null)
+  const playbackCommandInFlightRef = useRef(false)
+  const playbackCommandFlushTimerRef = useRef<number | null>(null)
   const suppressPlayerEventsRef = useRef(false)
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
@@ -185,6 +206,7 @@ export default function VideoSyncManager() {
   }, [state])
 
   const applyManagerStateUpdate = useCallback((nextState: VideoSyncState): void => {
+    latestStateRef.current = nextState
     setState((currentState) => {
       if (!shouldApplyManagerStateUpdate(currentState, nextState)) {
         return currentState
@@ -212,6 +234,13 @@ export default function VideoSyncManager() {
     if (suppressPlayerEventsTimeoutRef.current != null) {
       window.clearTimeout(suppressPlayerEventsTimeoutRef.current)
       suppressPlayerEventsTimeoutRef.current = null
+    }
+  }, [])
+
+  const clearPlaybackCommandFlushTimer = useCallback(() => {
+    if (playbackCommandFlushTimerRef.current != null) {
+      window.clearTimeout(playbackCommandFlushTimerRef.current)
+      playbackCommandFlushTimerRef.current = null
     }
   }, [])
 
@@ -249,6 +278,7 @@ export default function VideoSyncManager() {
 
       const updated = (await response.json()) as CommandResponse
       if (updated.data?.state) {
+        latestStateRef.current = updated.data.state
         setState(updated.data.state)
       }
       if (updated.data?.telemetry) {
@@ -267,12 +297,67 @@ export default function VideoSyncManager() {
     }
   }, [instructorPasscode, sessionId])
 
+  const flushManagerPlaybackIntent = useCallback(async (): Promise<void> => {
+    clearPlaybackCommandFlushTimer()
+
+    if (playbackCommandInFlightRef.current) {
+      return
+    }
+
+    const desiredIntent = desiredPlaybackIntentRef.current
+    if (desiredIntent == null) {
+      return
+    }
+
+    const authoritativeIsPlaying = latestStateRef.current.isPlaying
+    if ((desiredIntent === 'play') === authoritativeIsPlaying) {
+      desiredPlaybackIntentRef.current = null
+      desiredPlaybackPositionRef.current = null
+      return
+    }
+
+    playbackCommandInFlightRef.current = true
+    const didSend = await sendCommand(desiredIntent, {
+      positionSec: desiredPlaybackPositionRef.current ?? undefined,
+      reportErrors: false,
+    })
+    playbackCommandInFlightRef.current = false
+
+    if (!didSend) {
+      desiredPlaybackIntentRef.current = null
+      desiredPlaybackPositionRef.current = null
+      return
+    }
+
+    setSuppressPlayerEventsForWindow(900)
+
+    const nextDesiredIntent = desiredPlaybackIntentRef.current
+    const nextAuthoritativeIsPlaying = latestStateRef.current.isPlaying
+    if (nextDesiredIntent == null || (nextDesiredIntent === 'play') === nextAuthoritativeIsPlaying) {
+      desiredPlaybackIntentRef.current = null
+      desiredPlaybackPositionRef.current = null
+      return
+    }
+
+    playbackCommandFlushTimerRef.current = window.setTimeout(() => {
+      void flushManagerPlaybackIntent()
+    }, MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS)
+  }, [clearPlaybackCommandFlushTimer, sendCommand, setSuppressPlayerEventsForWindow])
+
+  const scheduleManagerPlaybackIntentFlush = useCallback((delayMs = MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS): void => {
+    clearPlaybackCommandFlushTimer()
+    playbackCommandFlushTimerRef.current = window.setTimeout(() => {
+      void flushManagerPlaybackIntent()
+    }, delayMs)
+  }, [clearPlaybackCommandFlushTimer, flushManagerPlaybackIntent])
+
   const applyStateToPlayer = useCallback((nextState: VideoSyncState) => {
     const player = playerRef.current
     if (!player || !nextState.videoId) {
       return
     }
 
+    setErrorMessage((current) => clearManagerPlayerLoadError(current))
     setSuppressPlayerEventsForWindow()
 
     const desiredPositionSec = computeDesiredPositionSec(nextState)
@@ -431,6 +516,10 @@ export default function VideoSyncManager() {
     if (setupMode) {
       setPlayerReady(false)
       loadedVideoIdRef.current = null
+      desiredPlaybackIntentRef.current = null
+      desiredPlaybackPositionRef.current = null
+      playbackCommandInFlightRef.current = false
+      clearPlaybackCommandFlushTimer()
       playerRef.current?.destroy()
       playerRef.current = null
       clearPlayerEventSuppression()
@@ -476,11 +565,19 @@ export default function VideoSyncManager() {
               const playerPosition = clampNumber(target.getCurrentTime())
               const states = resolveYoutubePlayerState(youtubeRef.current)
 
-              if (event.data === states.PLAYING) {
-                void sendCommand('play', { positionSec: playerPosition, reportErrors: false })
-              } else if (event.data === states.PAUSED) {
-                void sendCommand('pause', { positionSec: playerPosition, reportErrors: false })
+              const nextIntent = getManagerPlaybackIntentForStateChange({
+                eventState: event.data,
+                playingStateValue: states.PLAYING,
+                pausedStateValue: states.PAUSED,
+              })
+
+              if (nextIntent == null) {
+                return
               }
+
+              desiredPlaybackIntentRef.current = nextIntent
+              desiredPlaybackPositionRef.current = playerPosition
+              scheduleManagerPlaybackIntentFlush()
             },
             onError: () => {
               if (cancelled) return
@@ -503,11 +600,15 @@ export default function VideoSyncManager() {
       cancelled = true
       setPlayerReady(false)
       loadedVideoIdRef.current = null
+      desiredPlaybackIntentRef.current = null
+      desiredPlaybackPositionRef.current = null
+      playbackCommandInFlightRef.current = false
+      clearPlaybackCommandFlushTimer()
       playerRef.current?.destroy()
       playerRef.current = null
       clearPlayerEventSuppression()
     }
-  }, [applyStateToPlayer, clearPlayerEventSuppression, sendCommand, setupMode])
+  }, [applyStateToPlayer, clearPlaybackCommandFlushTimer, clearPlayerEventSuppression, scheduleManagerPlaybackIntentFlush, setupMode])
 
   useEffect(() => {
     setStopSecInput(state.stopSec == null ? '' : String(state.stopSec))

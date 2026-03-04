@@ -16,6 +16,7 @@ export interface YoutubePlayerLike {
   cueVideoById(options: { videoId: string; startSeconds?: number; endSeconds?: number }): void
   playVideo(): void
   pauseVideo(): void
+  setPlaybackRate(suggestedRate: number): void
   mute(): void
   unMute(): void
   seekTo(seconds: number, allowSeekAhead: boolean): void

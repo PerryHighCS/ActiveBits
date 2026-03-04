@@ -7,6 +7,7 @@ import {
   type VideoSyncState,
 } from '../protocol.js'
 import {
+  clampPositionSec,
   computeDriftSec,
   computeDesiredPositionSec,
   DEFAULT_DRIFT_TOLERANCE_SEC,
@@ -32,6 +33,14 @@ interface SessionResponse {
 }
 
 const STUDENT_PLAYING_DRIFT_TOLERANCE_SEC = 0.5
+const STUDENT_HARD_SEEK_DRIFT_SEC = 1.5
+const STUDENT_CATCH_UP_PLAYBACK_RATE = 1.25
+const STUDENT_SLOW_DOWN_PLAYBACK_RATE = 0.75
+
+interface StudentPlaybackSyncAction {
+  type: 'none' | 'rate' | 'seek'
+  playbackRate: number
+}
 
 export function shouldInitializeYoutubePlayer(
   videoId: string,
@@ -119,6 +128,8 @@ export function syncLoadedVideoSource(
   nextState: VideoSyncState,
   desiredPositionSec: number,
 ): void {
+  player.setPlaybackRate(1)
+
   const sourceOptions = {
     videoId: nextState.videoId,
     startSeconds: desiredPositionSec,
@@ -150,6 +161,34 @@ export function shouldCorrectStudentPlaybackDrift(
     desiredPositionSec,
     isPlaying ? STUDENT_PLAYING_DRIFT_TOLERANCE_SEC : DEFAULT_DRIFT_TOLERANCE_SEC,
   )
+}
+
+export function getStudentPlaybackSyncAction(
+  playerPositionSec: number,
+  desiredPositionSec: number,
+  isPlaying: boolean,
+): StudentPlaybackSyncAction {
+  if (!isPlaying) {
+    return shouldCorrectStudentPlaybackDrift(playerPositionSec, desiredPositionSec, false)
+      ? { type: 'seek', playbackRate: 1 }
+      : { type: 'none', playbackRate: 1 }
+  }
+
+  if (!shouldCorrectStudentPlaybackDrift(playerPositionSec, desiredPositionSec, true)) {
+    return { type: 'none', playbackRate: 1 }
+  }
+
+  const driftSec = computeDriftSec(playerPositionSec, desiredPositionSec)
+  if (driftSec > STUDENT_HARD_SEEK_DRIFT_SEC) {
+    return { type: 'seek', playbackRate: 1 }
+  }
+
+  const desired = clampPositionSec(desiredPositionSec)
+  const current = clampPositionSec(playerPositionSec)
+  return {
+    type: 'rate',
+    playbackRate: desired >= current ? STUDENT_CATCH_UP_PLAYBACK_RATE : STUDENT_SLOW_DOWN_PLAYBACK_RATE,
+  }
 }
 
 export async function reportVideoSyncStudentEvent(params: {
@@ -241,9 +280,11 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     } else {
       const currentTimeSec = player.getCurrentTime()
       const driftSec = computeDriftSec(currentTimeSec, desiredPositionSec)
+      const syncAction = getStudentPlaybackSyncAction(currentTimeSec, desiredPositionSec, nextState.isPlaying)
 
-      if (shouldCorrectStudentPlaybackDrift(currentTimeSec, desiredPositionSec, nextState.isPlaying)) {
+      if (syncAction.type === 'seek') {
         const wasUnsynced = isLocallyUnsyncedRef.current
+        player.setPlaybackRate(1)
         player.seekTo(desiredPositionSec, true)
         isLocallyUnsyncedRef.current = true
 
@@ -251,9 +292,21 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           lastUnsyncReportAtRef.current = now
           void reportEvent('unsync', { driftSec })
         }
+      } else if (syncAction.type === 'rate') {
+        const wasUnsynced = isLocallyUnsyncedRef.current
+        player.setPlaybackRate(syncAction.playbackRate)
+        isLocallyUnsyncedRef.current = true
+
+        if (!wasUnsynced || now - lastUnsyncReportAtRef.current >= 10_000) {
+          lastUnsyncReportAtRef.current = now
+          void reportEvent('unsync', { driftSec })
+        }
       } else if (isLocallyUnsyncedRef.current) {
+        player.setPlaybackRate(1)
         isLocallyUnsyncedRef.current = false
         void reportEvent('sync-correction', { driftSec, correctionResult: 'success' })
+      } else {
+        player.setPlaybackRate(1)
       }
     }
 
@@ -273,6 +326,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       }, 1200)
     } else {
       clearAutoplayCheckTimer(autoplayCheckTimerRef)
+      player.setPlaybackRate(1)
       player.pauseVideo()
       setAutoplayBlocked(false)
     }
@@ -413,6 +467,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const retryAutoplay = (): void => {
     const player = playerRef.current
     if (!player) return
+    player.setPlaybackRate(1)
     player.mute()
     player.playVideo()
     setAutoplayBlocked(false)

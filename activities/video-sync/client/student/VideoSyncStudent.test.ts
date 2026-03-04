@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { clearAutoplayCheckTimer } from './VideoSyncStudent.js'
+import { getStudentPlaybackSyncAction } from './VideoSyncStudent.js'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
 import { resetUnsyncedPlaybackTelemetry } from './VideoSyncStudent.js'
@@ -93,10 +94,37 @@ void test('shouldCorrectStudentPlaybackDrift is lenient while synced playback is
   assert.equal(shouldCorrectStudentPlaybackDrift(10, 10.3, false), true)
 })
 
+void test('getStudentPlaybackSyncAction uses rate correction for moderate live drift and seeking for larger misses', () => {
+  assert.deepEqual(getStudentPlaybackSyncAction(10, 10.2, true), {
+    type: 'none',
+    playbackRate: 1,
+  })
+  assert.deepEqual(getStudentPlaybackSyncAction(10, 10.8, true), {
+    type: 'rate',
+    playbackRate: 1.25,
+  })
+  assert.deepEqual(getStudentPlaybackSyncAction(10.8, 10, true), {
+    type: 'rate',
+    playbackRate: 0.75,
+  })
+  assert.deepEqual(getStudentPlaybackSyncAction(10, 12, true), {
+    type: 'seek',
+    playbackRate: 1,
+  })
+  assert.deepEqual(getStudentPlaybackSyncAction(10, 10.3, false), {
+    type: 'seek',
+    playbackRate: 1,
+  })
+})
+
 void test('syncLoadedVideoSource cues a paused synced video without autoplaying', () => {
   const loadCalls: Array<{ videoId: string; startSeconds?: number; endSeconds?: number }> = []
   const cueCalls: Array<{ videoId: string; startSeconds?: number; endSeconds?: number }> = []
+  const rateCalls: number[] = []
   const player = {
+    setPlaybackRate(rate: number) {
+      rateCalls.push(rate)
+    },
     loadVideoById(options: { videoId: string; startSeconds?: number; endSeconds?: number }) {
       loadCalls.push(options)
     },
@@ -112,6 +140,7 @@ void test('syncLoadedVideoSource cues a paused synced video without autoplaying'
     isPlaying: false,
   }, 12)
 
+  assert.deepEqual(rateCalls, [1])
   assert.deepEqual(loadCalls, [])
   assert.deepEqual(cueCalls, [{
     videoId: 'abcdefghijk',
@@ -123,7 +152,11 @@ void test('syncLoadedVideoSource cues a paused synced video without autoplaying'
 void test('syncLoadedVideoSource loads a playing synced video for immediate playback', () => {
   const loadCalls: Array<{ videoId: string; startSeconds?: number; endSeconds?: number }> = []
   const cueCalls: Array<{ videoId: string; startSeconds?: number; endSeconds?: number }> = []
+  const rateCalls: number[] = []
   const player = {
+    setPlaybackRate(rate: number) {
+      rateCalls.push(rate)
+    },
     loadVideoById(options: { videoId: string; startSeconds?: number; endSeconds?: number }) {
       loadCalls.push(options)
     },
@@ -138,6 +171,7 @@ void test('syncLoadedVideoSource loads a playing synced video for immediate play
     isPlaying: true,
   }, 18)
 
+  assert.deepEqual(rateCalls, [1])
   assert.deepEqual(cueCalls, [])
   assert.deepEqual(loadCalls, [{
     videoId: 'abcdefghijk',
