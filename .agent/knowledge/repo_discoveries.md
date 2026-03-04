@@ -16,6 +16,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-04
 - Area: activities
+- Discovery: `video-sync` read-path session normalization is persistence-worthy when it repairs malformed stored data. `GET /api/video-sync/:sessionId/session` should call `sessions.set(...)` if normalization changed persisted fields such as `instructorPasscode`, `state.videoId`, `state.serverTimestampMs`, or truncated telemetry error fields, even when playback projection and connection telemetry did not otherwise require a write.
+- Why it matters: In Valkey mode, `sessions.get()` returns a deserialized copy, so normalization fixes are lost unless the route explicitly persists them. Without this, malformed sessions can remain broken indefinitely and every read repeats the same repair work.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`
+- Follow-up action: When adding new persisted `video-sync` fields, include them in normalization-change expectations and keep the read-path persistence tests aligned with that contract.
+- Owner: Codex
+
+- Date: 2026-03-04
+- Area: activities
 - Discovery: In `video-sync`, Valkey-backed `unsync` and successful `sync-correction` event handlers should reuse the count returned by the upsert/clear Lua scripts instead of immediately issuing a second count-script `EVAL`; the standalone count script is still the source of truth for heartbeats, session reads, and stale-entry pruning.
 - Why it matters: Event requests are the hot path for drift telemetry. Reusing the mutation-script return value cuts redundant Valkey work roughly in half for those events while preserving cross-instance correctness and leaving periodic/read refresh paths intact.
 - Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`

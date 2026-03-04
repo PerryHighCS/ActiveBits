@@ -186,3 +186,35 @@ void test('loadYoutubeIframeApi does not stack iframe ready wrappers across retr
     mockDom.restore()
   }
 })
+
+void test('loadYoutubeIframeApi still resolves when an existing iframe ready handler throws', async () => {
+  const mockDom = installMockDom()
+  const originalConsoleError = console.error
+  const consoleErrors: unknown[][] = []
+  console.error = (...args: unknown[]) => {
+    consoleErrors.push(args)
+  }
+
+  try {
+    mockDom.windowMock.onYouTubeIframeAPIReady = () => {
+      throw new Error('[TEST] prior ready handler failure')
+    }
+
+    const loadPromise = loadYoutubeIframeApi()
+    mockDom.windowMock.YT = {
+      Player: class MockPlayer {} as unknown as YoutubeNamespace['Player'],
+    }
+
+    assert.doesNotThrow(() => {
+      mockDom.windowMock.onYouTubeIframeAPIReady?.()
+    })
+
+    const namespace = await loadPromise
+    assert.equal(namespace, mockDom.windowMock.YT)
+    assert.equal(consoleErrors.length, 1)
+    assert.match(String(consoleErrors[0]?.[0]), /Existing YouTube iframe ready handler failed/)
+  } finally {
+    console.error = originalConsoleError
+    mockDom.restore()
+  }
+})
