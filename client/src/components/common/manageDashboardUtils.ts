@@ -55,7 +55,15 @@ export interface ManageDashboardUtilityLike {
   description?: string
 }
 
-const createSessionBootstrapPayloads = new Map<string, Record<string, unknown>>()
+const CREATE_SESSION_BOOTSTRAP_TTL_MS = 5 * 60 * 1000
+const MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS = 100
+
+interface CreateSessionBootstrapPayloadEntry {
+  payload: Record<string, unknown>
+  createdAtMs: number
+}
+
+const createSessionBootstrapPayloads = new Map<string, CreateSessionBootstrapPayloadEntry>()
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -165,18 +173,48 @@ export function storeCreateSessionBootstrapPayload(
   activityId: string,
   sessionId: string,
   payload: Record<string, unknown>,
+  nowMs = Date.now(),
 ): void {
-  createSessionBootstrapPayloads.set(`${activityId}:${sessionId}`, payload)
+  pruneCreateSessionBootstrapPayloads(nowMs)
+  createSessionBootstrapPayloads.set(`${activityId}:${sessionId}`, {
+    payload,
+    createdAtMs: nowMs,
+  })
+  pruneCreateSessionBootstrapPayloads(nowMs)
 }
 
 export function consumeCreateSessionBootstrapPayload(
   activityId: string,
   sessionId: string,
+  nowMs = Date.now(),
 ): Record<string, unknown> | null {
   const key = `${activityId}:${sessionId}`
-  const payload = createSessionBootstrapPayloads.get(key) ?? null
+  const entry = createSessionBootstrapPayloads.get(key) ?? null
+  if (entry && nowMs - entry.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+    createSessionBootstrapPayloads.delete(key)
+    return null
+  }
+
+  const payload = entry?.payload ?? null
   createSessionBootstrapPayloads.delete(key)
   return payload
+}
+
+function pruneCreateSessionBootstrapPayloads(nowMs: number): void {
+  for (const [key, entry] of createSessionBootstrapPayloads.entries()) {
+    if (nowMs - entry.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+      createSessionBootstrapPayloads.delete(key)
+    }
+  }
+
+  while (createSessionBootstrapPayloads.size > MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS) {
+    const oldestKey = createSessionBootstrapPayloads.keys().next().value
+    if (typeof oldestKey !== 'string') {
+      break
+    }
+
+    createSessionBootstrapPayloads.delete(oldestKey)
+  }
 }
 
 export function parseDeepLinkOptions(rawDeepLinkOptions: unknown): DeepLinkOptions {
