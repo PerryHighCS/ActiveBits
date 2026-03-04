@@ -53,6 +53,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
         },
       },
       createSessionBootstrap: {
+        historyState: ['instructorPasscode'],
         sessionStorage: [
           {
             keyPrefix: 'syncdeck_instructor_',
@@ -98,6 +99,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
     keyPrefix: 'syncdeck_instructor_',
     responseField: 'instructorPasscode',
   })
+  assert.deepEqual(parsed.createSessionBootstrap?.historyState, ['instructorPasscode'])
   assert.deepEqual(parsed.utilities, [
     {
       id: 'gallery-walk-review-copy',
@@ -164,7 +166,7 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
           },
         },
         'bad-config-2',
-      ),
+    ),
     /responseField/,
   )
 
@@ -255,6 +257,29 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
         'bad-config-5',
       ),
     /utilities\[0\].*surfaces/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad6',
+          name: 'Bad6',
+          description: 'desc',
+          color: 'blue',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          createSessionBootstrap: {
+            historyState: ['ok', ''],
+          },
+        },
+        'bad-config-6',
+      ),
+    /historyState/,
   )
 })
 

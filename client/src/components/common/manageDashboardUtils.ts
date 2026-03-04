@@ -37,6 +37,7 @@ export interface CreateSessionBootstrapSessionStorageEntry {
 
 export interface CreateSessionBootstrapConfig {
   sessionStorage: CreateSessionBootstrapSessionStorageEntry[]
+  historyState?: string[]
 }
 
 export type DeepLinkOptions = Record<string, DeepLinkOption>
@@ -134,11 +135,21 @@ export function parseCreateSessionBootstrap(rawCreateSessionBootstrap: unknown):
     }))
     .filter((entry) => entry.keyPrefix.length > 0 && entry.responseField.length > 0)
 
-  if (sessionStorage.length === 0) {
+  const historyState = Array.isArray(rawCreateSessionBootstrap.historyState)
+    ? rawCreateSessionBootstrap.historyState
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+    : []
+
+  if (sessionStorage.length === 0 && historyState.length === 0) {
     return null
   }
 
-  return { sessionStorage }
+  return {
+    sessionStorage,
+    ...(historyState.length > 0 ? { historyState } : {}),
+  }
 }
 
 export function persistCreateSessionBootstrapToSessionStorage(
@@ -198,6 +209,25 @@ export function consumeCreateSessionBootstrapPayload(
   const payload = entry?.payload ?? null
   createSessionBootstrapPayloads.delete(key)
   return payload
+}
+
+export function buildCreateSessionBootstrapHistoryState(
+  rawCreateSessionBootstrap: unknown,
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const createSessionBootstrap = parseCreateSessionBootstrap(rawCreateSessionBootstrap)
+  if (!createSessionBootstrap?.historyState || createSessionBootstrap.historyState.length === 0) {
+    return null
+  }
+
+  const historyStatePayload = createSessionBootstrap.historyState.reduce<Record<string, unknown>>((accumulator, field) => {
+    if (field in payload) {
+      accumulator[field] = payload[field]
+    }
+    return accumulator
+  }, {})
+
+  return Object.keys(historyStatePayload).length > 0 ? historyStatePayload : null
 }
 
 function pruneCreateSessionBootstrapPayloads(nowMs: number): void {

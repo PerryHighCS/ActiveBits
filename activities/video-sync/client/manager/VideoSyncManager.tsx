@@ -112,6 +112,38 @@ export function readBootstrapSourceUrl(search: string): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
+export function resolveBootstrapInstructorPasscode(params: {
+  locationState: unknown
+  sessionId: string | null | undefined
+}): {
+  instructorPasscode: string | null
+  shouldClearLocationState: boolean
+} {
+  const fromLocationState = readBootstrapInstructorPasscode(params.locationState)
+  if (fromLocationState != null) {
+    return {
+      instructorPasscode: fromLocationState,
+      shouldClearLocationState: true,
+    }
+  }
+
+  if (!params.sessionId) {
+    return {
+      instructorPasscode: null,
+      shouldClearLocationState: false,
+    }
+  }
+
+  const fromBootstrapPayload = readBootstrapInstructorPasscode({
+    createSessionPayload: consumeCreateSessionBootstrapPayload('video-sync', params.sessionId) ?? undefined,
+  })
+
+  return {
+    instructorPasscode: fromBootstrapPayload,
+    shouldClearLocationState: false,
+  }
+}
+
 export function buildManagerWsUrl(params: {
   sessionId: string | null | undefined
   location: Pick<Location, 'protocol' | 'host'> | null | undefined
@@ -504,17 +536,19 @@ export default function VideoSyncManager() {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      const bootstrapped = readBootstrapInstructorPasscode(location.state)
-        ?? readBootstrapInstructorPasscode({
-          createSessionPayload: consumeCreateSessionBootstrapPayload('video-sync', sessionId) ?? undefined,
-        })
-      if (bootstrapped) {
-        void navigate(location.pathname + location.search, {
-          replace: true,
-          state: null,
-        })
+      const bootstrap = resolveBootstrapInstructorPasscode({
+        locationState: location.state,
+        sessionId,
+      })
+      if (bootstrap.instructorPasscode) {
+        if (bootstrap.shouldClearLocationState) {
+          void navigate(location.pathname + location.search, {
+            replace: true,
+            state: null,
+          })
+        }
         if (!isCancelled) {
-          setInstructorPasscode(bootstrapped)
+          setInstructorPasscode(bootstrap.instructorPasscode)
           setIsPasscodeReady(true)
         }
         return
