@@ -1034,7 +1034,7 @@ const SyncDeckManager: FC = () => {
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const syncDebugEnabledRef = useRef(false)
+  const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
   useEffect(() => {
     syncDebugEnabledRef.current = isSyncDeckDebugEnabled()

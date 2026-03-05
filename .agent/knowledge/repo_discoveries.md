@@ -324,3 +324,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/server/routes.ts`
 - Follow-up action: If warning volume increases in production, consider exposing dedupe hit/prune counters via status telemetry.
 - Owner: Codex
+
+- Date: 2026-03-05
+- Area: activities
+- Discovery: SyncDeck manager/student debug tracing refs must be initialized eagerly with `useRef(isSyncDeckDebugEnabled())` instead of `useRef(false)` to capture events that arrive before the first `useEffect` runs.
+- Why it matters: Early WebSocket or message-handler traffic can occur between first render commit and effect execution; lazy post-render initialization silently drops `[SYNCDECK-DEBUG]` traces even when `?syncdeckDebug=1` is present.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/shared/syncDebug.test.ts`
+- Follow-up action: Keep the existing `location.search` effect update for navigation-time toggles, but preserve eager ref initialization when refactoring trace logging paths.
+- Owner: Codex

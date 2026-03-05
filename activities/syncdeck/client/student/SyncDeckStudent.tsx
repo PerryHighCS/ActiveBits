@@ -743,7 +743,7 @@ const SyncDeckStudent: FC = () => {
   const hasSeenIframeReadySignalRef = useRef(false)
   const lastObservedIframeOriginRef = useRef<string | null>(null)
   const studentBacktrackOptOutRef = useRef(false)
-  const syncDebugEnabledRef = useRef(false)
+  const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
   const attachSessionEndedHandler = useSessionEndedHandler()
 
   useEffect(() => {
