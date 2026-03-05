@@ -316,3 +316,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/shared/revealSyncProtocol.ts`; `activities/syncdeck/shared/revealSyncProtocol.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/server/routes.ts`
 - Follow-up action: If protocol-major enforcement is required later, flip client/server compatibility warnings into explicit drops behind a gated rollout after decks are verified on `2.x`.
 - Owner: Codex
+
+- Date: 2026-03-05
+- Area: activities
+- Discovery: SyncDeck server reveal-sync protocol warning dedupe now uses a bounded in-memory TTL/LRU-style map (5-minute TTL, max 500 keys) instead of an unbounded set.
+- Why it matters: Keeps protocol warning spam suppression while preventing unbounded memory growth during long-running sessions with diverse mismatch signatures.
+- Evidence: `activities/syncdeck/server/routes.ts`
+- Follow-up action: If warning volume increases in production, consider exposing dedupe hit/prune counters via status telemetry.
+- Owner: Codex

@@ -111,7 +111,9 @@ const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
 const MAX_CHALKBOARD_DELTA_STROKES = 200
 const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === '1'
-const loggedProtocolWarningKeys = new Set<string>()
+const SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS = 5 * 60 * 1000
+const SYNCDECK_PROTOCOL_WARNING_DEDUPE_MAX_KEYS = 500
+const loggedProtocolWarningKeys = new Map<string, number>()
 
 type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'
 
@@ -129,11 +131,28 @@ function logSyncDeckProtocolEvent(
   }
 
   if (level === 'warn') {
+    const now = Date.now()
+    // Periodically prune stale dedupe keys to keep process memory bounded.
+    for (const [key, timestamp] of loggedProtocolWarningKeys) {
+      if (now - timestamp > SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS) {
+        loggedProtocolWarningKeys.delete(key)
+      }
+    }
+
     const dedupeKey = `${event}|${details.sessionId ?? 'session-unknown'}|${details.reason ?? 'reason-unknown'}|${details.receivedVersion ?? 'version-unknown'}|${details.action ?? 'action-unknown'}`
-    if (loggedProtocolWarningKeys.has(dedupeKey)) {
+    const existingTimestamp = loggedProtocolWarningKeys.get(dedupeKey)
+    if (typeof existingTimestamp === 'number' && now - existingTimestamp <= SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS) {
       return
     }
-    loggedProtocolWarningKeys.add(dedupeKey)
+
+    if (loggedProtocolWarningKeys.size >= SYNCDECK_PROTOCOL_WARNING_DEDUPE_MAX_KEYS) {
+      const oldestKey = loggedProtocolWarningKeys.keys().next().value as string | undefined
+      if (oldestKey) {
+        loggedProtocolWarningKeys.delete(oldestKey)
+      }
+    }
+
+    loggedProtocolWarningKeys.set(dedupeKey, now)
   }
 
   const payload = {
