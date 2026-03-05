@@ -4,7 +4,10 @@ import {
   getStudentPresentationCompatibilityError,
 } from '../shared/presentationUrlCompatibility.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
-import { REVEAL_SYNC_PROTOCOL_VERSION } from '../../shared/revealSyncProtocol.js'
+import {
+  REVEAL_SYNC_PROTOCOL_VERSION,
+  assessRevealSyncProtocolCompatibility,
+} from '../../shared/revealSyncProtocol.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
@@ -16,6 +19,8 @@ const DISCONNECTED_STATUS_DELAY_MS = 250
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
+const SYNCDECK_DEBUG_QUERY_PARAM = 'syncdeckDebug'
+const SYNCDECK_DEBUG_STORAGE_KEY = 'syncdeck_debug'
 interface SessionResponsePayload {
   session?: {
     data?: {
@@ -625,6 +630,32 @@ function parseRevealSyncEnvelope(data: unknown): RevealSyncEnvelope | null {
   return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
 }
 
+function isRevealSyncEnvelopeData(data: unknown): data is RevealSyncEnvelope {
+  const envelope = parseRevealSyncEnvelope(data)
+  return envelope?.type === 'reveal-sync'
+}
+
+function isSyncDeckDebugEnabled(): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  try {
+    const search = new URLSearchParams(window.location.search)
+    if (search.get(SYNCDECK_DEBUG_QUERY_PARAM) === '1') {
+      return true
+    }
+  } catch {
+    // Ignore malformed URL state.
+  }
+
+  try {
+    return window.localStorage.getItem(SYNCDECK_DEBUG_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 function extractRevealCommandName(data: unknown): string | null {
   const envelope = parseRevealSyncEnvelope(data)
   if (!envelope || envelope.type !== 'reveal-sync') {
@@ -1025,6 +1056,22 @@ const SyncDeckManager: FC = () => {
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const syncDebugEnabledRef = useRef(false)
+
+  useEffect(() => {
+    syncDebugEnabledRef.current = isSyncDeckDebugEnabled()
+  }, [location.search])
+
+  const traceSync = useCallback((event: string, details: Record<string, unknown>): void => {
+    if (!syncDebugEnabledRef.current) {
+      return
+    }
+
+    console.info('[SyncDeck][Manager]', {
+      event,
+      ...details,
+    })
+  }, [])
 
   const clearRestoreSuppressionTimeout = useCallback((): void => {
     if (restoreSuppressionTimeoutRef.current != null) {
@@ -1185,7 +1232,22 @@ const SyncDeckManager: FC = () => {
           const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage
           const statePayload = extractSyncDeckStatePayload(message)
           if (statePayload != null) {
+            if (isRevealSyncEnvelopeData(statePayload)) {
+              const compatibility = assessRevealSyncProtocolCompatibility(statePayload.version)
+              if (!compatibility.compatible) {
+                traceSync('warn_inbound_server_payload_incompatible_protocol', {
+                  reason: compatibility.reason,
+                  expectedVersion: compatibility.expectedVersion,
+                  receivedVersion: compatibility.receivedVersion,
+                  action: statePayload.action,
+                })
+              }
+            }
+
             if (!isInstructorSyncEnabledRef.current) {
+              traceSync('drop_inbound_server_payload_sync_disabled', {
+                type: isRevealSyncEnvelopeData(statePayload) ? statePayload.type : typeof statePayload,
+              })
               return
             }
 
@@ -1203,6 +1265,10 @@ const SyncDeckManager: FC = () => {
 
             lastInstructorPayloadRef.current = statePayload
             const commandName = extractRevealCommandName(statePayload)
+            traceSync('apply_inbound_server_payload', {
+              commandName,
+              action: isRevealSyncEnvelopeData(statePayload) ? statePayload.action : null,
+            })
             if (isInboundChalkboardReplayCommand(commandName)) {
               const replayStorage = readChalkboardSnapshotStorage(statePayload)
               if (replayStorage != null && replayStorage.trim().length > 0) {
@@ -1245,6 +1311,9 @@ const SyncDeckManager: FC = () => {
           }
 
           if (message.type !== 'syncdeck-students') {
+            traceSync('ignore_non_student_presence_payload', {
+              messageType: message.type as string | undefined,
+            })
             return
           }
 
@@ -1860,6 +1929,19 @@ const SyncDeckManager: FC = () => {
         return
       }
 
+      const envelope = parseRevealSyncEnvelope(event.data)
+      if (envelope?.type === 'reveal-sync') {
+        const compatibility = assessRevealSyncProtocolCompatibility(envelope.version)
+        if (!compatibility.compatible) {
+          traceSync('warn_inbound_iframe_payload_incompatible_protocol', {
+            reason: compatibility.reason,
+            expectedVersion: compatibility.expectedVersion,
+            receivedVersion: compatibility.receivedVersion,
+            action: envelope.action,
+          })
+        }
+      }
+
       const storyboardDisplayed = extractStoryboardDisplayed(event.data)
       if (typeof storyboardDisplayed === 'boolean') {
         setIsStoryboardOpen(storyboardDisplayed)
@@ -1874,8 +1956,7 @@ const SyncDeckManager: FC = () => {
         setIsPresentationPaused(pausedStateFromCommand)
       }
 
-      const initialEnvelope = parseRevealSyncEnvelope(event.data)
-      if (!hasSeenInstructorIframeReadySignalRef.current && initialEnvelope?.type === 'reveal-sync') {
+      if (!hasSeenInstructorIframeReadySignalRef.current && envelope?.type === 'reveal-sync') {
         hasSeenInstructorIframeReadySignalRef.current = true
         const targetWindow = presentationIframeRef.current?.contentWindow
         if (targetWindow && presentationOrigin) {
@@ -1919,8 +2000,10 @@ const SyncDeckManager: FC = () => {
       }
 
       try {
-        const envelope = parseRevealSyncEnvelope(event.data)
         if (!isInstructorSyncEnabledRef.current) {
+          traceSync('drop_outbound_iframe_payload_sync_disabled', {
+            action: envelope?.action,
+          })
           return
         }
 
@@ -1950,6 +2033,9 @@ const SyncDeckManager: FC = () => {
               payload: outboundChalkboardRelayCommand,
             }),
           )
+          traceSync('relay_outbound_chalkboard_payload', {
+            action: extractRevealCommandName(outboundChalkboardRelayCommand),
+          })
           return
         }
 
@@ -1969,6 +2055,9 @@ const SyncDeckManager: FC = () => {
             releaseRestoreSuppression()
           }
           if (restoreSuppression.shouldDrop) {
+            traceSync('drop_outbound_iframe_state_restore_suppression', {
+              action: envelope.action,
+            })
             return
           }
         }
@@ -1988,6 +2077,9 @@ const SyncDeckManager: FC = () => {
           envelope.action === 'state' &&
           shouldSuppressInstructorStateBroadcast(lastInstructorIndicesRef.current, explicitBoundaryRef.current)
         ) {
+          traceSync('drop_outbound_iframe_state_explicit_boundary', {
+            action: envelope.action,
+          })
           return
         }
 
@@ -2047,6 +2139,9 @@ const SyncDeckManager: FC = () => {
         }
 
         if (!shouldRelayRevealSyncPayloadToSession(sanitizedPayload)) {
+          traceSync('drop_outbound_iframe_payload_relay_policy', {
+            action: envelope?.action,
+          })
           return
         }
 
@@ -2056,6 +2151,9 @@ const SyncDeckManager: FC = () => {
             payload: sanitizedPayload,
           }),
         )
+        traceSync('relay_outbound_iframe_payload', {
+          action: envelope?.action,
+        })
       } catch {
         return
       }
@@ -2072,6 +2170,7 @@ const SyncDeckManager: FC = () => {
     applyDrawingToolModeToInstructorIframe,
     armRestoreSuppression,
     releaseRestoreSuppression,
+    traceSync,
   ])
 
   useEffect(

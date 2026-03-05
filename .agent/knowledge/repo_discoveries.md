@@ -308,3 +308,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
 - Follow-up action: Keep future SyncDeck host relay changes split between explicit boundary grants (`setStudentBoundary`), boundary clears (`clearBoundary`), and explicit user-driven snap commands (`syncToInstructor`) instead of inferring snap-to-instructor from ordinary `state` payloads with `studentBoundary: null`.
 - Owner: Codex
+
+- Date: 2026-03-05
+- Area: activities
+- Discovery: SyncDeck now centralizes reveal-sync protocol compatibility assessment (`assessRevealSyncProtocolCompatibility`) and adds opt-in client tracing (`?syncdeckDebug=1` or `localStorage.syncdeck_debug=1`) plus structured server warning telemetry for incompatible protocol envelopes.
+- Why it matters: Sync failures caused by message-schema/version drift were previously silent; instrumentation now shows where a payload was queued, relayed, suppressed, or warned for version mismatch without changing normal relay behavior.
+- Evidence: `activities/syncdeck/shared/revealSyncProtocol.ts`; `activities/syncdeck/shared/revealSyncProtocol.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/server/routes.ts`
+- Follow-up action: If protocol-major enforcement is required later, flip client/server compatibility warnings into explicit drops behind a gated rollout after decks are verified on `2.x`.
+- Owner: Codex

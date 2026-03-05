@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEv
 import { useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
-import { REVEAL_SYNC_PROTOCOL_VERSION } from '../../shared/revealSyncProtocol.js'
+import {
+  REVEAL_SYNC_PROTOCOL_VERSION,
+  assessRevealSyncProtocolCompatibility,
+} from '../../shared/revealSyncProtocol.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 
@@ -56,6 +59,8 @@ interface RevealStateIndicesPayload {
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
+const SYNCDECK_DEBUG_QUERY_PARAM = 'syncdeckDebug'
+const SYNCDECK_DEBUG_STORAGE_KEY = 'syncdeck_debug'
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
   if (a.h !== b.h) return a.h - b.h
@@ -140,6 +145,27 @@ function isRevealSyncMessage(value: unknown): value is RevealSyncEnvelope {
   }
 
   return value.type === 'reveal-sync' && typeof value.action === 'string'
+}
+
+function isSyncDeckDebugEnabled(): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  try {
+    const search = new URLSearchParams(window.location.search)
+    if (search.get(SYNCDECK_DEBUG_QUERY_PARAM) === '1') {
+      return true
+    }
+  } catch {
+    // Ignore malformed URL state.
+  }
+
+  try {
+    return window.localStorage.getItem(SYNCDECK_DEBUG_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
 }
 
 function isChalkboardRelayAction(action: unknown): action is ChalkboardRelayAction {
@@ -738,7 +764,23 @@ const SyncDeckStudent: FC = () => {
   const hasSeenIframeReadySignalRef = useRef(false)
   const lastObservedIframeOriginRef = useRef<string | null>(null)
   const studentBacktrackOptOutRef = useRef(false)
+  const syncDebugEnabledRef = useRef(false)
   const attachSessionEndedHandler = useSessionEndedHandler()
+
+  useEffect(() => {
+    syncDebugEnabledRef.current = isSyncDeckDebugEnabled()
+  }, [])
+
+  const traceSync = useCallback((event: string, details: Record<string, unknown>): void => {
+    if (!syncDebugEnabledRef.current) {
+      return
+    }
+
+    console.info('[SyncDeck][Student]', {
+      event,
+      ...details,
+    })
+  }, [])
 
   useEffect(() => {
     if (!sessionId) {
@@ -789,12 +831,18 @@ const SyncDeckStudent: FC = () => {
   const sendPayloadToIframe = useCallback((payload: unknown) => {
     if (!presentationOrigin) {
       pendingPayloadQueueRef.current.push(payload)
+      traceSync('queue_payload_missing_presentation_origin', {
+        queueDepth: pendingPayloadQueueRef.current.length,
+      })
       return
     }
 
     const target = iframeRef.current?.contentWindow
     if (!target) {
       pendingPayloadQueueRef.current.push(payload)
+      traceSync('queue_payload_missing_iframe_window', {
+        queueDepth: pendingPayloadQueueRef.current.length,
+      })
       return
     }
 
@@ -805,15 +853,24 @@ const SyncDeckStudent: FC = () => {
     })
     if (!targetOrigin) {
       pendingPayloadQueueRef.current.push(payload)
+      traceSync('queue_payload_missing_target_origin', {
+        queueDepth: pendingPayloadQueueRef.current.length,
+      })
       return
     }
 
     try {
       target.postMessage(payload, targetOrigin)
+      traceSync('post_message_to_iframe', {
+        targetOrigin,
+      })
     } catch {
       pendingPayloadQueueRef.current.push(payload)
+      traceSync('queue_payload_post_message_error', {
+        queueDepth: pendingPayloadQueueRef.current.length,
+      })
     }
-  }, [getIframeRuntimeOrigin, presentationOrigin])
+  }, [getIframeRuntimeOrigin, presentationOrigin, traceSync])
 
   const setBacktrackOptOut = useCallback((value: boolean) => {
     studentBacktrackOptOutRef.current = value
@@ -883,9 +940,24 @@ const SyncDeckStudent: FC = () => {
           return
         }
 
+        if (isRevealSyncMessage(parsed.payload)) {
+          const compatibility = assessRevealSyncProtocolCompatibility(parsed.payload.version)
+          if (!compatibility.compatible) {
+            traceSync('warn_inbound_server_payload_incompatible_protocol', {
+              reason: compatibility.reason,
+              expectedVersion: compatibility.expectedVersion,
+              receivedVersion: compatibility.receivedVersion,
+              action: parsed.payload.action,
+            })
+          }
+        }
+
         const drawingToolMode = parseDrawingToolModePayload(parsed.payload)
         if (drawingToolMode) {
           applyDrawingToolModeToIframe(drawingToolMode)
+          traceSync('apply_drawing_tool_mode', {
+            mode: drawingToolMode,
+          })
           return
         }
 
@@ -921,11 +993,17 @@ const SyncDeckStudent: FC = () => {
         )
         if (boundaryCommand != null) {
           sendPayloadToIframe(boundaryCommand)
+          traceSync('forward_boundary_command_to_iframe', {
+            action: (boundaryCommand.payload as { name?: unknown } | undefined)?.name as string | undefined,
+          })
         }
 
         const revealCommand = toRevealCommandMessage(parsed.payload)
         if (revealCommand == null) {
           if (boundaryCommand == null) {
+            traceSync('drop_inbound_server_payload_unhandled', {
+              messageType: parsed.type as string | undefined,
+            })
             return
           }
         } else {
@@ -937,6 +1015,13 @@ const SyncDeckStudent: FC = () => {
           )
           if (!suppressForwardSync) {
             sendPayloadToIframe(revealCommand)
+            traceSync('forward_reveal_command_to_iframe', {
+              action: (revealCommand as { payload?: { name?: unknown } }).payload?.name as string | undefined,
+            })
+          } else {
+            traceSync('drop_forward_sync_due_to_backtrack_opt_out', {
+              action: (revealCommand as { payload?: { name?: unknown } }).payload?.name as string | undefined,
+            })
           }
         }
 
@@ -945,7 +1030,7 @@ const SyncDeckStudent: FC = () => {
         return
       }
     },
-    [applyDrawingToolModeToIframe, sendPayloadToIframe, setBacktrackOptOut],
+    [applyDrawingToolModeToIframe, sendPayloadToIframe, setBacktrackOptOut, traceSync],
   )
 
   const replayLatestInstructorSyncToIframe = useCallback(() => {
@@ -984,6 +1069,18 @@ const SyncDeckStudent: FC = () => {
         setIsStoryboardOpen(storyboardDisplayed)
       }
 
+      if (isRevealSyncMessage(event.data)) {
+        const compatibility = assessRevealSyncProtocolCompatibility(event.data.version)
+        if (!compatibility.compatible) {
+          traceSync('warn_inbound_iframe_payload_incompatible_protocol', {
+            reason: compatibility.reason,
+            expectedVersion: compatibility.expectedVersion,
+            receivedVersion: compatibility.receivedVersion,
+            action: event.data.action,
+          })
+        }
+      }
+
       const localIndices = extractIndicesFromRevealStateMessage(event.data)
       if (localIndices) {
         const previousLocalIndices = localStudentIndicesRef.current
@@ -1014,6 +1111,9 @@ const SyncDeckStudent: FC = () => {
           for (const queuedPayload of queuedPayloads) {
             sendPayloadToIframe(queuedPayload)
           }
+          traceSync('flush_queued_iframe_payloads', {
+            count: queuedPayloads.length,
+          })
         }
         if (pendingDrawingToolModeRef.current != null) {
           applyDrawingToolModeToIframe(pendingDrawingToolModeRef.current)
@@ -1026,7 +1126,7 @@ const SyncDeckStudent: FC = () => {
     return () => {
       window.removeEventListener('message', handleIframeMessage)
     }
-  }, [applyDrawingToolModeToIframe, replayLatestInstructorSyncToIframe, sendPayloadToIframe, setBacktrackOptOut])
+  }, [applyDrawingToolModeToIframe, replayLatestInstructorSyncToIframe, sendPayloadToIframe, setBacktrackOptOut, traceSync])
 
   const buildStudentWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined') {
