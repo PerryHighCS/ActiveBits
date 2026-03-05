@@ -146,6 +146,37 @@ function isRevealSyncMessage(value: unknown): value is RevealSyncEnvelope {
   return value.type === 'reveal-sync' && typeof value.action === 'string'
 }
 
+export function resolveInboundPayloadType(rawPayload: unknown): string {
+  if (isPlainObject(rawPayload)) {
+    const payloadType = typeof rawPayload.type === 'string' ? rawPayload.type : null
+    const payloadAction = typeof rawPayload.action === 'string' ? rawPayload.action : null
+
+    if (payloadType && payloadAction) {
+      return `${payloadType}:${payloadAction}`
+    }
+
+    if (payloadType) {
+      return payloadType
+    }
+
+    if (payloadAction) {
+      return payloadAction
+    }
+
+    return 'object'
+  }
+
+  if (Array.isArray(rawPayload)) {
+    return 'array'
+  }
+
+  if (rawPayload === null) {
+    return 'null'
+  }
+
+  return typeof rawPayload
+}
+
 function isChalkboardRelayAction(action: unknown): action is ChalkboardRelayAction {
   return action === 'chalkboardStroke' || action === 'chalkboardState'
 }
@@ -981,7 +1012,7 @@ const SyncDeckStudent: FC = () => {
         if (revealCommand == null) {
           if (boundaryCommand == null) {
             traceSync('drop_inbound_server_payload_unhandled', {
-              messageType: parsed.type as string | undefined,
+              payloadType: resolveInboundPayloadType(parsed.payload),
             })
             return
           }

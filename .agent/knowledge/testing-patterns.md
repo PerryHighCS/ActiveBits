@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-03-05
+- Scope: unit
+- Pattern: Prefer behavior-driven assertions over source-text matching (for example, avoid `readFileSync` + regex checks against component source strings).
+- Why it helps: Source-string tests are brittle under formatting/renaming and can fail without any runtime regression signal.
+- Example (file/path): `activities/syncdeck/client/shared/syncDebug.test.ts`
+- Failure signal: Tests fail after whitespace or symbol-name changes even though debug/tracing behavior is unchanged.
+- Follow-up action: Keep checks at API/runtime boundary; place any unavoidable structural checks close to the owning component tests.
+- Owner: Codex
+
 - Date: 2026-02-26
 - Scope: integration
 - Pattern: When `server/activities/activityRegistry` is initialized during `node --test`, treat a discovered config file that disappears before import as a skippable race (`ERR_MODULE_NOT_FOUND` or loader-level `ENOENT`) instead of a fatal production config error.

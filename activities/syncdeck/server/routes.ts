@@ -130,8 +130,9 @@ function logSyncDeckProtocolEvent(
     return
   }
 
+  const now = Date.now()
+
   if (level === 'warn') {
-    const now = Date.now()
     // Periodically prune stale dedupe keys to keep process memory bounded.
     for (const [key, timestamp] of loggedProtocolWarningKeys) {
       if (now - timestamp > SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS) {
@@ -160,7 +161,7 @@ function logSyncDeckProtocolEvent(
     subsystem: 'reveal-sync-protocol',
     event,
     ...details,
-    ts: Date.now(),
+    ts: now,
   }
 
   const logMessage = JSON.stringify(payload)
