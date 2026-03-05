@@ -7,6 +7,8 @@ export interface RevealSyncProtocolCompatibility {
   reason: 'compatible' | 'missing-version' | 'invalid-version' | 'major-mismatch'
 }
 
+const REVEAL_SYNC_PROTOCOL_MAJOR = Number(REVEAL_SYNC_PROTOCOL_VERSION.split('.')[0])
+
 function parseSemverMajor(value: string): number | null {
   const trimmed = value.trim()
   if (trimmed.length === 0) {
@@ -32,9 +34,8 @@ export function assessRevealSyncProtocolCompatibility(version: unknown): RevealS
     }
   }
 
-  const hostMajor = parseSemverMajor(REVEAL_SYNC_PROTOCOL_VERSION)
   const receivedMajor = parseSemverMajor(version)
-  if (hostMajor == null || receivedMajor == null) {
+  if (receivedMajor == null) {
     return {
       compatible: false,
       expectedVersion: REVEAL_SYNC_PROTOCOL_VERSION,
@@ -43,7 +44,7 @@ export function assessRevealSyncProtocolCompatibility(version: unknown): RevealS
     }
   }
 
-  if (hostMajor !== receivedMajor) {
+  if (REVEAL_SYNC_PROTOCOL_MAJOR !== receivedMajor) {
     return {
       compatible: false,
       expectedVersion: REVEAL_SYNC_PROTOCOL_VERSION,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
@@ -8,6 +8,7 @@ import {
 } from '../../shared/revealSyncProtocol.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
+import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 
 interface SessionResponsePayload {
   session?: {
@@ -59,8 +60,6 @@ interface RevealStateIndicesPayload {
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
-const SYNCDECK_DEBUG_QUERY_PARAM = 'syncdeckDebug'
-const SYNCDECK_DEBUG_STORAGE_KEY = 'syncdeck_debug'
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
   if (a.h !== b.h) return a.h - b.h
@@ -145,27 +144,6 @@ function isRevealSyncMessage(value: unknown): value is RevealSyncEnvelope {
   }
 
   return value.type === 'reveal-sync' && typeof value.action === 'string'
-}
-
-function isSyncDeckDebugEnabled(): boolean {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  try {
-    const search = new URLSearchParams(window.location.search)
-    if (search.get(SYNCDECK_DEBUG_QUERY_PARAM) === '1') {
-      return true
-    }
-  } catch {
-    // Ignore malformed URL state.
-  }
-
-  try {
-    return window.localStorage.getItem(SYNCDECK_DEBUG_STORAGE_KEY) === '1'
-  } catch {
-    return false
-  }
 }
 
 function isChalkboardRelayAction(action: unknown): action is ChalkboardRelayAction {
@@ -740,6 +718,7 @@ export function shouldResetBacktrackOptOutByMaxPosition(
 
 const SyncDeckStudent: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
+  const location = useLocation()
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [presentationUrl, setPresentationUrl] = useState<string | null>(null)
@@ -769,7 +748,7 @@ const SyncDeckStudent: FC = () => {
 
   useEffect(() => {
     syncDebugEnabledRef.current = isSyncDeckDebugEnabled()
-  }, [])
+  }, [location.search])
 
   const traceSync = useCallback((event: string, details: Record<string, unknown>): void => {
     if (!syncDebugEnabledRef.current) {

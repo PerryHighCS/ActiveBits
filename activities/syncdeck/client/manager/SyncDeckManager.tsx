@@ -3,6 +3,7 @@ import { runSyncDeckPresentationPreflight } from '../shared/presentationPrefligh
 import {
   getStudentPresentationCompatibilityError,
 } from '../shared/presentationUrlCompatibility.js'
+import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
@@ -19,8 +20,6 @@ const DISCONNECTED_STATUS_DELAY_MS = 250
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
-const SYNCDECK_DEBUG_QUERY_PARAM = 'syncdeckDebug'
-const SYNCDECK_DEBUG_STORAGE_KEY = 'syncdeck_debug'
 interface SessionResponsePayload {
   session?: {
     data?: {
@@ -635,27 +634,6 @@ function isRevealSyncEnvelopeData(data: unknown): data is RevealSyncEnvelope {
   return envelope?.type === 'reveal-sync'
 }
 
-function isSyncDeckDebugEnabled(): boolean {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  try {
-    const search = new URLSearchParams(window.location.search)
-    if (search.get(SYNCDECK_DEBUG_QUERY_PARAM) === '1') {
-      return true
-    }
-  } catch {
-    // Ignore malformed URL state.
-  }
-
-  try {
-    return window.localStorage.getItem(SYNCDECK_DEBUG_STORAGE_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
 function extractRevealCommandName(data: unknown): string | null {
   const envelope = parseRevealSyncEnvelope(data)
   if (!envelope || envelope.type !== 'reveal-sync') {
@@ -1232,21 +1210,22 @@ const SyncDeckManager: FC = () => {
           const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage
           const statePayload = extractSyncDeckStatePayload(message)
           if (statePayload != null) {
-            if (isRevealSyncEnvelopeData(statePayload)) {
-              const compatibility = assessRevealSyncProtocolCompatibility(statePayload.version)
+            const revealSyncStatePayload = isRevealSyncEnvelopeData(statePayload) ? statePayload : null
+            if (revealSyncStatePayload) {
+              const compatibility = assessRevealSyncProtocolCompatibility(revealSyncStatePayload.version)
               if (!compatibility.compatible) {
                 traceSync('warn_inbound_server_payload_incompatible_protocol', {
                   reason: compatibility.reason,
                   expectedVersion: compatibility.expectedVersion,
                   receivedVersion: compatibility.receivedVersion,
-                  action: statePayload.action,
+                  action: revealSyncStatePayload.action,
                 })
               }
             }
 
             if (!isInstructorSyncEnabledRef.current) {
               traceSync('drop_inbound_server_payload_sync_disabled', {
-                type: isRevealSyncEnvelopeData(statePayload) ? statePayload.type : typeof statePayload,
+                type: revealSyncStatePayload ? revealSyncStatePayload.type : typeof statePayload,
               })
               return
             }
@@ -1267,7 +1246,7 @@ const SyncDeckManager: FC = () => {
             const commandName = extractRevealCommandName(statePayload)
             traceSync('apply_inbound_server_payload', {
               commandName,
-              action: isRevealSyncEnvelopeData(statePayload) ? statePayload.action : null,
+              action: revealSyncStatePayload ? revealSyncStatePayload.action : null,
             })
             if (isInboundChalkboardReplayCommand(commandName)) {
               const replayStorage = readChalkboardSnapshotStorage(statePayload)

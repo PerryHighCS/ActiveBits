@@ -12,6 +12,13 @@ void test('assessRevealSyncProtocolCompatibility accepts matching major versions
   assert.equal(result.reason, 'compatible')
 })
 
+void test('assessRevealSyncProtocolCompatibility accepts same major with different minor and patch', () => {
+  const result = assessRevealSyncProtocolCompatibility('2.7.19')
+
+  assert.equal(result.compatible, true)
+  assert.equal(result.reason, 'compatible')
+})
+
 void test('assessRevealSyncProtocolCompatibility rejects missing version values', () => {
   const result = assessRevealSyncProtocolCompatibility(undefined)
 
