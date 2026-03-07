@@ -11,6 +11,7 @@ import { resolveIframePostMessageTargetOrigin } from './SyncDeckStudent.js'
 import { shouldSuppressForwardInstructorSync } from './SyncDeckStudent.js'
 import { shouldResetBacktrackOptOutByMaxPosition } from './SyncDeckStudent.js'
 import { extractIndicesFromRevealStateMessage } from './SyncDeckStudent.js'
+import { resolveInboundPayloadType } from './SyncDeckStudent.js'
 import { MIXED_CONTENT_PRESENTATION_ERROR } from '../shared/presentationUrlCompatibility.js'
 
 void test('SyncDeckStudent renders join guidance copy', () => {
@@ -280,6 +281,26 @@ void test('toRevealCommandMessage maps resumed action to setState unpaused comma
     },
   })
   assert.equal(typeof (result as { ts?: unknown })?.ts, 'number')
+})
+
+void test('resolveInboundPayloadType combines payload type and action when both exist', () => {
+  assert.equal(
+    resolveInboundPayloadType({
+      type: 'reveal-sync',
+      action: 'state',
+      payload: {},
+    }),
+    'reveal-sync:state',
+  )
+})
+
+void test('resolveInboundPayloadType falls back to action/type or runtime shape', () => {
+  assert.equal(resolveInboundPayloadType({ action: 'state' }), 'state')
+  assert.equal(resolveInboundPayloadType({ type: 'custom' }), 'custom')
+  assert.equal(resolveInboundPayloadType({ payload: {} }), 'object')
+  assert.equal(resolveInboundPayloadType(['state']), 'array')
+  assert.equal(resolveInboundPayloadType(null), 'null')
+  assert.equal(resolveInboundPayloadType('state'), 'string')
 })
 
 void test('toRevealCommandMessage maps chalkboardStroke action to command envelope', () => {

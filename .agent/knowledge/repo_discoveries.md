@@ -308,3 +308,27 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
 - Follow-up action: Keep future SyncDeck host relay changes split between explicit boundary grants (`setStudentBoundary`), boundary clears (`clearBoundary`), and explicit user-driven snap commands (`syncToInstructor`) instead of inferring snap-to-instructor from ordinary `state` payloads with `studentBoundary: null`.
 - Owner: Codex
+
+- Date: 2026-03-05
+- Area: activities
+- Discovery: SyncDeck now centralizes reveal-sync protocol compatibility assessment (`assessRevealSyncProtocolCompatibility`) and adds opt-in client tracing (`?syncdeckDebug=1` or `localStorage.syncdeck_debug=1`) plus structured server warning telemetry for incompatible protocol envelopes.
+- Why it matters: Sync failures caused by message-schema/version drift were previously silent; instrumentation now shows where a payload was queued, relayed, suppressed, or warned for version mismatch without changing normal relay behavior.
+- Evidence: `activities/syncdeck/shared/revealSyncProtocol.ts`; `activities/syncdeck/shared/revealSyncProtocol.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/server/routes.ts`
+- Follow-up action: If protocol-major enforcement is required later, flip client/server compatibility warnings into explicit drops behind a gated rollout after decks are verified on `2.x`.
+- Owner: Codex
+
+- Date: 2026-03-05
+- Area: activities
+- Discovery: SyncDeck server reveal-sync protocol warning dedupe now uses a bounded in-memory TTL/LRU-style map (5-minute TTL, max 500 keys) instead of an unbounded set.
+- Why it matters: Keeps protocol warning spam suppression while preventing unbounded memory growth during long-running sessions with diverse mismatch signatures.
+- Evidence: `activities/syncdeck/server/routes.ts`
+- Follow-up action: If warning volume increases in production, consider exposing dedupe hit/prune counters via status telemetry.
+- Owner: Codex
+
+- Date: 2026-03-05
+- Area: activities
+- Discovery: SyncDeck manager/student debug tracing refs must be initialized eagerly with `useRef(isSyncDeckDebugEnabled())` instead of `useRef(false)` to capture events that arrive before the first `useEffect` runs.
+- Why it matters: Early WebSocket or message-handler traffic can occur between first render commit and effect execution; lazy post-render initialization silently drops `[SYNCDECK-DEBUG]` traces even when `?syncdeckDebug=1` is present.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/shared/syncDebug.test.ts`
+- Follow-up action: Keep the existing `location.search` effect update for navigation-time toggles, but preserve eager ref initialization when refactoring trace logging paths.
+- Owner: Codex

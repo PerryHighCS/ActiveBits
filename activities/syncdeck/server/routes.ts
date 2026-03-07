@@ -8,7 +8,10 @@ import {
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
-import { REVEAL_SYNC_PROTOCOL_VERSION } from '../shared/revealSyncProtocol.js'
+import {
+  REVEAL_SYNC_PROTOCOL_VERSION,
+  assessRevealSyncProtocolCompatibility,
+} from '../shared/revealSyncProtocol.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -107,11 +110,67 @@ const SYNCDECK_WS_UPDATE_TYPE = 'syncdeck-state-update'
 const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
 const MAX_CHALKBOARD_DELTA_STROKES = 200
+const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === '1'
+const SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS = 5 * 60 * 1000
+const SYNCDECK_PROTOCOL_WARNING_DEDUPE_MAX_KEYS = 500
+const loggedProtocolWarningKeys = new Map<string, number>()
 
 type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function logSyncDeckProtocolEvent(
+  level: 'info' | 'warn',
+  event: string,
+  details: Record<string, unknown>,
+): void {
+  if (level === 'info' && !SYNCDECK_PROTOCOL_DEBUG_ENABLED) {
+    return
+  }
+
+  const now = Date.now()
+
+  if (level === 'warn') {
+    // Periodically prune stale dedupe keys to keep process memory bounded.
+    for (const [key, timestamp] of loggedProtocolWarningKeys) {
+      if (now - timestamp > SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS) {
+        loggedProtocolWarningKeys.delete(key)
+      }
+    }
+
+    const dedupeKey = `${event}|${details.sessionId ?? 'session-unknown'}|${details.reason ?? 'reason-unknown'}|${details.receivedVersion ?? 'version-unknown'}|${details.action ?? 'action-unknown'}`
+    const existingTimestamp = loggedProtocolWarningKeys.get(dedupeKey)
+    if (typeof existingTimestamp === 'number' && now - existingTimestamp <= SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS) {
+      return
+    }
+
+    if (loggedProtocolWarningKeys.size >= SYNCDECK_PROTOCOL_WARNING_DEDUPE_MAX_KEYS) {
+      const oldestKey = loggedProtocolWarningKeys.keys().next().value as string | undefined
+      if (oldestKey) {
+        loggedProtocolWarningKeys.delete(oldestKey)
+      }
+    }
+
+    loggedProtocolWarningKeys.set(dedupeKey, now)
+  }
+
+  const payload = {
+    activity: 'syncdeck',
+    subsystem: 'reveal-sync-protocol',
+    event,
+    ...details,
+    ts: now,
+  }
+
+  const logMessage = JSON.stringify(payload)
+  if (level === 'warn') {
+    console.warn(logMessage)
+    return
+  }
+
+  console.info(logMessage)
 }
 
 function createInstructorPasscode(): string {
@@ -1037,11 +1096,32 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
         const message = parseWsMessage(raw)
         if (!message || message.type !== SYNCDECK_WS_UPDATE_TYPE) {
+          logSyncDeckProtocolEvent('info', 'ignore_instructor_ws_message', {
+            sessionId: client.sessionId,
+            reason: !message ? 'parse-failed' : 'unsupported-message-type',
+            messageType: message?.type ?? null,
+          })
           return
+        }
+
+        if (isPlainObject(message.payload) && message.payload.type === 'reveal-sync') {
+          const compatibility = assessRevealSyncProtocolCompatibility(message.payload.version)
+          if (!compatibility.compatible) {
+            logSyncDeckProtocolEvent('warn', 'warn_instructor_ws_payload_incompatible_protocol', {
+              sessionId: client.sessionId,
+              expectedVersion: compatibility.expectedVersion,
+              receivedVersion: compatibility.receivedVersion,
+              reason: compatibility.reason,
+              action: message.payload.action ?? null,
+            })
+          }
         }
 
         const session = asSyncDeckSession(await sessions.get(client.sessionId))
         if (!session) {
+          logSyncDeckProtocolEvent('info', 'ignore_instructor_ws_message_missing_session', {
+            sessionId: client.sessionId,
+          })
           return
         }
 
@@ -1055,6 +1135,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           session.data.drawingToolMode = drawingToolModeUpdate
         }
         await sessions.set(session.id, session)
+        logSyncDeckProtocolEvent('info', 'apply_instructor_ws_payload', {
+          sessionId: session.id,
+          payloadType: isPlainObject(message.payload) ? (message.payload.type ?? null) : null,
+          payloadAction: isPlainObject(message.payload) ? (message.payload.action ?? null) : null,
+        })
 
         for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
           if (peer.sessionId !== session.id || peer === client) {
