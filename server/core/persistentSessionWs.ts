@@ -14,6 +14,7 @@ import {
 } from './persistentSessions.js'
 import { createSession } from './sessions.js'
 import type { SessionStore as CoreSessionStore } from './sessions.js'
+import { buildSoloOnlyPolicyRejection } from './persistentSessionPolicyUtils.js'
 
 const OPEN_SOCKET_STATE = 1
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -166,7 +167,7 @@ async function handleTeacherCodeVerification(
     socket.send(
       JSON.stringify({
         type: 'teacher-code-error',
-        error: 'This permanent link is configured for solo use only.',
+        ...buildSoloOnlyPolicyRejection(),
       }),
     )
     return
