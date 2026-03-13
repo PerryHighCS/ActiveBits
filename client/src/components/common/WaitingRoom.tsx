@@ -17,6 +17,11 @@ import {
   type WaitingRoomFieldValueMap,
 } from './waitingRoomFormUtils'
 import {
+  buildEntryParticipantStorageKey,
+  persistEntryParticipantValues,
+  type EntryParticipantDestinationType,
+} from './entryParticipantStorage'
+import {
   buildPersistentAuthenticateApiUrl,
   buildPersistentTeacherCodeApiUrl,
   buildPersistentSessionWsUrl,
@@ -345,6 +350,15 @@ export default function WaitingRoom({
   const shareUrl = typeof window !== 'undefined' ? window.location.href : ''
   const isSoloOnlyMode = entryPolicy === 'solo-only'
 
+  const persistEntryParticipantHandoff = (destinationType: EntryParticipantDestinationType, destinationId: string) => {
+    if (typeof window === 'undefined' || window.sessionStorage == null) {
+      return
+    }
+
+    const storageKey = buildEntryParticipantStorageKey(activityName, destinationType, destinationId)
+    persistEntryParticipantValues(window.sessionStorage, storageKey, waitingRoomValues)
+  }
+
   const handleContinueSolo = () => {
     const nextTouchedFields = waitingRoomFields.reduce<Record<string, boolean>>((fields, field) => {
       fields[field.id] = true
@@ -358,6 +372,7 @@ export default function WaitingRoom({
     }
 
     const queryString = typeof window !== 'undefined' ? window.location.search : ''
+    persistEntryParticipantHandoff('solo', activityName)
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       wsRef.current.close()
     }
@@ -379,17 +394,19 @@ export default function WaitingRoom({
       return
     }
 
-    if (onJoinLive) {
-      onJoinLive()
-      return
-    }
-
     if (!startedSessionId) {
       setError('Live session is unavailable right now. Please refresh and try again.')
       return
     }
 
+    if (onJoinLive) {
+      persistEntryParticipantHandoff('session', startedSessionId)
+      onJoinLive()
+      return
+    }
+
     const queryString = typeof window !== 'undefined' ? window.location.search : ''
+    persistEntryParticipantHandoff('session', startedSessionId)
     if (!hasNavigatedRef.current) {
       hasNavigatedRef.current = true
       void navigate(`/${startedSessionId}${queryString}`)

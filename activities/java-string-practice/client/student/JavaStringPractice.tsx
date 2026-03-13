@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
+import {
+  buildEntryParticipantStorageKey,
+  consumeEntryParticipantValues,
+  getEntryParticipantDisplayName,
+} from '@src/components/common/entryParticipantStorage'
 import type {
   FeedbackState,
   JavaStringAnswer,
@@ -98,6 +103,22 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
     if (savedName) {
       setStudentName(savedName)
       setStudentId(savedId)
+      setNameSubmitted(true)
+      return
+    }
+
+    if (typeof window === 'undefined' || window.sessionStorage == null) {
+      return
+    }
+
+    const preflightValues = consumeEntryParticipantValues(
+      window.sessionStorage,
+      buildEntryParticipantStorageKey('java-string-practice', 'session', sessionId),
+    )
+    const displayName = getEntryParticipantDisplayName(preflightValues)
+    if (displayName) {
+      setStudentName(displayName)
+      localStorage.setItem(`student-name-${sessionId}`, displayName)
       setNameSubmitted(true)
     }
   }, [isSoloSession, sessionId])

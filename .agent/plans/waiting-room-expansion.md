@@ -613,6 +613,7 @@ that path ships.
 - [ ] Retain preflight form state across destination transitions (for example `wait -> join-live`) and carry collected data forward when entry proceeds
   Current status: started persistent sessions with waiting-room fields now stay inside the same `WaitingRoom` shell and reuse the stored preflight form state for `join-live`, but downstream join flow still does not submit/store that data beyond local sessionStorage.
 - [ ] Submit/store preflight data for later entry flow use
+  Current status: waiting-room `join-live` and `continue-solo` actions now copy collected values into a shared client-side entry handoff store keyed by destination, and `java-string-practice` consumes `displayName` from that handoff to skip its duplicate name gate. Server-backed participant storage and broader activity adoption are still outstanding.
 - [ ] Add clear [TEST] logging for expected error-path tests
 - [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
 
@@ -650,8 +651,8 @@ Direct solo-route migration note:
   solo path as a feedback-review/upload tool, so it should not be removed as a generic
   cleanup step without a replacement flow
 
-- [ ] Migrate `java-string-practice` to consume waiting-room-collected participant data for student entry
-- [ ] Remove or bypass duplicate startup name collection in `java-string-practice` once waiting-room entry is authoritative
+- [x] Migrate `java-string-practice` to consume waiting-room-collected participant data for student entry
+- [x] Remove or bypass duplicate startup name collection in `java-string-practice` once waiting-room entry is authoritative
 - [ ] Verify `java-string-practice` reconnect/progress flows still work with waiting-room-provided `participantId`
 - [ ] Migrate activity-local student ID generation toward shared server-side `participantId` issuance where needed
 - [ ] Define the migration/deprecation path for direct `/solo/:activityId` entry once permalink-based solo entry is ready

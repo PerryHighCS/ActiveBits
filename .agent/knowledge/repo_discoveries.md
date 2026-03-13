@@ -31,6 +31,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-13
+- Area: client | activities
+- Discovery: Waiting-room exit now writes collected values into a shared sessionStorage handoff keyed by destination (`session` or `solo`), and `java-string-practice` consumes that handoff's `displayName` to skip its duplicate live-session name prompt when preflight already captured it.
+- Why it matters: This is the first concrete carry-forward step from waiting-room UI into downstream activity entry, proving the migration path without yet introducing a server-backed participant registry.
+- Evidence: `client/src/components/common/entryParticipantStorage.ts`; `client/src/components/common/WaitingRoom.tsx`; `activities/java-string-practice/activity.config.ts`; `activities/java-string-practice/client/student/JavaStringPractice.tsx`
+- Follow-up action: Extend the same handoff to more activities or replace it with a shared server-backed participant-entry contract once `participantId` issuance and reconnect semantics are designed.
+- Owner: Codex
+
+- Date: 2026-03-13
 - Area: client
 - Discovery: `WaitingRoom` is no longer hard-coded as a teacher-wait blocker. It now accepts the resolved entry outcome so `continue-solo` permalink flows with waiting-room fields can render a solo-preflight screen and CTA instead of incorrectly telling the user to wait for a teacher.
 - Why it matters: Without outcome-aware presentation, future activities that add waiting-room fields would regress on `solo-allowed` or `solo-only` permalinks by showing misleading copy and the wrong primary action even though the router had already resolved a solo destination.

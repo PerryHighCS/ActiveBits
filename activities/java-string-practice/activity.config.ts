@@ -6,6 +6,17 @@ const javaStringPracticeConfig: ActivityConfig = {
   description: 'Interactive practice for Java String methods',
   color: 'purple',
   soloMode: true,
+  waitingRoom: {
+    fields: [
+      {
+        id: 'displayName',
+        label: 'Display Name',
+        type: 'text',
+        required: true,
+        placeholder: 'Your name',
+      },
+    ],
+  },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }
