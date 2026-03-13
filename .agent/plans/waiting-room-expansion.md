@@ -77,14 +77,17 @@ That suggests a generic shared flow:
 
 1. Student opens permalink, join-code, or equivalent activity entry URL.
 2. System resolves session metadata and entry policy.
-3. Waiting room checks whether preflight fields or a waiting state are needed.
-4. If needed, waiting room renders required preflight fields and/or blocking state.
-5. Waiting room determines current instructor presence / session state.
+3. Waiting room resolves role and current session/instructor context.
+4. Waiting room determines destination and whether any UI is needed.
+5. If needed, waiting room renders required preflight fields, role-entry UI, and/or blocking state.
 6. Student is routed to one of:
    - live managed session
    - solo continuation
    - blocked waiting state
    - immediate pass-through when nothing else is required
+
+The more precise ordering and terminology in **Entry Resolution Model** below is
+authoritative when this summary is too high-level.
 
 ---
 
@@ -307,6 +310,10 @@ Standalone/permalink/join-code entry may need to resolve role by using:
   have the cookie
 - default student role when no instructor authentication is present
 
+For `solo-only` permalinks, instructor authentication should not change the destination.
+An instructor arriving on a `solo-only` link should open the activity as a solo
+participant for demo/use, not as a managed instructor session.
+
 Embedded activity entry should not re-resolve role locally. Instead, it should inherit
 role from the parent session context.
 
@@ -319,10 +326,16 @@ role from the parent session context.
 
 | Outcome | Condition |
 |---|---|
-| `wait` | Policy requires instructor and none is present |
-| `join-live` | Instructor is present and managed entry is allowed for the resolved role |
-| `continue-solo` | No instructor is present and policy allows solo fallback and activity supports solo mode |
-| `solo-unavailable` | Policy allows solo fallback but activity does not support solo mode |
+| `wait` | Policy requires instructor and managed entry is not yet available |
+| `join-live` | The resolved role is entering a managed session path and the policy allows managed entry |
+| `continue-solo` | The policy resolves this entrant to solo mode and the activity supports solo mode |
+| `solo-unavailable` | The policy resolves this entrant to solo mode but the activity does not support solo mode |
+
+Additional clarification:
+
+- `instructor-required` links resolve students to `wait` until instructor presence is available; valid instructor auth resolves to managed instructor entry
+- `solo-allowed` links resolve to managed entry when instructor presence/managed access is available, otherwise to solo when allowed
+- `solo-only` links always resolve to `continue-solo` / `solo-unavailable` and never to `join-live`, even if instructor auth is present
 
 #### `wait` UX
 
@@ -350,10 +363,11 @@ shown before the resolved destination is entered.
 
 Examples:
 
-- Instructor present + no required preflight -> destination `join-live`, mode `pass-through`
+- Instructor present + managed session allowed + no required preflight -> destination `join-live`, mode `pass-through`
 - Instructor absent + solo allowed + no required preflight -> destination `continue-solo`, mode `pass-through`
 - Instructor absent + instructor-required policy -> destination `wait`, mode `render-ui`
 - No instructor cookie + user wants instructor access via permalink -> resolve role through waiting-room UI before destination selection completes
+- Instructor opens a `solo-only` permalink -> destination `continue-solo`, mode `pass-through` (solo demo participant)
 
 ### Important rule
 
@@ -467,7 +481,9 @@ permalink sessions use it first.
 ## Recommended Decisions
 
 1. `solo-only` permalinks should still route through the waiting-room gateway, but usually
-   as a fast preflight/pass-through step rather than a visible waiting screen.
+   as a fast preflight/pass-through step rather than a visible waiting screen. Instructor
+   auth does not convert a `solo-only` link into managed entry; instructors open it as solo
+   participants for demo/use.
 2. If a student starts in solo mode and an instructor later appears, the student should
    remain solo by default; do not auto-switch in v1.
 3. If a student is in `wait`, v1 should not auto-timeout them into solo or any other
@@ -498,6 +514,16 @@ permalink sessions use it first.
 
 ## Suggested Phases
 
+Recommended dependency order: `Phase 0 -> Phase 2 -> (Phase 3 + Phase 1) -> Phase 4`
+
+Rationale:
+
+- Phase 0 defines the contract and rollout rules
+- Phase 2 provides the waiting-room field/preflight framework that Phase 3 depends on
+- Phase 3 resolves entry behavior, and Phase 1 should only be exposed alongside that
+  resolver (or behind a feature flag)
+- Phase 4 migrates concrete activities once the shared entry path is working
+
 ### Phase 0 - Design and contract
 
 Phase 0 deliverables should be concrete artifacts, not just discussion:
@@ -523,8 +549,9 @@ this plan that a separate architecture record becomes useful.
 ### Phase 1 - Persistent link creation flow
 
 Rollout dependency: do not expose entry-policy behavior to users before the waiting-room
-resolver understands it. Either land Phase 1 alongside Phase 3, or gate Phase 1 API/UI
-exposure behind a feature flag until Phase 3 ships.
+resolver and preflight framework understand it. Either land Phase 1 alongside the
+Phase 2 + Phase 3 entry path, or gate Phase 1 API/UI exposure behind a feature flag until
+that path ships.
 
 - [ ] Add entry-policy control to permalink creation UI
 - [ ] Ensure entry-policy controls expose accessible names, state, and keyboard interaction
@@ -551,6 +578,7 @@ exposure behind a feature flag until Phase 3 ships.
 - [ ] Implement solo-unavailable informational state
 - [ ] Implement direct pass-through when no waiting-room UI is needed
 - [ ] Implement instructor-cookie and instructor-code role resolution for standalone entry
+- [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
 - [ ] Enforce entry policy server-side in entry/session APIs so disallowed joins are rejected even when the client is bypassed
 - [ ] Preserve existing live-session behavior when instructor is present
 - [ ] Ensure embedded entry inherits role from parent context and does not prompt for instructor code
