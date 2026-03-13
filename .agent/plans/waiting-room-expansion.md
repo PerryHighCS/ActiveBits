@@ -564,16 +564,16 @@ Phase 0 deliverables should be concrete artifacts, not just discussion:
 An additional ADR should only be created if the waiting-room contract diverges enough from
 this plan that a separate architecture record becomes useful.
 
-- [ ] Confirm permalink entry-policy vocabulary
-- [ ] Decide default behavior for existing permalinks
-- [ ] Define shared waiting-room field schema contract
+- [x] Confirm permalink entry-policy vocabulary
+- [x] Decide default behavior for existing permalinks
+- [x] Define shared waiting-room field schema contract
 - [ ] Decide and document sequencing when required preflight fields and waiting state both apply (v1: collect while waiting and carry forward)
 - [ ] Decide server/client ownership for validation and temporary storage
 - [ ] Define shared server-side `participantId` issuance and reconnect semantics
 - [ ] Define server-side enforcement rules so entry/session APIs reject disallowed joins even if the client is bypassed
 - [ ] Document role resolution rules for student, instructor-cookie, instructor-code, and embedded-role-inheritance paths
-- [ ] Document destination transitions for `wait`, `join-live`, `continue-solo`, and `solo-unavailable`
-- [ ] Document presentation-mode rules for `render-ui` vs `pass-through`
+- [x] Document destination transitions for `wait`, `join-live`, `continue-solo`, and `solo-unavailable`
+- [x] Document presentation-mode rules for `render-ui` vs `pass-through`
 - [ ] Define how permalink and ad-hoc join-code entry both route through the same waiting-room gateway
 
 ### Phase 1 - Persistent link creation flow
@@ -586,7 +586,7 @@ that path ships.
 - [ ] Add entry-policy control to permalink creation UI
 - [ ] Ensure entry-policy controls expose accessible names, state, and keyboard interaction
 - [ ] Persist selected entry policy in permalink metadata
-- [ ] Expose entry policy in session-entry/waiting-room API payloads
+- [x] Expose entry policy in session-entry/waiting-room API payloads
 - [ ] Define API error/response shape for server-enforced policy rejections
 - [ ] Gate Phase 1 UI/API exposure until Phase 3 resolver support exists, or land them together
 - [ ] Add visible entry-mode labeling in persistent link listings/details

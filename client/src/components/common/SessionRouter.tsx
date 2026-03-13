@@ -1,4 +1,5 @@
 import { Suspense, useCallback, useEffect, useState, type ChangeEvent, type ComponentType, type FormEvent } from 'react'
+import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { useNavigate, useParams } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
 import WaitingRoom from './WaitingRoom'
@@ -31,6 +32,7 @@ interface SessionPayload {
 }
 
 interface PersistentSessionInfo {
+  entryPolicy?: PersistentSessionEntryPolicy
   isStarted?: boolean
   sessionId?: string
   hasTeacherCookie?: boolean

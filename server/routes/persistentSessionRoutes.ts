@@ -5,6 +5,7 @@ import {
   getPersistentSession,
   verifyTeacherCodeWithHash,
   resetPersistentSession,
+  resolvePersistentSessionEntryPolicy,
 } from '../core/persistentSessions.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
@@ -325,6 +326,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
 
     res.json({
       activityName: session.activityName,
+      entryPolicy: resolvePersistentSessionEntryPolicy(session.entryPolicy),
       hasTeacherCookie,
       cookieCorrupted,
       isStarted: Boolean(session.sessionId),

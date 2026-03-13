@@ -1,9 +1,11 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto'
+import type { PersistentSessionEntryPolicy } from '../../types/waitingRoom.js'
 import { ValkeyPersistentStore } from './valkeyStore.js'
 
 interface PersistentSession {
   activityName: string
   hashedTeacherCode: string | null
+  entryPolicy?: PersistentSessionEntryPolicy
   createdAt: number
   sessionId: string | null
   teacherSocketId: string | null
@@ -36,6 +38,7 @@ const WAITER_TIMEOUT = 600_000
 const CLEANUP_INTERVAL = 60_000
 
 const DEFAULT_HMAC_SECRET = 'default-secret-change-in-production'
+const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
 const MIN_SECRET_LENGTH = 32
 
 function createInMemoryPersistentStore(): PersistentSessionStore {
@@ -171,6 +174,12 @@ export function resolvePersistentSessionSecret(): string {
 
 const HMAC_SECRET = resolvePersistentSessionSecret()
 
+export function resolvePersistentSessionEntryPolicy(value: unknown): PersistentSessionEntryPolicy {
+  return value === 'solo-allowed' || value === 'solo-only' || value === 'instructor-required'
+    ? value
+    : DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY
+}
+
 export function hashTeacherCode(teacherCode: string): string {
   return createHash('sha256').update(teacherCode).digest('hex')
 }
@@ -228,18 +237,21 @@ export async function getOrCreateActivePersistentSession(
   activityName: string,
   hash: string,
   hashedTeacherCode: string | null = null,
+  entryPolicy: PersistentSessionEntryPolicy = DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
 ): Promise<PersistentSession> {
   let session = await persistentStore.get(hash)
+  let shouldPersist = false
 
   if (!session) {
     session = {
       activityName,
       hashedTeacherCode,
+      entryPolicy,
       createdAt: Date.now(),
       sessionId: null,
       teacherSocketId: null,
     }
-    await persistentStore.set(hash, session)
+    shouldPersist = true
     waitersByHash.set(hash, [])
     ensureCleanupTimer()
   } else if (!waitersByHash.has(hash)) {
@@ -248,6 +260,16 @@ export async function getOrCreateActivePersistentSession(
 
   if (hashedTeacherCode && !session.hashedTeacherCode) {
     session.hashedTeacherCode = hashedTeacherCode
+    shouldPersist = true
+  }
+
+  const normalizedEntryPolicy = resolvePersistentSessionEntryPolicy(session.entryPolicy)
+  if (session.entryPolicy !== normalizedEntryPolicy) {
+    session.entryPolicy = normalizedEntryPolicy
+    shouldPersist = true
+  }
+
+  if (shouldPersist) {
     await persistentStore.set(hash, session)
   }
 

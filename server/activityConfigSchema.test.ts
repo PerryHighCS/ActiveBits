@@ -37,6 +37,34 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
           },
         ],
       },
+      waitingRoom: {
+        fields: [
+          {
+            id: 'displayName',
+            type: 'text',
+            label: 'Display name',
+            required: true,
+            placeholder: 'Enter your name',
+          },
+          {
+            id: 'team',
+            type: 'select',
+            options: [
+              { value: 'red', label: 'Red Team' },
+              { value: 'blue', label: 'Blue Team' },
+            ],
+          },
+          {
+            id: 'chooser',
+            type: 'custom',
+            component: 'ChooserField',
+            props: {
+              prompt: 'Pick your path',
+              allowSkip: false,
+            },
+          },
+        ],
+      },
     },
     'test-config',
   )
@@ -47,6 +75,8 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
     keyPrefix: 'syncdeck_instructor_',
     responseField: 'instructorPasscode',
   })
+  assert.equal(parsed.waitingRoom?.fields[0]?.type, 'text')
+  assert.equal(parsed.waitingRoom?.fields[2]?.type, 'custom')
 })
 
 void test('parseActivityConfig rejects invalid shared contract enums and shapes', () => {
@@ -85,6 +115,33 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
         'bad-config-2',
       ),
     /responseField/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad3',
+          name: 'Bad3',
+          description: 'desc',
+          color: 'orange',
+          soloMode: true,
+          waitingRoom: {
+            fields: [
+              {
+                id: 'chooser',
+                type: 'custom',
+                component: 'ChooserField',
+                props: {
+                  onPick: () => 'not-serializable',
+                },
+              },
+            ],
+          },
+        },
+        'bad-config-3',
+      ),
+    /props.*serializable object/,
   )
 })
 

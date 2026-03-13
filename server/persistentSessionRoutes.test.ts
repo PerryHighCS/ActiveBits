@@ -139,8 +139,12 @@ void test('persistent session route keeps valid backing session', async (t) => {
   const res = createMockRes()
   await handler(req, res)
   assert.equal(res.statusCode, 200, JSON.stringify(res.jsonBody))
+  assert.equal(res.jsonBody?.entryPolicy, 'instructor-required')
   assert.equal(res.jsonBody?.isStarted, true)
   assert.equal(res.jsonBody?.sessionId, 'live-session')
+
+  const stored = await getPersistentSession(hash)
+  assert.equal(stored?.entryPolicy, 'instructor-required')
 })
 
 void test('persistent session route resets when backing session missing', async (t) => {

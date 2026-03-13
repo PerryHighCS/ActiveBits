@@ -1,4 +1,8 @@
 import type { ComponentType, LazyExoticComponent, ReactNode } from 'react'
+import type {
+  ActivityWaitingRoomConfig,
+  WaitingRoomFieldComponentProps,
+} from './waitingRoom.js'
 
 export type ActivityRenderableComponent =
   | ComponentType<unknown>
@@ -74,6 +78,7 @@ export interface ActivityConfig {
   manageLayout?: {
     expandShell?: boolean
   }
+  waitingRoom?: ActivityWaitingRoomConfig
   isDev?: boolean
   clientEntry?: string
   serverEntry?: string
@@ -89,6 +94,7 @@ export interface ActivityClientModule {
     preflight: ActivityDeepLinkPreflightConfig,
     rawValue: string,
   ) => Promise<ActivityDeepLinkPreflightResult>
+  waitingRoomFields?: Record<string, ComponentType<WaitingRoomFieldComponentProps>>
 }
 
 export interface ActivityRegistryEntry extends ActivityConfig {
