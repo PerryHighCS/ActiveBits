@@ -4,6 +4,13 @@ services:
   app:
     image: mcr.microsoft.com/devcontainers/javascript-node:22
     user: vscode
+    # Allow nested sandbox tools inside the devcontainer without fully
+    # disabling seccomp for every syscall.
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+      - seccomp:unconfined
     volumes:
       - ..:/workspaces/ActiveBits:cached
     command: sleep infinity

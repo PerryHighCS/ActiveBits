@@ -332,3 +332,34 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/shared/syncDebug.test.ts`
 - Follow-up action: Keep the existing `location.search` effect update for navigation-time toggles, but preserve eager ref initialization when refactoring trace logging paths.
 - Owner: Codex
+- Date: 2026-03-13
+- Area: tooling
+- Discovery: The macOS Docker Desktop devcontainer blocked nested sandbox tooling such as Codex `apply_patch` because the `app` service was running under a seccomp profile that denied `unshare`, even though `kernel.unprivileged_userns_clone = 1` inside the guest. A repo-local namespace-friendly seccomp profile plus `cap_add: [SYS_ADMIN]` was added under `.devcontainer/` to make namespace-based tools work without switching the whole container to `seccomp:unconfined`.
+- Why it matters: Devcontainer-based coding agents and other sandboxed helpers can fail with `bwrap: No permissions to create a new namespace` or `unshare ... Operation not permitted` on macOS-backed containers unless the container security profile is loosened.
+- Evidence: `.devcontainer/docker-compose.yml`; `.devcontainer/seccomp-namespace.json`; `unshare -Ur true` previously failed with `Operation not permitted` in the `app` container.
+- Follow-up action: Rebuild the devcontainer after changing the compose security settings, then re-test namespace creation (`unshare -Ur true`) and Codex `apply_patch` before broadening the profile further.
+- Owner: Codex
+
+- Date: 2026-03-13
+- Area: tooling
+- Discovery: Even with the namespace-friendly seccomp profile, Codex sandbox launch can still fail with `bwrap: Failed to make / slave: Permission denied` when the container remains under AppArmor `docker-default (enforce)` and `bubblewrap` is missing.
+- Why it matters: This failure occurs before normal command execution and blocks agent automation paths that depend on nested sandboxing.
+- Evidence: `bwrap --ro-bind / / true` failed with `Failed to make / slave`; `/proc/self/attr/current` reported `docker-default (enforce)`; devcontainer updates in `.devcontainer/docker-compose.yml` (add `apparmor:unconfined`) and `.devcontainer/devcontainer.json` (install `bubblewrap` in `postCreateCommand`).
+- Follow-up action: Rebuild the devcontainer, then verify a non-escalated command path works (for example `echo sandbox-ok`) before continuing feature work.
+- Owner: Codex
+
+- Date: 2026-03-13
+- Area: tooling
+- Discovery: After rebuilding with `seccomp:unconfined` and `apparmor:unconfined`, nested sandbox launch is still blocked for the non-root `vscode` user at the user-ID mapping step: `unshare -Ur ...` fails with `write failed /proc/self/uid_map: Operation not permitted`, and `bwrap` fails with `setting up uid map: Permission denied`, while the same `unshare`/`bwrap` commands succeed under `sudo`.
+- Why it matters: The remaining blocker is no longer seccomp/AppArmor profile selection inside the container; it is unprivileged user-namespace ID mapping for `vscode`, so additional repo-local seccomp changes will not fix Codex sandbox startup on their own.
+- Evidence: `cat /proc/self/attr/current` reported `unconfined`; `/proc/sys/kernel/unprivileged_userns_clone=1`; `/proc/sys/kernel/apparmor_restrict_unprivileged_userns=1`; `strace` showed `openat(..., "uid_map", O_RDWR|O_CLOEXEC) = -1 EACCES`; `sudo unshare -Ur ...` and `sudo bwrap ...` both succeeded; installing `uidmap` added `newuidmap`/`newgidmap` but did not change the non-root `bwrap` failure.
+- Follow-up action: Investigate the host or Docker Desktop VM policy that still restricts unprivileged user namespace mapping for container users, or switch the agent path to a root/setuid-capable `bwrap` configuration that is actually honored by the runtime.
+- Owner: Codex
+
+- Date: 2026-03-13
+- Area: tooling
+- Discovery: After installing `bubblewrap` in the devcontainer, Codex can execute `bwrap` successfully only with escalated privileges; non-escalated runs still fail (`open /proc/.../ns/ns failed`). A minimal escalated command (`bwrap --ro-bind / / -- bash -lc 'echo BWRAP_MIN_OK'`) succeeds, and Codex `apply_patch` now executes end-to-end successfully.
+- Why it matters: This confirms agent workflows are unblocked for privileged command paths, while non-escalated namespace operations remain constrained and should not be assumed to work.
+- Evidence: Terminal validation on 2026-03-13: `command -v bwrap` => `/usr/bin/bwrap`; `bwrap --version` => `0.11.0`; non-escalated `bwrap` failed; escalated minimal `bwrap` succeeded; repeated `apply_patch` create/delete smoke tests succeeded.
+- Follow-up action: Keep using escalation for `bwrap`-dependent checks in this environment, and prefer `apply_patch` for file edits now that it is stable.
+- Owner: Codex
