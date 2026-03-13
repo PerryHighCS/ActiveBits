@@ -26,11 +26,16 @@ import {
   type WaitingRoomMessage,
 } from './waitingRoomUtils'
 import { getCustomFieldStatus } from './waitingRoomFieldUtils'
+import type { PersistentSessionEntryOutcome } from './persistentSessionEntryPolicyUtils'
+import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
+import { getWaitingRoomViewModel } from './waitingRoomViewUtils'
 
 interface WaitingRoomProps {
   activityName: string
   hash: string
   hasTeacherCookie: boolean
+  entryOutcome?: PersistentSessionEntryOutcome
+  entryPolicy?: PersistentSessionEntryPolicy
 }
 
 interface TeacherAuthenticateResponse {
@@ -54,7 +59,13 @@ function toFieldStringValue(value: WaitingRoomSerializableValue | undefined): st
  * WaitingRoom component for persistent sessions
  * Shows waiting students count and allows teacher to enter code to start session.
  */
-export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: WaitingRoomProps) {
+export default function WaitingRoom({
+  activityName,
+  hash,
+  hasTeacherCookie,
+  entryOutcome = 'wait',
+  entryPolicy,
+}: WaitingRoomProps) {
   const activity = getActivity(activityName)
   const waitingRoomFields = activity?.waitingRoom?.fields ?? EMPTY_WAITING_ROOM_FIELDS
   const [waiterCount, setWaiterCount] = useState(0)
@@ -72,8 +83,8 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
   const navigate = useNavigate()
 
   useEffect(() => {
-    shouldAutoAuthRef.current = hasTeacherCookie
-  }, [hasTeacherCookie])
+    shouldAutoAuthRef.current = hasTeacherCookie && entryPolicy !== 'solo-only'
+  }, [entryPolicy, hasTeacherCookie])
 
   useEffect(() => {
     const storageKey = buildWaitingRoomStorageKey(activityName, hash)
@@ -221,6 +232,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
   }, [activityName, hash, navigate])
 
   const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
+  const viewModel = getWaitingRoomViewModel(entryOutcome)
 
   const handleTeacherCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -307,6 +319,29 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
 
   const activityDisplayName = activity?.name || activityName
   const shareUrl = typeof window !== 'undefined' ? window.location.href : ''
+  const isSoloOnlyMode = entryPolicy === 'solo-only'
+
+  const handleContinueSolo = () => {
+    const nextTouchedFields = waitingRoomFields.reduce<Record<string, boolean>>((fields, field) => {
+      fields[field.id] = true
+      return fields
+    }, {})
+    setTouchedFields(nextTouchedFields)
+
+    if (Object.keys(waitingRoomErrors).length > 0) {
+      setError('Please complete the required details before continuing.')
+      return
+    }
+
+    const queryString = typeof window !== 'undefined' ? window.location.search : ''
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+      wsRef.current.close()
+    }
+    if (!hasNavigatedRef.current) {
+      hasNavigatedRef.current = true
+      void navigate(`/solo/${activityName}${queryString}`)
+    }
+  }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] max-w-2xl mx-auto p-6">
@@ -314,14 +349,18 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
         <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">{activityDisplayName}</h1>
 
         <div className="text-center mb-6">
-          <p className="text-lg text-gray-600 mb-2">Waiting for teacher to start the activity</p>
-          <p className="text-2xl font-bold text-blue-600">{getWaiterMessage(waiterCount)}</p>
+          <p className="text-lg text-gray-600 mb-2">{viewModel.statusTitle}</p>
+          {viewModel.showWaiterCount ? (
+            <p className="text-2xl font-bold text-blue-600">{getWaiterMessage(waiterCount)}</p>
+          ) : (
+            <p className="text-sm text-gray-600">{viewModel.statusDetail}</p>
+          )}
         </div>
 
         {waitingRoomFields.length > 0 && (
           <section aria-labelledby="waiting-room-fields-heading" className="border-t-2 border-gray-200 pt-6 mt-6">
-            <h2 id="waiting-room-fields-heading" className="text-center text-gray-800 mb-2 font-semibold">Before you join</h2>
-            <p className="text-sm text-gray-600 text-center mb-4">Complete these details while you wait for the activity to begin.</p>
+            <h2 id="waiting-room-fields-heading" className="text-center text-gray-800 mb-2 font-semibold">{viewModel.fieldHeading}</h2>
+            <p className="text-sm text-gray-600 text-center mb-4">{viewModel.fieldDescription}</p>
             <div className="space-y-4">
               {waitingRoomFields.map((field) => {
                 const fieldId = `waiting-room-field-${field.id}`
@@ -429,38 +468,57 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
           </section>
         )}
 
-        <div className="border-t-2 border-gray-200 pt-6 mt-6">
-          <p className="text-center text-gray-700 mb-4 font-semibold">Are you the teacher?</p>
-
-          <form onSubmit={handleTeacherCodeSubmit} className="flex flex-col items-center gap-4">
-            <label htmlFor="waiting-room-teacher-code" className="sr-only">Teacher code</label>
-            <input
-              id="waiting-room-teacher-code"
-              type="password"
-              placeholder="Enter teacher code"
-              value={teacherCode}
-              onChange={(event) => setTeacherCode(event.target.value)}
-              className="border-2 border-gray-300 rounded px-4 py-2 w-full max-w-xs text-center focus:outline-none focus:border-blue-500"
-              disabled={isSubmitting}
-              autoComplete="off"
-            />
-
+        {viewModel.soloActionLabel && (
+          <div className="border-t-2 border-gray-200 pt-6 mt-6 flex flex-col items-center gap-3">
             {error && <p className="text-red-600 text-sm">{error}</p>}
-
-            <Button
-              type="submit"
-              disabled={isSubmitting || !teacherCode.trim()}
-            >
-              {isSubmitting ? 'Verifying...' : 'Start Activity'}
+            <Button type="button" onClick={handleContinueSolo}>
+              {viewModel.soloActionLabel}
             </Button>
-          </form>
+          </div>
+        )}
 
-          {hasTeacherCookie && (
-            <p className="text-xs text-gray-500 text-center mt-4">
-              Tip: Your browser remembers your teacher code for this link
+        {viewModel.showTeacherSection && (
+          <div className="border-t-2 border-gray-200 pt-6 mt-6">
+            <p className="text-center text-gray-700 mb-4 font-semibold">
+              {entryOutcome === 'continue-solo' ? 'Want to start a live session instead?' : 'Are you the teacher?'}
             </p>
-          )}
-        </div>
+
+            <form onSubmit={handleTeacherCodeSubmit} className="flex flex-col items-center gap-4">
+              <label htmlFor="waiting-room-teacher-code" className="sr-only">Teacher code</label>
+              <input
+                id="waiting-room-teacher-code"
+                type="password"
+                placeholder="Enter teacher code"
+                value={teacherCode}
+                onChange={(event) => setTeacherCode(event.target.value)}
+                className="border-2 border-gray-300 rounded px-4 py-2 w-full max-w-xs text-center focus:outline-none focus:border-blue-500"
+                disabled={isSubmitting}
+                autoComplete="off"
+              />
+
+              {error && !viewModel.soloActionLabel && <p className="text-red-600 text-sm">{error}</p>}
+
+              <Button
+                type="submit"
+                disabled={isSubmitting || !teacherCode.trim() || isSoloOnlyMode}
+              >
+                {isSubmitting ? 'Verifying...' : 'Start Activity'}
+              </Button>
+            </form>
+
+            {isSoloOnlyMode && (
+              <p className="text-xs text-gray-500 text-center mt-4">
+                This link is configured for solo use only, so live teacher startup is unavailable here.
+              </p>
+            )}
+
+            {hasTeacherCookie && (
+              <p className="text-xs text-gray-500 text-center mt-4">
+                Tip: Your browser remembers your teacher code for this link
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mt-6 text-center text-sm text-gray-500">

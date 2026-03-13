@@ -16,6 +16,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-13
 - Area: client
+- Discovery: `WaitingRoom` is no longer hard-coded as a teacher-wait blocker. It now accepts the resolved entry outcome so `continue-solo` permalink flows with waiting-room fields can render a solo-preflight screen and CTA instead of incorrectly telling the user to wait for a teacher.
+- Why it matters: Without outcome-aware presentation, future activities that add waiting-room fields would regress on `solo-allowed` or `solo-only` permalinks by showing misleading copy and the wrong primary action even though the router had already resolved a solo destination.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomViewUtils.ts`; `client/src/components/common/SessionRouter.tsx`
+- Follow-up action: Extend the same outcome-aware waiting-room shell when preflight data starts flowing into downstream activity entry so the primary CTA can hand off validated participant data rather than only local sessionStorage state.
+- Owner: Codex
+
+- Date: 2026-03-13
+- Area: client
 - Discovery: Persistent permalink entry resolution now lives in shared client utility logic (`resolvePersistentSessionEntryOutcome`) so `SessionRouter` can treat `solo-only` and `solo-allowed` links consistently across started-session, teacher-cookie, and solo-support cases.
 - Why it matters: This prevents regressions where a remembered teacher cookie or an already-started managed session accidentally overrides `solo-only` behavior, and it gives later Phase 3 work one place to extend instead of scattering policy branches through route components.
 - Evidence: `client/src/components/common/persistentSessionEntryPolicyUtils.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/persistentSessionEntryPolicyUtils.test.ts`

@@ -7,8 +7,9 @@ Implemented so far:
 - Phase 0 contract baseline: shared waiting-room types, config schema validation, and
   persistent entry-policy normalization/defaulting are in place.
 - Phase 2 baseline: shared waiting-room rendering supports declarative built-in fields,
-  custom field registries loaded from the owning activity client bundle, and session
-  storage persistence for preflight values while a participant waits.
+  custom field registries loaded from the owning activity client bundle, session
+  storage persistence for preflight values while a participant waits, and outcome-aware
+  waiting-room presentation for wait vs. solo-preflight permalink states.
 
 Remaining work is centered on policy resolution, server-side enforcement, and carrying
 collected participant data into downstream join/solo flows.

@@ -476,6 +476,8 @@ const SessionRouter = () => {
         activityName={activityName}
         hash={hash}
         hasTeacherCookie={Boolean(persistentSessionInfo?.hasTeacherCookie)}
+        entryOutcome={persistentEntryOutcome}
+        entryPolicy={persistentSessionInfo?.entryPolicy}
       />
     )
   }
