@@ -400,3 +400,39 @@ void test('create persists non-default entry policy in metadata and list exposes
   assert.equal(sessionsList.length, 1)
   assert.equal((sessionsList[0] as Record<string, unknown>).entryPolicy, 'solo-allowed')
 })
+
+void test('authenticate rejects teacher auth for solo-only permalinks without mutating cookies', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const activityName = 'gallery-walk'
+  const teacherCode = 'solo-only-teacher'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-only')
+
+  const handler = getRoute(app, 'POST', '/api/persistent-session/authenticate')
+  const req = createMockReq({
+    body: {
+      activityName,
+      hash,
+      teacherCode,
+    },
+  })
+  const res = createMockRes()
+
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 409)
+  assert.deepEqual(res.jsonBody, {
+    error: 'This permanent link is configured for solo use only.',
+    code: 'entry-policy-rejected',
+    entryPolicy: 'solo-only',
+  })
+  assert.equal(res.cookies.has('persistent_sessions'), false)
+})

@@ -599,7 +599,7 @@ that path ships.
 - [x] Ensure entry-policy controls expose accessible names, state, and keyboard interaction
 - [x] Persist selected entry policy in permalink metadata
 - [x] Expose entry policy in session-entry/waiting-room API payloads
-- [ ] Define API error/response shape for server-enforced policy rejections
+- [x] Define API error/response shape for server-enforced policy rejections
 - [x] Gate Phase 1 UI/API exposure until Phase 3 resolver support exists, or land them together
 - [x] Add visible entry-mode labeling in persistent link listings/details
 - [x] Add tests for default and non-default permalink policies
@@ -622,7 +622,7 @@ that path ships.
 - [x] Implement direct pass-through when no waiting-room UI is needed
 - [ ] Implement instructor-cookie and instructor-code role resolution for standalone entry
 - [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
-- [ ] Enforce entry policy server-side in entry/session APIs so disallowed joins are rejected even when the client is bypassed
+- [x] Enforce entry policy server-side in entry/session APIs so disallowed joins are rejected even when the client is bypassed
 - [x] Preserve existing live-session behavior when instructor is present
 - [ ] Ensure embedded entry inherits role from parent context and does not prompt for instructor code
 - [ ] Add tests for role resolution, live join, wait, solo fallback, pass-through, unsupported-solo cases, and direct-API bypass attempts

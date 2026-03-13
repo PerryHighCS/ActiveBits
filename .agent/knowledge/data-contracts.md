@@ -19,9 +19,9 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Surface: REST
 - Contract: Generic persistent-link creation and listing now carry `entryPolicy?: PersistentSessionEntryPolicy`. `POST /api/persistent-session/create` accepts `entryPolicy` alongside `activityName`, `teacherCode`, and optional `selectedOptions`; `GET /api/persistent-session/list` returns each saved link with normalized `entryPolicy`.
 - Compatibility constraints: Missing or invalid `entryPolicy` values must normalize to `instructor-required`. Existing cookie-backed saved links without server metadata must still list as `instructor-required` until metadata is created by a newer flow.
-- Validation rules: Only `instructor-required`, `solo-allowed`, and `solo-only` are accepted; other values are treated as compatibility fallback to `instructor-required`. `solo-only` must not allow managed-session startup through the persistent-session websocket teacher-start path.
+- Validation rules: Only `instructor-required`, `solo-allowed`, and `solo-only` are accepted; other values are treated as compatibility fallback to `instructor-required`. `solo-only` must not allow managed-session startup through either `POST /api/persistent-session/authenticate` or the persistent-session websocket teacher-start path. Policy-rejected REST auth returns `409` with `{ error, code: 'entry-policy-rejected', entryPolicy: 'solo-only' }`.
 - Evidence (schema/tests/path): `server/routes/persistentSessionRoutes.ts`; `server/core/persistentSessionWs.ts`; `server/persistentSessionRoutes.test.ts`; `client/src/components/common/persistentSessionEntryPolicyUtils.ts`; `client/src/components/common/ManageDashboard.tsx`.
-- Follow-up action: Add shared error/response contracts for policy-rejected teacher start attempts and extend server-side enforcement beyond the websocket start path when join/session APIs are unified.
+- Follow-up action: Reuse the same policy-rejection shape if standalone join-code entry or future shared entry APIs introduce additional disallowed managed-entry paths.
 - Owner: Codex
 
 - Date: 2026-03-13

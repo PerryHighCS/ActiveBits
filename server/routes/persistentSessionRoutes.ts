@@ -31,6 +31,12 @@ interface PersistentSessionCreateBody {
   entryPolicy?: unknown
 }
 
+interface PersistentSessionPolicyRejection {
+  error: string
+  code: 'entry-policy-rejected'
+  entryPolicy: 'solo-only'
+}
+
 interface SessionStoreLike {
   get(id: string): Promise<unknown | null>
 }
@@ -82,6 +88,14 @@ function getBodyString(body: Record<string, unknown>, key: string): string | nul
 
 function toSelectedOptions(value: unknown): Record<string, unknown> {
   return isPlainObject(value) ? value : {}
+}
+
+function buildPersistentSessionPolicyRejection(): PersistentSessionPolicyRejection {
+  return {
+    error: 'This permanent link is configured for solo use only.',
+    code: 'entry-policy-rejected',
+    entryPolicy: 'solo-only',
+  }
 }
 
 function parsePersistentSessionsCookie(cookieValue: unknown, context = 'persistent_sessions'): CookieParseResult {
@@ -258,6 +272,13 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
+    const persistentSession = await getPersistentSession(hash)
+    const normalizedEntryPolicy = resolvePersistentSessionEntryPolicy(persistentSession?.entryPolicy)
+    if (normalizedEntryPolicy === 'solo-only') {
+      res.status(409).json(buildPersistentSessionPolicyRejection())
+      return
+    }
+
     const cookieName = 'persistent_sessions'
     let { sessions: sessionEntries } = parsePersistentSessionsCookie(
       req.cookies?.[cookieName],
@@ -293,7 +314,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       httpOnly: true,
     })
 
-    const persistentSession = await getPersistentSession(hash)
     res.json({
       success: true,
       isStarted: Boolean(persistentSession?.sessionId),
