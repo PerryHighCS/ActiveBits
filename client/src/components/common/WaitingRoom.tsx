@@ -1,8 +1,20 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import type {
+  WaitingRoomFieldConfig,
+  WaitingRoomSerializableValue,
+} from '../../../../types/waitingRoom.js'
 import Button from '../ui/Button'
 import { getActivity } from '@src/activities'
 import { getPersistentSelectedOptionsFromSearchForActivity } from './sessionRouterUtils'
+import {
+  buildWaitingRoomStorageKey,
+  getWaitingRoomInitialValues,
+  persistWaitingRoomValues,
+  readWaitingRoomValues,
+  validateWaitingRoomValues,
+  type WaitingRoomFieldValueMap,
+} from './waitingRoomFormUtils'
 import {
   buildPersistentAuthenticateApiUrl,
   buildPersistentTeacherCodeApiUrl,
@@ -25,15 +37,29 @@ interface TeacherAuthenticateResponse {
   sessionId?: string | null
 }
 
+const EMPTY_WAITING_ROOM_FIELDS: readonly WaitingRoomFieldConfig[] = []
+
+function getFieldLabel(field: WaitingRoomFieldConfig): string {
+  return field.label?.trim() || field.id
+}
+
+function toFieldStringValue(value: WaitingRoomSerializableValue | undefined): string {
+  return typeof value === 'string' ? value : ''
+}
+
 /**
  * WaitingRoom component for persistent sessions
- * Shows waiting students count and allows teacher to enter code to start session
+ * Shows waiting students count and allows teacher to enter code to start session.
  */
 export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: WaitingRoomProps) {
+  const activity = getActivity(activityName)
+  const waitingRoomFields = activity?.waitingRoom?.fields ?? EMPTY_WAITING_ROOM_FIELDS
   const [waiterCount, setWaiterCount] = useState(0)
   const [teacherCode, setTeacherCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [waitingRoomValues, setWaitingRoomValues] = useState<WaitingRoomFieldValueMap>({})
+  const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({})
   const shouldAutoAuthRef = useRef(hasTeacherCookie)
   const hasNavigatedRef = useRef(false)
   const teacherAuthRequestedRef = useRef(false)
@@ -43,6 +69,30 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
   useEffect(() => {
     shouldAutoAuthRef.current = hasTeacherCookie
   }, [hasTeacherCookie])
+
+  useEffect(() => {
+    const storageKey = buildWaitingRoomStorageKey(activityName, hash)
+    const storedValues = typeof window !== 'undefined' && window.sessionStorage != null
+      ? readWaitingRoomValues(window.sessionStorage, storageKey, waitingRoomFields)
+      : null
+
+    setWaitingRoomValues(getWaitingRoomInitialValues(waitingRoomFields, storedValues))
+    setTouchedFields({})
+  }, [activityName, hash, waitingRoomFields])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.sessionStorage == null) {
+      return
+    }
+
+    const storageKey = buildWaitingRoomStorageKey(activityName, hash)
+    if (waitingRoomFields.length === 0) {
+      window.sessionStorage.removeItem(storageKey)
+      return
+    }
+
+    persistWaitingRoomValues(window.sessionStorage, storageKey, waitingRoomFields, waitingRoomValues)
+  }, [activityName, hash, waitingRoomFields, waitingRoomValues])
 
   useEffect(() => {
     setError(null)
@@ -135,6 +185,8 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
     }
   }, [activityName, hash, navigate])
 
+  const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
+
   const handleTeacherCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)
@@ -147,7 +199,7 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
       const queryString = typeof window !== 'undefined' ? window.location.search : ''
       const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
         queryString,
-        getActivity(activityName)?.deepLinkOptions,
+        activity?.deepLinkOptions,
         activityName,
       )
 
@@ -204,7 +256,21 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
     }
   }
 
-  const activityDisplayName = getActivity(activityName)?.name || activityName
+  const handleFieldChange = (fieldId: string, value: string) => {
+    setWaitingRoomValues((current) => ({
+      ...current,
+      [fieldId]: value,
+    }))
+  }
+
+  const handleFieldBlur = (fieldId: string) => {
+    setTouchedFields((current) => ({
+      ...current,
+      [fieldId]: true,
+    }))
+  }
+
+  const activityDisplayName = activity?.name || activityName
   const shareUrl = typeof window !== 'undefined' ? window.location.href : ''
 
   return (
@@ -216,6 +282,83 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
           <p className="text-lg text-gray-600 mb-2">Waiting for teacher to start the activity</p>
           <p className="text-2xl font-bold text-blue-600">{getWaiterMessage(waiterCount)}</p>
         </div>
+
+        {waitingRoomFields.length > 0 && (
+          <section aria-labelledby="waiting-room-fields-heading" className="border-t-2 border-gray-200 pt-6 mt-6">
+            <h2 id="waiting-room-fields-heading" className="text-center text-gray-800 mb-2 font-semibold">Before you join</h2>
+            <p className="text-sm text-gray-600 text-center mb-4">Complete these details while you wait for the activity to begin.</p>
+            <div className="space-y-4">
+              {waitingRoomFields.map((field) => {
+                const fieldId = `waiting-room-field-${field.id}`
+                const helpId = field.helpText ? `${fieldId}-help` : undefined
+                const errorId = waitingRoomErrors[field.id] ? `${fieldId}-error` : undefined
+                const describedBy = [helpId, touchedFields[field.id] ? errorId : undefined].filter(Boolean).join(' ') || undefined
+                const error = touchedFields[field.id] ? waitingRoomErrors[field.id] : undefined
+
+                return (
+                  <div key={field.id} className="flex flex-col gap-2">
+                    <label htmlFor={fieldId} className="text-sm font-semibold text-gray-700">
+                      {getFieldLabel(field)}
+                      {field.required ? ' *' : ''}
+                    </label>
+
+                    {field.type === 'text' && (
+                      <input
+                        id={fieldId}
+                        type="text"
+                        value={toFieldStringValue(waitingRoomValues[field.id])}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) => handleFieldChange(field.id, event.target.value)}
+                        onBlur={() => handleFieldBlur(field.id)}
+                        placeholder={field.placeholder}
+                        className="border-2 border-gray-300 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
+                        aria-invalid={error ? 'true' : undefined}
+                        aria-describedby={describedBy}
+                        aria-required={field.required || undefined}
+                        required={field.required}
+                      />
+                    )}
+
+                    {field.type === 'select' && (
+                      <select
+                        id={fieldId}
+                        value={toFieldStringValue(waitingRoomValues[field.id])}
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) => handleFieldChange(field.id, event.target.value)}
+                        onBlur={() => handleFieldBlur(field.id)}
+                        className="border-2 border-gray-300 rounded px-4 py-2 bg-white focus:outline-none focus:border-blue-500"
+                        aria-invalid={error ? 'true' : undefined}
+                        aria-describedby={describedBy}
+                        aria-required={field.required || undefined}
+                        required={field.required}
+                      >
+                        <option value="">Select an option</option>
+                        {field.options.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    {field.type === 'custom' && (
+                      <div
+                        id={fieldId}
+                        className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+                        aria-describedby={describedBy}
+                      >
+                        Custom waiting-room fields are not available yet for {getFieldLabel(field)}.
+                      </div>
+                    )}
+
+                    {field.helpText && (
+                      <p id={helpId} className="text-xs text-gray-500">{field.helpText}</p>
+                    )}
+                    {error && (
+                      <p id={errorId} className="text-sm text-red-600">{error}</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
 
         <div className="border-t-2 border-gray-200 pt-6 mt-6">
           <p className="text-center text-gray-700 mb-4 font-semibold">Are you the teacher?</p>
