@@ -24,6 +24,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-13
 - Area: client
+- Discovery: Direct `/:sessionId` join-code entry can now reuse `WaitingRoom` as a field-only `join-live` preflight shell by disabling teacher/share affordances and completing entry through a callback instead of navigation.
+- Why it matters: This reduces the biggest functional gap between permalink and join-code entry for activities that declare `waitingRoom.fields`, without blocking on the larger future server-side participant-entry contract.
+- Evidence: `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/sessionEntryRenderUtils.ts`
+- Follow-up action: Replace the client-only completion callback with a shared entry handoff that submits/stores participant preflight data and works consistently for both permalink and direct session joins.
+- Owner: Codex
+
+- Date: 2026-03-13
+- Area: client
 - Discovery: `WaitingRoom` is no longer hard-coded as a teacher-wait blocker. It now accepts the resolved entry outcome so `continue-solo` permalink flows with waiting-room fields can render a solo-preflight screen and CTA instead of incorrectly telling the user to wait for a teacher.
 - Why it matters: Without outcome-aware presentation, future activities that add waiting-room fields would regress on `solo-allowed` or `solo-only` permalinks by showing misleading copy and the wrong primary action even though the router had already resolved a solo destination.
 - Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomViewUtils.ts`; `client/src/components/common/SessionRouter.tsx`

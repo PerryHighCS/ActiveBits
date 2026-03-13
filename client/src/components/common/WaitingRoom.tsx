@@ -38,6 +38,9 @@ interface WaitingRoomProps {
   entryOutcome?: PersistentSessionEntryOutcome
   entryPolicy?: PersistentSessionEntryPolicy
   startedSessionId?: string
+  allowTeacherSection?: boolean
+  showShareUrl?: boolean
+  onJoinLive?: () => void
 }
 
 interface TeacherAuthenticateResponse extends PersistentSessionAuthErrorResponse {
@@ -67,6 +70,9 @@ export default function WaitingRoom({
   entryOutcome = 'wait',
   entryPolicy,
   startedSessionId,
+  allowTeacherSection = true,
+  showShareUrl = true,
+  onJoinLive,
 }: WaitingRoomProps) {
   const activity = getActivity(activityName)
   const waitingRoomFields = activity?.waitingRoom?.fields ?? EMPTY_WAITING_ROOM_FIELDS
@@ -373,6 +379,11 @@ export default function WaitingRoom({
       return
     }
 
+    if (onJoinLive) {
+      onJoinLive()
+      return
+    }
+
     if (!startedSessionId) {
       setError('Live session is unavailable right now. Please refresh and try again.')
       return
@@ -519,7 +530,7 @@ export default function WaitingRoom({
           </div>
         )}
 
-        {viewModel.showTeacherSection && (
+        {viewModel.showTeacherSection && allowTeacherSection && (
           <div className="border-t-2 border-gray-200 pt-6 mt-6">
             <p className="text-center text-gray-700 mb-4 font-semibold">
               {entryOutcome === 'continue-solo' ? 'Want to start a live session instead?' : 'Are you the teacher?'}
@@ -563,10 +574,12 @@ export default function WaitingRoom({
         )}
       </div>
 
-      <div className="mt-6 text-center text-sm text-gray-500">
-        <p>Share this URL with your students:</p>
-        <code className="bg-gray-100 px-3 py-1 rounded mt-1 inline-block text-xs">{shareUrl}</code>
-      </div>
+      {showShareUrl && (
+        <div className="mt-6 text-center text-sm text-gray-500">
+          <p>Share this URL with your students:</p>
+          <code className="bg-gray-100 px-3 py-1 rounded mt-1 inline-block text-xs">{shareUrl}</code>
+        </div>
+      )}
     </div>
   )
 }

@@ -624,6 +624,8 @@ that path ships.
 - [x] Implement direct pass-through when no waiting-room UI is needed
 - [ ] Implement instructor-cookie and instructor-code role resolution for standalone entry
 - [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
+- [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
+  Current status: direct `/:sessionId` joins with activity-declared waiting-room fields now render the same `WaitingRoom` shell in `join-live` preflight mode before the student view mounts, but this is still a client-side preflight wrapper rather than a shared server-backed entry resolver contract.
 - [x] Enforce entry policy server-side in entry/session APIs so disallowed joins are rejected even when the client is bypassed
 - [x] Preserve existing live-session behavior when instructor is present
   Detail: when a persistent session is already started and the activity declares waiting-room fields, `SessionRouter` now renders `WaitingRoom` in a `join-live` preflight state instead of bypassing required field completion; activities without waiting-room fields keep the existing direct join card.

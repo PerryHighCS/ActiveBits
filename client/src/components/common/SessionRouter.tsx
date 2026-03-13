@@ -18,6 +18,7 @@ import {
   readCachedSession,
   type SessionCacheRecord,
 } from './sessionRouterUtils'
+import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
 import { resolvePersistentSessionEntryOutcome } from './persistentSessionEntryPolicyUtils'
 import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorResponse } from './persistentSessionAuthUtils'
 
@@ -96,6 +97,7 @@ const SessionRouter = () => {
   const { sessionId, activityName, hash, soloActivityId } = useParams<RouteParams>()
 
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
+  const [completedJoinPreflightSessionId, setCompletedJoinPreflightSessionId] = useState<string | null>(null)
   const [persistentSessionInfo, setPersistentSessionInfo] = useState<PersistentSessionInfo | null>(null)
   const [isLoadingPersistent, setIsLoadingPersistent] = useState(false)
   const [teacherCode, setTeacherCode] = useState('')
@@ -171,6 +173,10 @@ const SessionRouter = () => {
   }, [])
 
   useEffect(() => setError(null), [sessionIdInput])
+
+  useEffect(() => {
+    setCompletedJoinPreflightSessionId(null)
+  }, [sessionId])
 
   useEffect(() => {
     if (!hash || !activityName) return
@@ -574,6 +580,27 @@ const SessionRouter = () => {
   const StudentComponent = activity.StudentComponent
   if (!StudentComponent) {
     return <div className="text-center">Activity student view is unavailable.</div>
+  }
+
+  if (
+    shouldRenderSessionJoinPreflight({
+      sessionId: sessionData.sessionId,
+      waitingRoomFieldCount: activity.waitingRoom?.fields?.length ?? 0,
+      completedJoinPreflightSessionId,
+    })
+  ) {
+    return (
+      <WaitingRoom
+        activityName={activity.id}
+        hash={sessionData.sessionId}
+        hasTeacherCookie={false}
+        entryOutcome="join-live"
+        startedSessionId={sessionData.sessionId}
+        allowTeacherSection={false}
+        showShareUrl={false}
+        onJoinLive={() => setCompletedJoinPreflightSessionId(sessionData.sessionId)}
+      />
+    )
   }
 
   const SessionStudentComponent = StudentComponent as ActivityStudentComponent
