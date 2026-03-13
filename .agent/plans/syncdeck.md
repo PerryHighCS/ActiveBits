@@ -30,39 +30,54 @@ Future planning is currently organized into three tracks:
 
 ## 2) Embedded Activities
 
-### Goals
-- Let presentations launch embedded ActiveBits activities by slide events.
-- Keep embedded sessions linked to the parent SyncDeck session.
-- Support reporting and instructor workflows around embedded runs.
+Full design: `.agent/plans/syncdeck-embedded-activities.md`
 
-### Planned Work
-- Presentations can start activity by slide events.
-- Embedded activities have their own session linked to parent session.
-  - Candidate ID shape: `CHILD:parentid:childid`.
-  - Parent/child IDs are session IDs.
-  - Server does not cull children until parent is culled.
-  - Student identities/names sync from parent session.
-- Define websocket/session transport model for embedded activities.
-  - Current ActiveBits websocket handling is path-scoped per activity and each socket binds to a single `sessionId`.
-  - Current activity protocols are not documented as safe for multiplexing multiple activities or multiple sessions over one underlying websocket.
-  - Embedded-activity work must either keep separate websocket connections per activity/session or introduce a documented multiplexing envelope and routing model.
-- Define embedded-activity activation/claim flow for already-connected sessions.
-  - Evaluate whether this should mirror persistent-link activation, or use a parent-session-connected flow.
-  - Candidate approach: instructor requests child session creation over parent websocket, then joins child session.
-  - Parent session distributes per-user claim tokens so each connected user can claim their mapped seat in the child session.
-- Define multi-instructor arbitration for embedded-activity activation.
-  - Prevent duplicate child-session creation when multiple instructors are connected.
-  - Decide lock/leader/ownership rules for who can initiate (and retry/cancel) child-session opens.
-- Instructor can download a report.
-  - Activities may need to generate HTML for reporting.
-- Add an activity picker that can issue codes for presentation use.
+### Architecture Decision (recorded here for reference)
+
+**Host-overlay model chosen.** The activity iframe is rendered by the ActiveBits host page
+and absolutely positioned over the presentation iframe. It is NOT nested inside the deck iframe.
+
+Key reasons:
+- Host page already manages the presentation iframe; adding an activity iframe at the same
+  level keeps the architecture symmetric.
+- The SyncDeck header (on the host page) is always visible — "End Activity" lives there
+  with guaranteed accessibility regardless of deck content.
+- Activity code uses the normal ActiveBits session system with no embedded-mode awareness.
+- Presentation iframe stays mounted underneath the overlay for instant dismissal.
+
+### How instructor moves off
+
+Instructor clicks **"End Activity"** in the SyncDeck header. The button:
+- Appears only while an activity is active.
+- Shows an inline confirmation (not a blocking modal).
+- Calls `POST /api/syncdeck/:sessionId/embedded-activity/end`.
+- Server broadcasts `embedded-activity-end` to all students.
+- Both manager and student hosts unmount the activity overlay instantly;
+  the presentation resumes without any reload.
+
+### Goals
+- Let presentations launch embedded ActiveBits activities via slide events or a header picker.
+- Keep embedded sessions linked to the parent SyncDeck session (child session lifecycle tied to parent).
+- Distribute per-student claim tokens over the parent WebSocket so students auto-join
+  the child session with identity-mapped seating.
+- Prevent duplicate child sessions when multiple instructors are connected (first-caller ownership).
+- Support instructor reporting after embedded sessions.
+
+### Planned Work (phases)
+Tracked in `syncdeck-checklist.md` under "Embedded activities".
 
 ### Notes
-- Session-linking, lifecycle, and reporting contracts should be specified before implementation.
+- Session-linking, lifecycle, and reporting contracts must be finalized in Phase 0 before
+  any server implementation begins.
 - Embedded-activity protocol documentation is a required prerequisite, not optional implementation cleanup.
-- The documented protocol must explicitly cover transport boundaries, message envelope shape, activity/session routing, and whether multiplexing is supported.
-- Activation/claim protocol for embedded sessions should be specified before implementation; current websocket child-session handoff idea is only a candidate design.
-- Multi-instructor arbitration/locking rules should be specified before implementation to avoid duplicate child sessions.
+- The documented protocol must explicitly cover transport boundaries, message envelope shape,
+  activity/session routing, and whether multiplexing is supported.
+- Activation and claim flow for embedded sessions must be specified before implementation;
+  the current child-session handoff over the parent WebSocket remains a candidate design until finalized.
+- Multi-instructor arbitration uses first-caller ownership (server `embeddedActivityOwner` field);
+  subsequent instructor calls receive `409 Conflict` with `alreadyStarted: true`.
+- Activity Containment Policy must be preserved: SyncDeck code uses only `activityConfig`
+  metadata and must not import activity-specific implementation files.
 
 ---
 
