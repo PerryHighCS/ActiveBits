@@ -29,6 +29,7 @@ import { getCustomFieldStatus } from './waitingRoomFieldUtils'
 import type { PersistentSessionEntryOutcome } from './persistentSessionEntryPolicyUtils'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { getWaitingRoomViewModel } from './waitingRoomViewUtils'
+import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorResponse } from './persistentSessionAuthUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -38,8 +39,7 @@ interface WaitingRoomProps {
   entryPolicy?: PersistentSessionEntryPolicy
 }
 
-interface TeacherAuthenticateResponse {
-  error?: string
+interface TeacherAuthenticateResponse extends PersistentSessionAuthErrorResponse {
   isStarted?: boolean
   sessionId?: string | null
 }
@@ -266,7 +266,7 @@ export default function WaitingRoom({
 
       if (!authenticateResponse.ok) {
         const payload = (await authenticateResponse.json().catch(() => ({}))) as TeacherAuthenticateResponse
-        throw new Error(payload.error || 'Invalid teacher code')
+        throw new Error(resolvePersistentSessionAuthFailure(payload).message)
       }
 
       const payload = (await authenticateResponse.json()) as TeacherAuthenticateResponse

@@ -19,6 +19,7 @@ import {
   type SessionCacheRecord,
 } from './sessionRouterUtils'
 import { resolvePersistentSessionEntryOutcome } from './persistentSessionEntryPolicyUtils'
+import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorResponse } from './persistentSessionAuthUtils'
 
 interface RouteParams {
   [key: string]: string | undefined
@@ -39,9 +40,8 @@ interface PersistentSessionInfo {
   hasTeacherCookie?: boolean
 }
 
-interface TeacherAuthResponse {
+interface TeacherAuthResponse extends PersistentSessionAuthErrorResponse {
   sessionId?: string
-  error?: string
 }
 
 interface SessionData extends SessionCacheRecord {
@@ -401,7 +401,7 @@ const SessionRouter = () => {
 
           if (!response.ok) {
             const payload = (await response.json().catch(() => ({}))) as TeacherAuthResponse
-            throw new Error(payload.error || 'Invalid teacher code')
+            throw new Error(resolvePersistentSessionAuthFailure(payload).message)
           }
 
           const payload = (await response.json()) as TeacherAuthResponse
