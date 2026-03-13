@@ -37,6 +37,7 @@ interface WaitingRoomProps {
   hasTeacherCookie: boolean
   entryOutcome?: PersistentSessionEntryOutcome
   entryPolicy?: PersistentSessionEntryPolicy
+  startedSessionId?: string
 }
 
 interface TeacherAuthenticateResponse extends PersistentSessionAuthErrorResponse {
@@ -65,6 +66,7 @@ export default function WaitingRoom({
   hasTeacherCookie,
   entryOutcome = 'wait',
   entryPolicy,
+  startedSessionId,
 }: WaitingRoomProps) {
   const activity = getActivity(activityName)
   const waitingRoomFields = activity?.waitingRoom?.fields ?? EMPTY_WAITING_ROOM_FIELDS
@@ -81,6 +83,7 @@ export default function WaitingRoom({
   const teacherAuthRequestedRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
   const navigate = useNavigate()
+  const isWaitingForTeacher = entryOutcome === 'wait'
 
   useEffect(() => {
     shouldAutoAuthRef.current = hasTeacherCookie && entryPolicy !== 'solo-only'
@@ -143,6 +146,14 @@ export default function WaitingRoom({
   useEffect(() => {
     setError(null)
     teacherAuthRequestedRef.current = false
+
+    if (!isWaitingForTeacher) {
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+        wsRef.current.close()
+      }
+      wsRef.current = null
+      return undefined
+    }
 
     if (typeof window === 'undefined') {
       return undefined
@@ -229,7 +240,7 @@ export default function WaitingRoom({
         ws.close()
       }
     }
-  }, [activityName, hash, navigate])
+  }, [activityName, hash, isWaitingForTeacher, navigate])
 
   const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
   const viewModel = getWaitingRoomViewModel(entryOutcome)
@@ -289,6 +300,13 @@ export default function WaitingRoom({
       return
     }
 
+    if (!isWaitingForTeacher) {
+      setError('Live session is unavailable right now. Please refresh and try again.')
+      setIsSubmitting(false)
+      teacherAuthRequestedRef.current = false
+      return
+    }
+
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
         JSON.stringify({
@@ -340,6 +358,30 @@ export default function WaitingRoom({
     if (!hasNavigatedRef.current) {
       hasNavigatedRef.current = true
       void navigate(`/solo/${activityName}${queryString}`)
+    }
+  }
+
+  const handleJoinLive = () => {
+    const nextTouchedFields = waitingRoomFields.reduce<Record<string, boolean>>((fields, field) => {
+      fields[field.id] = true
+      return fields
+    }, {})
+    setTouchedFields(nextTouchedFields)
+
+    if (Object.keys(waitingRoomErrors).length > 0) {
+      setError('Please complete the required details before joining.')
+      return
+    }
+
+    if (!startedSessionId) {
+      setError('Live session is unavailable right now. Please refresh and try again.')
+      return
+    }
+
+    const queryString = typeof window !== 'undefined' ? window.location.search : ''
+    if (!hasNavigatedRef.current) {
+      hasNavigatedRef.current = true
+      void navigate(`/${startedSessionId}${queryString}`)
     }
   }
 
@@ -468,11 +510,11 @@ export default function WaitingRoom({
           </section>
         )}
 
-        {viewModel.soloActionLabel && (
+        {viewModel.primaryActionLabel && (
           <div className="border-t-2 border-gray-200 pt-6 mt-6 flex flex-col items-center gap-3">
             {error && <p className="text-red-600 text-sm">{error}</p>}
-            <Button type="button" onClick={handleContinueSolo}>
-              {viewModel.soloActionLabel}
+            <Button type="button" onClick={entryOutcome === 'join-live' ? handleJoinLive : handleContinueSolo}>
+              {viewModel.primaryActionLabel}
             </Button>
           </div>
         )}
@@ -496,13 +538,13 @@ export default function WaitingRoom({
                 autoComplete="off"
               />
 
-              {error && !viewModel.soloActionLabel && <p className="text-red-600 text-sm">{error}</p>}
+              {error && !viewModel.primaryActionLabel && <p className="text-red-600 text-sm">{error}</p>}
 
               <Button
                 type="submit"
                 disabled={isSubmitting || !teacherCode.trim() || isSoloOnlyMode}
               >
-                {isSubmitting ? 'Verifying...' : 'Start Activity'}
+                {isSubmitting ? 'Verifying...' : entryOutcome === 'join-live' ? 'Open Manage Dashboard' : 'Start Activity'}
               </Button>
             </form>
 

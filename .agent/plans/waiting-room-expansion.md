@@ -9,7 +9,8 @@ Implemented so far:
 - Phase 2 baseline: shared waiting-room rendering supports declarative built-in fields,
   custom field registries loaded from the owning activity client bundle, session
   storage persistence for preflight values while a participant waits, and outcome-aware
-  waiting-room presentation for wait vs. solo-preflight permalink states.
+  waiting-room presentation for wait, live-join preflight, and solo-preflight
+  permalink states.
 
 Remaining work is centered on policy resolution, server-side enforcement, and carrying
 collected participant data into downstream join/solo flows.
@@ -610,6 +611,7 @@ that path ships.
 - [x] Support required text/select-style field validation
 - [x] Ensure built-in and custom waiting-room controls meet accessibility semantics and keyboard requirements
 - [ ] Retain preflight form state across destination transitions (for example `wait -> join-live`) and carry collected data forward when entry proceeds
+  Current status: started persistent sessions with waiting-room fields now stay inside the same `WaitingRoom` shell and reuse the stored preflight form state for `join-live`, but downstream join flow still does not submit/store that data beyond local sessionStorage.
 - [ ] Submit/store preflight data for later entry flow use
 - [ ] Add clear [TEST] logging for expected error-path tests
 - [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
@@ -624,6 +626,7 @@ that path ships.
 - [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
 - [x] Enforce entry policy server-side in entry/session APIs so disallowed joins are rejected even when the client is bypassed
 - [x] Preserve existing live-session behavior when instructor is present
+  Detail: when a persistent session is already started and the activity declares waiting-room fields, `SessionRouter` now renders `WaitingRoom` in a `join-live` preflight state instead of bypassing required field completion; activities without waiting-room fields keep the existing direct join card.
 - [ ] Ensure embedded entry inherits role from parent context and does not prompt for instructor code
 - [ ] Add tests for role resolution, live join, wait, solo fallback, pass-through, unsupported-solo cases, and direct-API bypass attempts
 - [x] Add a test proving `solo-only` links with instructor auth resolve to `continue-solo`, not `join-live`

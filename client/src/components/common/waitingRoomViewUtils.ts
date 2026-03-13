@@ -7,7 +7,7 @@ export interface WaitingRoomViewModel {
   fieldDescription: string
   showWaiterCount: boolean
   showTeacherSection: boolean
-  soloActionLabel: string | null
+  primaryActionLabel: string | null
 }
 
 export function getWaitingRoomViewModel(entryOutcome: PersistentSessionEntryOutcome): WaitingRoomViewModel {
@@ -19,7 +19,19 @@ export function getWaitingRoomViewModel(entryOutcome: PersistentSessionEntryOutc
       fieldDescription: 'Complete these details before entering solo mode.',
       showWaiterCount: false,
       showTeacherSection: true,
-      soloActionLabel: 'Continue in Solo Mode',
+      primaryActionLabel: 'Continue in Solo Mode',
+    }
+  }
+
+  if (entryOutcome === 'join-live') {
+    return {
+      statusTitle: 'Session is ready to join',
+      statusDetail: 'Complete any required details below, then join the live session when you are ready.',
+      fieldHeading: 'Before you join',
+      fieldDescription: 'Complete these details before entering the live session.',
+      showWaiterCount: false,
+      showTeacherSection: true,
+      primaryActionLabel: 'Join Session',
     }
   }
 
@@ -30,6 +42,6 @@ export function getWaitingRoomViewModel(entryOutcome: PersistentSessionEntryOutc
     fieldDescription: 'Complete these details while you wait for the activity to begin.',
     showWaiterCount: true,
     showTeacherSection: true,
-    soloActionLabel: null,
+    primaryActionLabel: null,
   }
 }

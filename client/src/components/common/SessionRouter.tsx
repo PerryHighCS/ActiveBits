@@ -370,9 +370,23 @@ const SessionRouter = () => {
 
     if (persistentSessionInfo?.isStarted && persistentSessionInfo.sessionId) {
       const startedSessionId = persistentSessionInfo.sessionId
+      const hasWaitingRoomFields = (persistentActivity?.waitingRoom?.fields?.length ?? 0) > 0
 
       if (persistentSessionInfo.hasTeacherCookie) {
         return <div className="text-center">Redirecting to session...</div>
+      }
+
+      if (hasWaitingRoomFields) {
+        return (
+          <WaitingRoom
+            activityName={activityName}
+            hash={hash}
+            hasTeacherCookie={Boolean(persistentSessionInfo?.hasTeacherCookie)}
+            entryOutcome={persistentEntryOutcome}
+            entryPolicy={persistentSessionInfo?.entryPolicy}
+            startedSessionId={startedSessionId}
+          />
+        )
       }
 
       const handleTeacherLogin = async (event: FormEvent<HTMLFormElement>) => {
