@@ -535,6 +535,9 @@ permalink sessions use it first.
 3. Some current special-case solo-link behaviors (for example `gallery-walk` feedback review)
    may eventually be replaced by session-report download/review flows. Do not remove those
    affordances until an equivalent report-based workflow exists.
+4. Move session creation and participant registration toward a shared entry/session layer so
+   activities receive a resolved session + participant context instead of each activity
+   bootstrapping its own startup/session flow.
 
 ---
 
@@ -594,9 +597,10 @@ that path ships.
 - [ ] Build generic waiting-room field renderer from shared field metadata
 - [ ] Support required text/select-style field validation
 - [ ] Ensure built-in and custom waiting-room controls meet accessibility semantics and keyboard requirements
+- [ ] Retain preflight form state across destination transitions (for example `wait -> join-live`) and carry collected data forward when entry proceeds
 - [ ] Submit/store preflight data for later entry flow use
 - [ ] Add clear [TEST] logging for expected error-path tests
-- [ ] Add tests for required-field blocking, validation behavior, and accessibility-critical control states
+- [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
 
 ### Phase 3 - Entry resolution behavior
 
