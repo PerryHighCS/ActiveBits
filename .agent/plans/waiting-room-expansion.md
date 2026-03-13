@@ -335,6 +335,7 @@ Additional clarification:
 
 - `instructor-required` links resolve students to `wait` until instructor presence is available; valid instructor auth resolves to managed instructor entry
 - `solo-allowed` links resolve to managed entry when instructor presence/managed access is available, otherwise to solo when allowed
+- authenticated instructor entry on a `solo-allowed` link should resolve to `join-live`, not `continue-solo`
 - `solo-only` links always resolve to `continue-solo` / `solo-unavailable` and never to `join-live`, even if instructor auth is present
 
 #### `wait` UX
@@ -367,6 +368,7 @@ Examples:
 - Instructor absent + solo allowed + no required preflight -> destination `continue-solo`, mode `pass-through`
 - Instructor absent + instructor-required policy -> destination `wait`, mode `render-ui`
 - No instructor cookie + user wants instructor access via permalink -> resolve role through waiting-room UI before destination selection completes
+- Authenticated instructor opens a `solo-allowed` permalink -> destination `join-live`, mode `pass-through`
 - Instructor opens a `solo-only` permalink -> destination `continue-solo`, mode `pass-through` (solo demo participant)
 
 ### Important rule
@@ -583,6 +585,7 @@ that path ships.
 - [ ] Preserve existing live-session behavior when instructor is present
 - [ ] Ensure embedded entry inherits role from parent context and does not prompt for instructor code
 - [ ] Add tests for role resolution, live join, wait, solo fallback, pass-through, unsupported-solo cases, and direct-API bypass attempts
+- [ ] Add a test proving `solo-only` links with instructor auth resolve to `continue-solo`, not `join-live`
 
 ### Phase 4 - Downstream integration
 
