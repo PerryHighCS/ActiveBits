@@ -80,6 +80,8 @@ That suggests a generic shared flow:
 3. Waiting room resolves role and current session/instructor context.
 4. Waiting room determines destination and whether any UI is needed.
 5. If needed, waiting room renders required preflight fields, role-entry UI, and/or blocking state.
+   When both preflight and waiting apply, required preflight fields should be completed
+   during the waiting state and carried forward once entry can proceed.
 6. Student is routed to one of:
    - live managed session
    - solo continuation
@@ -352,6 +354,25 @@ The student should see a clear message that this activity requires a live instru
 session, along with any useful next action the entry surface can offer, such as staying on
 that screen to wait, retrying, or returning to a prior join/home surface if one exists.
 
+### Preflight plus waiting sequencing
+
+When an entrant both:
+
+- must wait before managed entry can proceed, and
+- has required preflight fields
+
+the v1 rule should be: collect required preflight fields during the waiting-room state,
+not after the instructor appears. The entered data should be retained and carried forward
+when the destination later changes from `wait` to `join-live`.
+
+Why this is the preferred sequence:
+
+- it reduces friction at the moment entry becomes available
+- it lets the waiting-room framework build one stable form/state path instead of a second
+  post-wait preflight step
+- it makes collected participant context available earlier for downstream resolution and
+  later inheritance
+
 ### Presentation mode
 
 `pass-through` is not a separate destination. It describes whether waiting-room UI is
@@ -511,6 +532,9 @@ permalink sessions use it first.
    workflow needs to persist attributes outside waiting-room-style handoff points.
 2. Revisit server-backed solo continuity only if a concrete cross-device or cross-browser
    resume requirement appears.
+3. Some current special-case solo-link behaviors (for example `gallery-walk` feedback review)
+   may eventually be replaced by session-report download/review flows. Do not remove those
+   affordances until an equivalent report-based workflow exists.
 
 ---
 
@@ -540,6 +564,7 @@ this plan that a separate architecture record becomes useful.
 - [ ] Confirm permalink entry-policy vocabulary
 - [ ] Decide default behavior for existing permalinks
 - [ ] Define shared waiting-room field schema contract
+- [ ] Decide and document sequencing when required preflight fields and waiting state both apply (v1: collect while waiting and carry forward)
 - [ ] Decide server/client ownership for validation and temporary storage
 - [ ] Define shared server-side `participantId` issuance and reconnect semantics
 - [ ] Define server-side enforcement rules so entry/session APIs reject disallowed joins even if the client is bypassed
@@ -594,10 +619,22 @@ consume waiting-room-provided `displayName` / `participantId` instead of collect
 own startup identity. This gives the phase a concrete exit condition before broader
 activity adoption.
 
+Direct solo-route migration note:
+
+- the long-term target is for solo entry to flow through permalink / waiting-room-based
+  entry rather than a separate direct `/solo/:activityId` launch path
+- in the short term, direct `/solo/:activityId` should be treated as a compatibility path
+  until permalink-based solo entry is working and activity migrations are complete
+- not every current "Copy solo link" button means the same thing: `gallery-walk` uses its
+  solo path as a feedback-review/upload tool, so it should not be removed as a generic
+  cleanup step without a replacement flow
+
 - [ ] Migrate `java-string-practice` to consume waiting-room-collected participant data for student entry
 - [ ] Remove or bypass duplicate startup name collection in `java-string-practice` once waiting-room entry is authoritative
 - [ ] Verify `java-string-practice` reconnect/progress flows still work with waiting-room-provided `participantId`
 - [ ] Migrate activity-local student ID generation toward shared server-side `participantId` issuance where needed
+- [ ] Define the migration/deprecation path for direct `/solo/:activityId` entry once permalink-based solo entry is ready
+- [ ] Keep or replace special-case solo entry actions (for example `gallery-walk` feedback review) before removing generic dashboard "Copy solo link" buttons
 - [ ] Align policy naming with future SyncDeck/presentation embedding work
 - [ ] Update related planning docs once embedded-activity decisions are finalized
 
@@ -612,6 +649,8 @@ Use this checklist when migrating an existing activity to waiting-room-based ent
 - [ ] Preserve reconnect behavior using shared server-issued `participantId`
 - [ ] Keep activity-specific fields local unless they are intentionally promoted to waiting-room fields
 - [ ] Decide whether any activity-specific field should be inheritable or a reusable participant attribute
+- [ ] Verify whether the activity's current direct `/solo/:activityId` entry should migrate to permalink-based entry or remain a special-case compatibility path
+- [ ] Preserve or replace any activity-specific solo-link behavior that is not just "launch solo practice" (for example `gallery-walk` feedback review/upload)
 - [ ] Verify solo mode still works with local-storage continuity and inherited participant context where applicable
 - [ ] Add or update tests for the migrated startup path, reconnect behavior, and any expected error states
 
