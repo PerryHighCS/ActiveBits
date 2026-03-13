@@ -120,6 +120,15 @@ behaviors into `true/false`.
 - Waiting-room/session-entry APIs should return the resolved policy to the client.
 - The existing default should remain `instructor-required` for safety unless explicitly changed.
 
+### Migration rule for existing permalinks
+
+Existing permalink records that do not yet have an entry-policy field should be treated as
+`instructor-required` by default.
+
+This should be an explicit compatibility rule in both server and client resolution paths,
+not an implementation accident. Older permalinks should continue to behave as they do
+now until a teacher explicitly updates or recreates them with a different policy.
+
 ---
 
 ## Waiting Room Data Collection
@@ -214,11 +223,42 @@ This keeps config declarative and avoids embedding component references directly
 `activity.config.ts`. Shared waiting-room code can render built-in field types itself and
 resolve custom ones from the client entry export.
 
+### Loading model for `waitingRoomFields`
+
+The existing activity loader eagerly reads small config modules but lazy-loads each
+activity's `client/index.tsx` bundle. The waiting room may need custom field components
+before the main activity UI renders, so the plan should treat `waitingRoomFields` as part
+of that same lazy-loaded client entry module.
+
+Recommended loading rule:
+
+- when waiting-room rendering sees a custom field for activity `X`, it should load
+  activity `X`'s existing client entry bundle and read `waitingRoomFields` from that module
+- do not introduce a separate custom-field bundle/registry path in v1 unless performance
+  data later shows a need for finer-grained splitting
+- built-in waiting-room fields should still render without loading any activity client code
+
+This keeps the loading model aligned with the current activity registry and avoids a second
+parallel component-discovery mechanism just for waiting-room fields.
+
 Recommended shared contract:
 
 - Config field shape includes `type`, `component?`, and serializable `props?`
+- `props?` in `activity.config.ts` must remain data-only and serializable (no functions,
+  class instances, component references, or callback-style behavior)
 - Client entry may export `waitingRoomFields?: Record<string, WaitingRoomFieldComponent>`
 - Missing custom component keys should fail safely with a clear fallback/error state
+
+This is important because `activity.config.ts` should stay declarative. Activity authors
+should pass configuration data such as labels, option lists, and flags through `props`,
+while interactive behavior lives in the exported React component implementation.
+
+Accessibility requirement:
+
+- Built-in waiting-room fields, custom `WaitingRoomFieldComponent` implementations, and
+  permalink entry-policy controls must follow the repository accessibility rules: prefer
+  semantic HTML, provide accessible names, expose relevant state with native/ARIA
+  attributes, and preserve keyboard interaction for custom controls.
 
 Recommended custom component props:
 
@@ -242,17 +282,78 @@ At runtime, the waiting room should resolve entry using:
 - current instructor presence
 - activity solo capability (`activityConfig.soloMode`)
 - completion of required preflight fields
+- role resolution needs for this entry surface
 - whether this entry can immediately pass through without showing waiting-room UI
 
-### Proposed state outcomes
+The model is clearer if it is treated as three separate decisions:
+
+1. **Role resolution**: who is entering?
+2. **Destination resolution**: where should they go?
+3. **Presentation mode**: does the waiting-room UI need to be shown?
+
+The client may render the waiting-room UX, but policy enforcement must not rely on the
+client alone. Server-side entry/session APIs should enforce the same resolved policy so a
+student cannot bypass `instructor-required` or similar restrictions by hitting the API
+ directly.
+
+### Role resolution
+
+Role resolution determines whether the entrant is acting as a student or instructor.
+
+Standalone/permalink/join-code entry may need to resolve role by using:
+
+- existing instructor authentication cookie
+- instructor code entry when the user intends to join as instructor but does not already
+  have the cookie
+- default student role when no instructor authentication is present
+
+Embedded activity entry should not re-resolve role locally. Instead, it should inherit
+role from the parent session context.
+
+- Parent instructor -> embedded instructor
+- Parent student -> embedded student
+- Embedded flows should not prompt for instructor code unless the parent role context is
+  missing or invalid
+
+### Destination outcomes
 
 | Outcome | Condition |
 |---|---|
 | `wait` | Policy requires instructor and none is present |
-| `join-live` | Instructor is present and normal managed entry is allowed |
+| `join-live` | Instructor is present and managed entry is allowed for the resolved role |
 | `continue-solo` | No instructor is present and policy allows solo fallback and activity supports solo mode |
 | `solo-unavailable` | Policy allows solo fallback but activity does not support solo mode |
-| `pass-through` | No blocking state or additional fields are required before launch |
+
+#### `wait` UX
+
+For v1, `wait` should remain a stable waiting-room state with no automatic timeout into a
+different destination. If the student is waiting for an instructor-required session, the
+UI should continue to show that they are waiting until instructor presence changes or the
+user explicitly retries, refreshes, or leaves.
+
+#### `solo-unavailable` UX
+
+`solo-unavailable` should be an informational waiting-room screen, not a dead-end redirect.
+The student should see a clear message that this activity requires a live instructor-led
+session, along with any useful next action the entry surface can offer, such as staying on
+that screen to wait, retrying, or returning to a prior join/home surface if one exists.
+
+### Presentation mode
+
+`pass-through` is not a separate destination. It describes whether waiting-room UI is
+shown before the resolved destination is entered.
+
+| Mode | Condition |
+|---|---|
+| `render-ui` | Waiting-room UI is needed for role entry, preflight fields, or blocked/waiting state |
+| `pass-through` | Destination is already known and no waiting-room UI is needed before launch |
+
+Examples:
+
+- Instructor present + no required preflight -> destination `join-live`, mode `pass-through`
+- Instructor absent + solo allowed + no required preflight -> destination `continue-solo`, mode `pass-through`
+- Instructor absent + instructor-required policy -> destination `wait`, mode `render-ui`
+- No instructor cookie + user wants instructor access via permalink -> resolve role through waiting-room UI before destination selection completes
 
 ### Important rule
 
@@ -280,6 +381,23 @@ Distinguish between two categories of preflight data:
 Shared participant fields should be eligible for inheritance by downstream activities.
 That means a child or embedded activity can use already-collected parent data instead of
 re-prompting for it.
+
+### `participantId` provenance
+
+`participantId` should be assigned by shared server-side entry/session functionality, not
+by individual activities and not by the client.
+
+Recommended provenance rule:
+
+- server generates `participantId` at the point where entry is accepted
+- waiting-room/session-entry response returns the resolved `participantId`
+- downstream activity launches inherit that `participantId` from shared participant context
+- clients may persist the assigned value for reconnect/solo continuity, but should not be
+  treated as the authority that creates it
+
+This matters because current activity code appears to generate student IDs inside
+activity-specific server routes. That should be migrated toward shared entry handling so
+participant identity is stable across waiting-room, activity, and embedded-child flows.
 
 ### Proposed inheritance rules
 
@@ -352,18 +470,21 @@ permalink sessions use it first.
    as a fast preflight/pass-through step rather than a visible waiting screen.
 2. If a student starts in solo mode and an instructor later appears, the student should
    remain solo by default; do not auto-switch in v1.
-3. Waiting-room data should live primarily in session/runtime context, with local
+3. If a student is in `wait`, v1 should not auto-timeout them into solo or any other
+   destination; they remain waiting until instructor presence changes or they explicitly
+   retry/leave.
+4. Waiting-room data should live primarily in session/runtime context, with local
    storage used for solo continuity in v1; avoid URL/query transport for participant
    identity data.
-4. Day-one shared participant fields should be limited to `displayName` and
+5. Day-one shared participant fields should be limited to `displayName` and
    `participantId`; additional values such as team should be modeled as reusable
    participant attributes with explicit inheritance/write-back rules rather than universal
    parent fields.
-5. Reusable participant attributes written back from a flow should become available to
+6. Reusable participant attributes written back from a flow should become available to
    future launches only, not currently running activities.
-6. Any allowed write-back should happen at a defined boundary such as waiting-room exit or
+7. Any allowed write-back should happen at a defined boundary such as waiting-room exit or
    equivalent handoff, not as unrestricted live two-way synchronization.
-7. Persistent link dashboards should visibly label entry mode, including live-only,
+8. Persistent link dashboards should visibly label entry mode, including live-only,
    async-capable, and solo-only.
 
 ## Deferred Future Work
@@ -379,18 +500,38 @@ permalink sessions use it first.
 
 ### Phase 0 - Design and contract
 
+Phase 0 deliverables should be concrete artifacts, not just discussion:
+
+- update this plan with the resolved decisions and rollout rules
+- record the finalized waiting-room / participant-context contract in `.agent/knowledge/data-contracts.md`
+- add or update shared schema/type definitions for the chosen contract before implementation work begins
+
+An additional ADR should only be created if the waiting-room contract diverges enough from
+this plan that a separate architecture record becomes useful.
+
 - [ ] Confirm permalink entry-policy vocabulary
 - [ ] Decide default behavior for existing permalinks
 - [ ] Define shared waiting-room field schema contract
 - [ ] Decide server/client ownership for validation and temporary storage
-- [ ] Document transition rules for `wait`, `join-live`, `continue-solo`, `solo-unavailable`, and `pass-through`
+- [ ] Define shared server-side `participantId` issuance and reconnect semantics
+- [ ] Define server-side enforcement rules so entry/session APIs reject disallowed joins even if the client is bypassed
+- [ ] Document role resolution rules for student, instructor-cookie, instructor-code, and embedded-role-inheritance paths
+- [ ] Document destination transitions for `wait`, `join-live`, `continue-solo`, and `solo-unavailable`
+- [ ] Document presentation-mode rules for `render-ui` vs `pass-through`
 - [ ] Define how permalink and ad-hoc join-code entry both route through the same waiting-room gateway
 
 ### Phase 1 - Persistent link creation flow
 
+Rollout dependency: do not expose entry-policy behavior to users before the waiting-room
+resolver understands it. Either land Phase 1 alongside Phase 3, or gate Phase 1 API/UI
+exposure behind a feature flag until Phase 3 ships.
+
 - [ ] Add entry-policy control to permalink creation UI
+- [ ] Ensure entry-policy controls expose accessible names, state, and keyboard interaction
 - [ ] Persist selected entry policy in permalink metadata
 - [ ] Expose entry policy in session-entry/waiting-room API payloads
+- [ ] Define API error/response shape for server-enforced policy rejections
+- [ ] Gate Phase 1 UI/API exposure until Phase 3 resolver support exists, or land them together
 - [ ] Add visible entry-mode labeling in persistent link listings/details
 - [ ] Add tests for default and non-default permalink policies
 
@@ -398,9 +539,10 @@ permalink sessions use it first.
 
 - [ ] Build generic waiting-room field renderer from shared field metadata
 - [ ] Support required text/select-style field validation
+- [ ] Ensure built-in and custom waiting-room controls meet accessibility semantics and keyboard requirements
 - [ ] Submit/store preflight data for later entry flow use
 - [ ] Add clear [TEST] logging for expected error-path tests
-- [ ] Add tests for required-field blocking and validation behavior
+- [ ] Add tests for required-field blocking, validation behavior, and accessibility-critical control states
 
 ### Phase 3 - Entry resolution behavior
 
@@ -408,14 +550,39 @@ permalink sessions use it first.
 - [ ] Implement solo-allowed fallback flow
 - [ ] Implement solo-unavailable informational state
 - [ ] Implement direct pass-through when no waiting-room UI is needed
+- [ ] Implement instructor-cookie and instructor-code role resolution for standalone entry
+- [ ] Enforce entry policy server-side in entry/session APIs so disallowed joins are rejected even when the client is bypassed
 - [ ] Preserve existing live-session behavior when instructor is present
-- [ ] Add tests for live join, wait, solo fallback, pass-through, and unsupported-solo cases
+- [ ] Ensure embedded entry inherits role from parent context and does not prompt for instructor code
+- [ ] Add tests for role resolution, live join, wait, solo fallback, pass-through, unsupported-solo cases, and direct-API bypass attempts
 
 ### Phase 4 - Downstream integration
 
-- [ ] Verify activity code can consume waiting-room-collected participant data
+Reference integration target: `java-string-practice` should be the first activity migrated to
+consume waiting-room-provided `displayName` / `participantId` instead of collecting its
+own startup identity. This gives the phase a concrete exit condition before broader
+activity adoption.
+
+- [ ] Migrate `java-string-practice` to consume waiting-room-collected participant data for student entry
+- [ ] Remove or bypass duplicate startup name collection in `java-string-practice` once waiting-room entry is authoritative
+- [ ] Verify `java-string-practice` reconnect/progress flows still work with waiting-room-provided `participantId`
+- [ ] Migrate activity-local student ID generation toward shared server-side `participantId` issuance where needed
 - [ ] Align policy naming with future SyncDeck/presentation embedding work
 - [ ] Update related planning docs once embedded-activity decisions are finalized
+
+## Activity Migration Checklist
+
+Use this checklist when migrating an existing activity to waiting-room-based entry:
+
+- [ ] Identify whether the activity currently collects student name or ID during startup
+- [ ] Move shared identity collection (`displayName`, `participantId`) to waiting-room / shared entry flow
+- [ ] Remove or bypass duplicate startup prompts once waiting-room entry is authoritative
+- [ ] Update activity client code to consume shared participant context instead of assuming local entry forms
+- [ ] Preserve reconnect behavior using shared server-issued `participantId`
+- [ ] Keep activity-specific fields local unless they are intentionally promoted to waiting-room fields
+- [ ] Decide whether any activity-specific field should be inheritable or a reusable participant attribute
+- [ ] Verify solo mode still works with local-storage continuity and inherited participant context where applicable
+- [ ] Add or update tests for the migrated startup path, reconnect behavior, and any expected error states
 
 ---
 
@@ -427,7 +594,7 @@ one common entry pipeline:
 - a universal waiting-room gateway for permalink and join-code entry
 - a permalink entry policy field
 - a generic waiting-room field schema
-- a runtime resolver that chooses `wait`, `join-live`, `continue-solo`, `solo-unavailable`, or `pass-through`
+- a runtime resolver that separates role resolution, destination resolution (`wait`, `join-live`, `continue-solo`, `solo-unavailable`), and presentation mode (`render-ui` vs `pass-through`)
 
 That should let waiting-room work move first without forcing premature decisions about
 embedded activity architecture, while still simplifying activity startup into one flow.
