@@ -1,6 +1,17 @@
 # Waiting Room Expansion Plan
 
-## Status: Design / Pre-Implementation
+## Status: Partial Implementation
+
+Implemented so far:
+
+- Phase 0 contract baseline: shared waiting-room types, config schema validation, and
+  persistent entry-policy normalization/defaulting are in place.
+- Phase 2 baseline: shared waiting-room rendering supports declarative built-in fields,
+  custom field registries loaded from the owning activity client bundle, and session
+  storage persistence for preflight values while a participant waits.
+
+Remaining work is centered on policy resolution, server-side enforcement, and carrying
+collected participant data into downstream join/solo flows.
 
 This document outlines a standalone planning track for expanding the waiting room
 experience. The goal is to make waiting-room behavior flexible enough to support:
@@ -596,7 +607,7 @@ that path ships.
 
 - [x] Build generic waiting-room field renderer from shared field metadata
 - [x] Support required text/select-style field validation
-- [ ] Ensure built-in and custom waiting-room controls meet accessibility semantics and keyboard requirements
+- [x] Ensure built-in and custom waiting-room controls meet accessibility semantics and keyboard requirements
 - [ ] Retain preflight form state across destination transitions (for example `wait -> join-live`) and carry collected data forward when entry proceeds
 - [ ] Submit/store preflight data for later entry flow use
 - [ ] Add clear [TEST] logging for expected error-path tests

@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-13
+- Area: client
+- Discovery: Waiting-room custom fields now reuse the owning activity's existing lazy-loaded client entry bundle via `loadActivityWaitingRoomFields(...)` instead of introducing a second discovery/bundling path.
+- Why it matters: This keeps waiting-room customization aligned with the current activity loader, avoids parallel registry complexity, and lets shared waiting-room UI fail safely with a loading or unavailable message when a custom field component cannot be resolved.
+- Evidence: `client/src/activities/index.ts`; `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomFieldUtils.ts`
+- Follow-up action: When an activity adopts `waitingRoom.fields` with `type: 'custom'`, export the matching component from its client entry `waitingRoomFields` map rather than adding shared-module conditionals.
+- Owner: Codex
+
 - Date: 2026-03-01
 - Area: activities
 - Discovery: SyncDeck presentation URLs must be scheme-compatible with the ActiveBits host page. When ActiveBits is loaded over HTTPS, configuring or joining a SyncDeck session with an `http://...` presentation URL causes mixed-content blocking, the iframe stays on an `about:blank` parent-origin window, and subsequent `postMessage(..., "http://...")` calls fail in the student view.

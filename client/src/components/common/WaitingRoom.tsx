@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type {
   WaitingRoomFieldConfig,
+  WaitingRoomFieldComponentProps,
   WaitingRoomSerializableValue,
 } from '../../../../types/waitingRoom.js'
 import Button from '../ui/Button'
-import { getActivity } from '@src/activities'
+import { getActivity, loadActivityWaitingRoomFields } from '@src/activities'
 import { getPersistentSelectedOptionsFromSearchForActivity } from './sessionRouterUtils'
 import {
   buildWaitingRoomStorageKey,
@@ -24,6 +25,7 @@ import {
   parseWaitingRoomMessage,
   type WaitingRoomMessage,
 } from './waitingRoomUtils'
+import { getCustomFieldStatus } from './waitingRoomFieldUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -38,6 +40,7 @@ interface TeacherAuthenticateResponse {
 }
 
 const EMPTY_WAITING_ROOM_FIELDS: readonly WaitingRoomFieldConfig[] = []
+const EMPTY_CUSTOM_FIELD_COMPONENTS: Record<string, ComponentType<WaitingRoomFieldComponentProps>> = {}
 
 function getFieldLabel(field: WaitingRoomFieldConfig): string {
   return field.label?.trim() || field.id
@@ -60,6 +63,8 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [waitingRoomValues, setWaitingRoomValues] = useState<WaitingRoomFieldValueMap>({})
   const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({})
+  const [customFieldComponents, setCustomFieldComponents] = useState<Record<string, ComponentType<WaitingRoomFieldComponentProps>>>(EMPTY_CUSTOM_FIELD_COMPONENTS)
+  const [customFieldLoadError, setCustomFieldLoadError] = useState<string | null>(null)
   const shouldAutoAuthRef = useRef(hasTeacherCookie)
   const hasNavigatedRef = useRef(false)
   const teacherAuthRequestedRef = useRef(false)
@@ -93,6 +98,36 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
 
     persistWaitingRoomValues(window.sessionStorage, storageKey, waitingRoomFields, waitingRoomValues)
   }, [activityName, hash, waitingRoomFields, waitingRoomValues])
+
+  useEffect(() => {
+    const hasCustomFields = waitingRoomFields.some((field) => field.type === 'custom')
+    if (!hasCustomFields) {
+      setCustomFieldComponents(EMPTY_CUSTOM_FIELD_COMPONENTS)
+      setCustomFieldLoadError(null)
+      return
+    }
+
+    let isCancelled = false
+    setCustomFieldLoadError(null)
+
+    void loadActivityWaitingRoomFields(activityName)
+      .then((loadedFields) => {
+        if (!isCancelled) {
+          setCustomFieldComponents(loadedFields)
+        }
+      })
+      .catch((error) => {
+        console.error('[WaitingRoom] Failed to load custom waiting-room fields:', error)
+        if (!isCancelled) {
+          setCustomFieldComponents(EMPTY_CUSTOM_FIELD_COMPONENTS)
+          setCustomFieldLoadError('Custom waiting-room fields are unavailable right now.')
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [activityName, waitingRoomFields])
 
   useEffect(() => {
     setError(null)
@@ -294,13 +329,26 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
                 const errorId = waitingRoomErrors[field.id] ? `${fieldId}-error` : undefined
                 const describedBy = [helpId, touchedFields[field.id] ? errorId : undefined].filter(Boolean).join(' ') || undefined
                 const error = touchedFields[field.id] ? waitingRoomErrors[field.id] : undefined
+                const CustomFieldComponent = field.type === 'custom' ? (customFieldComponents[field.component] ?? null) : null
+                const customFieldStatus = getCustomFieldStatus(field, CustomFieldComponent, customFieldLoadError)
+                const fieldLabel = (
+                  <>
+                    {getFieldLabel(field)}
+                    {field.required ? ' *' : ''}
+                  </>
+                )
 
                 return (
                   <div key={field.id} className="flex flex-col gap-2">
-                    <label htmlFor={fieldId} className="text-sm font-semibold text-gray-700">
-                      {getFieldLabel(field)}
-                      {field.required ? ' *' : ''}
-                    </label>
+                    {field.type === 'custom' ? (
+                      <div id={`${fieldId}-label`} className="text-sm font-semibold text-gray-700">
+                        {fieldLabel}
+                      </div>
+                    ) : (
+                      <label htmlFor={fieldId} className="text-sm font-semibold text-gray-700">
+                        {fieldLabel}
+                      </label>
+                    )}
 
                     {field.type === 'text' && (
                       <input
@@ -340,10 +388,31 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
                     {field.type === 'custom' && (
                       <div
                         id={fieldId}
-                        className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+                        role="group"
+                        aria-labelledby={`${fieldId}-label`}
                         aria-describedby={describedBy}
+                        aria-invalid={error ? 'true' : undefined}
+                        className="flex flex-col gap-2"
                       >
-                        Custom waiting-room fields are not available yet for {getFieldLabel(field)}.
+                        {CustomFieldComponent ? (
+                          <CustomFieldComponent
+                            field={field}
+                            value={waitingRoomValues[field.id] ?? null}
+                            onChange={(value) => {
+                              setWaitingRoomValues((current) => ({
+                                ...current,
+                                [field.id]: value,
+                              }))
+                              handleFieldBlur(field.id)
+                            }}
+                            disabled={isSubmitting}
+                            error={error}
+                          />
+                        ) : (
+                          <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                            {customFieldStatus}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -364,7 +433,9 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
           <p className="text-center text-gray-700 mb-4 font-semibold">Are you the teacher?</p>
 
           <form onSubmit={handleTeacherCodeSubmit} className="flex flex-col items-center gap-4">
+            <label htmlFor="waiting-room-teacher-code" className="sr-only">Teacher code</label>
             <input
+              id="waiting-room-teacher-code"
               type="password"
               placeholder="Enter teacher code"
               value={teacherCode}
