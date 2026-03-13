@@ -4,6 +4,7 @@ import { activities } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
 import { useClipboard } from '@src/hooks/useClipboard'
 import type { ActivityPersistentLinkBuildResult, ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
+import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import {
   buildPersistentLinkUrl,
   buildPersistentSessionKey,
@@ -19,15 +20,22 @@ import {
   type DeepLinkSelection,
 } from './manageDashboardUtils'
 import { resolveCustomPersistentLinkBuilder } from './manageDashboardViewUtils'
+import {
+  getPersistentSessionEntryPolicyDescription,
+  getPersistentSessionEntryPolicyLabel,
+  PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS,
+} from './persistentSessionEntryPolicyUtils'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 
 type DashboardActivity = (typeof activities)[number]
+const DEFAULT_PERSISTENT_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
 
 interface PersistentSession {
   activityName: string
   hash: string
   fullUrl: string
+  entryPolicy?: PersistentSessionEntryPolicy
   teacherCode?: string
   selectedOptions?: Record<string, unknown>
 }
@@ -131,6 +139,9 @@ export default function ManageDashboard() {
   const [soloActivity, setSoloActivity] = useState<DashboardActivity | null>(null)
   const [soloOptions, setSoloOptions] = useState<DeepLinkSelection>({})
   const [persistentOptions, setPersistentOptions] = useState<DeepLinkSelection>({})
+  const [persistentEntryPolicy, setPersistentEntryPolicy] = useState<PersistentSessionEntryPolicy>(
+    DEFAULT_PERSISTENT_ENTRY_POLICY,
+  )
 
   const refreshPersistentSessions = useCallback(async (): Promise<void> => {
     try {
@@ -194,6 +205,7 @@ export default function ManageDashboard() {
     setPersistentUrl(null)
     setError(null)
     setPersistentOptions(initializeDeepLinkOptions(activity.deepLinkOptions))
+    setPersistentEntryPolicy(DEFAULT_PERSISTENT_ENTRY_POLICY)
   }
 
   const closePersistentModal = (): void => {
@@ -204,6 +216,7 @@ export default function ManageDashboard() {
     setError(null)
     setIsCreating(false)
     setPersistentOptions({})
+    setPersistentEntryPolicy(DEFAULT_PERSISTENT_ENTRY_POLICY)
   }
 
   const handlePersistentLinkCreated = useCallback(
@@ -258,6 +271,7 @@ export default function ManageDashboard() {
         activityName: selectedActivity.id,
         teacherCode: teacherCode.trim(),
         selectedOptions,
+        entryPolicy: persistentEntryPolicy,
       }
 
       const response = await fetch(endpoint, {
@@ -268,6 +282,7 @@ export default function ManageDashboard() {
             ? {
                 activityName: requestBody.activityName,
                 teacherCode: requestBody.teacherCode,
+                entryPolicy: requestBody.entryPolicy,
               }
             : requestBody,
         ),
@@ -307,11 +322,12 @@ export default function ManageDashboard() {
   }
 
   const downloadPersistentLinksCSV = (): void => {
-    const headers = ['Activity', 'Teacher Code', 'URL']
+    const headers = ['Activity', 'Entry Mode', 'Teacher Code', 'URL']
     const rows = persistentSessions.map((session) => {
       const sessionKey = buildPersistentSessionKey(session.activityName, session.hash)
       return [
         getActivityName(session.activityName),
+        getPersistentSessionEntryPolicyLabel(session.entryPolicy),
         savedSessions[sessionKey] || '',
         `${session.fullUrl}${buildQueryString(session.selectedOptions)}`,
       ]
@@ -439,11 +455,14 @@ export default function ManageDashboard() {
                 getActivityById(session.activityName)?.deepLinkOptions,
                 session.selectedOptions,
               )
+              const entryPolicyLabel = getPersistentSessionEntryPolicyLabel(session.entryPolicy)
+              const entryPolicyDescription = getPersistentSessionEntryPolicyDescription(session.entryPolicy)
 
               return (
                 <div key={`${sessionKey}-${index}`} className={`flex items-center gap-2 ${bgClass} p-3 rounded border-2 ${borderClass}`}>
                   <div className="flex-1">
                     <p className="font-semibold text-gray-700">{getActivityName(session.activityName)}</p>
+                    <p className="text-xs text-gray-500 mt-1">Entry mode: {entryPolicyLabel}. {entryPolicyDescription}</p>
                     {optionDescriptions.length > 0 && (
                       <p className="text-xs text-gray-500 mt-1">Options: {optionDescriptions.join(', ')}</p>
                     )}
@@ -531,6 +550,27 @@ export default function ManageDashboard() {
                 </p>
               </div>
 
+              <div>
+                <label htmlFor="persistent-entry-policy" className="block text-sm font-semibold text-gray-700 mb-2">
+                  Entry mode
+                </label>
+                <select
+                  id="persistent-entry-policy"
+                  value={persistentEntryPolicy}
+                  onChange={(event) => setPersistentEntryPolicy(event.target.value as PersistentSessionEntryPolicy)}
+                  className="border-2 border-gray-300 rounded px-4 py-2 w-full bg-white focus:outline-none focus:border-blue-500"
+                >
+                  {PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  {getPersistentSessionEntryPolicyDescription(persistentEntryPolicy)}
+                </p>
+              </div>
+
               {selectedActivity && Object.keys(selectedActivityOptions).length > 0 && (
                 <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
                   <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
@@ -614,7 +654,7 @@ export default function ManageDashboard() {
             </div>
 
             <p className="text-sm text-gray-600">
-              Save this URL! Anyone who visits it will wait for you to start the session with your teacher code.
+              Save this URL! Entry mode: {getPersistentSessionEntryPolicyLabel(persistentEntryPolicy)}.
             </p>
           </div>
         )}

@@ -18,6 +18,7 @@ import {
   readCachedSession,
   type SessionCacheRecord,
 } from './sessionRouterUtils'
+import { resolvePersistentSessionEntryOutcome } from './persistentSessionEntryPolicyUtils'
 
 interface RouteParams {
   [key: string]: string | undefined
@@ -198,6 +199,17 @@ const SessionRouter = () => {
     if (!persistentSessionInfo?.isStarted || !persistentSessionInfo.sessionId) return
     if (!persistentSessionInfo.hasTeacherCookie) return
 
+    const activity = getActivity(activityName)
+    const outcome = resolvePersistentSessionEntryOutcome({
+      entryPolicy: persistentSessionInfo.entryPolicy,
+      isStarted: persistentSessionInfo.isStarted,
+      hasTeacherCookie: persistentSessionInfo.hasTeacherCookie,
+      activitySupportsSolo: Boolean(activity?.soloMode),
+    })
+    if (outcome !== 'join-live') {
+      return
+    }
+
     let isCancelled = false
     const startedSessionId = persistentSessionInfo.sessionId
     const queryString = getWindowSearch()
@@ -214,6 +226,7 @@ const SessionRouter = () => {
     }
   }, [
     activityName,
+    persistentSessionInfo?.entryPolicy,
     persistentSessionInfo?.hasTeacherCookie,
     persistentSessionInfo?.isStarted,
     persistentSessionInfo?.sessionId,
@@ -260,6 +273,30 @@ const SessionRouter = () => {
   }, [hash, activityName, persistentSessionInfo?.isStarted, navigate])
 
   useEffect(() => {
+    if (!hash || !activityName || !persistentSessionInfo) {
+      return
+    }
+
+    const activity = getActivity(activityName)
+    const outcome = resolvePersistentSessionEntryOutcome({
+      entryPolicy: persistentSessionInfo.entryPolicy,
+      isStarted: persistentSessionInfo.isStarted,
+      hasTeacherCookie: persistentSessionInfo.hasTeacherCookie,
+      activitySupportsSolo: Boolean(activity?.soloMode),
+    })
+
+    if (outcome !== 'continue-solo') {
+      return
+    }
+
+    if ((activity?.waitingRoom?.fields?.length ?? 0) > 0) {
+      return
+    }
+
+    void navigate(`/solo/${activityName}${getWindowSearch()}`, { replace: true })
+  }, [activityName, hash, navigate, persistentSessionInfo])
+
+  useEffect(() => {
     if (!sessionId || sessionData || typeof window === 'undefined') return
 
     const storageKey = `session-${sessionId}`
@@ -303,6 +340,32 @@ const SessionRouter = () => {
   if (hash && activityName) {
     if (isLoadingPersistent || persistentSessionInfo === null) {
       return <div className="text-center">Loading...</div>
+    }
+
+    const persistentActivity = getActivity(activityName)
+    const persistentEntryOutcome = resolvePersistentSessionEntryOutcome({
+      entryPolicy: persistentSessionInfo.entryPolicy,
+      isStarted: persistentSessionInfo.isStarted,
+      hasTeacherCookie: persistentSessionInfo.hasTeacherCookie,
+      activitySupportsSolo: Boolean(persistentActivity?.soloMode),
+    })
+
+    if (persistentEntryOutcome === 'solo-unavailable') {
+      return (
+        <div className="max-w-lg mx-auto bg-white rounded-lg shadow-lg lg:p-6 border border-gray-200">
+          <h1 className="text-2xl font-bold text-gray-800 mb-3 text-center">Live session required</h1>
+          <p className="text-gray-700 text-center mb-4">
+            This permanent link is configured for solo entry, but {persistentActivity?.name || activityName} does not support solo mode.
+          </p>
+          <p className="text-sm text-gray-600 text-center">
+            Ask your teacher for a live session link or return when they have started a classroom session for this activity.
+          </p>
+        </div>
+      )
+    }
+
+    if (persistentEntryOutcome === 'continue-solo') {
+      return <div className="text-center">Redirecting to solo mode...</div>
     }
 
     if (persistentSessionInfo?.isStarted && persistentSessionInfo.sessionId) {

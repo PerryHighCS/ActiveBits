@@ -1,0 +1,84 @@
+import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
+
+const DEFAULT_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
+
+function normalizePersistentSessionEntryPolicy(value: unknown): PersistentSessionEntryPolicy {
+  return value === 'solo-allowed' || value === 'solo-only' || value === 'instructor-required'
+    ? value
+    : DEFAULT_ENTRY_POLICY
+}
+
+export interface PersistentSessionEntryPolicyOption {
+  value: PersistentSessionEntryPolicy
+  label: string
+  description: string
+}
+
+export type PersistentSessionEntryOutcome =
+  | 'wait'
+  | 'join-live'
+  | 'continue-solo'
+  | 'solo-unavailable'
+
+export const PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS: readonly PersistentSessionEntryPolicyOption[] = [
+  {
+    value: 'instructor-required',
+    label: 'Live Only',
+    description: 'Students wait for a teacher before they can enter.',
+  },
+  {
+    value: 'solo-allowed',
+    label: 'Live Or Solo',
+    description: 'Students join the live session when it is running, or continue solo when no teacher is present.',
+  },
+  {
+    value: 'solo-only',
+    label: 'Solo Only',
+    description: 'This link always opens solo mode and never starts a managed live session.',
+  },
+] as const
+
+export interface ResolvePersistentSessionEntryParams {
+  entryPolicy?: PersistentSessionEntryPolicy
+  isStarted?: boolean
+  hasTeacherCookie?: boolean
+  activitySupportsSolo: boolean
+}
+
+export function getPersistentSessionEntryPolicyLabel(value: unknown): string {
+  const normalized = normalizePersistentSessionEntryPolicy(value)
+  return PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS.find((option) => option.value === normalized)?.label ?? 'Live Only'
+}
+
+export function getPersistentSessionEntryPolicyDescription(value: unknown): string {
+  const normalized = normalizePersistentSessionEntryPolicy(value)
+  return PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS.find((option) => option.value === normalized)?.description
+    ?? 'Students wait for a teacher before they can enter.'
+}
+
+export function resolvePersistentSessionEntryOutcome({
+  entryPolicy = DEFAULT_ENTRY_POLICY,
+  isStarted = false,
+  hasTeacherCookie = false,
+  activitySupportsSolo,
+}: ResolvePersistentSessionEntryParams): PersistentSessionEntryOutcome {
+  const normalizedPolicy = normalizePersistentSessionEntryPolicy(entryPolicy)
+
+  if (normalizedPolicy === 'solo-only') {
+    return activitySupportsSolo ? 'continue-solo' : 'solo-unavailable'
+  }
+
+  if (isStarted) {
+    return 'join-live'
+  }
+
+  if (hasTeacherCookie) {
+    return 'wait'
+  }
+
+  if (normalizedPolicy === 'solo-allowed') {
+    return activitySupportsSolo ? 'continue-solo' : 'solo-unavailable'
+  }
+
+  return 'wait'
+}

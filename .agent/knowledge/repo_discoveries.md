@@ -16,6 +16,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-13
 - Area: client
+- Discovery: Persistent permalink entry resolution now lives in shared client utility logic (`resolvePersistentSessionEntryOutcome`) so `SessionRouter` can treat `solo-only` and `solo-allowed` links consistently across started-session, teacher-cookie, and solo-support cases.
+- Why it matters: This prevents regressions where a remembered teacher cookie or an already-started managed session accidentally overrides `solo-only` behavior, and it gives later Phase 3 work one place to extend instead of scattering policy branches through route components.
+- Evidence: `client/src/components/common/persistentSessionEntryPolicyUtils.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/persistentSessionEntryPolicyUtils.test.ts`
+- Follow-up action: Reuse the resolver shape when ad-hoc join-code entry is folded into the same waiting-room gateway, and expand it to account for waiting-room preflight state once participant-data carry-forward lands.
+- Owner: Codex
+
+- Date: 2026-03-13
+- Area: client
 - Discovery: Waiting-room custom fields now reuse the owning activity's existing lazy-loaded client entry bundle via `loadActivityWaitingRoomFields(...)` instead of introducing a second discovery/bundling path.
 - Why it matters: This keeps waiting-room customization aligned with the current activity loader, avoids parallel registry complexity, and lets shared waiting-room UI fail safely with a loading or unavailable message when a custom field component cannot be resolved.
 - Evidence: `client/src/activities/index.ts`; `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomFieldUtils.ts`

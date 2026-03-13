@@ -16,12 +16,21 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-03-13
+- Surface: REST
+- Contract: Generic persistent-link creation and listing now carry `entryPolicy?: PersistentSessionEntryPolicy`. `POST /api/persistent-session/create` accepts `entryPolicy` alongside `activityName`, `teacherCode`, and optional `selectedOptions`; `GET /api/persistent-session/list` returns each saved link with normalized `entryPolicy`.
+- Compatibility constraints: Missing or invalid `entryPolicy` values must normalize to `instructor-required`. Existing cookie-backed saved links without server metadata must still list as `instructor-required` until metadata is created by a newer flow.
+- Validation rules: Only `instructor-required`, `solo-allowed`, and `solo-only` are accepted; other values are treated as compatibility fallback to `instructor-required`. `solo-only` must not allow managed-session startup through the persistent-session websocket teacher-start path.
+- Evidence (schema/tests/path): `server/routes/persistentSessionRoutes.ts`; `server/core/persistentSessionWs.ts`; `server/persistentSessionRoutes.test.ts`; `client/src/components/common/persistentSessionEntryPolicyUtils.ts`; `client/src/components/common/ManageDashboard.tsx`.
+- Follow-up action: Add shared error/response contracts for policy-rejected teacher start attempts and extend server-side enforcement beyond the websocket start path when join/session APIs are unified.
+- Owner: Codex
+
+- Date: 2026-03-13
 - Surface: activity interface
 - Contract: Waiting-room Phase 0 shared contract is split across `ActivityConfig.waitingRoom` and shared waiting-room types. `ActivityConfig.waitingRoom.fields` accepts declarative field metadata with built-in field types `text`, `select`, and `custom`, while persistent/permalink entry policy uses `PersistentSessionEntryPolicy = 'instructor-required' | 'solo-allowed' | 'solo-only'` with compatibility default `instructor-required`.
 - Compatibility constraints: Existing activities without `waitingRoom` remain unchanged. Existing persistent-session metadata that lacks `entryPolicy` must resolve to `instructor-required` in both stored metadata normalization and waiting-room status responses. Custom field `props` must stay data-only and serializable so config remains declarative.
 - Validation rules: `waitingRoom.fields` must be an array; each field requires non-empty `id` and valid `type`; `select` fields require at least one option; `custom` fields require a string `component`; `custom.props` and `custom.defaultValue` must be serializable; persistent entry policy values outside the supported vocabulary normalize to `instructor-required`.
 - Evidence (schema/tests/path): `types/waitingRoom.ts`; `types/activity.ts`; `types/activityConfigSchema.ts`; `server/activityConfigSchema.test.ts`; `server/core/persistentSessions.ts`; `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`.
-- Follow-up action: Phase 1 should reuse `PersistentSessionEntryPolicy` in permalink creation/listing APIs, and Phase 2 should build the waiting-room renderer against `ActivityConfig.waitingRoom.fields` plus `ActivityClientModule.waitingRoomFields`.
+- Follow-up action: Phase 3 should reuse `PersistentSessionEntryPolicy` across the remaining join/session enforcement paths, and Phase 4 should carry waiting-room-collected data into downstream entry flows.
 - Owner: Codex
 
 - Date: 2026-02-23

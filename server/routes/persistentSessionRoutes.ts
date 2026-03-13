@@ -24,6 +24,13 @@ interface CookieParseResult {
   error: string | null
 }
 
+interface PersistentSessionCreateBody {
+  activityName?: unknown
+  teacherCode?: unknown
+  selectedOptions?: unknown
+  entryPolicy?: unknown
+}
+
 interface SessionStoreLike {
   get(id: string): Promise<unknown | null>
 }
@@ -125,15 +132,14 @@ function parsePersistentSessionsCookie(cookieValue: unknown, context = 'persiste
 }
 
 export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersistentSessionRoutesOptions): void {
-  app.get('/api/persistent-session/list', (req, res) => {
+  app.get('/api/persistent-session/list', async (req, res) => {
     try {
       const { sessions: sessionEntries } = parsePersistentSessionsCookie(
         req.cookies?.persistent_sessions,
         'persistent_sessions (/api/persistent-session/list)',
       )
 
-      const sessionList = sessionEntries
-        .map((entry) => {
+      const sessionList = (await Promise.all(sessionEntries.map(async (entry) => {
           const parts = entry.key.split(':')
           if (parts.length !== 2 || !parts[0] || !parts[1]) {
             console.warn(`Invalid session key format: "${entry.key}"`)
@@ -143,16 +149,17 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
           const [activityName, hash] = parts
           const host = req.get('x-forwarded-host') ?? req.get('host')
           const protocol = req.get('x-forwarded-proto') ?? req.protocol
+          const persistentSession = await getPersistentSession(hash)
           return {
             activityName,
             hash,
             teacherCode: entry.teacherCode,
+            entryPolicy: resolvePersistentSessionEntryPolicy(persistentSession?.entryPolicy),
             selectedOptions: entry.selectedOptions || {},
             url: `/activity/${activityName}/${hash}`,
             fullUrl: host ? `${protocol}://${host}/activity/${activityName}/${hash}` : null,
           }
-        })
-        .filter(Boolean)
+        }))).filter(Boolean)
 
       res.json({ sessions: sessionList })
     } catch (err) {
@@ -161,11 +168,12 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     }
   })
 
-  app.post('/api/persistent-session/create', (req, res) => {
-    const body = isPlainObject(req.body) ? req.body : {}
+  app.post('/api/persistent-session/create', async (req, res) => {
+    const body = isPlainObject(req.body) ? (req.body as PersistentSessionCreateBody & Record<string, unknown>) : {}
     const activityName = getBodyString(body, 'activityName')
     const teacherCode = getBodyString(body, 'teacherCode')
     const selectedOptions = toSelectedOptions(body.selectedOptions)
+    const entryPolicy = resolvePersistentSessionEntryPolicy(body.entryPolicy)
 
     if (!activityName || !teacherCode) {
       res.status(400).json({ error: 'Missing activityName or teacherCode' })
@@ -193,7 +201,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       'persistent_sessions (/api/persistent-session/create)',
     )
 
-    const { hash } = generatePersistentHash(activityName, teacherCode)
+    const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
     const cookieKey = `${activityName}:${hash}`
 
     const existingIndex = sessionEntries.findIndex((entry) => entry.key === cookieKey)
@@ -204,6 +212,8 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
     }
+
+    await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
 
     res.cookie(cookieName, JSON.stringify(sessionEntries), {
       maxAge: ONE_YEAR_MS,

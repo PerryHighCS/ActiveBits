@@ -162,6 +162,16 @@ async function handleTeacherCodeVerification(
     return
   }
 
+  if (persistentSession.entryPolicy === 'solo-only') {
+    socket.send(
+      JSON.stringify({
+        type: 'teacher-code-error',
+        error: 'This permanent link is configured for solo use only.',
+      }),
+    )
+    return
+  }
+
   const validation = verifyTeacherCodeWithHash(persistentSession.activityName, hash, teacherCode)
 
   if (!validation.valid) {

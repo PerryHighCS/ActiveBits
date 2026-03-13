@@ -346,3 +346,57 @@ void test('authenticate preserves existing selectedOptions from cookie over requ
     prompt: 'warmup',
   })
 })
+
+void test('create persists non-default entry policy in metadata and list exposes it', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'gallery-walk',
+      teacherCode: 'solo-allowed-code',
+      entryPolicy: 'solo-allowed',
+    },
+    headers: {
+      host: 'bits.example',
+    },
+    protocol: 'https',
+  })
+  const createRes = createMockRes()
+
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  const stored = await getPersistentSession(hash)
+  assert.equal(stored?.entryPolicy, 'solo-allowed')
+
+  const cookie = createRes.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+
+  const listHandler = getRoute(app, 'GET', '/api/persistent-session/list')
+  const listReq = createMockReq({
+    cookies: {
+      persistent_sessions: cookie.value,
+    },
+    headers: {
+      host: 'bits.example',
+    },
+    protocol: 'https',
+  })
+  const listRes = createMockRes()
+
+  await listHandler(listReq, listRes)
+
+  assert.equal(listRes.statusCode, 200)
+  const sessionsList = Array.isArray(listRes.jsonBody?.sessions) ? listRes.jsonBody.sessions : []
+  assert.equal(sessionsList.length, 1)
+  assert.equal((sessionsList[0] as Record<string, unknown>).entryPolicy, 'solo-allowed')
+})
