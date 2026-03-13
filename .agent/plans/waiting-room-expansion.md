@@ -594,8 +594,8 @@ that path ships.
 
 ### Phase 2 - Waiting room preflight framework
 
-- [ ] Build generic waiting-room field renderer from shared field metadata
-- [ ] Support required text/select-style field validation
+- [x] Build generic waiting-room field renderer from shared field metadata
+- [x] Support required text/select-style field validation
 - [ ] Ensure built-in and custom waiting-room controls meet accessibility semantics and keyboard requirements
 - [ ] Retain preflight form state across destination transitions (for example `wait -> join-live`) and carry collected data forward when entry proceeds
 - [ ] Submit/store preflight data for later entry flow use
