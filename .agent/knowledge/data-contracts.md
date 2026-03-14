@@ -167,3 +167,12 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/server/studentParticipants.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
 - Follow-up action: Keep this contract in place unless/until SyncDeck is moved onto a broader shared accepted-entry service that can authoritatively issue and validate participant context across presentation-linked flows.
 - Owner: Codex
+
+- Date: 2026-03-14
+- Surface: REST
+- Contract: SyncDeck now exposes `POST /api/syncdeck/:sessionId/embedded-context` as a parent-context proof surface for future embedded launches. A valid `instructorPasscode` resolves `{ resolvedRole: 'teacher' }`; a valid registered `studentId` resolves `{ resolvedRole: 'student', studentId, studentName }`; unknown identity resolves `403 { error: 'forbidden' }`.
+- Compatibility constraints: This does not launch embedded activities yet and does not replace waiting-room entry. It is a narrow validation surface meant to prove inherited parent role from an existing SyncDeck session without prompting for teacher code again in the eventual child flow.
+- Validation rules: Missing or invalid `sessionId` follows existing SyncDeck route patterns (`400` / `404`). Student inheritance must only succeed for an already registered SyncDeck student record. Teacher inheritance must only succeed for a valid instructor passcode for that session.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: Wire the eventual embedded child-launch path to this validated parent context instead of re-deriving teacher/student role from client claims alone.
+- Owner: Codex

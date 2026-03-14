@@ -59,6 +59,12 @@ interface SyncDeckStudent {
   lastStudentStateAt: number | null
 }
 
+interface SyncDeckEmbeddedEntryContextResponse {
+  resolvedRole: 'teacher' | 'student'
+  studentId?: string
+  studentName?: string
+}
+
 interface SyncDeckEmbeddedActivity {
   embeddedId: string
   activityType: string
@@ -238,6 +244,17 @@ function normalizeStudentEntry(value: unknown): SyncDeckStudent | null {
     lastIndices: normalizeSlideIndices(value.lastIndices),
     lastStudentStateAt: normalizeNullableFiniteNumber(value.lastStudentStateAt),
   }
+}
+
+function findSyncDeckStudentById(
+  students: SyncDeckStudent[],
+  studentId: string | null,
+): SyncDeckStudent | null {
+  if (!studentId) {
+    return null
+  }
+
+  return students.find((student) => student.studentId === studentId) ?? null
 }
 
 function normalizeEmbeddedActivityEntry(value: unknown): SyncDeckEmbeddedActivity | null {
@@ -933,6 +950,46 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const response = res as unknown as JsonResponse
     response.json({ studentId, name })
+  })
+
+  app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      const response = res as unknown as JsonResponse
+      response.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      const response = res as unknown as JsonResponse
+      response.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeStudentName(readStringField(req.body, 'instructorPasscode'))
+    if (instructorPasscode && verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      const response = res as unknown as JsonResponse
+      const payload: SyncDeckEmbeddedEntryContextResponse = { resolvedRole: 'teacher' }
+      response.json(payload)
+      return
+    }
+
+    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
+    const student = findSyncDeckStudentById(session.data.students, studentId)
+    if (student) {
+      const response = res as unknown as JsonResponse
+      const payload: SyncDeckEmbeddedEntryContextResponse = {
+        resolvedRole: 'student',
+        studentId: student.studentId,
+        studentName: student.name,
+      }
+      response.json(payload)
+      return
+    }
+
+    const response = res as unknown as JsonResponse
+    response.status(403).json({ error: 'forbidden' })
   })
 
   app.post('/api/syncdeck/:sessionId/configure', async (req, res) => {

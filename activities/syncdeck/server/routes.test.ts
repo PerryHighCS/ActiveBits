@@ -1653,6 +1653,95 @@ void test('register-student route returns 404 for invalid session', async () => 
   assert.deepEqual(res.body, { error: 'invalid session' })
 })
 
+void test('embedded-context route resolves teacher role from valid instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: 'teacher-passcode-1' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { resolvedRole: 'teacher' })
+})
+
+void test('embedded-context route resolves student role from registered student id', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { studentId: 'student-1' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    resolvedRole: 'student',
+    studentId: 'student-1',
+    studentName: 'Ada Lovelace',
+  })
+})
+
+void test('embedded-context route rejects unknown parent identity', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { studentId: 'missing-student' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, { error: 'forbidden' })
+})
+
 void test('create route initializes syncdeck session state', async () => {
   const app = createMockApp()
   const ws = createMockWs()

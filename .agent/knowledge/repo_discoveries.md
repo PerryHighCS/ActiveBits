@@ -191,6 +191,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: server | activities
+- Discovery: SyncDeck now has a first runtime surface for embedded role inheritance, even though no embedded child launcher consumes it yet. `POST /api/syncdeck/:sessionId/embedded-context` can validate inherited teacher role from instructor passcode or inherited student role from a registered parent-session student ID.
+- Why it matters: This converts the embedded-role plan from pure design text into a concrete server proof surface. The remaining work is now more specific: wire child launch/entry to this validated parent context instead of inventing teacher/student role in the embedded child from scratch.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: When the embedded child-launch path is implemented, use this endpoint or an equivalent validated server surface as the parent-context authority rather than trusting client-claimed inherited role.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: activities | server
 - Discovery: Python List Practice is no longer fully outside the shared participant contract on the server side. Its websocket join, stats updates, disconnect handling, and normalized stored student records now use shared-style participant IDs and activity-owned wrappers around the common session participant helpers, and the student client now accepts a server-issued `studentId` message.
 - Why it matters: This closes one of the explicit remaining gaps from the plan without forcing a waiting-room UI migration for the activity. Python List Practice can now participate in the same broader participant-ID/reconnect direction as the Java and traveling-salesman activities, while still keeping its own activity-specific UI flow for now.
