@@ -175,8 +175,8 @@ export function getActivityWaitingRoomFieldCount(activityName: string): number {
 
 export function activitySupportsStandalonePermalink(activityName: string): boolean {
   const matchingConfig = filteredConfigs.find((config) => config.id === activityName)
-  return matchingConfig?.loadedConfig.standaloneEntry?.enabled === true
-    && matchingConfig.loadedConfig.standaloneEntry?.supportsPermalink === true
+  const standaloneEntry = matchingConfig?.loadedConfig.standaloneEntry
+  return standaloneEntry?.enabled === true && standaloneEntry?.supportsPermalink === true
 }
 
 /**
