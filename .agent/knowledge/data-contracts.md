@@ -33,6 +33,24 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Extend or replace this helper once Python List Practice and SyncDeck are migrated to the same participant contract, especially where their current flows still mix registration, reconnect, and progress persistence differently.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Surface: internal module
+- Contract: The current waiting-room branch treats `participantId` as shared early identity, but not yet as a fully authoritative accepted-entry contract. Shared code now covers ID issuance, entry handoff storage, reconnect/create for several session-backed activities, accepted-participant lookup, mutation, disconnect handling, and duplicate-socket replacement. Activity routes still own the final acceptance and persistence boundary after handoff.
+- Compatibility constraints: Existing activities may continue to use activity-owned registration or acceptance flows as long as they do not break the earlier shared `participantId` and handoff assumptions. Separate `studentId` vs `id` field names remain tolerated for now.
+- Validation rules: Waiting-room handoff may mint `participantId` before activity startup, but an activity may only treat that identity as authoritative after its own accepted-entry checks succeed. Shared helpers should be preferred for session-backed participant lookup/mutation where the participant record fits the common shape.
+- Evidence (schema/tests/path): `server/core/participantIds.ts`; `server/core/entryParticipants.ts`; `server/core/sessionParticipants.ts`; `server/core/participantSockets.ts`; `server/sessionParticipants.test.ts`; `server/participantSockets.test.ts`; `client/src/components/common/entryParticipantStorage.ts`; `client/src/components/common/entryParticipantIdentityUtils.ts`
+- Follow-up action: Decide whether to stop at the current shared-helper boundary or introduce one broader accepted-entry service that owns post-handoff participant acceptance/reconnect across more activities.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Surface: REST | internal module
+- Contract: Consuming a live session entry-participant token now also records an accepted-entry participant record on the session in `acceptedEntryParticipants[participantId] = { participantId, displayName, acceptedAt }`. This makes accepted entry observable on the server after the token is redeemed, not only on the client that consumed it.
+- Compatibility constraints: The consume route response remains `{ values }`, and activities are not yet required to consult `acceptedEntryParticipants` during websocket join or later updates. Existing direct joins without waiting-room handoff still work unchanged.
+- Validation rules: Only consumed values with a non-empty string `participantId` produce an accepted-entry record. `displayName` is normalized to a trimmed string or `null`. The accepted-entry record is session-scoped and written at token-consume time.
+- Evidence (schema/tests/path): `server/core/acceptedEntryParticipants.ts`; `server/core/sessions.ts`; `server/acceptedEntryParticipants.test.ts`; `server/sessionEntryRoutes.test.ts`
+- Follow-up action: Decide which activity join/reconnect paths should start consulting `acceptedEntryParticipants` first so post-handoff participant acceptance becomes more authoritative than “client sent a matching name and ID”.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Surface: REST | websocket
 - Contract: Generic persistent-link creation and listing now carry `entryPolicy?: PersistentSessionEntryPolicy`. `POST /api/persistent-session/create` accepts `entryPolicy` alongside `activityName`, `teacherCode`, and optional `selectedOptions`; `GET /api/persistent-session/list` returns each saved link with normalized `entryPolicy`. Teacher-start rejection for `solo-only` uses a shared payload shape across both `POST /api/persistent-session/authenticate` and websocket `teacher-code-error`.

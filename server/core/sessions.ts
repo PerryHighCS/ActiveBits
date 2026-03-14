@@ -9,6 +9,7 @@ import { normalizeSessionData } from './sessionNormalization.js'
 import { getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
 import { consumeSessionEntryParticipant, storeSessionEntryParticipant } from './sessionEntryParticipants.js'
 import { buildSessionEntryStatus } from './entryStatus.js'
+import { acceptEntryParticipant } from './acceptedEntryParticipants.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
@@ -338,6 +339,7 @@ export function setupSessionRoutes(app: {
         return
       }
 
+      acceptEntryParticipant(session, values)
       await sessions.set(sessionId, session)
       res.json({ values })
     } catch (error) {

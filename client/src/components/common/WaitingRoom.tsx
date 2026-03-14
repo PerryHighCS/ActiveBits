@@ -23,18 +23,14 @@ import {
 import {
   buildPersistentAuthenticateApiUrl,
   buildPersistentSessionWsUrl,
-  isWaitingRoomMessage,
-  parseWaitingRoomMessage,
-  type WaitingRoomMessage,
 } from './waitingRoomUtils'
 import type { PersistentSessionEntryOutcome } from './persistentSessionEntryPolicyUtils'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorResponse } from './persistentSessionAuthUtils'
 import { resolveWaitingRoomPrimaryAction } from './waitingRoomActionUtils'
 import { persistWaitingRoomServerBackedHandoff } from './waitingRoomHandoffUtils'
-import { resolveWaitingRoomMessageTransition } from './waitingRoomTransitionUtils'
-import { attemptWaitingRoomAutoTeacherAuth } from './waitingRoomAutoAuthUtils'
 import { resolveWaitingRoomTeacherSubmitResult } from './waitingRoomTeacherSubmitUtils'
+import { attachWaitingRoomSocketHandlers } from './waitingRoomSocketUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -165,62 +161,19 @@ export default function WaitingRoom({
     const wsUrl = buildPersistentSessionWsUrl(window.location, hash, activityName)
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
-
-    const navigateOnce = (path: string) => {
-      if (hasNavigatedRef.current) return
-      hasNavigatedRef.current = true
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close()
-      }
-      void navigate(path)
-    }
-
-    ws.onopen = () => {
-      setError(null)
-      void attemptWaitingRoomAutoTeacherAuth({
-        shouldAutoAuth: shouldAutoAuthRef.current,
-        hash,
-        activityName,
-        ws,
-      })
-    }
-
-    ws.onmessage = (event) => {
-      const rawMessage = parseWaitingRoomMessage(String(event.data))
-      if (!rawMessage) {
-        console.error('Failed to parse WebSocket message:', event.data)
-        return
-      }
-      if (!isWaitingRoomMessage(rawMessage)) {
-        return
-      }
-
-      if (hasNavigatedRef.current) {
-        return
-      }
-
-      const queryString = typeof window !== 'undefined' ? window.location.search : ''
-      handleWaitingRoomMessage({
-        message: rawMessage,
-        setWaiterCount,
-        setError,
-        setIsSubmitting,
-        teacherAuthRequestedRef,
-        navigateOnce,
-        activityName,
-        queryString,
-      })
-    }
-
-    ws.onerror = () => {
-      if (hasNavigatedRef.current) return
-      setError('Connection error.')
-    }
-
-    ws.onclose = () => {
-      if (hasNavigatedRef.current) return
-      setError('Connection closed.')
-    }
+    attachWaitingRoomSocketHandlers({
+      ws,
+      shouldAutoAuth: shouldAutoAuthRef.current,
+      hash,
+      activityName,
+      queryString: typeof window !== 'undefined' ? window.location.search : '',
+      hasNavigatedRef,
+      teacherAuthRequestedRef,
+      setWaiterCount,
+      setError,
+      setIsSubmitting,
+      navigate,
+    })
 
     return () => {
       if (ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
@@ -435,51 +388,4 @@ export default function WaitingRoom({
       onFieldBlur={handleFieldBlur}
     />
   )
-}
-
-function handleWaitingRoomMessage({
-  message,
-  setWaiterCount,
-  setError,
-  setIsSubmitting,
-  teacherAuthRequestedRef,
-  navigateOnce,
-  activityName,
-  queryString,
-}: {
-  message: WaitingRoomMessage
-  setWaiterCount: (count: number) => void
-  setError: (error: string | null) => void
-  setIsSubmitting: (isSubmitting: boolean) => void
-  teacherAuthRequestedRef: { current: boolean }
-  navigateOnce: (path: string) => void
-  activityName: string
-  queryString: string
-}): void {
-  const resolution = resolveWaitingRoomMessageTransition({
-    message,
-    teacherAuthRequested: teacherAuthRequestedRef.current,
-    activityName,
-    queryString,
-  })
-
-  if (typeof resolution.waiterCount === 'number') {
-    setWaiterCount(resolution.waiterCount)
-  }
-
-  if (typeof resolution.error === 'string' || resolution.error === null) {
-    setError(resolution.error)
-  }
-
-  if (typeof resolution.isSubmitting === 'boolean') {
-    setIsSubmitting(resolution.isSubmitting)
-  }
-
-  if (resolution.clearTeacherAuthRequested) {
-    teacherAuthRequestedRef.current = false
-  }
-
-  if (typeof resolution.navigateTo === 'string') {
-    navigateOnce(resolution.navigateTo)
-  }
 }

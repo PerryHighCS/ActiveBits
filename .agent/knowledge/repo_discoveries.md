@@ -55,6 +55,30 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | testing
+- Discovery: `WaitingRoom` websocket handler wiring now has its own seam in `waitingRoomSocketUtils.ts`, so the branch no longer relies on implicit coverage for `onopen`, `onmessage`, `onerror`, and `onclose` attachment behavior.
+- Why it matters: This essentially exhausts the low-cost seam-first testing path for `WaitingRoom`. The remaining untested area is no longer hidden business logic; it is true container-level interaction across form submission, network calls, and router/runtime boundaries.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomSocketUtils.ts`; `client/src/components/common/waitingRoomSocketUtils.test.ts`
+- Follow-up action: If the team wants more than this, make an explicit choice about a higher-level interaction harness rather than continuing to peel off tiny shared helpers.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Area: server | docs
+- Discovery: The main open waiting-room architecture question is no longer “join-code vs permalink flow.” Those flows now share the same entry-status and handoff model while intentionally keeping separate `sessionId` and `hash` entrypoints. The more important remaining question is whether post-handoff participant acceptance/reconnect should stay as today’s shared-helper boundary or move into one broader accepted-entry service.
+- Why it matters: This narrows the branch’s next step to a real product/runtime decision. More time spent trying to unify entry URLs or peel off additional `WaitingRoom` helpers would add less value than deciding how authoritative shared `participantId` should become after handoff.
+- Evidence: `.agent/plans/waiting-room-expansion.md`; `server/core/entryStatus.ts`; `server/core/entryParticipants.ts`; `server/core/sessionParticipants.ts`; `server/core/participantSockets.ts`
+- Follow-up action: If implementation continues on this branch, prioritize a concrete accepted-entry service decision before more activity migration or more waiting-room-only test work.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Area: server
+- Discovery: Live session handoff is no longer only “consume token, return values.” The consume route now also records accepted participant identity on the session itself in `acceptedEntryParticipants`, keyed by `participantId`.
+- Why it matters: This is the first server-side record that survives beyond the one-shot token consume and can become the basis for a more authoritative accepted-entry contract. It narrows the next implementation question from “should the server remember accepted entry at all?” to “which activity join/reconnect paths should consult that remembered acceptance first?”
+- Evidence: `server/core/acceptedEntryParticipants.ts`; `server/core/sessions.ts`; `server/acceptedEntryParticipants.test.ts`; `server/sessionEntryRoutes.test.ts`
+- Follow-up action: Start with one or two session-backed activities and let websocket join prefer accepted-entry identity by `participantId`, then decide whether that should become a broader shared join/reconnect rule.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | client | testing
 - Discovery: Waiting-room entry semantics are now testable at a stable helper boundary instead of only through route/component flows: `server/core/entryStatus.ts` covers shared join/wait/solo/pass-through decisions, `server/core/sessionEntryParticipants.ts` covers tokenized live-entry handoff normalization/one-shot consume behavior, and `entryParticipantStorage` covers client-side 404-vs-retry token handling.
 - Why it matters: The branch’s remaining test gaps are now narrower and easier to reason about. We can add high-signal matrix coverage for shared entry behavior without forcing a brittle DOM harness around the whole `WaitingRoom` component before the API contracts settle.

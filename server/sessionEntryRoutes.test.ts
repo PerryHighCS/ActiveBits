@@ -208,12 +208,15 @@ void test('session entry participant routes store and consume waiting-room value
   assert.equal(storeRes.statusCode, 200)
   const token = typeof storeRes.jsonBody?.entryParticipantToken === 'string' ? storeRes.jsonBody.entryParticipantToken : null
   assert.equal(typeof token, 'string')
-  assert.equal(typeof (storeRes.jsonBody?.values as Record<string, unknown> | undefined)?.participantId, 'string')
+  const participantId = typeof (storeRes.jsonBody?.values as Record<string, unknown> | undefined)?.participantId === 'string'
+    ? (storeRes.jsonBody?.values as Record<string, unknown>).participantId as string
+    : null
+  assert.equal(typeof participantId, 'string')
   assert.deepEqual(
     storeRes.jsonBody?.values,
     {
       displayName: 'Ada',
-      participantId: (storeRes.jsonBody?.values as Record<string, unknown>).participantId,
+      participantId,
     },
   )
 
@@ -228,7 +231,19 @@ void test('session entry participant routes store and consume waiting-room value
     {
       values: {
         displayName: 'Ada',
-        participantId: (storeRes.jsonBody?.values as Record<string, unknown>).participantId,
+        participantId,
+      },
+    },
+  )
+  assert.deepEqual(
+    (sessionMap.get('session-3')?.data as Record<string, unknown>).acceptedEntryParticipants,
+    {
+      [participantId as string]: {
+        participantId,
+        displayName: 'Ada',
+        acceptedAt: (sessionMap.get('session-3')?.data as {
+          acceptedEntryParticipants?: Record<string, { acceptedAt: number }>
+        }).acceptedEntryParticipants?.[participantId as string]?.acceptedAt,
       },
     },
   )

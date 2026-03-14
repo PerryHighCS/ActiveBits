@@ -80,6 +80,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-14
 - Scope: unit
+- Pattern: When the remaining untested logic in a heavy shared component is the websocket handler wiring itself, extract one attachment helper that owns `onopen`, `onmessage`, `onerror`, and `onclose` setup and test that at the event-handler level.
+- Why it helps: This is the last efficient seam before a higher-level harness. It verifies the actual lifecycle wiring while still avoiding a browser runner and without fragmenting the component into many smaller helpers that only mirror individual lines.
+- Example (file/path): `client/src/components/common/waitingRoomSocketUtils.ts`; `client/src/components/common/waitingRoomSocketUtils.test.ts`
+- Failure signal: The component’s websocket lifecycle behavior regresses even though the smaller decision helpers still pass, because handlers were attached incorrectly or navigation/error behavior changed at the wiring layer.
+- Follow-up action: Treat the remaining uncovered behavior as true container integration. If confidence beyond this point is required, prefer an explicit interaction harness decision over more helper extraction.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
 - Pattern: For activity-owned reconnect/recovery behavior that hangs off websocket close events, extract the close-decision logic into a tiny activity-local helper and test that helper directly instead of trying to simulate the whole websocket lifecycle in the component test.
 - Why it helps: It keeps the test focused on the product contract change, like “stale server-issued identity should clear cached registration and require rejoin,” without depending on browser WebSocket mocks or the full student component state machine.
 - Example (file/path): `activities/syncdeck/client/student/reconnectUtils.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`
