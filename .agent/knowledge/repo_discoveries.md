@@ -151,6 +151,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: server | activities
+- Discovery: `server/core/sessionParticipants.ts` now also has a dedicated disconnect helper, and the same shared participant-read helper is used in traveling-salesman’s algorithm broadcast selection. The shared participant contract now spans reconnect/create, accepted lookup, later mutation, and disconnect handling for the current shared-path activities.
+- Why it matters: This reduces more route-local participant boilerplate and makes the remaining gap easier to see: we no longer mainly need more helper extraction in these activities, we need a broader accepted-entry service boundary for activities that still live outside this shared path.
+- Evidence: `server/core/sessionParticipants.ts`; `server/sessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/students.ts`; `activities/traveling-salesman/server/routes/algorithms.ts`
+- Follow-up action: Prefer these shared helpers for any further post-entry participant reads/mutations inside the current shared-path activities, and spend future design effort on the cross-activity accepted-entry contract rather than more route-local cleanup.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: client | server | activities
 - Discovery: The live entry-participant handoff now mints shared `participantId` before activity-specific websocket join. `java-string-practice` and `java-format-practice` can carry that ID into their first live-session websocket URL instead of waiting for the activity route to assign and echo a new one after connection.
 - Why it matters: This is the first shared path where participant identity exists before activity-specific join logic runs, which narrows the gap between “waiting-room accepted entry” and “activity-owned participant registration” without yet forcing every activity onto one registration service.

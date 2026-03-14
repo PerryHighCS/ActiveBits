@@ -27,6 +27,11 @@ export interface UpdateSessionParticipantParams<TParticipant extends SessionPart
   update: (participant: TParticipant) => void
 }
 
+export interface DisconnectSessionParticipantParams<TParticipant extends SessionParticipantIdentity>
+  extends FindSessionParticipantParams<TParticipant> {
+  now?: number
+}
+
 export interface FindSessionParticipantParams<TParticipant extends SessionParticipantIdentity> {
   participants: TParticipant[]
   participantId: string | null
@@ -75,6 +80,25 @@ export function updateSessionParticipant<TParticipant extends SessionParticipant
   participant.lastSeen = now
   update(participant)
   return participant
+}
+
+export function disconnectSessionParticipant<TParticipant extends SessionParticipantIdentity>({
+  participants,
+  participantId,
+  participantName = null,
+  allowLegacyUnnamedMatch = false,
+  now = Date.now(),
+}: DisconnectSessionParticipantParams<TParticipant>): TParticipant | undefined {
+  return updateSessionParticipant({
+    participants,
+    participantId,
+    participantName,
+    allowLegacyUnnamedMatch,
+    now,
+    update: (participant) => {
+      participant.connected = false
+    },
+  })
 }
 
 export function connectSessionParticipant<TParticipant extends SessionParticipantIdentity>({

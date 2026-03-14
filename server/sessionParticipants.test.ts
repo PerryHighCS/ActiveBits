@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { connectSessionParticipant, findSessionParticipant, updateSessionParticipant } from './core/sessionParticipants.js'
+import {
+  connectSessionParticipant,
+  disconnectSessionParticipant,
+  findSessionParticipant,
+  updateSessionParticipant,
+} from './core/sessionParticipants.js'
 
 interface TestParticipant {
   id?: string
@@ -128,4 +133,20 @@ void test('updateSessionParticipant touches lastSeen and updates a matched parti
   assert.equal(updated, participants[0])
   assert.equal(participants[0]?.connected, false)
   assert.equal(participants[0]?.lastSeen, 25)
+})
+
+void test('disconnectSessionParticipant marks a matched participant disconnected and updates lastSeen', () => {
+  const participants: TestParticipant[] = [
+    { id: 'student-2', name: 'Grace', connected: true, joined: 10, lastSeen: 10 },
+  ]
+
+  const disconnected = disconnectSessionParticipant({
+    participants,
+    participantId: 'student-2',
+    now: 35,
+  })
+
+  assert.equal(disconnected, participants[0])
+  assert.equal(participants[0]?.connected, false)
+  assert.equal(participants[0]?.lastSeen, 35)
 })

@@ -5,7 +5,7 @@ import type {
   TravelingSalesmanSocket,
 } from '../../travelingSalesmanTypes.js'
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
-import { connectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
+import { connectSessionParticipant, disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers, closeDuplicateStudentSockets, generateStudentId } from './shared.js'
 
@@ -107,12 +107,9 @@ export default function registerStudentRoutes(
       if (!client.sessionId || !client.studentId) return
       try {
         await updateStudentStatus(client.sessionId, (session) => {
-          const student = updateSessionParticipant({
+          const student = disconnectSessionParticipant({
             participants: session.data.students,
             participantId: client.studentId,
-            update: (participant) => {
-              participant.connected = false
-            },
           })
           if (!student) return false
           return true

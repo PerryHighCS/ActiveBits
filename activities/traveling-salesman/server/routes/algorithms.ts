@@ -275,7 +275,10 @@ export default function registerAlgorithmRoutes(
         timeToComplete: session.data.algorithms.heuristic.computeTime,
       }
     } else {
-      const student = session.data.students.find((entry) => entry.id === solutionId)
+      const student = findSessionParticipant({
+        participants: session.data.students,
+        participantId: solutionId,
+      })
       if (student) {
         solution = {
           id: student.id,
@@ -310,3 +313,4 @@ export default function registerAlgorithmRoutes(
     res.json({ success: true })
   })
 }
+import { findSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
