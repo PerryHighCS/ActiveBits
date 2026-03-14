@@ -720,6 +720,7 @@ void test('persistent entry participant routes store and consume values by token
   const teacherCode = 'persistent-entry-participant'
   const { hash } = generatePersistentHash(activityName, teacherCode)
   t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash)
 
   const storeHandler = getRoute(app, 'POST', '/api/persistent-session/:hash/entry-participant')
   const storeRes = createMockRes()
@@ -762,6 +763,29 @@ void test('persistent entry participant routes store and consume values by token
 
   assert.equal(missingRes.statusCode, 404)
   assert.deepEqual(missingRes.jsonBody, { error: 'entry participant not found' })
+})
+
+void test('persistent entry participant store route rejects invalid persistent sessions', async () => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const storeHandler = getRoute(app, 'POST', '/api/persistent-session/:hash/entry-participant')
+  const res = createMockRes()
+  await storeHandler(createMockReq({
+    params: { hash: 'missing-hash' },
+    query: { activityName: 'java-string-practice' },
+    body: {
+      values: {
+        displayName: 'Ada',
+      },
+    },
+  }), res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.jsonBody, { error: 'invalid persistent session' })
 })
 
 void test('teacher lifecycle clears session on explicit end', async (t) => {

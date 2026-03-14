@@ -448,6 +448,12 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
+    const persistentSession = await getPersistentSession(hash)
+    if (!persistentSession || persistentSession.activityName !== activityName) {
+      res.status(404).json({ error: 'invalid persistent session' })
+      return
+    }
+
     try {
       const body = isPlainObject(req.body) ? req.body : {}
       const { token, values } = await storePersistentSessionEntryParticipant(activityName, hash, body.values)

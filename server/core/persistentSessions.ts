@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto'
 import type { PersistentSessionEntryPolicy, WaitingRoomSerializableValue } from '../../types/waitingRoom.js'
-import { generateParticipantId } from './participantIds.js'
+import { consumeEntryParticipant, storeEntryParticipant } from './entryParticipants.js'
 import { ValkeyPersistentStore } from './valkeyStore.js'
 
 interface PersistentSession {
@@ -42,44 +42,6 @@ const CLEANUP_INTERVAL = 60_000
 const DEFAULT_HMAC_SECRET = 'default-secret-change-in-production'
 const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
 const MIN_SECRET_LENGTH = 32
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function isSerializableValue(value: unknown): value is WaitingRoomSerializableValue {
-  if (value == null) {
-    return true
-  }
-
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return true
-  }
-
-  if (Array.isArray(value)) {
-    return value.every((entry) => isSerializableValue(entry))
-  }
-
-  if (!isRecord(value)) {
-    return false
-  }
-
-  return Object.values(value).every((entry) => isSerializableValue(entry))
-}
-
-function normalizeEntryParticipantValues(value: unknown): Record<string, WaitingRoomSerializableValue> {
-  if (!isRecord(value)) {
-    return {}
-  }
-
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => isSerializableValue(entry)),
-  ) as Record<string, WaitingRoomSerializableValue>
-}
-
-function generateEntryParticipantToken(): string {
-  return randomBytes(8).toString('hex')
-}
 
 function createInMemoryPersistentStore(): PersistentSessionStore {
   const memoryStore = new Map<string, unknown>()
@@ -444,21 +406,10 @@ export async function storePersistentSessionEntryParticipant(
   values: unknown,
 ): Promise<{ token: string; values: Record<string, WaitingRoomSerializableValue> }> {
   const session = await getOrCreateActivePersistentSession(activityName, hash)
-  const normalizedValues = normalizeEntryParticipantValues(values)
-  const participantId = typeof normalizedValues.participantId === 'string' && normalizedValues.participantId.trim().length > 0
-    ? normalizedValues.participantId.trim()
-    : generateParticipantId()
-  const token = generateEntryParticipantToken()
-  const storedValues = {
-    ...normalizedValues,
-    participantId,
-  }
-
-  session.entryParticipants ??= {}
-  session.entryParticipants[token] = storedValues
+  const storedEntryParticipant = storeEntryParticipant(session, values)
   await persistentStore.set(hash, session)
 
-  return { token, values: storedValues }
+  return storedEntryParticipant
 }
 
 export async function consumePersistentSessionEntryParticipant(
@@ -470,17 +421,11 @@ export async function consumePersistentSessionEntryParticipant(
     return null
   }
 
-  const normalizedToken = token.trim()
-  if (!normalizedToken) {
-    return null
-  }
-
-  const values = session.entryParticipants?.[normalizedToken]
+  const values = consumeEntryParticipant(session, token)
   if (!values) {
     return null
   }
 
-  delete session.entryParticipants?.[normalizedToken]
   await persistentStore.set(hash, session)
   return values
 }
