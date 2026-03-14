@@ -141,6 +141,21 @@ function parsePersistentSessionsCookie(cookieValue: unknown, context = 'persiste
   }
 }
 
+function getValidatedPersistentSessionCookieEntry(
+  sessionEntries: readonly CookieSessionEntry[],
+  activityName: string,
+  hash: string,
+): CookieSessionEntry | null {
+  const cookieKey = `${activityName}:${hash}`
+  const entry = sessionEntries.find((sessionEntry) => sessionEntry.key === cookieKey)
+  const teacherCode = typeof entry?.teacherCode === 'string' ? entry.teacherCode : null
+  if (!entry || !teacherCode) {
+    return null
+  }
+
+  return verifyTeacherCodeWithHash(activityName, hash, teacherCode).valid ? entry : null
+}
+
 export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersistentSessionRoutesOptions): void {
   app.get('/api/persistent-session/list', async (req, res) => {
     try {
@@ -335,8 +350,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       req.cookies?.persistent_sessions,
       'persistent_sessions (/api/persistent-session/:hash)',
     )
-    const cookieKey = `${activityName}:${hash}`
-    const hasTeacherCookie = sessionEntries.some((entry) => entry.key === cookieKey)
+    const hasTeacherCookie = getValidatedPersistentSessionCookieEntry(sessionEntries, activityName, hash) != null
     const entryContext = await loadPersistentSessionEntryGatewayContext({
       activityName,
       hash,
@@ -375,8 +389,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       req.cookies?.persistent_sessions,
       'persistent_sessions (/api/persistent-session/:hash/entry)',
     )
-    const cookieKey = `${activityName}:${hash}`
-    const hasTeacherCookie = sessionEntries.some((entry) => entry.key === cookieKey)
+    const hasTeacherCookie = getValidatedPersistentSessionCookieEntry(sessionEntries, activityName, hash) != null
 
     res.json(await loadPersistentSessionEntryStatus({
       activityName,
@@ -403,20 +416,19 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       req.cookies?.persistent_sessions,
       'persistent_sessions (/api/persistent-session/:hash/teacher-code)',
     )
-    const cookieKey = `${activityName}:${hash}`
-    const entry = sessionEntries.find((sessionEntry) => sessionEntry.key === cookieKey)
+    const entry = getValidatedPersistentSessionCookieEntry(sessionEntries, activityName, hash)
     const teacherCode = typeof entry?.teacherCode === 'string' ? entry.teacherCode : null
 
     if (teacherCode) {
-      const validation = verifyTeacherCodeWithHash(activityName, hash, teacherCode)
-      if (!validation.valid) {
-        res.status(403).json({ error: 'forbidden' })
-        return
-      }
-
       res.json({ teacherCode })
       return
     }
+    const hasMatchingCookieKey = sessionEntries.some((sessionEntry) => sessionEntry.key === `${activityName}:${hash}`)
+    if (hasMatchingCookieKey) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
     res.status(404).json({ error: 'No teacher code found' })
   })
 }

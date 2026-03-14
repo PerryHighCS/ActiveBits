@@ -555,6 +555,40 @@ void test('persistent session metadata route reports corrupted cookies while pre
   })
 })
 
+void test('persistent session metadata route ignores invalid remembered teacher cookies', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'GET', '/api/persistent-session/:hash')
+
+  const activityName = 'java-string-practice'
+  const { hash } = generatePersistentHash(activityName, 'actual-teacher-code')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash)
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { hash },
+    query: { activityName },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code') },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, {
+    activityName,
+    entryPolicy: 'instructor-required',
+    hasTeacherCookie: false,
+    cookieCorrupted: false,
+    isStarted: false,
+    sessionId: null,
+    queryParams: {},
+  })
+})
+
 void test('teacher-code route rejects requests missing activityName', async () => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
@@ -568,6 +602,45 @@ void test('teacher-code route rejects requests missing activityName', async () =
 
   assert.equal(res.statusCode, 400)
   assert.deepEqual(res.jsonBody, { error: 'Missing activityName parameter' })
+})
+
+void test('persistent session entry route ignores invalid remembered teacher cookies for role resolution', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'GET', '/api/persistent-session/:hash/entry')
+
+  const activityName = 'java-string-practice'
+  const { hash } = generatePersistentHash(activityName, 'actual-teacher-code')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash)
+  sessionMap.set('live-session', { id: 'live-session' })
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { hash },
+    query: { activityName },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code') },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, {
+    activityName,
+    hash,
+    entryPolicy: 'instructor-required',
+    hasTeacherCookie: false,
+    isStarted: true,
+    sessionId: 'live-session',
+    waitingRoomFieldCount: 1,
+    resolvedRole: 'student',
+    entryOutcome: 'join-live',
+    presentationMode: 'render-ui',
+  })
 })
 
 void test('teacher-code route returns 404 when the permalink has no remembered teacher code', async () => {
