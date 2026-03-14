@@ -4,6 +4,7 @@ import type {
   ActivityCreateSessionBootstrapSessionStorageEntry,
   ActivityDeepLinkOption,
   ActivityDeepLinkOptionChoice,
+  ActivityManageDashboardUtility,
   ActivityDeepLinkPreflightConfig,
 } from './activity.js'
 import type {
@@ -253,6 +254,29 @@ function parseManageLayout(raw: unknown, context: string): ActivityConfig['manag
   }
 }
 
+function parseManageDashboardUtilities(raw: unknown, context: string): ActivityManageDashboardUtility[] | undefined {
+  if (raw == null) {
+    return undefined
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(`${context}: "utilities" must be an array when provided`)
+  }
+
+  return raw.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`${context}.utilities[${index}] must be an object`)
+    }
+
+    return {
+      label: readRequiredString(entry, 'label', `${context}.utilities[${index}]`),
+      path: readRequiredString(entry, 'path', `${context}.utilities[${index}]`),
+      ...(readOptionalString(entry, 'description', `${context}.utilities[${index}]`) !== undefined
+        ? { description: readOptionalString(entry, 'description', `${context}.utilities[${index}]`) }
+        : {}),
+    }
+  })
+}
+
 function parseManageDashboard(raw: unknown, context: string): ActivityConfig['manageDashboard'] {
   if (raw == null) {
     return undefined
@@ -262,8 +286,10 @@ function parseManageDashboard(raw: unknown, context: string): ActivityConfig['ma
   }
 
   const customPersistentLinkBuilder = readOptionalBoolean(raw, 'customPersistentLinkBuilder', `${context}.manageDashboard`)
+  const utilities = parseManageDashboardUtilities(raw.utilities, `${context}.manageDashboard`)
   return {
     ...(customPersistentLinkBuilder !== undefined ? { customPersistentLinkBuilder } : {}),
+    ...(utilities !== undefined ? { utilities } : {}),
   }
 }
 

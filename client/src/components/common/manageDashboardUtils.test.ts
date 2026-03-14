@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildPersistentLinkUrl,
+  buildManageDashboardUtilityUrl,
   buildPersistentSessionKey,
   buildQueryString,
   buildSoloLink,
@@ -107,6 +108,21 @@ void test('validateDeepLinkSelection enforces URL validator options', () => {
 
 void test('buildPersistentSessionKey creates stable map keys', () => {
   assert.equal(buildPersistentSessionKey('raffle', 'abc123'), 'raffle:abc123')
+})
+
+void test('buildManageDashboardUtilityUrl normalizes relative utility paths and preserves absolute URLs', () => {
+  assert.equal(
+    buildManageDashboardUtilityUrl('https://bits.example', '/solo/gallery-walk'),
+    'https://bits.example/solo/gallery-walk',
+  )
+  assert.equal(
+    buildManageDashboardUtilityUrl('https://bits.example', 'solo/gallery-walk'),
+    'https://bits.example/solo/gallery-walk',
+  )
+  assert.equal(
+    buildManageDashboardUtilityUrl('https://bits.example', 'https://docs.example/guide'),
+    'https://docs.example/guide',
+  )
 })
 
 void test('filterPersistentEntryPolicyOptionsForActivity keeps only live-only for non-solo activities', () => {

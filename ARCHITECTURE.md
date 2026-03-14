@@ -86,11 +86,19 @@ export default {
   name: 'Display Name',         // Human-readable name
   description: 'Brief description', // Shown in dashboard
   color: 'blue',                // Accent color for activity card
-  soloMode: false,              // Allow solo practice without teacher
-  soloModeMeta: {               // Optional: customize Solo Bits/manager labels
+  soloMode: false,              // Allow standalone entry without teacher
+  soloModeMeta: {               // Optional: customize generic solo-route labels
     title: 'Solo Card Title',
     description: 'Solo mode description',
-    buttonText: 'Copy Solo Link',
+  },
+  manageDashboard: {
+    utilities: [                // Optional: extra dashboard utility links
+      {
+        label: 'Copy Feedback Review Link',
+        path: '/solo/gallery-walk',
+        description: 'Upload and review feedback that was left for you.',
+      },
+    ],
   },
   // Optional: shared permanent-link modal options and server-side link generation
   deepLinkOptions: {
@@ -170,7 +178,7 @@ export const myActivity = {
 2. **Session ID Format**: Solo sessions use the format `solo-{activity-id}` (e.g., `solo-java-string-practice`)
 3. **No Teacher Required**: Students can start practicing immediately without a teacher-managed session
 4. **Client-Side State**: Solo activities typically use `localStorage` for progress persistence
-5. **Custom Labels**: Optional `soloModeMeta` lets each activity override the Solo Bits card title/description and the dashboard "Copy Solo…" button text
+5. **Dashboard Utilities**: Optional `manageDashboard.utilities` lets an activity expose extra copyable routes on the management dashboard without overloading permalink or solo capability semantics
 6. **Deep Linking Support**: Solo mode supports query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort` auto-selects the merge sort algorithm
 
 ### Solo Mode vs. Teacher Mode

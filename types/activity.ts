@@ -52,6 +52,12 @@ export interface ActivityCreateSessionBootstrapConfig {
   sessionStorage?: ActivityCreateSessionBootstrapSessionStorageEntry[]
 }
 
+export interface ActivityManageDashboardUtility {
+  label: string
+  path: string
+  description?: string
+}
+
 export interface ActivityConfig {
   id: string
   name: string
@@ -74,6 +80,7 @@ export interface ActivityConfig {
   createSessionBootstrap?: ActivityCreateSessionBootstrapConfig
   manageDashboard?: {
     customPersistentLinkBuilder?: boolean
+    utilities?: ActivityManageDashboardUtility[]
   }
   manageLayout?: {
     expandShell?: boolean

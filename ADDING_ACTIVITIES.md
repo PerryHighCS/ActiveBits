@@ -405,7 +405,7 @@ export const practiceActivity = {
 
 ### Customizing Solo Mode Labels
 
-Provide an optional `soloModeMeta` object in `activity.config.ts` to override the Solo Bits card title/description and the "Copy Solo Practice Link" button text on the management dashboard:
+Provide an optional `soloModeMeta` object in `activity.config.ts` to override the generic `/solo/...` card title/description where that route still exists:
 
 ```typescript
 export default {
@@ -414,12 +414,32 @@ export default {
   soloModeMeta: {
     title: 'Review Gallery Walk Feedback',
     description: 'Upload a .gw file to see the comments left for you.',
-    buttonText: 'Copy Feedback Review Link',
   },
 };
 ```
 
-If omitted, the UI falls back to `name`, `description`, and the default button label.
+If omitted, the UI falls back to `name` and `description`.
+
+### Adding Dashboard Utility Links
+
+If an activity needs a special-purpose route on the management dashboard that is not the standard permalink flow, declare it with `manageDashboard.utilities`:
+
+```typescript
+export default {
+  // ...
+  manageDashboard: {
+    utilities: [
+      {
+        label: 'Copy Feedback Review Link',
+        path: '/solo/gallery-walk',
+        description: 'Upload a .gw file to review exported feedback.',
+      },
+    ],
+  },
+};
+```
+
+These utility buttons copy the declared route as an absolute URL from the dashboard. Keep them activity-specific and use them for special tools rather than for normal student entry.
 
 ### Deep Linking in Solo Mode
 

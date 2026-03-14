@@ -49,6 +49,12 @@ export interface PersistentEntryPolicyOptionLike {
   description: string
 }
 
+export interface ManageDashboardUtilityLike {
+  label: string
+  path: string
+  description?: string
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -261,6 +267,15 @@ export function buildSoloLink(
   selectedOptions: Record<string, unknown> | null | undefined,
 ): string {
   return `${origin}/solo/${activityId}${buildQueryString(selectedOptions)}`
+}
+
+export function buildManageDashboardUtilityUrl(origin: string, path: string): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path
+  }
+
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${origin}${normalizedPath}`
 }
 
 export function filterPersistentEntryPolicyOptionsForActivity<T extends PersistentEntryPolicyOptionLike>(

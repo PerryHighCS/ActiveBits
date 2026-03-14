@@ -9,7 +9,15 @@ const galleryWalkConfig: ActivityConfig = {
   soloModeMeta: {
     title: 'Review Gallery Walk Feedback',
     description: 'Upload and review feedback that was left for you.',
-    buttonText: 'Copy Feedback Review Link',
+  },
+  manageDashboard: {
+    utilities: [
+      {
+        label: 'Copy Feedback Review Link',
+        path: '/solo/gallery-walk',
+        description: 'Upload and review feedback that was left for you.',
+      },
+    ],
   },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',

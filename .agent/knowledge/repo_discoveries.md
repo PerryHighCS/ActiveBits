@@ -263,6 +263,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | activities
+- Discovery: The management dashboard no longer treats `soloMode` as a reason to show a generic “Copy Solo Practice Link” button. Extra one-off routes now belong in `manageDashboard.utilities`, which exposes copyable utility links like Gallery Walk’s feedback-review route without overloading permalink or standalone-entry semantics.
+- Why it matters: This separates “supports standalone entry” from “needs a special-purpose dashboard tool.” It lets activities keep permalink generation as the main student entry surface while still surfacing exceptional routes honestly on the dashboard.
+- Evidence: `client/src/components/common/ManageDashboard.tsx`; `client/src/components/common/manageDashboardUtils.ts`; `activities/gallery-walk/activity.config.ts`; `types/activity.ts`
+- Follow-up action: Use `manageDashboard.utilities` for future activity-specific dashboard tools instead of reviving special solo-link buttons, and revisit `soloMode` semantics separately as the remaining `/solo/...` routes are phased out.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | activities
 - Discovery: `server/core/sessionParticipants.ts` now also exposes shared accepted-participant lookup via `findSessionParticipant(...)`, and the migrated Java activity progress endpoints use it instead of route-local `find(...)` logic.
 - Why it matters: This extends the shared participant contract one step past websocket join. Waiting-room-issued or reconnected `participantId` is now the first lookup key for later progress updates too, while legacy name-only fallback remains explicitly opt-in for older sessions.
