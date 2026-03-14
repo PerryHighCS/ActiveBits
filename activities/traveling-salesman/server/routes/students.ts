@@ -5,6 +5,7 @@ import type {
   TravelingSalesmanSocket,
 } from '../../travelingSalesmanTypes.js'
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
+import { connectSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers, closeDuplicateStudentSockets, generateStudentId } from './shared.js'
 
@@ -30,20 +31,16 @@ export default function registerStudentRoutes(
       ;(async () => {
         const session = asTravelingSalesmanSession(await sessions.get(client.sessionId || ''))
         if (session) {
-          const student = studentId
-            ? session.data.students.find((entry) => entry.id === studentId)
-            : session.data.students.find((entry) => entry.name === studentName)
-
-          if (!student) {
-            // New student
-            const newId = generateStudentId(studentName)
-            client.studentId = newId
-            session.data.students.push({
-              id: newId,
-              name: studentName,
+          const { participantId } = connectSessionParticipant({
+            participants: session.data.students,
+            participantId: studentId,
+            participantName: studentName,
+            createParticipant: (participantId, participantName, now) => ({
+              id: participantId,
+              name: participantName,
               connected: true,
-              joined: Date.now(),
-              lastSeen: Date.now(),
+              joined: now,
+              lastSeen: now,
               currentRoute: [],
               routeDistance: 0,
               complete: false,
@@ -51,14 +48,11 @@ export default function registerStudentRoutes(
               routeStartTime: null,
               routeCompleteTime: null,
               timeToComplete: null,
-            })
-          } else {
-            // Reconnection
-            client.studentId = student.id
-            student.connected = true
-            student.lastSeen = Date.now()
-            closeDuplicateStudentSockets(ws, client)
-          }
+            }),
+            generateParticipantId: () => generateStudentId(studentName),
+          })
+          client.studentId = participantId
+          closeDuplicateStudentSockets(ws, client)
 
           await sessions.set(session.id, session)
           client.send(

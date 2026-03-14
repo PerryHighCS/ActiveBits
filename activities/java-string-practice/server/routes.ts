@@ -1,6 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
+import { connectSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
@@ -159,28 +160,23 @@ export default function setupJavaStringPracticeRoutes(
         const session = asJavaStringSession(await sessions.get(activeSessionId))
         if (!session) return
 
-        const existingStudent = client.studentId
-          ? session.data.students.find((student) => student.id === client.studentId)
-          : session.data.students.find((student) => student.name === activeStudentName && !student.id)
-
-        if (existingStudent) {
-          existingStudent.connected = true
-          existingStudent.lastSeen = Date.now()
-          client.studentId = existingStudent.id || null
-          closeDuplicateStudentSockets(client)
-        } else {
-          const newId = generateParticipantId()
-          client.studentId = newId
-          session.data.students.push({
-            id: newId,
-            name: activeStudentName,
+        const { participantId } = connectSessionParticipant({
+          participants: session.data.students,
+          participantId: client.studentId ?? null,
+          participantName: activeStudentName,
+          allowLegacyUnnamedMatch: true,
+          createParticipant: (participantId, participantName, now) => ({
+            id: participantId,
+            name: participantName,
             connected: true,
-            joined: Date.now(),
-            lastSeen: Date.now(),
+            joined: now,
+            lastSeen: now,
             stats: { ...defaultStats },
-          })
-          closeDuplicateStudentSockets(client)
-        }
+          }),
+          generateParticipantId,
+        })
+        client.studentId = participantId
+        closeDuplicateStudentSockets(client)
 
         await sessions.set(session.id, session)
         await broadcast('studentsUpdate', { students: session.data.students }, session.id)

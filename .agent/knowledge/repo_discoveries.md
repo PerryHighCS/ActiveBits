@@ -22,6 +22,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Centralize participant lookup/reconnect behavior next; generation format alone is not enough to make participant identity portable across activities.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: server | activities
+- Discovery: `server/core/sessionParticipants.ts` now centralizes the common “reconnect by ID or create a participant record” flow for session-backed student arrays, and `java-string-practice`, `java-format-practice`, and `traveling-salesman` all use it.
+- Why it matters: This is the next real step after shared ID generation: the branch now has one reusable reconnect/create rule for multiple activities instead of repeating subtly different `find(...)` and mutation logic in each websocket route.
+- Evidence: `server/core/sessionParticipants.ts`; `server/sessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/students.ts`
+- Follow-up action: Migrate Python List Practice and evaluate whether SyncDeck's REST registration + websocket reconnect path should converge on the same helper or a broader shared participant-entry service.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Area: client
 - Discovery: Started persistent sessions no longer always bypass the waiting-room shell. When an activity declares `waitingRoom.fields`, `SessionRouter` now routes already-started permalink entry through `WaitingRoom` with a `join-live` outcome, while activities without fields keep the simpler direct join card.

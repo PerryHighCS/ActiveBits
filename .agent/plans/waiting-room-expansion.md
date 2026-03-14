@@ -584,6 +584,7 @@ this plan that a separate architecture record becomes useful.
 - [ ] Decide server/client ownership for validation and temporary storage
 - [ ] Define shared server-side `participantId` issuance and reconnect semantics
   Current status: shared server-side participant ID generation now starts in `server/core/participantIds.ts`, and `java-string-practice`, `java-format-practice`, `traveling-salesman`, and SyncDeck registration paths reuse it. Reconnect semantics and cross-activity participant context are still activity-specific.
+  Update: `java-string-practice`, `java-format-practice`, and `traveling-salesman` now also share a generic session-backed reconnect/create helper in `server/core/sessionParticipants.ts`, but Python List Practice and SyncDeck still use activity-owned matching rules.
 - [ ] Define server-side enforcement rules so entry/session APIs reject disallowed joins even if the client is bypassed
 - [ ] Document role resolution rules for student, instructor-cookie, instructor-code, and embedded-role-inheritance paths
 - [x] Document destination transitions for `wait`, `join-live`, `continue-solo`, and `solo-unavailable`

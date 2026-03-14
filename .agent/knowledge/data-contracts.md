@@ -24,6 +24,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Replace activity-owned reconnect matching and participant record creation with a shared participant-entry contract once waiting-room/server handoff design is ready.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Surface: internal module
+- Contract: `connectSessionParticipant()` in `server/core/sessionParticipants.ts` now provides a shared reconnect-or-create flow for session-backed student arrays whose records use `{ id?, name, connected?, lastSeen? }` plus activity-specific extra fields. It resolves by explicit participant ID first and can optionally support legacy name-only matches for older sessions missing IDs.
+- Compatibility constraints: The helper does not change activity wire formats; routes still send existing payload keys such as `studentId`. It only centralizes in-memory/session-store mutation rules for activities that opt in.
+- Validation rules: Existing participant IDs win over name matches; legacy name fallback is only enabled where explicitly requested; reconnect updates `connected` and `lastSeen`; missing IDs on matched legacy participants are backfilled with a generated shared participant ID.
+- Evidence (schema/tests/path): `server/core/sessionParticipants.ts`; `server/sessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/students.ts`.
+- Follow-up action: Extend or replace this helper once Python List Practice and SyncDeck are migrated to the same participant contract, especially where their current flows still mix registration, reconnect, and progress persistence differently.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Surface: REST | websocket
 - Contract: Generic persistent-link creation and listing now carry `entryPolicy?: PersistentSessionEntryPolicy`. `POST /api/persistent-session/create` accepts `entryPolicy` alongside `activityName`, `teacherCode`, and optional `selectedOptions`; `GET /api/persistent-session/list` returns each saved link with normalized `entryPolicy`. Teacher-start rejection for `solo-only` uses a shared payload shape across both `POST /api/persistent-session/authenticate` and websocket `teacher-code-error`.

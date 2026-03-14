@@ -1,6 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
+import { connectSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
@@ -166,30 +167,29 @@ export default function setupJavaFormatPracticeRoutes(
         console.log('Found session:', session ? 'yes' : 'no')
         if (!session) return
 
-        const existing = studentId
-          ? session.data.students.find((student) => student.id === studentId)
-          : session.data.students.find((student) => student.name === activeStudentName && !student.id)
+        const { participantId, isNew } = connectSessionParticipant({
+          participants: session.data.students,
+          participantId: studentId,
+          participantName: activeStudentName,
+          allowLegacyUnnamedMatch: true,
+          createParticipant: (participantId, participantName, now) => ({
+            id: participantId,
+            name: participantName,
+            connected: true,
+            joined: now,
+            lastSeen: now,
+            stats: { ...defaultStats },
+          }),
+          generateParticipantId,
+        })
+        client.studentId = participantId
 
-        if (existing) {
-          console.log(`Reconnecting student: ${activeStudentName} (${existing.id})`)
-          existing.connected = true
-          existing.lastSeen = Date.now()
-          client.studentId = existing.id || null
-          closeDuplicateStudentSockets(client)
+        if (!isNew) {
+          console.log(`Reconnecting student: ${activeStudentName} (${participantId})`)
         } else {
           console.log(`New student joining: ${activeStudentName}`)
-          const newId = generateParticipantId()
-          client.studentId = newId
-          session.data.students.push({
-            id: newId,
-            name: activeStudentName,
-            connected: true,
-            joined: Date.now(),
-            lastSeen: Date.now(),
-            stats: { ...defaultStats },
-          })
-          closeDuplicateStudentSockets(client)
         }
+        closeDuplicateStudentSockets(client)
 
         await sessions.set(session.id, session)
         console.log('Total students in session:', session.data.students.length)
