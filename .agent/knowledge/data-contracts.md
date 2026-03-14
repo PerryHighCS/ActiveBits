@@ -102,7 +102,7 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Compatibility constraints: This is an implementation contract, not yet a fully unified participant service. Activities that have not adopted waiting-room handoff continue to behave as before, and solo `/:activityId` entry remains a separate compatibility path outside the persistent permalink handoff routes.
 - Validation rules: Client must not treat waiting-room form completion as equivalent to accepted activity registration; only server-issued handoff plus later activity join/startup acceptance are authoritative. Server handoff routes must not assume activity-specific participant schemas beyond serializable waiting-room values plus shared `participantId`.
 - Evidence (schema/tests/path): `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomFormUtils.ts`; `client/src/components/common/entryParticipantStorage.ts`; `server/core/sessions.ts`; `server/core/sessionEntryParticipants.ts`; `server/core/persistentSessions.ts`; `server/persistentSessionRoutes.test.ts`; `.agent/plans/waiting-room-expansion.md`
-- Follow-up action: Revisit this split only when broader activity registration or standalone `/solo/:activityId` entry moves onto the same shared server-backed participant context.
+- Follow-up action: The biggest remaining contract work is defining what happens after handoff: which server surface accepts a waiting-room-issued `participantId`, how reconnect is proven across activities, and whether standalone `/solo/:activityId` entry should eventually share that same accepted-entry contract.
 - Owner: Codex
 
 - Date: 2026-02-23

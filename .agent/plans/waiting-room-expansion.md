@@ -15,6 +15,27 @@ Implemented so far:
 Remaining work is centered on policy resolution, server-side enforcement, and carrying
 collected participant data into downstream join/solo flows.
 
+## Highest-Value Remaining Work
+
+The branch now has:
+
+- shared server-backed entry-status payloads for both join-code and permalink entry
+- shared opaque-token handoff rules for live entry and permalink solo continuation
+- early shared `participantId` issuance during waiting-room handoff
+
+The most important work still open before this plan can be considered waiting-room-complete:
+
+- define the shared accepted-entry / reconnect contract after handoff
+  This is the biggest remaining product boundary. Waiting-room handoff now issues a shared `participantId`, but activity-specific routes still decide how that ID is accepted, matched, reconnected, and persisted.
+- decide whether parallel entry endpoints are “done enough” or should converge behind one gateway service
+  Current implementation intentionally keeps two entrypoints (`/api/session/:sessionId/entry` and `/api/persistent-session/:hash/entry`) with shared backend decision logic. The remaining decision is whether to stop there or centralize lookup + handoff orchestration further.
+- implement embedded role inheritance
+  Embedded entry is still a documented target contract, not a runtime path. Parent-managed launches should inherit teacher/student role without prompting for instructor code again.
+- close the remaining waiting-room test gap
+  Helper and route coverage are strong, but full `WaitingRoom.tsx` interaction coverage for required-field blocking and carry-forward is still limited by the current Node/Vite test boundary.
+- keep Phase 4 activity migration deferred until the above semantics stabilize
+  More activity migrations would otherwise build on participant rules that are still changing.
+
 This document outlines a standalone planning track for expanding the waiting room
 experience. The goal is to make waiting-room behavior flexible enough to support:
 
@@ -586,7 +607,7 @@ this plan that a separate architecture record becomes useful.
   Current status: client-side waiting-room code owns immediate field rendering, required-field validation, wait-state form persistence, token persistence, and fallback local-value storage. Server-side entry routes own temporary handoff storage for live-session entry and persistent permalink solo continuation, plus opaque token issuance/consume and early shared `participantId` minting. Activity routes remain responsible for activity-specific reconnect/registration validation until a broader shared participant-entry service exists.
 - [ ] Define shared server-side `participantId` issuance and reconnect semantics
   Current status: shared server-side participant ID generation now starts in `server/core/participantIds.ts`, and `java-string-practice`, `java-format-practice`, `traveling-salesman`, and SyncDeck registration paths reuse it. Reconnect semantics and cross-activity participant context are still activity-specific.
-  Update: `java-string-practice`, `java-format-practice`, and `traveling-salesman` now also share a generic session-backed reconnect/create helper in `server/core/sessionParticipants.ts`, and live waiting-room handoff now issues `participantId` earlier through the shared session entry-participant store before those activities open their first websocket connection. Python List Practice and SyncDeck still use activity-owned matching rules.
+  Update: `java-string-practice`, `java-format-practice`, and `traveling-salesman` now also share a generic session-backed reconnect/create helper in `server/core/sessionParticipants.ts`, and waiting-room handoff now issues `participantId` earlier through shared entry-participant storage before downstream activity startup. Python List Practice and SyncDeck still use activity-owned matching rules, and the project still lacks one authoritative “accepted participant entry” contract after handoff.
 - [x] Define server-side enforcement rules so entry/session APIs reject disallowed joins even if the client is bypassed
   Current status: persistent-session teacher start paths now reject `solo-only` through both REST auth and websocket teacher-code verification, and join-code/live entry now goes through explicit server-backed entry status and handoff endpoints instead of relying on client-only routing assumptions.
 - [x] Document role resolution rules for student, instructor-cookie, instructor-code, and embedded-role-inheritance paths
@@ -594,7 +615,7 @@ this plan that a separate architecture record becomes useful.
 - [x] Document destination transitions for `wait`, `join-live`, `continue-solo`, and `solo-unavailable`
 - [x] Document presentation-mode rules for `render-ui` vs `pass-through`
 - [ ] Define how permalink and ad-hoc join-code entry both route through the same waiting-room gateway
-  Current status: direct `/:sessionId` and permalink `/activity/:activityName/:hash` entry both ask the server for an entry-status payload before the router decides whether to wait, preflight, join live, or continue solo. Those payloads are now assembled through a shared server-side entry-status builder, but they still use separate backend endpoints and storage lookups rather than one fully shared gateway service.
+  Current status: direct `/:sessionId` and permalink `/activity/:activityName/:hash` entry both ask the server for an entry-status payload before the router decides whether to wait, preflight, join live, or continue solo. Those payloads are now assembled through a shared server-side entry-status builder, and both entry-participant handoff paths share backend token/normalization rules. The remaining decision is whether parallel endpoints are acceptable as the final architecture, or whether lookup + handoff orchestration should also be unified behind one gateway service.
 
 ### Phase 1 - Persistent link creation flow
 
@@ -625,6 +646,7 @@ that path ships.
   Current status: waiting-room route coverage now includes an explicit `[TEST]` marker for the intentionally noisy corrupted-cookie parse path in `server/persistentSessionRoutes.test.ts`. Broader adoption is still open for other future waiting-room-related tests that intentionally emit warnings/errors.
 - [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
   Current status: utility-level coverage now exists for waiting-room field validation/storage (`waitingRoomFormUtils.test.ts`), primary-action blocking rules (`waitingRoomActionUtils.test.ts`), live-session entry-token storage/consume behavior including 404 vs retry semantics (`entryParticipantStorage.test.ts`), and shared live-entry/join/solo/wait/pass-through status resolution (`server/entryStatus.test.ts`). Full component-level interaction coverage for required-field blocking and carry-forward inside `WaitingRoom.tsx` is still outstanding because the current Node test runner does not directly support the Vite activity-loader path used by that component.
+  Follow-up target: either add a stable component-test seam around `WaitingRoom.tsx` without `import.meta.glob`, or explicitly introduce a browser-level harness only if the helper/route boundary stops being sufficient.
 
 ### Phase 3 - Entry resolution behavior
 
@@ -635,11 +657,12 @@ that path ships.
 - [x] Implement instructor-cookie and instructor-code role resolution for standalone entry
 - [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
 - [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
-  Current status: direct `/:sessionId` joins fetch `/api/session/:sessionId/entry` first, and permalink entry fetches `/api/persistent-session/:hash/entry` first. `SessionRouter` uses those server-backed entry-status payloads to decide whether to render the shared `WaitingRoom` shell or pass straight through before fetching full session data, and both payloads now come from the same server-side builder. The remaining gap is that join-code and permalink entry still use parallel entry endpoints instead of one fully unified gateway/participant handoff service.
+  Current status: direct `/:sessionId` joins fetch `/api/session/:sessionId/entry` first, and permalink entry fetches `/api/persistent-session/:hash/entry` first. `SessionRouter` uses those server-backed entry-status payloads to decide whether to render the shared `WaitingRoom` shell or pass straight through before fetching full session data, and both payloads now come from the same server-side builder. The remaining gap is architectural rather than behavioral: join-code and permalink entry still use parallel entry endpoints, even though their decision and handoff rules are now much more aligned.
 - [x] Enforce entry policy server-side in entry/session APIs so disallowed joins are rejected even when the client is bypassed
 - [x] Preserve existing live-session behavior when instructor is present
   Detail: when a persistent session is already started and the activity declares waiting-room fields, `SessionRouter` renders `WaitingRoom` in a `join-live` preflight state instead of bypassing required field completion. When no waiting-room fields are required, student permalink entry now uses direct pass-through to the live session while teacher-cookie-managed entry still redirects to the manage dashboard.
 - [ ] Ensure embedded entry inherits role from parent context and does not prompt for instructor code
+  Current status: no embedded-entry runtime path has been migrated onto the shared waiting-room resolver yet. This still needs concrete product rules for when parent context is authoritative, how solo-only behaves under embedding, and what server surface proves inherited role.
 - [ ] Add tests for role resolution, live join, wait, solo fallback, pass-through, unsupported-solo cases, and direct-API bypass attempts
   Current status: shared server-side entry-status matrix tests now cover live join, wait, solo fallback, pass-through, and unsupported-solo outcomes in `server/entryStatus.test.ts`, and route-level coverage in `server/sessionEntryRoutes.test.ts` plus `server/persistentSessionRoutes.test.ts` now includes missing-session handling, token-trimming/blank-token behavior, malformed permalink entry requests, corrupted-cookie handling, stale backing-session repair, student-vs-teacher live-entry role boundaries, and solo-unavailable permalink outcomes. Embedded-role inheritance still needs dedicated tests, and there is not yet a distinct embedded-entry API surface to exercise for bypass coverage.
 - [x] Add a test proving `solo-only` links with instructor auth resolve to `continue-solo`, not `join-live`

@@ -99,7 +99,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: The opaque waiting-room participant handoff now has one shared backend normalization/token helper in `server/core/entryParticipants.ts`, and both the live-session wrapper (`sessionEntryParticipants.ts`) and persistent-session wrapper (`persistentSessions.ts`) delegate to it.
 - Why it matters: This keeps `participantId` minting, serializable-value filtering, token shape, and one-shot consume behavior aligned across the two entrypoints without pretending the surrounding session lookup lifecycles are identical.
 - Evidence: `server/core/entryParticipants.ts`; `server/core/sessionEntryParticipants.ts`; `server/core/persistentSessions.ts`; `server/entryParticipants.test.ts`; `server/sessionEntryParticipants.test.ts`; `server/persistentSessionRoutes.test.ts`; `server/sessionEntryRoutes.test.ts`
-- Follow-up action: Reuse this helper if more entry-backed contexts appear, and keep the wrapper modules responsible only for container lookup/persistence rather than reintroducing token/normalization logic there.
+- Follow-up action: Reuse this helper if more entry-backed contexts appear, and keep the wrapper modules responsible only for container lookup/persistence rather than reintroducing token/normalization logic there. The next non-refactor step after this helper is not more token plumbing; it is defining the shared post-handoff participant acceptance/reconnect contract.
 - Owner: Codex
 
 - Date: 2026-03-13
