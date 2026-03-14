@@ -78,6 +78,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Decide whether SyncDeck should keep this registration bridge as its steady state or collapse the separate register route once more activities consume waiting-room accepted identity directly.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Surface: client entry | session-backed registration
+- Contract: `SyncDeckStudent` now treats accepted waiting-room identity as a continuation path instead of a second signup gate. When unresolved entry handoff provides both `displayName` and `participantId`, the client auto-registers through `register-student` and shows a transient “Joining SyncDeck” status instead of rendering the manual name form.
+- Compatibility constraints: Manual registration remains the fallback when auto-registration cannot run or fails. Stored SyncDeck student identity still wins over newly consumed accepted-entry values, so reconnect behavior for previously registered students remains unchanged.
+- Validation rules: Auto-registration only runs when there is no existing registered SyncDeck identity, the accepted `participantId` is present, and the carried-forward display name is non-empty. If the server registration attempt fails, the client clears the pending accepted participant ID and falls back to the manual name form with the existing error message.
+- Evidence (schema/tests/path): `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/registrationUtils.ts`; `activities/syncdeck/client/student/registrationUtils.test.ts`
+- Follow-up action: If SyncDeck drops its separate register route later, migrate this auto-registration gate into the same shared accepted-entry join contract rather than recreating another activity-specific pre-connect step.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Surface: REST | websocket
 - Contract: Generic persistent-link creation and listing now carry `entryPolicy?: PersistentSessionEntryPolicy`. `POST /api/persistent-session/create` accepts `entryPolicy` alongside `activityName`, `teacherCode`, and optional `selectedOptions`; `GET /api/persistent-session/list` returns each saved link with normalized `entryPolicy`. Teacher-start rejection for `solo-only` uses a shared payload shape across both `POST /api/persistent-session/authenticate` and websocket `teacher-code-error`.

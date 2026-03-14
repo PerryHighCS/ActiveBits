@@ -16,6 +16,7 @@ import {
   buildSyncDeckRegistrationRequest,
   resolveSyncDeckInitialRegistrationState,
   shouldAutoRegisterSyncDeckStudent,
+  shouldShowSyncDeckAutoRegistrationGate,
 } from './registrationUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
@@ -1494,6 +1495,31 @@ const SyncDeckStudent: FC = () => {
       <div className="p-6 max-w-3xl mx-auto space-y-3">
         <h1 className="text-2xl font-bold">SyncDeck</h1>
         <p className="text-sm text-gray-700">{error || presentationUrlError || 'Session unavailable.'}</p>
+      </div>
+    )
+  }
+
+  if (shouldShowSyncDeckAutoRegistrationGate({
+    isRegisteringStudent,
+    pendingAcceptedParticipantId,
+    registeredStudentId,
+    registeredStudentName,
+    studentNameInput,
+  })) {
+    return (
+      <div className="fixed inset-0 z-10 bg-white flex items-center justify-center p-6">
+        <div
+          className="w-full max-w-md border border-gray-200 rounded p-4 space-y-3"
+          role="status"
+          aria-live="polite"
+        >
+          <h1 className="text-xl font-bold text-gray-800">Joining SyncDeck</h1>
+          <p className="text-sm text-gray-700">
+            Continuing as <span className="font-semibold">{studentNameInput}</span>.
+          </p>
+          <p className="text-sm text-gray-600">Finishing your presentation entry…</p>
+          {joinError ? <p className="text-sm text-red-600">{joinError}</p> : null}
+        </div>
       </div>
     )
   }

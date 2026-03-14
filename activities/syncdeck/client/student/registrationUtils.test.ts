@@ -4,6 +4,7 @@ import {
   buildSyncDeckRegistrationRequest,
   resolveSyncDeckInitialRegistrationState,
   shouldAutoRegisterSyncDeckStudent,
+  shouldShowSyncDeckAutoRegistrationGate,
 } from './registrationUtils.js'
 
 void test('resolveSyncDeckInitialRegistrationState prefers stored registration when present', () => {
@@ -75,6 +76,32 @@ void test('shouldAutoRegisterSyncDeckStudent only when accepted entry identity s
     pendingAcceptedParticipantId: 'participant-1',
     registeredStudentId: 'participant-1',
     registeredStudentName: 'Ada Lovelace',
+    studentNameInput: 'Ada Lovelace',
+  }), false)
+})
+
+void test('shouldShowSyncDeckAutoRegistrationGate hides manual join form while accepted entry registration is pending', () => {
+  assert.equal(shouldShowSyncDeckAutoRegistrationGate({
+    isRegisteringStudent: false,
+    pendingAcceptedParticipantId: 'participant-1',
+    registeredStudentId: '',
+    registeredStudentName: '',
+    studentNameInput: 'Ada Lovelace',
+  }), true)
+
+  assert.equal(shouldShowSyncDeckAutoRegistrationGate({
+    isRegisteringStudent: true,
+    pendingAcceptedParticipantId: 'participant-1',
+    registeredStudentId: '',
+    registeredStudentName: '',
+    studentNameInput: 'Ada Lovelace',
+  }), true)
+
+  assert.equal(shouldShowSyncDeckAutoRegistrationGate({
+    isRegisteringStudent: false,
+    pendingAcceptedParticipantId: '',
+    registeredStudentId: '',
+    registeredStudentName: '',
     studentNameInput: 'Ada Lovelace',
   }), false)
 })

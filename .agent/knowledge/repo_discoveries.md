@@ -683,3 +683,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/studentParticipants.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/registrationUtils.ts`; `activities/syncdeck/client/student/registrationUtils.test.ts`
 - Follow-up action: Decide whether SyncDeck should stop at this registration bridge or eventually replace the separate register route with the same accepted-entry connect service used by the other session-backed activities.
 - Owner: Codex
+
+- Date: 2026-03-14
+- Area: syncdeck
+- Discovery: Once accepted waiting-room identity is present, SyncDeck should render that path as “continuing into the presentation,” not as a second registration form. The client now shows a transient joining state while auto-registration is in flight and only falls back to the manual join form if the bridge cannot complete.
+- Why it matters: This makes SyncDeck feel like the same waiting-room flow as the other migrated activities even though its websocket path is still reconnect-only under the hood.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/registrationUtils.ts`; `activities/syncdeck/client/student/registrationUtils.test.ts`
+- Follow-up action: If SyncDeck later adopts the shared accepted-entry connect service directly, remove the remaining activity-specific registration gate rather than preserving both flows.
+- Owner: Codex

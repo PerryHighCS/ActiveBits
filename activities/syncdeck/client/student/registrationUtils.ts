@@ -75,3 +75,12 @@ export function shouldAutoRegisterSyncDeckStudent(state: SyncDeckAutoRegistratio
     && normalizeString(state.registeredStudentId).length === 0
   )
 }
+
+export function shouldShowSyncDeckAutoRegistrationGate(state: SyncDeckAutoRegistrationState): boolean {
+  return (
+    normalizeString(state.pendingAcceptedParticipantId).length > 0
+    && normalizeString(state.studentNameInput).length > 0
+    && normalizeString(state.registeredStudentName).length === 0
+    && normalizeString(state.registeredStudentId).length === 0
+  )
+}
