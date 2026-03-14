@@ -42,6 +42,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Follow-up action: Use this seam pattern sparingly for high-value shared containers, then add fuller interaction tests later if the runtime boundary becomes easier to exercise.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For activity-owned reconnect/recovery behavior that hangs off websocket close events, extract the close-decision logic into a tiny activity-local helper and test that helper directly instead of trying to simulate the whole websocket lifecycle in the component test.
+- Why it helps: It keeps the test focused on the product contract change, like “stale server-issued identity should clear cached registration and require rejoin,” without depending on browser WebSocket mocks or the full student component state machine.
+- Example (file/path): `activities/syncdeck/client/student/reconnectUtils.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`
+- Failure signal: Recovery copy/state regressions slip through because the only available tests cover low-level URL builders or large render snapshots, not the close-event decision itself.
+- Follow-up action: Reuse this pattern for other activity-owned reconnect paths when the decision surface is stable and the container wiring is much heavier than the rule being tested.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Scope: integration
 - Pattern: In sandboxed agent environments where some server tests fail during local port binding or related host restrictions, use `npm run test:codex` as the validation gate and record the skipped full-suite limitation alongside targeted checks for the touched server surface.

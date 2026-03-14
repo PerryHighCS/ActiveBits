@@ -183,6 +183,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | activities | testing
+- Discovery: SyncDeck’s stale-student-ID recovery is now isolated behind a tiny client helper rather than living only inside the full student component close handler.
+- Why it matters: This gives the branch a direct test seam for the newer “server-issued IDs only” contract on the client side. We can verify that stale cached SyncDeck identity clears local registration and requires rejoin without needing a full browser-style websocket harness.
+- Evidence: `activities/syncdeck/client/student/reconnectUtils.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: If SyncDeck’s reconnect UX changes again, update the helper and its tests first, then keep the student component wiring thin.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: activities | server
 - Discovery: Python List Practice is no longer fully outside the shared participant contract on the server side. Its websocket join, stats updates, disconnect handling, and normalized stored student records now use shared-style participant IDs and activity-owned wrappers around the common session participant helpers, and the student client now accepts a server-issued `studentId` message.
 - Why it matters: This closes one of the explicit remaining gaps from the plan without forcing a waiting-room UI migration for the activity. Python List Practice can now participate in the same broader participant-ID/reconnect direction as the Java and traveling-salesman activities, while still keeping its own activity-specific UI flow for now.

@@ -6,6 +6,7 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
+import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
@@ -1162,21 +1163,22 @@ const SyncDeckStudent: FC = () => {
         setStatusMessage('Connected. Waiting for instructor sync…')
       },
       onClose: (event) => {
-        if (event.code === 1008 && (event.reason === 'missing studentId' || event.reason === 'unregistered student')) {
+        const closeDecision = resolveSyncDeckStudentCloseDecision(event)
+        if (closeDecision.clearCachedIdentity) {
           if (typeof window !== 'undefined' && sessionId) {
             window.sessionStorage.removeItem(`syncdeck_student_name_${sessionId}`)
             window.sessionStorage.removeItem(`syncdeck_student_id_${sessionId}`)
           }
           setRegisteredStudentName('')
           setRegisteredStudentId('')
-          setJoinError('Please re-enter your name to rejoin this presentation.')
+          setJoinError(closeDecision.joinError)
           setConnectionState('disconnected')
-          setStatusMessage('Reconnect required before instructor sync can resume.')
+          setStatusMessage(closeDecision.statusMessage)
           return
         }
 
         setConnectionState('disconnected')
-        setStatusMessage('Reconnecting to instructor sync…')
+        setStatusMessage(closeDecision.statusMessage)
       },
       onMessage: handleWsMessage,
       attachSessionEndedHandler,
