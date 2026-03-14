@@ -195,7 +195,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: SyncDeck now has a first runtime surface for embedded role inheritance, even though no embedded child launcher consumes it yet. `POST /api/syncdeck/:sessionId/embedded-context` can validate inherited teacher role from instructor passcode or inherited student role from a registered parent-session student ID.
 - Why it matters: This converts the embedded-role plan from pure design text into a concrete server proof surface. The remaining work is now more specific: wire child launch/entry to this validated parent context instead of inventing teacher/student role in the embedded child from scratch.
 - Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
-- Follow-up action: When the embedded child-launch path is implemented, use this endpoint or an equivalent validated server surface as the parent-context authority rather than trusting client-claimed inherited role.
+- Follow-up action: When the embedded child-launch path is implemented, use this endpoint or the matching client helper in `activities/syncdeck/client/shared/embeddedContextUtils.ts` as the parent-context authority rather than trusting client-claimed inherited role.
 - Owner: Codex
 
 - Date: 2026-03-14
