@@ -1,10 +1,30 @@
 import type { ActivityRegistryEntry, ActivityUtility } from '../../../../types/activity.js'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
-import { resolvePersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
+import * as waitingRoomModule from '../../../../types/waitingRoom.js'
 import { normalizeSelectedOptions } from './manageDashboardUtils'
 import { isValidHttpUrl } from './urlValidationUtils'
 
 export const CACHE_TTL = 1000 * 60 * 60 * 12
+
+const waitingRoomModuleRecord = waitingRoomModule as unknown as Record<string, unknown>
+const waitingRoomDefaultExport = Reflect.get(waitingRoomModuleRecord, 'default')
+const waitingRoomExports = (
+  waitingRoomDefaultExport != null && typeof waitingRoomDefaultExport === 'object'
+    ? (waitingRoomDefaultExport as Record<string, unknown>)
+    : waitingRoomModuleRecord
+)
+
+const resolvePersistentSessionEntryPolicyFromTypes = waitingRoomExports.resolvePersistentSessionEntryPolicy as
+  | ((value: unknown) => PersistentSessionEntryPolicy)
+  | undefined
+
+const resolvePersistentSessionEntryPolicy = (value: unknown): PersistentSessionEntryPolicy => {
+  if (typeof resolvePersistentSessionEntryPolicyFromTypes === 'function') {
+    return resolvePersistentSessionEntryPolicyFromTypes(value)
+  }
+
+  return value === 'solo-allowed' || value === 'solo-only' ? value : 'instructor-required'
+}
 
 export interface SessionCacheStorage {
   length: number
