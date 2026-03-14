@@ -4,6 +4,7 @@ import {
   buildSyncDeckEmbeddedContextApiUrl,
   buildSyncDeckEmbeddedContextRequestBody,
   fetchSyncDeckEmbeddedContext,
+  resolveSyncDeckEmbeddedContextRequestFromStorage,
 } from './embeddedContextUtils.js'
 
 void test('buildSyncDeckEmbeddedContextApiUrl encodes session id', () => {
@@ -68,6 +69,51 @@ void test('fetchSyncDeckEmbeddedContext returns null on forbidden response', asy
       json: async () => ({ error: 'forbidden' }),
     }) as Response) as typeof fetch,
   )
+
+  assert.equal(result, null)
+})
+
+void test('resolveSyncDeckEmbeddedContextRequestFromStorage prefers instructor passcode over student id', () => {
+  const storage = new Map<string, string>([
+    ['syncdeck_instructor_session-1', ' teacher-pass '],
+    ['syncdeck_student_id_session-1', ' student-1 '],
+  ])
+
+  const result = resolveSyncDeckEmbeddedContextRequestFromStorage('session-1', {
+    getItem(key: string) {
+      return storage.get(key) ?? null
+    },
+  })
+
+  assert.deepEqual(result, {
+    sessionId: 'session-1',
+    instructorPasscode: 'teacher-pass',
+  })
+})
+
+void test('resolveSyncDeckEmbeddedContextRequestFromStorage falls back to student identity', () => {
+  const storage = new Map<string, string>([
+    ['syncdeck_student_id_session-1', ' student-1 '],
+  ])
+
+  const result = resolveSyncDeckEmbeddedContextRequestFromStorage('session-1', {
+    getItem(key: string) {
+      return storage.get(key) ?? null
+    },
+  })
+
+  assert.deepEqual(result, {
+    sessionId: 'session-1',
+    studentId: 'student-1',
+  })
+})
+
+void test('resolveSyncDeckEmbeddedContextRequestFromStorage returns null when no parent identity is stored', () => {
+  const result = resolveSyncDeckEmbeddedContextRequestFromStorage('session-1', {
+    getItem() {
+      return null
+    },
+  })
 
   assert.equal(result, null)
 })

@@ -33,6 +33,7 @@ The most important work still open before this plan can be considered waiting-ro
   Embedded entry is still a documented target contract, not a runtime path. Parent-managed launches should inherit teacher/student role without prompting for instructor code again.
 - close the remaining waiting-room test gap
   Helper and route coverage are strong, and `WaitingRoomContent.tsx` now gives us render-level accessibility/control-state coverage without importing the Vite activity loader. The remaining gap is full interaction coverage for `WaitingRoom.tsx` carry-forward, websocket state, and end-to-end form submission.
+  Current testing recommendation: keep extending helper/presentational/activity-local seams first and do not introduce a Playwright/browser harness yet unless those seams stop covering the remaining risky behavior.
 - keep Phase 4 activity migration deferred until the above semantics stabilize
   More activity migrations would otherwise build on participant rules that are still changing.
 
@@ -646,7 +647,7 @@ that path ships.
   Current status: waiting-room route coverage now includes an explicit `[TEST]` marker for the intentionally noisy corrupted-cookie parse path in `server/persistentSessionRoutes.test.ts`. Broader adoption is still open for other future waiting-room-related tests that intentionally emit warnings/errors.
 - [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
   Current status: utility-level coverage now exists for waiting-room field validation/storage (`waitingRoomFormUtils.test.ts`), primary-action blocking rules (`waitingRoomActionUtils.test.ts`), live-session entry-token storage/consume behavior including 404 vs retry semantics (`entryParticipantStorage.test.ts`), shared live-entry/join/solo/wait/pass-through status resolution (`server/entryStatus.test.ts`), and render-level accessibility/control-state coverage through `WaitingRoomContent.test.tsx`. Full interaction coverage for carry-forward and websocket-driven state inside `WaitingRoom.tsx` is still outstanding, but the new presentational seam avoids the previous hard stop from the Vite activity-loader path.
-  Follow-up target: either add a stable component-test seam around `WaitingRoom.tsx` without `import.meta.glob`, or explicitly introduce a browser-level harness only if the helper/route boundary stops being sufficient.
+  Follow-up target: first add one more stable component-level seam around `WaitingRoom.tsx` carry-forward/websocket decisions without `import.meta.glob`; only revisit a browser-level harness after those cheaper seams are exhausted and a real gap remains.
 
 ### Phase 3 - Entry resolution behavior
 

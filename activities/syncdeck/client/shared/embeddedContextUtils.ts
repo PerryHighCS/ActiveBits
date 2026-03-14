@@ -10,6 +10,23 @@ export interface SyncDeckEmbeddedContextResponse {
   studentName?: string
 }
 
+export interface SyncDeckEmbeddedContextStorageLike {
+  getItem(key: string): string | null
+}
+
+function getTrimmedStorageValue(
+  storage: SyncDeckEmbeddedContextStorageLike,
+  key: string,
+): string | null {
+  const value = storage.getItem(key)
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 export function buildSyncDeckEmbeddedContextApiUrl(sessionId: string): string {
   return `/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-context`
 }
@@ -30,6 +47,33 @@ export function buildSyncDeckEmbeddedContextRequestBody(
   }
 
   return body
+}
+
+export function resolveSyncDeckEmbeddedContextRequestFromStorage(
+  sessionId: string,
+  storage: SyncDeckEmbeddedContextStorageLike | null,
+): SyncDeckEmbeddedContextRequest | null {
+  if (!storage) {
+    return null
+  }
+
+  const instructorPasscode = getTrimmedStorageValue(storage, `syncdeck_instructor_${sessionId}`)
+  if (instructorPasscode) {
+    return {
+      sessionId,
+      instructorPasscode,
+    }
+  }
+
+  const studentId = getTrimmedStorageValue(storage, `syncdeck_student_id_${sessionId}`)
+  if (studentId) {
+    return {
+      sessionId,
+      studentId,
+    }
+  }
+
+  return null
 }
 
 export async function fetchSyncDeckEmbeddedContext(
