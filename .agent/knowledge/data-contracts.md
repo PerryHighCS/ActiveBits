@@ -71,6 +71,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 - Date: 2026-03-14
 - Surface: REST | internal module
+- Contract: Persistent/permalink entry now also has a dedicated server-backed gateway payload at `GET /api/persistent-session/:hash/entry?activityName=...`. The response shape is `{ activityName, hash, entryPolicy, hasTeacherCookie, isStarted, sessionId, waitingRoomFieldCount, resolvedRole, entryOutcome, presentationMode }`, and `SessionRouter` now trusts that server-computed decision instead of recomputing permalink role/presentation locally from raw metadata.
+- Compatibility constraints: `GET /api/persistent-session/:hash` remains available for older metadata/status consumers. Permalink and join-code entry now use parallel entry-status endpoints with aligned decision vocabulary, but they are not yet a single shared backend gateway service.
+- Validation rules: Missing `hash` or `activityName` returns `400`; missing sessions still normalize/reset through existing persistent-session lookup rules before the entry-status payload is returned. `solo-only` with remembered teacher cookie must still resolve to student-role solo behavior, not teacher live entry.
+- Evidence (schema/tests/path): `types/waitingRoom.ts`; `server/core/persistentSessionEntryStatus.ts`; `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`
+- Follow-up action: When the entry surfaces are finally unified, replace the parallel session/persistent entry endpoints with one shared gateway abstraction instead of letting both grow independently.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Surface: REST | internal module
 - Contract: Live-session waiting-room carry-forward now uses a server-backed handoff contract. `POST /api/session/:sessionId/entry-participant` accepts `{ values }`, normalizes the serializable waiting-room fields, stores them temporarily in the session data under an opaque token, and returns `{ entryParticipantToken, values }`. `GET /api/session/:sessionId/entry-participant/:token` consumes that token once and returns `{ values }`.
 - Compatibility constraints: Solo entry still uses client-only handoff storage. Live-session activities may keep their old sessionStorage value fallback while migrating; the opaque token path is additive and does not change existing activity websocket payloads or runtime `studentId` fields.
 - Validation rules: Missing sessions return `404 { error: 'invalid session' }`; missing or already-consumed tokens return `404 { error: 'entry participant not found' }`; non-serializable values are dropped during normalization before storage; successful consume removes the stored token entry. Live-session storage now guarantees a non-empty `participantId` string in the stored/returned values, minting one with the shared participant ID helper when the waiting-room payload did not already include one.

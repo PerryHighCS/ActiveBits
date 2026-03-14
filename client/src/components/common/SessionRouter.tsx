@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useState, type ChangeEvent, type ComponentType, type FormEvent } from 'react'
-import type { PersistentSessionEntryPolicy, SessionEntryStatus } from '../../../../types/waitingRoom.js'
+import type { PersistentSessionEntryStatus, SessionEntryStatus } from '../../../../types/waitingRoom.js'
 import { useNavigate, useParams } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
 import WaitingRoom from './WaitingRoom'
@@ -7,8 +7,8 @@ import LoadingFallback from './LoadingFallback'
 import { getActivity, activities } from '@src/activities'
 import {
   buildTeacherManagePathFromSession,
+  buildPersistentSessionEntryApiUrl,
   buildSessionEntryApiUrl,
-  buildPersistentSessionApiUrl,
   buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
@@ -19,7 +19,6 @@ import {
   type SessionCacheRecord,
 } from './sessionRouterUtils'
 import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
-import { resolvePersistentSessionEntryDecision } from './persistentSessionEntryPolicyUtils'
 
 interface RouteParams {
   [key: string]: string | undefined
@@ -31,13 +30,6 @@ interface RouteParams {
 
 interface SessionPayload {
   session?: Record<string, unknown>
-}
-
-interface PersistentSessionInfo {
-  entryPolicy?: PersistentSessionEntryPolicy
-  isStarted?: boolean
-  sessionId?: string
-  hasTeacherCookie?: boolean
 }
 
 interface SessionData extends SessionCacheRecord {
@@ -92,7 +84,7 @@ const SessionRouter = () => {
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
   const [sessionEntryStatus, setSessionEntryStatus] = useState<SessionEntryStatus | null>(null)
   const [completedJoinPreflightSessionId, setCompletedJoinPreflightSessionId] = useState<string | null>(null)
-  const [persistentSessionInfo, setPersistentSessionInfo] = useState<PersistentSessionInfo | null>(null)
+  const [persistentSessionEntryStatus, setPersistentSessionEntryStatus] = useState<PersistentSessionEntryStatus | null>(null)
   const [isLoadingPersistent, setIsLoadingPersistent] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
@@ -153,17 +145,17 @@ const SessionRouter = () => {
 
     queueMicrotask(() => {
       setIsLoadingPersistent(true)
-      setPersistentSessionInfo(null)
+      setPersistentSessionEntryStatus(null)
       setError(null)
     })
-    const url = buildPersistentSessionApiUrl(hash, activityName, getWindowSearch())
+    const url = buildPersistentSessionEntryApiUrl(hash, activityName, getWindowSearch())
     fetch(url, { credentials: 'include' })
       .then((response) => {
         if (!response.ok) throw new Error('Persistent session not found')
-        return response.json() as Promise<PersistentSessionInfo>
+        return response.json() as Promise<PersistentSessionEntryStatus>
       })
       .then((data) => {
-        setPersistentSessionInfo(data)
+        setPersistentSessionEntryStatus(data)
         setIsLoadingPersistent(false)
       })
       .catch(() => {
@@ -174,23 +166,13 @@ const SessionRouter = () => {
 
   useEffect(() => {
     if (!activityName) return
-    if (!persistentSessionInfo?.isStarted || !persistentSessionInfo.sessionId) return
-    if (!persistentSessionInfo.hasTeacherCookie) return
-
-    const activity = getActivity(activityName)
-    const decision = resolvePersistentSessionEntryDecision({
-      entryPolicy: persistentSessionInfo.entryPolicy,
-      isStarted: persistentSessionInfo.isStarted,
-      activitySupportsSolo: Boolean(activity?.soloMode),
-      waitingRoomFieldCount: activity?.waitingRoom?.fields?.length ?? 0,
-      teacherIntent: persistentSessionInfo.hasTeacherCookie ? 'cookie' : 'none',
-    })
-    if (decision.resolvedRole !== 'teacher' || decision.entryOutcome !== 'join-live') {
+    if (!persistentSessionEntryStatus?.isStarted || !persistentSessionEntryStatus.sessionId) return
+    if (persistentSessionEntryStatus.resolvedRole !== 'teacher' || persistentSessionEntryStatus.entryOutcome !== 'join-live') {
       return
     }
 
     let isCancelled = false
-    const startedSessionId = persistentSessionInfo.sessionId
+    const startedSessionId = persistentSessionEntryStatus.sessionId
     const queryString = getWindowSearch()
 
     void (async () => {
@@ -205,33 +187,33 @@ const SessionRouter = () => {
     }
   }, [
     activityName,
-    persistentSessionInfo?.entryPolicy,
-    persistentSessionInfo?.hasTeacherCookie,
-    persistentSessionInfo?.isStarted,
-    persistentSessionInfo?.sessionId,
+    persistentSessionEntryStatus?.entryOutcome,
+    persistentSessionEntryStatus?.isStarted,
+    persistentSessionEntryStatus?.resolvedRole,
+    persistentSessionEntryStatus?.sessionId,
     navigate,
     resolveTeacherManagePath,
   ])
 
   useEffect(() => {
     if (!hash || !activityName) return undefined
-    if (!persistentSessionInfo?.isStarted) return undefined
+    if (!persistentSessionEntryStatus?.isStarted) return undefined
 
     let isCancelled = false
 
     const pollStatus = async () => {
       try {
-        const url = buildPersistentSessionApiUrl(hash, activityName, getWindowSearch())
+        const url = buildPersistentSessionEntryApiUrl(hash, activityName, getWindowSearch())
         const response = await fetch(url, {
           credentials: 'include',
         })
 
         if (!response.ok) return
 
-        const data = (await response.json()) as PersistentSessionInfo
+        const data = (await response.json()) as PersistentSessionEntryStatus
         if (isCancelled) return
 
-        setPersistentSessionInfo(data)
+        setPersistentSessionEntryStatus(data)
         if (!data.isStarted) {
           void navigate('/session-ended')
         }
@@ -249,53 +231,38 @@ const SessionRouter = () => {
       isCancelled = true
       clearInterval(intervalId)
     }
-  }, [hash, activityName, persistentSessionInfo?.isStarted, navigate])
+  }, [activityName, hash, navigate, persistentSessionEntryStatus?.isStarted])
 
   useEffect(() => {
-    if (!hash || !activityName || !persistentSessionInfo) {
+    if (!hash || !activityName || !persistentSessionEntryStatus) {
       return
     }
-
-    const activity = getActivity(activityName)
-    const decision = resolvePersistentSessionEntryDecision({
-      entryPolicy: persistentSessionInfo.entryPolicy,
-      isStarted: persistentSessionInfo.isStarted,
-      activitySupportsSolo: Boolean(activity?.soloMode),
-      waitingRoomFieldCount: activity?.waitingRoom?.fields?.length ?? 0,
-      teacherIntent: persistentSessionInfo.hasTeacherCookie ? 'cookie' : 'none',
-    })
-
-    if (decision.entryOutcome !== 'continue-solo' || decision.presentationMode !== 'pass-through') {
-      return
-    }
-
-    void navigate(`/solo/${activityName}${getWindowSearch()}`, { replace: true })
-  }, [activityName, hash, navigate, persistentSessionInfo])
-
-  useEffect(() => {
-    if (!hash || !activityName || !persistentSessionInfo?.isStarted || !persistentSessionInfo.sessionId) {
-      return
-    }
-
-    const activity = getActivity(activityName)
-    const decision = resolvePersistentSessionEntryDecision({
-      entryPolicy: persistentSessionInfo.entryPolicy,
-      isStarted: persistentSessionInfo.isStarted,
-      activitySupportsSolo: Boolean(activity?.soloMode),
-      waitingRoomFieldCount: activity?.waitingRoom?.fields?.length ?? 0,
-      teacherIntent: persistentSessionInfo.hasTeacherCookie ? 'cookie' : 'none',
-    })
 
     if (
-      decision.resolvedRole !== 'student'
-      || decision.entryOutcome !== 'join-live'
-      || decision.presentationMode !== 'pass-through'
+      persistentSessionEntryStatus.entryOutcome !== 'continue-solo'
+      || persistentSessionEntryStatus.presentationMode !== 'pass-through'
     ) {
       return
     }
 
-    void navigate(`/${persistentSessionInfo.sessionId}`, { replace: true })
-  }, [activityName, hash, navigate, persistentSessionInfo])
+    void navigate(`/solo/${activityName}${getWindowSearch()}`, { replace: true })
+  }, [activityName, hash, navigate, persistentSessionEntryStatus])
+
+  useEffect(() => {
+    if (!hash || !activityName || !persistentSessionEntryStatus?.isStarted || !persistentSessionEntryStatus.sessionId) {
+      return
+    }
+
+    if (
+      persistentSessionEntryStatus.resolvedRole !== 'student'
+      || persistentSessionEntryStatus.entryOutcome !== 'join-live'
+      || persistentSessionEntryStatus.presentationMode !== 'pass-through'
+    ) {
+      return
+    }
+
+    void navigate(`/${persistentSessionEntryStatus.sessionId}`, { replace: true })
+  }, [activityName, hash, navigate, persistentSessionEntryStatus])
 
   useEffect(() => {
     if (!sessionId || sessionEntryStatus) return
@@ -364,19 +331,12 @@ const SessionRouter = () => {
   if (error || soloRouteError) return <div className="text-red-500 text-center">{error || soloRouteError}</div>
 
   if (hash && activityName) {
-    if (isLoadingPersistent || persistentSessionInfo === null) {
+    if (isLoadingPersistent || persistentSessionEntryStatus === null) {
       return <div className="text-center">Loading...</div>
     }
 
     const persistentActivity = getActivity(activityName)
-    const persistentEntryDecision = resolvePersistentSessionEntryDecision({
-      entryPolicy: persistentSessionInfo.entryPolicy,
-      isStarted: persistentSessionInfo.isStarted,
-      activitySupportsSolo: Boolean(persistentActivity?.soloMode),
-      waitingRoomFieldCount: persistentActivity?.waitingRoom?.fields?.length ?? 0,
-      teacherIntent: persistentSessionInfo.hasTeacherCookie ? 'cookie' : 'none',
-    })
-    const persistentEntryOutcome = persistentEntryDecision.entryOutcome
+    const persistentEntryOutcome = persistentSessionEntryStatus.entryOutcome
 
     if (persistentEntryOutcome === 'solo-unavailable') {
       return (
@@ -396,16 +356,16 @@ const SessionRouter = () => {
       return <div className="text-center">Redirecting to solo mode...</div>
     }
 
-    if (persistentSessionInfo?.isStarted && persistentSessionInfo.sessionId) {
-      const startedSessionId = persistentSessionInfo.sessionId
-      if (persistentEntryDecision.presentationMode === 'render-ui') {
+    if (persistentSessionEntryStatus.isStarted && persistentSessionEntryStatus.sessionId) {
+      const startedSessionId = persistentSessionEntryStatus.sessionId
+      if (persistentSessionEntryStatus.presentationMode === 'render-ui') {
         return (
           <WaitingRoom
             activityName={activityName}
             hash={hash}
-            hasTeacherCookie={Boolean(persistentSessionInfo?.hasTeacherCookie)}
+            hasTeacherCookie={persistentSessionEntryStatus.hasTeacherCookie}
             entryOutcome={persistentEntryOutcome}
-            entryPolicy={persistentSessionInfo?.entryPolicy}
+            entryPolicy={persistentSessionEntryStatus.entryPolicy}
             startedSessionId={startedSessionId}
           />
         )
@@ -417,9 +377,9 @@ const SessionRouter = () => {
       <WaitingRoom
         activityName={activityName}
         hash={hash}
-        hasTeacherCookie={Boolean(persistentSessionInfo?.hasTeacherCookie)}
+        hasTeacherCookie={persistentSessionEntryStatus.hasTeacherCookie}
         entryOutcome={persistentEntryOutcome}
-        entryPolicy={persistentSessionInfo?.entryPolicy}
+        entryPolicy={persistentSessionEntryStatus.entryPolicy}
       />
     )
   }
@@ -529,7 +489,7 @@ const SessionRouter = () => {
 
   return (
     <Suspense fallback={<LoadingFallback />}>
-      <SessionStudentComponent sessionData={sessionData} persistentSessionInfo={persistentSessionInfo} />
+      <SessionStudentComponent sessionData={sessionData} persistentSessionInfo={persistentSessionEntryStatus} />
     </Suspense>
   )
 }

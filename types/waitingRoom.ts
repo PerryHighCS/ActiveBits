@@ -27,6 +27,19 @@ export interface SessionEntryStatus {
   presentationMode: WaitingRoomPresentationMode
 }
 
+export interface PersistentSessionEntryStatus {
+  activityName: string
+  hash: string
+  entryPolicy: PersistentSessionEntryPolicy
+  hasTeacherCookie: boolean
+  isStarted: boolean
+  sessionId: string | null
+  waitingRoomFieldCount: number
+  resolvedRole: WaitingRoomResolvedRole
+  entryOutcome: WaitingRoomEntryOutcome
+  presentationMode: WaitingRoomPresentationMode
+}
+
 export type WaitingRoomSerializableValue =
   | null
   | boolean

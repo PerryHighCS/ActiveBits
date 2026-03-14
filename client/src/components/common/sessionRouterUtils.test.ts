@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildTeacherManagePathFromSession,
+  buildPersistentSessionEntryApiUrl,
   buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
   buildSessionEntryApiUrl,
@@ -105,6 +106,14 @@ void test('buildPersistentSessionApiUrl encodes hash and activityName and preser
 void test('buildPersistentSessionApiUrl replaces existing activityName in search', () => {
   const url = buildPersistentSessionApiUrl('abc123', 'new-name', '?activityName=old&mode=solo')
   assert.equal(url, '/api/persistent-session/abc123?activityName=new-name&mode=solo')
+})
+
+void test('buildPersistentSessionEntryApiUrl targets the server-backed permalink entry route', () => {
+  const url = buildPersistentSessionEntryApiUrl('abc/123', 'merge&sort', '?mode=review')
+  assert.equal(
+    url,
+    '/api/persistent-session/abc%2F123/entry?mode=review&activityName=merge%26sort',
+  )
 })
 
 void test('buildSessionEntryApiUrl encodes the session ID for join entry lookups', () => {

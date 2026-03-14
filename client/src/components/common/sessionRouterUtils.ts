@@ -96,6 +96,12 @@ export function buildPersistentSessionApiUrl(hash: string, activityName: string,
   return `/api/persistent-session/${encodeURIComponent(hash)}?${query.toString()}`
 }
 
+export function buildPersistentSessionEntryApiUrl(hash: string, activityName: string, search: string): string {
+  const query = new URLSearchParams(search)
+  query.set('activityName', activityName)
+  return `/api/persistent-session/${encodeURIComponent(hash)}/entry?${query.toString()}`
+}
+
 export function buildSessionEntryApiUrl(sessionId: string): string {
   return `/api/session/${encodeURIComponent(sessionId)}/entry`
 }

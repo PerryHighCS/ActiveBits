@@ -1,4 +1,9 @@
-import { getAllowedActivities, isValidActivity } from '../activities/activityRegistry.js'
+import {
+  activitySupportsSoloMode,
+  getActivityWaitingRoomFieldCount,
+  getAllowedActivities,
+  isValidActivity,
+} from '../activities/activityRegistry.js'
 import {
   generatePersistentHash,
   getOrCreateActivePersistentSession,
@@ -11,6 +16,7 @@ import {
   buildSoloOnlyPolicyRejection,
   type PersistentSessionPolicyRejectionPayload,
 } from '../core/persistentSessionPolicyUtils.js'
+import { resolvePersistentSessionEntryStatus } from '../core/persistentSessionEntryStatus.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -353,6 +359,49 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       sessionId: session.sessionId,
       queryParams,
     })
+  })
+
+  app.get('/api/persistent-session/:hash/entry', async (req, res) => {
+    const hash = req.params.hash
+    const activityName = getQueryString(req.query.activityName)
+
+    if (!hash) {
+      res.status(400).json({ error: 'Missing hash parameter' })
+      return
+    }
+
+    if (!activityName) {
+      res.status(400).json({ error: 'Missing activityName parameter' })
+      return
+    }
+
+    let session = await getOrCreateActivePersistentSession(activityName, hash)
+
+    if (session.sessionId) {
+      const backingSession = await sessions.get(session.sessionId)
+      if (backingSession == null) {
+        await resetPersistentSession(hash)
+        session = await getOrCreateActivePersistentSession(activityName, hash)
+      }
+    }
+
+    const { sessions: sessionEntries } = parsePersistentSessionsCookie(
+      req.cookies?.persistent_sessions,
+      'persistent_sessions (/api/persistent-session/:hash/entry)',
+    )
+    const cookieKey = `${activityName}:${hash}`
+    const hasTeacherCookie = sessionEntries.some((entry) => entry.key === cookieKey)
+
+    res.json(resolvePersistentSessionEntryStatus({
+      activityName: session.activityName,
+      hash,
+      entryPolicy: session.entryPolicy,
+      isStarted: Boolean(session.sessionId),
+      sessionId: session.sessionId,
+      hasTeacherCookie,
+      activitySupportsSolo: activitySupportsSoloMode(session.activityName),
+      waitingRoomFieldCount: getActivityWaitingRoomFieldCount(session.activityName),
+    }))
   })
 
   app.get('/api/persistent-session/:hash/teacher-code', (req, res) => {

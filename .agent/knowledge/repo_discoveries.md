@@ -62,6 +62,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Unify the persistent-link and join-code gateway endpoints once participant handoff moves server-side; right now they still expose parallel entry contracts even though the client flow is more aligned.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: client | server
+- Discovery: Permalink entry now follows the same server-backed “entry metadata first” pattern as join-code entry. The server exposes `GET /api/persistent-session/:hash/entry`, and `SessionRouter` now uses that route’s resolved role/outcome/presentation payload instead of recomputing permalink status on the client from `entryPolicy`, teacher cookie, and session-start flags.
+- Why it matters: This removes another split-brain decision path from the client and brings permalink and join-code entry much closer to the same gateway model, even though the backend still uses separate persistent-session and direct-session lookup endpoints.
+- Evidence: `server/core/persistentSessionEntryStatus.ts`; `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `types/waitingRoom.ts`
+- Follow-up action: The next true unification step is backend-side, not router-side: collapse the parallel entry-status endpoints into one shared gateway abstraction once participant handoff and role inheritance rules are stable enough.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Area: client | activities
 - Discovery: Waiting-room exit now writes collected values into a shared sessionStorage handoff keyed by destination (`session` or `solo`), and `java-string-practice` consumes that handoff's `displayName` to skip its duplicate live-session name prompt when preflight already captured it.

@@ -218,6 +218,88 @@ void test('persistent session route allows recreation after reset', async (t) =>
   assert.equal(secondRes.jsonBody?.sessionId, 'new-session')
 })
 
+void test('persistent session entry route returns shared entry status for started live sessions', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'GET', '/api/persistent-session/:hash/entry')
+
+  const activityName = 'java-string-practice'
+  const teacherCode = 'entry-status-code'
+  const { hash } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash)
+  sessionMap.set('live-session', { id: 'live-session' })
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const req = createMockReq({
+    params: { hash },
+    query: { activityName },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  })
+  const res = createMockRes()
+
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, {
+    activityName,
+    hash,
+    entryPolicy: 'instructor-required',
+    hasTeacherCookie: true,
+    isStarted: true,
+    sessionId: 'live-session',
+    waitingRoomFieldCount: 1,
+    resolvedRole: 'teacher',
+    entryOutcome: 'join-live',
+    presentationMode: 'render-ui',
+  })
+})
+
+void test('persistent session entry route keeps solo-only links in solo status even with teacher cookie', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'GET', '/api/persistent-session/:hash/entry')
+
+  const activityName = 'java-format-practice'
+  const teacherCode = 'solo-only-entry'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-only')
+
+  const req = createMockReq({
+    params: { hash },
+    query: { activityName },
+    cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
+  })
+  const res = createMockRes()
+
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, {
+    activityName,
+    hash,
+    entryPolicy: 'solo-only',
+    hasTeacherCookie: true,
+    isStarted: false,
+    sessionId: null,
+    waitingRoomFieldCount: 1,
+    resolvedRole: 'student',
+    entryOutcome: 'continue-solo',
+    presentationMode: 'render-ui',
+  })
+})
+
 void test('teacher lifecycle clears session on explicit end', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()
