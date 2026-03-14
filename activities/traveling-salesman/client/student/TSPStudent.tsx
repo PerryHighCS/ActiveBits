@@ -183,20 +183,6 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
     };
   }, [sessionId, isSoloSession]);
 
-  useEffect(() => {
-    if (isSoloSession && !initialIdentity) {
-      setStudentName('Solo Student');
-      setStudentId('solo-user');
-      setNameSubmitted(true);
-      setIdentityResolved(true);
-      return;
-    }
-
-    if (!isSoloSession) {
-      return;
-    }
-  }, [initialIdentity, isSoloSession]);
-
   const restoreStudentRoute = useCallback(async (idToRestore: string) => {
     if (sessionId == null || idToRestore == null || idToRestore === '') return;
     try {
