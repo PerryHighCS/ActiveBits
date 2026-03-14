@@ -38,6 +38,13 @@ export function resolveWaitingRoomPrimaryAction({
     }
   }
 
+  if (entryOutcome === 'solo-unavailable') {
+    return {
+      touchedFields,
+      errorMessage: 'Solo mode is not available for this activity.',
+    }
+  }
+
   if (entryOutcome === 'join-live' && !startedSessionId) {
     return {
       touchedFields,

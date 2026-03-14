@@ -35,3 +35,15 @@ void test('getWaitingRoomViewModel returns live-join preflight copy for join-liv
   assert.equal(viewModel.fieldHeading, '')
   assert.equal(viewModel.fieldDescription, '')
 })
+
+void test('getWaitingRoomViewModel returns solo-unavailable error copy with no primary action', () => {
+  const viewModel = getWaitingRoomViewModel('solo-unavailable')
+
+  assert.equal(viewModel.showWaiterCount, false)
+  assert.equal(viewModel.showTeacherSection, false)
+  assert.equal(viewModel.primaryActionLabel, null)
+  assert.match(viewModel.statusTitle, /solo mode is not available/i)
+  assert.match(viewModel.statusDetail, /does not support solo mode/i)
+  assert.equal(viewModel.fieldHeading, '')
+  assert.equal(viewModel.fieldDescription, '')
+})

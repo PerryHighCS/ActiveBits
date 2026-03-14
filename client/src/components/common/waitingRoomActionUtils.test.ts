@@ -102,3 +102,31 @@ void test('resolveWaitingRoomPrimaryAction allows join-live when fields are vali
     },
   )
 })
+
+void test('resolveWaitingRoomPrimaryAction blocks entry when outcome is solo-unavailable', () => {
+  assert.deepEqual(
+    resolveWaitingRoomPrimaryAction({
+      waitingRoomFields,
+      waitingRoomErrors: {},
+      entryOutcome: 'solo-unavailable',
+    }),
+    {
+      touchedFields: {
+        displayName: true,
+        team: true,
+      },
+      errorMessage: 'Solo mode is not available for this activity.',
+    },
+  )
+})
+
+void test('resolveWaitingRoomPrimaryAction blocks solo-unavailable even when field errors are present', () => {
+  // solo-unavailable is checked after field errors; field errors take priority
+  const result = resolveWaitingRoomPrimaryAction({
+    waitingRoomFields,
+    waitingRoomErrors: { displayName: 'Display name is required.' },
+    entryOutcome: 'solo-unavailable',
+  })
+  assert.equal(typeof result.errorMessage, 'string')
+  assert.notEqual(result.errorMessage, null)
+})

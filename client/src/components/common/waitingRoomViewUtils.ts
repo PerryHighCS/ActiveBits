@@ -35,6 +35,18 @@ export function getWaitingRoomViewModel(entryOutcome: PersistentSessionEntryOutc
     }
   }
 
+  if (entryOutcome === 'solo-unavailable') {
+    return {
+      statusTitle: 'Solo mode is not available',
+      statusDetail: 'This activity does not support solo mode. Ask your teacher for a join code.',
+      fieldHeading: '',
+      fieldDescription: '',
+      showWaiterCount: false,
+      showTeacherSection: false,
+      primaryActionLabel: null,
+    }
+  }
+
   return {
     statusTitle: 'Waiting for teacher to start the activity',
     statusDetail: 'You can complete any required details while you wait.',
