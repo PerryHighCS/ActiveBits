@@ -62,6 +62,24 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-14
 - Scope: unit
+- Pattern: For heavy submit handlers inside `WaitingRoom`, extract just the post-request decision matrix instead of the whole network flow. Cover the branch between manage redirect, websocket verification, and user-facing error states with a pure helper.
+- Why it helps: It captures the real product risk in teacher-code submission without forcing the client suite to mock the entire fetch + websocket + navigation stack inside the shared container.
+- Example (file/path): `client/src/components/common/waitingRoomTeacherSubmitUtils.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.test.ts`
+- Failure signal: Teacher-code submit starts routing to the wrong destination or leaves the wrong error/submitting state behind, while fetch/auth helper tests still pass.
+- Follow-up action: Treat the remaining uncovered portion as container wiring. If that wiring becomes important enough to test, prefer one higher-level interaction layer instead of continuing to split out tiny helpers.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For websocket `onopen` branches that recover remembered teacher auth, extract the “fetch remembered code then send verification” flow into a small helper and test success, missing-data, fetch-failure, and send-failure cases directly.
+- Why it helps: This covers the last substantial async branch inside `WaitingRoom` without introducing a browser harness just to exercise cookie-backed teacher auto-auth.
+- Example (file/path): `client/src/components/common/waitingRoomAutoAuthUtils.ts`; `client/src/components/common/waitingRoomAutoAuthUtils.test.ts`
+- Failure signal: Teacher-cookie auto-auth silently stops sending verification, or starts throwing on fetch/send failures, while message-transition and render tests still pass.
+- Follow-up action: After this seam, be cautious about further extraction. The remaining websocket lifecycle cases are likely better treated as either accepted container risk or a reason to add a higher-level harness later.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
 - Pattern: For activity-owned reconnect/recovery behavior that hangs off websocket close events, extract the close-decision logic into a tiny activity-local helper and test that helper directly instead of trying to simulate the whole websocket lifecycle in the component test.
 - Why it helps: It keeps the test focused on the product contract change, like “stale server-issued identity should clear cached registration and require rejoin,” without depending on browser WebSocket mocks or the full student component state machine.
 - Example (file/path): `activities/syncdeck/client/student/reconnectUtils.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`

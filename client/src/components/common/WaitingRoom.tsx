@@ -22,7 +22,6 @@ import {
 } from './entryParticipantStorage'
 import {
   buildPersistentAuthenticateApiUrl,
-  buildPersistentTeacherCodeApiUrl,
   buildPersistentSessionWsUrl,
   isWaitingRoomMessage,
   parseWaitingRoomMessage,
@@ -34,6 +33,8 @@ import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorRes
 import { resolveWaitingRoomPrimaryAction } from './waitingRoomActionUtils'
 import { persistWaitingRoomServerBackedHandoff } from './waitingRoomHandoffUtils'
 import { resolveWaitingRoomMessageTransition } from './waitingRoomTransitionUtils'
+import { attemptWaitingRoomAutoTeacherAuth } from './waitingRoomAutoAuthUtils'
+import { resolveWaitingRoomTeacherSubmitResult } from './waitingRoomTeacherSubmitUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -176,28 +177,12 @@ export default function WaitingRoom({
 
     ws.onopen = () => {
       setError(null)
-
-      if (shouldAutoAuthRef.current) {
-        fetch(buildPersistentTeacherCodeApiUrl(hash, activityName), {
-          credentials: 'include',
-        })
-          .then((response) => response.json())
-          .then((data: { teacherCode?: string }) => {
-            if (!data.teacherCode) return
-
-            try {
-              ws.send(
-                JSON.stringify({
-                  type: 'verify-teacher-code',
-                  teacherCode: data.teacherCode,
-                }),
-              )
-            } catch (sendError) {
-              console.error('Failed to send teacher code over WS:', sendError)
-            }
-          })
-          .catch((fetchError) => console.error('Failed to fetch teacher code:', fetchError))
-      }
+      void attemptWaitingRoomAutoTeacherAuth({
+        shouldAutoAuth: shouldAutoAuthRef.current,
+        hash,
+        activityName,
+        ws,
+      })
     }
 
     ws.onmessage = (event) => {
@@ -253,9 +238,9 @@ export default function WaitingRoom({
     teacherAuthRequestedRef.current = true
 
     const normalizedTeacherCode = teacherCode.trim()
+    const queryString = typeof window !== 'undefined' ? window.location.search : ''
 
     try {
-      const queryString = typeof window !== 'undefined' ? window.location.search : ''
       const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
         queryString,
         activity?.deepLinkOptions,
@@ -282,16 +267,44 @@ export default function WaitingRoom({
       }
 
       const payload = (await authenticateResponse.json()) as TeacherAuthenticateResponse
-      if (payload.isStarted && typeof payload.sessionId === 'string' && payload.sessionId.length > 0) {
-        const queryString = typeof window !== 'undefined' ? window.location.search : ''
-        const teacherPath = `/manage/${activityName}/${payload.sessionId}${queryString}`
+      const submissionResolution = resolveWaitingRoomTeacherSubmitResult({
+        payload,
+        activityName,
+        queryString,
+        normalizedTeacherCode,
+        isWaitingForTeacher,
+        hasOpenSocket: wsRef.current?.readyState === WebSocket.OPEN,
+      })
+
+      if (typeof submissionResolution.navigateTo === 'string') {
         if (!hasNavigatedRef.current) {
           hasNavigatedRef.current = true
-          if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+          if (submissionResolution.closeSocket && wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
             wsRef.current.close()
           }
-          void navigate(teacherPath)
+          void navigate(submissionResolution.navigateTo)
         }
+        return
+      }
+
+      if (typeof submissionResolution.sendVerifyTeacherCode === 'string' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'verify-teacher-code',
+            teacherCode: submissionResolution.sendVerifyTeacherCode,
+          }),
+        )
+        return
+      }
+
+      if (submissionResolution.clearTeacherAuthRequested) {
+        teacherAuthRequestedRef.current = false
+      }
+      if (typeof submissionResolution.isSubmitting === 'boolean') {
+        setIsSubmitting(submissionResolution.isSubmitting)
+      }
+      if (typeof submissionResolution.errorMessage === 'string') {
+        setError(submissionResolution.errorMessage)
         return
       }
     } catch (authenticateError) {
@@ -299,26 +312,6 @@ export default function WaitingRoom({
       setIsSubmitting(false)
       teacherAuthRequestedRef.current = false
       return
-    }
-
-    if (!isWaitingForTeacher) {
-      setError('Live session is unavailable right now. Please refresh and try again.')
-      setIsSubmitting(false)
-      teacherAuthRequestedRef.current = false
-      return
-    }
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'verify-teacher-code',
-          teacherCode: normalizedTeacherCode,
-        }),
-      )
-    } else {
-      setError('Not connected. Please refresh the page.')
-      setIsSubmitting(false)
-      teacherAuthRequestedRef.current = false
     }
   }
 

@@ -47,6 +47,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | testing
+- Discovery: `WaitingRoom` now has direct helper coverage for both of its remaining substantial async branches: cookie-backed teacher auto-auth on websocket open (`waitingRoomAutoAuthUtils.ts`) and post-auth teacher-code submit routing (`waitingRoomTeacherSubmitUtils.ts`).
+- Why it matters: This means the seam-first strategy has covered most of the risky `WaitingRoom` decision logic without adding Playwright. What remains is mostly container wiring across websocket lifecycle events and true end-to-end form/network interaction, not large untested logic branches.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomAutoAuthUtils.ts`; `client/src/components/common/waitingRoomAutoAuthUtils.test.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.test.ts`
+- Follow-up action: If additional `WaitingRoom` confidence is still needed, decide explicitly whether the remaining container-wiring risk justifies a higher-level interaction harness instead of extracting more tiny helpers.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | client | testing
 - Discovery: Waiting-room entry semantics are now testable at a stable helper boundary instead of only through route/component flows: `server/core/entryStatus.ts` covers shared join/wait/solo/pass-through decisions, `server/core/sessionEntryParticipants.ts` covers tokenized live-entry handoff normalization/one-shot consume behavior, and `entryParticipantStorage` covers client-side 404-vs-retry token handling.
 - Why it matters: The branch’s remaining test gaps are now narrower and easier to reason about. We can add high-signal matrix coverage for shared entry behavior without forcing a brittle DOM harness around the whole `WaitingRoom` component before the API contracts settle.
