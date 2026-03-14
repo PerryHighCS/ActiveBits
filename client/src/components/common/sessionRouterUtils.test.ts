@@ -116,6 +116,24 @@ void test('buildPersistentSessionEntryApiUrl targets the server-backed permalink
   )
 })
 
+void test('buildSessionEntryApiUrl encodes raw session identifiers for the join entry route', () => {
+  assert.equal(
+    buildSessionEntryApiUrl('session/1?x y'),
+    '/api/session/session%2F1%3Fx%20y/entry',
+  )
+})
+
+void test('buildPersistentTeacherManagePath preserves query params for most activities but clears syncdeck bootstrap params', () => {
+  assert.equal(
+    buildPersistentTeacherManagePath('raffle', 'session-1', '?foo=bar'),
+    '/manage/raffle/session-1?foo=bar',
+  )
+  assert.equal(
+    buildPersistentTeacherManagePath('syncdeck', 'session-1', '?presentationUrl=https%3A%2F%2Fslides.example'),
+    '/manage/syncdeck/session-1',
+  )
+})
+
 void test('buildSessionEntryApiUrl encodes the session ID for join entry lookups', () => {
   assert.equal(buildSessionEntryApiUrl('ab/c 123'), '/api/session/ab%2Fc%20123/entry')
 })

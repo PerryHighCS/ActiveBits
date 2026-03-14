@@ -150,6 +150,31 @@ void test('session entry route returns 404 for missing sessions', async () => {
   assert.deepEqual(res.jsonBody, { error: 'invalid session' })
 })
 
+void test('session entry participant store route returns 404 for missing sessions', async () => {
+  await initializeActivityRegistry()
+  const sessions = {
+    get: async () => null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant')({
+    params: { sessionId: 'missing' },
+    body: { values: { displayName: 'Ada' } },
+  }, res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.jsonBody, { error: 'invalid session' })
+})
+
 void test('session entry participant routes store and consume waiting-room values by token', async () => {
   await initializeActivityRegistry()
   const session = createSessionRecord('session-3', 'java-string-practice')
@@ -215,4 +240,79 @@ void test('session entry participant routes store and consume waiting-room value
 
   assert.equal(missingRes.statusCode, 404)
   assert.deepEqual(missingRes.jsonBody, { error: 'entry participant not found' })
+})
+
+void test('session entry participant consume route trims tokens and rejects blank token requests', async () => {
+  await initializeActivityRegistry()
+  const session = createSessionRecord('session-4', 'java-string-practice')
+  const sessionMap = new Map<string, SessionRecord>([['session-4', session]])
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, nextSession: SessionRecord) => {
+      sessionMap.set(id, nextSession)
+    },
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const storeRes = createMockResponse()
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant')({
+    params: { sessionId: 'session-4' },
+    body: {
+      values: {
+        displayName: 'Grace',
+      },
+    },
+  }, storeRes)
+
+  const token = String(storeRes.jsonBody?.entryParticipantToken)
+
+  const trimmedConsumeRes = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
+    params: { sessionId: 'session-4', token: `  ${token}  ` },
+  }, trimmedConsumeRes)
+
+  assert.equal(trimmedConsumeRes.statusCode, 200)
+  assert.equal(
+    typeof (trimmedConsumeRes.jsonBody?.values as Record<string, unknown> | undefined)?.participantId,
+    'string',
+  )
+
+  const blankConsumeRes = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
+    params: { sessionId: 'session-4', token: '   ' },
+  }, blankConsumeRes)
+
+  assert.equal(blankConsumeRes.statusCode, 404)
+  assert.deepEqual(blankConsumeRes.jsonBody, { error: 'entry participant not found' })
+})
+
+void test('session entry participant consume route returns 404 for missing sessions', async () => {
+  await initializeActivityRegistry()
+  const sessions = {
+    get: async () => null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
+    params: { sessionId: 'missing', token: 'token-1' },
+  }, res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.jsonBody, { error: 'invalid session' })
 })
