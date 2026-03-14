@@ -24,6 +24,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Follow-up action: Keep helper-level matrix coverage current as new entry outcomes or handoff semantics are added, then add integration tests only for the riskiest UI or API glue.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Scope: integration
+- Pattern: When a server test intentionally triggers noisy warning/error output on waiting-room entry paths, add a short `[TEST]` console marker immediately before the trigger so expected parse/auth noise is distinguishable from real regressions in the test log.
+- Why it helps: Waiting-room and permalink tests now intentionally exercise corrupted-cookie and similar failure paths; explicit markers make the resulting server logs legible during focused runs and in broader sandbox fallback gates.
+- Example (file/path): `server/persistentSessionRoutes.test.ts`
+- Failure signal: Test output includes scary-looking parse/auth error logs with no nearby indication that the noise was intentionally triggered by the test.
+- Follow-up action: Add the same marker pattern to future waiting-room tests that intentionally produce console noise, especially around cookie parsing, auth failures, or storage fallbacks.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Scope: integration
 - Pattern: In sandboxed agent environments where some server tests fail during local port binding or related host restrictions, use `npm run test:codex` as the validation gate and record the skipped full-suite limitation alongside targeted checks for the touched server surface.

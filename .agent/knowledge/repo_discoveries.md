@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-14
+- Area: server | testing
+- Discovery: Waiting-room route coverage is now broad enough to validate most current entry-gateway API edges without a browser harness. `persistentSessionRoutes.test.ts` covers malformed permalink entry requests, corrupted cookie parsing, stale backing-session repair, student/teacher live-entry role differences, and solo-unavailable permalink outcomes, while `sessionEntryRoutes.test.ts` covers missing-session and token-trimming behavior for live entry-participant handoff routes.
+- Why it matters: The remaining test gaps are now concentrated in still-unimplemented embedded-role inheritance and `WaitingRoom.tsx` component interactions rather than basic entry-route correctness. That keeps future effort focused on real product gaps instead of more route boilerplate.
+- Evidence: `server/persistentSessionRoutes.test.ts`; `server/sessionEntryRoutes.test.ts`; `server/entryStatus.test.ts`
+- Follow-up action: When embedded entry work lands, add route/integration coverage there first; for `WaitingRoom.tsx`, revisit component-level tests only if the test environment gains a stable way to mock or bypass the Vite `import.meta.glob` activity loader.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | client | testing
 - Discovery: Waiting-room entry semantics are now testable at a stable helper boundary instead of only through route/component flows: `server/core/entryStatus.ts` covers shared join/wait/solo/pass-through decisions, `server/core/sessionEntryParticipants.ts` covers tokenized live-entry handoff normalization/one-shot consume behavior, and `entryParticipantStorage` covers client-side 404-vs-retry token handling.
 - Why it matters: The branch’s remaining test gaps are now narrower and easier to reason about. We can add high-signal matrix coverage for shared entry behavior without forcing a brittle DOM harness around the whole `WaitingRoom` component before the API contracts settle.
