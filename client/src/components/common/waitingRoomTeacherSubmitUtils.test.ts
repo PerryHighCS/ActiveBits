@@ -30,18 +30,6 @@ void test('resolveWaitingRoomTeacherSubmitResult sends teacher code over open we
   })
 })
 
-void test('resolveWaitingRoomTeacherSubmitResult sends teacher code over open websocket while waiting', () => {
-  assert.deepEqual(resolveWaitingRoomTeacherSubmitResult({
-    payload: {},
-    activityName: 'java-string-practice',
-    queryString: '',
-    normalizedTeacherCode: 'teacher-1',
-    hasOpenSocket: true,
-  }), {
-    sendVerifyTeacherCode: 'teacher-1',
-  })
-})
-
 void test('resolveWaitingRoomTeacherSubmitResult reports disconnected socket while waiting', () => {
   assert.deepEqual(resolveWaitingRoomTeacherSubmitResult({
     payload: {},
