@@ -103,8 +103,9 @@ export default {
     utilities: [                // Optional: extra dashboard utility links
       {
         label: 'Copy Feedback Review Link',
-        path: '/solo/gallery-walk',
+        path: '/util/gallery-walk/viewer',
         description: 'Upload and review feedback that was left for you.',
+        standaloneSessionId: 'solo-gallery-walk',
       },
     ],
   },

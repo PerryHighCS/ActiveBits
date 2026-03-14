@@ -22,9 +22,10 @@ const galleryWalkConfig: ActivityConfig = {
     utilities: [
       {
         label: 'Copy Feedback Review Link',
-        path: '/solo/gallery-walk',
+        path: '/util/gallery-walk/viewer',
         description: 'Upload and review feedback that was left for you.',
         showOnHome: true,
+        standaloneSessionId: 'solo-gallery-walk',
       },
     ],
   },

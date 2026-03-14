@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useState, type ChangeEvent, type ComponentType, type FormEvent } from 'react'
 import type { PersistentSessionEntryStatus, SessionEntryStatus } from '../../../../types/waitingRoom.js'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
 import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
@@ -13,6 +13,7 @@ import {
   buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
+  findUtilityRouteMatch,
   getHomeUtilityActivities,
   getSessionPresentationUrlForTeacherRedirect,
   getStandaloneHomeActivities,
@@ -29,6 +30,8 @@ interface RouteParams {
   activityName?: string
   hash?: string
   soloActivityId?: string
+  utilityActivityId?: string
+  utilityId?: string
 }
 
 interface SessionPayload {
@@ -82,7 +85,8 @@ function getWindowSearch(): string {
 
 const SessionRouter = () => {
   const [sessionIdInput, setSessionIdInput] = useState('')
-  const { sessionId, activityName, hash, soloActivityId } = useParams<RouteParams>()
+  const { sessionId, activityName, hash, soloActivityId, utilityActivityId, utilityId } = useParams<RouteParams>()
+  const location = useLocation()
 
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
   const [sessionEntryStatus, setSessionEntryStatus] = useState<SessionEntryStatus | null>(null)
@@ -110,6 +114,14 @@ const SessionRouter = () => {
       : activities.some((entry) => entry.id === soloActivityId)
         ? 'This activity does not support solo mode'
         : 'Unknown solo activity'
+  const utilityRouteMatch = (utilityActivityId != null && utilityId != null)
+    ? findUtilityRouteMatch(activities, location.pathname)
+    : null
+  const utilityRouteError = utilityActivityId == null
+    ? null
+    : utilityRouteMatch != null
+      ? null
+      : 'Unknown utility route'
 
   const resolveTeacherManagePath = useCallback(
     async (
@@ -343,7 +355,9 @@ const SessionRouter = () => {
     }
   }
 
-  if (error || soloRouteError) return <div className="text-red-500 text-center">{error || soloRouteError}</div>
+  if (error || soloRouteError || utilityRouteError) {
+    return <div className="text-red-500 text-center">{error || soloRouteError || utilityRouteError}</div>
+  }
 
   if (hash && activityName) {
     if (isLoadingPersistent || persistentSessionEntryStatus === null) {
@@ -412,6 +426,23 @@ const SessionRouter = () => {
     return (
       <Suspense fallback={<LoadingFallback />}>
         <SoloStudentComponent sessionData={{ sessionId: `solo-${soloActivity.id}`, studentName: 'Solo Student' }} />
+      </Suspense>
+    )
+  }
+
+  if (utilityRouteMatch) {
+    const StudentComponent = utilityRouteMatch.activity.StudentComponent
+
+    if (!StudentComponent) {
+      return <div className="text-center">Utility view is unavailable for this activity.</div>
+    }
+
+    const UtilityStudentComponent = StudentComponent as ActivityStudentComponent
+    const utilitySessionId = utilityRouteMatch.utility.standaloneSessionId || `solo-${utilityRouteMatch.activity.id}`
+
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <UtilityStudentComponent sessionData={{ sessionId: utilitySessionId, studentName: 'Utility User' }} />
       </Suspense>
     )
   }

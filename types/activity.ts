@@ -57,6 +57,7 @@ export interface ActivityManageDashboardUtility {
   path: string
   description?: string
   showOnHome?: boolean
+  standaloneSessionId?: string
 }
 
 export interface ActivityStandaloneEntryConfig {

@@ -9,6 +9,7 @@ import {
   buildPersistentSessionApiUrl,
   buildSessionEntryApiUrl,
   cleanExpiredSessions,
+  findUtilityRouteMatch,
   getHomeUtilityActivities,
   getPersistentLinkControlStateFromSearch,
   normalizePersistentPresentationUrl,
@@ -381,7 +382,7 @@ void test('getHomeUtilityActivities returns activities with home-visible utiliti
       soloMode: true,
       manageDashboard: {
         utilities: [
-          { label: 'Feedback Review', path: '/solo/gallery-walk', showOnHome: true },
+          { label: 'Feedback Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
         ],
       },
     },
@@ -400,4 +401,33 @@ void test('getHomeUtilityActivities returns activities with home-visible utiliti
   ])
 
   assert.deepEqual(result.map((activity) => activity.id), ['gallery-walk'])
+})
+
+void test('findUtilityRouteMatch resolves configured utility paths', () => {
+  const match = findUtilityRouteMatch([
+    {
+      id: 'gallery-walk',
+      name: 'Gallery Walk',
+      description: 'G',
+      color: 'blue',
+      soloMode: true,
+      manageDashboard: {
+        utilities: [
+          { label: 'Feedback Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
+        ],
+      },
+    },
+    {
+      id: 'syncdeck',
+      name: 'SyncDeck',
+      description: 'S',
+      color: 'indigo',
+      soloMode: false,
+    },
+  ], '/util/gallery-walk/viewer')
+
+  assert.equal(match?.activity.id, 'gallery-walk')
+  assert.equal(match?.utility.label, 'Feedback Review')
+  assert.equal(match?.utility.standaloneSessionId, 'solo-gallery-walk')
+  assert.equal(findUtilityRouteMatch([], '/util/gallery-walk/viewer'), null)
 })

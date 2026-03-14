@@ -274,6 +274,9 @@ function parseManageDashboardUtilities(raw: unknown, context: string): ActivityM
       ...(readOptionalString(entry, 'description', `${context}.utilities[${index}]`) !== undefined
         ? { description: readOptionalString(entry, 'description', `${context}.utilities[${index}]`) }
         : {}),
+      ...(readOptionalString(entry, 'standaloneSessionId', `${context}.utilities[${index}]`) !== undefined
+        ? { standaloneSessionId: readOptionalString(entry, 'standaloneSessionId', `${context}.utilities[${index}]`) }
+        : {}),
       ...(readOptionalBoolean(entry, 'showOnHome', `${context}.utilities[${index}]`) !== undefined
         ? { showOnHome: readOptionalBoolean(entry, 'showOnHome', `${context}.utilities[${index}]`) }
         : {}),

@@ -451,8 +451,9 @@ export default {
     utilities: [
       {
         label: 'Copy Feedback Review Link',
-        path: '/solo/gallery-walk',
+        path: '/util/gallery-walk/viewer',
         description: 'Upload a .gw file to review exported feedback.',
+        standaloneSessionId: 'solo-gallery-walk',
       },
     ],
   },

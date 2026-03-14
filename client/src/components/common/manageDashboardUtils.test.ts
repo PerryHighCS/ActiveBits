@@ -112,12 +112,12 @@ void test('buildPersistentSessionKey creates stable map keys', () => {
 
 void test('buildManageDashboardUtilityUrl normalizes relative utility paths and preserves absolute URLs', () => {
   assert.equal(
-    buildManageDashboardUtilityUrl('https://bits.example', '/solo/gallery-walk'),
-    'https://bits.example/solo/gallery-walk',
+    buildManageDashboardUtilityUrl('https://bits.example', '/util/gallery-walk/viewer'),
+    'https://bits.example/util/gallery-walk/viewer',
   )
   assert.equal(
-    buildManageDashboardUtilityUrl('https://bits.example', 'solo/gallery-walk'),
-    'https://bits.example/solo/gallery-walk',
+    buildManageDashboardUtilityUrl('https://bits.example', 'util/gallery-walk/viewer'),
+    'https://bits.example/util/gallery-walk/viewer',
   )
   assert.equal(
     buildManageDashboardUtilityUrl('https://bits.example', 'https://docs.example/guide'),
