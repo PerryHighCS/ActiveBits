@@ -708,6 +708,62 @@ void test('teacher-code route returns the remembered code when it still validate
   assert.deepEqual(res.jsonBody, { teacherCode })
 })
 
+void test('persistent entry participant routes store and consume values by token', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const activityName = 'java-string-practice'
+  const teacherCode = 'persistent-entry-participant'
+  const { hash } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  const storeHandler = getRoute(app, 'POST', '/api/persistent-session/:hash/entry-participant')
+  const storeRes = createMockRes()
+  await storeHandler(createMockReq({
+    params: { hash },
+    query: { activityName },
+    body: {
+      values: {
+        displayName: 'Ada',
+        ignored: () => 'x',
+      },
+    },
+  }), storeRes)
+
+  assert.equal(storeRes.statusCode, 200)
+  const token = typeof storeRes.jsonBody?.entryParticipantToken === 'string' ? storeRes.jsonBody.entryParticipantToken : null
+  assert.equal(typeof token, 'string')
+  assert.equal(typeof (storeRes.jsonBody?.values as Record<string, unknown> | undefined)?.participantId, 'string')
+
+  const consumeHandler = getRoute(app, 'GET', '/api/persistent-session/:hash/entry-participant/:token')
+  const consumeRes = createMockRes()
+  await consumeHandler(createMockReq({
+    params: { hash, token: String(token) },
+    query: { activityName },
+  }), consumeRes)
+
+  assert.equal(consumeRes.statusCode, 200)
+  assert.deepEqual(consumeRes.jsonBody, {
+    values: {
+      displayName: 'Ada',
+      participantId: (storeRes.jsonBody?.values as Record<string, unknown>).participantId,
+    },
+  })
+
+  const missingRes = createMockRes()
+  await consumeHandler(createMockReq({
+    params: { hash, token: String(token) },
+    query: { activityName },
+  }), missingRes)
+
+  assert.equal(missingRes.statusCode, 404)
+  assert.deepEqual(missingRes.jsonBody, { error: 'entry participant not found' })
+})
+
 void test('teacher lifecycle clears session on explicit end', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()

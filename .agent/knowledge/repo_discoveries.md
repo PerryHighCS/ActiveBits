@@ -111,6 +111,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | server
+- Discovery: Persistent permalink `continue-solo` now uses the same broad opaque-token handoff pattern as live entry. `WaitingRoom` posts solo preflight values to new persistent-session entry-participant routes, stores only the returned token plus `persistentHash` in sessionStorage, and `entryParticipantStorage` can consume that token later for solo startup while still falling back to local values if the server-backed write fails.
+- Why it matters: This removes the previous asymmetry where live entry had early shared `participantId` and server-backed carry-forward but solo permalink continuation still depended entirely on client-held values. The branch now has one reusable token-based handoff shape for both live and persistent-solo waiting-room exits without collapsing the entrypoints themselves.
+- Evidence: `server/core/persistentSessions.ts`; `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/entryParticipantStorage.ts`; `client/src/components/common/entryParticipantStorage.test.ts`
+- Follow-up action: Decide whether standalone `/solo/:activityId` should eventually consume the same server-backed participant context, or remain a lighter compatibility path outside persistent permalink entry.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: client | server | activities
 - Discovery: The live entry-participant handoff now mints shared `participantId` before activity-specific websocket join. `java-string-practice` and `java-format-practice` can carry that ID into their first live-session websocket URL instead of waiting for the activity route to assign and echo a new one after connection.
 - Why it matters: This is the first shared path where participant identity exists before activity-specific join logic runs, which narrows the gap between “waiting-room accepted entry” and “activity-owned participant registration” without yet forcing every activity onto one registration service.

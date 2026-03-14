@@ -3,9 +3,11 @@ import {
   isValidActivity,
 } from '../activities/activityRegistry.js'
 import {
+  consumePersistentSessionEntryParticipant,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   getPersistentSession,
+  storePersistentSessionEntryParticipant,
   verifyTeacherCodeWithHash,
   resolvePersistentSessionEntryPolicy,
 } from '../core/persistentSessions.js'
@@ -431,6 +433,68 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     }
 
     res.status(404).json({ error: 'No teacher code found' })
+  })
+
+  app.post('/api/persistent-session/:hash/entry-participant', async (req, res) => {
+    const hash = req.params.hash
+    const activityName = getQueryString(req.query.activityName)
+
+    if (!hash) {
+      res.status(400).json({ error: 'Missing hash parameter' })
+      return
+    }
+    if (!activityName) {
+      res.status(400).json({ error: 'Missing activityName parameter' })
+      return
+    }
+
+    try {
+      const body = isPlainObject(req.body) ? req.body : {}
+      const { token, values } = await storePersistentSessionEntryParticipant(activityName, hash, body.values)
+      res.json({ entryParticipantToken: token, values })
+    } catch (error) {
+      console.error('Error storing persistent session entry participant:', { activityName, hash, error })
+      res.status(500).json({ error: 'internal server error' })
+    }
+  })
+
+  app.get('/api/persistent-session/:hash/entry-participant/:token', async (req, res) => {
+    const hash = req.params.hash
+    const activityName = getQueryString(req.query.activityName)
+
+    if (!hash) {
+      res.status(400).json({ error: 'Missing hash parameter' })
+      return
+    }
+    if (!activityName) {
+      res.status(400).json({ error: 'Missing activityName parameter' })
+      return
+    }
+
+    const persistentSession = await getPersistentSession(hash)
+    if (!persistentSession || persistentSession.activityName !== activityName) {
+      res.status(404).json({ error: 'invalid persistent session' })
+      return
+    }
+
+    try {
+      const token = req.params.token
+      if (!token) {
+        res.status(404).json({ error: 'entry participant not found' })
+        return
+      }
+
+      const values = await consumePersistentSessionEntryParticipant(hash, token)
+      if (!values) {
+        res.status(404).json({ error: 'entry participant not found' })
+        return
+      }
+
+      res.json({ values })
+    } catch (error) {
+      console.error('Error consuming persistent session entry participant:', { activityName, hash, error })
+      res.status(500).json({ error: 'internal server error' })
+    }
   })
 }
 

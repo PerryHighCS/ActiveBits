@@ -17,11 +17,11 @@ import {
   type WaitingRoomFieldValueMap,
 } from './waitingRoomFormUtils'
 import {
+  buildPersistentEntryParticipantSubmitApiUrl,
   buildSessionEntryParticipantSubmitApiUrl,
   buildEntryParticipantStorageKey,
   persistEntryParticipantToken,
   persistEntryParticipantValues,
-  type EntryParticipantDestinationType,
 } from './entryParticipantStorage'
 import {
   buildPersistentAuthenticateApiUrl,
@@ -353,15 +353,6 @@ export default function WaitingRoom({
   const shareUrl = typeof window !== 'undefined' ? window.location.href : ''
   const isSoloOnlyMode = entryPolicy === 'solo-only'
 
-  const persistEntryParticipantHandoff = (destinationType: EntryParticipantDestinationType, destinationId: string) => {
-    if (typeof window === 'undefined' || window.sessionStorage == null) {
-      return
-    }
-
-    const storageKey = buildEntryParticipantStorageKey(activityName, destinationType, destinationId)
-    persistEntryParticipantValues(window.sessionStorage, storageKey, waitingRoomValues)
-  }
-
   const persistServerBackedSessionEntryParticipantHandoff = async (destinationId: string) => {
     if (typeof window === 'undefined' || window.sessionStorage == null) {
       return
@@ -398,7 +389,43 @@ export default function WaitingRoom({
     }
   }
 
-  const handleContinueSolo = () => {
+  const persistServerBackedSoloEntryParticipantHandoff = async () => {
+    if (typeof window === 'undefined' || window.sessionStorage == null) {
+      return
+    }
+
+    const storageKey = buildEntryParticipantStorageKey(activityName, 'solo', activityName)
+
+    try {
+      const response = await fetch(buildPersistentEntryParticipantSubmitApiUrl(hash, activityName), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          values: waitingRoomValues,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to store solo waiting-room handoff (${response.status})`)
+      }
+
+      const payload = await response.json() as { entryParticipantToken?: unknown }
+      const token = typeof payload.entryParticipantToken === 'string' ? payload.entryParticipantToken.trim() : ''
+      if (!token) {
+        throw new Error('Missing entry participant token')
+      }
+
+      persistEntryParticipantToken(window.sessionStorage, storageKey, token, { persistentHash: hash })
+    } catch (error) {
+      console.warn('[WaitingRoom] Failed to store solo entry participant on server, falling back to client handoff:', error)
+      persistEntryParticipantValues(window.sessionStorage, storageKey, waitingRoomValues)
+    }
+  }
+
+  const handleContinueSolo = async () => {
     const actionResolution = resolveWaitingRoomPrimaryAction({
       waitingRoomFields,
       waitingRoomErrors,
@@ -412,7 +439,7 @@ export default function WaitingRoom({
     }
 
     const queryString = typeof window !== 'undefined' ? window.location.search : ''
-    persistEntryParticipantHandoff('solo', activityName)
+    await persistServerBackedSoloEntryParticipantHandoff()
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       wsRef.current.close()
     }

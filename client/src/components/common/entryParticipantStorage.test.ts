@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildSessionEntryParticipantConsumeApiUrl,
+  buildPersistentEntryParticipantConsumeApiUrl,
+  buildPersistentEntryParticipantSubmitApiUrl,
   buildSessionEntryParticipantStorageKey,
   buildSessionEntryParticipantSubmitApiUrl,
   buildSoloEntryParticipantStorageKey,
@@ -78,6 +80,17 @@ void test('buildSessionEntryParticipant submit/consume URLs encode session and t
   )
 })
 
+void test('buildPersistentEntryParticipant submit/consume URLs encode hash and preserve activity context', () => {
+  assert.equal(
+    buildPersistentEntryParticipantSubmitApiUrl('hash/1', 'java-string-practice'),
+    '/api/persistent-session/hash%2F1/entry-participant?activityName=java-string-practice',
+  )
+  assert.equal(
+    buildPersistentEntryParticipantConsumeApiUrl('hash/1', 'token 2', 'java-string-practice'),
+    '/api/persistent-session/hash%2F1/entry-participant/token%202?activityName=java-string-practice',
+  )
+})
+
 void test('consumeEntryParticipantValues drops malformed payloads after removing them from storage', () => {
   const storage = createStorage()
   const storageKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-2')
@@ -135,6 +148,41 @@ void test('consumeEntryParticipantDisplayName reads local session or solo handof
     }),
     'Grace',
   )
+})
+
+void test('consumeEntryParticipantDisplayName can resolve a server-backed token handoff for solo entry', async () => {
+  const storage = createStorage()
+  const storageKey = buildSoloEntryParticipantStorageKey('java-string-practice')
+  persistEntryParticipantToken(storage, storageKey, 'token-solo', { persistentHash: 'hash-123' })
+
+  const requests: string[] = []
+  const fetchImpl = async (input: string) => {
+    requests.push(input)
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          values: {
+            displayName: 'Solo Ada',
+          },
+        }
+      },
+    }
+  }
+
+  assert.equal(
+    await consumeEntryParticipantDisplayName(storage, {
+      activityName: 'java-string-practice',
+      sessionId: undefined,
+      isSoloSession: true,
+    }, fetchImpl),
+    'Solo Ada',
+  )
+  assert.deepEqual(requests, [
+    '/api/persistent-session/hash-123/entry-participant/token-solo?activityName=java-string-practice',
+  ])
+  assert.equal(storage.getItem(storageKey), null)
 })
 
 void test('consumeEntryParticipantDisplayName can resolve a server-backed token handoff for session entry', async () => {

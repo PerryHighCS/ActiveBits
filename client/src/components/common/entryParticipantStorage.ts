@@ -10,7 +10,7 @@ export type EntryParticipantValueMap = Record<string, WaitingRoomSerializableVal
 export type EntryParticipantDestinationType = 'session' | 'solo'
 type EntryParticipantHandoff =
   | { kind: 'values'; values: EntryParticipantValueMap }
-  | { kind: 'token'; token: string }
+  | { kind: 'token'; token: string; persistentHash?: string }
 
 export interface EntryParticipantLookupParams {
   activityName: string
@@ -69,7 +69,9 @@ function isEntryParticipantHandoff(value: unknown): value is EntryParticipantHan
     return isRecord(value.values)
   }
 
-  return value.kind === 'token' && typeof value.token === 'string'
+  return value.kind === 'token'
+    && typeof value.token === 'string'
+    && (value.persistentHash === undefined || typeof value.persistentHash === 'string')
 }
 
 export function buildEntryParticipantStorageKey(
@@ -108,12 +110,14 @@ export function persistEntryParticipantToken(
   storage: EntryParticipantStorageLike,
   storageKey: string,
   token: string,
+  options: { persistentHash?: string } = {},
   onWarn: (message: string, error: unknown) => void = console.warn,
 ): void {
   try {
     storage.setItem(storageKey, JSON.stringify({
       kind: 'token',
       token,
+      ...(typeof options.persistentHash === 'string' ? { persistentHash: options.persistentHash } : {}),
     } satisfies EntryParticipantHandoff))
   } catch (error) {
     onWarn('[EntryParticipantStorage] Failed to persist entry participant token:', error)
@@ -178,6 +182,16 @@ export function buildSessionEntryParticipantConsumeApiUrl(sessionId: string, tok
   return `/api/session/${encodeURIComponent(sessionId)}/entry-participant/${encodeURIComponent(token)}`
 }
 
+export function buildPersistentEntryParticipantSubmitApiUrl(hash: string, activityName: string): string {
+  const query = new URLSearchParams({ activityName })
+  return `/api/persistent-session/${encodeURIComponent(hash)}/entry-participant?${query.toString()}`
+}
+
+export function buildPersistentEntryParticipantConsumeApiUrl(hash: string, token: string, activityName: string): string {
+  const query = new URLSearchParams({ activityName })
+  return `/api/persistent-session/${encodeURIComponent(hash)}/entry-participant/${encodeURIComponent(token)}?${query.toString()}`
+}
+
 export async function consumeResolvedEntryParticipantValues(
   storage: EntryParticipantStorageLike,
   { activityName, sessionId, isSoloSession }: EntryParticipantLookupParams,
@@ -201,12 +215,22 @@ export async function consumeResolvedEntryParticipantValues(
     return handoff.values
   }
 
-  if (!sessionId || fetchImpl == null) {
+  if (fetchImpl == null) {
     return null
   }
 
   try {
-    const response = await fetchImpl(buildSessionEntryParticipantConsumeApiUrl(sessionId, handoff.token), {
+    const apiUrl = isSoloSession
+      ? (typeof handoff.persistentHash === 'string' && handoff.persistentHash.length > 0
+        ? buildPersistentEntryParticipantConsumeApiUrl(handoff.persistentHash, handoff.token, activityName)
+        : null)
+      : (sessionId ? buildSessionEntryParticipantConsumeApiUrl(sessionId, handoff.token) : null)
+
+    if (!apiUrl) {
+      return null
+    }
+
+    const response = await fetchImpl(apiUrl, {
       credentials: 'include',
     })
     if (!response.ok) {
