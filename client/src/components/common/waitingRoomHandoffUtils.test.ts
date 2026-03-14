@@ -25,10 +25,12 @@ function createStorage(): EntryParticipantStorageLike {
 
 void test('persistWaitingRoomServerBackedHandoff stores an opaque token on success', async () => {
   const storage = createStorage()
+  const participantContextStorage = createStorage()
   const storageKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-1')
 
   await persistWaitingRoomServerBackedHandoff({
     storage,
+    participantContextStorage,
     storageKey,
     values: { displayName: 'Ada' },
     submitApiUrl: '/api/session/session-1/entry-participant',
@@ -49,7 +51,7 @@ void test('persistWaitingRoomServerBackedHandoff stores an opaque token on succe
     kind: 'token',
     token: 'token-123',
   })
-  assert.deepEqual(readSessionParticipantContext(storage, 'session-1'), {
+  assert.deepEqual(readSessionParticipantContext(participantContextStorage, 'session-1'), {
     studentName: 'Ada',
     studentId: 'participant-1',
   })
@@ -83,11 +85,13 @@ void test('persistWaitingRoomServerBackedHandoff stores persistent hash with sol
 
 void test('persistWaitingRoomServerBackedHandoff falls back to local values when server write fails', async () => {
   const storage = createStorage()
+  const participantContextStorage = createStorage()
   const storageKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-2')
   const warnings: string[] = []
 
   await persistWaitingRoomServerBackedHandoff({
     storage,
+    participantContextStorage,
     storageKey,
     values: { displayName: 'Grace' },
     submitApiUrl: '/api/session/session-2/entry-participant',
@@ -106,7 +110,7 @@ void test('persistWaitingRoomServerBackedHandoff falls back to local values when
     kind: 'values',
     values: { displayName: 'Grace' },
   })
-  assert.deepEqual(readSessionParticipantContext(storage, 'session-2'), {
+  assert.deepEqual(readSessionParticipantContext(participantContextStorage, 'session-2'), {
     studentName: 'Grace',
     studentId: null,
   })

@@ -288,6 +288,7 @@ export default function WaitingRoom({
   const persistServerBackedSessionEntryParticipantHandoff = async (destinationId: string) => {
     await persistWaitingRoomServerBackedHandoff({
       storage: typeof window !== 'undefined' ? window.sessionStorage : null,
+      participantContextStorage: typeof window !== 'undefined' ? window.localStorage : null,
       storageKey: buildEntryParticipantStorageKey(activityName, 'session', destinationId),
       values: waitingRoomValues,
       submitApiUrl: buildSessionEntryParticipantSubmitApiUrl(destinationId),

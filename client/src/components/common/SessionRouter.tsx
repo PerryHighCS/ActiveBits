@@ -94,6 +94,10 @@ const SessionRouter = () => {
     typeof window !== 'undefined'
     && sessionId != null
   ) ? Boolean(readSessionParticipantContext(window.localStorage, sessionId)) : false
+  const hasStoredPersistentSessionParticipantContext = (
+    typeof window !== 'undefined'
+    && persistentSessionEntryStatus?.sessionId != null
+  ) ? Boolean(readSessionParticipantContext(window.localStorage, persistentSessionEntryStatus.sessionId)) : false
   const soloActivity = soloActivityId
     ? activities.find((entry) => entry.id === soloActivityId && entry.soloMode) ?? null
     : null
@@ -270,6 +274,23 @@ const SessionRouter = () => {
   }, [activityName, hash, navigate, persistentSessionEntryStatus])
 
   useEffect(() => {
+    if (!hash || !activityName || !persistentSessionEntryStatus?.isStarted || !persistentSessionEntryStatus.sessionId) {
+      return
+    }
+
+    if (
+      persistentSessionEntryStatus.resolvedRole !== 'student'
+      || persistentSessionEntryStatus.entryOutcome !== 'join-live'
+      || persistentSessionEntryStatus.presentationMode !== 'render-ui'
+      || !hasStoredPersistentSessionParticipantContext
+    ) {
+      return
+    }
+
+    void navigate(`/${persistentSessionEntryStatus.sessionId}`, { replace: true })
+  }, [activityName, hash, hasStoredPersistentSessionParticipantContext, navigate, persistentSessionEntryStatus])
+
+  useEffect(() => {
     if (!sessionId || sessionEntryStatus) return
 
     fetch(buildSessionEntryApiUrl(sessionId))
@@ -364,7 +385,11 @@ const SessionRouter = () => {
 
     if (persistentSessionEntryStatus.isStarted && persistentSessionEntryStatus.sessionId) {
       const startedSessionId = persistentSessionEntryStatus.sessionId
-      if (persistentSessionEntryStatus.presentationMode === 'render-ui') {
+      if (shouldRenderSessionJoinPreflight({
+        sessionId: startedSessionId,
+        presentationMode: persistentSessionEntryStatus.presentationMode,
+        hasStoredParticipantContext: hasStoredPersistentSessionParticipantContext,
+      })) {
         return (
           <WaitingRoom
             activityName={activityName}

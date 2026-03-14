@@ -14,6 +14,7 @@ export interface WaitingRoomHandoffPersistenceParams {
   storageKey: string
   values: EntryParticipantValueMap
   submitApiUrl: string
+  participantContextStorage?: EntryParticipantStorageLike | null
   sessionParticipantContextSessionId?: string
   persistentHash?: string
   fetchImpl?: EntryParticipantFetchLike | null
@@ -25,6 +26,7 @@ export async function persistWaitingRoomServerBackedHandoff({
   storageKey,
   values,
   submitApiUrl,
+  participantContextStorage = storage,
   sessionParticipantContextSessionId,
   persistentHash,
   fetchImpl = typeof fetch === 'function' ? fetch.bind(globalThis) as EntryParticipantFetchLike : null,
@@ -35,7 +37,7 @@ export async function persistWaitingRoomServerBackedHandoff({
   }
 
   if (sessionParticipantContextSessionId) {
-    persistSessionParticipantContext(storage, sessionParticipantContextSessionId, {
+    persistSessionParticipantContext(participantContextStorage ?? storage, sessionParticipantContextSessionId, {
       studentName: getEntryParticipantDisplayName(values),
       studentId: getEntryParticipantParticipantId(values),
     }, onWarn)
@@ -70,7 +72,7 @@ export async function persistWaitingRoomServerBackedHandoff({
       && !Array.isArray(payload.values)
     ) {
       const responseValues = payload.values as EntryParticipantValueMap
-      persistSessionParticipantContext(storage, sessionParticipantContextSessionId, {
+      persistSessionParticipantContext(participantContextStorage ?? storage, sessionParticipantContextSessionId, {
         studentName: getEntryParticipantDisplayName(responseValues),
         studentId: getEntryParticipantParticipantId(responseValues),
       }, onWarn)
