@@ -534,6 +534,8 @@ void test('persistent session metadata route reports corrupted cookies while pre
 
   await getOrCreateActivePersistentSession(activityName, hash)
 
+  console.log('[TEST] Expected corrupted-cookie parse error output follows for persistent session metadata route coverage.')
+
   const res = createMockRes()
   await handler(createMockReq({
     params: { hash },
