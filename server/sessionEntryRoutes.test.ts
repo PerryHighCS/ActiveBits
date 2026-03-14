@@ -308,6 +308,39 @@ void test('session entry participant consume route trims tokens and rejects blan
   assert.deepEqual(blankConsumeRes.jsonBody, { error: 'entry participant not found' })
 })
 
+void test('session entry participant store route rejects oversized payloads', async () => {
+  await initializeActivityRegistry()
+  const session = createSessionRecord('session-5', 'java-string-practice')
+  const sessionMap = new Map<string, SessionRecord>([['session-5', session]])
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, nextSession: SessionRecord) => {
+      sessionMap.set(id, nextSession)
+    },
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant')({
+    params: { sessionId: 'session-5' },
+    body: {
+      values: {
+        displayName: 'x'.repeat(9000),
+      },
+    },
+  }, res)
+
+  assert.equal(res.statusCode, 413)
+  assert.deepEqual(res.jsonBody, { error: 'entry participant payload too large' })
+})
+
 void test('session entry participant consume route returns 404 for missing sessions', async () => {
   await initializeActivityRegistry()
   const sessions = {

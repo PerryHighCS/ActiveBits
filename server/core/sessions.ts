@@ -7,7 +7,11 @@ import type { SessionLike } from './valkeyStore.js'
 import { SessionCache } from './sessionCache.js'
 import { normalizeSessionData } from './sessionNormalization.js'
 import { getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
-import { consumeSessionEntryParticipant, storeSessionEntryParticipant } from './sessionEntryParticipants.js'
+import {
+  consumeSessionEntryParticipant,
+  SessionEntryParticipantStoreError,
+  storeSessionEntryParticipant,
+} from './sessionEntryParticipants.js'
 import { buildSessionEntryStatus } from './entryStatus.js'
 import { acceptEntryParticipant } from './acceptedEntryParticipants.js'
 
@@ -319,6 +323,10 @@ export function setupSessionRoutes(app: {
       await sessions.set(sessionId, session)
       res.json({ entryParticipantToken: token, values })
     } catch (error) {
+      if (error instanceof SessionEntryParticipantStoreError) {
+        res.status(error.statusCode).json({ error: error.message })
+        return
+      }
       console.error('Error storing session entry participant:', { sessionId, error })
       res.status(500).json({ error: 'internal server error' })
     }
