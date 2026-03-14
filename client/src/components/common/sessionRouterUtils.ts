@@ -1,4 +1,4 @@
-import type { ActivityManageDashboardUtility, ActivityRegistryEntry } from '../../../../types/activity.js'
+import type { ActivityRegistryEntry, ActivityUtility } from '../../../../types/activity.js'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { normalizeSelectedOptions } from './manageDashboardUtils'
 import { isValidHttpUrl } from './urlValidationUtils'
@@ -261,14 +261,14 @@ export function getStandaloneHomeActivities(activityList: readonly ActivityRegis
 
 export function getHomeUtilityActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {
   return activityList.filter((activity) =>
-    Array.isArray(activity.manageDashboard?.utilities)
-    && activity.manageDashboard.utilities.some((utility) => utility.showOnHome === true),
+    Array.isArray(activity.utilities)
+    && activity.utilities.some((utility) => utility.surfaces?.includes('home')),
   )
 }
 
 export interface UtilityRouteMatch {
   activity: ActivityRegistryEntry
-  utility: ActivityManageDashboardUtility
+  utility: ActivityUtility
 }
 
 export function findUtilityRouteMatch(
@@ -276,7 +276,7 @@ export function findUtilityRouteMatch(
   pathname: string,
 ): UtilityRouteMatch | null {
   for (const activity of activityList) {
-    const utility = activity.manageDashboard?.utilities?.find((entry) => entry.path === pathname)
+    const utility = activity.utilities?.find((entry) => entry.path === pathname)
     if (utility) {
       return { activity, utility }
     }

@@ -502,11 +502,11 @@ const SessionRouter = () => {
             <p className="text-center text-gray-600 mb-6">Activity-specific tools and viewers</p>
             <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
               {utilityActivities.flatMap((activity) =>
-                (activity.manageDashboard?.utilities ?? [])
-                  .filter((utility) => utility.showOnHome === true)
+                (activity.utilities ?? [])
+                  .filter((utility) => utility.surfaces?.includes('home'))
                   .map((utility) => (
                     <div
-                      key={`${activity.id}:${utility.label}:${utility.path}`}
+                      key={`${activity.id}:${utility.id}`}
                       onClick={() => navigate(utility.path)}
                       className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer h-full flex flex-col"
                     >

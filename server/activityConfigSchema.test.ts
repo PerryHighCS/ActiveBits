@@ -17,6 +17,24 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
         supportsPermalink: false,
         showOnHome: false,
       },
+      utilities: [
+        {
+          id: 'gallery-walk-review-copy',
+          label: 'Copy Gallery Walk Review Link',
+          action: 'copy-url',
+          path: '/util/gallery-walk/viewer',
+          description: 'Upload and review feedback that was left for you.',
+          surfaces: ['manage'],
+          standaloneSessionId: 'solo-gallery-walk',
+        },
+        {
+          id: 'gallery-walk-review-home',
+          label: 'Gallery Walk Review',
+          action: 'go-to-url',
+          path: '/util/gallery-walk/viewer',
+          surfaces: ['home'],
+        },
+      ],
       deepLinkOptions: {
         presentationUrl: {
           label: 'Presentation URL',
@@ -80,6 +98,24 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
     keyPrefix: 'syncdeck_instructor_',
     responseField: 'instructorPasscode',
   })
+  assert.deepEqual(parsed.utilities, [
+    {
+      id: 'gallery-walk-review-copy',
+      label: 'Copy Gallery Walk Review Link',
+      action: 'copy-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload and review feedback that was left for you.',
+      surfaces: ['manage'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+    {
+      id: 'gallery-walk-review-home',
+      label: 'Gallery Walk Review',
+      action: 'go-to-url',
+      path: '/util/gallery-walk/viewer',
+      surfaces: ['home'],
+    },
+  ])
   assert.equal(parsed.waitingRoom?.fields[0]?.type, 'text')
   assert.equal(parsed.waitingRoom?.fields[2]?.type, 'custom')
 })
@@ -162,6 +198,63 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
         'bad-config-3',
       ),
     /props.*serializable object/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad4',
+          name: 'Bad4',
+          description: 'desc',
+          color: 'purple',
+          standaloneEntry: {
+            enabled: false,
+            supportsDirectPath: false,
+            supportsPermalink: false,
+            showOnHome: false,
+          },
+          utilities: [
+            {
+              id: 'utility',
+              label: 'Broken Utility',
+              action: 'download-url',
+              path: '/util/broken',
+            },
+          ],
+        },
+        'bad-config-4',
+      ),
+    /utilities\[0\].*action/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad5',
+          name: 'Bad5',
+          description: 'desc',
+          color: 'teal',
+          standaloneEntry: {
+            enabled: false,
+            supportsDirectPath: false,
+            supportsPermalink: false,
+            showOnHome: false,
+          },
+          utilities: [
+            {
+              id: 'utility',
+              label: 'Broken Utility',
+              action: 'copy-url',
+              path: '/util/broken',
+              surfaces: ['manage', 'dashboard'],
+            },
+          ],
+        },
+        'bad-config-5',
+      ),
+    /utilities\[0\].*surfaces/,
   )
 })
 

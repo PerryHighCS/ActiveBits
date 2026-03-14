@@ -4,7 +4,7 @@ import type {
   ActivityCreateSessionBootstrapSessionStorageEntry,
   ActivityDeepLinkOption,
   ActivityDeepLinkOptionChoice,
-  ActivityManageDashboardUtility,
+  ActivityUtility,
   ActivityStandaloneEntryConfig,
   ActivityDeepLinkPreflightConfig,
 } from './activity.js'
@@ -235,7 +235,7 @@ function parseManageLayout(raw: unknown, context: string): ActivityConfig['manag
   }
 }
 
-function parseManageDashboardUtilities(raw: unknown, context: string): ActivityManageDashboardUtility[] | undefined {
+function parseUtilities(raw: unknown, context: string): ActivityUtility[] | undefined {
   if (raw == null) {
     return undefined
   }
@@ -248,8 +248,22 @@ function parseManageDashboardUtilities(raw: unknown, context: string): ActivityM
       throw new Error(`${context}.utilities[${index}] must be an object`)
     }
 
+    const action = entry.action
+    if (action !== 'copy-url' && action !== 'go-to-url') {
+      throw new Error(`${context}.utilities[${index}]: "action" must be "copy-url" or "go-to-url"`)
+    }
+
+    const surfaces = entry.surfaces
+    if (surfaces !== undefined) {
+      if (!Array.isArray(surfaces) || surfaces.some((surface) => surface !== 'manage' && surface !== 'home')) {
+        throw new Error(`${context}.utilities[${index}]: "surfaces" must contain only "manage" or "home"`)
+      }
+    }
+
     return {
+      id: readRequiredString(entry, 'id', `${context}.utilities[${index}]`),
       label: readRequiredString(entry, 'label', `${context}.utilities[${index}]`),
+      action,
       path: readRequiredString(entry, 'path', `${context}.utilities[${index}]`),
       ...(readOptionalString(entry, 'description', `${context}.utilities[${index}]`) !== undefined
         ? { description: readOptionalString(entry, 'description', `${context}.utilities[${index}]`) }
@@ -257,9 +271,7 @@ function parseManageDashboardUtilities(raw: unknown, context: string): ActivityM
       ...(readOptionalString(entry, 'standaloneSessionId', `${context}.utilities[${index}]`) !== undefined
         ? { standaloneSessionId: readOptionalString(entry, 'standaloneSessionId', `${context}.utilities[${index}]`) }
         : {}),
-      ...(readOptionalBoolean(entry, 'showOnHome', `${context}.utilities[${index}]`) !== undefined
-        ? { showOnHome: readOptionalBoolean(entry, 'showOnHome', `${context}.utilities[${index}]`) }
-        : {}),
+      ...(surfaces !== undefined ? { surfaces: surfaces as Array<'manage' | 'home'> } : {}),
     }
   })
 }
@@ -302,10 +314,8 @@ function parseManageDashboard(raw: unknown, context: string): ActivityConfig['ma
   }
 
   const customPersistentLinkBuilder = readOptionalBoolean(raw, 'customPersistentLinkBuilder', `${context}.manageDashboard`)
-  const utilities = parseManageDashboardUtilities(raw.utilities, `${context}.manageDashboard`)
   return {
     ...(customPersistentLinkBuilder !== undefined ? { customPersistentLinkBuilder } : {}),
-    ...(utilities !== undefined ? { utilities } : {}),
   }
 }
 
@@ -443,6 +453,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const deepLinkOptions = parseDeepLinkOptions(rawConfig.deepLinkOptions, context)
   const deepLinkGenerator = parseDeepLinkGenerator(rawConfig.deepLinkGenerator, context)
   const createSessionBootstrap = parseCreateSessionBootstrap(rawConfig.createSessionBootstrap, context)
+  const utilities = parseUtilities(rawConfig.utilities, context)
   const manageDashboard = parseManageDashboard(rawConfig.manageDashboard, context)
   const manageLayout = parseManageLayout(rawConfig.manageLayout, context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)
@@ -454,6 +465,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   assignOptionalField(parsed, 'deepLinkOptions', deepLinkOptions)
   assignOptionalField(parsed, 'deepLinkGenerator', deepLinkGenerator)
   assignOptionalField(parsed, 'createSessionBootstrap', createSessionBootstrap)
+  assignOptionalField(parsed, 'utilities', utilities)
   assignOptionalField(parsed, 'manageDashboard', manageDashboard)
   assignOptionalField(parsed, 'manageLayout', manageLayout)
   assignOptionalField(parsed, 'waitingRoom', waitingRoom)

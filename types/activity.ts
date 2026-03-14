@@ -52,11 +52,13 @@ export interface ActivityCreateSessionBootstrapConfig {
   sessionStorage?: ActivityCreateSessionBootstrapSessionStorageEntry[]
 }
 
-export interface ActivityManageDashboardUtility {
+export interface ActivityUtility {
+  id: string
   label: string
+  action: 'copy-url' | 'go-to-url'
   path: string
   description?: string
-  showOnHome?: boolean
+  surfaces?: Array<'manage' | 'home'>
   standaloneSessionId?: string
 }
 
@@ -76,6 +78,7 @@ export interface ActivityConfig {
   description: string
   color: string
   standaloneEntry: ActivityStandaloneEntryConfig
+  utilities?: ActivityUtility[]
   deepLinkOptions?: Record<string, ActivityDeepLinkOption>
   deepLinkGenerator?: {
     endpoint: string
@@ -86,7 +89,6 @@ export interface ActivityConfig {
   createSessionBootstrap?: ActivityCreateSessionBootstrapConfig
   manageDashboard?: {
     customPersistentLinkBuilder?: boolean
-    utilities?: ActivityManageDashboardUtility[]
   }
   manageLayout?: {
     expandShell?: boolean

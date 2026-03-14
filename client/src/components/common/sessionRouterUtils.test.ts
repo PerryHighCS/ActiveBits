@@ -383,11 +383,16 @@ void test('getHomeUtilityActivities returns activities with home-visible utiliti
         supportsPermalink: false,
         showOnHome: false,
       },
-      manageDashboard: {
-        utilities: [
-          { label: 'Gallery Walk Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
-        ],
-      },
+      utilities: [
+        {
+          id: 'gallery-walk-review-home',
+          label: 'Gallery Walk Review',
+          action: 'go-to-url',
+          path: '/util/gallery-walk/viewer',
+          surfaces: ['home'],
+          standaloneSessionId: 'solo-gallery-walk',
+        },
+      ],
     },
     {
       id: 'syncdeck',
@@ -400,11 +405,9 @@ void test('getHomeUtilityActivities returns activities with home-visible utiliti
         supportsPermalink: false,
         showOnHome: false,
       },
-      manageDashboard: {
-        utilities: [
-          { label: 'Hidden Utility', path: '/tool', showOnHome: false },
-        ],
-      },
+      utilities: [
+        { id: 'hidden', label: 'Hidden Utility', action: 'go-to-url', path: '/tool', surfaces: ['manage'] },
+      ],
     },
   ])
 
@@ -424,11 +427,16 @@ void test('findUtilityRouteMatch resolves configured utility paths', () => {
         supportsPermalink: false,
         showOnHome: false,
       },
-      manageDashboard: {
-        utilities: [
-          { label: 'Gallery Walk Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
-        ],
-      },
+      utilities: [
+        {
+          id: 'gallery-walk-review-copy',
+          label: 'Copy Gallery Walk Review Link',
+          action: 'copy-url',
+          path: '/util/gallery-walk/viewer',
+          surfaces: ['manage'],
+          standaloneSessionId: 'solo-gallery-walk',
+        },
+      ],
     },
     {
       id: 'syncdeck',
@@ -445,7 +453,8 @@ void test('findUtilityRouteMatch resolves configured utility paths', () => {
   ], '/util/gallery-walk/viewer')
 
   assert.equal(match?.activity.id, 'gallery-walk')
-  assert.equal(match?.utility.label, 'Gallery Walk Review')
+  assert.equal(match?.utility.id, 'gallery-walk-review-copy')
+  assert.equal(match?.utility.label, 'Copy Gallery Walk Review Link')
   assert.equal(match?.utility.standaloneSessionId, 'solo-gallery-walk')
   assert.equal(findUtilityRouteMatch([], '/util/gallery-walk/viewer'), null)
 })

@@ -419,7 +419,7 @@ export default function ManageDashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {activities.map((activity) => {
-          const utilityLinks = activity.manageDashboard?.utilities ?? []
+          const utilityLinks = (activity.utilities ?? []).filter((utility) => utility.surfaces?.includes('manage'))
 
           return (
             <div
@@ -451,14 +451,23 @@ export default function ManageDashboard() {
                     const utilityUrl = buildManageDashboardUtilityUrl(getWindowOrigin(), utility.path)
                     return (
                       <button
-                        key={`${activity.id}:${utility.label}:${utility.path}`}
+                        key={`${activity.id}:${utility.id}`}
                         onClick={() => {
+                          if (utility.action === 'go-to-url') {
+                            if (/^https?:\/\//.test(utility.path)) {
+                              window.location.assign(utility.path)
+                            } else {
+                              void navigate(utility.path)
+                            }
+                            return
+                          }
+
                           void copyToClipboard(utilityUrl)
                         }}
                         className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded transition-colors"
                         title={utility.description}
                       >
-                        {isCopied(utilityUrl) ? `✓ Copied ${utility.label}` : utility.label}
+                        {utility.action === 'copy-url' && isCopied(utilityUrl) ? `✓ Copied ${utility.label}` : utility.label}
                       </button>
                     )
                   })}

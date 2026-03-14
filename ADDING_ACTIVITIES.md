@@ -428,27 +428,37 @@ export default {
 
 `standaloneEntry.title` and `standaloneEntry.description` are used by shared standalone UI when present.
 
-### Adding Dashboard Utility Links
+### Adding Utility Links
 
-If an activity needs a special-purpose route on the management dashboard that is not the standard permalink flow, declare it with `manageDashboard.utilities`:
+If an activity needs a special-purpose route that is not the standard permalink flow, declare it with top-level `utilities`:
 
 ```typescript
 export default {
   // ...
-  manageDashboard: {
-    utilities: [
-      {
-        label: 'Gallery Walk Review',
-        path: '/util/gallery-walk/viewer',
-        description: 'Upload a .gw file to review exported feedback.',
-        standaloneSessionId: 'solo-gallery-walk',
-      },
-    ],
-  },
+  utilities: [
+    {
+      id: 'gallery-walk-review-copy',
+      label: 'Copy Gallery Walk Review Link',
+      action: 'copy-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload a .gw file to review exported feedback.',
+      surfaces: ['manage'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+    {
+      id: 'gallery-walk-review-home',
+      label: 'Gallery Walk Review',
+      action: 'go-to-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload a .gw file to review exported feedback.',
+      surfaces: ['home'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+  ],
 };
 ```
 
-These utility buttons copy the declared route as an absolute URL from the dashboard. Keep them activity-specific and use them for special tools rather than for normal student entry.
+Use `action: 'copy-url'` for dashboard copy buttons and `action: 'go-to-url'` for navigable utility cards. Keep utilities activity-specific and use them for special tools rather than for normal student entry.
 
 ### Deep Linking in Solo Mode
 

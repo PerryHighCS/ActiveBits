@@ -264,10 +264,10 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-14
 - Area: client | activities
-- Discovery: The management dashboard no longer treats standalone support as a reason to show a generic “Copy Solo Practice Link” button. Extra one-off routes now belong in `manageDashboard.utilities`, which exposes copyable utility links like Gallery Walk’s feedback-review route without overloading permalink or standalone-entry semantics.
-- Why it matters: This separates “supports standalone entry” from “needs a special-purpose dashboard tool.” It lets activities keep permalink generation as the main student entry surface while still surfacing exceptional routes honestly on the dashboard.
-- Evidence: `client/src/components/common/ManageDashboard.tsx`; `client/src/components/common/manageDashboardUtils.ts`; `activities/gallery-walk/activity.config.ts`; `types/activity.ts`
-- Follow-up action: Use `manageDashboard.utilities` for future activity-specific dashboard tools instead of reviving special solo-link buttons, and keep standalone capability decisions on `standaloneEntry`.
+- Discovery: Extra one-off routes now belong in top-level `utilities`, not under `manageDashboard`. Utilities can declare their own action (`copy-url` or `go-to-url`) and surfaces (`manage`, `home`), which lets Gallery Walk expose separate dashboard-copy and home-navigation entries without overloading standalone-entry semantics.
+- Why it matters: This separates “supports standalone entry” from “needs a special-purpose tool.” It keeps permalink generation as the main student entry surface while still surfacing exceptional activity-owned routes honestly across shared UI surfaces.
+- Evidence: `client/src/components/common/ManageDashboard.tsx`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `activities/gallery-walk/activity.config.ts`; `types/activity.ts`
+- Follow-up action: Use top-level `utilities` for future activity-specific tools instead of reviving special solo-link buttons or nesting cross-surface utility concerns under `manageDashboard`.
 - Owner: Codex
 
 - Date: 2026-03-14

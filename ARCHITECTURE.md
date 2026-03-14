@@ -94,16 +94,26 @@ export default {
     title: 'Standalone Card Title',
     description: 'Standalone entry description',
   },
-  manageDashboard: {
-    utilities: [                // Optional: extra dashboard utility links
-      {
-        label: 'Gallery Walk Review',
-        path: '/util/gallery-walk/viewer',
-        description: 'Upload and review feedback that was left for you.',
-        standaloneSessionId: 'solo-gallery-walk',
-      },
-    ],
-  },
+  utilities: [                  // Optional: extra utility routes/actions
+    {
+      id: 'gallery-walk-review-copy',
+      label: 'Copy Gallery Walk Review Link',
+      action: 'copy-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload and review feedback that was left for you.',
+      surfaces: ['manage'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+    {
+      id: 'gallery-walk-review-home',
+      label: 'Gallery Walk Review',
+      action: 'go-to-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload and review feedback that was left for you.',
+      surfaces: ['home'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+  ],
   // Optional: shared permanent-link modal options and server-side link generation
   deepLinkOptions: {
     presentationUrl: {
@@ -190,7 +200,7 @@ export const myActivity = {
 2. **Session ID Format**: Solo sessions use the format `solo-{activity-id}` (e.g., `solo-java-string-practice`)
 3. **No Teacher Required**: Students can start practicing immediately without a teacher-managed session
 4. **Client-Side State**: Solo activities typically use `localStorage` for progress persistence
-5. **Dashboard Utilities**: Optional `manageDashboard.utilities` lets an activity expose extra copyable routes on the management dashboard without overloading permalink or solo capability semantics
+5. **Utilities**: Optional top-level `utilities` lets an activity expose dashboard and home-page tools without overloading permalink or standalone-entry semantics
 6. **Deep Linking Support**: Direct standalone routes can still support query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort`
 
 Activities can also support standalone via permalink without supporting `/solo/:activityId`. SyncDeck is the motivating example for that split.
