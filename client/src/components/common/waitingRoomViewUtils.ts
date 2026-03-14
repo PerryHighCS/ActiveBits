@@ -13,7 +13,7 @@ export interface WaitingRoomViewModel {
 export function getWaitingRoomViewModel(entryOutcome: PersistentSessionEntryOutcome): WaitingRoomViewModel {
   if (entryOutcome === 'continue-solo') {
     return {
-      statusTitle: 'Ready when you are',
+      statusTitle: '',
       statusDetail: '',
       fieldHeading: '',
       fieldDescription: '',
@@ -25,7 +25,7 @@ export function getWaitingRoomViewModel(entryOutcome: PersistentSessionEntryOutc
 
   if (entryOutcome === 'join-live') {
     return {
-      statusTitle: 'Ready when you are',
+      statusTitle: '',
       statusDetail: '',
       fieldHeading: '',
       fieldDescription: '',

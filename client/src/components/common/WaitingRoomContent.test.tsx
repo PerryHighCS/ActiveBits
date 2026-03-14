@@ -1,8 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import WaitingRoomContent from './WaitingRoomContent'
 import type { WaitingRoomFieldConfig } from '../../../../types/waitingRoom.js'
+
+void React
 
 const sampleFields: readonly WaitingRoomFieldConfig[] = [
   {
@@ -126,10 +129,44 @@ void test('WaitingRoomContent avoids duplicate instructional copy for live prefl
     />,
   )
 
-  assert.match(html, /Session is ready to join/)
+  assert.doesNotMatch(html, /Ready when you are/)
   assert.doesNotMatch(html, /Join the live session when you are ready\./)
   assert.doesNotMatch(html, /Before you join/)
   assert.doesNotMatch(html, /Complete these details before entering the live session\./)
+})
+
+void test('WaitingRoomContent labels the solo-to-live teacher prompt explicitly', () => {
+  const html = renderToStaticMarkup(
+    <WaitingRoomContent
+      activityDisplayName="Java String Practice"
+      waiterCount={0}
+      error={null}
+      isSubmitting={false}
+      waitingRoomFields={[]}
+      waitingRoomValues={{}}
+      touchedFields={{}}
+      waitingRoomErrors={{}}
+      customFieldComponents={{}}
+      customFieldLoadError={null}
+      entryOutcome="continue-solo"
+      entryPolicy="solo-allowed"
+      allowTeacherSection
+      showShareUrl={false}
+      hasTeacherCookie={false}
+      teacherCode=""
+      shareUrl=""
+      onTeacherCodeChange={() => {}}
+      onTeacherCodeSubmit={(event) => {
+        event.preventDefault()
+      }}
+      onPrimaryAction={() => {}}
+      onFieldChange={() => {}}
+      onFieldBlur={() => {}}
+    />,
+  )
+
+  assert.match(html, /Teachers: Want to start a live session instead\?/)
+  assert.match(html, /Continue in Solo Mode/)
 })
 
 void test('WaitingRoomContent hides share footer for students and shows it for remembered teachers', () => {

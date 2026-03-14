@@ -76,16 +76,56 @@ export default function WaitingRoom({
   const [teacherCode, setTeacherCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [currentEntryOutcome, setCurrentEntryOutcome] = useState<PersistentSessionEntryOutcome>(entryOutcome)
+  const [currentStartedSessionId, setCurrentStartedSessionId] = useState<string | undefined>(startedSessionId)
   const [waitingRoomValues, setWaitingRoomValues] = useState<WaitingRoomFieldValueMap>({})
   const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({})
   const [customFieldComponents, setCustomFieldComponents] = useState<Record<string, ComponentType<WaitingRoomFieldComponentProps>>>(EMPTY_CUSTOM_FIELD_COMPONENTS)
   const [customFieldLoadError, setCustomFieldLoadError] = useState<string | null>(null)
   const shouldAutoAuthRef = useRef(hasTeacherCookie)
+  const currentEntryOutcomeRef = useRef<PersistentSessionEntryOutcome>(entryOutcome)
+  const currentEntryPolicyRef = useRef<PersistentSessionEntryPolicy | undefined>(entryPolicy)
   const hasNavigatedRef = useRef(false)
   const teacherAuthRequestedRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
   const navigate = useNavigate()
-  const isWaitingForTeacher = entryOutcome === 'wait'
+  const effectiveEntryOutcome: PersistentSessionEntryOutcome = (
+    currentEntryOutcome === 'join-live' && !currentStartedSessionId
+  ) ? 'continue-solo' : currentEntryOutcome
+  const isWaitingForTeacher = currentEntryOutcome === 'wait'
+  const shouldListenForSessionUpdates = entryPolicy === 'solo-allowed'
+    && (currentEntryOutcome === 'continue-solo' || currentEntryOutcome === 'join-live')
+  const shouldKeepWaitingRoomSocketOpen = isWaitingForTeacher || shouldListenForSessionUpdates
+
+  useEffect(() => {
+    setCurrentEntryOutcome(entryOutcome)
+    currentEntryOutcomeRef.current = entryOutcome
+  }, [entryOutcome])
+
+  useEffect(() => {
+    setCurrentStartedSessionId(startedSessionId)
+  }, [startedSessionId])
+
+  useEffect(() => {
+    currentEntryOutcomeRef.current = currentEntryOutcome
+  }, [currentEntryOutcome])
+
+  useEffect(() => {
+    currentEntryPolicyRef.current = entryPolicy
+  }, [entryPolicy])
+
+  const closeSocketQuietly = (socket: WebSocket | null) => {
+    if (!socket) {
+      return
+    }
+
+    socket.onclose = null
+    socket.onerror = null
+
+    if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) {
+      socket.close()
+    }
+  }
 
   useEffect(() => {
     shouldAutoAuthRef.current = hasTeacherCookie && entryPolicy !== 'solo-only'
@@ -149,10 +189,8 @@ export default function WaitingRoom({
     setError(null)
     teacherAuthRequestedRef.current = false
 
-    if (!isWaitingForTeacher) {
-      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-        wsRef.current.close()
-      }
+    if (!shouldKeepWaitingRoomSocketOpen) {
+      closeSocketQuietly(wsRef.current)
       wsRef.current = null
       return undefined
     }
@@ -170,20 +208,22 @@ export default function WaitingRoom({
       hash,
       activityName,
       queryString: typeof window !== 'undefined' ? window.location.search : '',
+      currentEntryOutcomeRef,
+      currentEntryPolicyRef,
       hasNavigatedRef,
       teacherAuthRequestedRef,
       setWaiterCount,
       setError,
       setIsSubmitting,
+      setEntryOutcome: setCurrentEntryOutcome,
+      setStartedSessionId: setCurrentStartedSessionId,
       navigate,
     })
 
     return () => {
-      if (ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
-        ws.close()
-      }
+      closeSocketQuietly(ws)
     }
-  }, [activityName, hash, isWaitingForTeacher, navigate])
+  }, [activityName, hash, navigate, shouldKeepWaitingRoomSocketOpen])
 
   const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
 
@@ -316,7 +356,7 @@ export default function WaitingRoom({
     const actionResolution = resolveWaitingRoomPrimaryAction({
       waitingRoomFields,
       waitingRoomErrors,
-      entryOutcome,
+      entryOutcome: effectiveEntryOutcome,
     })
     setTouchedFields(actionResolution.touchedFields)
 
@@ -327,9 +367,7 @@ export default function WaitingRoom({
 
     const queryString = typeof window !== 'undefined' ? window.location.search : ''
     await persistServerBackedSoloEntryParticipantHandoff()
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-      wsRef.current.close()
-    }
+    closeSocketQuietly(wsRef.current)
     if (!hasNavigatedRef.current) {
       hasNavigatedRef.current = true
       void navigate(`/solo/${activityName}${queryString}`)
@@ -340,8 +378,8 @@ export default function WaitingRoom({
     const actionResolution = resolveWaitingRoomPrimaryAction({
       waitingRoomFields,
       waitingRoomErrors,
-      entryOutcome,
-      startedSessionId,
+      entryOutcome: effectiveEntryOutcome,
+      startedSessionId: currentStartedSessionId,
     })
     setTouchedFields(actionResolution.touchedFields)
 
@@ -350,7 +388,7 @@ export default function WaitingRoom({
       return
     }
 
-    const liveSessionId = startedSessionId
+    const liveSessionId = currentStartedSessionId
     if (!liveSessionId) {
       setError('Live session is unavailable right now. Please refresh and try again.')
       return
@@ -382,7 +420,7 @@ export default function WaitingRoom({
       waitingRoomErrors={waitingRoomErrors}
       customFieldComponents={customFieldComponents}
       customFieldLoadError={customFieldLoadError}
-      entryOutcome={entryOutcome}
+      entryOutcome={effectiveEntryOutcome}
       entryPolicy={entryPolicy}
       allowTeacherSection={allowTeacherSection}
       showShareUrl={showShareUrl}
@@ -391,7 +429,7 @@ export default function WaitingRoom({
       shareUrl={shareUrl}
       onTeacherCodeChange={setTeacherCode}
       onTeacherCodeSubmit={handleTeacherCodeSubmit}
-      onPrimaryAction={entryOutcome === 'join-live' ? handleJoinLive : handleContinueSolo}
+      onPrimaryAction={effectiveEntryOutcome === 'join-live' ? handleJoinLive : handleContinueSolo}
       onFieldChange={handleFieldChange}
       onFieldBlur={handleFieldBlur}
     />

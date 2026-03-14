@@ -1,4 +1,4 @@
-import type { ChangeEvent, ComponentType, FormEvent } from 'react'
+import React, { type ChangeEvent, type ComponentType, type FormEvent } from 'react'
 import type {
   WaitingRoomFieldConfig,
   WaitingRoomFieldComponentProps,
@@ -11,6 +11,8 @@ import { getWaitingRoomViewModel } from './waitingRoomViewUtils'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import type { WaitingRoomFieldValueMap } from './waitingRoomFormUtils'
 import { getWaiterMessage } from './waitingRoomUtils'
+
+void React
 
 interface WaitingRoomContentProps {
   activityDisplayName: string
@@ -78,7 +80,9 @@ export default function WaitingRoomContent({
         <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">{activityDisplayName}</h1>
 
         <div className="text-center mb-6">
-          <p className="text-lg text-gray-600 mb-2">{viewModel.statusTitle}</p>
+          {viewModel.statusTitle ? (
+            <p className="text-lg text-gray-600 mb-2">{viewModel.statusTitle}</p>
+          ) : null}
           {viewModel.showWaiterCount ? (
             <p className="text-2xl font-bold text-blue-600">{getWaiterMessage(waiterCount)}</p>
           ) : viewModel.statusDetail ? (
@@ -212,7 +216,7 @@ export default function WaitingRoomContent({
         {viewModel.showTeacherSection && allowTeacherSection && !isSoloOnlyMode && (
           <div className="border-t-2 border-gray-200 pt-6 mt-6">
             <p className="text-center text-gray-700 mb-4 font-semibold">
-              {entryOutcome === 'continue-solo' ? 'Want to start a live session instead?' : 'Are you the teacher?'}
+              {entryOutcome === 'continue-solo' ? 'Teachers: Want to start a live session instead?' : 'Are you the teacher?'}
             </p>
 
             <form onSubmit={onTeacherCodeSubmit} className="flex flex-col items-center gap-4">
