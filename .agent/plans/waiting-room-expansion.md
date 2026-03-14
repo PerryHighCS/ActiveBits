@@ -639,6 +639,11 @@ that path ships.
 
 ### Phase 4 - Downstream integration
 
+Status note:
+
+- Phase 4 is now explicitly deferred until the remaining Phase 0-3 waiting-room work is complete enough that activity migrations are not building on unstable entry/storage semantics.
+- Existing activity migration notes below should be treated as prioritization guidance for later, not as the current implementation queue for this branch.
+
 Reference integration target: `java-string-practice` should be the first activity migrated to
 consume waiting-room-provided `displayName` / `participantId` instead of collecting its
 own startup identity. This gives the phase a concrete exit condition before broader
@@ -667,6 +672,11 @@ Direct solo-route migration note:
 ## Activity Migration Checklist
 
 Use this checklist when migrating an existing activity to waiting-room-based entry:
+
+Deferral note:
+
+- Do not treat this checklist as active branch scope until the remaining core waiting-room items in Phases 0-3 are closed or intentionally deferred.
+- For now, keep these notes as migration prep so later work can resume without re-auditing the activity landscape.
 
 - [ ] Identify whether the activity currently collects student name or ID during startup
 - [ ] Move shared identity collection (`displayName`, `participantId`) to waiting-room / shared entry flow
