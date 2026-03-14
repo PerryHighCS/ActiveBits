@@ -78,6 +78,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Extend this contract beyond `displayName` and live-session handoff only when shared participant identity and reconnect ownership are finalized, so we do not ossify an incomplete participant schema too early.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Surface: client | REST | websocket
+- Contract: Waiting-room ownership is now split intentionally. Client-side waiting-room code owns declarative field rendering, required-field validation, wait-state form persistence, and solo handoff. Server-side entry routes own live-session handoff storage, opaque token issuance/consume, and early shared `participantId` issuance. Activity routes/websockets still own activity-specific acceptance, reconnect matching, and progress semantics after entry is handed off.
+- Compatibility constraints: This is an implementation contract, not yet a fully unified participant service. Activities that have not adopted waiting-room handoff continue to behave as before. Solo mode remains intentionally client-owned in v1.
+- Validation rules: Client must not treat waiting-room form completion as equivalent to accepted live-session registration; only server-issued live entry handoff and later activity join acceptance are authoritative. Server handoff routes must not assume activity-specific participant schemas beyond serializable waiting-room values plus shared `participantId`.
+- Evidence (schema/tests/path): `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomFormUtils.ts`; `client/src/components/common/entryParticipantStorage.ts`; `server/core/sessions.ts`; `server/core/sessionEntryParticipants.ts`; `.agent/plans/waiting-room-expansion.md`
+- Follow-up action: Revisit this split only when solo mode or broader activity registration moves onto the same shared server-backed participant context.
+- Owner: Codex
+
 - Date: 2026-02-23
 - Surface: REST
 - Contract: Activity-specific deep-link URL generation contract for SyncDeck uses `POST /api/syncdeck/generate-url` with request body `{ activityName: 'syncdeck', teacherCode: string, selectedOptions: { presentationUrl?: string } }` and returns `{ hash: string, url: string }` where `url` is the authoritative persistent activity URL including validated query params (`presentationUrl`) plus integrity metadata (`urlHash`).

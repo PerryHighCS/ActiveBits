@@ -580,12 +580,15 @@ this plan that a separate architecture record becomes useful.
 - [x] Confirm permalink entry-policy vocabulary
 - [x] Decide default behavior for existing permalinks
 - [x] Define shared waiting-room field schema contract
-- [ ] Decide and document sequencing when required preflight fields and waiting state both apply (v1: collect while waiting and carry forward)
-- [ ] Decide server/client ownership for validation and temporary storage
+- [x] Decide and document sequencing when required preflight fields and waiting state both apply (v1: collect while waiting and carry forward)
+  Current status: when waiting-room fields are required and managed entry is not yet available, `WaitingRoom` collects those values during the visible wait state and keeps them through the later `wait -> join-live` transition. Entry proceeds only after those values are carried into the downstream handoff path instead of prompting again after the wait ends.
+- [x] Decide server/client ownership for validation and temporary storage
+  Current status: client-side waiting-room code owns immediate field rendering, required-field validation, and solo-mode temporary handoff. Server-side entry routes own live-session temporary handoff storage, opaque token issuance, and shared live-entry `participantId` minting. Activity routes remain responsible for activity-specific reconnect/registration validation until a broader shared participant-entry service exists.
 - [ ] Define shared server-side `participantId` issuance and reconnect semantics
   Current status: shared server-side participant ID generation now starts in `server/core/participantIds.ts`, and `java-string-practice`, `java-format-practice`, `traveling-salesman`, and SyncDeck registration paths reuse it. Reconnect semantics and cross-activity participant context are still activity-specific.
   Update: `java-string-practice`, `java-format-practice`, and `traveling-salesman` now also share a generic session-backed reconnect/create helper in `server/core/sessionParticipants.ts`, and live waiting-room handoff now issues `participantId` earlier through the shared session entry-participant store before those activities open their first websocket connection. Python List Practice and SyncDeck still use activity-owned matching rules.
-- [ ] Define server-side enforcement rules so entry/session APIs reject disallowed joins even if the client is bypassed
+- [x] Define server-side enforcement rules so entry/session APIs reject disallowed joins even if the client is bypassed
+  Current status: persistent-session teacher start paths now reject `solo-only` through both REST auth and websocket teacher-code verification, and join-code/live entry now goes through explicit server-backed entry status and handoff endpoints instead of relying on client-only routing assumptions.
 - [x] Document role resolution rules for student, instructor-cookie, instructor-code, and embedded-role-inheritance paths
   Current status: standalone permalink resolution now treats unauthenticated entry as student by default, remembered teacher cookie and successful teacher-code auth as instructor intent for managed links, and `solo-only` as a forced solo/student outcome even when instructor auth exists. Embedded-role inheritance remains documented contract work, not yet implemented runtime behavior.
 - [x] Document destination transitions for `wait`, `join-live`, `continue-solo`, and `solo-unavailable`
@@ -614,20 +617,20 @@ that path ships.
 - [x] Build generic waiting-room field renderer from shared field metadata
 - [x] Support required text/select-style field validation
 - [x] Ensure built-in and custom waiting-room controls meet accessibility semantics and keyboard requirements
-- [ ] Retain preflight form state across destination transitions (for example `wait -> join-live`) and carry collected data forward when entry proceeds
-  Current status: started persistent sessions with waiting-room fields now stay inside the same `WaitingRoom` shell and reuse the stored preflight form state for `join-live`. Live-session handoff now stores waiting-room values server-side behind an opaque session token before entry proceeds, while solo carry-forward still uses client storage only.
-- [ ] Submit/store preflight data for later entry flow use
-  Current status: waiting-room `join-live` now posts collected values to a server-backed session entry-participant store and leaves only an opaque token in client storage, while `continue-solo` still uses client-side handoff values. `java-string-practice` and `java-format-practice` both consume `displayName` and a shared server-issued `participantId` from that live-session handoff (with client-value fallback) to skip their duplicate name gates and reconnect earlier. Broader activity adoption and a fully shared participant context are still outstanding.
+- [x] Retain preflight form state across destination transitions (for example `wait -> join-live`) and carry collected data forward when entry proceeds
+  Current status: started persistent sessions with waiting-room fields now stay inside the same `WaitingRoom` shell and reuse the stored preflight form state for `join-live`. Live-session handoff stores waiting-room values server-side behind an opaque session token before entry proceeds, while solo carry-forward still uses client storage only.
+- [x] Submit/store preflight data for later entry flow use
+  Current status: waiting-room `join-live` posts collected values to a server-backed session entry-participant store and leaves only an opaque token in client storage, while `continue-solo` uses client-side handoff values. `java-string-practice` and `java-format-practice` both consume `displayName` and a shared server-issued `participantId` from that live-session handoff (with client-value fallback) to skip duplicate startup prompts and reconnect earlier. Broader activity adoption and a fully shared participant context are still outstanding follow-up work, not missing framework capability.
 - [ ] Add clear [TEST] logging for expected error-path tests
 - [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
 
 ### Phase 3 - Entry resolution behavior
 
-- [ ] Implement instructor-required blocking flow
+- [x] Implement instructor-required blocking flow
 - [x] Implement solo-allowed fallback flow
 - [x] Implement solo-unavailable informational state
 - [x] Implement direct pass-through when no waiting-room UI is needed
-- [ ] Implement instructor-cookie and instructor-code role resolution for standalone entry
+- [x] Implement instructor-cookie and instructor-code role resolution for standalone entry
 - [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
 - [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
   Current status: direct `/:sessionId` joins now fetch `/api/session/:sessionId/entry` first, and `SessionRouter` uses that server-backed entry-status payload to decide whether to render the shared `WaitingRoom` shell or pass straight through before fetching full session data. The remaining gap is that join-code and permalink entry still use parallel entry endpoints instead of one fully unified gateway/participant handoff service.
