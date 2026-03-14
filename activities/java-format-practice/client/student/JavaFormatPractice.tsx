@@ -3,8 +3,9 @@ import InterleavedOutputGrid from '../components/InterleavedOutputGrid';
 import ExpectedOutputGrid from '../components/ExpectedOutputGrid';
 import { useNavigate } from 'react-router-dom';
 import {
-  consumeEntryParticipantDisplayName,
-  consumeEntryParticipantParticipantId,
+  consumeResolvedEntryParticipantValues,
+  getEntryParticipantDisplayName,
+  getEntryParticipantParticipantId,
 } from '@src/components/common/entryParticipantStorage';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
@@ -226,10 +227,9 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
         sessionId,
         isSoloSession,
       } as const;
-      const [preflightDisplayName, preflightParticipantId] = await Promise.all([
-        consumeEntryParticipantDisplayName(window.sessionStorage, entryLookup),
-        consumeEntryParticipantParticipantId(window.sessionStorage, entryLookup),
-      ]);
+      const preflightValues = await consumeResolvedEntryParticipantValues(window.sessionStorage, entryLookup);
+      const preflightDisplayName = getEntryParticipantDisplayName(preflightValues);
+      const preflightParticipantId = getEntryParticipantParticipantId(preflightValues);
 
       if (isCancelled) {
         return;

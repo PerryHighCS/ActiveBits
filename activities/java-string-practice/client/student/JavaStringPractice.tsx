@@ -4,8 +4,9 @@ import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
-  consumeEntryParticipantDisplayName,
-  consumeEntryParticipantParticipantId,
+  consumeResolvedEntryParticipantValues,
+  getEntryParticipantDisplayName,
+  getEntryParticipantParticipantId,
 } from '@src/components/common/entryParticipantStorage'
 import type {
   FeedbackState,
@@ -106,10 +107,9 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
         sessionId,
         isSoloSession,
       } as const
-      const [preflightDisplayName, preflightParticipantId] = await Promise.all([
-        consumeEntryParticipantDisplayName(window.sessionStorage, entryLookup),
-        consumeEntryParticipantParticipantId(window.sessionStorage, entryLookup),
-      ])
+      const preflightValues = await consumeResolvedEntryParticipantValues(window.sessionStorage, entryLookup)
+      const preflightDisplayName = getEntryParticipantDisplayName(preflightValues)
+      const preflightParticipantId = getEntryParticipantParticipantId(preflightValues)
       if (isCancelled) {
         return
       }

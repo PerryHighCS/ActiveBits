@@ -202,6 +202,44 @@ void test('consumeResolvedEntryParticipantValues returns the full server-backed 
   })
 })
 
+void test('consumeResolvedEntryParticipantValues only calls the server consume endpoint once per token-backed handoff', async () => {
+  const storage = createStorage()
+  const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-5')
+  persistEntryParticipantToken(storage, storageKey, 'token-once')
+
+  let requestCount = 0
+  const values = await consumeResolvedEntryParticipantValues(
+    storage,
+    {
+      activityName: 'java-string-practice',
+      sessionId: 'session-5',
+      isSoloSession: false,
+    },
+    async () => {
+      requestCount += 1
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            values: {
+              displayName: 'Ada',
+              participantId: 'participant-1',
+            },
+          }
+        },
+      }
+    },
+  )
+
+  assert.equal(requestCount, 1)
+  assert.deepEqual(values, {
+    displayName: 'Ada',
+    participantId: 'participant-1',
+  })
+  assert.equal(storage.getItem(storageKey), null)
+})
+
 void test('consumeEntryParticipantParticipantId reads a server-backed participant ID handoff', async () => {
   const storage = createStorage()
   const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-4')
