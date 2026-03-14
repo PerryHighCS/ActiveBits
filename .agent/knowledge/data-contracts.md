@@ -81,7 +81,7 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Date: 2026-03-14
 - Surface: activity config | waiting room
 - Contract: SyncDeck now declares the shared waiting-room `displayName` field in `activity.config.ts`, so join-code and permalink entry can collect student identity before the activity-specific registration/connect path runs.
-- Compatibility constraints: SyncDeck still remains `soloMode: false` and still owns its registration-plus-websocket reconnect flow after waiting-room entry. The waiting-room field declaration is now the required student-name collection step for new entry rather than a hint layered on top of an in-activity prompt.
+- Compatibility constraints: SyncDeck still does not support the generic `/solo/:activityId` route, but the config model now allows standalone capability to be expressed separately from direct solo-path support. The waiting-room field declaration is now the required student-name collection step for new entry rather than a hint layered on top of an in-activity prompt.
 - Validation rules: `displayName` is required and uses the same shared text-field contract as the migrated Java activities. New SyncDeck student entry now expects that value to be collected before the activity loads.
 - Evidence (schema/tests/path): `activities/syncdeck/activity.config.ts`; `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/SessionRouter.tsx`
 - Follow-up action: If SyncDeck later removes its separate registration route, keep the waiting-room field as the single authoritative student-name collection step instead of reintroducing a second in-activity prompt.

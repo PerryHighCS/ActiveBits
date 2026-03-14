@@ -6,14 +6,16 @@ import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
 import { getActivity, activities } from '@src/activities'
 import {
+  activitySupportsDirectStandalonePath,
   buildTeacherManagePathFromSession,
   buildPersistentSessionEntryApiUrl,
   buildSessionEntryApiUrl,
   buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
+  getHomeUtilityActivities,
   getSessionPresentationUrlForTeacherRedirect,
-  getSoloActivities,
+  getStandaloneHomeActivities,
   isJoinSessionId,
   readCachedSession,
   type SessionCacheRecord,
@@ -99,7 +101,7 @@ const SessionRouter = () => {
     && persistentSessionEntryStatus?.sessionId != null
   ) ? Boolean(readSessionParticipantContext(window.localStorage, persistentSessionEntryStatus.sessionId)) : false
   const soloActivity = soloActivityId
-    ? activities.find((entry) => entry.id === soloActivityId && entry.soloMode) ?? null
+    ? activities.find((entry) => entry.id === soloActivityId && activitySupportsDirectStandalonePath(entry)) ?? null
     : null
   const soloRouteError = soloActivityId == null
     ? null
@@ -415,7 +417,8 @@ const SessionRouter = () => {
   }
 
   if (!sessionId) {
-    const soloActivities = getSoloActivities(activities)
+    const standaloneActivities = getStandaloneHomeActivities(activities)
+    const utilityActivities = getHomeUtilityActivities(activities)
 
     return (
       <div className="flex flex-col items-center gap-8 max-w-6xl mx-auto p-6">
@@ -434,14 +437,14 @@ const SessionRouter = () => {
           <Button type="submit">Join Session</Button>
         </form>
 
-        {soloActivities.length > 0 && (
+        {standaloneActivities.length > 0 && (
           <div className="w-full border-t-2 border-gray-300 pt-8">
-            <h2 className="text-2xl font-bold text-center mb-4 text-gray-800">Solo Bits</h2>
+            <h2 className="text-2xl font-bold text-center mb-4 text-gray-800">Standalone Activities</h2>
             <p className="text-center text-gray-600 mb-6">Practice on your own</p>
             <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
-              {soloActivities.map((activity) => {
-                const soloTitle = activity.soloModeMeta?.title || activity.name
-                const soloDescription = activity.soloModeMeta?.description || activity.description
+              {standaloneActivities.map((activity) => {
+                const standaloneTitle = activity.standaloneEntry?.title || activity.soloModeMeta?.title || activity.name
+                const standaloneDescription = activity.standaloneEntry?.description || activity.soloModeMeta?.description || activity.description
 
                 return (
                   <div
@@ -450,14 +453,41 @@ const SessionRouter = () => {
                     className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer h-full flex flex-col"
                   >
                     <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>
-                      <h3 className="text-xl font-semibold">{soloTitle}</h3>
+                      <h3 className="text-xl font-semibold">{standaloneTitle}</h3>
                     </div>
                     <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4 flex-1`}>
-                      <p className="text-gray-600">{soloDescription}</p>
+                      <p className="text-gray-600">{standaloneDescription}</p>
                     </div>
                   </div>
                 )
               })}
+            </div>
+          </div>
+        )}
+
+        {utilityActivities.length > 0 && (
+          <div className="w-full border-t-2 border-gray-300 pt-8">
+            <h2 className="text-2xl font-bold text-center mb-4 text-gray-800">Utility Tools</h2>
+            <p className="text-center text-gray-600 mb-6">Activity-specific tools and viewers</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
+              {utilityActivities.flatMap((activity) =>
+                (activity.manageDashboard?.utilities ?? [])
+                  .filter((utility) => utility.showOnHome === true)
+                  .map((utility) => (
+                    <div
+                      key={`${activity.id}:${utility.label}:${utility.path}`}
+                      onClick={() => navigate(utility.path)}
+                      className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer h-full flex flex-col"
+                    >
+                      <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>
+                        <h3 className="text-xl font-semibold">{utility.label}</h3>
+                      </div>
+                      <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4 flex-1`}>
+                        <p className="text-gray-600">{utility.description || activity.description}</p>
+                      </div>
+                    </div>
+                  ))
+              )}
             </div>
           </div>
         )}

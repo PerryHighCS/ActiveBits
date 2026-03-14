@@ -1,6 +1,6 @@
 import {
   getAllowedActivities,
-  activitySupportsSoloMode,
+  activitySupportsStandalonePermalink,
   isValidActivity,
 } from '../activities/activityRegistry.js'
 import {
@@ -262,7 +262,7 @@ function buildPersistentSessionRelativeUrl(
 }
 
 function validateEntryPolicyForActivity(activityName: string, entryPolicy: string): string | null {
-  if (activitySupportsSoloMode(activityName)) {
+  if (activitySupportsStandalonePermalink(activityName)) {
     return null
   }
 

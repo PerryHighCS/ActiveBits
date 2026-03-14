@@ -6,6 +6,14 @@ const galleryWalkConfig: ActivityConfig = {
   description: 'Participants showcase projects and leave peer feedback',
   color: 'blue',
   soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: false,
+    showOnHome: false,
+    title: 'Review Gallery Walk Feedback',
+    description: 'Upload and review feedback that was left for you.',
+  },
   soloModeMeta: {
     title: 'Review Gallery Walk Feedback',
     description: 'Upload and review feedback that was left for you.',
@@ -16,6 +24,7 @@ const galleryWalkConfig: ActivityConfig = {
         label: 'Copy Feedback Review Link',
         path: '/solo/gallery-walk',
         description: 'Upload and review feedback that was left for you.',
+        showOnHome: true,
       },
     ],
   },

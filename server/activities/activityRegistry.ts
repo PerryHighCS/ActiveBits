@@ -11,6 +11,12 @@ interface ActivityConfigLike extends Record<string, unknown> {
     fields?: unknown[]
   }
   soloMode?: boolean
+  standaloneEntry?: {
+    enabled?: boolean
+    supportsDirectPath?: boolean
+    supportsPermalink?: boolean
+    showOnHome?: boolean
+  }
 }
 
 interface DiscoveredConfig {
@@ -170,7 +176,13 @@ export function getActivityWaitingRoomFieldCount(activityName: string): number {
 
 export function activitySupportsSoloMode(activityName: string): boolean {
   const matchingConfig = filteredConfigs.find((config) => config.id === activityName)
-  return matchingConfig?.loadedConfig.soloMode === true
+  return matchingConfig?.loadedConfig.standaloneEntry?.enabled === true
+}
+
+export function activitySupportsStandalonePermalink(activityName: string): boolean {
+  const matchingConfig = filteredConfigs.find((config) => config.id === activityName)
+  return matchingConfig?.loadedConfig.standaloneEntry?.enabled === true
+    && matchingConfig.loadedConfig.standaloneEntry?.supportsPermalink === true
 }
 
 /**

@@ -56,6 +56,16 @@ export interface ActivityManageDashboardUtility {
   label: string
   path: string
   description?: string
+  showOnHome?: boolean
+}
+
+export interface ActivityStandaloneEntryConfig {
+  enabled: boolean
+  supportsDirectPath?: boolean
+  supportsPermalink?: boolean
+  showOnHome?: boolean
+  title?: string
+  description?: string
 }
 
 export interface ActivityConfig {
@@ -70,6 +80,7 @@ export interface ActivityConfig {
     description?: string
     buttonText?: string
   }
+  standaloneEntry?: ActivityStandaloneEntryConfig
   deepLinkOptions?: Record<string, ActivityDeepLinkOption>
   deepLinkGenerator?: {
     endpoint: string

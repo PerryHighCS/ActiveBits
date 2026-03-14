@@ -5,6 +5,7 @@ import type {
   ActivityDeepLinkOption,
   ActivityDeepLinkOptionChoice,
   ActivityManageDashboardUtility,
+  ActivityStandaloneEntryConfig,
   ActivityDeepLinkPreflightConfig,
 } from './activity.js'
 import type {
@@ -273,8 +274,40 @@ function parseManageDashboardUtilities(raw: unknown, context: string): ActivityM
       ...(readOptionalString(entry, 'description', `${context}.utilities[${index}]`) !== undefined
         ? { description: readOptionalString(entry, 'description', `${context}.utilities[${index}]`) }
         : {}),
+      ...(readOptionalBoolean(entry, 'showOnHome', `${context}.utilities[${index}]`) !== undefined
+        ? { showOnHome: readOptionalBoolean(entry, 'showOnHome', `${context}.utilities[${index}]`) }
+        : {}),
     }
   })
+}
+
+function parseStandaloneEntry(raw: unknown, context: string): ActivityStandaloneEntryConfig | undefined {
+  if (raw == null) {
+    return undefined
+  }
+  if (!isRecord(raw)) {
+    throw new Error(`${context}: "standaloneEntry" must be an object when provided`)
+  }
+
+  const enabled = raw.enabled
+  if (typeof enabled !== 'boolean') {
+    throw new Error(`${context}.standaloneEntry: "enabled" must be a boolean`)
+  }
+
+  const supportsDirectPath = readOptionalBoolean(raw, 'supportsDirectPath', `${context}.standaloneEntry`)
+  const supportsPermalink = readOptionalBoolean(raw, 'supportsPermalink', `${context}.standaloneEntry`)
+  const showOnHome = readOptionalBoolean(raw, 'showOnHome', `${context}.standaloneEntry`)
+  const title = readOptionalString(raw, 'title', `${context}.standaloneEntry`)
+  const description = readOptionalString(raw, 'description', `${context}.standaloneEntry`)
+
+  return {
+    enabled,
+    ...(supportsDirectPath !== undefined ? { supportsDirectPath } : {}),
+    ...(supportsPermalink !== undefined ? { supportsPermalink } : {}),
+    ...(showOnHome !== undefined ? { showOnHome } : {}),
+    ...(title !== undefined ? { title } : {}),
+    ...(description !== undefined ? { description } : {}),
+  }
 }
 
 function parseManageDashboard(raw: unknown, context: string): ActivityConfig['manageDashboard'] {
@@ -424,6 +457,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const serverEntry = readOptionalString(rawConfig, 'serverEntry', context)
   const isDev = readOptionalBoolean(rawConfig, 'isDev', context)
   const soloModeMeta = parseSoloModeMeta(rawConfig.soloModeMeta, context)
+  const standaloneEntry = parseStandaloneEntry(rawConfig.standaloneEntry, context)
   const deepLinkOptions = parseDeepLinkOptions(rawConfig.deepLinkOptions, context)
   const deepLinkGenerator = parseDeepLinkGenerator(rawConfig.deepLinkGenerator, context)
   const createSessionBootstrap = parseCreateSessionBootstrap(rawConfig.createSessionBootstrap, context)
@@ -436,6 +470,14 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   assignOptionalField(parsed, 'serverEntry', serverEntry)
   assignOptionalField(parsed, 'isDev', isDev)
   assignOptionalField(parsed, 'soloModeMeta', soloModeMeta)
+  assignOptionalField(parsed, 'standaloneEntry', standaloneEntry ?? {
+    enabled: parsed.soloMode,
+    supportsDirectPath: parsed.soloMode,
+    supportsPermalink: parsed.soloMode,
+    showOnHome: parsed.soloMode,
+    ...(soloModeMeta?.title ? { title: soloModeMeta.title } : {}),
+    ...(soloModeMeta?.description ? { description: soloModeMeta.description } : {}),
+  })
   assignOptionalField(parsed, 'deepLinkOptions', deepLinkOptions)
   assignOptionalField(parsed, 'deepLinkGenerator', deepLinkGenerator)
   assignOptionalField(parsed, 'createSessionBootstrap', createSessionBootstrap)

@@ -1,4 +1,4 @@
-import { activitySupportsSoloMode, getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
+import { activitySupportsStandalonePermalink, getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
 import {
   getOrCreateActivePersistentSession,
   resetPersistentSession,
@@ -52,7 +52,7 @@ export async function loadPersistentSessionEntryGatewayContext({
     sessionId: session.sessionId,
     hasTeacherCookie,
     waitingRoomFieldCount: getActivityWaitingRoomFieldCount(session.activityName),
-    activitySupportsSolo: activitySupportsSoloMode(session.activityName),
+    activitySupportsSolo: activitySupportsStandalonePermalink(session.activityName),
   }
 }
 

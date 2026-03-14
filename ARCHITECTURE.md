@@ -86,8 +86,16 @@ export default {
   name: 'Display Name',         // Human-readable name
   description: 'Brief description', // Shown in dashboard
   color: 'blue',                // Accent color for activity card
-  soloMode: false,              // Allow standalone entry without teacher
-  soloModeMeta: {               // Optional: customize generic solo-route labels
+  soloMode: false,              // Legacy compatibility flag while generic /solo routes still exist
+  standaloneEntry: {            // Optional: explicit standalone-entry capabilities
+    enabled: false,
+    supportsDirectPath: false,  // Supports /solo/:activityId
+    supportsPermalink: false,   // Supports standalone-capable permalinks
+    showOnHome: false,          // Show in the home-page standalone section
+    title: 'Standalone Card Title',
+    description: 'Standalone entry description',
+  },
+  soloModeMeta: {               // Optional: compatibility labels for generic solo cards
     title: 'Solo Card Title',
     description: 'Solo mode description',
   },
@@ -153,33 +161,44 @@ Routes are automatically generated in `App.tsx` based on registered activities:
 
 See **[ADDING_ACTIVITIES.md](ADDING_ACTIVITIES.md)** for a complete step-by-step tutorial with working code examples.
 
-## Solo Mode
+## Standalone Entry
 
-Solo mode enables students to practice activities independently without requiring a teacher to manage a session. This feature provides self-paced learning opportunities directly from the join page.
+Standalone entry enables students to use certain activities without requiring a teacher-managed live session. Shared config now distinguishes between:
+- direct standalone routes at `/solo/:activityId`
+- standalone-capable permalinks
+- utility routes that are not normal student-entry flows
 
 ### Configuration
 
-Enable solo mode by setting `soloMode: true` in the activity configuration:
+Declare standalone capabilities in the activity configuration:
 
 ```typescript
 export const myActivity = {
   id: 'my-activity',
   name: 'My Activity',
-  soloMode: true,  // Appears in "Solo Bits" section
+  soloMode: true,  // Legacy compatibility while generic /solo routes still exist
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   // ... other config
 };
 ```
 
 ### How It Works
 
-1. **Display**: Activities with `soloMode: true` appear as clickable cards in the "Solo Bits" section on the join page (`/`)
+1. **Display**: Activities with `standaloneEntry.showOnHome: true` and `supportsDirectPath: true` appear as clickable cards in the standalone section on the join page (`/`)
    - Cards display in a responsive 3-column grid on medium screens and larger (1 column on mobile)
    - Each card shows the activity name, description, and clickable area to launch the activity
 2. **Session ID Format**: Solo sessions use the format `solo-{activity-id}` (e.g., `solo-java-string-practice`)
 3. **No Teacher Required**: Students can start practicing immediately without a teacher-managed session
 4. **Client-Side State**: Solo activities typically use `localStorage` for progress persistence
 5. **Dashboard Utilities**: Optional `manageDashboard.utilities` lets an activity expose extra copyable routes on the management dashboard without overloading permalink or solo capability semantics
-6. **Deep Linking Support**: Solo mode supports query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort` auto-selects the merge sort algorithm
+6. **Deep Linking Support**: Direct standalone routes can still support query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort`
+
+Activities can also support standalone via permalink without supporting `/solo/:activityId`. SyncDeck is the motivating example for that split.
 
 ### Solo Mode vs. Teacher Mode
 

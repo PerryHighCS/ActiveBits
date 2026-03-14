@@ -6,6 +6,14 @@ const syncdeckConfig: ActivityConfig = {
   description: 'Host a synchronized presentation for your class',
   color: 'indigo',
   soloMode: false,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: false,
+    supportsPermalink: true,
+    showOnHome: false,
+    title: 'SyncDeck Standalone',
+    description: 'Launch a hosted standalone presentation session from a permalink.',
+  },
   waitingRoom: {
     fields: [
       {

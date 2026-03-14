@@ -43,7 +43,7 @@
 
 ## 🎓 For Students (Solo Mode)
 
-1. Go to main page → Click "Solo Bits"
+1. Go to main page → Click the activity in "Standalone Activities"
 2. Find "Algorithm Practice" 
 3. Choose an algorithm to explore
 4. You control the step-through:
@@ -160,4 +160,3 @@ For detailed documentation, see:
 - `README.md` - Complete architecture and features
 - `EXTENSION_GUIDE.md` - How to add new algorithms
 - `ALGORITHM_DEMO_IMPLEMENTATION.md` - Implementation details
-

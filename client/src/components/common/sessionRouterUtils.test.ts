@@ -1,21 +1,25 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  activitySupportsDirectStandalonePath,
+  activitySupportsStandalonePermalink,
   buildTeacherManagePathFromSession,
   buildPersistentSessionEntryApiUrl,
   buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
   buildSessionEntryApiUrl,
   cleanExpiredSessions,
+  getHomeUtilityActivities,
   getPersistentLinkControlStateFromSearch,
   normalizePersistentPresentationUrl,
   getPersistentSelectedOptionsFromSearchForActivity,
   getPersistentSelectedOptionsFromSearch,
   getPersistentQuerySuffix,
   getSessionPresentationUrlForTeacherRedirect,
-  getSoloActivities,
+  getStandaloneHomeActivities,
   isJoinSessionId,
   readCachedSession,
+  shouldShowStandaloneActivityOnHome,
 } from './sessionRouterUtils'
 
 interface MockStorage {
@@ -328,11 +332,72 @@ void test('isJoinSessionId requires a full non-zero hex string', () => {
   assert.equal(isJoinSessionId(''), false)
 })
 
-void test('getSoloActivities filters activity list to solo-mode entries', () => {
-  const result = getSoloActivities([
-    { id: 'a', name: 'A', description: 'A', color: 'blue', soloMode: true },
-    { id: 'b', name: 'B', description: 'B', color: 'green', soloMode: false },
+void test('standalone activity helpers respect direct-path, permalink, and home visibility flags', () => {
+  const directHome = {
+    id: 'a',
+    name: 'A',
+    description: 'A',
+    color: 'blue',
+    soloMode: true,
+    standaloneEntry: {
+      enabled: true,
+      supportsDirectPath: true,
+      supportsPermalink: true,
+      showOnHome: true,
+    },
+  }
+  const permalinkOnly = {
+    id: 'b',
+    name: 'B',
+    description: 'B',
+    color: 'green',
+    soloMode: false,
+    standaloneEntry: {
+      enabled: true,
+      supportsDirectPath: false,
+      supportsPermalink: true,
+      showOnHome: false,
+    },
+  }
+
+  assert.equal(activitySupportsDirectStandalonePath(directHome), true)
+  assert.equal(activitySupportsStandalonePermalink(directHome), true)
+  assert.equal(shouldShowStandaloneActivityOnHome(directHome), true)
+
+  assert.equal(activitySupportsDirectStandalonePath(permalinkOnly), false)
+  assert.equal(activitySupportsStandalonePermalink(permalinkOnly), true)
+  assert.equal(shouldShowStandaloneActivityOnHome(permalinkOnly), false)
+
+  assert.deepEqual(getStandaloneHomeActivities([directHome, permalinkOnly]).map((activity) => activity.id), ['a'])
+})
+
+void test('getHomeUtilityActivities returns activities with home-visible utilities', () => {
+  const result = getHomeUtilityActivities([
+    {
+      id: 'gallery-walk',
+      name: 'Gallery Walk',
+      description: 'G',
+      color: 'blue',
+      soloMode: true,
+      manageDashboard: {
+        utilities: [
+          { label: 'Feedback Review', path: '/solo/gallery-walk', showOnHome: true },
+        ],
+      },
+    },
+    {
+      id: 'syncdeck',
+      name: 'SyncDeck',
+      description: 'S',
+      color: 'indigo',
+      soloMode: false,
+      manageDashboard: {
+        utilities: [
+          { label: 'Hidden Utility', path: '/tool', showOnHome: false },
+        ],
+      },
+    },
   ])
 
-  assert.deepEqual(result.map((activity) => activity.id), ['a'])
+  assert.deepEqual(result.map((activity) => activity.id), ['gallery-walk'])
 })

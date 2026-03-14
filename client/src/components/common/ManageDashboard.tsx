@@ -32,6 +32,10 @@ import Button from '../ui/Button'
 type DashboardActivity = (typeof activities)[number]
 const DEFAULT_PERSISTENT_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
 
+function supportsStandalonePermalink(activity: DashboardActivity): boolean {
+  return activity.standaloneEntry?.enabled === true && activity.standaloneEntry.supportsPermalink === true
+}
+
 interface PersistentSession {
   activityName: string
   hash: string
@@ -212,7 +216,7 @@ export default function ManageDashboard() {
     setPersistentEntryPolicy(
       normalizePersistentEntryPolicyForActivity(
         session?.entryPolicy || DEFAULT_PERSISTENT_ENTRY_POLICY,
-        activity.soloMode,
+        supportsStandalonePermalink(activity),
       ),
     )
   }
@@ -389,7 +393,10 @@ export default function ManageDashboard() {
 
   const selectedActivityOptions = selectedActivity ? parseDeepLinkOptions(selectedActivity.deepLinkOptions) : {}
   const persistentEntryPolicyOptions = selectedActivity
-    ? filterPersistentEntryPolicyOptionsForActivity(PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS, selectedActivity.soloMode)
+    ? filterPersistentEntryPolicyOptionsForActivity(
+      PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS,
+      supportsStandalonePermalink(selectedActivity),
+    )
     : [...PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS]
   const persistentOptionErrors = selectedActivity
     ? validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)

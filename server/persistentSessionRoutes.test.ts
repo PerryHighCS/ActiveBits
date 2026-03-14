@@ -1035,7 +1035,7 @@ void test('create persists non-default entry policy in metadata and list exposes
   const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
   const createReq = createMockReq({
     body: {
-      activityName: 'gallery-walk',
+      activityName: 'java-string-practice',
       teacherCode: 'solo-allowed-code',
       entryPolicy: 'solo-allowed',
     },
@@ -1049,7 +1049,7 @@ void test('create persists non-default entry policy in metadata and list exposes
   await createHandler(createReq, createRes)
 
   assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
-  const activityName = 'gallery-walk'
+  const activityName = 'java-string-practice'
   const hash = String(createRes.jsonBody?.hash ?? '')
   const url = String(createRes.jsonBody?.url ?? '')
   t.after(async () => cleanupPersistentSession(hash))

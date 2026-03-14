@@ -271,6 +271,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | server | activity config
+- Discovery: `soloMode` is no longer expressive enough by itself, because standalone capability now splits across direct `/solo/:activityId` support, standalone-capable permalinks, and home-page discovery. The new `standaloneEntry` config captures those dimensions while the schema still derives a compatibility default from `soloMode` when absent.
+- Why it matters: This lets SyncDeck support standalone via permalink without being forced onto `/solo/syncdeck`, and lets Gallery Walk stay a home-page utility without pretending it supports standalone permalinks.
+- Evidence: `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `server/activities/activityRegistry.ts`; `activities/syncdeck/activity.config.ts`; `activities/gallery-walk/activity.config.ts`
+- Follow-up action: Keep new activities on explicit `standaloneEntry` declarations instead of relying on the `soloMode` compatibility fallback, and only remove the legacy fallback after all activity configs have been updated.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | activities
 - Discovery: `server/core/sessionParticipants.ts` now also exposes shared accepted-participant lookup via `findSessionParticipant(...)`, and the migrated Java activity progress endpoints use it instead of route-local `find(...)` logic.
 - Why it matters: This extends the shared participant contract one step past websocket join. Waiting-room-issued or reconnected `participantId` is now the first lookup key for later progress updates too, while legacy name-only fallback remains explicitly opt-in for older sessions.

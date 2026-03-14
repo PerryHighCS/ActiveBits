@@ -147,7 +147,7 @@ export default {
 };
 ```
 
-Keep metadata (id/name/description/color/soloMode + optional soloModeMeta overrides) in `activity.config.ts` to avoid dueling sources of truth. The client entry is lazy-loaded via `React.lazy`, so keep it side-effect free and focused on exporting the components/footer. The loader merges `{...config, ...clientEntry}` at runtime, and each activity builds into its own chunk (`activity-<id>-<hash>.js`).
+Keep metadata (id/name/description/color plus standalone-entry capability declarations) in `activity.config.ts` to avoid dueling sources of truth. The client entry is lazy-loaded via `React.lazy`, so keep it side-effect free and focused on exporting the components/footer. The loader merges `{...config, ...clientEntry}` at runtime, and each activity builds into its own chunk (`activity-<id>-<hash>.js`).
 
 ### Step 5: Create Server Routes
 
@@ -242,9 +242,15 @@ export default {
   description: 'Ask students questions and collect responses',
   color: 'purple',
   soloMode: false,
+  standaloneEntry: {
+    enabled: false,
+    supportsDirectPath: false,
+    supportsPermalink: false,
+    showOnHome: false,
+  },
   soloModeMeta: {
     title: 'Quiz practice',
-    description: 'Shown instead of description for Solo Bits cards (optional)',
+    description: 'Compatibility label for generic /solo cards when used',
     buttonText: 'Copy Quiz Solo Link',
   },
   // Optional: Define query parameters for deep linking (e.g., permanent links that pre-configure settings)
@@ -370,13 +376,13 @@ No central registry updates are needed; activities are auto-discovered from `act
 7. **Use SessionHeader** - All manager components should use the unified SessionHeader
 8. **Handle session termination** - Student components should use useSessionEndedHandler hook
 
-## Solo Mode Activities
+## Standalone Activities
 
-Solo mode allows students to practice activities independently without a teacher managing a session. Activities with `soloMode: true` appear in the "Solo Bits" section on the join page.
+Standalone activities allow students to practice independently without a teacher managing a live session. Shared config now distinguishes between direct `/solo/:activityId` routes, standalone-capable permalinks, and utility routes.
 
 ### When to Use Solo Mode
 
-Enable solo mode (`soloMode: true`) for activities that:
+Enable standalone entry for activities that:
 - Focus on individual practice and skill building
 - Don't require teacher orchestration or real-time management
 - Can function entirely client-side or with minimal server interaction
@@ -391,7 +397,13 @@ export const practiceActivity = {
   description: 'Individual skill practice',
   ManagerComponent: () => <div>This activity is solo-only</div>,
   StudentComponent: PracticeComponent,
-  soloMode: true,  // Shows in Solo Bits
+  soloMode: true,  // Legacy compatibility while /solo routes still exist
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   color: 'green',
   footerContent: null,
 };
@@ -405,12 +417,20 @@ export const practiceActivity = {
 
 ### Customizing Solo Mode Labels
 
-Provide an optional `soloModeMeta` object in `activity.config.ts` to override the generic `/solo/...` card title/description where that route still exists:
+Provide an optional `standaloneEntry` block to declare how standalone entry works, and keep `soloModeMeta` only for compatibility labels on generic `/solo/...` cards where that route still exists:
 
 ```typescript
 export default {
   // ...
   soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: false,
+    showOnHome: false,
+    title: 'Review Gallery Walk Feedback',
+    description: 'Upload a .gw file to see the comments left for you.',
+  },
   soloModeMeta: {
     title: 'Review Gallery Walk Feedback',
     description: 'Upload a .gw file to see the comments left for you.',
@@ -418,7 +438,7 @@ export default {
 };
 ```
 
-If omitted, the UI falls back to `name` and `description`.
+If `standaloneEntry` is omitted, the parser currently derives a compatibility default from `soloMode`, but new activities should declare `standaloneEntry` explicitly.
 
 ### Adding Dashboard Utility Links
 

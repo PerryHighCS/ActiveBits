@@ -243,6 +243,25 @@ export function isJoinSessionId(input: string): boolean {
   return !/^0+$/i.test(value)
 }
 
-export function getSoloActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {
-  return activityList.filter((activity) => activity.soloMode)
+export function activitySupportsDirectStandalonePath(activity: ActivityRegistryEntry): boolean {
+  return activity.standaloneEntry?.enabled === true && activity.standaloneEntry.supportsDirectPath === true
+}
+
+export function activitySupportsStandalonePermalink(activity: ActivityRegistryEntry): boolean {
+  return activity.standaloneEntry?.enabled === true && activity.standaloneEntry.supportsPermalink === true
+}
+
+export function shouldShowStandaloneActivityOnHome(activity: ActivityRegistryEntry): boolean {
+  return activitySupportsDirectStandalonePath(activity) && activity.standaloneEntry?.showOnHome === true
+}
+
+export function getStandaloneHomeActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {
+  return activityList.filter((activity) => shouldShowStandaloneActivityOnHome(activity))
+}
+
+export function getHomeUtilityActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {
+  return activityList.filter((activity) =>
+    Array.isArray(activity.manageDashboard?.utilities)
+    && activity.manageDashboard.utilities.some((utility) => utility.showOnHome === true),
+  )
 }
