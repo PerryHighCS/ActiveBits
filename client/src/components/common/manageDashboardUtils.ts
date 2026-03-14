@@ -43,6 +43,12 @@ export type DeepLinkOptions = Record<string, DeepLinkOption>
 export type DeepLinkSelection = Record<string, string>
 export type DeepLinkValidationErrors = Record<string, string>
 
+export interface PersistentEntryPolicyOptionLike {
+  value: 'instructor-required' | 'solo-allowed' | 'solo-only'
+  label: string
+  description: string
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -255,6 +261,30 @@ export function buildSoloLink(
   selectedOptions: Record<string, unknown> | null | undefined,
 ): string {
   return `${origin}/solo/${activityId}${buildQueryString(selectedOptions)}`
+}
+
+export function filterPersistentEntryPolicyOptionsForActivity<T extends PersistentEntryPolicyOptionLike>(
+  options: readonly T[],
+  activitySupportsSolo: boolean,
+): T[] {
+  if (activitySupportsSolo) {
+    return [...options]
+  }
+
+  return options.filter((option) => option.value === 'instructor-required')
+}
+
+export function normalizePersistentEntryPolicyForActivity<
+  T extends PersistentEntryPolicyOptionLike['value'],
+>(
+  entryPolicy: T,
+  activitySupportsSolo: boolean,
+): T | 'instructor-required' {
+  if (activitySupportsSolo) {
+    return entryPolicy
+  }
+
+  return entryPolicy === 'instructor-required' ? entryPolicy : 'instructor-required'
 }
 
 export function buildPersistentSessionKey(activityName: string, hash: string): string {

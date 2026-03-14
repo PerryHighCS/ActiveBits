@@ -1,5 +1,6 @@
 import {
   getAllowedActivities,
+  activitySupportsSoloMode,
   isValidActivity,
 } from '../activities/activityRegistry.js'
 import {
@@ -260,6 +261,18 @@ function buildPersistentSessionRelativeUrl(
   return `${baseUrl}?${params.toString()}`
 }
 
+function validateEntryPolicyForActivity(activityName: string, entryPolicy: string): string | null {
+  if (activitySupportsSoloMode(activityName)) {
+    return null
+  }
+
+  if (entryPolicy === 'solo-allowed' || entryPolicy === 'solo-only') {
+    return 'This activity does not support solo entry links'
+  }
+
+  return null
+}
+
 export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersistentSessionRoutesOptions): void {
   app.get('/api/persistent-session/list', async (req, res) => {
     try {
@@ -325,6 +338,11 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       res.status(400).json({ error: `Teacher code must be at most ${MAX_TEACHER_CODE_LENGTH} characters` })
       return
     }
+    const entryPolicyError = validateEntryPolicyForActivity(activityName, entryPolicy)
+    if (entryPolicyError) {
+      res.status(400).json({ error: entryPolicyError })
+      return
+    }
 
     const cookieName = 'persistent_sessions'
     let { sessions: sessionEntries } = parsePersistentSessionsCookie(
@@ -378,6 +396,11 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
         error: 'Invalid activity name',
         allowedActivities: getAllowedActivities(),
       })
+      return
+    }
+    const entryPolicyError = validateEntryPolicyForActivity(activityName, entryPolicy)
+    if (entryPolicyError) {
+      res.status(400).json({ error: entryPolicyError })
       return
     }
 

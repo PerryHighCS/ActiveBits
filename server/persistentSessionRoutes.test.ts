@@ -219,6 +219,53 @@ void test('persistent session route allows recreation after reset', async (t) =>
   assert.equal(secondRes.jsonBody?.sessionId, 'new-session')
 })
 
+void test('persistent session create rejects solo-capable entry policies for non-solo activities', async () => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessions = { get: async () => null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/persistent-session/create')
+
+  const req = createMockReq({
+    body: {
+      activityName: 'raffle',
+      teacherCode: 'teacher-secret',
+      entryPolicy: 'solo-only',
+    },
+  })
+  const res = createMockRes()
+
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.jsonBody, { error: 'This activity does not support solo entry links' })
+})
+
+void test('persistent session update rejects solo-capable entry policies for non-solo activities', async () => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessions = { get: async () => null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/persistent-session/update')
+
+  const req = createMockReq({
+    body: {
+      activityName: 'raffle',
+      hash: 'deadbeef',
+      entryPolicy: 'solo-allowed',
+      selectedOptions: {},
+    },
+  })
+  const res = createMockRes()
+
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.jsonBody, { error: 'This activity does not support solo entry links' })
+})
+
 void test('persistent session entry route returns shared entry status for started live sessions', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

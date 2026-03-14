@@ -10,7 +10,9 @@ import {
   buildPersistentSessionKey,
   buildSoloLink,
   describeSelectedOptions,
+  filterPersistentEntryPolicyOptionsForActivity,
   initializeDeepLinkOptions,
+  normalizePersistentEntryPolicyForActivity,
   normalizeSelectedOptions,
   persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkGenerator,
@@ -210,7 +212,12 @@ export default function ManageDashboard() {
         ? normalizeSelectedOptions(activity.deepLinkOptions, session.selectedOptions || {})
         : initializeDeepLinkOptions(activity.deepLinkOptions),
     )
-    setPersistentEntryPolicy(session?.entryPolicy || DEFAULT_PERSISTENT_ENTRY_POLICY)
+    setPersistentEntryPolicy(
+      normalizePersistentEntryPolicyForActivity(
+        session?.entryPolicy || DEFAULT_PERSISTENT_ENTRY_POLICY,
+        activity.soloMode,
+      ),
+    )
   }
 
   const closePersistentModal = (): void => {
@@ -399,6 +406,9 @@ export default function ManageDashboard() {
     buildSoloLink(getWindowOrigin(), activityId, options)
 
   const selectedActivityOptions = selectedActivity ? parseDeepLinkOptions(selectedActivity.deepLinkOptions) : {}
+  const persistentEntryPolicyOptions = selectedActivity
+    ? filterPersistentEntryPolicyOptionsForActivity(PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS, selectedActivity.soloMode)
+    : [...PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS]
   const persistentOptionErrors = selectedActivity
     ? validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)
     : {}
@@ -642,7 +652,7 @@ export default function ManageDashboard() {
                   onChange={(event) => setPersistentEntryPolicy(event.target.value as PersistentSessionEntryPolicy)}
                   className="border-2 border-gray-300 rounded px-4 py-2 w-full bg-white focus:outline-none focus:border-blue-500"
                 >
-                  {PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS.map((option) => (
+                  {persistentEntryPolicyOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
