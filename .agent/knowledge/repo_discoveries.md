@@ -91,7 +91,15 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: Accepted-entry reconnect is now a real shared service, not just a pair of Java-specific route edits. `connectAcceptedSessionParticipant()` centralizes the “use explicit name or fall back to accepted-entry name by `participantId`, then run shared connect/reconnect logic” pattern, and `traveling-salesman` now uses it alongside the Java activities.
 - Why it matters: This is the first reusable server entry service in the post-handoff space. It proves that accepted-entry authority can be shared without collapsing all activity join behavior into one route, while also making the next gap clearer: Python List Practice and SyncDeck still need an explicit decision about whether to join this service or keep their activity-owned entry semantics.
 - Evidence: `server/core/acceptedSessionParticipants.ts`; `server/acceptedSessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/students.ts`
-- Follow-up action: If more adoption is desired, Python List Practice is the next natural candidate. If not, the next architectural step is deciding whether this service is “enough shared authority” or should grow into a broader accepted-entry contract that also governs later reconnect/mutation surfaces.
+- Follow-up action: Python List Practice has now joined this service too, so the remaining adoption question is mostly SyncDeck. The broader architectural question is whether this service is “enough shared authority” or should grow into a more comprehensive accepted-entry contract that also governs later reconnect/mutation surfaces.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Area: server | activities
+- Discovery: Python List Practice now also uses the shared accepted-entry connect service through its activity-owned `connectPythonListPracticeStudent(...)` wrapper.
+- Why it matters: This shows the service is not just for the initially migrated Java/traveling-salesman activities. It can support another session-backed activity with slightly different helper structure without forcing a rewrite of that activity’s stats/update paths.
+- Evidence: `activities/python-list-practice/server/studentParticipants.ts`; `activities/python-list-practice/server/studentParticipants.test.ts`; `server/core/acceptedSessionParticipants.ts`
+- Follow-up action: Decide explicitly whether SyncDeck should stay on its separate registration-first model or whether a future shared accepted-entry contract should bridge that gap too.
 - Owner: Codex
 
 - Date: 2026-03-14

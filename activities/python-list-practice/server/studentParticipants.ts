@@ -1,10 +1,16 @@
+import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import {
-  connectSessionParticipant,
   disconnectSessionParticipant,
   updateSessionParticipant,
 } from 'activebits-server/core/sessionParticipants.js'
 import type { PythonListPracticeStats, PythonListPracticeStudent } from '../pythonListPracticeTypes.js'
+
+interface PythonListPracticeSessionLike {
+  data: {
+    students: PythonListPracticeStudent[]
+  }
+}
 
 const defaultStats: PythonListPracticeStats = {
   total: 0,
@@ -48,13 +54,14 @@ export function normalizePythonListPracticeStudent(
 }
 
 export function connectPythonListPracticeStudent(
-  students: PythonListPracticeStudent[],
+  session: PythonListPracticeSessionLike,
   participantId: string | null,
-  participantName: string,
+  participantName: string | null,
   now = Date.now(),
-): { participantId: string } {
-  const result = connectSessionParticipant({
-    participants: students,
+): { participantId: string; participantName: string } | null {
+  const result = connectAcceptedSessionParticipant({
+    session,
+    participants: session.data.students,
     participantId,
     participantName,
     now,
@@ -64,7 +71,14 @@ export function connectPythonListPracticeStudent(
     generateParticipantId,
   })
 
-  return { participantId: result.participantId }
+  if (!result) {
+    return null
+  }
+
+  return {
+    participantId: result.participantId,
+    participantName: result.participantName,
+  }
 }
 
 export function updatePythonListPracticeStudentStats(

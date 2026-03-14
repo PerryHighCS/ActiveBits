@@ -281,11 +281,16 @@ export default function setupPythonListPracticeRoutes(
           await sessions.get(client.sessionId!),
         )
         if (session) {
-          const { participantId } = connectPythonListPracticeStudent(
-            session.data.students,
+          const result = connectPythonListPracticeStudent(
+            session,
             client.studentId,
-            client.studentName,
+            client.studentName ?? null,
           )
+          if (!result) {
+            return
+          }
+          const { participantId, participantName } = result
+          client.studentName = participantName
           client.studentId = participantId
 
           await sessions.set(session.id, session)

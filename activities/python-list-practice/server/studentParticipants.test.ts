@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { acceptEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import type { PythonListPracticeStudent } from '../pythonListPracticeTypes.js'
 import {
   connectPythonListPracticeStudent,
@@ -13,6 +14,14 @@ const sampleStats = {
   correct: 2,
   streak: 1,
   longestStreak: 2,
+}
+
+function createSession(students: PythonListPracticeStudent[]) {
+  return {
+    data: {
+      students,
+    },
+  }
 }
 
 void test('normalizePythonListPracticeStudent backfills missing ids with shared participant ids', () => {
@@ -32,12 +41,28 @@ void test('connectPythonListPracticeStudent reconnects legacy unnamed matches an
     { id: '', name: 'Grace', stats: sampleStats, connected: false, lastSeen: 5 },
   ]
 
-  const result = connectPythonListPracticeStudent(students, null, 'Grace', 20)
+  const result = connectPythonListPracticeStudent(createSession(students), null, 'Grace', 20)
 
-  assert.match(result.participantId, /^[a-f0-9]{16}$/)
+  assert.match(String(result?.participantId), /^[a-f0-9]{16}$/)
+  assert.equal(result?.participantName, 'Grace')
   assert.equal(students[0]?.id, result.participantId)
   assert.equal(students[0]?.connected, true)
   assert.equal(students[0]?.lastSeen, 20)
+})
+
+void test('connectPythonListPracticeStudent falls back to accepted-entry display name by participantId', () => {
+  const students: PythonListPracticeStudent[] = []
+  const session = createSession(students)
+  acceptEntryParticipant(session as never, {
+    participantId: 'student-1',
+    displayName: 'Ada',
+  }, 20)
+
+  const result = connectPythonListPracticeStudent(session, 'student-1', null, 30)
+
+  assert.match(String(result?.participantId), /^[a-f0-9]{16}$/)
+  assert.equal(result?.participantName, 'Ada')
+  assert.equal(students[0]?.name, 'Ada')
 })
 
 void test('updatePythonListPracticeStudentStats updates existing students or creates a named fallback record', () => {
