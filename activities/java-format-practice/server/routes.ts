@@ -1,6 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
+import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { connectSessionParticipant, disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -104,26 +105,6 @@ export default function setupJavaFormatPracticeRoutes(
 ): void {
   const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws)
 
-  function closeDuplicateStudentSockets(currentSocket: JavaFormatSocket): void {
-    if (!currentSocket.sessionId || !currentSocket.studentId) return
-
-    for (const client of ws.wss.clients as Set<JavaFormatSocket>) {
-      if (
-        client !== currentSocket &&
-        client.readyState === 1 &&
-        client.sessionId === currentSocket.sessionId &&
-        client.studentId === currentSocket.studentId
-      ) {
-        client.ignoreDisconnect = true
-        try {
-          client.close(4000, 'Replaced by new connection')
-        } catch (error) {
-          console.error('Failed to close duplicate student socket', error)
-        }
-      }
-    }
-  }
-
   async function broadcast(type: string, payload: unknown, sessionId: string): Promise<void> {
     const message = JSON.stringify({ type, payload })
 
@@ -189,7 +170,7 @@ export default function setupJavaFormatPracticeRoutes(
         } else {
           console.log(`New student joining: ${activeStudentName}`)
         }
-        closeDuplicateStudentSockets(client)
+        closeDuplicateParticipantSockets(ws.wss.clients as Set<JavaFormatSocket>, client)
 
         await sessions.set(session.id, session)
         console.log('Total students in session:', session.data.students.length)

@@ -6,6 +6,7 @@ import {
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
+import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -1067,6 +1068,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           })
         }
         await sessions.set(session.id, session)
+        closeDuplicateParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, client)
       }
 
       if (session.data.lastInstructorPayload != null) {

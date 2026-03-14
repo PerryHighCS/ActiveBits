@@ -168,6 +168,8 @@ function createSyncDeckSession(id: string, instructorPasscode = 'passcode-1'): S
 
 class MockSocket implements ActiveBitsWebSocket {
   sessionId?: string | null
+  studentId?: string | null
+  ignoreDisconnect?: boolean
   isAlive?: boolean
   clientIp?: string
   readyState = 1
@@ -264,6 +266,39 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
         JSON.stringify(asRecord(entry.payload)?.payload) === JSON.stringify({ h: 2, v: 0, f: 0 }),
     ),
   )
+})
+
+void test('syncdeck websocket closes duplicate student sockets for the same session participant', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const existingSocket = new MockSocket()
+  existingSocket.sessionId = 's1'
+  existingSocket.studentId = 'student-1'
+  const replacementSocket = new MockSocket()
+  ws.wss.clients.add(existingSocket)
+  ws.wss.clients.add(replacementSocket)
+
+  handler?.(
+    replacementSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'student-1',
+      studentName: 'Ada Lovelace',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(existingSocket.ignoreDisconnect, true)
+  assert.deepEqual(existingSocket.closeCalls, [{ code: 4000, reason: 'Replaced by new connection' }])
 })
 
 void test('syncdeck websocket sends latest state snapshot to instructor on connect', async () => {

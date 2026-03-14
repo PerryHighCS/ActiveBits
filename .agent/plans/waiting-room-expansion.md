@@ -32,7 +32,7 @@ The most important work still open before this plan can be considered waiting-ro
 - implement embedded role inheritance
   Embedded entry is still a documented target contract, not a runtime path. Parent-managed launches should inherit teacher/student role without prompting for instructor code again.
 - close the remaining waiting-room test gap
-  Helper and route coverage are strong, but full `WaitingRoom.tsx` interaction coverage for required-field blocking and carry-forward is still limited by the current Node/Vite test boundary.
+  Helper and route coverage are strong, and `WaitingRoomContent.tsx` now gives us render-level accessibility/control-state coverage without importing the Vite activity loader. The remaining gap is full interaction coverage for `WaitingRoom.tsx` carry-forward, websocket state, and end-to-end form submission.
 - keep Phase 4 activity migration deferred until the above semantics stabilize
   More activity migrations would otherwise build on participant rules that are still changing.
 
@@ -645,7 +645,7 @@ that path ships.
 - [ ] Add clear [TEST] logging for expected error-path tests
   Current status: waiting-room route coverage now includes an explicit `[TEST]` marker for the intentionally noisy corrupted-cookie parse path in `server/persistentSessionRoutes.test.ts`. Broader adoption is still open for other future waiting-room-related tests that intentionally emit warnings/errors.
 - [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
-  Current status: utility-level coverage now exists for waiting-room field validation/storage (`waitingRoomFormUtils.test.ts`), primary-action blocking rules (`waitingRoomActionUtils.test.ts`), live-session entry-token storage/consume behavior including 404 vs retry semantics (`entryParticipantStorage.test.ts`), and shared live-entry/join/solo/wait/pass-through status resolution (`server/entryStatus.test.ts`). Full component-level interaction coverage for required-field blocking and carry-forward inside `WaitingRoom.tsx` is still outstanding because the current Node test runner does not directly support the Vite activity-loader path used by that component.
+  Current status: utility-level coverage now exists for waiting-room field validation/storage (`waitingRoomFormUtils.test.ts`), primary-action blocking rules (`waitingRoomActionUtils.test.ts`), live-session entry-token storage/consume behavior including 404 vs retry semantics (`entryParticipantStorage.test.ts`), shared live-entry/join/solo/wait/pass-through status resolution (`server/entryStatus.test.ts`), and render-level accessibility/control-state coverage through `WaitingRoomContent.test.tsx`. Full interaction coverage for carry-forward and websocket-driven state inside `WaitingRoom.tsx` is still outstanding, but the new presentational seam avoids the previous hard stop from the Vite activity-loader path.
   Follow-up target: either add a stable component-test seam around `WaitingRoom.tsx` without `import.meta.glob`, or explicitly introduce a browser-level harness only if the helper/route boundary stops being sufficient.
 
 ### Phase 3 - Entry resolution behavior

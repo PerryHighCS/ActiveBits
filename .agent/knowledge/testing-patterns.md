@@ -33,6 +33,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Follow-up action: Add the same marker pattern to future waiting-room tests that intentionally produce console noise, especially around cookie parsing, auth failures, or storage fallbacks.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For shared components that are hard to import in the Node test runner because their container pulls Vite-only activity loading, extract a pure presentational seam and test that seam with `react-dom/server` markup assertions first.
+- Why it helps: This gives us real accessibility and control-state coverage without forcing a new browser harness or trying to mock `import.meta.glob` inside the existing Node-based client suite.
+- Example (file/path): `client/src/components/common/WaitingRoomContent.tsx`; `client/src/components/common/WaitingRoomContent.test.tsx`
+- Failure signal: Important ARIA wiring or disabled-state regressions slip through because the only directly testable surface is a low-level helper, while the container component remains too heavy for the current test runner.
+- Follow-up action: Use this seam pattern sparingly for high-value shared containers, then add fuller interaction tests later if the runtime boundary becomes easier to exercise.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Scope: integration
 - Pattern: In sandboxed agent environments where some server tests fail during local port binding or related host restrictions, use `npm run test:codex` as the validation gate and record the skipped full-suite limitation alongside targeted checks for the touched server surface.

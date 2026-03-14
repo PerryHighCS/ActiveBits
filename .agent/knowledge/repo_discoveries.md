@@ -19,7 +19,15 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: Waiting-room route coverage is now broad enough to validate most current entry-gateway API edges without a browser harness. `persistentSessionRoutes.test.ts` covers malformed permalink entry requests, corrupted cookie parsing, stale backing-session repair, student/teacher live-entry role differences, and solo-unavailable permalink outcomes, while `sessionEntryRoutes.test.ts` covers missing-session and token-trimming behavior for live entry-participant handoff routes.
 - Why it matters: The remaining test gaps are now concentrated in still-unimplemented embedded-role inheritance and `WaitingRoom.tsx` component interactions rather than basic entry-route correctness. That keeps future effort focused on real product gaps instead of more route boilerplate.
 - Evidence: `server/persistentSessionRoutes.test.ts`; `server/sessionEntryRoutes.test.ts`; `server/entryStatus.test.ts`
-- Follow-up action: When embedded entry work lands, add route/integration coverage there first; for `WaitingRoom.tsx`, revisit component-level tests only if the test environment gains a stable way to mock or bypass the Vite `import.meta.glob` activity loader.
+- Follow-up action: When embedded entry work lands, add route/integration coverage there first; for `WaitingRoom.tsx`, extend the new presentational seam and only add a heavier browser-style harness if interaction coverage still cannot be reached through the existing client test stack.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Area: client | testing
+- Discovery: `WaitingRoom` now has a pure presentational seam in `WaitingRoomContent.tsx`, which can be tested directly in the Node client suite even though the full container still depends on the Vite activity loader.
+- Why it matters: This removes the earlier all-or-nothing testing boundary around the waiting-room UI. We can now cover accessibility wiring, teacher-control disabled states, and other rendering-critical behavior without introducing Playwright or reworking the activity loader just to test one shared component.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/WaitingRoomContent.tsx`; `client/src/components/common/WaitingRoomContent.test.tsx`
+- Follow-up action: Add more render-level cases through the seam as waiting-room UI evolves, and reserve any future browser-harness work for behavior that genuinely needs end-to-end navigation, websocket timing, or storage integration.
 - Owner: Codex
 
 - Date: 2026-03-14
@@ -160,9 +168,9 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-14
 - Area: server | activities
-- Discovery: Duplicate student-socket eviction now also lives in shared server code. `server/core/participantSockets.ts` centralizes the “same session + same participant ID replaces older socket” rule, and the Java plus traveling-salesman routes now delegate to it.
-- Why it matters: This keeps one more part of the accepted-participant lifecycle aligned across the activities already on the shared path. The same participant ID now implies the same duplicate-connection replacement behavior without each route carrying its own close-loop implementation.
-- Evidence: `server/core/participantSockets.ts`; `server/participantSockets.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/shared.ts`
+- Discovery: Duplicate student-socket eviction now also lives in shared server code. `server/core/participantSockets.ts` centralizes the “same session + same participant ID replaces older socket” rule, and the Java routes, traveling-salesman, and SyncDeck websocket student path now delegate to it.
+- Why it matters: This keeps one more part of the accepted-participant lifecycle aligned across the activities already on the shared path. The same participant ID now implies the same duplicate-connection replacement behavior without each route carrying its own close-loop implementation, even in SyncDeck where broader registration/reconnect semantics are still activity-owned.
+- Evidence: `server/core/participantSockets.ts`; `server/participantSockets.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/shared.ts`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
 - Follow-up action: Reuse this helper anywhere session-bound participant sockets should be single-owner by `participantId`, and avoid reintroducing route-local duplicate-close loops unless an activity genuinely needs a different replacement policy.
 - Owner: Codex
 
