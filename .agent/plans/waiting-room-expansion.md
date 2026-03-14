@@ -680,6 +680,18 @@ Use this checklist when migrating an existing activity to waiting-room-based ent
 - [ ] Verify solo mode still works with local-storage continuity and inherited participant context where applicable
 - [ ] Add or update tests for the migrated startup path, reconnect behavior, and any expected error states
 
+### Activity Audit Notes
+
+- `java-string-practice`: active migration target and good fit for the shared waiting-room model. It already consumes waiting-room `displayName`, but still needs shared `participantId` carry-forward verification for reconnect/progress.
+- `java-format-practice`: good fit for the shared waiting-room model. It now consumes waiting-room `displayName`, but still relies on activity-local reconnect/progress semantics.
+- `traveling-salesman`: likely good follow-on migration target because it still prompts for student identity locally in the client, while its server reconnect logic now uses the shared participant helper. Waiting-room fields could replace the student-name gate later.
+- `python-list-practice`: likely good migration target, but still uses its own local `studentName` / `studentId` lifecycle on both client and server. It should be considered one of the next activities for shared participant-entry convergence.
+- `algorithm-demo`: lower priority for waiting-room identity migration. It does not currently collect student identity the same way, and its main entry-specific behavior is deep-link algorithm preselection plus solo-state persistence.
+- `raffle`: defer for now. Student entry is effectively "claim a ticket for this session" and local storage mainly caches the assigned ticket payload; it does not currently need the same participant-name/preflight flow unless the product later wants named or sectioned ticket assignment.
+- `gallery-walk`: defer with explicit caution. Its live flow has separate reviewee and reviewer identities plus kiosk/reviewer local-storage state, and its solo link is a special feedback-review/upload path rather than a generic solo practice entry.
+- `syncdeck`: defer to the SyncDeck/presentation track. Student identity already uses REST registration plus websocket reconnect, and embedded/presentation concerns make it a broader participant-entry design problem than the current waiting-room branch should absorb.
+- `www-sim`: defer with hostname-specific treatment. The student "identity" is the chosen hostname, and local storage persists hostname plus DNS/browser workspace state; if migrated later, hostname should likely be modeled as an activity-specific waiting-room field rather than forced into generic `displayName`.
+
 ---
 
 ## Initial Recommendation

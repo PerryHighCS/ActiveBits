@@ -30,6 +30,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Migrate Python List Practice and evaluate whether SyncDeck's REST registration + websocket reconnect path should converge on the same helper or a broader shared participant-entry service.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: activities | docs
+- Discovery: The current activities split into three migration buckets for waiting-room/participant work. Good-fit identity migrations are `java-string-practice`, `java-format-practice`, `traveling-salesman`, and likely `python-list-practice`; low-priority or special-case deferrals are `raffle`, `gallery-walk`, `syncdeck`, `www-sim`, and mostly `algorithm-demo`.
+- Why it matters: Future work should not treat every activity as if it needs the same waiting-room identity flow. Some activities mainly need shared participant entry, while others use local storage for workflow state (`raffle` ticket caching, `www-sim` hostname workspace state) or have specialized solo/reviewer flows that need separate design (`gallery-walk`, `syncdeck`).
+- Evidence: `activities/java-string-practice/client/student/JavaStringPractice.tsx`; `activities/java-format-practice/client/student/JavaFormatPractice.tsx`; `activities/traveling-salesman/client/student/TSPStudent.tsx`; `activities/python-list-practice/client/student/PythonListPractice.tsx`; `activities/raffle/client/student/TicketPage.tsx`; `activities/gallery-walk/client/student/StudentPage.tsx`; `activities/syncdeck/server/routes.ts`; `activities/www-sim/client/student/WwwSim.tsx`; `activities/algorithm-demo/client/student/DemoStudent.tsx`; `.agent/plans/waiting-room-expansion.md`
+- Follow-up action: Use the migration checklist notes to prioritize `python-list-practice` and `traveling-salesman` before revisiting the deferred/special-case activities, and keep any future `gallery-walk` / `www-sim` work explicit about their non-generic identity models.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Area: client
 - Discovery: Started persistent sessions no longer always bypass the waiting-room shell. When an activity declares `waitingRoom.fields`, `SessionRouter` now routes already-started permalink entry through `WaitingRoom` with a `join-live` outcome, while activities without fields keep the simpler direct join card.
