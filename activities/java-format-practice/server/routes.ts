@@ -165,6 +165,22 @@ export default function setupJavaFormatPracticeRoutes(
           generateParticipantId,
         })
         if (!result) {
+          try {
+            if (client.readyState === 1) {
+              client.send(
+                JSON.stringify({
+                  type: 'error',
+                  payload: {
+                    code: 'waiting-room-required',
+                    message: 'Student identity not accepted. Rejoin from the waiting room.',
+                  },
+                }),
+              )
+            }
+          } catch (error) {
+            console.error('Failed to send waiting-room-required error:', error)
+          }
+          client.close(1008, 'waiting-room-required')
           return
         }
         client.studentName = result.participantName

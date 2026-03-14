@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-14
+- Area: server | activities
+- Discovery: WebSocket student-join handlers that rely on accepted-entry identity should fail closed when identity cannot be resolved. `java-format-practice`, `java-string-practice`, `traveling-salesman`, and `python-list-practice` now send an explicit WS error payload and close with code `1008`/reason `waiting-room-required` instead of returning early and leaving an unresolved socket connected.
+- Why it matters: Returning early on unresolved identity leaves a live socket without a valid participant binding, which can cause stale connections and reconnect loops. Closing with a policy code enforces waiting-room-first entry semantics and makes client recovery paths deterministic.
+- Evidence: `activities/java-format-practice/server/routes.ts`; `activities/java-string-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/students.ts`; `activities/python-list-practice/server/routes.ts`
+- Follow-up action: Apply the same fail-closed contract to any new activity websocket join path that depends on accepted-entry records, and consider adding shared helper utilities for this rejection pattern to reduce route duplication.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | testing
 - Discovery: Waiting-room route coverage is now broad enough to validate most current entry-gateway API edges without a browser harness. `persistentSessionRoutes.test.ts` covers malformed permalink entry requests, corrupted cookie parsing, stale backing-session repair, student/teacher live-entry role differences, and solo-unavailable permalink outcomes, while `sessionEntryRoutes.test.ts` covers missing-session and token-trimming behavior for live entry-participant handoff routes.
 - Why it matters: The remaining test gaps are now concentrated in still-unimplemented embedded-role inheritance and `WaitingRoom.tsx` component interactions rather than basic entry-route correctness. That keeps future effort focused on real product gaps instead of more route boilerplate.

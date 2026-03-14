@@ -287,6 +287,22 @@ export default function setupPythonListPracticeRoutes(
             client.studentName ?? null,
           )
           if (!result) {
+            try {
+              if (client.readyState === 1) {
+                client.send(
+                  JSON.stringify({
+                    type: 'error',
+                    payload: {
+                      code: 'waiting-room-required',
+                      message: 'Student identity not accepted. Rejoin from the waiting room.',
+                    },
+                  }),
+                )
+              }
+            } catch (err) {
+              console.error('WS send failed', err)
+            }
+            client.close(1008, 'waiting-room-required')
             return
           }
           const { participantId, participantName } = result
