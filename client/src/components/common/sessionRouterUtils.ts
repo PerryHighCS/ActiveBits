@@ -1,9 +1,18 @@
 import type { ActivityRegistryEntry, ActivityUtility } from '../../../../types/activity.js'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
+import * as waitingRoomModule from '../../../../types/waitingRoom.js'
 import { normalizeSelectedOptions } from './manageDashboardUtils'
 import { isValidHttpUrl } from './urlValidationUtils'
 
 export const CACHE_TTL = 1000 * 60 * 60 * 12
+
+const waitingRoomExports = (
+  (waitingRoomModule as unknown as { default?: unknown }).default ?? waitingRoomModule
+) as {
+  resolvePersistentSessionEntryPolicy: (value: unknown) => PersistentSessionEntryPolicy
+}
+
+const resolvePersistentSessionEntryPolicy = waitingRoomExports.resolvePersistentSessionEntryPolicy
 
 export interface SessionCacheStorage {
   length: number
@@ -101,12 +110,6 @@ export function buildPersistentSessionEntryApiUrl(hash: string, activityName: st
   const query = new URLSearchParams(search)
   query.set('activityName', activityName)
   return `/api/persistent-session/${encodeURIComponent(hash)}/entry?${query.toString()}`
-}
-
-function resolvePersistentSessionEntryPolicy(value: unknown): PersistentSessionEntryPolicy {
-  return value === 'solo-allowed' || value === 'solo-only' || value === 'instructor-required'
-    ? value
-    : 'instructor-required'
 }
 
 export function getPersistentLinkControlStateFromSearch(search: string): {
