@@ -634,6 +634,19 @@ function normalizeStudentName(value: unknown): string {
   return trimmed.slice(0, 80)
 }
 
+function normalizeInstructorPasscode(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > MAX_TEACHER_CODE_LENGTH) {
+    return null
+  }
+
+  return trimmed
+}
+
 function asSyncDeckSession(session: SessionRecord | null): SyncDeckSession | null {
   if (!session || session.type !== 'syncdeck') {
     return null
@@ -950,7 +963,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const instructorPasscode = normalizeStudentName(readStringField(req.body, 'instructorPasscode'))
+    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
     if (instructorPasscode && verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
       const response = res as unknown as JsonResponse
       const payload: SyncDeckEmbeddedEntryContextResponse = { resolvedRole: 'teacher' }

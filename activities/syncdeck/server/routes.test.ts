@@ -1659,6 +1659,42 @@ void test('embedded-context route resolves teacher role from valid instructor pa
   assert.deepEqual(res.body, { resolvedRole: 'teacher' })
 })
 
+void test('embedded-context route does not authenticate teacher when instructorPasscode is missing or blank', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'Student'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
+  assert.equal(typeof handler, 'function')
+
+  const missingRes = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+    ),
+    missingRes,
+  )
+
+  assert.equal(missingRes.statusCode, 403)
+  assert.deepEqual(missingRes.body, { error: 'forbidden' })
+
+  const blankRes = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: '   ' },
+    ),
+    blankRes,
+  )
+
+  assert.equal(blankRes.statusCode, 403)
+  assert.deepEqual(blankRes.body, { error: 'forbidden' })
+})
+
 void test('embedded-context route resolves student role from registered student id', async () => {
   const app = createMockApp()
   const ws = createMockWs()
