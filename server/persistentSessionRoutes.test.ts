@@ -1083,6 +1083,126 @@ void test('persistent session entry route honors signed query entryPolicy after 
   assert.equal(entryRes.jsonBody?.entryOutcome, 'continue-solo')
 })
 
+void test('update rewrites permalink settings for the same hash and preserves teacher code', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'java-string-practice',
+      teacherCode: 'update-link-code',
+      entryPolicy: 'instructor-required',
+    },
+  })
+  const createRes = createMockRes()
+
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+  const cookie = createRes.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+
+  const updateHandler = getRoute(app, 'POST', '/api/persistent-session/update')
+  const updateReq = createMockReq({
+    cookies: { persistent_sessions: cookie.value },
+    body: {
+      activityName: 'java-string-practice',
+      hash,
+      entryPolicy: 'solo-allowed',
+    },
+  })
+  const updateRes = createMockRes()
+
+  await updateHandler(updateReq, updateRes)
+
+  assert.equal(updateRes.statusCode, 200, JSON.stringify(updateRes.jsonBody))
+  assert.equal(updateRes.jsonBody?.hash, hash)
+  assert.match(String(updateRes.jsonBody?.url ?? ''), /entryPolicy=solo-allowed/)
+  assert.match(String(updateRes.jsonBody?.url ?? ''), /urlHash=[a-f0-9]{16}/)
+
+  const updatedCookie = updateRes.cookies.get('persistent_sessions')
+  assert.ok(updatedCookie)
+
+  const listHandler = getRoute(app, 'GET', '/api/persistent-session/list')
+  const listReq = createMockReq({
+    cookies: { persistent_sessions: updatedCookie.value },
+    headers: { host: 'bits.example' },
+    protocol: 'https',
+  })
+  const listRes = createMockRes()
+  await listHandler(listReq, listRes)
+
+  assert.equal(listRes.statusCode, 200)
+  const sessionsList = Array.isArray(listRes.jsonBody?.sessions) ? listRes.jsonBody.sessions : []
+  assert.equal(sessionsList.length, 1)
+  assert.equal((sessionsList[0] as Record<string, unknown>).entryPolicy, 'solo-allowed')
+  assert.equal((sessionsList[0] as Record<string, unknown>).teacherCode, 'update-link-code')
+})
+
+void test('remove drops a saved permalink from the teacher cookie list', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'java-string-practice',
+      teacherCode: 'remove-link-code',
+      entryPolicy: 'solo-allowed',
+    },
+  })
+  const createRes = createMockRes()
+
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+  const cookie = createRes.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+
+  const removeHandler = getRoute(app, 'POST', '/api/persistent-session/remove')
+  const removeReq = createMockReq({
+    cookies: { persistent_sessions: cookie.value },
+    body: {
+      activityName: 'java-string-practice',
+      hash,
+    },
+  })
+  const removeRes = createMockRes()
+
+  await removeHandler(removeReq, removeRes)
+
+  assert.equal(removeRes.statusCode, 200, JSON.stringify(removeRes.jsonBody))
+  assert.deepEqual(removeRes.jsonBody, { success: true })
+
+  const updatedCookie = removeRes.cookies.get('persistent_sessions')
+  assert.ok(updatedCookie)
+
+  const listHandler = getRoute(app, 'GET', '/api/persistent-session/list')
+  const listReq = createMockReq({
+    cookies: { persistent_sessions: updatedCookie.value },
+    headers: { host: 'bits.example' },
+    protocol: 'https',
+  })
+  const listRes = createMockRes()
+  await listHandler(listReq, listRes)
+
+  assert.equal(listRes.statusCode, 200)
+  assert.deepEqual(listRes.jsonBody, { sessions: [] })
+})
+
 void test('getOrCreateActivePersistentSession updates stored entry policy when an existing permalink is reused', async (t) => {
   initializePersistentStorage(null)
 

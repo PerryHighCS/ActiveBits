@@ -3,6 +3,7 @@ import {
   isValidActivity,
 } from '../activities/activityRegistry.js'
 import {
+  cleanupPersistentSession,
   consumePersistentSessionEntryParticipant,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
@@ -51,6 +52,7 @@ interface PersistentSessionCreateBody {
   teacherCode?: unknown
   selectedOptions?: unknown
   entryPolicy?: unknown
+  hash?: unknown
 }
 
 interface SessionStoreLike {
@@ -172,6 +174,15 @@ function getValidatedPersistentSessionCookieEntry(
   }
 
   return verifyTeacherCodeWithHash(activityName, hash, teacherCode).valid ? entry : null
+}
+
+function writePersistentSessionsCookie(res: ResponseLike, sessionEntries: CookieSessionEntry[]): void {
+  res.cookie('persistent_sessions', JSON.stringify(sessionEntries), {
+    maxAge: ONE_YEAR_MS,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+  })
 }
 
 function getPersistentLinkSelectedOptionsFromQuery(query: RequestLike['query']): Record<string, string> {
@@ -346,14 +357,103 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
 
     await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
 
-    res.cookie(cookieName, JSON.stringify(sessionEntries), {
-      maxAge: ONE_YEAR_MS,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-    })
+    writePersistentSessionsCookie(res, sessionEntries)
 
     res.json({ url: `/activity/${activityName}/${hash}?${query.toString()}`, hash })
+  })
+
+  app.post('/api/persistent-session/update', async (req, res) => {
+    const body = isPlainObject(req.body) ? (req.body as PersistentSessionCreateBody & Record<string, unknown>) : {}
+    const activityName = getBodyString(body, 'activityName')
+    const hash = getBodyString(body, 'hash')
+    const selectedOptions = toSelectedOptions(body.selectedOptions)
+    const entryPolicy = resolvePersistentSessionEntryPolicy(body.entryPolicy)
+
+    if (!activityName || !hash) {
+      res.status(400).json({ error: 'Missing activityName or hash' })
+      return
+    }
+    if (!isValidActivity(activityName)) {
+      res.status(400).json({
+        error: 'Invalid activity name',
+        allowedActivities: getAllowedActivities(),
+      })
+      return
+    }
+
+    const cookieName = 'persistent_sessions'
+    let { sessions: sessionEntries } = parsePersistentSessionsCookie(
+      req.cookies?.[cookieName],
+      'persistent_sessions (/api/persistent-session/update)',
+    )
+    const existingEntry = getValidatedPersistentSessionCookieEntry(sessionEntries, activityName, hash)
+    if (!existingEntry || typeof existingEntry.teacherCode !== 'string') {
+      res.status(404).json({ error: 'Persistent link not found' })
+      return
+    }
+
+    const query = buildPersistentLinkUrlQuery({
+      hash,
+      entryPolicy,
+      selectedOptions,
+    })
+    const cookieKey = `${activityName}:${hash}`
+    sessionEntries = sessionEntries.filter((entry) => entry.key !== cookieKey)
+    sessionEntries.push({
+      key: cookieKey,
+      teacherCode: existingEntry.teacherCode,
+      selectedOptions,
+      entryPolicy,
+      urlHash: query.get('urlHash') ?? undefined,
+    })
+
+    await getOrCreateActivePersistentSession(
+      activityName,
+      hash,
+      null,
+      entryPolicy,
+    )
+
+    writePersistentSessionsCookie(res, sessionEntries)
+    res.json({
+      url: `/activity/${activityName}/${hash}?${query.toString()}`,
+      hash,
+    })
+  })
+
+  app.post('/api/persistent-session/remove', async (req, res) => {
+    const body = isPlainObject(req.body) ? (req.body as PersistentSessionCreateBody & Record<string, unknown>) : {}
+    const activityName = getBodyString(body, 'activityName')
+    const hash = getBodyString(body, 'hash')
+
+    if (!activityName || !hash) {
+      res.status(400).json({ error: 'Missing activityName or hash' })
+      return
+    }
+    if (!isValidActivity(activityName)) {
+      res.status(400).json({
+        error: 'Invalid activity name',
+        allowedActivities: getAllowedActivities(),
+      })
+      return
+    }
+
+    const cookieName = 'persistent_sessions'
+    let { sessions: sessionEntries } = parsePersistentSessionsCookie(
+      req.cookies?.[cookieName],
+      'persistent_sessions (/api/persistent-session/remove)',
+    )
+    const cookieKey = `${activityName}:${hash}`
+    const existingEntry = getValidatedPersistentSessionCookieEntry(sessionEntries, activityName, hash)
+    if (!existingEntry) {
+      res.status(404).json({ error: 'Persistent link not found' })
+      return
+    }
+
+    sessionEntries = sessionEntries.filter((entry) => entry.key !== cookieKey)
+    writePersistentSessionsCookie(res, sessionEntries)
+    await cleanupPersistentSession(hash)
+    res.json({ success: true })
   })
 
   app.post('/api/persistent-session/authenticate', async (req, res) => {
@@ -445,12 +545,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
     }
 
-    res.cookie(cookieName, JSON.stringify(sessionEntries), {
-      maxAge: ONE_YEAR_MS,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-    })
+    writePersistentSessionsCookie(res, sessionEntries)
 
     res.json({
       success: true,

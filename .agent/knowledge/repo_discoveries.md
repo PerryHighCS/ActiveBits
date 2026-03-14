@@ -549,6 +549,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Focus future changes on evolving `ActivityPersistentLinkBuilderProps` (only if multiple activities need more shared callbacks/state) rather than adding protocol-specific branches back into `ManageDashboard`.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: client | persistent sessions
+- Discovery: `ManageDashboard` permalink rows now support shared remove and edit actions. Remove uses a left-side `×` action that forgets the permalink from the teacher cookie and cleans current runtime metadata; edit opens the shared permalink modal with existing `selectedOptions` + `entryPolicy` preloaded and rewrites the signed permalink URL for the same hash.
+- Why it matters: Instructors can now maintain old permalinks without hand-editing cookies or recreating entirely new hashes just to adjust entry mode or deep-link options.
+- Evidence: `client/src/components/common/ManageDashboard.tsx`; `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`
+- Follow-up action: Temporary compatibility path: edits currently force the shared form even for activities that have a create-only `PersistentLinkBuilderComponent`. If activity-owned builders later need custom edit UX, extend the shared builder props contract instead of adding more one-off shared branches.
+- Owner: Codex
+
 - Date: 2026-02-26
 - Area: client
 - Discovery: Shared HTTP(S) URL validation used by `ManageDashboard` deep-link parsing and `SessionRouter` teacher redirect parsing now lives in `client/src/components/common/urlValidationUtils.ts` (`isValidHttpUrl`), and `SessionRouter`'s async manage-path resolver is memoized with `useCallback` so `react-hooks/exhaustive-deps` can include it without warnings.

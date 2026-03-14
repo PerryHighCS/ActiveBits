@@ -125,6 +125,7 @@ export default function ManageDashboard() {
   const navigate = useNavigate()
   const [showPersistentModal, setShowPersistentModal] = useState(false)
   const [selectedActivity, setSelectedActivity] = useState<DashboardActivity | null>(null)
+  const [editingPersistentSession, setEditingPersistentSession] = useState<PersistentSession | null>(null)
   const [teacherCode, setTeacherCode] = useState('')
   const [persistentUrl, setPersistentUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -197,19 +198,25 @@ export default function ManageDashboard() {
     }
   }
 
-  const openPersistentModal = (activity: DashboardActivity): void => {
+  const openPersistentModal = (activity: DashboardActivity, session: PersistentSession | null = null): void => {
     setSelectedActivity(activity)
+    setEditingPersistentSession(session)
     setShowPersistentModal(true)
-    setTeacherCode('')
+    setTeacherCode(session ? (savedSessions[buildPersistentSessionKey(session.activityName, session.hash)] || '') : '')
     setPersistentUrl(null)
     setError(null)
-    setPersistentOptions(initializeDeepLinkOptions(activity.deepLinkOptions))
-    setPersistentEntryPolicy(DEFAULT_PERSISTENT_ENTRY_POLICY)
+    setPersistentOptions(
+      session
+        ? normalizeSelectedOptions(activity.deepLinkOptions, session.selectedOptions || {})
+        : initializeDeepLinkOptions(activity.deepLinkOptions),
+    )
+    setPersistentEntryPolicy(session?.entryPolicy || DEFAULT_PERSISTENT_ENTRY_POLICY)
   }
 
   const closePersistentModal = (): void => {
     setShowPersistentModal(false)
     setSelectedActivity(null)
+    setEditingPersistentSession(null)
     setTeacherCode('')
     setPersistentUrl(null)
     setError(null)
@@ -265,22 +272,32 @@ export default function ManageDashboard() {
     try {
       const selectedOptions = normalizeSelectedOptions(selectedActivity.deepLinkOptions, persistentOptions)
       const deepLinkGenerator = parseDeepLinkGenerator(selectedActivity.deepLinkGenerator)
-      const endpoint = deepLinkGenerator?.endpoint ?? '/api/persistent-session/create'
-      const requestBody = {
-        activityName: selectedActivity.id,
-        teacherCode: teacherCode.trim(),
-        selectedOptions,
-        entryPolicy: persistentEntryPolicy,
-      }
+      const isEditing = editingPersistentSession != null
+      const endpoint = isEditing
+        ? '/api/persistent-session/update'
+        : (deepLinkGenerator?.endpoint ?? '/api/persistent-session/create')
+      const requestBody = isEditing
+        ? {
+            activityName: selectedActivity.id,
+            hash: editingPersistentSession.hash,
+            selectedOptions,
+            entryPolicy: persistentEntryPolicy,
+          }
+        : {
+            activityName: selectedActivity.id,
+            teacherCode: teacherCode.trim(),
+            selectedOptions,
+            entryPolicy: persistentEntryPolicy,
+          }
 
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          deepLinkGenerator?.expectsSelectedOptions === false
+          !isEditing && deepLinkGenerator?.expectsSelectedOptions === false
             ? {
                 activityName: requestBody.activityName,
-                teacherCode: requestBody.teacherCode,
+                teacherCode: 'teacherCode' in requestBody ? requestBody.teacherCode : undefined,
                 entryPolicy: requestBody.entryPolicy,
               }
             : requestBody,
@@ -307,10 +324,13 @@ export default function ManageDashboard() {
       }
 
       const fullUrl = buildPersistentLinkUrl(getWindowOrigin(), payload.url, selectedOptions, deepLinkGenerator)
+      const persistedTeacherCode = isEditing
+        ? (savedSessions[buildPersistentSessionKey(selectedActivity.id, editingPersistentSession.hash)] || '')
+        : teacherCode.trim()
       await handlePersistentLinkCreated(selectedActivity.id, {
         fullUrl,
         hash: payload.hash as string,
-        teacherCode: teacherCode.trim(),
+        teacherCode: persistedTeacherCode,
         selectedOptions,
       })
     } catch (createError) {
@@ -341,6 +361,38 @@ export default function ManageDashboard() {
       ...previous,
       [sessionKey]: !previous[sessionKey],
     }))
+  }
+
+  const removePersistentLink = async (session: PersistentSession): Promise<void> => {
+    if (typeof window !== 'undefined' && !window.confirm(`Remove the permanent link for ${getActivityName(session.activityName)}?`)) {
+      return
+    }
+
+    const response = await fetch('/api/persistent-session/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        activityName: session.activityName,
+        hash: session.hash,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to remove permanent link')
+    }
+
+    const sessionKey = buildPersistentSessionKey(session.activityName, session.hash)
+    setSavedSessions((previous) => {
+      const next = { ...previous }
+      delete next[sessionKey]
+      return next
+    })
+    setVisibleCodes((previous) => {
+      const next = { ...previous }
+      delete next[sessionKey]
+      return next
+    })
+    await refreshPersistentSessions()
   }
 
   const getSoloLink = (activityId: string, options: Record<string, unknown> = {}): string =>
@@ -459,6 +511,18 @@ export default function ManageDashboard() {
 
               return (
                 <div key={`${sessionKey}-${index}`} className={`flex items-center gap-2 ${bgClass} p-3 rounded border-2 ${borderClass}`}>
+                  <button
+                    type="button"
+                    aria-label={`Remove permanent link for ${getActivityName(session.activityName)}`}
+                    className="self-start text-gray-500 hover:text-red-600 text-xl leading-none px-2 py-1"
+                    onClick={() => {
+                      void removePersistentLink(session).catch((removeError) => {
+                        setSessionError(removeError instanceof Error ? removeError.message : String(removeError))
+                      })
+                    }}
+                  >
+                    ×
+                  </button>
                   <div className="flex-1">
                     <p className="font-semibold text-gray-700">{getActivityName(session.activityName)}</p>
                     <p className="text-xs text-gray-500 mt-1">Entry mode: {entryPolicyLabel}. {entryPolicyDescription}</p>
@@ -481,6 +545,17 @@ export default function ManageDashboard() {
                       )}
                     </div>
                   </div>
+                  <Button
+                    onClick={() => {
+                      const activity = getActivityById(session.activityName)
+                      if (activity) {
+                        openPersistentModal(activity, session)
+                      }
+                    }}
+                    variant="outline"
+                  >
+                    Edit
+                  </Button>
                   <Button
                     onClick={() => {
                       void copyToClipboard(fullSessionUrl)
@@ -507,9 +582,15 @@ export default function ManageDashboard() {
         </div>
       )}
 
-      <Modal open={showPersistentModal} onClose={closePersistentModal} title={`Create Permanent Link - ${selectedActivity?.name}`}>
+      <Modal
+        open={showPersistentModal}
+        onClose={closePersistentModal}
+        title={`${editingPersistentSession ? 'Edit' : 'Create'} Permanent Link - ${selectedActivity?.name}`}
+      >
         {!persistentUrl ? (
-          CustomPersistentLinkBuilder && selectedActivity ? (
+          // Temporary workaround (owner: Codex, cleanup: once activity-owned builders support edit props):
+          // use the shared form for edits so existing create-only custom builders remain compatible.
+          CustomPersistentLinkBuilder && selectedActivity && !editingPersistentSession ? (
             <Suspense fallback={<p className="text-sm text-gray-600">Loading link builder...</p>}>
               <CustomPersistentLinkBuilder
                 activityId={selectedActivity.id}
@@ -532,22 +613,24 @@ export default function ManageDashboard() {
                 </p>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
-                <input
-                  type="text"
-                  value={teacherCode}
-                  onChange={(event) => setTeacherCode(event.target.value)}
-                  className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
-                  placeholder="Create a Teacher Code for this link"
-                  minLength={6}
-                  required
-                  autoComplete="off"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Remember this code! You'll need it to start sessions from this link.
-                </p>
-              </div>
+              {!editingPersistentSession && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+                  <input
+                    type="text"
+                    value={teacherCode}
+                    onChange={(event) => setTeacherCode(event.target.value)}
+                    className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
+                    placeholder="Create a Teacher Code for this link"
+                    minLength={6}
+                    required
+                    autoComplete="off"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Remember this code! You'll need it to start sessions from this link.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label htmlFor="persistent-entry-policy" className="block text-sm font-semibold text-gray-700 mb-2">
@@ -618,14 +701,19 @@ export default function ManageDashboard() {
 
               {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
 
-              <Button type="submit" disabled={isCreating || teacherCode.length < 6 || hasPersistentOptionErrors}>
-                {isCreating ? 'Creating...' : 'Generate Link'}
+              <Button
+                type="submit"
+                disabled={isCreating || (!editingPersistentSession && teacherCode.length < 6) || hasPersistentOptionErrors}
+              >
+                {isCreating ? (editingPersistentSession ? 'Saving...' : 'Creating...') : (editingPersistentSession ? 'Save Changes' : 'Generate Link')}
               </Button>
             </form>
           )
         ) : (
           <div className="flex flex-col gap-4">
-            <p className="text-green-600 font-semibold">✓ Permanent link created successfully!</p>
+            <p className="text-green-600 font-semibold">
+              ✓ Permanent link {editingPersistentSession ? 'updated' : 'created'} successfully!
+            </p>
 
             <div className="bg-gray-50 p-4 rounded border-2 border-gray-200">
               <p className="text-sm text-gray-600 mb-2 font-semibold">Your permanent URL:</p>

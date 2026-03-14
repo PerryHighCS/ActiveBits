@@ -635,6 +635,8 @@ that path ships.
 - [x] Define API error/response shape for server-enforced policy rejections
 - [x] Gate Phase 1 UI/API exposure until Phase 3 resolver support exists, or land them together
 - [x] Add visible entry-mode labeling in persistent link listings/details
+- [x] Let instructors update or remove saved permalinks from the dashboard
+  Current status: `ManageDashboard` rows now expose a left-side remove action and a right-side edit action. Shared routes `POST /api/persistent-session/update` and `POST /api/persistent-session/remove` let the dashboard rewrite signed permalink state for the same hash or forget an old permalink from the teacher cookie without recreating the whole link.
 - [x] Add tests for default and non-default permalink policies
 
 ### Phase 2 - Waiting room preflight framework
