@@ -94,3 +94,38 @@ void test('WaitingRoomContent disables teacher startup in solo-only mode', () =>
   assert.match(html, /This link is configured for solo use only/)
   assert.match(html, /<button[^>]*disabled=""[^>]*>Start Activity<\/button>/)
 })
+
+void test('WaitingRoomContent avoids duplicate instructional copy for live preflight fields', () => {
+  const html = renderToStaticMarkup(
+    <WaitingRoomContent
+      activityDisplayName="Java String Practice"
+      waiterCount={0}
+      error={null}
+      isSubmitting={false}
+      waitingRoomFields={sampleFields}
+      waitingRoomValues={{ displayName: '', team: '' }}
+      touchedFields={{}}
+      waitingRoomErrors={{}}
+      customFieldComponents={{}}
+      customFieldLoadError={null}
+      entryOutcome="join-live"
+      allowTeacherSection
+      showShareUrl={false}
+      hasTeacherCookie={false}
+      teacherCode=""
+      shareUrl=""
+      onTeacherCodeChange={() => {}}
+      onTeacherCodeSubmit={(event) => {
+        event.preventDefault()
+      }}
+      onPrimaryAction={() => {}}
+      onFieldChange={() => {}}
+      onFieldBlur={() => {}}
+    />,
+  )
+
+  assert.match(html, /Session is ready to join/)
+  assert.doesNotMatch(html, /Join the live session when you are ready\./)
+  assert.doesNotMatch(html, /Before you join/)
+  assert.doesNotMatch(html, /Complete these details before entering the live session\./)
+})

@@ -14,9 +14,9 @@ export function getWaitingRoomViewModel(entryOutcome: PersistentSessionEntryOutc
   if (entryOutcome === 'continue-solo') {
     return {
       statusTitle: 'Solo mode is available',
-      statusDetail: 'Complete any required details below, then continue into solo mode when you are ready.',
-      fieldHeading: 'Before you begin',
-      fieldDescription: 'Complete these details before entering solo mode.',
+      statusDetail: '',
+      fieldHeading: '',
+      fieldDescription: '',
       showWaiterCount: false,
       showTeacherSection: true,
       primaryActionLabel: 'Continue in Solo Mode',
@@ -26,9 +26,9 @@ export function getWaitingRoomViewModel(entryOutcome: PersistentSessionEntryOutc
   if (entryOutcome === 'join-live') {
     return {
       statusTitle: 'Session is ready to join',
-      statusDetail: 'Complete any required details below, then join the live session when you are ready.',
-      fieldHeading: 'Before you join',
-      fieldDescription: 'Complete these details before entering the live session.',
+      statusDetail: '',
+      fieldHeading: '',
+      fieldDescription: '',
       showWaiterCount: false,
       showTeacherSection: true,
       primaryActionLabel: 'Join Session',

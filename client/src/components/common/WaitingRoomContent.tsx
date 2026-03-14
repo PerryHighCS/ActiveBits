@@ -81,15 +81,21 @@ export default function WaitingRoomContent({
           <p className="text-lg text-gray-600 mb-2">{viewModel.statusTitle}</p>
           {viewModel.showWaiterCount ? (
             <p className="text-2xl font-bold text-blue-600">{getWaiterMessage(waiterCount)}</p>
-          ) : (
+          ) : viewModel.statusDetail ? (
             <p className="text-sm text-gray-600">{viewModel.statusDetail}</p>
-          )}
+          ) : null}
         </div>
 
         {waitingRoomFields.length > 0 && (
           <section aria-labelledby="waiting-room-fields-heading" className="border-t-2 border-gray-200 pt-6 mt-6">
-            <h2 id="waiting-room-fields-heading" className="text-center text-gray-800 mb-2 font-semibold">{viewModel.fieldHeading}</h2>
-            <p className="text-sm text-gray-600 text-center mb-4">{viewModel.fieldDescription}</p>
+            {viewModel.fieldHeading ? (
+              <h2 id="waiting-room-fields-heading" className="text-center text-gray-800 mb-2 font-semibold">{viewModel.fieldHeading}</h2>
+            ) : (
+              <span id="waiting-room-fields-heading" className="sr-only">Waiting room details</span>
+            )}
+            {viewModel.fieldDescription ? (
+              <p className="text-sm text-gray-600 text-center mb-4">{viewModel.fieldDescription}</p>
+            ) : null}
             <div className="space-y-4">
               {waitingRoomFields.map((field) => {
                 const fieldId = `waiting-room-field-${field.id}`
