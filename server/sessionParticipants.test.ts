@@ -116,6 +116,22 @@ void test('findSessionParticipant prefers participantId and can fall back to unn
   )
 })
 
+void test('findSessionParticipant does not match by name when allowLegacyUnnamedMatch is false', () => {
+  const participants: TestParticipant[] = [
+    { name: 'Grace', connected: false, joined: 12, lastSeen: 12 },
+  ]
+
+  assert.equal(
+    findSessionParticipant({
+      participants,
+      participantId: null,
+      participantName: 'Grace',
+      allowLegacyUnnamedMatch: false,
+    }),
+    undefined,
+  )
+})
+
 void test('updateSessionParticipant touches lastSeen and updates a matched participant', () => {
   const participants: TestParticipant[] = [
     { id: 'student-1', name: 'Ada', connected: true, joined: 10, lastSeen: 10 },

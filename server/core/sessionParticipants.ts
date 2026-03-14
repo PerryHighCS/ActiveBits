@@ -53,8 +53,12 @@ export function findSessionParticipant<TParticipant extends SessionParticipantId
     return undefined
   }
 
+  if (!allowLegacyUnnamedMatch) {
+    return undefined
+  }
+
   return participants.find((participant) =>
-    participant.name === participantName && (!allowLegacyUnnamedMatch || participant.id == null || participant.id === ''),
+    participant.name === participantName && (participant.id == null || participant.id === ''),
   )
 }
 
