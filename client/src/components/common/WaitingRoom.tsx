@@ -19,8 +19,6 @@ import {
   buildPersistentEntryParticipantSubmitApiUrl,
   buildSessionEntryParticipantSubmitApiUrl,
   buildEntryParticipantStorageKey,
-  persistEntryParticipantToken,
-  persistEntryParticipantValues,
 } from './entryParticipantStorage'
 import {
   buildPersistentAuthenticateApiUrl,
@@ -34,6 +32,7 @@ import type { PersistentSessionEntryOutcome } from './persistentSessionEntryPoli
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorResponse } from './persistentSessionAuthUtils'
 import { resolveWaitingRoomPrimaryAction } from './waitingRoomActionUtils'
+import { persistWaitingRoomServerBackedHandoff } from './waitingRoomHandoffUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -340,75 +339,22 @@ export default function WaitingRoom({
   const shareUrl = typeof window !== 'undefined' ? window.location.href : ''
 
   const persistServerBackedSessionEntryParticipantHandoff = async (destinationId: string) => {
-    if (typeof window === 'undefined' || window.sessionStorage == null) {
-      return
-    }
-
-    const storageKey = buildEntryParticipantStorageKey(activityName, 'session', destinationId)
-
-    try {
-      const response = await fetch(buildSessionEntryParticipantSubmitApiUrl(destinationId), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          values: waitingRoomValues,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to store waiting-room handoff (${response.status})`)
-      }
-
-      const payload = await response.json() as { entryParticipantToken?: unknown }
-      const token = typeof payload.entryParticipantToken === 'string' ? payload.entryParticipantToken.trim() : ''
-      if (!token) {
-        throw new Error('Missing entry participant token')
-      }
-
-      persistEntryParticipantToken(window.sessionStorage, storageKey, token)
-    } catch (error) {
-      console.warn('[WaitingRoom] Failed to store session entry participant on server, falling back to client handoff:', error)
-      persistEntryParticipantValues(window.sessionStorage, storageKey, waitingRoomValues)
-    }
+    await persistWaitingRoomServerBackedHandoff({
+      storage: typeof window !== 'undefined' ? window.sessionStorage : null,
+      storageKey: buildEntryParticipantStorageKey(activityName, 'session', destinationId),
+      values: waitingRoomValues,
+      submitApiUrl: buildSessionEntryParticipantSubmitApiUrl(destinationId),
+    })
   }
 
   const persistServerBackedSoloEntryParticipantHandoff = async () => {
-    if (typeof window === 'undefined' || window.sessionStorage == null) {
-      return
-    }
-
-    const storageKey = buildEntryParticipantStorageKey(activityName, 'solo', activityName)
-
-    try {
-      const response = await fetch(buildPersistentEntryParticipantSubmitApiUrl(hash, activityName), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          values: waitingRoomValues,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to store solo waiting-room handoff (${response.status})`)
-      }
-
-      const payload = await response.json() as { entryParticipantToken?: unknown }
-      const token = typeof payload.entryParticipantToken === 'string' ? payload.entryParticipantToken.trim() : ''
-      if (!token) {
-        throw new Error('Missing entry participant token')
-      }
-
-      persistEntryParticipantToken(window.sessionStorage, storageKey, token, { persistentHash: hash })
-    } catch (error) {
-      console.warn('[WaitingRoom] Failed to store solo entry participant on server, falling back to client handoff:', error)
-      persistEntryParticipantValues(window.sessionStorage, storageKey, waitingRoomValues)
-    }
+    await persistWaitingRoomServerBackedHandoff({
+      storage: typeof window !== 'undefined' ? window.sessionStorage : null,
+      storageKey: buildEntryParticipantStorageKey(activityName, 'solo', activityName),
+      values: waitingRoomValues,
+      submitApiUrl: buildPersistentEntryParticipantSubmitApiUrl(hash, activityName),
+      persistentHash: hash,
+    })
   }
 
   const handleContinueSolo = async () => {

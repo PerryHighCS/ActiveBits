@@ -31,6 +31,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | testing
+- Discovery: `WaitingRoom` carry-forward persistence now has its own stable helper seam in `waitingRoomHandoffUtils.ts`, covering the high-risk branch between successful server-backed token storage and local-value fallback.
+- Why it matters: This closes another part of the earlier “full container or nothing” testing gap without introducing Playwright. The current client test stack can now verify that waiting-room exit data is preserved correctly across success, failure, and malformed-token responses before any heavier browser harness is justified.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomHandoffUtils.ts`; `client/src/components/common/waitingRoomHandoffUtils.test.ts`
+- Follow-up action: Keep extracting similarly narrow `WaitingRoom` seams for websocket/wait-state transitions if needed, and only revisit browser-level tooling once those seams stop covering the remaining risky behavior.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | client | testing
 - Discovery: Waiting-room entry semantics are now testable at a stable helper boundary instead of only through route/component flows: `server/core/entryStatus.ts` covers shared join/wait/solo/pass-through decisions, `server/core/sessionEntryParticipants.ts` covers tokenized live-entry handoff normalization/one-shot consume behavior, and `entryParticipantStorage` covers client-side 404-vs-retry token handling.
 - Why it matters: The branch’s remaining test gaps are now narrower and easier to reason about. We can add high-signal matrix coverage for shared entry behavior without forcing a brittle DOM harness around the whole `WaitingRoom` component before the API contracts settle.

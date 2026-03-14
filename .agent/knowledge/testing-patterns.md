@@ -44,6 +44,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-14
 - Scope: unit
+- Pattern: For `WaitingRoom` carry-forward behavior, extract the persistence branch into a helper that owns the “store server-backed token or fall back to local values” decision, then test that helper directly instead of trying to drive the whole container through storage and network state.
+- Why it helps: The riskiest regression in this area is not the visual shell, it is whether entry data is preserved correctly when the server handoff succeeds, fails, or returns malformed payload. A focused helper test covers that contract cheaply and keeps the current Node client suite sufficient without jumping to Playwright.
+- Example (file/path): `client/src/components/common/waitingRoomHandoffUtils.ts`; `client/src/components/common/waitingRoomHandoffUtils.test.ts`
+- Failure signal: Waiting-room carry-forward silently stops preserving data after a failed handoff write, or starts storing raw values when an opaque token should have been written, without any render-only test noticing.
+- Follow-up action: Reuse this seam-first pattern for other `WaitingRoom` transition branches, especially websocket-driven wait-state decisions, before considering a heavier browser harness.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
 - Pattern: For activity-owned reconnect/recovery behavior that hangs off websocket close events, extract the close-decision logic into a tiny activity-local helper and test that helper directly instead of trying to simulate the whole websocket lifecycle in the component test.
 - Why it helps: It keeps the test focused on the product contract change, like “stale server-issued identity should clear cached registration and require rejoin,” without depending on browser WebSocket mocks or the full student component state machine.
 - Example (file/path): `activities/syncdeck/client/student/reconnectUtils.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`
