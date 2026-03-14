@@ -158,3 +158,12 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `activities/syncdeck/shared/revealSyncProtocol.ts`; `activities/syncdeck/client/shared/presentationPreflight.ts`; `activities/syncdeck/client/shared/presentationPreflight.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/server/routes.ts`.
 - Follow-up action: If the reveal-sync schema version changes again, update the shared module once and keep compatibility tests around preflight/startup handshakes.
 - Owner: Codex
+
+- Date: 2026-03-14
+- Surface: REST | websocket
+- Contract: SyncDeck student identity is server-issued. `POST /api/syncdeck/:sessionId/register-student` is the authoritative source of `studentId`, and `/ws/syncdeck` student connects must present a previously registered `studentId`. Missing or unknown IDs are rejected with websocket close code `1008` and reason `missing studentId` or `unregistered student`.
+- Compatibility constraints: SyncDeck still uses its own REST registration flow rather than the shared waiting-room accepted-entry service. The client may cache `studentId` in `sessionStorage`, but cached values are only valid if they still match a registered student record for that session.
+- Validation rules: Server must not create a new SyncDeck student record from websocket query params alone. The client should clear stale cached registration and prompt for re-entry when websocket connect fails for missing or unknown student identity.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/server/studentParticipants.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Keep this contract in place unless/until SyncDeck is moved onto a broader shared accepted-entry service that can authoritatively issue and validate participant context across presentation-linked flows.
+- Owner: Codex
