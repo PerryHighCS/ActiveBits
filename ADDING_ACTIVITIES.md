@@ -438,7 +438,7 @@ export default {
   manageDashboard: {
     utilities: [
       {
-        label: 'Copy Feedback Review Link',
+        label: 'Gallery Walk Review',
         path: '/util/gallery-walk/viewer',
         description: 'Upload a .gw file to review exported feedback.',
         standaloneSessionId: 'solo-gallery-walk',

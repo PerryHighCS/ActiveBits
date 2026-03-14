@@ -97,7 +97,7 @@ export default {
   manageDashboard: {
     utilities: [                // Optional: extra dashboard utility links
       {
-        label: 'Copy Feedback Review Link',
+        label: 'Gallery Walk Review',
         path: '/util/gallery-walk/viewer',
         description: 'Upload and review feedback that was left for you.',
         standaloneSessionId: 'solo-gallery-walk',

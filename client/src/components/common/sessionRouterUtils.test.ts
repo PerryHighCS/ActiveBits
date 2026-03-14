@@ -385,7 +385,7 @@ void test('getHomeUtilityActivities returns activities with home-visible utiliti
       },
       manageDashboard: {
         utilities: [
-          { label: 'Feedback Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
+          { label: 'Gallery Walk Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
         ],
       },
     },
@@ -426,7 +426,7 @@ void test('findUtilityRouteMatch resolves configured utility paths', () => {
       },
       manageDashboard: {
         utilities: [
-          { label: 'Feedback Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
+          { label: 'Gallery Walk Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
         ],
       },
     },
@@ -445,7 +445,7 @@ void test('findUtilityRouteMatch resolves configured utility paths', () => {
   ], '/util/gallery-walk/viewer')
 
   assert.equal(match?.activity.id, 'gallery-walk')
-  assert.equal(match?.utility.label, 'Feedback Review')
+  assert.equal(match?.utility.label, 'Gallery Walk Review')
   assert.equal(match?.utility.standaloneSessionId, 'solo-gallery-walk')
   assert.equal(findUtilityRouteMatch([], '/util/gallery-walk/viewer'), null)
 })

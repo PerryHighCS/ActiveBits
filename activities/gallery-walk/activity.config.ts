@@ -16,7 +16,7 @@ const galleryWalkConfig: ActivityConfig = {
   manageDashboard: {
     utilities: [
       {
-        label: 'Copy Feedback Review Link',
+        label: 'Gallery Walk Review',
         path: '/util/gallery-walk/viewer',
         description: 'Upload and review feedback that was left for you.',
         showOnHome: true,
