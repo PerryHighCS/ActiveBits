@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto'
 import type { PersistentSessionEntryPolicy, WaitingRoomSerializableValue } from '../../types/waitingRoom.js'
+import * as waitingRoomModule from '../../types/waitingRoom.js'
 import { consumeEntryParticipant, storeEntryParticipant } from './entryParticipants.js'
 import { ValkeyPersistentStore } from './valkeyStore.js'
 
@@ -40,8 +41,17 @@ const WAITER_TIMEOUT = 600_000
 const CLEANUP_INTERVAL = 60_000
 
 const DEFAULT_HMAC_SECRET = 'default-secret-change-in-production'
-const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
 const MIN_SECRET_LENGTH = 32
+
+const waitingRoomExports = (
+  (waitingRoomModule as unknown as { default?: unknown }).default ?? waitingRoomModule
+) as {
+  DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY: PersistentSessionEntryPolicy
+  resolvePersistentSessionEntryPolicy: (value: unknown) => PersistentSessionEntryPolicy
+}
+
+const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY = waitingRoomExports.DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY
+const resolvePersistentSessionEntryPolicyFromTypes = waitingRoomExports.resolvePersistentSessionEntryPolicy
 
 function createInMemoryPersistentStore(): PersistentSessionStore {
   const memoryStore = new Map<string, unknown>()
@@ -177,9 +187,7 @@ export function resolvePersistentSessionSecret(): string {
 const HMAC_SECRET = resolvePersistentSessionSecret()
 
 export function resolvePersistentSessionEntryPolicy(value: unknown): PersistentSessionEntryPolicy {
-  return value === 'solo-allowed' || value === 'solo-only' || value === 'instructor-required'
-    ? value
-    : DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY
+  return resolvePersistentSessionEntryPolicyFromTypes(value)
 }
 
 export function hashTeacherCode(teacherCode: string): string {

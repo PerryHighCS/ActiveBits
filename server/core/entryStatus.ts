@@ -6,6 +6,7 @@ import type {
   WaitingRoomPresentationMode,
   WaitingRoomResolvedRole,
 } from '../../types/waitingRoom.js'
+import { resolvePersistentSessionEntryPolicy } from './persistentSessions.js'
 
 export interface BaseEntryStatusParams {
   activityName: string
@@ -40,12 +41,6 @@ export function buildSessionEntryStatus({
   }
 }
 
-function normalizePersistentSessionEntryPolicy(value: unknown): PersistentSessionEntryPolicy {
-  return value === 'solo-allowed' || value === 'solo-only' || value === 'instructor-required'
-    ? value
-    : 'instructor-required'
-}
-
 export function buildPersistentEntryStatus({
   activityName,
   hash,
@@ -65,7 +60,7 @@ export function buildPersistentEntryStatus({
   activitySupportsSolo: boolean
   waitingRoomFieldCount: number
 }): PersistentSessionEntryStatus {
-  const normalizedPolicy = normalizePersistentSessionEntryPolicy(entryPolicy)
+  const normalizedPolicy = resolvePersistentSessionEntryPolicy(entryPolicy)
   const resolvedRole: WaitingRoomResolvedRole = normalizedPolicy !== 'solo-only' && hasTeacherCookie ? 'teacher' : 'student'
 
   let entryOutcome: WaitingRoomEntryOutcome
