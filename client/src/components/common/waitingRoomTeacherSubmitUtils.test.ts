@@ -11,7 +11,6 @@ void test('resolveWaitingRoomTeacherSubmitResult redirects to manage when auth r
     activityName: 'java-string-practice',
     queryString: '?foo=bar',
     normalizedTeacherCode: 'teacher-1',
-    isWaitingForTeacher: true,
     hasOpenSocket: true,
   }), {
     navigateTo: '/manage/java-string-practice/session-1?foo=bar',
@@ -19,18 +18,15 @@ void test('resolveWaitingRoomTeacherSubmitResult redirects to manage when auth r
   })
 })
 
-void test('resolveWaitingRoomTeacherSubmitResult reports unavailable live session when not waiting', () => {
+void test('resolveWaitingRoomTeacherSubmitResult sends teacher code over open websocket even outside pure wait state', () => {
   assert.deepEqual(resolveWaitingRoomTeacherSubmitResult({
     payload: {},
     activityName: 'java-string-practice',
     queryString: '',
     normalizedTeacherCode: 'teacher-1',
-    isWaitingForTeacher: false,
     hasOpenSocket: true,
   }), {
-    errorMessage: 'Live session is unavailable right now. Please refresh and try again.',
-    isSubmitting: false,
-    clearTeacherAuthRequested: true,
+    sendVerifyTeacherCode: 'teacher-1',
   })
 })
 
@@ -40,7 +36,6 @@ void test('resolveWaitingRoomTeacherSubmitResult sends teacher code over open we
     activityName: 'java-string-practice',
     queryString: '',
     normalizedTeacherCode: 'teacher-1',
-    isWaitingForTeacher: true,
     hasOpenSocket: true,
   }), {
     sendVerifyTeacherCode: 'teacher-1',
@@ -53,7 +48,6 @@ void test('resolveWaitingRoomTeacherSubmitResult reports disconnected socket whi
     activityName: 'java-string-practice',
     queryString: '',
     normalizedTeacherCode: 'teacher-1',
-    isWaitingForTeacher: true,
     hasOpenSocket: false,
   }), {
     errorMessage: 'Not connected. Please refresh the page.',

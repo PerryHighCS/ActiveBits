@@ -271,7 +271,6 @@ export default function WaitingRoom({
         activityName,
         queryString,
         normalizedTeacherCode,
-        isWaitingForTeacher,
         hasOpenSocket: wsRef.current?.readyState === WebSocket.OPEN,
       })
 

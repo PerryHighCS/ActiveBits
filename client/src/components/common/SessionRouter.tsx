@@ -267,6 +267,7 @@ const SessionRouter = () => {
       persistentSessionEntryStatus.resolvedRole !== 'student'
       || persistentSessionEntryStatus.entryOutcome !== 'join-live'
       || persistentSessionEntryStatus.presentationMode !== 'render-ui'
+      || persistentSessionEntryStatus.entryPolicy === 'solo-allowed'
       || !hasStoredPersistentSessionParticipantContext
     ) {
       return

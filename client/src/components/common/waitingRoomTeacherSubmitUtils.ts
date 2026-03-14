@@ -8,7 +8,6 @@ export interface ResolveWaitingRoomTeacherSubmitParams {
   activityName: string
   queryString: string
   normalizedTeacherCode: string
-  isWaitingForTeacher: boolean
   hasOpenSocket: boolean
 }
 
@@ -26,21 +25,12 @@ export function resolveWaitingRoomTeacherSubmitResult({
   activityName,
   queryString,
   normalizedTeacherCode,
-  isWaitingForTeacher,
   hasOpenSocket,
 }: ResolveWaitingRoomTeacherSubmitParams): WaitingRoomTeacherSubmitResolution {
   if (payload.isStarted && typeof payload.sessionId === 'string' && payload.sessionId.length > 0) {
     return {
       navigateTo: `/manage/${activityName}/${payload.sessionId}${queryString}`,
       closeSocket: true,
-    }
-  }
-
-  if (!isWaitingForTeacher) {
-    return {
-      errorMessage: 'Live session is unavailable right now. Please refresh and try again.',
-      isSubmitting: false,
-      clearTeacherAuthRequested: true,
     }
   }
 
