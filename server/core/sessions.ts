@@ -1,10 +1,12 @@
 import { randomBytes } from 'crypto'
 import type { Session as SharedSession, SessionStore as SharedSessionStore } from '../../types/session.js'
+import type { SessionEntryStatus } from '../../types/waitingRoom.js'
 import { findHashBySessionId, resetPersistentSession } from './persistentSessions.js'
 import { ValkeySessionStore } from './valkeyStore.js'
 import type { SessionLike } from './valkeyStore.js'
 import { SessionCache } from './sessionCache.js'
 import { normalizeSessionData } from './sessionNormalization.js'
+import { getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
@@ -267,6 +269,27 @@ export function setupSessionRoutes(app: {
   get(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
   delete(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
 }, sessions: SessionStore, wss: WsServerLike | null = null): void {
+  app.get('/api/session/:sessionId/entry', async (req, res) => {
+    const { sessionId } = req.params
+    const session = await sessions.get(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const activityName = typeof session.type === 'string' ? session.type : ''
+    const waitingRoomFieldCount = activityName ? getActivityWaitingRoomFieldCount(activityName) : 0
+    const payload = {
+      sessionId,
+      activityName,
+      waitingRoomFieldCount,
+      resolvedRole: 'student',
+      entryOutcome: 'join-live',
+      presentationMode: waitingRoomFieldCount > 0 ? 'render-ui' : 'pass-through',
+    } satisfies SessionEntryStatus & Record<string, unknown>
+    res.json(payload)
+  })
+
   app.get('/api/session/:sessionId', async (req, res) => {
     const { sessionId } = req.params
     const session = await sessions.get(sessionId)

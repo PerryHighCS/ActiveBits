@@ -1,19 +1,21 @@
+import type { WaitingRoomPresentationMode } from '../../../../types/waitingRoom.js'
+
 export interface ResolveSessionJoinPreflightParams {
   sessionId?: string
-  waitingRoomFieldCount: number
+  presentationMode?: WaitingRoomPresentationMode
   completedJoinPreflightSessionId?: string | null
 }
 
 export function shouldRenderSessionJoinPreflight({
   sessionId,
-  waitingRoomFieldCount,
+  presentationMode,
   completedJoinPreflightSessionId,
 }: ResolveSessionJoinPreflightParams): boolean {
   if (!sessionId) {
     return false
   }
 
-  if (waitingRoomFieldCount <= 0) {
+  if (presentationMode !== 'render-ui') {
     return false
   }
 

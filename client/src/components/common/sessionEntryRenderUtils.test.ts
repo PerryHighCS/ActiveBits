@@ -6,18 +6,18 @@ void test('shouldRenderSessionJoinPreflight returns false when sessionId is miss
   assert.equal(
     shouldRenderSessionJoinPreflight({
       sessionId: undefined,
-      waitingRoomFieldCount: 2,
+      presentationMode: 'render-ui',
       completedJoinPreflightSessionId: null,
     }),
     false,
   )
 })
 
-void test('shouldRenderSessionJoinPreflight returns false when activity has no waiting-room fields', () => {
+void test('shouldRenderSessionJoinPreflight returns false when entry status is pass-through', () => {
   assert.equal(
     shouldRenderSessionJoinPreflight({
       sessionId: 'abc123',
-      waitingRoomFieldCount: 0,
+      presentationMode: 'pass-through',
       completedJoinPreflightSessionId: null,
     }),
     false,
@@ -28,7 +28,7 @@ void test('shouldRenderSessionJoinPreflight returns true until current session p
   assert.equal(
     shouldRenderSessionJoinPreflight({
       sessionId: 'abc123',
-      waitingRoomFieldCount: 1,
+      presentationMode: 'render-ui',
       completedJoinPreflightSessionId: null,
     }),
     true,
@@ -37,7 +37,7 @@ void test('shouldRenderSessionJoinPreflight returns true until current session p
   assert.equal(
     shouldRenderSessionJoinPreflight({
       sessionId: 'abc123',
-      waitingRoomFieldCount: 1,
+      presentationMode: 'render-ui',
       completedJoinPreflightSessionId: 'other-session',
     }),
     true,
@@ -48,7 +48,7 @@ void test('shouldRenderSessionJoinPreflight returns false after current session 
   assert.equal(
     shouldRenderSessionJoinPreflight({
       sessionId: 'abc123',
-      waitingRoomFieldCount: 1,
+      presentationMode: 'render-ui',
       completedJoinPreflightSessionId: 'abc123',
     }),
     false,

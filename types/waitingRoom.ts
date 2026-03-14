@@ -8,6 +8,25 @@ export type PersistentSessionEntryPolicy = (typeof PERSISTENT_SESSION_ENTRY_POLI
 
 export const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
 
+export type WaitingRoomEntryOutcome =
+  | 'wait'
+  | 'join-live'
+  | 'continue-solo'
+  | 'solo-unavailable'
+
+export type WaitingRoomResolvedRole = 'student' | 'teacher'
+
+export type WaitingRoomPresentationMode = 'render-ui' | 'pass-through'
+
+export interface SessionEntryStatus {
+  sessionId: string
+  activityName: string
+  waitingRoomFieldCount: number
+  resolvedRole: WaitingRoomResolvedRole
+  entryOutcome: WaitingRoomEntryOutcome
+  presentationMode: WaitingRoomPresentationMode
+}
+
 export type WaitingRoomSerializableValue =
   | null
   | boolean

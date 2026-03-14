@@ -1,4 +1,9 @@
-import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
+import type {
+  PersistentSessionEntryPolicy,
+  WaitingRoomEntryOutcome,
+  WaitingRoomPresentationMode,
+  WaitingRoomResolvedRole,
+} from '../../../../types/waitingRoom.js'
 
 const DEFAULT_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
 
@@ -14,15 +19,11 @@ export interface PersistentSessionEntryPolicyOption {
   description: string
 }
 
-export type PersistentSessionEntryOutcome =
-  | 'wait'
-  | 'join-live'
-  | 'continue-solo'
-  | 'solo-unavailable'
+export type PersistentSessionEntryOutcome = WaitingRoomEntryOutcome
 
-export type PersistentSessionResolvedRole = 'student' | 'teacher'
+export type PersistentSessionResolvedRole = WaitingRoomResolvedRole
 
-export type PersistentSessionPresentationMode = 'render-ui' | 'pass-through'
+export type PersistentSessionPresentationMode = WaitingRoomPresentationMode
 
 export type PersistentSessionTeacherIntent = 'none' | 'cookie' | 'code'
 

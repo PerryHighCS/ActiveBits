@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useState, type ChangeEvent, type ComponentType, type FormEvent } from 'react'
-import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
+import type { PersistentSessionEntryPolicy, SessionEntryStatus } from '../../../../types/waitingRoom.js'
 import { useNavigate, useParams } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
 import WaitingRoom from './WaitingRoom'
@@ -7,6 +7,7 @@ import LoadingFallback from './LoadingFallback'
 import { getActivity, activities } from '@src/activities'
 import {
   buildTeacherManagePathFromSession,
+  buildSessionEntryApiUrl,
   buildPersistentSessionApiUrl,
   buildPersistentTeacherManagePath,
   CACHE_TTL,
@@ -89,6 +90,7 @@ const SessionRouter = () => {
   const { sessionId, activityName, hash, soloActivityId } = useParams<RouteParams>()
 
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
+  const [sessionEntryStatus, setSessionEntryStatus] = useState<SessionEntryStatus | null>(null)
   const [completedJoinPreflightSessionId, setCompletedJoinPreflightSessionId] = useState<string | null>(null)
   const [persistentSessionInfo, setPersistentSessionInfo] = useState<PersistentSessionInfo | null>(null)
   const [isLoadingPersistent, setIsLoadingPersistent] = useState(false)
@@ -140,6 +142,9 @@ const SessionRouter = () => {
   useEffect(() => {
     queueMicrotask(() => {
       setCompletedJoinPreflightSessionId(null)
+      setSessionData(null)
+      setSessionEntryStatus(null)
+      setError(null)
     })
   }, [sessionId])
 
@@ -293,7 +298,29 @@ const SessionRouter = () => {
   }, [activityName, hash, navigate, persistentSessionInfo])
 
   useEffect(() => {
+    if (!sessionId || sessionEntryStatus) return
+
+    fetch(buildSessionEntryApiUrl(sessionId))
+      .then((response) => {
+        if (!response.ok) throw new Error('Session not found')
+        return response.json() as Promise<SessionEntryStatus>
+      })
+      .then((payload) => {
+        setSessionEntryStatus(payload)
+      })
+      .catch(() => setError('Invalid or missing session'))
+  }, [sessionEntryStatus, sessionId])
+
+  useEffect(() => {
     if (!sessionId || sessionData || typeof window === 'undefined') return
+    if (!sessionEntryStatus) return
+    if (shouldRenderSessionJoinPreflight({
+      sessionId: sessionEntryStatus.sessionId,
+      presentationMode: sessionEntryStatus.presentationMode,
+      completedJoinPreflightSessionId,
+    })) {
+      return
+    }
 
     const storageKey = `session-${sessionId}`
     const cached = readCachedSession(localStorage, storageKey, Date.now(), CACHE_TTL)
@@ -320,7 +347,7 @@ const SessionRouter = () => {
         setSessionData(fullData)
       })
       .catch(() => setError('Invalid or missing session'))
-  }, [sessionId, sessionData])
+  }, [completedJoinPreflightSessionId, sessionData, sessionEntryStatus, sessionId])
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSessionIdInput(event.target.value.toLowerCase())
@@ -464,6 +491,27 @@ const SessionRouter = () => {
     )
   }
 
+  if (sessionEntryStatus && shouldRenderSessionJoinPreflight({
+    sessionId: sessionEntryStatus.sessionId,
+    presentationMode: sessionEntryStatus.presentationMode,
+    completedJoinPreflightSessionId,
+  })) {
+    return (
+      <WaitingRoom
+        activityName={sessionEntryStatus.activityName}
+        hash={sessionEntryStatus.sessionId}
+        hasTeacherCookie={false}
+        entryOutcome={sessionEntryStatus.entryOutcome}
+        startedSessionId={sessionEntryStatus.sessionId}
+        allowTeacherSection={false}
+        showShareUrl={false}
+        onJoinLive={() => setCompletedJoinPreflightSessionId(sessionEntryStatus.sessionId)}
+      />
+    )
+  }
+
+  if (sessionId && !sessionEntryStatus) return <div className="text-center">Loading session...</div>
+
   if (!sessionData) return <div className="text-center">Loading session...</div>
 
   const activity = getActivity(sessionData.type || '')
@@ -475,27 +523,6 @@ const SessionRouter = () => {
   const StudentComponent = activity.StudentComponent
   if (!StudentComponent) {
     return <div className="text-center">Activity student view is unavailable.</div>
-  }
-
-  if (
-    shouldRenderSessionJoinPreflight({
-      sessionId: sessionData.sessionId,
-      waitingRoomFieldCount: activity.waitingRoom?.fields?.length ?? 0,
-      completedJoinPreflightSessionId,
-    })
-  ) {
-    return (
-      <WaitingRoom
-        activityName={activity.id}
-        hash={sessionData.sessionId}
-        hasTeacherCookie={false}
-        entryOutcome="join-live"
-        startedSessionId={sessionData.sessionId}
-        allowTeacherSection={false}
-        showShareUrl={false}
-        onJoinLive={() => setCompletedJoinPreflightSessionId(sessionData.sessionId)}
-      />
-    )
   }
 
   const SessionStudentComponent = StudentComponent as ActivityStudentComponent

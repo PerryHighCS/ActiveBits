@@ -60,6 +60,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Reuse the same role/presentation resolver shape when join-code entry is moved behind a shared server-backed waiting-room gateway, and extend it to embedded parent-role inheritance once that track is ready.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Surface: REST | internal module
+- Contract: Direct session/join-code entry now has a dedicated server-backed gateway payload at `GET /api/session/:sessionId/entry`. The response shape is `{ sessionId, activityName, waitingRoomFieldCount, resolvedRole, entryOutcome, presentationMode }`, currently fixed to student `join-live` with `presentationMode` derived from whether the activity declares waiting-room fields. `SessionRouter` uses this payload before fetching full session data.
+- Compatibility constraints: `GET /api/session/:sessionId` remains unchanged for activity runtime data. The new `/entry` route adds gateway metadata without changing existing session payload consumers. Join-code entry still uses a separate endpoint from persistent/permalink entry; this contract narrows the divergence but does not fully unify the surfaces yet.
+- Validation rules: Missing sessions return `404 { error: 'invalid session' }` like the existing session route. Activities with waiting-room fields must resolve to `presentationMode: render-ui`; activities without fields resolve to `pass-through`.
+- Evidence (schema/tests/path): `types/waitingRoom.ts`; `server/core/sessions.ts`; `server/sessionEntryRoutes.test.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `client/src/components/common/sessionEntryRenderUtils.ts`
+- Follow-up action: Collapse permalink and join-code entry onto one shared gateway service once server-backed participant handoff/storage is designed, so both surfaces stop carrying parallel entry payloads.
+- Owner: Codex
+
 - Date: 2026-02-23
 - Surface: REST
 - Contract: Activity-specific deep-link URL generation contract for SyncDeck uses `POST /api/syncdeck/generate-url` with request body `{ activityName: 'syncdeck', teacherCode: string, selectedOptions: { presentationUrl?: string } }` and returns `{ hash: string, url: string }` where `url` is the authoritative persistent activity URL including validated query params (`presentationUrl`) plus integrity metadata (`urlHash`).

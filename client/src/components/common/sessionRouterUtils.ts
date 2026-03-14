@@ -96,6 +96,10 @@ export function buildPersistentSessionApiUrl(hash: string, activityName: string,
   return `/api/persistent-session/${encodeURIComponent(hash)}?${query.toString()}`
 }
 
+export function buildSessionEntryApiUrl(sessionId: string): string {
+  return `/api/session/${encodeURIComponent(sessionId)}/entry`
+}
+
 export function buildPersistentTeacherManagePath(activityName: string, sessionId: string, queryString: string): string {
   // SyncDeck should resume from live session state instead of reusing permalink bootstrap params.
   const search = activityName === 'syncdeck' ? '' : queryString

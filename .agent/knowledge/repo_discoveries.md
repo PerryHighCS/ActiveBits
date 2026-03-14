@@ -54,6 +54,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Replace the client-only completion callback with a shared entry handoff that submits/stores participant preflight data and works consistently for both permalink and direct session joins.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: client | server
+- Discovery: Direct `/:sessionId` joins no longer treat `/api/session/:sessionId` as both gateway lookup and runtime payload. The server now exposes `GET /api/session/:sessionId/entry`, and `SessionRouter` uses that entry-status response first to decide whether join-code entry should render the waiting-room shell or pass straight through before it fetches the full session record.
+- Why it matters: This is the first server-backed gateway step for ad-hoc join-code entry, so permalink and join-code flows now share the same broad shape of “entry metadata first, activity payload second” instead of join-code being only a client-side preflight wrapper.
+- Evidence: `server/core/sessions.ts`; `server/sessionEntryRoutes.test.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `client/src/components/common/sessionEntryRenderUtils.ts`; `types/waitingRoom.ts`
+- Follow-up action: Unify the persistent-link and join-code gateway endpoints once participant handoff moves server-side; right now they still expose parallel entry contracts even though the client flow is more aligned.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Area: client | activities
 - Discovery: Waiting-room exit now writes collected values into a shared sessionStorage handoff keyed by destination (`session` or `solo`), and `java-string-practice` consumes that handoff's `displayName` to skip its duplicate live-session name prompt when preflight already captured it.

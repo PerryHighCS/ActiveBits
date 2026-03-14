@@ -4,6 +4,7 @@ import {
   buildTeacherManagePathFromSession,
   buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
+  buildSessionEntryApiUrl,
   cleanExpiredSessions,
   normalizePersistentPresentationUrl,
   getPersistentSelectedOptionsFromSearchForActivity,
@@ -104,6 +105,10 @@ void test('buildPersistentSessionApiUrl encodes hash and activityName and preser
 void test('buildPersistentSessionApiUrl replaces existing activityName in search', () => {
   const url = buildPersistentSessionApiUrl('abc123', 'new-name', '?activityName=old&mode=solo')
   assert.equal(url, '/api/persistent-session/abc123?activityName=new-name&mode=solo')
+})
+
+void test('buildSessionEntryApiUrl encodes the session ID for join entry lookups', () => {
+  assert.equal(buildSessionEntryApiUrl('ab/c 123'), '/api/session/ab%2Fc%20123/entry')
 })
 
 void test('buildPersistentTeacherManagePath drops permalink query for started syncdeck sessions', () => {

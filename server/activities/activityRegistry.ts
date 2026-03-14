@@ -7,6 +7,9 @@ import { isMissingDiscoveredConfigError } from './activityRegistryMissingConfigE
 interface ActivityConfigLike extends Record<string, unknown> {
   serverEntry?: string
   isDev?: boolean
+  waitingRoom?: {
+    fields?: unknown[]
+  }
 }
 
 interface DiscoveredConfig {
@@ -156,6 +159,12 @@ export function getAllowedActivities(): string[] {
 
 export function isValidActivity(activityName: string): boolean {
   return ALLOWED_ACTIVITIES.includes(activityName)
+}
+
+export function getActivityWaitingRoomFieldCount(activityName: string): number {
+  const matchingConfig = filteredConfigs.find((config) => config.id === activityName)
+  const fields = matchingConfig?.loadedConfig.waitingRoom?.fields
+  return Array.isArray(fields) ? fields.length : 0
 }
 
 /**
