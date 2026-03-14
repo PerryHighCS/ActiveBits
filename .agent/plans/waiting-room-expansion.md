@@ -586,7 +586,8 @@ this plan that a separate architecture record becomes useful.
   Current status: shared server-side participant ID generation now starts in `server/core/participantIds.ts`, and `java-string-practice`, `java-format-practice`, `traveling-salesman`, and SyncDeck registration paths reuse it. Reconnect semantics and cross-activity participant context are still activity-specific.
   Update: `java-string-practice`, `java-format-practice`, and `traveling-salesman` now also share a generic session-backed reconnect/create helper in `server/core/sessionParticipants.ts`, but Python List Practice and SyncDeck still use activity-owned matching rules.
 - [ ] Define server-side enforcement rules so entry/session APIs reject disallowed joins even if the client is bypassed
-- [ ] Document role resolution rules for student, instructor-cookie, instructor-code, and embedded-role-inheritance paths
+- [x] Document role resolution rules for student, instructor-cookie, instructor-code, and embedded-role-inheritance paths
+  Current status: standalone permalink resolution now treats unauthenticated entry as student by default, remembered teacher cookie and successful teacher-code auth as instructor intent for managed links, and `solo-only` as a forced solo/student outcome even when instructor auth exists. Embedded-role inheritance remains documented contract work, not yet implemented runtime behavior.
 - [x] Document destination transitions for `wait`, `join-live`, `continue-solo`, and `solo-unavailable`
 - [x] Document presentation-mode rules for `render-ui` vs `pass-through`
 - [ ] Define how permalink and ad-hoc join-code entry both route through the same waiting-room gateway
@@ -632,7 +633,7 @@ that path ships.
   Current status: direct `/:sessionId` joins with activity-declared waiting-room fields now render the same `WaitingRoom` shell in `join-live` preflight mode before the student view mounts, but this is still a client-side preflight wrapper rather than a shared server-backed entry resolver contract.
 - [x] Enforce entry policy server-side in entry/session APIs so disallowed joins are rejected even when the client is bypassed
 - [x] Preserve existing live-session behavior when instructor is present
-  Detail: when a persistent session is already started and the activity declares waiting-room fields, `SessionRouter` now renders `WaitingRoom` in a `join-live` preflight state instead of bypassing required field completion; activities without waiting-room fields keep the existing direct join card.
+  Detail: when a persistent session is already started and the activity declares waiting-room fields, `SessionRouter` renders `WaitingRoom` in a `join-live` preflight state instead of bypassing required field completion. When no waiting-room fields are required, student permalink entry now uses direct pass-through to the live session while teacher-cookie-managed entry still redirects to the manage dashboard.
 - [ ] Ensure embedded entry inherits role from parent context and does not prompt for instructor code
 - [ ] Add tests for role resolution, live join, wait, solo fallback, pass-through, unsupported-solo cases, and direct-API bypass attempts
 - [x] Add a test proving `solo-only` links with instructor auth resolve to `continue-solo`, not `join-live`

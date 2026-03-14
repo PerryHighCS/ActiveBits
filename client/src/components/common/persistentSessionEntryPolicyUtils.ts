@@ -20,6 +20,12 @@ export type PersistentSessionEntryOutcome =
   | 'continue-solo'
   | 'solo-unavailable'
 
+export type PersistentSessionResolvedRole = 'student' | 'teacher'
+
+export type PersistentSessionPresentationMode = 'render-ui' | 'pass-through'
+
+export type PersistentSessionTeacherIntent = 'none' | 'cookie' | 'code'
+
 export const PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS: readonly PersistentSessionEntryPolicyOption[] = [
   {
     value: 'instructor-required',
@@ -43,6 +49,20 @@ export interface ResolvePersistentSessionEntryParams {
   isStarted?: boolean
   hasTeacherCookie?: boolean
   activitySupportsSolo: boolean
+}
+
+export interface ResolvePersistentSessionEntryDecisionParams {
+  entryPolicy?: PersistentSessionEntryPolicy
+  isStarted?: boolean
+  activitySupportsSolo: boolean
+  waitingRoomFieldCount?: number
+  teacherIntent?: PersistentSessionTeacherIntent
+}
+
+export interface PersistentSessionEntryDecision {
+  resolvedRole: PersistentSessionResolvedRole
+  entryOutcome: PersistentSessionEntryOutcome
+  presentationMode: PersistentSessionPresentationMode
 }
 
 export function getPersistentSessionEntryPolicyLabel(value: unknown): string {
@@ -81,4 +101,35 @@ export function resolvePersistentSessionEntryOutcome({
   }
 
   return 'wait'
+}
+
+export function resolvePersistentSessionEntryDecision({
+  entryPolicy = DEFAULT_ENTRY_POLICY,
+  isStarted = false,
+  activitySupportsSolo,
+  waitingRoomFieldCount = 0,
+  teacherIntent = 'none',
+}: ResolvePersistentSessionEntryDecisionParams): PersistentSessionEntryDecision {
+  const normalizedPolicy = normalizePersistentSessionEntryPolicy(entryPolicy)
+  const resolvedRole: PersistentSessionResolvedRole = normalizedPolicy !== 'solo-only'
+    && (teacherIntent === 'cookie' || teacherIntent === 'code')
+    ? 'teacher'
+    : 'student'
+
+  const entryOutcome = resolvePersistentSessionEntryOutcome({
+    entryPolicy: normalizedPolicy,
+    isStarted,
+    hasTeacherCookie: resolvedRole === 'teacher',
+    activitySupportsSolo,
+  })
+
+  const presentationMode: PersistentSessionPresentationMode = waitingRoomFieldCount > 0 || entryOutcome === 'wait'
+    ? 'render-ui'
+    : 'pass-through'
+
+  return {
+    resolvedRole,
+    entryOutcome,
+    presentationMode,
+  }
 }

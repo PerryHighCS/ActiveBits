@@ -86,6 +86,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Reuse the resolver shape when ad-hoc join-code entry is folded into the same waiting-room gateway, and expand it to account for waiting-room preflight state once participant-data carry-forward lands.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: client
+- Discovery: Standalone permalink entry resolution now has one shared decision shape for role, destination, and presentation mode, and `SessionRouter` uses that decision to pass student `join-live` permalinks straight into the running session when no waiting-room fields are required.
+- Why it matters: This removes one more special-case permalink branch, codifies the plan's “student by default, teacher only via auth intent, `solo-only` stays solo” rule, and keeps role/presentation decisions in one place before the later server-backed gateway work.
+- Evidence: `client/src/components/common/persistentSessionEntryPolicyUtils.ts`; `client/src/components/common/persistentSessionEntryPolicyUtils.test.ts`; `client/src/components/common/SessionRouter.tsx`; `.agent/plans/waiting-room-expansion.md`; `.agent/knowledge/data-contracts.md`
+- Follow-up action: Expand the same decision model to join-code and embedded entry once those flows stop bypassing the shared resolver and can carry parent role or server-issued participant context.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Area: client
 - Discovery: Waiting-room custom fields now reuse the owning activity's existing lazy-loaded client entry bundle via `loadActivityWaitingRoomFields(...)` instead of introducing a second discovery/bundling path.

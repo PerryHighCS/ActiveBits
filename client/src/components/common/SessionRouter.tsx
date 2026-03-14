@@ -12,15 +12,13 @@ import {
   CACHE_TTL,
   cleanExpiredSessions,
   getSessionPresentationUrlForTeacherRedirect,
-  getPersistentSelectedOptionsFromSearchForActivity,
   getSoloActivities,
   isJoinSessionId,
   readCachedSession,
   type SessionCacheRecord,
 } from './sessionRouterUtils'
 import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
-import { resolvePersistentSessionEntryOutcome } from './persistentSessionEntryPolicyUtils'
-import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorResponse } from './persistentSessionAuthUtils'
+import { resolvePersistentSessionEntryDecision } from './persistentSessionEntryPolicyUtils'
 
 interface RouteParams {
   [key: string]: string | undefined
@@ -39,10 +37,6 @@ interface PersistentSessionInfo {
   isStarted?: boolean
   sessionId?: string
   hasTeacherCookie?: boolean
-}
-
-interface TeacherAuthResponse extends PersistentSessionAuthErrorResponse {
-  sessionId?: string
 }
 
 interface SessionData extends SessionCacheRecord {
@@ -92,21 +86,25 @@ function getWindowSearch(): string {
 
 const SessionRouter = () => {
   const [sessionIdInput, setSessionIdInput] = useState('')
-  const [soloActivity, setSoloActivity] = useState<(typeof activities)[number] | null>(null)
-
   const { sessionId, activityName, hash, soloActivityId } = useParams<RouteParams>()
 
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
   const [completedJoinPreflightSessionId, setCompletedJoinPreflightSessionId] = useState<string | null>(null)
   const [persistentSessionInfo, setPersistentSessionInfo] = useState<PersistentSessionInfo | null>(null)
   const [isLoadingPersistent, setIsLoadingPersistent] = useState(false)
-  const [teacherCode, setTeacherCode] = useState('')
-  const [teacherAuthError, setTeacherAuthError] = useState('')
-  const [isAuthenticatingTeacher, setIsAuthenticatingTeacher] = useState(false)
-  const [showTeacherAuth, setShowTeacherAuth] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const soloActivity = soloActivityId
+    ? activities.find((entry) => entry.id === soloActivityId && entry.soloMode) ?? null
+    : null
+  const soloRouteError = soloActivityId == null
+    ? null
+    : soloActivity != null
+      ? null
+      : activities.some((entry) => entry.id === soloActivityId)
+        ? 'This activity does not support solo mode'
+        : 'Unknown solo activity'
 
   const resolveTeacherManagePath = useCallback(
     async (
@@ -135,55 +133,24 @@ const SessionRouter = () => {
   )
 
   useEffect(() => {
-    if (hash && activityName) {
-      setTeacherCode('')
-      setTeacherAuthError('')
-      setIsAuthenticatingTeacher(false)
-      setShowTeacherAuth(false)
-    }
-  }, [hash, activityName])
-
-  useEffect(() => {
-    if (!soloActivityId) {
-      setSoloActivity(null)
-      setError(null)
-      return
-    }
-
-    const activity = activities.find((entry) => entry.id === soloActivityId)
-    if (!activity) {
-      setSoloActivity(null)
-      setError('Unknown solo activity')
-      return
-    }
-
-    if (!activity.soloMode) {
-      setSoloActivity(null)
-      setError('This activity does not support solo mode')
-      return
-    }
-
-    setError(null)
-    setSoloActivity(activity)
-  }, [soloActivityId])
-
-  useEffect(() => {
     if (typeof window === 'undefined') return
     cleanExpiredSessions(localStorage, Date.now(), CACHE_TTL)
   }, [])
 
-  useEffect(() => setError(null), [sessionIdInput])
-
   useEffect(() => {
-    setCompletedJoinPreflightSessionId(null)
+    queueMicrotask(() => {
+      setCompletedJoinPreflightSessionId(null)
+    })
   }, [sessionId])
 
   useEffect(() => {
     if (!hash || !activityName) return
 
-    setIsLoadingPersistent(true)
-    setPersistentSessionInfo(null)
-
+    queueMicrotask(() => {
+      setIsLoadingPersistent(true)
+      setPersistentSessionInfo(null)
+      setError(null)
+    })
     const url = buildPersistentSessionApiUrl(hash, activityName, getWindowSearch())
     fetch(url, { credentials: 'include' })
       .then((response) => {
@@ -206,13 +173,14 @@ const SessionRouter = () => {
     if (!persistentSessionInfo.hasTeacherCookie) return
 
     const activity = getActivity(activityName)
-    const outcome = resolvePersistentSessionEntryOutcome({
+    const decision = resolvePersistentSessionEntryDecision({
       entryPolicy: persistentSessionInfo.entryPolicy,
       isStarted: persistentSessionInfo.isStarted,
-      hasTeacherCookie: persistentSessionInfo.hasTeacherCookie,
       activitySupportsSolo: Boolean(activity?.soloMode),
+      waitingRoomFieldCount: activity?.waitingRoom?.fields?.length ?? 0,
+      teacherIntent: persistentSessionInfo.hasTeacherCookie ? 'cookie' : 'none',
     })
-    if (outcome !== 'join-live') {
+    if (decision.resolvedRole !== 'teacher' || decision.entryOutcome !== 'join-live') {
       return
     }
 
@@ -284,22 +252,44 @@ const SessionRouter = () => {
     }
 
     const activity = getActivity(activityName)
-    const outcome = resolvePersistentSessionEntryOutcome({
+    const decision = resolvePersistentSessionEntryDecision({
       entryPolicy: persistentSessionInfo.entryPolicy,
       isStarted: persistentSessionInfo.isStarted,
-      hasTeacherCookie: persistentSessionInfo.hasTeacherCookie,
       activitySupportsSolo: Boolean(activity?.soloMode),
+      waitingRoomFieldCount: activity?.waitingRoom?.fields?.length ?? 0,
+      teacherIntent: persistentSessionInfo.hasTeacherCookie ? 'cookie' : 'none',
     })
 
-    if (outcome !== 'continue-solo') {
-      return
-    }
-
-    if ((activity?.waitingRoom?.fields?.length ?? 0) > 0) {
+    if (decision.entryOutcome !== 'continue-solo' || decision.presentationMode !== 'pass-through') {
       return
     }
 
     void navigate(`/solo/${activityName}${getWindowSearch()}`, { replace: true })
+  }, [activityName, hash, navigate, persistentSessionInfo])
+
+  useEffect(() => {
+    if (!hash || !activityName || !persistentSessionInfo?.isStarted || !persistentSessionInfo.sessionId) {
+      return
+    }
+
+    const activity = getActivity(activityName)
+    const decision = resolvePersistentSessionEntryDecision({
+      entryPolicy: persistentSessionInfo.entryPolicy,
+      isStarted: persistentSessionInfo.isStarted,
+      activitySupportsSolo: Boolean(activity?.soloMode),
+      waitingRoomFieldCount: activity?.waitingRoom?.fields?.length ?? 0,
+      teacherIntent: persistentSessionInfo.hasTeacherCookie ? 'cookie' : 'none',
+    })
+
+    if (
+      decision.resolvedRole !== 'student'
+      || decision.entryOutcome !== 'join-live'
+      || decision.presentationMode !== 'pass-through'
+    ) {
+      return
+    }
+
+    void navigate(`/${persistentSessionInfo.sessionId}`, { replace: true })
   }, [activityName, hash, navigate, persistentSessionInfo])
 
   useEffect(() => {
@@ -308,7 +298,9 @@ const SessionRouter = () => {
     const storageKey = `session-${sessionId}`
     const cached = readCachedSession(localStorage, storageKey, Date.now(), CACHE_TTL)
     if (cached) {
-      setSessionData(cached as SessionData)
+      queueMicrotask(() => {
+        setSessionData(cached as SessionData)
+      })
       return
     }
 
@@ -332,6 +324,7 @@ const SessionRouter = () => {
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSessionIdInput(event.target.value.toLowerCase())
+    setError(null)
   }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -341,7 +334,7 @@ const SessionRouter = () => {
     }
   }
 
-  if (error) return <div className="text-red-500 text-center">{error}</div>
+  if (error || soloRouteError) return <div className="text-red-500 text-center">{error || soloRouteError}</div>
 
   if (hash && activityName) {
     if (isLoadingPersistent || persistentSessionInfo === null) {
@@ -349,12 +342,14 @@ const SessionRouter = () => {
     }
 
     const persistentActivity = getActivity(activityName)
-    const persistentEntryOutcome = resolvePersistentSessionEntryOutcome({
+    const persistentEntryDecision = resolvePersistentSessionEntryDecision({
       entryPolicy: persistentSessionInfo.entryPolicy,
       isStarted: persistentSessionInfo.isStarted,
-      hasTeacherCookie: persistentSessionInfo.hasTeacherCookie,
       activitySupportsSolo: Boolean(persistentActivity?.soloMode),
+      waitingRoomFieldCount: persistentActivity?.waitingRoom?.fields?.length ?? 0,
+      teacherIntent: persistentSessionInfo.hasTeacherCookie ? 'cookie' : 'none',
     })
+    const persistentEntryOutcome = persistentEntryDecision.entryOutcome
 
     if (persistentEntryOutcome === 'solo-unavailable') {
       return (
@@ -376,13 +371,7 @@ const SessionRouter = () => {
 
     if (persistentSessionInfo?.isStarted && persistentSessionInfo.sessionId) {
       const startedSessionId = persistentSessionInfo.sessionId
-      const hasWaitingRoomFields = (persistentActivity?.waitingRoom?.fields?.length ?? 0) > 0
-
-      if (persistentSessionInfo.hasTeacherCookie) {
-        return <div className="text-center">Redirecting to session...</div>
-      }
-
-      if (hasWaitingRoomFields) {
+      if (persistentEntryDecision.presentationMode === 'render-ui') {
         return (
           <WaitingRoom
             activityName={activityName}
@@ -394,101 +383,7 @@ const SessionRouter = () => {
           />
         )
       }
-
-      const handleTeacherLogin = async (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault()
-        setTeacherAuthError('')
-        setIsAuthenticatingTeacher(true)
-
-        try {
-          const response = await fetch('/api/persistent-session/authenticate', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({
-              activityName,
-              hash,
-              teacherCode: teacherCode.trim(),
-              selectedOptions: getPersistentSelectedOptionsFromSearchForActivity(
-                getWindowSearch(),
-                getActivity(activityName)?.deepLinkOptions,
-                activityName,
-              ),
-            }),
-          })
-
-          if (!response.ok) {
-            const payload = (await response.json().catch(() => ({}))) as TeacherAuthResponse
-            throw new Error(resolvePersistentSessionAuthFailure(payload).message)
-          }
-
-          const payload = (await response.json()) as TeacherAuthResponse
-          const queryString = getWindowSearch()
-          const targetSessionId = payload.sessionId || startedSessionId
-          const path = await resolveTeacherManagePath(activityName, targetSessionId, queryString)
-          void navigate(path, { replace: true })
-        } catch (authError) {
-          setTeacherAuthError(authError instanceof Error ? authError.message : String(authError))
-          setIsAuthenticatingTeacher(false)
-        }
-      }
-
-      const handleStudentJoin = () => {
-        void navigate(`/${persistentSessionInfo.sessionId}`, { replace: true })
-      }
-
-      return (
-        <div className="max-w-lg mx-auto bg-white rounded-lg shadow-lg lg:p-6 border border-gray-200">
-          <h1 className="text-2xl font-bold text-gray-800 mb-3 text-center">Session is already running</h1>
-          <p className="text-gray-700 text-center mb-6">
-            Join the session now or log in as a teacher to open the manage dashboard.
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-3 justify-between">
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => {
-                if (!showTeacherAuth) {
-                  setShowTeacherAuth(true)
-                }
-                setTeacherAuthError('')
-              }}
-            >
-              Join as Teacher
-            </Button>
-            <Button type="button" onClick={handleStudentJoin}>
-              Join Session
-            </Button>
-          </div>
-
-          {showTeacherAuth && (
-            <form onSubmit={handleTeacherLogin} className="space-y-4 mt-6 border-t border-gray-200 pt-6">
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-semibold text-gray-700">Teacher Code</label>
-                <input
-                  type="password"
-                  value={teacherCode}
-                  onChange={(event) => setTeacherCode(event.target.value)}
-                  className="border-2 border-gray-300 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
-                  placeholder="Enter teacher code"
-                  autoComplete="off"
-                  required
-                  disabled={isAuthenticatingTeacher}
-                />
-                {teacherAuthError && <p className="text-sm text-red-600">{teacherAuthError}</p>}
-              </div>
-              <div className="flex justify-end">
-                <Button type="submit" disabled={!teacherCode.trim() || isAuthenticatingTeacher}>
-                  {isAuthenticatingTeacher ? 'Verifying...' : 'Manage Session'}
-                </Button>
-              </div>
-            </form>
-          )}
-        </div>
-      )
+      return <div className="text-center">Redirecting to session...</div>
     }
 
     return (

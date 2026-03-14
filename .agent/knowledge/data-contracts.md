@@ -51,6 +51,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Phase 3 should reuse `PersistentSessionEntryPolicy` across the remaining join/session enforcement paths, and Phase 4 should carry waiting-room-collected data into downstream entry flows.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Surface: internal module
+- Contract: Standalone persistent-link entry resolution is now modeled as three outputs in shared client logic: `resolvedRole` (`student | teacher`), `entryOutcome` (`wait | join-live | continue-solo | solo-unavailable`), and `presentationMode` (`render-ui | pass-through`). Default unauthenticated permalink entry resolves to student. Remembered teacher cookie or successful teacher-code auth count as instructor intent for managed-entry policies, while `solo-only` always resolves to student-role solo behavior even when instructor auth exists.
+- Compatibility constraints: This resolver currently governs standalone permalink entry in the client. Embedded-role inheritance is documented as the target contract but is not yet a runtime-enforced path. Existing server rejection behavior for `solo-only` managed startup remains unchanged and authoritative.
+- Validation rules: `solo-only` must never resolve to managed `join-live`; waiting state always renders UI; any required waiting-room field forces `presentationMode: render-ui`; started student live entry with no required fields may use `presentationMode: pass-through`.
+- Evidence (schema/tests/path): `client/src/components/common/persistentSessionEntryPolicyUtils.ts`; `client/src/components/common/persistentSessionEntryPolicyUtils.test.ts`; `client/src/components/common/SessionRouter.tsx`; `.agent/plans/waiting-room-expansion.md`
+- Follow-up action: Reuse the same role/presentation resolver shape when join-code entry is moved behind a shared server-backed waiting-room gateway, and extend it to embedded parent-role inheritance once that track is ready.
+- Owner: Codex
+
 - Date: 2026-02-23
 - Surface: REST
 - Contract: Activity-specific deep-link URL generation contract for SyncDeck uses `POST /api/syncdeck/generate-url` with request body `{ activityName: 'syncdeck', teacherCode: string, selectedOptions: { presentationUrl?: string } }` and returns `{ hash: string, url: string }` where `url` is the authoritative persistent activity URL including validated query params (`presentationUrl`) plus integrity metadata (`urlHash`).

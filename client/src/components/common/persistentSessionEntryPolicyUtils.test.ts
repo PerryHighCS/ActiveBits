@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   getPersistentSessionEntryPolicyDescription,
   getPersistentSessionEntryPolicyLabel,
+  resolvePersistentSessionEntryDecision,
   resolvePersistentSessionEntryOutcome,
 } from './persistentSessionEntryPolicyUtils'
 
@@ -88,5 +89,83 @@ void test('resolvePersistentSessionEntryOutcome keeps teacher-authenticated but 
       activitySupportsSolo: true,
     }),
     'wait',
+  )
+})
+
+void test('resolvePersistentSessionEntryDecision resolves teacher role from remembered auth except on solo-only links', () => {
+  assert.deepEqual(
+    resolvePersistentSessionEntryDecision({
+      entryPolicy: 'solo-allowed',
+      isStarted: false,
+      activitySupportsSolo: true,
+      teacherIntent: 'cookie',
+    }),
+    {
+      resolvedRole: 'teacher',
+      entryOutcome: 'wait',
+      presentationMode: 'render-ui',
+    },
+  )
+
+  assert.deepEqual(
+    resolvePersistentSessionEntryDecision({
+      entryPolicy: 'solo-only',
+      isStarted: true,
+      activitySupportsSolo: true,
+      teacherIntent: 'cookie',
+    }),
+    {
+      resolvedRole: 'student',
+      entryOutcome: 'continue-solo',
+      presentationMode: 'pass-through',
+    },
+  )
+})
+
+void test('resolvePersistentSessionEntryDecision treats instructor-code intent as teacher role for managed entry', () => {
+  assert.deepEqual(
+    resolvePersistentSessionEntryDecision({
+      entryPolicy: 'instructor-required',
+      isStarted: true,
+      activitySupportsSolo: false,
+      teacherIntent: 'code',
+    }),
+    {
+      resolvedRole: 'teacher',
+      entryOutcome: 'join-live',
+      presentationMode: 'pass-through',
+    },
+  )
+})
+
+void test('resolvePersistentSessionEntryDecision uses pass-through when live or solo entry needs no waiting-room UI', () => {
+  assert.deepEqual(
+    resolvePersistentSessionEntryDecision({
+      entryPolicy: 'instructor-required',
+      isStarted: true,
+      activitySupportsSolo: true,
+      teacherIntent: 'none',
+      waitingRoomFieldCount: 0,
+    }),
+    {
+      resolvedRole: 'student',
+      entryOutcome: 'join-live',
+      presentationMode: 'pass-through',
+    },
+  )
+
+  assert.deepEqual(
+    resolvePersistentSessionEntryDecision({
+      entryPolicy: 'solo-allowed',
+      isStarted: false,
+      activitySupportsSolo: true,
+      teacherIntent: 'none',
+      waitingRoomFieldCount: 1,
+    }),
+    {
+      resolvedRole: 'student',
+      entryOutcome: 'continue-solo',
+      presentationMode: 'render-ui',
+    },
   )
 })
