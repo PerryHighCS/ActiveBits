@@ -1,4 +1,3 @@
-import type { SessionRecord } from './sessions.js'
 import {
   connectSessionParticipant,
   type ConnectSessionParticipantParams,
@@ -6,11 +5,12 @@ import {
   findSessionParticipant,
   type SessionParticipantIdentity,
 } from './sessionParticipants.js'
+import type { AcceptedEntryParticipantSessionLike } from './acceptedEntryParticipants.js'
 import { resolveAcceptedEntryParticipantName } from './acceptedEntryParticipants.js'
 
 export interface ConnectAcceptedSessionParticipantParams<TParticipant extends SessionParticipantIdentity>
   extends Omit<ConnectSessionParticipantParams<TParticipant>, 'participantName'> {
-  session: SessionRecord
+  session: AcceptedEntryParticipantSessionLike
   participantName: string | null
 }
 

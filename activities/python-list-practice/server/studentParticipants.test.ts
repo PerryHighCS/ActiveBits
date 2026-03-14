@@ -60,8 +60,9 @@ void test('connectPythonListPracticeStudent falls back to accepted-entry display
 
   const result = connectPythonListPracticeStudent(session, 'student-1', null, 30)
 
-  assert.match(String(result?.participantId), /^[a-f0-9]{16}$/)
+  assert.equal(result?.participantId, 'student-1')
   assert.equal(result?.participantName, 'Ada')
+  assert.equal(students[0]?.id, 'student-1')
   assert.equal(students[0]?.name, 'Ada')
 })
 

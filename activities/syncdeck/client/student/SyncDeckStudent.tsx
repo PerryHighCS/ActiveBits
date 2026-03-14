@@ -654,14 +654,12 @@ export function buildStudentWebSocketUrl(params: {
   sessionId?: string | null
   presentationUrl?: string | null
   studentId?: string | null
-  studentName?: string | null
   protocol?: string | null
   host?: string | null
 }): string | null {
   const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : ''
   const presentationUrl = typeof params.presentationUrl === 'string' ? params.presentationUrl.trim() : ''
   const studentId = typeof params.studentId === 'string' ? params.studentId.trim() : ''
-  const studentName = typeof params.studentName === 'string' ? params.studentName.trim() : ''
   const protocol = typeof params.protocol === 'string' ? params.protocol : ''
   const host = typeof params.host === 'string' ? params.host.trim() : ''
 
@@ -673,7 +671,6 @@ export function buildStudentWebSocketUrl(params: {
   const queryParams = new URLSearchParams({
     sessionId,
     studentId,
-    studentName: studentName || 'Student',
   })
 
   return `${wsProtocol}//${host}/ws/syncdeck?${queryParams.toString()}`
@@ -1191,11 +1188,10 @@ const SyncDeckStudent: FC = () => {
       sessionId,
       presentationUrl,
       studentId: registeredStudentId,
-      studentName: registeredStudentName,
       protocol: window.location.protocol,
       host: window.location.host,
     })
-  }, [sessionId, presentationUrl, registeredStudentId, registeredStudentName])
+  }, [sessionId, presentationUrl, registeredStudentId])
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs, socketRef: studentSocketRef } =
     useResilientWebSocket({

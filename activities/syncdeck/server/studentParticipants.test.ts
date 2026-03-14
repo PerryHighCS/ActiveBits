@@ -19,15 +19,26 @@ void test('connectSyncDeckStudent updates an existing student by participantId',
 
   const result = connectSyncDeckStudent(session, 'student-1', 220)
 
-  assert.equal(result.isNew, false)
-  assert.equal(result.participantId, 'student-1')
+  assert.equal(result?.isNew, false)
+  assert.equal(result?.participantId, 'student-1')
   assert.equal(session.data.students[0]?.name, 'Old Name')
   assert.equal(session.data.students[0]?.joinedAt, 100)
   assert.equal(session.data.students[0]?.lastSeenAt, 220)
 })
 
 void test('connectSyncDeckStudent creates a new student from accepted entry when participantId is unknown to the student list', () => {
-  const session = {
+  const session: {
+    data: {
+      students: Array<{
+        studentId: string
+        name: string
+        joinedAt: number
+        lastSeenAt: number
+        lastIndices: { h: number; v: number; f: number } | null
+        lastStudentStateAt: number | null
+      }>
+    }
+  } = {
     data: {
       students: [],
     },
@@ -42,7 +53,7 @@ void test('connectSyncDeckStudent creates a new student from accepted entry when
   assert.equal(result?.isNew, true)
   assert.equal(result?.participantId, 'participant-1')
   assert.equal(session.data.students.length, 1)
-  assert.equal(session.data.students[0]?.name, 'Ada Lovelace')
+  assert.equal(session.data.students[0]?.name ?? null, 'Ada Lovelace')
 })
 
 void test('connectSyncDeckStudent returns null when participantId is missing', () => {

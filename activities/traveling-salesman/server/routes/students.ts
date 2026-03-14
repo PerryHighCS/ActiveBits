@@ -36,7 +36,7 @@ export default function registerStudentRoutes(
             session,
             participants: session.data.students,
             participantId: studentId,
-            participantName: studentName,
+            participantName: studentName ?? null,
             createParticipant: (participantId, participantName, now) => ({
               id: participantId,
               name: participantName,
@@ -116,7 +116,7 @@ export default function registerStudentRoutes(
         await updateStudentStatus(client.sessionId, (session) => {
           const student = disconnectSessionParticipant({
             participants: session.data.students,
-            participantId: client.studentId,
+            participantId: client.studentId ?? null,
           })
           if (!student) return false
           return true

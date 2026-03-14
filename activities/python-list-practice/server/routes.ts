@@ -283,7 +283,7 @@ export default function setupPythonListPracticeRoutes(
         if (session) {
           const result = connectPythonListPracticeStudent(
             session,
-            client.studentId,
+            client.studentId ?? null,
             client.studentName ?? null,
           )
           if (!result) {
@@ -310,7 +310,7 @@ export default function setupPythonListPracticeRoutes(
               if (sess) {
                 const student = disconnectPythonListPracticeStudent(
                   sess.data.students,
-                  client.studentId,
+                  client.studentId ?? null,
                   client.studentName ?? null,
                 )
                 if (student) {

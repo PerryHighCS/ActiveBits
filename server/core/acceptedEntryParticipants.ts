@@ -1,4 +1,3 @@
-import type { SessionRecord } from './sessions.js'
 import type { EntryParticipantValues } from './entryParticipants.js'
 
 export interface AcceptedEntryParticipantRecord {
@@ -11,11 +10,15 @@ interface AcceptedEntryParticipantContainer {
   acceptedEntryParticipants?: Record<string, AcceptedEntryParticipantRecord>
 }
 
+export interface AcceptedEntryParticipantSessionLike {
+  data: unknown
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function getAcceptedEntryParticipantContainer(session: SessionRecord): AcceptedEntryParticipantContainer {
+function getAcceptedEntryParticipantContainer(session: AcceptedEntryParticipantSessionLike): AcceptedEntryParticipantContainer {
   if (!isRecord(session.data)) {
     session.data = {}
   }
@@ -39,7 +42,7 @@ function normalizeDisplayName(value: unknown): string | null {
 }
 
 export function acceptEntryParticipant(
-  session: SessionRecord,
+  session: AcceptedEntryParticipantSessionLike,
   values: EntryParticipantValues,
   now = Date.now(),
 ): AcceptedEntryParticipantRecord | null {
@@ -61,7 +64,7 @@ export function acceptEntryParticipant(
 }
 
 export function findAcceptedEntryParticipant(
-  session: SessionRecord,
+  session: AcceptedEntryParticipantSessionLike,
   participantId: string | null,
 ): AcceptedEntryParticipantRecord | null {
   const normalizedParticipantId = typeof participantId === 'string' ? participantId.trim() : ''
@@ -74,7 +77,7 @@ export function findAcceptedEntryParticipant(
 }
 
 export function resolveAcceptedEntryParticipantName(
-  session: SessionRecord,
+  session: AcceptedEntryParticipantSessionLike,
   participantId: string | null,
   fallbackName: string | null,
 ): string | null {

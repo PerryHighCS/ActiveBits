@@ -105,7 +105,6 @@ interface SyncDeckSocket extends ActiveBitsWebSocket {
   isInstructor?: boolean
   sessionId?: string | null
   studentId?: string | null
-  studentName?: string | null
 }
 
 interface SyncDeckWsMessage {
@@ -1039,7 +1038,6 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     client.sessionId = query.get('sessionId')
     client.isInstructor = false
     client.studentId = normalizeStudentId(query.get('studentId'))
-    client.studentName = normalizeStudentName(query.get('studentName'))
 
     const sessionId = client.sessionId
     if (!sessionId) {
@@ -1097,7 +1095,6 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
 
       client.studentId = connectedStudent.participantId
-      client.studentName = connectedStudent.student.name
       await sessions.set(session.id, session)
       closeDuplicateParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, client)
 
