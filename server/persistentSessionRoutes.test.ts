@@ -588,6 +588,53 @@ void test('teacher-code route returns 404 when the permalink has no remembered t
   assert.deepEqual(res.jsonBody, { error: 'No teacher code found' })
 })
 
+void test('teacher-code route rejects remembered codes that do not validate for the permalink hash', async () => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'GET', '/api/persistent-session/:hash/teacher-code')
+
+  const activityName = 'java-string-practice'
+  const { hash } = generatePersistentHash(activityName, 'actual-teacher-code')
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { hash },
+    query: { activityName },
+    cookies: {
+      persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code'),
+    },
+  }), res)
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.jsonBody, { error: 'forbidden' })
+})
+
+void test('teacher-code route returns the remembered code when it still validates for the permalink hash', async () => {
+  initializePersistentStorage(null)
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'GET', '/api/persistent-session/:hash/teacher-code')
+
+  const activityName = 'java-string-practice'
+  const teacherCode = 'valid-teacher-code'
+  const { hash } = generatePersistentHash(activityName, teacherCode)
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { hash },
+    query: { activityName },
+    cookies: {
+      persistent_sessions: buildCookieValue(activityName, hash, teacherCode),
+    },
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, { teacherCode })
+})
+
 void test('teacher lifecycle clears session on explicit end', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()

@@ -408,6 +408,12 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const teacherCode = typeof entry?.teacherCode === 'string' ? entry.teacherCode : null
 
     if (teacherCode) {
+      const validation = verifyTeacherCodeWithHash(activityName, hash, teacherCode)
+      if (!validation.valid) {
+        res.status(403).json({ error: 'forbidden' })
+        return
+      }
+
       res.json({ teacherCode })
       return
     }
