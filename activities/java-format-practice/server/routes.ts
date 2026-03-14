@@ -1,9 +1,9 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
-import { resolveAcceptedEntryParticipantName } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
-import { connectSessionParticipant, disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
+import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
@@ -148,20 +148,11 @@ export default function setupJavaFormatPracticeRoutes(
         console.log('Found session:', session ? 'yes' : 'no')
         if (!session) return
 
-        const activeStudentName = resolveAcceptedEntryParticipantName(
+        const result = connectAcceptedSessionParticipant({
           session,
-          studentId,
-          client.studentName ?? null,
-        )
-        if (!activeStudentName) {
-          return
-        }
-        client.studentName = activeStudentName
-
-        const { participantId, isNew } = connectSessionParticipant({
           participants: session.data.students,
           participantId: studentId,
-          participantName: activeStudentName,
+          participantName: client.studentName ?? null,
           allowLegacyUnnamedMatch: true,
           createParticipant: (participantId, participantName, now) => ({
             id: participantId,
@@ -173,12 +164,17 @@ export default function setupJavaFormatPracticeRoutes(
           }),
           generateParticipantId,
         })
+        if (!result) {
+          return
+        }
+        client.studentName = result.participantName
+        const { participantId, isNew } = result
         client.studentId = participantId
 
         if (!isNew) {
-          console.log(`Reconnecting student: ${activeStudentName} (${participantId})`)
+          console.log(`Reconnecting student: ${result.participantName} (${participantId})`)
         } else {
-          console.log(`New student joining: ${activeStudentName}`)
+          console.log(`New student joining: ${result.participantName}`)
         }
         closeDuplicateParticipantSockets(ws.wss.clients as Set<JavaFormatSocket>, client)
 

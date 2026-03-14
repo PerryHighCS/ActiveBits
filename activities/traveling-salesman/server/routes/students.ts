@@ -5,7 +5,8 @@ import type {
   TravelingSalesmanSocket,
 } from '../../travelingSalesmanTypes.js'
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
-import { connectSessionParticipant, disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
+import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
+import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers, closeDuplicateStudentSockets, generateStudentId } from './shared.js'
 
@@ -27,11 +28,12 @@ export default function registerStudentRoutes(
     const studentName = qp.get('studentName') || null
     const studentId = qp.get('studentId') || null
 
-    if (client.sessionId && studentName) {
+    if (client.sessionId) {
       ;(async () => {
         const session = asTravelingSalesmanSession(await sessions.get(client.sessionId || ''))
         if (session) {
-          const { participantId } = connectSessionParticipant({
+          const result = connectAcceptedSessionParticipant({
+            session,
             participants: session.data.students,
             participantId: studentId,
             participantName: studentName,
@@ -49,8 +51,13 @@ export default function registerStudentRoutes(
               routeCompleteTime: null,
               timeToComplete: null,
             }),
-            generateParticipantId: () => generateStudentId(studentName),
+            generateParticipantId: () => generateStudentId(studentName ?? 'student'),
           })
+          if (!result) {
+            return
+          }
+          const { participantId } = result
+          client.studentName = result.participantName
           client.studentId = participantId
           closeDuplicateStudentSockets(ws, client)
 

@@ -1,9 +1,9 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
-import { resolveAcceptedEntryParticipantName } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
-import { connectSessionParticipant, disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
+import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
@@ -142,20 +142,11 @@ export default function setupJavaStringPracticeRoutes(
         const session = asJavaStringSession(await sessions.get(activeSessionId))
         if (!session) return
 
-        const activeStudentName = resolveAcceptedEntryParticipantName(
+        const result = connectAcceptedSessionParticipant({
           session,
-          client.studentId ?? null,
-          client.studentName ?? null,
-        )
-        if (!activeStudentName) {
-          return
-        }
-        client.studentName = activeStudentName
-
-        const { participantId } = connectSessionParticipant({
           participants: session.data.students,
           participantId: client.studentId ?? null,
-          participantName: activeStudentName,
+          participantName: client.studentName ?? null,
           allowLegacyUnnamedMatch: true,
           createParticipant: (participantId, participantName, now) => ({
             id: participantId,
@@ -167,6 +158,11 @@ export default function setupJavaStringPracticeRoutes(
           }),
           generateParticipantId,
         })
+        if (!result) {
+          return
+        }
+        client.studentName = result.participantName
+        const { participantId } = result
         client.studentId = participantId
         closeDuplicateParticipantSockets(ws.wss.clients as Set<JavaStringSocket>, client)
 

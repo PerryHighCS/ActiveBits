@@ -87,6 +87,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: server | activities
+- Discovery: Accepted-entry reconnect is now a real shared service, not just a pair of Java-specific route edits. `connectAcceptedSessionParticipant()` centralizes the “use explicit name or fall back to accepted-entry name by `participantId`, then run shared connect/reconnect logic” pattern, and `traveling-salesman` now uses it alongside the Java activities.
+- Why it matters: This is the first reusable server entry service in the post-handoff space. It proves that accepted-entry authority can be shared without collapsing all activity join behavior into one route, while also making the next gap clearer: Python List Practice and SyncDeck still need an explicit decision about whether to join this service or keep their activity-owned entry semantics.
+- Evidence: `server/core/acceptedSessionParticipants.ts`; `server/acceptedSessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/students.ts`
+- Follow-up action: If more adoption is desired, Python List Practice is the next natural candidate. If not, the next architectural step is deciding whether this service is “enough shared authority” or should grow into a broader accepted-entry contract that also governs later reconnect/mutation surfaces.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | client | testing
 - Discovery: Waiting-room entry semantics are now testable at a stable helper boundary instead of only through route/component flows: `server/core/entryStatus.ts` covers shared join/wait/solo/pass-through decisions, `server/core/sessionEntryParticipants.ts` covers tokenized live-entry handoff normalization/one-shot consume behavior, and `entryParticipantStorage` covers client-side 404-vs-retry token handling.
 - Why it matters: The branch’s remaining test gaps are now narrower and easier to reason about. We can add high-signal matrix coverage for shared entry behavior without forcing a brittle DOM harness around the whole `WaitingRoom` component before the API contracts settle.

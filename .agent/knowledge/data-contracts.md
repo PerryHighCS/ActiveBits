@@ -60,6 +60,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Decide whether to extend the same fallback rule to additional session-backed activities or replace it with a broader accepted-entry join service.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Surface: websocket | internal module
+- Contract: `connectAcceptedSessionParticipant()` in `server/core/acceptedSessionParticipants.ts` is now the shared server entry-point for session-backed websocket joins that want to prefer accepted-entry identity. It resolves the effective participant name from explicit query input first, then from `acceptedEntryParticipants[participantId]`, and finally delegates to `connectSessionParticipant()` for the actual connect/reconnect mutation.
+- Compatibility constraints: Activities opt into this service individually. It does not replace activity-specific participant fields or payload shapes, and it does not force activities without accepted-entry support to change behavior.
+- Validation rules: A join only proceeds when the service can resolve a non-empty participant name. Explicit client-provided names still win over accepted-entry fallback. The downstream participant connect logic continues to own ID/backfill, legacy unnamed matching, and record creation rules.
+- Evidence (schema/tests/path): `server/core/acceptedSessionParticipants.ts`; `server/acceptedSessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/students.ts`
+- Follow-up action: Decide whether Python List Practice should adopt the same service next, and whether the long-term target is a broader accepted-entry service that also covers post-join mutation and reconnect validation across more than websocket connect.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Surface: REST | websocket
 - Contract: Generic persistent-link creation and listing now carry `entryPolicy?: PersistentSessionEntryPolicy`. `POST /api/persistent-session/create` accepts `entryPolicy` alongside `activityName`, `teacherCode`, and optional `selectedOptions`; `GET /api/persistent-session/list` returns each saved link with normalized `entryPolicy`. Teacher-start rejection for `solo-only` uses a shared payload shape across both `POST /api/persistent-session/authenticate` and websocket `teacher-code-error`.
