@@ -371,6 +371,7 @@ const SessionRouter = () => {
         sessionId: startedSessionId,
         presentationMode: persistentSessionEntryStatus.presentationMode,
         hasStoredParticipantContext: hasStoredPersistentSessionParticipantContext,
+        allowStoredParticipantContext: persistentSessionEntryStatus.entryPolicy === 'solo-allowed',
       })) {
         return (
           <WaitingRoom

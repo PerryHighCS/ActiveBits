@@ -66,3 +66,16 @@ void test('shouldRenderSessionJoinPreflight returns false when stored participan
     false,
   )
 })
+
+void test('shouldRenderSessionJoinPreflight can still render when stored participant context is allowed', () => {
+  assert.equal(
+    shouldRenderSessionJoinPreflight({
+      sessionId: 'abc123',
+      presentationMode: 'render-ui',
+      completedJoinPreflightSessionId: null,
+      hasStoredParticipantContext: true,
+      allowStoredParticipantContext: true,
+    }),
+    true,
+  )
+})

@@ -231,6 +231,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | activities
+- Discovery: `python-list-practice` now opts into the shared waiting-room `displayName` field and resolves initial student identity through `resolveInitialEntryParticipantIdentity(...)` instead of bootstrapping from activity-local `python-list-practice-name-*` / `python-list-practice-id-*` keys.
+- Why it matters: The activity now matches the same name-capture and reconnect-entry model already used by the Java practice activities. Waiting-room name collection can carry through directly, while Python List Practice still keeps its own activity-specific stats storage and runtime UI.
+- Evidence: `activities/python-list-practice/activity.config.ts`; `activities/python-list-practice/client/student/PythonListPractice.tsx`; `client/src/components/common/entryParticipantIdentityUtils.ts`
+- Follow-up action: Keep Python List Practice on the shared entry identity path and avoid reintroducing activity-local bootstrap keys if its runtime flow changes again.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: client | permalink entry
 - Discovery: `solo-allowed` permalinks should stay on the waiting room when no live session is active instead of auto-redirecting immediately to `/solo/...`.
 - Why it matters: The waiting room is the only shared surface where both sides of the “live or solo” choice are available at once: students can continue solo, while instructors without a remembered cookie still need the teacher-code form to start a live session. Auto-redirecting to solo makes that teacher-start path unreachable.

@@ -15,7 +15,7 @@ void test('resolveWaitingRoomMessageTransition returns waiter count updates', ()
   })
 })
 
-void test('resolveWaitingRoomMessageTransition routes students to live session when session starts', () => {
+void test('resolveWaitingRoomMessageTransition keeps live-only permalink students on the waiting room when session starts', () => {
   assert.deepEqual(resolveWaitingRoomMessageTransition({
     message: { type: 'session-started', sessionId: 'session-1' },
     teacherAuthRequested: false,
@@ -24,7 +24,11 @@ void test('resolveWaitingRoomMessageTransition routes students to live session w
     currentEntryOutcome: 'wait',
     currentEntryPolicy: 'instructor-required',
   }), {
-    navigateTo: '/session-1?foo=bar',
+    error: null,
+    isSubmitting: false,
+    clearTeacherAuthRequested: true,
+    nextEntryOutcome: 'join-live',
+    nextStartedSessionId: 'session-1',
   })
 })
 

@@ -34,7 +34,10 @@ export function resolveWaitingRoomMessageTransition({
   }
 
   if (message.type === 'session-started') {
-    if (!teacherAuthRequested && currentEntryOutcome === 'continue-solo') {
+    if (!teacherAuthRequested && currentEntryPolicy && (
+      currentEntryOutcome === 'continue-solo'
+      || currentEntryOutcome === 'wait'
+    )) {
       return {
         error: null,
         isSubmitting: false,
