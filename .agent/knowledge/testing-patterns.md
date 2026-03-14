@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For waiting-room entry logic, put the outcome matrix in small shared server/client helpers and test those helpers directly before relying on route/component integration coverage.
+- Why it helps: The important regressions here are policy/output combinations (`wait`, `join-live`, `continue-solo`, `solo-unavailable`, `render-ui`, `pass-through`) and one-shot handoff semantics, which are easier to exercise exhaustively in helper tests than through brittle full-component flows.
+- Example (file/path): `server/entryStatus.test.ts`; `server/sessionEntryParticipants.test.ts`; `client/src/components/common/entryParticipantStorage.test.ts`
+- Failure signal: A new policy branch or handoff behavior changes the resolved outcome/presentation or token cleanup semantics without any route/component snapshot obviously failing.
+- Follow-up action: Keep helper-level matrix coverage current as new entry outcomes or handoff semantics are added, then add integration tests only for the riskiest UI or API glue.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Scope: integration
 - Pattern: In sandboxed agent environments where some server tests fail during local port binding or related host restrictions, use `npm run test:codex` as the validation gate and record the skipped full-suite limitation alongside targeted checks for the touched server surface.

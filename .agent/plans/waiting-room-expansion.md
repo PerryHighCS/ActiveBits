@@ -623,6 +623,7 @@ that path ships.
   Current status: waiting-room `join-live` posts collected values to a server-backed session entry-participant store and leaves only an opaque token in client storage, while `continue-solo` uses client-side handoff values. `java-string-practice` and `java-format-practice` both consume `displayName` and a shared server-issued `participantId` from that live-session handoff (with client-value fallback) to skip duplicate startup prompts and reconnect earlier. Broader activity adoption and a fully shared participant context are still outstanding follow-up work, not missing framework capability.
 - [ ] Add clear [TEST] logging for expected error-path tests
 - [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
+  Current status: utility-level coverage now exists for waiting-room field validation/storage (`waitingRoomFormUtils.test.ts`), live-session entry-token storage/consume behavior including 404 vs retry semantics (`entryParticipantStorage.test.ts`), and shared live-entry/join/solo/wait/pass-through status resolution (`server/entryStatus.test.ts`). Full component-level interaction coverage for required-field blocking and carry-forward inside `WaitingRoom.tsx` is still outstanding.
 
 ### Phase 3 - Entry resolution behavior
 
@@ -639,6 +640,7 @@ that path ships.
   Detail: when a persistent session is already started and the activity declares waiting-room fields, `SessionRouter` renders `WaitingRoom` in a `join-live` preflight state instead of bypassing required field completion. When no waiting-room fields are required, student permalink entry now uses direct pass-through to the live session while teacher-cookie-managed entry still redirects to the manage dashboard.
 - [ ] Ensure embedded entry inherits role from parent context and does not prompt for instructor code
 - [ ] Add tests for role resolution, live join, wait, solo fallback, pass-through, unsupported-solo cases, and direct-API bypass attempts
+  Current status: shared server-side entry-status matrix tests now cover live join, wait, solo fallback, pass-through, and unsupported-solo outcomes in `server/entryStatus.test.ts`, and route-level coverage continues in `server/sessionEntryRoutes.test.ts` plus `server/persistentSessionRoutes.test.ts`. Direct-API bypass attempts and embedded-role inheritance still need dedicated tests.
 - [x] Add a test proving `solo-only` links with instructor auth resolve to `continue-solo`, not `join-live`
 
 ### Phase 4 - Downstream integration

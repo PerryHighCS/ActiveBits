@@ -240,6 +240,59 @@ void test('consumeResolvedEntryParticipantValues only calls the server consume e
   assert.equal(storage.getItem(storageKey), null)
 })
 
+void test('consumeResolvedEntryParticipantValues clears token handoff after a 404 consume response', async () => {
+  const storage = createStorage()
+  const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-6')
+  persistEntryParticipantToken(storage, storageKey, 'token-missing')
+
+  const values = await consumeResolvedEntryParticipantValues(
+    storage,
+    {
+      activityName: 'java-string-practice',
+      sessionId: 'session-6',
+      isSoloSession: false,
+    },
+    async () => ({
+      ok: false,
+      status: 404,
+      async json() {
+        return {}
+      },
+    }),
+  )
+
+  assert.equal(values, null)
+  assert.equal(storage.getItem(storageKey), null)
+})
+
+void test('consumeResolvedEntryParticipantValues preserves token handoff after a transient server failure', async () => {
+  const storage = createStorage()
+  const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-7')
+  persistEntryParticipantToken(storage, storageKey, 'token-retry')
+
+  const values = await consumeResolvedEntryParticipantValues(
+    storage,
+    {
+      activityName: 'java-string-practice',
+      sessionId: 'session-7',
+      isSoloSession: false,
+    },
+    async () => ({
+      ok: false,
+      status: 500,
+      async json() {
+        return {}
+      },
+    }),
+  )
+
+  assert.equal(values, null)
+  assert.equal(storage.getItem(storageKey), JSON.stringify({
+    kind: 'token',
+    token: 'token-retry',
+  }))
+})
+
 void test('consumeEntryParticipantParticipantId reads a server-backed participant ID handoff', async () => {
   const storage = createStorage()
   const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-4')

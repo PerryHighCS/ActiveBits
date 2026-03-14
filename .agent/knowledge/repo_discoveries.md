@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-14
+- Area: server | client | testing
+- Discovery: Waiting-room entry semantics are now testable at a stable helper boundary instead of only through route/component flows: `server/core/entryStatus.ts` covers shared join/wait/solo/pass-through decisions, `server/core/sessionEntryParticipants.ts` covers tokenized live-entry handoff normalization/one-shot consume behavior, and `entryParticipantStorage` covers client-side 404-vs-retry token handling.
+- Why it matters: The branch’s remaining test gaps are now narrower and easier to reason about. We can add high-signal matrix coverage for shared entry behavior without forcing a brittle DOM harness around the whole `WaitingRoom` component before the API contracts settle.
+- Evidence: `server/entryStatus.test.ts`; `server/sessionEntryParticipants.test.ts`; `client/src/components/common/entryParticipantStorage.test.ts`
+- Follow-up action: Add targeted `WaitingRoom.tsx` interaction tests later for required-field blocking and carry-forward once the shared helper and route contracts stop moving.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | activities
 - Discovery: Participant ID minting is now centralized in `server/core/participantIds.ts`, and multiple activity server paths (`java-string-practice`, `java-format-practice`, `traveling-salesman`, SyncDeck registration) reuse the same 16-hex format instead of each route inventing its own timestamp/random pattern.
 - Why it matters: This is the first concrete server-side step toward a shared `participantId` contract, and it removes name-derived or route-shaped ID differences before reconnect semantics are centralized.
