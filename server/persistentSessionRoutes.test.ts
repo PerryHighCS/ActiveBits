@@ -940,6 +940,40 @@ void test('create persists non-default entry policy in metadata and list exposes
   assert.equal((sessionsList[0] as Record<string, unknown>).entryPolicy, 'solo-allowed')
 })
 
+void test('persistent session list omits remembered teacherCode when the cookie entry no longer validates', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const listHandler = getRoute(app, 'GET', '/api/persistent-session/list')
+
+  const activityName = 'gallery-walk'
+  const teacherCode = 'actual-list-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+
+  const listRes = createMockRes()
+  await listHandler(createMockReq({
+    cookies: {
+      persistent_sessions: buildCookieValue(activityName, hash, 'wrong-list-code'),
+    },
+    headers: {
+      host: 'bits.example',
+    },
+    protocol: 'https',
+  }), listRes)
+
+  assert.equal(listRes.statusCode, 200)
+  const sessionsList = Array.isArray(listRes.jsonBody?.sessions) ? listRes.jsonBody.sessions : []
+  assert.equal(sessionsList.length, 1)
+  assert.equal((sessionsList[0] as Record<string, unknown>).teacherCode, undefined)
+  assert.equal((sessionsList[0] as Record<string, unknown>).entryPolicy, 'instructor-required')
+})
+
 void test('authenticate rejects teacher auth for solo-only permalinks without mutating cookies', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

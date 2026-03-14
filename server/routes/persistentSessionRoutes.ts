@@ -175,10 +175,11 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
           const host = req.get('x-forwarded-host') ?? req.get('host')
           const protocol = req.get('x-forwarded-proto') ?? req.protocol
           const persistentSession = await getPersistentSession(hash)
+          const validatedEntry = getValidatedPersistentSessionCookieEntry([entry], activityName, hash)
           return {
             activityName,
             hash,
-            teacherCode: entry.teacherCode,
+            teacherCode: validatedEntry?.teacherCode,
             entryPolicy: resolvePersistentSessionEntryPolicy(persistentSession?.entryPolicy),
             selectedOptions: entry.selectedOptions || {},
             url: `/activity/${activityName}/${hash}`,
