@@ -297,7 +297,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     )
     const cookieKey = `${activityName}:${hash}`
     const existingIndex = sessionEntries.findIndex((entry) => entry.key === cookieKey)
-    const existingEntry = existingIndex >= 0 ? sessionEntries[existingIndex] : undefined
+    const existingEntry = getValidatedPersistentSessionCookieEntry(sessionEntries, activityName, hash)
     const existingSelectedOptions = toSelectedOptions(existingEntry?.selectedOptions)
 
     if (existingIndex !== -1) {

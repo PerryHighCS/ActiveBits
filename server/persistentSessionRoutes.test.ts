@@ -837,6 +837,55 @@ void test('authenticate preserves existing selectedOptions from cookie over requ
   })
 })
 
+void test('authenticate ignores selectedOptions from invalid remembered teacher cookies', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const activityName = 'gallery-walk'
+  const teacherCode = 'persistent-teacher-invalid-cookie'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'syncdeck-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const handler = getRoute(app, 'POST', '/api/persistent-session/authenticate')
+  const req = createMockReq({
+    cookies: {
+      persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code', {
+        mode: 'stale-cookie-value',
+        prompt: 'stale-cookie-prompt',
+      }),
+    },
+    body: {
+      activityName,
+      hash,
+      teacherCode,
+      selectedOptions: {
+        mode: 'review',
+        prompt: 'exit ticket',
+      },
+    },
+  })
+  const res = createMockRes()
+
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 200)
+  const cookie = res.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+  const parsed = JSON.parse(cookie.value) as Array<{ key?: string; selectedOptions?: Record<string, unknown> }>
+  const entry = parsed.find((candidate) => candidate.key === `${activityName}:${hash}`)
+  assert.deepEqual(entry?.selectedOptions, {
+    mode: 'review',
+    prompt: 'exit ticket',
+  })
+})
+
 void test('create persists non-default entry policy in metadata and list exposes it', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()
