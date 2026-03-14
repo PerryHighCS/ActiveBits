@@ -53,6 +53,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-14
 - Scope: unit
+- Pattern: For `WaitingRoom` websocket message handling, move the message-to-transition decision into a helper that returns navigation, error, submit-state, or waiter-count updates, then test that matrix directly.
+- Why it helps: It covers the highest-risk wait-state behavior, like teacher-authenticated routing and teacher-code rejection recovery, without trying to spin up the full websocket lifecycle inside the shared component test.
+- Example (file/path): `client/src/components/common/waitingRoomTransitionUtils.ts`; `client/src/components/common/waitingRoomTransitionUtils.test.ts`
+- Failure signal: Wait-state routing regresses, but render-only and storage-only tests still pass because the bug lives in message interpretation rather than UI presentation.
+- Follow-up action: Keep the remaining websocket-specific tests focused on lifecycle wiring, such as open/close/error behavior, and only escalate to a browser harness if those cases cannot be covered cleanly through helper seams plus existing route tests.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
 - Pattern: For activity-owned reconnect/recovery behavior that hangs off websocket close events, extract the close-decision logic into a tiny activity-local helper and test that helper directly instead of trying to simulate the whole websocket lifecycle in the component test.
 - Why it helps: It keeps the test focused on the product contract change, like “stale server-issued identity should clear cached registration and require rejoin,” without depending on browser WebSocket mocks or the full student component state machine.
 - Example (file/path): `activities/syncdeck/client/student/reconnectUtils.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`

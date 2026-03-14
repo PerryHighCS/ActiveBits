@@ -33,6 +33,7 @@ import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom
 import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorResponse } from './persistentSessionAuthUtils'
 import { resolveWaitingRoomPrimaryAction } from './waitingRoomActionUtils'
 import { persistWaitingRoomServerBackedHandoff } from './waitingRoomHandoffUtils'
+import { resolveWaitingRoomMessageTransition } from './waitingRoomTransitionUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -443,17 +444,6 @@ export default function WaitingRoom({
   )
 }
 
-interface HandleWaitingRoomMessageParams {
-  message: WaitingRoomMessage
-  setWaiterCount: (count: number) => void
-  setError: (error: string | null) => void
-  setIsSubmitting: (isSubmitting: boolean) => void
-  teacherAuthRequestedRef: { current: boolean }
-  navigateOnce: (path: string) => void
-  activityName: string
-  queryString: string
-}
-
 function handleWaitingRoomMessage({
   message,
   setWaiterCount,
@@ -463,34 +453,40 @@ function handleWaitingRoomMessage({
   navigateOnce,
   activityName,
   queryString,
-}: HandleWaitingRoomMessageParams): void {
-  if (message.type === 'waiter-count') {
-    setWaiterCount(message.count)
-    return
+}: {
+  message: WaitingRoomMessage
+  setWaiterCount: (count: number) => void
+  setError: (error: string | null) => void
+  setIsSubmitting: (isSubmitting: boolean) => void
+  teacherAuthRequestedRef: { current: boolean }
+  navigateOnce: (path: string) => void
+  activityName: string
+  queryString: string
+}): void {
+  const resolution = resolveWaitingRoomMessageTransition({
+    message,
+    teacherAuthRequested: teacherAuthRequestedRef.current,
+    activityName,
+    queryString,
+  })
+
+  if (typeof resolution.waiterCount === 'number') {
+    setWaiterCount(resolution.waiterCount)
   }
 
-  if (message.type === 'session-started') {
-    if (teacherAuthRequestedRef.current) {
-      navigateOnce(`/manage/${activityName}/${message.sessionId}${queryString}`)
-    } else {
-      navigateOnce(`/${message.sessionId}${queryString}`)
-    }
-    return
+  if (typeof resolution.error === 'string' || resolution.error === null) {
+    setError(resolution.error)
   }
 
-  if (message.type === 'session-ended') {
-    navigateOnce('/session-ended')
-    return
+  if (typeof resolution.isSubmitting === 'boolean') {
+    setIsSubmitting(resolution.isSubmitting)
   }
 
-  if (message.type === 'teacher-authenticated') {
-    navigateOnce(`/manage/${activityName}/${message.sessionId}${queryString}`)
-    return
-  }
-
-  if (message.type === 'teacher-code-error') {
-    setError(message.error)
-    setIsSubmitting(false)
+  if (resolution.clearTeacherAuthRequested) {
     teacherAuthRequestedRef.current = false
+  }
+
+  if (typeof resolution.navigateTo === 'string') {
+    navigateOnce(resolution.navigateTo)
   }
 }

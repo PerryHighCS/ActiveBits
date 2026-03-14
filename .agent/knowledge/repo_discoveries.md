@@ -39,6 +39,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | testing
+- Discovery: `WaitingRoom` websocket message handling now also has a stable seam in `waitingRoomTransitionUtils.ts`, so teacher-auth, session-started, session-ended, waiter-count, and teacher-code-error routing can be verified without importing the full container into a browser-style harness.
+- Why it matters: This narrows the remaining waiting-room test gap again. The hard-to-reach portion is no longer “all websocket behavior,” it is the lifecycle wiring around open/close/error and any true end-to-end submission path that still spans the container boundary.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomTransitionUtils.ts`; `client/src/components/common/waitingRoomTransitionUtils.test.ts`
+- Follow-up action: If more waiting-room test depth is needed, prefer a small seam around websocket lifecycle error/close handling next; only revisit Playwright or another browser harness if that final boundary still resists direct coverage.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | client | testing
 - Discovery: Waiting-room entry semantics are now testable at a stable helper boundary instead of only through route/component flows: `server/core/entryStatus.ts` covers shared join/wait/solo/pass-through decisions, `server/core/sessionEntryParticipants.ts` covers tokenized live-entry handoff normalization/one-shot consume behavior, and `entryParticipantStorage` covers client-side 404-vs-retry token handling.
 - Why it matters: The branch’s remaining test gaps are now narrower and easier to reason about. We can add high-signal matrix coverage for shared entry behavior without forcing a brittle DOM harness around the whole `WaitingRoom` component before the API contracts settle.
