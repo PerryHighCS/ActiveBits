@@ -1,5 +1,6 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
+import { resolveAcceptedEntryParticipantName } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { connectSessionParticipant, disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
@@ -139,14 +140,23 @@ export default function setupJavaFormatPracticeRoutes(
       `WebSocket connection: sessionId=${client.sessionId}, studentName=${client.studentName}, studentId=${studentId}`,
     )
 
-    if (client.sessionId && client.studentName) {
+    if (client.sessionId) {
       const activeSessionId = client.sessionId
-      const activeStudentName = client.studentName
 
       ;(async () => {
         const session = asJavaFormatSession(await sessions.get(activeSessionId))
         console.log('Found session:', session ? 'yes' : 'no')
         if (!session) return
+
+        const activeStudentName = resolveAcceptedEntryParticipantName(
+          session,
+          studentId,
+          client.studentName ?? null,
+        )
+        if (!activeStudentName) {
+          return
+        }
+        client.studentName = activeStudentName
 
         const { participantId, isNew } = connectSessionParticipant({
           participants: session.data.students,

@@ -51,6 +51,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Decide which activity join/reconnect paths should start consulting `acceptedEntryParticipants` first so post-handoff participant acceptance becomes more authoritative than “client sent a matching name and ID”.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Surface: websocket | internal module
+- Contract: `java-string-practice` and `java-format-practice` websocket joins now consult `acceptedEntryParticipants` by `participantId` when the reconnecting client does not send `studentName`. A previously accepted waiting-room entry can therefore rehydrate the participant name server-side during join.
+- Compatibility constraints: Explicit `studentName` from the client still wins when present. Activities that have not opted into this behavior remain unchanged. Direct joins without prior accepted entry still require the existing query-name behavior.
+- Validation rules: Only a non-empty accepted-entry `displayName` for the supplied `participantId` may be used as the fallback name. Missing accepted-entry records do not create or guess a name.
+- Evidence (schema/tests/path): `server/core/acceptedEntryParticipants.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `server/acceptedEntryParticipants.test.ts`
+- Follow-up action: Decide whether to extend the same fallback rule to additional session-backed activities or replace it with a broader accepted-entry join service.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Surface: REST | websocket
 - Contract: Generic persistent-link creation and listing now carry `entryPolicy?: PersistentSessionEntryPolicy`. `POST /api/persistent-session/create` accepts `entryPolicy` alongside `activityName`, `teacherCode`, and optional `selectedOptions`; `GET /api/persistent-session/list` returns each saved link with normalized `entryPolicy`. Teacher-start rejection for `solo-only` uses a shared payload shape across both `POST /api/persistent-session/authenticate` and websocket `teacher-code-error`.

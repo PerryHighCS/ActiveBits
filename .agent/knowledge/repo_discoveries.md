@@ -79,6 +79,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: server | activities
+- Discovery: The first accepted-entry join fallback is now live in the migrated Java activities. Their websocket join paths can recover the participant name from the server-side `acceptedEntryParticipants` record when the client reconnects with `participantId` but without `studentName`.
+- Why it matters: This is the first point where accepted entry affects actual join behavior instead of only being remembered on the server. It reduces reliance on the client resending the display name after waiting-room handoff and makes the remaining gap more specific: other activities and broader reconnect rules still need a shared authority decision.
+- Evidence: `server/core/acceptedEntryParticipants.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`
+- Follow-up action: If we continue on this branch, decide whether to extend this fallback to more session-backed activities or to pause and design a broader accepted-entry join/reconnect service before spreading the pattern further.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | client | testing
 - Discovery: Waiting-room entry semantics are now testable at a stable helper boundary instead of only through route/component flows: `server/core/entryStatus.ts` covers shared join/wait/solo/pass-through decisions, `server/core/sessionEntryParticipants.ts` covers tokenized live-entry handoff normalization/one-shot consume behavior, and `entryParticipantStorage` covers client-side 404-vs-retry token handling.
 - Why it matters: The branch’s remaining test gaps are now narrower and easier to reason about. We can add high-signal matrix coverage for shared entry behavior without forcing a brittle DOM harness around the whole `WaitingRoom` component before the API contracts settle.
