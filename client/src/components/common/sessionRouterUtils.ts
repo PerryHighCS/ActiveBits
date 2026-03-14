@@ -36,7 +36,7 @@ function getSessionStorageKeys(storage: SessionCacheStorage): string[] {
 
   for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index)
-    if (key && key.startsWith('session-')) {
+    if (key && key.startsWith('session-') && !key.startsWith('session-participant:')) {
       keys.push(key)
     }
   }

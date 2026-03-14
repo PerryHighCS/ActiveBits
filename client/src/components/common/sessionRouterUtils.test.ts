@@ -55,6 +55,7 @@ void test('cleanExpiredSessions removes stale and malformed session-* entries on
     'session-valid': JSON.stringify({ timestamp: now - 100 }),
     'session-expired': JSON.stringify({ timestamp: now - 50_000 }),
     'session-invalid': 'not-json',
+    'session-participant:session-valid': JSON.stringify({ studentName: 'Ada', studentId: 'participant-1' }),
     other: JSON.stringify({ timestamp: 1 }),
   })
 
@@ -63,6 +64,7 @@ void test('cleanExpiredSessions removes stale and malformed session-* entries on
   assert.equal(storage.getItem('session-valid') !== null, true)
   assert.equal(storage.getItem('session-expired'), null)
   assert.equal(storage.getItem('session-invalid'), null)
+  assert.equal(storage.getItem('session-participant:session-valid') !== null, true)
   assert.equal(storage.getItem('other') !== null, true)
   assert.ok(logs.some((entry) => entry.includes('Expiring session-expired')))
   assert.ok(logs.some((entry) => entry.includes('Removing invalid entry session-invalid')))

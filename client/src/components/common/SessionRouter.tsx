@@ -19,6 +19,7 @@ import {
   type SessionCacheRecord,
 } from './sessionRouterUtils'
 import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
+import { readSessionParticipantContext } from './sessionParticipantContext'
 
 interface RouteParams {
   [key: string]: string | undefined
@@ -89,6 +90,10 @@ const SessionRouter = () => {
 
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const hasStoredSessionParticipantContext = (
+    typeof window !== 'undefined'
+    && sessionId != null
+  ) ? Boolean(readSessionParticipantContext(window.localStorage, sessionId)) : false
   const soloActivity = soloActivityId
     ? activities.find((entry) => entry.id === soloActivityId && entry.soloMode) ?? null
     : null
@@ -285,6 +290,7 @@ const SessionRouter = () => {
       sessionId: sessionEntryStatus.sessionId,
       presentationMode: sessionEntryStatus.presentationMode,
       completedJoinPreflightSessionId,
+      hasStoredParticipantContext: hasStoredSessionParticipantContext,
     })) {
       return
     }
@@ -314,7 +320,7 @@ const SessionRouter = () => {
         setSessionData(fullData)
       })
       .catch(() => setError('Invalid or missing session'))
-  }, [completedJoinPreflightSessionId, sessionData, sessionEntryStatus, sessionId])
+  }, [completedJoinPreflightSessionId, hasStoredSessionParticipantContext, sessionData, sessionEntryStatus, sessionId])
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSessionIdInput(event.target.value.toLowerCase())
@@ -455,6 +461,7 @@ const SessionRouter = () => {
     sessionId: sessionEntryStatus.sessionId,
     presentationMode: sessionEntryStatus.presentationMode,
     completedJoinPreflightSessionId,
+    hasStoredParticipantContext: hasStoredSessionParticipantContext,
   })) {
     return (
       <WaitingRoom

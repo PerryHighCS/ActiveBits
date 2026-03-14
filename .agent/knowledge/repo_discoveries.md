@@ -215,6 +215,22 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | server | activities
+- Discovery: The Java activities now support ID-only rejoin. The shared `connectAcceptedSessionParticipant()` service can reuse an existing participant's stored name when reconnecting by `participantId`, and `resolveInitialEntryParticipantIdentity()` now treats a persisted session `studentId` as sufficient to skip the duplicate name gate while reconnect state hydrates.
+- Why it matters: Rejoin no longer depends on the browser retaining both the display name and the ID. If local name storage is cleared but the server-issued `participantId` remains, the Java activities can still reconnect through the shared participant contract instead of prompting again.
+- Evidence: `server/core/acceptedSessionParticipants.ts`; `server/acceptedSessionParticipants.test.ts`; `client/src/components/common/entryParticipantIdentityUtils.ts`; `client/src/components/common/entryParticipantIdentityUtils.test.ts`; `activities/java-string-practice/client/student/JavaStringPractice.tsx`; `activities/java-format-practice/client/student/JavaFormatPractice.tsx`
+- Follow-up action: Apply the same “ID-only rejoin is sufficient” rule to later activities that adopt the shared accepted-entry connect service, and move the actual session-scoped reconnect identity persistence into the shared entry layer so activities stop owning the timing of `student-name-*` / `student-id-*` writes.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Area: client | shared entry
+- Discovery: Session-scoped reconnect identity now has a dedicated shared client store in `sessionParticipantContext.ts`. The Java activities no longer need their own continuous persistence effect; they read identity through `entryParticipantIdentityUtils` and refresh the shared context only when the server confirms a `studentId`.
+- Why it matters: This is the first concrete move from “every activity owns its own local reconnect keys” toward “shared entry code owns the reusable participant context shape.” It narrows the next migration step to expanding the authoritative write path, not inventing another per-activity workaround.
+- Evidence: `client/src/components/common/sessionParticipantContext.ts`; `client/src/components/common/sessionParticipantContext.test.ts`; `client/src/components/common/entryParticipantIdentityUtils.ts`; `activities/java-string-practice/client/student/JavaStringPractice.tsx`; `activities/java-format-practice/client/student/JavaFormatPractice.tsx`
+- Follow-up action: Shift more of the authoritative write timing into shared entry acceptance itself, then migrate the remaining activities off direct `student-name-*` / `student-id-*` reads.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | activities
 - Discovery: `server/core/sessionParticipants.ts` now also exposes shared accepted-participant lookup via `findSessionParticipant(...)`, and the migrated Java activity progress endpoints use it instead of route-local `find(...)` logic.
 - Why it matters: This extends the shared participant contract one step past websocket join. Waiting-room-issued or reconnected `participantId` is now the first lookup key for later progress updates too, while legacy name-only fallback remains explicitly opt-in for older sessions.

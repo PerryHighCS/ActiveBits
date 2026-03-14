@@ -4,8 +4,10 @@ import ExpectedOutputGrid from '../components/ExpectedOutputGrid';
 import { useNavigate } from 'react-router-dom';
 import {
   persistSessionParticipantIdentity,
+  readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils';
+import { persistSessionParticipantContext } from '@src/components/common/sessionParticipantContext';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
@@ -147,6 +149,11 @@ function generateVariableCycles(
 export default function JavaFormatPractice({ sessionData }: JavaFormatPracticeProps) {
   const sessionId = sessionData?.sessionId;
   const isSoloSession = sessionId ? sessionId.startsWith('solo-') : false;
+  const initialIdentity = (
+    typeof window !== 'undefined'
+    && sessionId
+    && !isSoloSession
+  ) ? readStoredSessionParticipantIdentity(window.localStorage, sessionId) : null;
   const studentIdRef = useRef<string | null>(null);
   const cycleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
@@ -154,9 +161,10 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   // Get session-ended handler
   const attachSessionEndedHandler = useSessionEndedHandler();
 
-  const [studentName, setStudentName] = useState('');
-  const [studentId, setStudentId] = useState<string | null>(null);
-  const [nameSubmitted, setNameSubmitted] = useState(false);
+  const [studentName, setStudentName] = useState(initialIdentity?.studentName ?? '');
+  const [studentId, setStudentId] = useState<string | null>(initialIdentity?.studentId ?? null);
+  const [nameSubmitted, setNameSubmitted] = useState(initialIdentity?.nameSubmitted ?? false);
+  const [identityResolved, setIdentityResolved] = useState(Boolean(initialIdentity));
   const [currentChallenge, setCurrentChallenge] = useState<JavaFormatChallenge | null>(null);
   const [currentFormatCallIndex, setCurrentFormatCallIndex] = useState(0);
   const [selectedDifficulty, setSelectedDifficulty] = useState<JavaFormatDifficulty>('beginner');
@@ -217,21 +225,29 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     let isCancelled = false;
 
     void (async () => {
-      const identity = await resolveInitialEntryParticipantIdentity({
-        activityName: 'java-format-practice',
-        sessionId,
-        isSoloSession,
-        localStorage: window.localStorage,
-        sessionStorage: window.sessionStorage,
-      });
+      try {
+        const identity = await resolveInitialEntryParticipantIdentity({
+          activityName: 'java-format-practice',
+          sessionId,
+          isSoloSession,
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+        });
 
-      if (isCancelled) {
-        return;
+        if (isCancelled) {
+          return;
+        }
+
+        setStudentName(identity.studentName);
+        setStudentId(identity.studentId);
+        setNameSubmitted(identity.nameSubmitted);
+      } catch (error) {
+        console.error('Failed to resolve initial participant identity:', error);
+      } finally {
+        if (!isCancelled) {
+          setIdentityResolved(true);
+        }
       }
-
-      setStudentName(identity.studentName);
-      setStudentId(identity.studentId);
-      setNameSubmitted(identity.nameSubmitted);
     })();
 
     return () => {
@@ -292,7 +308,12 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
           const newStudentId = message.payload.studentId;
           if (newStudentId) {
             setStudentId(newStudentId);
-            localStorage.setItem(`student-id-${sessionId}`, newStudentId);
+            if (sessionId) {
+              persistSessionParticipantContext(window.localStorage, sessionId, {
+                studentName: studentName.trim() || null,
+                studentId: newStudentId,
+              });
+            }
           }
         } else if (message.type === 'difficultyUpdate') {
           const difficulty = message.payload.difficulty || 'beginner';
@@ -315,7 +336,7 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
         console.error('Failed to parse WebSocket message:', err);
       }
     },
-    [navigate, resetChallengeState, sessionId, selectedTheme, selectedDifficulty]
+    [navigate, resetChallengeState, sessionId, selectedTheme, selectedDifficulty, studentName]
   );
 
   const handleWsOpen = useCallback(() => {
@@ -327,9 +348,10 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     const host = window.location.host;
     const currentId = studentIdRef.current;
     const studentIdParam = currentId ? `&studentId=${encodeURIComponent(currentId)}` : '';
-    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(
-      studentName
-    )}${studentIdParam}`;
+    const studentNameParam = studentName.trim().length > 0
+      ? `&studentName=${encodeURIComponent(studentName)}`
+      : '';
+    return `${protocol}//${host}/ws/java-format-practice?sessionId=${sessionId}${studentNameParam}${studentIdParam}`;
   }, [nameSubmitted, isSoloSession, sessionId, studentName]);
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs } = useResilientWebSocket({
@@ -1006,6 +1028,10 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
   };
 
   // Show name prompt if not in solo mode and name not submitted
+  if (!isSoloSession && !identityResolved) {
+    return <div>Rejoining session...</div>;
+  }
+
   if (!isSoloSession && !nameSubmitted) {
     return (
       <div className="name-prompt-overlay">

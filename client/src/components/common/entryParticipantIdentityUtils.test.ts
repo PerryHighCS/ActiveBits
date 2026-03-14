@@ -9,8 +9,10 @@ import {
 } from './entryParticipantStorage'
 import {
   persistSessionParticipantIdentity,
+  readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from './entryParticipantIdentityUtils'
+import { readSessionParticipantContext } from './sessionParticipantContext'
 
 function createStorage(): EntryParticipantStorageLike {
   const values = new Map<string, string>()
@@ -35,6 +37,10 @@ void test('persistSessionParticipantIdentity stores session participant name and
 
   assert.equal(storage.getItem('student-name-session-1'), 'Ada')
   assert.equal(storage.getItem('student-id-session-1'), 'participant-1')
+  assert.deepEqual(readSessionParticipantContext(storage, 'session-1'), {
+    studentName: 'Ada',
+    studentId: 'participant-1',
+  })
 })
 
 void test('resolveInitialEntryParticipantIdentity prefers stored live-session identity', async () => {
@@ -56,6 +62,17 @@ void test('resolveInitialEntryParticipantIdentity prefers stored live-session id
   })
 
   assert.deepEqual(identity, {
+    studentName: 'Grace',
+    studentId: 'participant-1',
+    nameSubmitted: true,
+  })
+})
+
+void test('readStoredSessionParticipantIdentity reads shared session participant context first', () => {
+  const localStorage = createStorage()
+  persistSessionParticipantIdentity(localStorage, 'session-1', 'Grace', 'participant-1')
+
+  assert.deepEqual(readStoredSessionParticipantIdentity(localStorage, 'session-1'), {
     studentName: 'Grace',
     studentId: 'participant-1',
     nameSubmitted: true,
@@ -84,8 +101,30 @@ void test('resolveInitialEntryParticipantIdentity promotes preflight values into
     studentId: 'participant-2',
     nameSubmitted: true,
   })
-  assert.equal(localStorage.getItem('student-name-session-2'), 'Ada')
-  assert.equal(localStorage.getItem('student-id-session-2'), 'participant-2')
+  assert.deepEqual(readSessionParticipantContext(localStorage, 'session-2'), {
+    studentName: 'Ada',
+    studentId: 'participant-2',
+  })
+})
+
+void test('resolveInitialEntryParticipantIdentity treats stored participant id as sufficient live rejoin identity', async () => {
+  const localStorage = createStorage()
+  persistSessionParticipantIdentity(localStorage, 'session-2', 'Ada', 'participant-2')
+  localStorage.removeItem('student-name-session-2')
+
+  const identity = await resolveInitialEntryParticipantIdentity({
+    activityName: 'java-string-practice',
+    sessionId: 'session-2',
+    isSoloSession: false,
+    localStorage,
+    sessionStorage: createStorage(),
+  })
+
+  assert.deepEqual(identity, {
+    studentName: 'Ada',
+    studentId: 'participant-2',
+    nameSubmitted: true,
+  })
 })
 
 void test('resolveInitialEntryParticipantIdentity resolves solo identity from preflight token', async () => {

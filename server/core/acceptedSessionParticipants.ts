@@ -29,23 +29,25 @@ export function connectAcceptedSessionParticipant<TParticipant extends SessionPa
   createParticipant,
   generateParticipantId,
 }: ConnectAcceptedSessionParticipantParams<TParticipant>): ConnectAcceptedSessionParticipantResult<TParticipant> | null {
-  const resolvedParticipantName = resolveAcceptedEntryParticipantName(
-    session,
-    participantId,
-    participantName,
-  )
-  if (!resolvedParticipantName) {
-    return null
-  }
-
   const normalizedParticipantId = typeof participantId === 'string' ? participantId.trim() : ''
-  if (normalizedParticipantId) {
-    const existingParticipant = findSessionParticipant({
+  const existingParticipant = normalizedParticipantId
+    ? findSessionParticipant({
       participants,
       participantId: normalizedParticipantId,
       participantName: null,
       allowLegacyUnnamedMatch,
     })
+    : null
+  const resolvedParticipantName = resolveAcceptedEntryParticipantName(
+    session,
+    participantId,
+    participantName ?? existingParticipant?.name ?? null,
+  )
+  if (!resolvedParticipantName) {
+    return null
+  }
+
+  if (normalizedParticipantId) {
     if (!existingParticipant) {
       const participant = createParticipant(normalizedParticipantId, resolvedParticipantName, now ?? Date.now())
       participants.push(participant)

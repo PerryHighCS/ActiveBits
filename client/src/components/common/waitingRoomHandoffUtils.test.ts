@@ -5,6 +5,7 @@ import {
   type EntryParticipantStorageLike,
 } from './entryParticipantStorage'
 import { persistWaitingRoomServerBackedHandoff } from './waitingRoomHandoffUtils'
+import { readSessionParticipantContext } from './sessionParticipantContext'
 
 function createStorage(): EntryParticipantStorageLike {
   const values = new Map<string, string>()
@@ -31,11 +32,15 @@ void test('persistWaitingRoomServerBackedHandoff stores an opaque token on succe
     storageKey,
     values: { displayName: 'Ada' },
     submitApiUrl: '/api/session/session-1/entry-participant',
+    sessionParticipantContextSessionId: 'session-1',
     fetchImpl: async () => ({
       ok: true,
       status: 200,
       async json() {
-        return { entryParticipantToken: ' token-123 ' }
+        return {
+          entryParticipantToken: ' token-123 ',
+          values: { displayName: 'Ada', participantId: 'participant-1' },
+        }
       },
     }),
   })
@@ -43,6 +48,10 @@ void test('persistWaitingRoomServerBackedHandoff stores an opaque token on succe
   assert.deepEqual(JSON.parse(String(storage.getItem(storageKey))), {
     kind: 'token',
     token: 'token-123',
+  })
+  assert.deepEqual(readSessionParticipantContext(storage, 'session-1'), {
+    studentName: 'Ada',
+    studentId: 'participant-1',
   })
 })
 
@@ -82,6 +91,7 @@ void test('persistWaitingRoomServerBackedHandoff falls back to local values when
     storageKey,
     values: { displayName: 'Grace' },
     submitApiUrl: '/api/session/session-2/entry-participant',
+    sessionParticipantContextSessionId: 'session-2',
     fetchImpl: async () => ({
       ok: false,
       status: 500,
@@ -95,6 +105,10 @@ void test('persistWaitingRoomServerBackedHandoff falls back to local values when
   assert.deepEqual(JSON.parse(String(storage.getItem(storageKey))), {
     kind: 'values',
     values: { displayName: 'Grace' },
+  })
+  assert.deepEqual(readSessionParticipantContext(storage, 'session-2'), {
+    studentName: 'Grace',
+    studentId: null,
   })
   assert.equal(warnings[0], '[WaitingRoom] Failed to store entry participant on server, falling back to client handoff:')
 })

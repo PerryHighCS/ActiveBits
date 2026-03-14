@@ -6,6 +6,10 @@ import {
   type EntryParticipantLookupParams,
   type EntryParticipantStorageLike,
 } from './entryParticipantStorage'
+import {
+  persistSessionParticipantContext,
+  readSessionParticipantContext,
+} from './sessionParticipantContext'
 
 export interface ResolvedEntryParticipantIdentity {
   studentName: string
@@ -35,10 +39,44 @@ export function persistSessionParticipantIdentity(
   studentName: string,
   studentId: string | null,
 ): void {
+  persistSessionParticipantContext(storage, sessionId, {
+    studentName,
+    studentId,
+  })
   storage.setItem(`student-name-${sessionId}`, studentName)
   if (studentId) {
     storage.setItem(`student-id-${sessionId}`, studentId)
   }
+}
+
+export function readStoredSessionParticipantIdentity(
+  storage: EntryParticipantStorageLike,
+  sessionId: string,
+): ResolvedEntryParticipantIdentity | null {
+  const sharedContext = readSessionParticipantContext(storage, sessionId)
+  if (sharedContext?.studentName || sharedContext?.studentId) {
+    return {
+      studentName: sharedContext.studentName ?? '',
+      studentId: sharedContext.studentId,
+      nameSubmitted: true,
+    }
+  }
+
+  const savedName = getStoredString(storage, `student-name-${sessionId}`)
+  const savedId = getStoredString(storage, `student-id-${sessionId}`)
+  if (savedName || savedId) {
+    persistSessionParticipantContext(storage, sessionId, {
+      studentName: savedName,
+      studentId: savedId,
+    })
+    return {
+      studentName: savedName ?? '',
+      studentId: savedId,
+      nameSubmitted: true,
+    }
+  }
+
+  return null
 }
 
 export async function resolveInitialEntryParticipantIdentity(
@@ -79,23 +117,22 @@ export async function resolveInitialEntryParticipantIdentity(
   }
 
   if (localStorage) {
-    const savedName = getStoredString(localStorage, `student-name-${sessionId}`)
-    if (savedName) {
-      return {
-        studentName: savedName,
-        studentId: getStoredString(localStorage, `student-id-${sessionId}`),
-        nameSubmitted: true,
-      }
+    const storedIdentity = readStoredSessionParticipantIdentity(localStorage, sessionId)
+    if (storedIdentity) {
+      return storedIdentity
     }
   }
 
-  if (preflightDisplayName) {
+  if (preflightDisplayName || preflightParticipantId) {
     if (localStorage) {
-      persistSessionParticipantIdentity(localStorage, sessionId, preflightDisplayName, preflightParticipantId)
+      persistSessionParticipantContext(localStorage, sessionId, {
+        studentName: preflightDisplayName,
+        studentId: preflightParticipantId,
+      })
     }
 
     return {
-      studentName: preflightDisplayName,
+      studentName: preflightDisplayName ?? '',
       studentId: preflightParticipantId,
       nameSubmitted: true,
     }

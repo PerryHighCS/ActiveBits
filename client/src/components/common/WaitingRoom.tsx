@@ -291,6 +291,7 @@ export default function WaitingRoom({
       storageKey: buildEntryParticipantStorageKey(activityName, 'session', destinationId),
       values: waitingRoomValues,
       submitApiUrl: buildSessionEntryParticipantSubmitApiUrl(destinationId),
+      sessionParticipantContextSessionId: destinationId,
     })
   }
 

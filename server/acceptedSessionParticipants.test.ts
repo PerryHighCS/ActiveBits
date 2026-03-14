@@ -71,6 +71,37 @@ void test('connectAcceptedSessionParticipant falls back to accepted-entry displa
   assert.equal(participants[0]?.name, 'Grace')
 })
 
+void test('connectAcceptedSessionParticipant reuses existing participant name when reconnecting by participantId', () => {
+  const session = createSessionRecord('session-4')
+  const existingParticipant: TestParticipant = {
+    id: 'participant-1',
+    name: 'Lin',
+    connected: false,
+    lastSeen: 10,
+  }
+  const participants: TestParticipant[] = [existingParticipant]
+
+  const result = connectAcceptedSessionParticipant({
+    session,
+    participants,
+    participantId: 'participant-1',
+    participantName: null,
+    createParticipant: (participantId, participantName, now) => ({
+      id: participantId,
+      name: participantName,
+      connected: true,
+      lastSeen: now,
+    }),
+    generateParticipantId: () => 'generated-id',
+  })
+
+  assert.equal(result?.participantName, 'Lin')
+  assert.equal(result?.participantId, 'participant-1')
+  assert.equal(result?.isNew, false)
+  assert.equal(participants.length, 1)
+  assert.equal(participants[0]?.name, 'Lin')
+})
+
 void test('connectAcceptedSessionParticipant returns null when neither explicit nor accepted-entry name exists', () => {
   const session = createSessionRecord('session-3')
   const participants: TestParticipant[] = []

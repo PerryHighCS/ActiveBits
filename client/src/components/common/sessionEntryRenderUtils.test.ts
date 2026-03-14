@@ -54,3 +54,15 @@ void test('shouldRenderSessionJoinPreflight returns false after current session 
     false,
   )
 })
+
+void test('shouldRenderSessionJoinPreflight returns false when stored participant context already exists', () => {
+  assert.equal(
+    shouldRenderSessionJoinPreflight({
+      sessionId: 'abc123',
+      presentationMode: 'render-ui',
+      completedJoinPreflightSessionId: null,
+      hasStoredParticipantContext: true,
+    }),
+    false,
+  )
+})
