@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-14
+- Area: server | activities
+- Discovery: Participant ID minting is now centralized in `server/core/participantIds.ts`, and multiple activity server paths (`java-string-practice`, `java-format-practice`, `traveling-salesman`, SyncDeck registration) reuse the same 16-hex format instead of each route inventing its own timestamp/random pattern.
+- Why it matters: This is the first concrete server-side step toward a shared `participantId` contract, and it removes name-derived or route-shaped ID differences before reconnect semantics are centralized.
+- Evidence: `server/core/participantIds.ts`; `server/participantIds.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/shared.ts`; `activities/syncdeck/server/routes.ts`
+- Follow-up action: Centralize participant lookup/reconnect behavior next; generation format alone is not enough to make participant identity portable across activities.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Area: client
 - Discovery: Started persistent sessions no longer always bypass the waiting-room shell. When an activity declares `waitingRoom.fields`, `SessionRouter` now routes already-started permalink entry through `WaitingRoom` with a `join-live` outcome, while activities without fields keep the simpler direct join card.

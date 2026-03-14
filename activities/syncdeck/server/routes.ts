@@ -5,6 +5,7 @@ import {
   resolvePersistentSessionSecret,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
+import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -925,7 +926,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const name = normalizeStudentName(readStringField(req.body, 'name'))
-    const studentId = randomBytes(8).toString('hex')
+    const studentId = generateParticipantId()
     const now = Date.now()
 
     session.data.students.push({

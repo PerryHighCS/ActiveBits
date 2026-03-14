@@ -583,6 +583,7 @@ this plan that a separate architecture record becomes useful.
 - [ ] Decide and document sequencing when required preflight fields and waiting state both apply (v1: collect while waiting and carry forward)
 - [ ] Decide server/client ownership for validation and temporary storage
 - [ ] Define shared server-side `participantId` issuance and reconnect semantics
+  Current status: shared server-side participant ID generation now starts in `server/core/participantIds.ts`, and `java-string-practice`, `java-format-practice`, `traveling-salesman`, and SyncDeck registration paths reuse it. Reconnect semantics and cross-activity participant context are still activity-specific.
 - [ ] Define server-side enforcement rules so entry/session APIs reject disallowed joins even if the client is bypassed
 - [ ] Document role resolution rules for student, instructor-cookie, instructor-code, and embedded-role-inheritance paths
 - [x] Document destination transitions for `wait`, `join-live`, `continue-solo`, and `solo-unavailable`
@@ -656,6 +657,7 @@ Direct solo-route migration note:
 - [x] Remove or bypass duplicate startup name collection in `java-string-practice` once waiting-room entry is authoritative
 - [ ] Verify `java-string-practice` reconnect/progress flows still work with waiting-room-provided `participantId`
 - [ ] Migrate activity-local student ID generation toward shared server-side `participantId` issuance where needed
+  Current status: ID minting is now centralized, but activity-specific reconnect lookup and persistence rules still need a shared contract before this checkbox can close.
 - [ ] Define the migration/deprecation path for direct `/solo/:activityId` entry once permalink-based solo entry is ready
 - [ ] Keep or replace special-case solo entry actions (for example `gallery-walk` feedback review) before removing generic dashboard "Copy solo link" buttons
 - [ ] Align policy naming with future SyncDeck/presentation embedding work

@@ -1,5 +1,6 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
+import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
@@ -93,12 +94,6 @@ function asJavaStringSession(session: SessionRecord | null): JavaStringSession |
   return session as JavaStringSession
 }
 
-function generateStudentId(name: string): string {
-  const timestamp = Date.now().toString(36)
-  const random = Math.random().toString(36).substring(2, 6)
-  return `${name}-${timestamp}-${random}`
-}
-
 registerSessionNormalizer('java-string-practice', (session) => {
   session.data = normalizeSessionData(session.data)
 })
@@ -174,7 +169,7 @@ export default function setupJavaStringPracticeRoutes(
           client.studentId = existingStudent.id || null
           closeDuplicateStudentSockets(client)
         } else {
-          const newId = generateStudentId(activeStudentName)
+          const newId = generateParticipantId()
           client.studentId = newId
           session.data.students.push({
             id: newId,

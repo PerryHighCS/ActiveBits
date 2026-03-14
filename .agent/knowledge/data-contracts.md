@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-14
+- Surface: internal module
+- Contract: Shared server-side participant IDs now originate from `generateParticipantId()` in `server/core/participantIds.ts`, which returns a 16-character lowercase hex token. Activity server routes may still store that value under existing field names such as `studentId` or `id`, but new ID minting should come from the shared helper instead of route-local timestamp/random concatenation.
+- Compatibility constraints: Existing websocket and REST payload keys remain unchanged for now (`studentId`, `id`, etc.) so activity clients do not break. This contract centralizes only issuance format, not yet the higher-level participant context schema or reconnect ownership.
+- Validation rules: Generated IDs must match `/^[a-f0-9]{16}$/` and be random enough for repeated issuance without route-local prefixes or user-name-derived content.
+- Evidence (schema/tests/path): `server/core/participantIds.ts`; `server/participantIds.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/shared.ts`; `activities/syncdeck/server/routes.ts`.
+- Follow-up action: Replace activity-owned reconnect matching and participant record creation with a shared participant-entry contract once waiting-room/server handoff design is ready.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Surface: REST | websocket
 - Contract: Generic persistent-link creation and listing now carry `entryPolicy?: PersistentSessionEntryPolicy`. `POST /api/persistent-session/create` accepts `entryPolicy` alongside `activityName`, `teacherCode`, and optional `selectedOptions`; `GET /api/persistent-session/list` returns each saved link with normalized `entryPolicy`. Teacher-start rejection for `solo-only` uses a shared payload shape across both `POST /api/persistent-session/authenticate` and websocket `teacher-code-error`.

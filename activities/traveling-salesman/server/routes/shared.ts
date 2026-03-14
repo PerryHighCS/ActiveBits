@@ -1,5 +1,5 @@
-import crypto from 'node:crypto'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
+import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import type { WsRouter } from '../../../../types/websocket.js'
 import type {
   TravelingSalesmanSession,
@@ -25,12 +25,7 @@ interface BroadcastRouteRecord {
  * Generate unique student ID
  */
 export function generateStudentId(_name: string): string {
-  if (typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  const timestamp = Date.now().toString(36)
-  const random = crypto.randomBytes(8).toString('hex')
-  return `${timestamp}-${random}`
+  return generateParticipantId()
 }
 
 /**
