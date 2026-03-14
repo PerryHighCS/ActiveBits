@@ -23,6 +23,8 @@ export interface SyncDeckAutoRegistrationState {
   studentNameInput: string
 }
 
+export type SyncDeckRegistrationGateVariant = 'auto-registering' | 'restart-entry' | 'none'
+
 function normalizeString(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -83,4 +85,21 @@ export function shouldShowSyncDeckAutoRegistrationGate(state: SyncDeckAutoRegist
     && normalizeString(state.registeredStudentName).length === 0
     && normalizeString(state.registeredStudentId).length === 0
   )
+}
+
+export function resolveSyncDeckRegistrationGateVariant(
+  state: SyncDeckAutoRegistrationState,
+): SyncDeckRegistrationGateVariant {
+  if (
+    normalizeString(state.registeredStudentName).length > 0
+    && normalizeString(state.registeredStudentId).length > 0
+  ) {
+    return 'none'
+  }
+
+  if (shouldShowSyncDeckAutoRegistrationGate(state)) {
+    return 'auto-registering'
+  }
+
+  return 'restart-entry'
 }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildSyncDeckRegistrationRequest,
+  resolveSyncDeckRegistrationGateVariant,
   resolveSyncDeckInitialRegistrationState,
   shouldAutoRegisterSyncDeckStudent,
   shouldShowSyncDeckAutoRegistrationGate,
@@ -104,4 +105,30 @@ void test('shouldShowSyncDeckAutoRegistrationGate hides manual join form while a
     registeredStudentName: '',
     studentNameInput: 'Ada Lovelace',
   }), false)
+})
+
+void test('resolveSyncDeckRegistrationGateVariant prefers registered identity, then auto-registration, then restart-entry', () => {
+  assert.equal(resolveSyncDeckRegistrationGateVariant({
+    isRegisteringStudent: false,
+    pendingAcceptedParticipantId: '',
+    registeredStudentId: 'student-1',
+    registeredStudentName: 'Ada Lovelace',
+    studentNameInput: 'Ada Lovelace',
+  }), 'none')
+
+  assert.equal(resolveSyncDeckRegistrationGateVariant({
+    isRegisteringStudent: false,
+    pendingAcceptedParticipantId: 'participant-1',
+    registeredStudentId: '',
+    registeredStudentName: '',
+    studentNameInput: 'Ada Lovelace',
+  }), 'auto-registering')
+
+  assert.equal(resolveSyncDeckRegistrationGateVariant({
+    isRegisteringStudent: false,
+    pendingAcceptedParticipantId: '',
+    registeredStudentId: '',
+    registeredStudentName: '',
+    studentNameInput: '',
+  }), 'restart-entry')
 })

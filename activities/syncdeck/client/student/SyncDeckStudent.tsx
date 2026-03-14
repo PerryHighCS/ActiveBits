@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
@@ -14,9 +14,9 @@ import {
 import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
 import {
   buildSyncDeckRegistrationRequest,
+  resolveSyncDeckRegistrationGateVariant,
   resolveSyncDeckInitialRegistrationState,
   shouldAutoRegisterSyncDeckStudent,
-  shouldShowSyncDeckAutoRegistrationGate,
 } from './registrationUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
@@ -789,6 +789,13 @@ const SyncDeckStudent: FC = () => {
   const studentBacktrackOptOutRef = useRef(false)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
   const attachSessionEndedHandler = useSessionEndedHandler()
+  const registrationGateVariant = resolveSyncDeckRegistrationGateVariant({
+    isRegisteringStudent,
+    pendingAcceptedParticipantId,
+    registeredStudentId,
+    registeredStudentName,
+    studentNameInput,
+  })
 
   useEffect(() => {
     syncDebugEnabledRef.current = isSyncDeckDebugEnabled()
@@ -1341,9 +1348,15 @@ const SyncDeckStudent: FC = () => {
       return
     }
 
+    const normalizedParticipantId = participantId.trim()
+    if (normalizedParticipantId.length === 0) {
+      setJoinError('This presentation now requires entry through the waiting room.')
+      return
+    }
+
     const normalized = name.trim().slice(0, 80)
     if (normalized.length === 0) {
-      setJoinError('Please enter your name before joining.')
+      setJoinError('This presentation now requires entry through the waiting room.')
       return
     }
 
@@ -1356,7 +1369,7 @@ const SyncDeckStudent: FC = () => {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify(buildSyncDeckRegistrationRequest(normalized, participantId)),
+        body: JSON.stringify(buildSyncDeckRegistrationRequest(normalized, normalizedParticipantId)),
       })
 
       if (!response.ok) {
@@ -1427,13 +1440,6 @@ const SyncDeckStudent: FC = () => {
     studentNameInput,
   ])
 
-  const handleNameSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
-    await registerStudent(studentNameInput, pendingAcceptedParticipantId, {
-      fallbackToManualEntryOnFailure: false,
-    })
-  }
-
   const handleIframeLoad = useCallback(() => {
     hasSeenIframeReadySignalRef.current = false
     sendPayloadToIframe(buildStudentRoleCommandMessage())
@@ -1499,13 +1505,7 @@ const SyncDeckStudent: FC = () => {
     )
   }
 
-  if (shouldShowSyncDeckAutoRegistrationGate({
-    isRegisteringStudent,
-    pendingAcceptedParticipantId,
-    registeredStudentId,
-    registeredStudentName,
-    studentNameInput,
-  })) {
+  if (registrationGateVariant === 'auto-registering') {
     return (
       <div className="fixed inset-0 z-10 bg-white flex items-center justify-center p-6">
         <div
@@ -1524,33 +1524,27 @@ const SyncDeckStudent: FC = () => {
     )
   }
 
-  if (registeredStudentName.trim().length === 0) {
+  if (registrationGateVariant === 'restart-entry') {
     return (
       <div className="fixed inset-0 z-10 bg-white flex items-center justify-center p-6">
-        <form onSubmit={handleNameSubmit} className="w-full max-w-md border border-gray-200 rounded p-4 space-y-3">
-          <h1 className="text-xl font-bold text-gray-800">Join SyncDeck</h1>
-          <label className="block text-sm text-gray-700">
-            <span className="block font-semibold mb-1">Your Name</span>
-            <input
-              type="text"
-              value={studentNameInput}
-              onChange={(event) => setStudentNameInput(event.target.value)}
-              className="w-full border-2 border-gray-300 rounded px-3 py-2"
-              placeholder="Enter your name"
-              maxLength={80}
-              required
-              autoFocus
-            />
-          </label>
+        <div className="w-full max-w-md border border-gray-200 rounded p-4 space-y-3">
+          <h1 className="text-xl font-bold text-gray-800">Return to Waiting Room</h1>
+          <p className="text-sm text-gray-700">
+            SyncDeck now expects student entry to come through the waiting room before the presentation loads.
+          </p>
           {joinError ? <p className="text-sm text-red-600">{joinError}</p> : null}
           <button
-            type="submit"
-            disabled={isRegisteringStudent}
+            type="button"
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                window.location.reload()
+              }
+            }}
             className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
           >
-            {isRegisteringStudent ? 'Joining…' : 'Join Presentation'}
+            Reload Entry Flow
           </button>
-        </form>
+        </div>
       </div>
     )
   }

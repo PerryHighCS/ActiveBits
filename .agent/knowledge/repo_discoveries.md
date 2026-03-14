@@ -681,7 +681,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: SyncDeck no longer has to mint a fresh student identity before it can benefit from waiting-room entry. Its registration route can now reuse `acceptedEntryParticipants[participantId]` for both name recovery and ID reuse, and the student client can auto-register from accepted waiting-room identity instead of forcing a second manual submit.
 - Why it matters: This moves SyncDeck toward the shared accepted-entry model without forcing websocket connect to create participants again. It also exposed that activity-level session normalizers must preserve shared waiting-room metadata like `acceptedEntryParticipants`, or later registration/join steps silently lose the server-side handoff record.
 - Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/studentParticipants.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/registrationUtils.ts`; `activities/syncdeck/client/student/registrationUtils.test.ts`
-- Follow-up action: Decide whether SyncDeck should stop at this registration bridge or eventually replace the separate register route with the same accepted-entry connect service used by the other session-backed activities.
+- Follow-up action: The remaining SyncDeck-specific question is whether to keep the register route as an internal accepted-entry checkpoint or replace it outright with the same accepted-entry connect service used by the other session-backed activities.
 - Owner: Codex
 
 - Date: 2026-03-14
@@ -690,4 +690,20 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: This makes SyncDeck feel like the same waiting-room flow as the other migrated activities even though its websocket path is still reconnect-only under the hood.
 - Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/registrationUtils.ts`; `activities/syncdeck/client/student/registrationUtils.test.ts`
 - Follow-up action: If SyncDeck later adopts the shared accepted-entry connect service directly, remove the remaining activity-specific registration gate rather than preserving both flows.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Area: syncdeck
+- Discovery: Declaring SyncDeck’s required `displayName` at the activity-config level is the cleanest way to make waiting-room accepted identity the default path instead of a compatibility bridge.
+- Why it matters: That keeps shared waiting-room collection responsible for student naming, lets join-code and permalink flows behave the same way, and reduces the chance that SyncDeck drifts back into “ask again inside the activity” behavior.
+- Evidence: `activities/syncdeck/activity.config.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `.agent/plans/waiting-room-expansion.md`
+- Follow-up action: The remaining SyncDeck-specific piece is the server-side registration/connect split, not name collection. Future migration work should focus there rather than adding more UI prompts.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Area: syncdeck
+- Discovery: Once SyncDeck declares the waiting-room `displayName` field, the old ad hoc name-only `register-student` path becomes unnecessary noise. Tightening the route to require accepted-entry `participantId` and sending students back through the waiting-room flow when that identity is missing removes the last duplicate student-name collection path.
+- Why it matters: This makes waiting-room accepted entry authoritative for new SyncDeck student identity instead of merely advisory, while still leaving websocket connect in reconnect-only mode.
+- Evidence: `activities/syncdeck/activity.config.ts`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/registrationUtils.ts`
+- Follow-up action: The remaining convergence work is now almost entirely about replacing the registration/connect split, not about student-name collection.
 - Owner: Codex

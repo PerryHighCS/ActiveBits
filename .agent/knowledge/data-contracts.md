@@ -71,20 +71,29 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 - Date: 2026-03-14
 - Surface: REST | session-backed registration
-- Contract: `POST /api/syncdeck/:sessionId/register-student` now accepts optional `participantId` in addition to `name`. When `participantId` matches a server-side `acceptedEntryParticipants` record, the route may reuse that accepted waiting-room identity and register the student under the same server-issued ID even if the client omits `name`.
-- Compatibility constraints: Explicit client-provided `name` still wins when present. SyncDeck websocket connect remains reconnect-only and still requires a previously registered student record. SyncDeck session normalization must preserve shared `acceptedEntryParticipants` metadata so the registration route can consult it later.
-- Validation rules: The route returns `400 { error: 'invalid payload' }` when neither an explicit non-empty `name` nor an accepted-entry display name can be resolved. When the supplied `participantId` already belongs to a registered SyncDeck student, registration updates that existing student instead of minting a new ID.
+- Contract: `POST /api/syncdeck/:sessionId/register-student` now requires accepted-entry identity instead of ad hoc client registration data. The request must include `participantId`, and the route resolves the student display name only from the session’s `acceptedEntryParticipants[participantId]` record before registering or reconnecting the SyncDeck student under that same server-issued ID.
+- Compatibility constraints: SyncDeck websocket connect remains reconnect-only and still requires a previously registered student record. SyncDeck session normalization must preserve shared `acceptedEntryParticipants` metadata so the registration route can consult it later. The old name-only registration path is no longer supported.
+- Validation rules: The route returns `400 { error: 'invalid payload' }` when `participantId` is missing. It returns `409 { error: 'accepted entry required' }` when the supplied `participantId` does not have a usable accepted-entry display name on the session. When the supplied `participantId` already belongs to a registered SyncDeck student, registration updates that existing student instead of minting a new ID.
 - Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/studentParticipants.test.ts`
-- Follow-up action: Decide whether SyncDeck should keep this registration bridge as its steady state or collapse the separate register route once more activities consume waiting-room accepted identity directly.
+- Follow-up action: If SyncDeck later adopts the shared accepted-entry connect service directly, remove the remaining register route and carry these validation rules forward into the shared join contract.
 - Owner: Codex
 
 - Date: 2026-03-14
 - Surface: client entry | session-backed registration
-- Contract: `SyncDeckStudent` now treats accepted waiting-room identity as a continuation path instead of a second signup gate. When unresolved entry handoff provides both `displayName` and `participantId`, the client auto-registers through `register-student` and shows a transient “Joining SyncDeck” status instead of rendering the manual name form.
-- Compatibility constraints: Manual registration remains the fallback when auto-registration cannot run or fails. Stored SyncDeck student identity still wins over newly consumed accepted-entry values, so reconnect behavior for previously registered students remains unchanged.
-- Validation rules: Auto-registration only runs when there is no existing registered SyncDeck identity, the accepted `participantId` is present, and the carried-forward display name is non-empty. If the server registration attempt fails, the client clears the pending accepted participant ID and falls back to the manual name form with the existing error message.
+- Contract: `SyncDeckStudent` now treats accepted waiting-room identity as the only new-entry path instead of a second signup gate. When unresolved entry handoff provides both `displayName` and `participantId`, the client auto-registers through `register-student` and shows a transient “Joining SyncDeck” status. When that accepted identity is missing or rejected, the student is told to restart the waiting-room entry flow instead of re-entering a name inside the activity.
+- Compatibility constraints: Stored SyncDeck student identity still wins over newly consumed accepted-entry values, so reconnect behavior for previously registered students remains unchanged. The old in-activity manual name form is no longer part of the standard flow.
+- Validation rules: Auto-registration only runs when there is no existing registered SyncDeck identity, the accepted `participantId` is present, and the carried-forward display name is non-empty. If the server registration attempt fails, the client clears the pending accepted participant ID and falls back to the “restart entry” state rather than rendering a manual name form.
 - Evidence (schema/tests/path): `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/registrationUtils.ts`; `activities/syncdeck/client/student/registrationUtils.test.ts`
 - Follow-up action: If SyncDeck drops its separate register route later, migrate this auto-registration gate into the same shared accepted-entry join contract rather than recreating another activity-specific pre-connect step.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Surface: activity config | waiting room
+- Contract: SyncDeck now declares the shared waiting-room `displayName` field in `activity.config.ts`, so join-code and permalink entry can collect student identity before the activity-specific registration/connect path runs.
+- Compatibility constraints: SyncDeck still remains `soloMode: false` and still owns its registration-plus-websocket reconnect flow after waiting-room entry. The waiting-room field declaration is now the required student-name collection step for new entry rather than a hint layered on top of an in-activity prompt.
+- Validation rules: `displayName` is required and uses the same shared text-field contract as the migrated Java activities. New SyncDeck student entry now expects that value to be collected before the activity loads.
+- Evidence (schema/tests/path): `activities/syncdeck/activity.config.ts`; `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/SessionRouter.tsx`
+- Follow-up action: If SyncDeck later removes its separate registration route, keep the waiting-room field as the single authoritative student-name collection step instead of reintroducing a second in-activity prompt.
 - Owner: Codex
 
 - Date: 2026-03-13

@@ -1597,7 +1597,7 @@ void test('instructor-passcode route rejects forged cookie key with wrong teache
   assert.deepEqual(res.body, { error: 'forbidden' })
 })
 
-void test('register-student route creates a student record for valid syncdeck session', async () => {
+void test('register-student route requires accepted-entry identity instead of ad hoc names', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({
@@ -1619,15 +1619,13 @@ void test('register-student route creates a student record for valid syncdeck se
     res,
   )
 
-  assert.equal(res.statusCode, 200)
-  const payload = res.body as { studentId?: unknown; name?: unknown }
-  assert.equal(typeof payload.studentId, 'string')
-  assert.ok((payload.studentId as string).length > 0)
-  assert.equal(payload.name, 'Ada Lovelace')
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    error: 'invalid payload',
+  })
 
   const students = (storeState.store.s1?.data as { students?: Array<{ name?: string }> }).students ?? []
-  assert.equal(students.length, 1)
-  assert.equal(students[0]?.name, 'Ada Lovelace')
+  assert.equal(students.length, 0)
 })
 
 void test('register-student route reuses accepted-entry identity when participantId is provided', async () => {
@@ -1671,7 +1669,7 @@ void test('register-student route reuses accepted-entry identity when participan
   assert.equal(students[0]?.name, 'Ada From Waiting Room')
 })
 
-void test('register-student route rejects missing name when no accepted-entry identity exists', async () => {
+void test('register-student route rejects participant ids without accepted-entry identity', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({
@@ -1693,9 +1691,9 @@ void test('register-student route rejects missing name when no accepted-entry id
     res,
   )
 
-  assert.equal(res.statusCode, 400)
+  assert.equal(res.statusCode, 409)
   assert.deepEqual(res.body, {
-    error: 'invalid payload',
+    error: 'accepted entry required',
   })
 })
 

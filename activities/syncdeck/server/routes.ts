@@ -6,7 +6,7 @@ import {
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
-import { resolveAcceptedEntryParticipantName } from 'activebits-server/core/acceptedEntryParticipants.js'
+import { findAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -953,10 +953,17 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const requestedParticipantId = normalizeStudentId(readStringField(req.body, 'participantId'))
-    const name = resolveAcceptedEntryParticipantName(session, requestedParticipantId, readStringField(req.body, 'name'))
-    if (!name) {
+    if (!requestedParticipantId) {
       const response = res as unknown as JsonResponse
       response.status(400).json({ error: 'invalid payload' })
+      return
+    }
+
+    const acceptedParticipant = findAcceptedEntryParticipant(session, requestedParticipantId)
+    const name = typeof acceptedParticipant?.displayName === 'string' ? acceptedParticipant.displayName.trim() : ''
+    if (!name) {
+      const response = res as unknown as JsonResponse
+      response.status(409).json({ error: 'accepted entry required' })
       return
     }
 
