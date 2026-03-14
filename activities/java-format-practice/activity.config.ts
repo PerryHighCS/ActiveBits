@@ -6,6 +6,17 @@ const javaFormatPracticeConfig: ActivityConfig = {
   description: 'Interactive practice for Java printf and String.format',
   color: 'emerald',
   soloMode: true,
+  waitingRoom: {
+    fields: [
+      {
+        id: 'displayName',
+        label: 'Display Name',
+        type: 'text',
+        required: true,
+        placeholder: 'Your name',
+      },
+    ],
+  },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }

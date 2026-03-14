@@ -39,6 +39,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-13
+- Area: client | activities
+- Discovery: `consumeEntryParticipantDisplayName(...)` now gives activities one shared way to read waiting-room `displayName` handoff data for either live-session or solo entry, and `java-format-practice` is the second activity to adopt it.
+- Why it matters: This reduces migration copy-paste and proves the handoff model works for both `session` and `solo` destinations before a server-backed participant context exists.
+- Evidence: `client/src/components/common/entryParticipantStorage.ts`; `activities/java-string-practice/client/student/JavaStringPractice.tsx`; `activities/java-format-practice/activity.config.ts`; `activities/java-format-practice/client/student/JavaFormatPractice.tsx`
+- Follow-up action: Keep later activity migrations using the shared helper instead of re-implementing storage-key logic, and replace the helper with a server-backed lookup once participant entry is centralized.
+- Owner: Codex
+
+- Date: 2026-03-13
 - Area: client
 - Discovery: `WaitingRoom` is no longer hard-coded as a teacher-wait blocker. It now accepts the resolved entry outcome so `continue-solo` permalink flows with waiting-room fields can render a solo-preflight screen and CTA instead of incorrectly telling the user to wait for a teacher.
 - Why it matters: Without outcome-aware presentation, future activities that add waiting-room fields would regress on `solo-allowed` or `solo-only` permalinks by showing misleading copy and the wrong primary action even though the router had already resolved a solo destination.

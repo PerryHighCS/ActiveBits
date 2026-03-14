@@ -614,6 +614,7 @@ that path ships.
   Current status: started persistent sessions with waiting-room fields now stay inside the same `WaitingRoom` shell and reuse the stored preflight form state for `join-live`, but downstream join flow still does not submit/store that data beyond local sessionStorage.
 - [ ] Submit/store preflight data for later entry flow use
   Current status: waiting-room `join-live` and `continue-solo` actions now copy collected values into a shared client-side entry handoff store keyed by destination, and `java-string-practice` consumes `displayName` from that handoff to skip its duplicate name gate. Server-backed participant storage and broader activity adoption are still outstanding.
+  Update: `java-format-practice` now consumes the same `displayName` handoff, and `java-string-practice` also honors it on solo entry instead of always forcing `Solo Student`.
 - [ ] Add clear [TEST] logging for expected error-path tests
 - [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
 

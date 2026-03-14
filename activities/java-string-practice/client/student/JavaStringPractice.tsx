@@ -4,9 +4,7 @@ import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
-  buildEntryParticipantStorageKey,
-  consumeEntryParticipantValues,
-  getEntryParticipantDisplayName,
+  consumeEntryParticipantDisplayName,
 } from '@src/components/common/entryParticipantStorage'
 import type {
   FeedbackState,
@@ -91,8 +89,22 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
   }, [])
 
   useEffect(() => {
+    if (typeof window === 'undefined' || window.sessionStorage == null) {
+      if (isSoloSession) {
+        setStudentName('Solo Student')
+        setNameSubmitted(true)
+      }
+      return
+    }
+
+    const preflightDisplayName = consumeEntryParticipantDisplayName(window.sessionStorage, {
+      activityName: 'java-string-practice',
+      sessionId,
+      isSoloSession,
+    })
+
     if (isSoloSession) {
-      setStudentName('Solo Student')
+      setStudentName(preflightDisplayName ?? 'Solo Student')
       setNameSubmitted(true)
       return
     }
@@ -107,18 +119,9 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
       return
     }
 
-    if (typeof window === 'undefined' || window.sessionStorage == null) {
-      return
-    }
-
-    const preflightValues = consumeEntryParticipantValues(
-      window.sessionStorage,
-      buildEntryParticipantStorageKey('java-string-practice', 'session', sessionId),
-    )
-    const displayName = getEntryParticipantDisplayName(preflightValues)
-    if (displayName) {
-      setStudentName(displayName)
-      localStorage.setItem(`student-name-${sessionId}`, displayName)
+    if (preflightDisplayName) {
+      setStudentName(preflightDisplayName)
+      localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName)
       setNameSubmitted(true)
     }
   }, [isSoloSession, sessionId])

@@ -8,6 +8,11 @@ export interface EntryParticipantStorageLike {
 
 export type EntryParticipantValueMap = Record<string, WaitingRoomSerializableValue>
 export type EntryParticipantDestinationType = 'session' | 'solo'
+export interface EntryParticipantLookupParams {
+  activityName: string
+  sessionId?: string
+  isSoloSession: boolean
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -45,6 +50,14 @@ export function buildEntryParticipantStorageKey(
   destinationId: string,
 ): string {
   return `entry-participant:${activityName}:${destinationType}:${destinationId}`
+}
+
+export function buildSessionEntryParticipantStorageKey(activityName: string, sessionId: string): string {
+  return buildEntryParticipantStorageKey(activityName, 'session', sessionId)
+}
+
+export function buildSoloEntryParticipantStorageKey(activityName: string): string {
+  return buildEntryParticipantStorageKey(activityName, 'solo', activityName)
 }
 
 export function persistEntryParticipantValues(
@@ -93,4 +106,19 @@ export function getEntryParticipantDisplayName(values: EntryParticipantValueMap 
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+export function consumeEntryParticipantDisplayName(
+  storage: EntryParticipantStorageLike,
+  { activityName, sessionId, isSoloSession }: EntryParticipantLookupParams,
+): string | null {
+  const storageKey = isSoloSession
+    ? buildSoloEntryParticipantStorageKey(activityName)
+    : (sessionId ? buildSessionEntryParticipantStorageKey(activityName, sessionId) : null)
+
+  if (!storageKey) {
+    return null
+  }
+
+  return getEntryParticipantDisplayName(consumeEntryParticipantValues(storage, storageKey))
 }

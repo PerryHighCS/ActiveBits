@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, type KeyboardEvent, type Mous
 import InterleavedOutputGrid from '../components/InterleavedOutputGrid';
 import ExpectedOutputGrid from '../components/ExpectedOutputGrid';
 import { useNavigate } from 'react-router-dom';
+import { consumeEntryParticipantDisplayName } from '@src/components/common/entryParticipantStorage';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
@@ -206,8 +207,22 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
 
   // Initialize student name for non-solo sessions
   useEffect(() => {
+    if (typeof window === 'undefined' || window.sessionStorage == null) {
+      if (isSoloSession) {
+        setStudentName('Solo Student');
+        setNameSubmitted(true);
+      }
+      return;
+    }
+
+    const preflightDisplayName = consumeEntryParticipantDisplayName(window.sessionStorage, {
+      activityName: 'java-format-practice',
+      sessionId,
+      isSoloSession,
+    });
+
     if (isSoloSession) {
-      setStudentName('Solo Student');
+      setStudentName(preflightDisplayName ?? 'Solo Student');
       setNameSubmitted(true);
       return;
     }
@@ -217,6 +232,13 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     if (savedName) {
       setStudentName(savedName);
       setStudentId(savedId);
+      setNameSubmitted(true);
+      return;
+    }
+
+    if (preflightDisplayName) {
+      setStudentName(preflightDisplayName);
+      localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName);
       setNameSubmitted(true);
     }
   }, [sessionId, isSoloSession]);
