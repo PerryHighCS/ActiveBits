@@ -6,7 +6,6 @@ import {
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
-import { findAcceptedEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -14,7 +13,7 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../shared/revealSyncProtocol.js'
-import { connectSyncDeckStudent, registerSyncDeckStudent } from './studentParticipants.js'
+import { connectSyncDeckStudent } from './studentParticipants.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -937,49 +936,6 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
   })
 
-  app.post('/api/syncdeck/:sessionId/register-student', async (req, res) => {
-    const sessionId = req.params.sessionId
-    if (!sessionId) {
-      const response = res as unknown as JsonResponse
-      response.status(400).json({ error: 'missing sessionId' })
-      return
-    }
-
-    const session = asSyncDeckSession(await sessions.get(sessionId))
-    if (!session) {
-      const response = res as unknown as JsonResponse
-      response.status(404).json({ error: 'invalid session' })
-      return
-    }
-
-    const requestedParticipantId = normalizeStudentId(readStringField(req.body, 'participantId'))
-    if (!requestedParticipantId) {
-      const response = res as unknown as JsonResponse
-      response.status(400).json({ error: 'invalid payload' })
-      return
-    }
-
-    const acceptedParticipant = findAcceptedEntryParticipant(session, requestedParticipantId)
-    const name = typeof acceptedParticipant?.displayName === 'string' ? acceptedParticipant.displayName.trim() : ''
-    if (!name) {
-      const response = res as unknown as JsonResponse
-      response.status(409).json({ error: 'accepted entry required' })
-      return
-    }
-
-    const { participantId: studentId } = registerSyncDeckStudent(
-      session.data.students,
-      name,
-      Date.now(),
-      requestedParticipantId,
-    )
-    await sessions.set(session.id, session)
-    await broadcastStudentsToInstructors(session.id)
-
-    const response = res as unknown as JsonResponse
-    response.json({ studentId, name })
-  })
-
   app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
     const sessionId = req.params.sessionId
     if (!sessionId) {
@@ -1132,9 +1088,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
 
       const connectedStudent = connectSyncDeckStudent(
-        session.data.students,
+        session,
         client.studentId,
-        client.studentName ?? 'Student',
       )
       if (!connectedStudent) {
         socket.close(1008, 'unregistered student')
@@ -1142,6 +1097,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       }
 
       client.studentId = connectedStudent.participantId
+      client.studentName = connectedStudent.student.name
       await sessions.set(session.id, session)
       closeDuplicateParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, client)
 

@@ -66,6 +66,8 @@ void test('connectAcceptedSessionParticipant falls back to accepted-entry displa
   })
 
   assert.equal(result?.participantName, 'Grace')
+  assert.equal(result?.participantId, 'participant-1')
+  assert.equal(participants[0]?.id, 'participant-1')
   assert.equal(participants[0]?.name, 'Grace')
 })
 

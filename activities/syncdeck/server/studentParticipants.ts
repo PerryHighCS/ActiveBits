@@ -1,4 +1,5 @@
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
+import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
 import { connectSessionParticipant, type SessionParticipantIdentity } from 'activebits-server/core/sessionParticipants.js'
 
 export interface SyncDeckStudentParticipant {
@@ -12,6 +13,12 @@ export interface SyncDeckStudentParticipant {
 
 interface SyncDeckParticipantAdapter extends SessionParticipantIdentity {
   source: SyncDeckStudentParticipant
+}
+
+interface SyncDeckSessionLike {
+  data: {
+    students: SyncDeckStudentParticipant[]
+  }
 }
 
 function toAdapter(student: SyncDeckStudentParticipant): SyncDeckParticipantAdapter {
@@ -44,58 +51,56 @@ function createSyncDeckStudent(
   }
 }
 
-export function registerSyncDeckStudent(
-  students: SyncDeckStudentParticipant[],
-  participantName: string,
-  now = Date.now(),
-  participantId: string | null = null,
-): { participantId: string; student: SyncDeckStudentParticipant; isNew: boolean } {
-  const normalizedParticipantId = typeof participantId === 'string' ? participantId.trim() : ''
-  if (normalizedParticipantId) {
-    const existing = students.find((student) => student.studentId === normalizedParticipantId)
-    if (existing) {
-      existing.name = participantName
-      existing.lastSeenAt = now
-      return {
-        participantId: existing.studentId,
-        student: existing,
-        isNew: false,
-      }
-    }
-  }
-
-  const resolvedParticipantId = normalizedParticipantId || generateParticipantId()
-  const student = createSyncDeckStudent(resolvedParticipantId, participantName, now)
-  students.push(student)
-  return { participantId: resolvedParticipantId, student, isNew: true }
-}
-
 export function connectSyncDeckStudent(
-  students: SyncDeckStudentParticipant[],
+  session: SyncDeckSessionLike,
   participantId: string | null,
-  participantName: string,
   now = Date.now(),
 ): { participantId: string; student: SyncDeckStudentParticipant; isNew: boolean } | null {
   if (!participantId) {
     return null
   }
 
-  if (!students.some((student) => student.studentId === participantId)) {
-    return null
+  const students = session.data.students
+  const existingStudent = students.find((student) => student.studentId === participantId)
+  if (existingStudent) {
+    const adapters = students.map(toAdapter)
+    const result = connectSessionParticipant({
+      participants: adapters,
+      participantId,
+      participantName: existingStudent.name,
+      now,
+      createParticipant: (resolvedParticipantId, resolvedParticipantName, createdAt) =>
+        toAdapter(createSyncDeckStudent(resolvedParticipantId, resolvedParticipantName, createdAt)),
+      generateParticipantId,
+    })
+
+    syncAdapterToSource(result.participant)
+    if (result.isNew) {
+      students.push(result.participant.source)
+    }
+
+    return {
+      participantId: result.participantId,
+      student: result.participant.source,
+      isNew: result.isNew,
+    }
   }
 
   const adapters = students.map(toAdapter)
-  const result = connectSessionParticipant({
+  const result = connectAcceptedSessionParticipant({
+    session,
     participants: adapters,
     participantId,
-    participantName,
+    participantName: null,
     now,
     createParticipant: (resolvedParticipantId, resolvedParticipantName, createdAt) =>
       toAdapter(createSyncDeckStudent(resolvedParticipantId, resolvedParticipantName, createdAt)),
     generateParticipantId,
   })
+  if (!result) {
+    return null
+  }
 
-  result.participant.name = participantName
   syncAdapterToSource(result.participant)
   if (result.isNew) {
     students.push(result.participant.source)

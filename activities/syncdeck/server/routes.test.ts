@@ -398,9 +398,47 @@ void test('syncdeck websocket updates an existing student record on reconnect', 
   }).students ?? []
   assert.equal(students.length, 1)
   assert.equal(students[0]?.studentId, 'student-1')
-  assert.equal(students[0]?.name, 'Ada Lovelace')
+  assert.equal(students[0]?.name, 'Old Name')
   assert.equal(students[0]?.joinedAt, 100)
   assert.ok((students[0]?.lastSeenAt ?? 0) >= 110)
+})
+
+void test('syncdeck websocket creates a student from accepted entry when no prior registration exists', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createSyncDeckSession('s1', 'teacher-pass')
+  acceptEntryParticipant(session, {
+    participantId: 'participant-1',
+    displayName: 'Ada Lovelace',
+  }, 100)
+  const state = createSessionStore({
+    s1: session,
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(
+    studentSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'participant-1',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(studentSocket.closeCalls, [])
+  const students = (state.store.s1?.data as {
+    students?: Array<{ studentId: string; name: string }>
+  }).students ?? []
+  assert.equal(students.length, 1)
+  assert.equal(students[0]?.studentId, 'participant-1')
+  assert.equal(students[0]?.name, 'Ada Lovelace')
 })
 
 void test('syncdeck websocket sends latest state snapshot to instructor on connect', async () => {
@@ -1595,130 +1633,6 @@ void test('instructor-passcode route rejects forged cookie key with wrong teache
 
   assert.equal(res.statusCode, 403)
   assert.deepEqual(res.body, { error: 'forbidden' })
-})
-
-void test('register-student route requires accepted-entry identity instead of ad hoc names', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const storeState = createSessionStore({
-    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
-  })
-  setupSyncDeckRoutes(app, storeState.sessions, ws)
-
-  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
-  assert.equal(typeof handler, 'function')
-
-  const res = createResponse()
-  await handler?.(
-    createRequest(
-      { sessionId: 's1' },
-      {
-        name: 'Ada Lovelace',
-      },
-    ),
-    res,
-  )
-
-  assert.equal(res.statusCode, 400)
-  assert.deepEqual(res.body, {
-    error: 'invalid payload',
-  })
-
-  const students = (storeState.store.s1?.data as { students?: Array<{ name?: string }> }).students ?? []
-  assert.equal(students.length, 0)
-})
-
-void test('register-student route reuses accepted-entry identity when participantId is provided', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const session = createSyncDeckSession('s1', 'teacher-passcode-1')
-  acceptEntryParticipant(session, {
-    participantId: 'participant-1',
-    displayName: 'Ada From Waiting Room',
-  }, 123)
-  const storeState = createSessionStore({
-    s1: session,
-  })
-  setupSyncDeckRoutes(app, storeState.sessions, ws)
-
-  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
-  assert.equal(typeof handler, 'function')
-
-  const res = createResponse()
-  await handler?.(
-    createRequest(
-      { sessionId: 's1' },
-      {
-        participantId: 'participant-1',
-      },
-    ),
-    res,
-  )
-
-  assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, {
-    studentId: 'participant-1',
-    name: 'Ada From Waiting Room',
-  })
-
-  const students = (storeState.store.s1?.data as {
-    students?: Array<{ studentId?: string; name?: string }>
-  }).students ?? []
-  assert.equal(students.length, 1)
-  assert.equal(students[0]?.studentId, 'participant-1')
-  assert.equal(students[0]?.name, 'Ada From Waiting Room')
-})
-
-void test('register-student route rejects participant ids without accepted-entry identity', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const storeState = createSessionStore({
-    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
-  })
-  setupSyncDeckRoutes(app, storeState.sessions, ws)
-
-  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
-  assert.equal(typeof handler, 'function')
-
-  const res = createResponse()
-  await handler?.(
-    createRequest(
-      { sessionId: 's1' },
-      {
-        participantId: 'participant-1',
-      },
-    ),
-    res,
-  )
-
-  assert.equal(res.statusCode, 409)
-  assert.deepEqual(res.body, {
-    error: 'accepted entry required',
-  })
-})
-
-void test('register-student route returns 404 for invalid session', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const storeState = createSessionStore({})
-  setupSyncDeckRoutes(app, storeState.sessions, ws)
-
-  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
-  assert.equal(typeof handler, 'function')
-
-  const res = createResponse()
-  await handler?.(
-    createRequest(
-      { sessionId: 'missing' },
-      {
-        name: 'Student',
-      },
-    ),
-    res,
-  )
-
-  assert.equal(res.statusCode, 404)
-  assert.deepEqual(res.body, { error: 'invalid session' })
 })
 
 void test('embedded-context route resolves teacher role from valid instructor passcode', async () => {
