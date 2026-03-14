@@ -730,7 +730,7 @@ Deferral note:
 
 - `java-string-practice`: substantially converged. It now consumes waiting-room `displayName`, reconnects cleanly from shared `participantId`, and can rejoin without a duplicate name prompt even when only the stored participant ID survives locally.
 - `java-format-practice`: substantially converged. It now consumes waiting-room `displayName`, reconnects cleanly from shared `participantId`, and no longer needs a local display-name cache to skip the startup prompt on rejoin.
-- `traveling-salesman`: likely good follow-on migration target because it still prompts for student identity locally in the client, while its server reconnect logic now uses the shared participant helper. Waiting-room fields could replace the student-name gate later.
+- `traveling-salesman`: now migrated onto the shared waiting-room display-name and accepted-entry bootstrap path, while keeping its activity-specific route-building/session payload logic.
 - `python-list-practice`: now migrated onto the shared waiting-room display-name and accepted-entry bootstrap path, while keeping its own activity-specific stats/session payload logic.
 - `algorithm-demo`: lower priority for waiting-room identity migration. It does not currently collect student identity the same way, and its main entry-specific behavior is deep-link algorithm preselection plus solo-state persistence.
 - `raffle`: defer for now. Student entry is effectively "claim a ticket for this session" and local storage mainly caches the assigned ticket payload; it does not currently need the same participant-name/preflight flow unless the product later wants named or sectioned ticket assignment.

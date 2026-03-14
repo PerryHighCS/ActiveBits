@@ -2,6 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler';
+import {
+  persistSessionParticipantIdentity,
+  readStoredSessionParticipantIdentity,
+  resolveInitialEntryParticipantIdentity,
+} from '@src/components/common/entryParticipantIdentityUtils';
 import { useTspSession } from '../hooks/useTspSession';
 import { useRouteBuilder } from '../hooks/useRouteBuilder';
 import Button from '@src/components/ui/Button';
@@ -98,13 +103,19 @@ export function buildSoloDisplayedRoutes(
 export default function TSPStudent({ sessionData }: TSPStudentProps) {
   const sessionId = sessionData?.sessionId;
   const isSoloSession = sessionId ? sessionId.startsWith('solo-') : false;
+  const initialIdentity = (
+    typeof window !== 'undefined'
+    && sessionId
+    && !isSoloSession
+  ) ? readStoredSessionParticipantIdentity(window.localStorage, sessionId) : null
   const navigate = useNavigate();
   const attachSessionEndedHandler = useSessionEndedHandler();
   const studentIdRef = useRef<string | null>(null);
 
-  const [studentName, setStudentName] = useState('');
-  const [studentId, setStudentId] = useState<string | null>(null);
-  const [nameSubmitted, setNameSubmitted] = useState(false);
+  const [studentName, setStudentName] = useState(initialIdentity?.studentName ?? '');
+  const [studentId, setStudentId] = useState<string | null>(initialIdentity?.studentId ?? null);
+  const [nameSubmitted, setNameSubmitted] = useState(initialIdentity?.nameSubmitted ?? false);
+  const [identityResolved, setIdentityResolved] = useState(Boolean(initialIdentity));
 
   const [cities, setCities] = useState<City[]>([]);
   const [distanceMatrix, setDistanceMatrix] = useState<DistanceMatrix>([]);
@@ -135,21 +146,56 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
 
   // Load saved student info
   useEffect(() => {
-    if (isSoloSession) {
-      setStudentName('Solo Student');
-      setStudentId('solo-user');
-      setNameSubmitted(true);
+    if (typeof window === 'undefined') {
       return;
     }
 
-    const savedName = localStorage.getItem(`student-name-${sessionId}`);
-    const savedId = localStorage.getItem(`student-id-${sessionId}`);
-    if (savedName) {
-      setStudentName(savedName);
-      setStudentId(savedId);
-      setNameSubmitted(true);
-    }
+    let isCancelled = false;
+
+    void (async () => {
+      try {
+        const identity = await resolveInitialEntryParticipantIdentity({
+          activityName: 'traveling-salesman',
+          sessionId,
+          isSoloSession,
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+          soloDisplayName: 'Solo Student',
+        });
+        if (isCancelled) {
+          return;
+        }
+
+        setStudentName(identity.studentName);
+        setStudentId(identity.studentId);
+        setNameSubmitted(identity.nameSubmitted);
+      } catch (err) {
+        console.error('Failed to resolve initial participant identity:', err);
+      } finally {
+        if (!isCancelled) {
+          setIdentityResolved(true);
+        }
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [sessionId, isSoloSession]);
+
+  useEffect(() => {
+    if (isSoloSession && !initialIdentity) {
+      setStudentName('Solo Student');
+      setStudentId('solo-user');
+      setNameSubmitted(true);
+      setIdentityResolved(true);
+      return;
+    }
+
+    if (!isSoloSession) {
+      return;
+    }
+  }, [initialIdentity, isSoloSession]);
 
   const restoreStudentRoute = useCallback(async (idToRestore: string) => {
     if (sessionId == null || idToRestore == null || idToRestore === '') return;
@@ -212,7 +258,14 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
         const newStudentId = typeof payloadBody?.studentId === 'string' ? payloadBody.studentId : null;
         if (newStudentId == null || newStudentId === '') return;
         setStudentId(newStudentId);
-        localStorage.setItem(`student-id-${sessionId}`, newStudentId);
+        if (sessionId) {
+          persistSessionParticipantIdentity(
+            window.localStorage,
+            sessionId,
+            studentName.trim(),
+            newStudentId,
+          );
+        }
       } else if (payload.type === 'problemUpdate') {
         setCities(Array.isArray(payloadBody?.cities) ? (payloadBody.cities as City[]) : []);
         setDistanceMatrix(Array.isArray(payloadBody?.distanceMatrix) ? (payloadBody.distanceMatrix as DistanceMatrix) : []);
@@ -440,10 +493,21 @@ export default function TSPStudent({ sessionData }: TSPStudentProps) {
   const handleNameSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (studentName.trim()) {
+      if (sessionId) {
+        persistSessionParticipantIdentity(window.localStorage, sessionId, studentName.trim(), studentId);
+      }
       setNameSubmitted(true);
-      localStorage.setItem(`student-name-${sessionId}`, studentName);
     }
   };
+
+  if (nameSubmitted !== true && isSoloSession !== true && identityResolved !== true) {
+    return (
+      <div className="tsp-student-setup">
+        <h2>Traveling Salesman</h2>
+        <p>Rejoining session...</p>
+      </div>
+    );
+  }
 
   if (nameSubmitted !== true && isSoloSession !== true) {
     return (

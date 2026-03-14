@@ -6,6 +6,17 @@ const travelingSalesmanConfig: ActivityConfig = {
   description: 'Explore optimal routes: compete against brute force and heuristic algorithms',
   color: 'orange',
   soloMode: true,
+  waitingRoom: {
+    fields: [
+      {
+        id: 'displayName',
+        label: 'Display Name',
+        type: 'text',
+        required: true,
+        placeholder: 'Your name',
+      },
+    ],
+  },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }

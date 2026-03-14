@@ -239,6 +239,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | activities
+- Discovery: `traveling-salesman` now also opts into the shared waiting-room `displayName` field and resolves initial student identity through `resolveInitialEntryParticipantIdentity(...)` instead of relying on its own local name bootstrap.
+- Why it matters: This brings another session-backed activity onto the same shared name-capture and reconnect-entry path as the Java and Python practice activities, while still leaving route-building, leaderboard, and map state activity-owned.
+- Evidence: `activities/traveling-salesman/activity.config.ts`; `activities/traveling-salesman/client/student/TSPStudent.tsx`; `client/src/components/common/entryParticipantIdentityUtils.ts`
+- Follow-up action: Keep TSP on the shared entry identity path and avoid reintroducing an activity-local name gate if its reconnect flow is refined later.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: client | permalink entry
 - Discovery: `solo-allowed` permalinks should stay on the waiting room when no live session is active instead of auto-redirecting immediately to `/solo/...`.
 - Why it matters: The waiting room is the only shared surface where both sides of the “live or solo” choice are available at once: students can continue solo, while instructors without a remembered cookie still need the teacher-code form to start a live session. Auto-redirecting to solo makes that teacher-start path unreachable.
