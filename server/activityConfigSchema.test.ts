@@ -11,7 +11,12 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
       name: 'SyncDeck',
       description: 'desc',
       color: 'indigo',
-      soloMode: false,
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
       deepLinkOptions: {
         presentationUrl: {
           label: 'Presentation URL',
@@ -88,7 +93,12 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
           name: 'Bad',
           description: 'desc',
           color: 'red',
-          soloMode: false,
+          standaloneEntry: {
+            enabled: false,
+            supportsDirectPath: false,
+            supportsPermalink: false,
+            showOnHome: false,
+          },
           deepLinkGenerator: {
             endpoint: '/api/example',
             mode: 'invalid-mode',
@@ -107,7 +117,12 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
           name: 'Bad2',
           description: 'desc',
           color: 'blue',
-          soloMode: true,
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
           createSessionBootstrap: {
             sessionStorage: [{ keyPrefix: 'x_' }],
           },
@@ -125,7 +140,12 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
           name: 'Bad3',
           description: 'desc',
           color: 'orange',
-          soloMode: true,
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
           waitingRoom: {
             fields: [
               {
@@ -152,7 +172,12 @@ void test('parseActivityConfig removes optional keys when input provides null', 
       name: 'Nullables',
       description: 'desc',
       color: 'green',
-      soloMode: false,
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
       title: null,
       deepLinkOptions: null,
     },

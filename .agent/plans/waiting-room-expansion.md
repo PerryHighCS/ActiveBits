@@ -1,6 +1,6 @@
 # Waiting Room Expansion Plan
 
-## Status: Partial Implementation
+## Status: Core Expansion Complete
 
 Implemented so far:
 
@@ -12,10 +12,11 @@ Implemented so far:
   waiting-room presentation for wait, live-join preflight, and solo-preflight
   permalink states.
 
-Remaining work is centered on policy resolution, server-side enforcement, and carrying
-collected participant data into downstream join/solo flows.
+The core waiting-room expansion is now in place across shared entry resolution,
+server-backed handoff, accepted-entry reconnect, waiting-room rendering, and the
+session-backed activity family that fits this contract.
 
-## Highest-Value Remaining Work
+## Post-Expansion Follow-on Work
 
 The branch now has:
 
@@ -23,18 +24,16 @@ The branch now has:
 - shared opaque-token handoff rules for live entry and permalink solo continuation
 - early shared `participantId` issuance during waiting-room handoff
 
-The most important work still open before this plan can be considered waiting-room-complete:
+The most important work still open after this expansion is now:
 
-- define the shared accepted-entry / reconnect contract after handoff
-  This is the biggest remaining product boundary. Waiting-room handoff now issues a shared `participantId`, but activity-specific routes still decide how that ID is accepted, matched, reconnected, and persisted.
-- treat separate `sessionId` and `hash` entrypoints as stable unless a new operational reason appears
-  Current implementation intentionally keeps two entrypoints (`/api/session/:sessionId/entry` and `/api/persistent-session/:hash/entry`) with shared backend decision logic. This is now considered an acceptable steady state rather than an active refactor target.
-- implement embedded role inheritance
+- embedded role inheritance
   Embedded entry is still a documented target contract, not a runtime path. Parent-managed launches should inherit teacher/student role without prompting for instructor code again.
 - decide whether true container-level waiting-room interaction coverage is worth adding
   Helper and route coverage are now strong enough that the remaining gap is mostly end-to-end container interaction across form submission, fetch, router, and runtime boundaries rather than missing waiting-room decision logic. This is now a tooling/value decision, not an obvious missing implementation task.
-- keep Phase 4 activity migration deferred until the above semantics stabilize
-  More activity migrations would otherwise build on participant rules that are still changing.
+- keep non-family activity migration activity-specific
+  Activities like `raffle`, `www-sim`, and utility-style `gallery-walk` routes intentionally do not fit the session-backed student-participant family, so future work there should be treated as product-specific adaptation rather than unfinished waiting-room core migration.
+- continue standalone-entry cleanup as separate architecture work
+  `standaloneEntry` is now the source of truth for standalone capability. Any future `/solo/...` route cleanup or SyncDeck standalone rollout should build on that contract rather than revisiting waiting-room policy resolution itself.
 
 This document outlines a standalone planning track for expanding the waiting room
 experience. The goal is to make waiting-room behavior flexible enough to support:
@@ -319,7 +318,7 @@ At runtime, the waiting room should resolve entry using:
 
 - permalink/session policy
 - current instructor presence
-- activity solo capability (`activityConfig.soloMode`)
+- activity standalone capability (`activityConfig.standaloneEntry`)
 - completion of required preflight fields
 - role resolution needs for this entry surface
 - whether this entry can immediately pass through without showing waiting-room UI

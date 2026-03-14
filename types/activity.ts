@@ -75,13 +75,7 @@ export interface ActivityConfig {
   title?: string
   description: string
   color: string
-  soloMode: boolean
-  soloModeMeta?: {
-    title?: string
-    description?: string
-    buttonText?: string
-  }
-  standaloneEntry?: ActivityStandaloneEntryConfig
+  standaloneEntry: ActivityStandaloneEntryConfig
   deepLinkOptions?: Record<string, ActivityDeepLinkOption>
   deepLinkGenerator?: {
     endpoint: string

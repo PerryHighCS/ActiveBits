@@ -8,7 +8,7 @@ Current activity areas include:
 - Network and web-systems simulations
 - Algorithm demonstrations
 - Java and Python practice activities
-- Solo practice modes for independent student work
+- Standalone practice and utility flows for independent student work
 
 ## Documentation
 

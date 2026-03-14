@@ -474,8 +474,8 @@ const SessionRouter = () => {
             <p className="text-center text-gray-600 mb-6">Practice on your own</p>
             <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
               {standaloneActivities.map((activity) => {
-                const standaloneTitle = activity.standaloneEntry?.title || activity.soloModeMeta?.title || activity.name
-                const standaloneDescription = activity.standaloneEntry?.description || activity.soloModeMeta?.description || activity.description
+                const standaloneTitle = activity.standaloneEntry.title || activity.name
+                const standaloneDescription = activity.standaloneEntry.description || activity.description
 
                 return (
                   <div

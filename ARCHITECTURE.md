@@ -86,18 +86,13 @@ export default {
   name: 'Display Name',         // Human-readable name
   description: 'Brief description', // Shown in dashboard
   color: 'blue',                // Accent color for activity card
-  soloMode: false,              // Legacy compatibility flag while generic /solo routes still exist
-  standaloneEntry: {            // Optional: explicit standalone-entry capabilities
+  standaloneEntry: {            // Explicit standalone-entry capabilities
     enabled: false,
     supportsDirectPath: false,  // Supports /solo/:activityId
     supportsPermalink: false,   // Supports standalone-capable permalinks
     showOnHome: false,          // Show in the home-page standalone section
     title: 'Standalone Card Title',
     description: 'Standalone entry description',
-  },
-  soloModeMeta: {               // Optional: compatibility labels for generic solo cards
-    title: 'Solo Card Title',
-    description: 'Solo mode description',
   },
   manageDashboard: {
     utilities: [                // Optional: extra dashboard utility links
@@ -177,7 +172,6 @@ Declare standalone capabilities in the activity configuration:
 export const myActivity = {
   id: 'my-activity',
   name: 'My Activity',
-  soloMode: true,  // Legacy compatibility while generic /solo routes still exist
   standaloneEntry: {
     enabled: true,
     supportsDirectPath: true,

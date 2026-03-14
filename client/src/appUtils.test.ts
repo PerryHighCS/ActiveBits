@@ -5,13 +5,19 @@ import { findFooterActivity } from './appUtils'
 void test('findFooterActivity returns activity with footer for manage paths', () => {
   const footerComponent = () => null
   const activities = [
-    { id: 'raffle', name: 'Raffle', description: 'R', color: 'blue', soloMode: false },
+    {
+      id: 'raffle',
+      name: 'Raffle',
+      description: 'R',
+      color: 'blue',
+      standaloneEntry: { enabled: false, supportsDirectPath: false, supportsPermalink: false, showOnHome: false },
+    },
     {
       id: 'gallery-walk',
       name: 'Gallery',
       description: 'G',
       color: 'green',
-      soloMode: true,
+      standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false, showOnHome: false },
       FooterComponent: footerComponent,
     },
   ]
@@ -21,7 +27,13 @@ void test('findFooterActivity returns activity with footer for manage paths', ()
 })
 
 void test('findFooterActivity returns null when no footer component is available', () => {
-  const activities = [{ id: 'raffle', name: 'Raffle', description: 'R', color: 'blue', soloMode: false }]
+  const activities = [{
+    id: 'raffle',
+    name: 'Raffle',
+    description: 'R',
+    color: 'blue',
+    standaloneEntry: { enabled: false, supportsDirectPath: false, supportsPermalink: false, showOnHome: false },
+  }]
 
   const result = findFooterActivity('/manage/raffle/abc123', activities)
   assert.equal(result, null)

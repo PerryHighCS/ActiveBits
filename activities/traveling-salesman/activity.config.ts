@@ -5,7 +5,12 @@ const travelingSalesmanConfig: ActivityConfig = {
   name: 'Traveling Salesman',
   description: 'Explore optimal routes: compete against brute force and heuristic algorithms',
   color: 'orange',
-  soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   waitingRoom: {
     fields: [
       {

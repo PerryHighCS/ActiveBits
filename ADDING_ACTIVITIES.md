@@ -241,17 +241,11 @@ export default {
   name: 'Quiz',
   description: 'Ask students questions and collect responses',
   color: 'purple',
-  soloMode: false,
   standaloneEntry: {
     enabled: false,
     supportsDirectPath: false,
     supportsPermalink: false,
     showOnHome: false,
-  },
-  soloModeMeta: {
-    title: 'Quiz practice',
-    description: 'Compatibility label for generic /solo cards when used',
-    buttonText: 'Copy Quiz Solo Link',
   },
   // Optional: Define query parameters for deep linking (e.g., permanent links that pre-configure settings)
   deepLinkOptions: {
@@ -397,7 +391,6 @@ export const practiceActivity = {
   description: 'Individual skill practice',
   ManagerComponent: () => <div>This activity is solo-only</div>,
   StudentComponent: PracticeComponent,
-  soloMode: true,  // Legacy compatibility while /solo routes still exist
   standaloneEntry: {
     enabled: true,
     supportsDirectPath: true,
@@ -415,14 +408,13 @@ export const practiceActivity = {
 - Store state in localStorage if persistence is needed
 - Server routes are optional for fully client-side activities
 
-### Customizing Solo Mode Labels
+### Customizing Standalone Labels
 
-Provide an optional `standaloneEntry` block to declare how standalone entry works, and keep `soloModeMeta` only for compatibility labels on generic `/solo/...` cards where that route still exists:
+Provide an optional `standaloneEntry` block to declare how standalone entry works and to customize shared standalone card labels:
 
 ```typescript
 export default {
   // ...
-  soloMode: true,
   standaloneEntry: {
     enabled: true,
     supportsDirectPath: true,
@@ -431,14 +423,10 @@ export default {
     title: 'Review Gallery Walk Feedback',
     description: 'Upload a .gw file to see the comments left for you.',
   },
-  soloModeMeta: {
-    title: 'Review Gallery Walk Feedback',
-    description: 'Upload a .gw file to see the comments left for you.',
-  },
 };
 ```
 
-If `standaloneEntry` is omitted, the parser currently derives a compatibility default from `soloMode`, but new activities should declare `standaloneEntry` explicitly.
+`standaloneEntry.title` and `standaloneEntry.description` are used by shared standalone UI when present.
 
 ### Adding Dashboard Utility Links
 

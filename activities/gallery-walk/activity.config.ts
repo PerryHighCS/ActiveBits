@@ -5,16 +5,11 @@ const galleryWalkConfig: ActivityConfig = {
   name: 'Gallery Walk',
   description: 'Participants showcase projects and leave peer feedback',
   color: 'blue',
-  soloMode: true,
   standaloneEntry: {
     enabled: true,
     supportsDirectPath: true,
     supportsPermalink: false,
     showOnHome: false,
-    title: 'Review Gallery Walk Feedback',
-    description: 'Upload and review feedback that was left for you.',
-  },
-  soloModeMeta: {
     title: 'Review Gallery Walk Feedback',
     description: 'Upload and review feedback that was left for you.',
   },

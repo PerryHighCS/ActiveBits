@@ -264,18 +264,18 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-14
 - Area: client | activities
-- Discovery: The management dashboard no longer treats `soloMode` as a reason to show a generic “Copy Solo Practice Link” button. Extra one-off routes now belong in `manageDashboard.utilities`, which exposes copyable utility links like Gallery Walk’s feedback-review route without overloading permalink or standalone-entry semantics.
+- Discovery: The management dashboard no longer treats standalone support as a reason to show a generic “Copy Solo Practice Link” button. Extra one-off routes now belong in `manageDashboard.utilities`, which exposes copyable utility links like Gallery Walk’s feedback-review route without overloading permalink or standalone-entry semantics.
 - Why it matters: This separates “supports standalone entry” from “needs a special-purpose dashboard tool.” It lets activities keep permalink generation as the main student entry surface while still surfacing exceptional routes honestly on the dashboard.
 - Evidence: `client/src/components/common/ManageDashboard.tsx`; `client/src/components/common/manageDashboardUtils.ts`; `activities/gallery-walk/activity.config.ts`; `types/activity.ts`
-- Follow-up action: Use `manageDashboard.utilities` for future activity-specific dashboard tools instead of reviving special solo-link buttons, and revisit `soloMode` semantics separately as the remaining `/solo/...` routes are phased out.
+- Follow-up action: Use `manageDashboard.utilities` for future activity-specific dashboard tools instead of reviving special solo-link buttons, and keep standalone capability decisions on `standaloneEntry`.
 - Owner: Codex
 
 - Date: 2026-03-14
 - Area: client | server | activity config
-- Discovery: `soloMode` is no longer expressive enough by itself, because standalone capability now splits across direct `/solo/:activityId` support, standalone-capable permalinks, and home-page discovery. The new `standaloneEntry` config captures those dimensions while the schema still derives a compatibility default from `soloMode` when absent.
+- Discovery: Standalone capability now splits across direct `/solo/:activityId` support, standalone-capable permalinks, and home-page discovery. The `standaloneEntry` config captures those dimensions directly.
 - Why it matters: This lets SyncDeck support standalone via permalink without being forced onto `/solo/syncdeck`, and lets Gallery Walk stay a home-page utility without pretending it supports standalone permalinks.
 - Evidence: `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `server/activities/activityRegistry.ts`; `activities/syncdeck/activity.config.ts`; `activities/gallery-walk/activity.config.ts`
-- Follow-up action: Keep new activities on explicit `standaloneEntry` declarations instead of relying on the `soloMode` compatibility fallback, and only remove the legacy fallback after all activity configs have been updated.
+- Follow-up action: Keep new activities on explicit `standaloneEntry` declarations and use that shape as the only source of truth for standalone behavior.
 - Owner: Codex
 
 - Date: 2026-03-14

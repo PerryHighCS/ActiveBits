@@ -74,26 +74,6 @@ function isSerializableValue(value: unknown): value is WaitingRoomSerializableVa
   return Object.values(value).every((entry) => isSerializableValue(entry))
 }
 
-function parseSoloModeMeta(raw: unknown, context: string): ActivityConfig['soloModeMeta'] {
-  if (raw == null) {
-    return undefined
-  }
-  if (!isRecord(raw)) {
-    throw new Error(`${context}: "soloModeMeta" must be an object when provided`)
-  }
-
-  const parsed: NonNullable<ActivityConfig['soloModeMeta']> = {}
-  const title = readOptionalString(raw, 'title', `${context}.soloModeMeta`)
-  const description = readOptionalString(raw, 'description', `${context}.soloModeMeta`)
-  const buttonText = readOptionalString(raw, 'buttonText', `${context}.soloModeMeta`)
-
-  if (title !== undefined) parsed.title = title
-  if (description !== undefined) parsed.description = description
-  if (buttonText !== undefined) parsed.buttonText = buttonText
-
-  return parsed
-}
-
 function parseDeepLinkOptionChoices(raw: unknown, context: string): ActivityDeepLinkOptionChoice[] | undefined {
   if (raw == null) {
     return undefined
@@ -447,11 +427,12 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
     name: readRequiredString(rawConfig, 'name', context),
     description: readRequiredString(rawConfig, 'description', context),
     color: readRequiredString(rawConfig, 'color', context),
-    soloMode: (() => {
-      if (typeof rawConfig.soloMode !== 'boolean') {
-        throw new Error(`${context}: "soloMode" must be a boolean`)
+    standaloneEntry: (() => {
+      const standaloneEntry = parseStandaloneEntry(rawConfig.standaloneEntry, context)
+      if (!standaloneEntry) {
+        throw new Error(`${context}: "standaloneEntry" must be provided`)
       }
-      return rawConfig.soloMode
+      return standaloneEntry
     })(),
   }
 
@@ -459,8 +440,6 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const clientEntry = readOptionalString(rawConfig, 'clientEntry', context)
   const serverEntry = readOptionalString(rawConfig, 'serverEntry', context)
   const isDev = readOptionalBoolean(rawConfig, 'isDev', context)
-  const soloModeMeta = parseSoloModeMeta(rawConfig.soloModeMeta, context)
-  const standaloneEntry = parseStandaloneEntry(rawConfig.standaloneEntry, context)
   const deepLinkOptions = parseDeepLinkOptions(rawConfig.deepLinkOptions, context)
   const deepLinkGenerator = parseDeepLinkGenerator(rawConfig.deepLinkGenerator, context)
   const createSessionBootstrap = parseCreateSessionBootstrap(rawConfig.createSessionBootstrap, context)
@@ -472,15 +451,6 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   assignOptionalField(parsed, 'clientEntry', clientEntry)
   assignOptionalField(parsed, 'serverEntry', serverEntry)
   assignOptionalField(parsed, 'isDev', isDev)
-  assignOptionalField(parsed, 'soloModeMeta', soloModeMeta)
-  assignOptionalField(parsed, 'standaloneEntry', standaloneEntry ?? {
-    enabled: parsed.soloMode,
-    supportsDirectPath: parsed.soloMode,
-    supportsPermalink: parsed.soloMode,
-    showOnHome: parsed.soloMode,
-    ...(soloModeMeta?.title ? { title: soloModeMeta.title } : {}),
-    ...(soloModeMeta?.description ? { description: soloModeMeta.description } : {}),
-  })
   assignOptionalField(parsed, 'deepLinkOptions', deepLinkOptions)
   assignOptionalField(parsed, 'deepLinkGenerator', deepLinkGenerator)
   assignOptionalField(parsed, 'createSessionBootstrap', createSessionBootstrap)

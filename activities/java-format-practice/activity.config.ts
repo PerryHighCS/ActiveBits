@@ -5,7 +5,12 @@ const javaFormatPracticeConfig: ActivityConfig = {
   name: 'Java Format Practice',
   description: 'Interactive practice for Java printf and String.format',
   color: 'emerald',
-  soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   waitingRoom: {
     fields: [
       {

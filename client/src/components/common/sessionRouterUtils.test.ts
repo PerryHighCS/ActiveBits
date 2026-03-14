@@ -339,7 +339,6 @@ void test('standalone activity helpers respect direct-path, permalink, and home 
     name: 'A',
     description: 'A',
     color: 'blue',
-    soloMode: true,
     standaloneEntry: {
       enabled: true,
       supportsDirectPath: true,
@@ -352,7 +351,6 @@ void test('standalone activity helpers respect direct-path, permalink, and home 
     name: 'B',
     description: 'B',
     color: 'green',
-    soloMode: false,
     standaloneEntry: {
       enabled: true,
       supportsDirectPath: false,
@@ -379,7 +377,12 @@ void test('getHomeUtilityActivities returns activities with home-visible utiliti
       name: 'Gallery Walk',
       description: 'G',
       color: 'blue',
-      soloMode: true,
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
       manageDashboard: {
         utilities: [
           { label: 'Feedback Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
@@ -391,7 +394,12 @@ void test('getHomeUtilityActivities returns activities with home-visible utiliti
       name: 'SyncDeck',
       description: 'S',
       color: 'indigo',
-      soloMode: false,
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
       manageDashboard: {
         utilities: [
           { label: 'Hidden Utility', path: '/tool', showOnHome: false },
@@ -410,7 +418,12 @@ void test('findUtilityRouteMatch resolves configured utility paths', () => {
       name: 'Gallery Walk',
       description: 'G',
       color: 'blue',
-      soloMode: true,
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
       manageDashboard: {
         utilities: [
           { label: 'Feedback Review', path: '/util/gallery-walk/viewer', showOnHome: true, standaloneSessionId: 'solo-gallery-walk' },
@@ -422,7 +435,12 @@ void test('findUtilityRouteMatch resolves configured utility paths', () => {
       name: 'SyncDeck',
       description: 'S',
       color: 'indigo',
-      soloMode: false,
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
     },
   ], '/util/gallery-walk/viewer')
 

@@ -5,7 +5,12 @@ const pythonListPracticeConfig: ActivityConfig = {
   name: 'Python List Practice',
   description: 'Practice Python list operations with words and numbers',
   color: 'green',
-  soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   waitingRoom: {
     fields: [
       {

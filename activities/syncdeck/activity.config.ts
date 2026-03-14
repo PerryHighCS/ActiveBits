@@ -5,7 +5,6 @@ const syncdeckConfig: ActivityConfig = {
   name: 'SyncDeck',
   description: 'Host a synchronized presentation for your class',
   color: 'indigo',
-  soloMode: false,
   standaloneEntry: {
     enabled: true,
     supportsDirectPath: false,

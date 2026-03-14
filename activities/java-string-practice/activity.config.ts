@@ -5,7 +5,12 @@ const javaStringPracticeConfig: ActivityConfig = {
   name: 'Java String Practice',
   description: 'Interactive practice for Java String methods',
   color: 'purple',
-  soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   waitingRoom: {
     fields: [
       {
