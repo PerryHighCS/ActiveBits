@@ -122,3 +122,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: CI fails with `[ERROR] Failed to load config for activity "...test-activity..."` followed by `ENOENT ... activity.config.js` and a fatal production exit during unrelated server tests.
 - Follow-up action: Prefer temp fixtures outside the auto-discovered `activities/` root when possible, or mark them `isDev` and clean up deterministically.
 - Owner: Codex
+
+- Date: 2026-03-14
+- Scope: e2e
+- Pattern: Treat the `live/solo` permalink waiting-room transition as a strong first Playwright candidate if the repo adds browser-level coverage later, but do not block fixes on that harness while the seam suite still covers the logic reliably.
+- Why it helps: This flow crosses the exact boundaries that are awkward in the current Node client runner: same-browser student/instructor reuse, teacher-code auth, websocket-driven state flips from solo to live join and back again, and permalink-specific router behavior while the same waiting-room screen stays mounted.
+- Example (file/path): `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/waitingRoomSocketUtils.test.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.test.ts`
+- Failure signal: Manual browser testing finds regressions in the `live/solo` permalink flow even though the helper/unit suite still passes, especially around teacher auth after a student has used the link, or around regaining solo/live actions after session state changes.
+- Follow-up action: If or when Playwright is introduced, make this one of the first scenarios: student opens `live/solo` permalink, teacher starts live, student sees `Join Session`, teacher ends live before join, student regains solo action, and a second instructor can still reach the teacher-code path.
+- Owner: Codex

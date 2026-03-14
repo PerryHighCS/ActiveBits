@@ -239,6 +239,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | testing
+- Discovery: The `live/solo` permalink waiting-room flow is now the clearest first browser-level test candidate if the repo adds Playwright later, but the current seam-heavy client coverage is still good enough to ship fixes without adding that harness immediately.
+- Why it matters: Recent regressions in this flow came from mounted-screen transitions across permalink entry state, teacher auth, websocket lifecycle, and same-browser role reuse. The helper seams were still sufficient to fix them, but this path now represents the highest-value place to spend a future browser-harness budget.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/waitingRoomSocketUtils.test.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.test.ts`; `client/src/components/common/waitingRoomTransitionUtils.test.ts`
+- Follow-up action: If Playwright is introduced, make this flow one of the first scenarios and keep the existing seam tests as the fast inner loop rather than replacing them.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | activities
 - Discovery: `server/core/sessionParticipants.ts` now also exposes shared accepted-participant lookup via `findSessionParticipant(...)`, and the migrated Java activity progress endpoints use it instead of route-local `find(...)` logic.
 - Why it matters: This extends the shared participant contract one step past websocket join. Waiting-room-issued or reconnected `participantId` is now the first lookup key for later progress updates too, while legacy name-only fallback remains explicitly opt-in for older sessions.
