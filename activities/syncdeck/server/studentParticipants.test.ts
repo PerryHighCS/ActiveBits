@@ -12,7 +12,37 @@ void test('registerSyncDeckStudent creates a new syncdeck student record', () =>
   assert.equal(result.student.lastSeenAt, 123)
   assert.equal(typeof result.participantId, 'string')
   assert.equal(result.participantId.length, 16)
+  assert.equal(result.isNew, true)
   assert.deepEqual(students, [result.student])
+})
+
+void test('registerSyncDeckStudent reuses a provided participantId when present', () => {
+  const students = []
+
+  const result = registerSyncDeckStudent(students, 'Ada Lovelace', 123, 'participant-1')
+
+  assert.equal(result.participantId, 'participant-1')
+  assert.equal(result.student.studentId, 'participant-1')
+  assert.equal(result.isNew, true)
+})
+
+void test('registerSyncDeckStudent updates an existing record when provided participantId is already registered', () => {
+  const students = [{
+    studentId: 'participant-1',
+    name: 'Old Name',
+    joinedAt: 100,
+    lastSeenAt: 110,
+    lastIndices: null,
+    lastStudentStateAt: null,
+  }]
+
+  const result = registerSyncDeckStudent(students, 'Ada Lovelace', 220, 'participant-1')
+
+  assert.equal(result.participantId, 'participant-1')
+  assert.equal(result.student.name, 'Ada Lovelace')
+  assert.equal(result.student.joinedAt, 100)
+  assert.equal(result.student.lastSeenAt, 220)
+  assert.equal(result.isNew, false)
 })
 
 void test('connectSyncDeckStudent updates an existing student by participantId', () => {

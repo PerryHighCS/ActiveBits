@@ -3,10 +3,20 @@ import { useLocation, useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
+  consumeResolvedEntryParticipantValues,
+  getEntryParticipantDisplayName,
+  getEntryParticipantParticipantId,
+} from '@src/components/common/entryParticipantStorage'
+import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
 import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
+import {
+  buildSyncDeckRegistrationRequest,
+  resolveSyncDeckInitialRegistrationState,
+  shouldAutoRegisterSyncDeckStudent,
+} from './registrationUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
@@ -762,6 +772,7 @@ const SyncDeckStudent: FC = () => {
   const [studentNameInput, setStudentNameInput] = useState('')
   const [registeredStudentName, setRegisteredStudentName] = useState('')
   const [registeredStudentId, setRegisteredStudentId] = useState('')
+  const [pendingAcceptedParticipantId, setPendingAcceptedParticipantId] = useState('')
   const [isRegisteringStudent, setIsRegisteringStudent] = useState(false)
   const [joinError, setJoinError] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
@@ -798,13 +809,43 @@ const SyncDeckStudent: FC = () => {
       return
     }
 
+    let isCancelled = false
     const storedName = getStoredStudentName(sessionId)
     const storedStudentId = getStoredStudentId(sessionId)
-    setStudentNameInput(storedName)
 
-    if (storedName.length > 0 && storedStudentId.length > 0) {
-      setRegisteredStudentName(storedName)
-      setRegisteredStudentId(storedStudentId)
+    void (async () => {
+      const acceptedValues =
+        typeof window !== 'undefined' && window.sessionStorage != null
+          ? await consumeResolvedEntryParticipantValues(window.sessionStorage, {
+            activityName: 'syncdeck',
+            sessionId,
+            isSoloSession: false,
+          })
+          : null
+
+      if (isCancelled) {
+        return
+      }
+
+      const initialState = resolveSyncDeckInitialRegistrationState(
+        {
+          studentName: storedName,
+          studentId: storedStudentId,
+        },
+        {
+          displayName: getEntryParticipantDisplayName(acceptedValues),
+          participantId: getEntryParticipantParticipantId(acceptedValues),
+        },
+      )
+
+      setStudentNameInput(initialState.studentNameInput)
+      setRegisteredStudentName(initialState.registeredStudentName)
+      setRegisteredStudentId(initialState.registeredStudentId)
+      setPendingAcceptedParticipantId(initialState.pendingAcceptedParticipantId)
+    })()
+
+    return () => {
+      isCancelled = true
     }
   }, [sessionId])
 
@@ -1290,13 +1331,16 @@ const SyncDeckStudent: FC = () => {
     }
   }, [sessionId, presentationUrl, presentationUrlError, registeredStudentName, registeredStudentId, connectStudentWs, disconnectStudentWs])
 
-  const handleNameSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
+  const registerStudent = useCallback(async (
+    name: string,
+    participantId: string,
+    options: { fallbackToManualEntryOnFailure: boolean },
+  ): Promise<void> => {
     if (!sessionId || !presentationUrl || isRegisteringStudent) {
       return
     }
 
-    const normalized = studentNameInput.trim().slice(0, 80)
+    const normalized = name.trim().slice(0, 80)
     if (normalized.length === 0) {
       setJoinError('Please enter your name before joining.')
       return
@@ -1311,10 +1355,13 @@ const SyncDeckStudent: FC = () => {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify({ name: normalized }),
+        body: JSON.stringify(buildSyncDeckRegistrationRequest(normalized, participantId)),
       })
 
       if (!response.ok) {
+        if (options.fallbackToManualEntryOnFailure) {
+          setPendingAcceptedParticipantId('')
+        }
         setJoinError('Unable to join this presentation right now. Please try again.')
         return
       }
@@ -1338,12 +1385,52 @@ const SyncDeckStudent: FC = () => {
 
       setRegisteredStudentName(nextStudentName)
       setRegisteredStudentId(nextStudentId)
+      setPendingAcceptedParticipantId('')
       setJoinError(null)
     } catch {
+      if (options.fallbackToManualEntryOnFailure) {
+        setPendingAcceptedParticipantId('')
+      }
       setJoinError('Unable to join this presentation right now. Please try again.')
     } finally {
       setIsRegisteringStudent(false)
     }
+  }, [isRegisteringStudent, presentationUrl, sessionId])
+
+  useEffect(() => {
+    if (!presentationUrl || presentationUrlError) {
+      return
+    }
+
+    if (!shouldAutoRegisterSyncDeckStudent({
+      isRegisteringStudent,
+      pendingAcceptedParticipantId,
+      registeredStudentId,
+      registeredStudentName,
+      studentNameInput,
+    })) {
+      return
+    }
+
+    void registerStudent(studentNameInput, pendingAcceptedParticipantId, {
+      fallbackToManualEntryOnFailure: true,
+    })
+  }, [
+    isRegisteringStudent,
+    pendingAcceptedParticipantId,
+    presentationUrl,
+    presentationUrlError,
+    registerStudent,
+    registeredStudentId,
+    registeredStudentName,
+    studentNameInput,
+  ])
+
+  const handleNameSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    await registerStudent(studentNameInput, pendingAcceptedParticipantId, {
+      fallbackToManualEntryOnFailure: false,
+    })
   }
 
   const handleIframeLoad = useCallback(() => {

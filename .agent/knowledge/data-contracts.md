@@ -66,7 +66,16 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Compatibility constraints: Activities opt into this service individually. It does not replace activity-specific participant fields or payload shapes, and it does not force activities without accepted-entry support to change behavior.
 - Validation rules: A join only proceeds when the service can resolve a non-empty participant name. Explicit client-provided names still win over accepted-entry fallback. The downstream participant connect logic continues to own ID/backfill, legacy unnamed matching, and record creation rules.
 - Evidence (schema/tests/path): `server/core/acceptedSessionParticipants.ts`; `server/acceptedSessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/students.ts`; `activities/python-list-practice/server/studentParticipants.ts`
-- Follow-up action: Decide whether SyncDeck should ever adopt the same service, and whether the long-term target is a broader accepted-entry service that also covers post-join mutation and reconnect validation across more than websocket connect.
+- Follow-up action: SyncDeck now converges on accepted-entry identity at registration time instead of websocket join. Decide whether that registration bridge is sufficient, or whether SyncDeck should eventually replace its register-then-connect split with the same shared accepted-entry connect service.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Surface: REST | session-backed registration
+- Contract: `POST /api/syncdeck/:sessionId/register-student` now accepts optional `participantId` in addition to `name`. When `participantId` matches a server-side `acceptedEntryParticipants` record, the route may reuse that accepted waiting-room identity and register the student under the same server-issued ID even if the client omits `name`.
+- Compatibility constraints: Explicit client-provided `name` still wins when present. SyncDeck websocket connect remains reconnect-only and still requires a previously registered student record. SyncDeck session normalization must preserve shared `acceptedEntryParticipants` metadata so the registration route can consult it later.
+- Validation rules: The route returns `400 { error: 'invalid payload' }` when neither an explicit non-empty `name` nor an accepted-entry display name can be resolved. When the supplied `participantId` already belongs to a registered SyncDeck student, registration updates that existing student instead of minting a new ID.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/studentParticipants.test.ts`
+- Follow-up action: Decide whether SyncDeck should keep this registration bridge as its steady state or collapse the separate register route once more activities consume waiting-room accepted identity directly.
 - Owner: Codex
 
 - Date: 2026-03-13

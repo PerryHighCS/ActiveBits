@@ -675,3 +675,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: Terminal validation on 2026-03-13: `command -v bwrap` => `/usr/bin/bwrap`; `bwrap --version` => `0.11.0`; non-escalated `bwrap` failed; escalated minimal `bwrap` succeeded; repeated `apply_patch` create/delete smoke tests succeeded.
 - Follow-up action: Keep using escalation for `bwrap`-dependent checks in this environment, and prefer `apply_patch` for file edits now that it is stable.
 - Owner: Codex
+
+- Date: 2026-03-14
+- Area: syncdeck
+- Discovery: SyncDeck no longer has to mint a fresh student identity before it can benefit from waiting-room entry. Its registration route can now reuse `acceptedEntryParticipants[participantId]` for both name recovery and ID reuse, and the student client can auto-register from accepted waiting-room identity instead of forcing a second manual submit.
+- Why it matters: This moves SyncDeck toward the shared accepted-entry model without forcing websocket connect to create participants again. It also exposed that activity-level session normalizers must preserve shared waiting-room metadata like `acceptedEntryParticipants`, or later registration/join steps silently lose the server-side handoff record.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/studentParticipants.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/registrationUtils.ts`; `activities/syncdeck/client/student/registrationUtils.test.ts`
+- Follow-up action: Decide whether SyncDeck should stop at this registration bridge or eventually replace the separate register route with the same accepted-entry connect service used by the other session-backed activities.
+- Owner: Codex

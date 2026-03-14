@@ -6,6 +6,7 @@ import {
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
+import { resolveAcceptedEntryParticipantName } from 'activebits-server/core/acceptedEntryParticipants.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -438,8 +439,16 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
       : extractIndicesFromInstructorPayload(normalizedLastInstructorPayload)
         ? normalizedLastInstructorPayload
         : null
+  const preservedAcceptedEntryParticipants = isPlainObject(source.acceptedEntryParticipants)
+    ? source.acceptedEntryParticipants
+    : undefined
+  const preservedEntryParticipants = isPlainObject(source.entryParticipants)
+    ? source.entryParticipants
+    : undefined
 
   return {
+    ...(preservedAcceptedEntryParticipants ? { acceptedEntryParticipants: preservedAcceptedEntryParticipants } : {}),
+    ...(preservedEntryParticipants ? { entryParticipants: preservedEntryParticipants } : {}),
     presentationUrl: typeof source.presentationUrl === 'string' ? source.presentationUrl : null,
     instructorPasscode:
       typeof source.instructorPasscode === 'string' && source.instructorPasscode.length > 0
@@ -943,8 +952,20 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const name = normalizeStudentName(readStringField(req.body, 'name'))
-    const { participantId: studentId } = registerSyncDeckStudent(session.data.students, name)
+    const requestedParticipantId = normalizeStudentId(readStringField(req.body, 'participantId'))
+    const name = resolveAcceptedEntryParticipantName(session, requestedParticipantId, readStringField(req.body, 'name'))
+    if (!name) {
+      const response = res as unknown as JsonResponse
+      response.status(400).json({ error: 'invalid payload' })
+      return
+    }
+
+    const { participantId: studentId } = registerSyncDeckStudent(
+      session.data.students,
+      name,
+      Date.now(),
+      requestedParticipantId,
+    )
     await sessions.set(session.id, session)
     await broadcastStudentsToInstructors(session.id)
 

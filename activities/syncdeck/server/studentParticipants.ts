@@ -48,11 +48,26 @@ export function registerSyncDeckStudent(
   students: SyncDeckStudentParticipant[],
   participantName: string,
   now = Date.now(),
-): { participantId: string; student: SyncDeckStudentParticipant } {
-  const participantId = generateParticipantId()
-  const student = createSyncDeckStudent(participantId, participantName, now)
+  participantId: string | null = null,
+): { participantId: string; student: SyncDeckStudentParticipant; isNew: boolean } {
+  const normalizedParticipantId = typeof participantId === 'string' ? participantId.trim() : ''
+  if (normalizedParticipantId) {
+    const existing = students.find((student) => student.studentId === normalizedParticipantId)
+    if (existing) {
+      existing.name = participantName
+      existing.lastSeenAt = now
+      return {
+        participantId: existing.studentId,
+        student: existing,
+        isNew: false,
+      }
+    }
+  }
+
+  const resolvedParticipantId = normalizedParticipantId || generateParticipantId()
+  const student = createSyncDeckStudent(resolvedParticipantId, participantName, now)
   students.push(student)
-  return { participantId, student }
+  return { participantId: resolvedParticipantId, student, isNew: true }
 }
 
 export function connectSyncDeckStudent(

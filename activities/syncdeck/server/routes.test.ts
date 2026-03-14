@@ -1,4 +1,5 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { acceptEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   generatePersistentHash,
   getOrCreateActivePersistentSession,
@@ -1627,6 +1628,75 @@ void test('register-student route creates a student record for valid syncdeck se
   const students = (storeState.store.s1?.data as { students?: Array<{ name?: string }> }).students ?? []
   assert.equal(students.length, 1)
   assert.equal(students[0]?.name, 'Ada Lovelace')
+})
+
+void test('register-student route reuses accepted-entry identity when participantId is provided', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createSyncDeckSession('s1', 'teacher-passcode-1')
+  acceptEntryParticipant(session, {
+    participantId: 'participant-1',
+    displayName: 'Ada From Waiting Room',
+  }, 123)
+  const storeState = createSessionStore({
+    s1: session,
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        participantId: 'participant-1',
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    studentId: 'participant-1',
+    name: 'Ada From Waiting Room',
+  })
+
+  const students = (storeState.store.s1?.data as {
+    students?: Array<{ studentId?: string; name?: string }>
+  }).students ?? []
+  assert.equal(students.length, 1)
+  assert.equal(students[0]?.studentId, 'participant-1')
+  assert.equal(students[0]?.name, 'Ada From Waiting Room')
+})
+
+void test('register-student route rejects missing name when no accepted-entry identity exists', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        participantId: 'participant-1',
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    error: 'invalid payload',
+  })
 })
 
 void test('register-student route returns 404 for invalid session', async () => {
