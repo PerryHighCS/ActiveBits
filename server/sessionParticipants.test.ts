@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { connectSessionParticipant, findSessionParticipant } from './core/sessionParticipants.js'
+import { connectSessionParticipant, findSessionParticipant, updateSessionParticipant } from './core/sessionParticipants.js'
 
 interface TestParticipant {
   id?: string
@@ -109,4 +109,23 @@ void test('findSessionParticipant prefers participantId and can fall back to unn
     }),
     undefined,
   )
+})
+
+void test('updateSessionParticipant touches lastSeen and updates a matched participant', () => {
+  const participants: TestParticipant[] = [
+    { id: 'student-1', name: 'Ada', connected: true, joined: 10, lastSeen: 10 },
+  ]
+
+  const updated = updateSessionParticipant({
+    participants,
+    participantId: 'student-1',
+    now: 25,
+    update: (participant) => {
+      participant.connected = false
+    },
+  })
+
+  assert.equal(updated, participants[0])
+  assert.equal(participants[0]?.connected, false)
+  assert.equal(participants[0]?.lastSeen, 25)
 })

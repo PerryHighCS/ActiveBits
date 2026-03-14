@@ -21,6 +21,12 @@ export interface ConnectSessionParticipantResult<TParticipant extends SessionPar
   isNew: boolean
 }
 
+export interface UpdateSessionParticipantParams<TParticipant extends SessionParticipantIdentity>
+  extends FindSessionParticipantParams<TParticipant> {
+  now?: number
+  update: (participant: TParticipant) => void
+}
+
 export interface FindSessionParticipantParams<TParticipant extends SessionParticipantIdentity> {
   participants: TParticipant[]
   participantId: string | null
@@ -45,6 +51,30 @@ export function findSessionParticipant<TParticipant extends SessionParticipantId
   return participants.find((participant) =>
     participant.name === participantName && (!allowLegacyUnnamedMatch || participant.id == null || participant.id === ''),
   )
+}
+
+export function updateSessionParticipant<TParticipant extends SessionParticipantIdentity>({
+  participants,
+  participantId,
+  participantName = null,
+  allowLegacyUnnamedMatch = false,
+  now = Date.now(),
+  update,
+}: UpdateSessionParticipantParams<TParticipant>): TParticipant | undefined {
+  const participant = findSessionParticipant({
+    participants,
+    participantId,
+    participantName,
+    allowLegacyUnnamedMatch,
+  })
+
+  if (!participant) {
+    return undefined
+  }
+
+  participant.lastSeen = now
+  update(participant)
+  return participant
 }
 
 export function connectSessionParticipant<TParticipant extends SessionParticipantIdentity>({

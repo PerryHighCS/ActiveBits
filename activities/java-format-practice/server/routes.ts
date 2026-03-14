@@ -1,7 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
-import { connectSessionParticipant, findSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
+import { connectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
@@ -210,10 +210,15 @@ export default function setupJavaFormatPracticeRoutes(
         const session = asJavaFormatSession(await sessions.get(activeSessionId))
         if (!session) return
 
-        const student = session.data.students.find((entry) => entry.id === activeStudentId)
+        const student = updateSessionParticipant({
+          participants: session.data.students,
+          participantId: activeStudentId,
+          update: (participant) => {
+            participant.connected = false
+          },
+        })
         if (!student) return
 
-        student.connected = false
         await sessions.set(session.id, session)
         await broadcast('studentsUpdate', { students: session.data.students }, session.id)
       })().catch((error) => console.error('Error in student disconnect:', error))
@@ -321,15 +326,16 @@ export default function setupJavaFormatPracticeRoutes(
 
     const studentId = typeof body.studentId === 'string' ? body.studentId : null
     const studentName = validateStudentName(body.studentName)
-    const student = findSessionParticipant({
+    const student = updateSessionParticipant({
       participants: session.data.students,
       participantId: studentId,
       participantName: studentName,
       allowLegacyUnnamedMatch: true,
+      update: (participant) => {
+        participant.stats = stats
+      },
     })
     if (student) {
-      student.stats = stats
-      student.lastSeen = Date.now()
       await sessions.set(session.id, session)
       await broadcast('studentsUpdate', { students: session.data.students }, session.id)
     }

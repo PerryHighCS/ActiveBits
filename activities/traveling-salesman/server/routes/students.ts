@@ -5,7 +5,7 @@ import type {
   TravelingSalesmanSocket,
 } from '../../travelingSalesmanTypes.js'
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
-import { connectSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
+import { connectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers, closeDuplicateStudentSockets, generateStudentId } from './shared.js'
 
@@ -107,10 +107,14 @@ export default function registerStudentRoutes(
       if (!client.sessionId || !client.studentId) return
       try {
         await updateStudentStatus(client.sessionId, (session) => {
-          const student = session.data.students.find((entry) => entry.id === client.studentId)
+          const student = updateSessionParticipant({
+            participants: session.data.students,
+            participantId: client.studentId,
+            update: (participant) => {
+              participant.connected = false
+            },
+          })
           if (!student) return false
-          student.connected = false
-          student.lastSeen = Date.now()
           return true
         })
       } catch (err) {
@@ -159,23 +163,27 @@ export default function registerStudentRoutes(
       return
     }
 
-    const student = session.data.students.find((entry) => entry.id === studentId)
+    const student = updateSessionParticipant({
+      participants: session.data.students,
+      participantId: studentId,
+      update: (participant) => {
+        participant.currentRoute = route
+        participant.routeDistance = distance
+        participant.complete = route.length === session.data.problem.numCities
+        if (participant.complete) {
+          participant.routeCompleteTime = Date.now()
+          participant.timeToComplete = timeToComplete
+          participant.attempts = (participant.attempts ?? 0) + 1
+        } else {
+          participant.routeCompleteTime = null
+          participant.timeToComplete = null
+        }
+      },
+    })
 
     if (!student) {
       res.status(404).json({ error: 'Student not found' })
       return
-    }
-
-    student.currentRoute = route
-    student.routeDistance = distance
-    student.complete = route.length === session.data.problem.numCities
-    if (student.complete) {
-      student.routeCompleteTime = Date.now()
-      student.timeToComplete = timeToComplete
-      student.attempts = (student.attempts ?? 0) + 1
-    } else {
-      student.routeCompleteTime = null
-      student.timeToComplete = null
     }
 
     await updateStudentStatus(session, () => true)
