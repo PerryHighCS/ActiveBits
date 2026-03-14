@@ -1,4 +1,5 @@
 import type { ActivityRegistryEntry } from '../../../../types/activity.js'
+import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { normalizeSelectedOptions } from './manageDashboardUtils'
 import { isValidHttpUrl } from './urlValidationUtils'
 
@@ -100,6 +101,26 @@ export function buildPersistentSessionEntryApiUrl(hash: string, activityName: st
   const query = new URLSearchParams(search)
   query.set('activityName', activityName)
   return `/api/persistent-session/${encodeURIComponent(hash)}/entry?${query.toString()}`
+}
+
+function resolvePersistentSessionEntryPolicy(value: unknown): PersistentSessionEntryPolicy {
+  return value === 'solo-allowed' || value === 'solo-only' || value === 'instructor-required'
+    ? value
+    : 'instructor-required'
+}
+
+export function getPersistentLinkControlStateFromSearch(search: string): {
+  entryPolicy: PersistentSessionEntryPolicy
+  urlHash: string | null
+} {
+  const params = new URLSearchParams(search)
+  const entryPolicy = resolvePersistentSessionEntryPolicy(params.get('entryPolicy'))
+  const candidateUrlHash = params.get('urlHash')?.trim() ?? ''
+
+  return {
+    entryPolicy,
+    urlHash: /^[a-f0-9]{16}$/i.test(candidateUrlHash) ? candidateUrlHash.toLowerCase() : null,
+  }
 }
 
 export function buildSessionEntryApiUrl(sessionId: string): string {

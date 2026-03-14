@@ -8,7 +8,6 @@ import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom
 import {
   buildPersistentLinkUrl,
   buildPersistentSessionKey,
-  buildQueryString,
   buildSoloLink,
   describeSelectedOptions,
   initializeDeepLinkOptions,
@@ -329,7 +328,7 @@ export default function ManageDashboard() {
         getActivityName(session.activityName),
         getPersistentSessionEntryPolicyLabel(session.entryPolicy),
         savedSessions[sessionKey] || '',
-        `${session.fullUrl}${buildQueryString(session.selectedOptions)}`,
+        buildPersistentLinkUrl('', session.fullUrl, session.selectedOptions || {}, null),
       ]
     })
 
@@ -450,7 +449,7 @@ export default function ManageDashboard() {
               const sessionKey = buildPersistentSessionKey(session.activityName, session.hash)
               const teacherCodeForSession = savedSessions[sessionKey]
               const isVisible = Boolean(visibleCodes[sessionKey])
-              const fullSessionUrl = `${session.fullUrl}${buildQueryString(session.selectedOptions)}`
+              const fullSessionUrl = buildPersistentLinkUrl('', session.fullUrl, session.selectedOptions || {}, null)
               const optionDescriptions = describeSelectedOptions(
                 getActivityById(session.activityName)?.deepLinkOptions,
                 session.selectedOptions,

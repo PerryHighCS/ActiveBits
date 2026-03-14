@@ -477,6 +477,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Keep signed/generated query params in sync with any future SyncDeck deep-link integrity fields and add migration handling if cookie entry shape changes again.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: persistent sessions
+- Discovery: Generic persistent links now carry signed URL state for permalink meaning too. `POST /api/persistent-session/create` returns `entryPolicy` plus a short `urlHash` in the permalink query, teacher cookies preserve that same signed state for dashboard reconstruction, and generic permalink metadata/entry/auth routes now trust verified URL state before falling back to the compatibility default `Live Only`.
+- Why it matters: Local/dev servers do not have durable persistent-session metadata. Without self-describing signed URL state, restarted servers silently forget `solo-allowed` / `solo-only` and revert to `instructor-required` because the opaque hash alone does not encode `entryPolicy`.
+- Evidence: `server/core/persistentLinkUrlState.ts`; `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `client/src/components/common/manageDashboardUtils.ts`
+- Follow-up action: Keep future generic permalink control params inside the signed query contract instead of adding unsigned meaning-bearing params beside the hash.
+- Owner: Codex
+
 - Date: 2026-02-23
 - Area: tooling
 - Discovery: Upgrading `client`/`server` to `eslint@10` is currently blocked by `eslint-plugin-react-hooks`. The latest published `eslint-plugin-react-hooks@7.0.1` still declares a peer dependency range that supports ESLint up to `^9.0.0`, so `npm install` fails with `ERESOLVE` before lint can run.

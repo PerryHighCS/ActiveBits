@@ -270,7 +270,17 @@ export function buildPersistentLinkUrl(
   const absoluteUrl = /^https?:\/\//i.test(urlFromServer) ? urlFromServer : `${origin}${urlFromServer}`
 
   if (deepLinkGenerator == null || deepLinkGenerator.mode === 'append-query') {
-    return `${absoluteUrl}${buildQueryString(selectedOptions)}`
+    const mergedUrl = new URL(absoluteUrl, origin || 'http://localhost')
+    for (const [key, value] of Object.entries(selectedOptions || {})) {
+      if (value != null && value !== '') {
+        mergedUrl.searchParams.set(key, toStringValue(value))
+      }
+    }
+    return /^https?:\/\//i.test(urlFromServer)
+      ? mergedUrl.toString()
+      : `${mergedUrl.pathname}${mergedUrl.search}${mergedUrl.hash}`.startsWith('/')
+        ? `${origin}${mergedUrl.pathname}${mergedUrl.search}${mergedUrl.hash}`
+        : mergedUrl.toString()
   }
 
   return absoluteUrl

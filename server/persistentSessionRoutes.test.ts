@@ -11,6 +11,7 @@ import {
   resetPersistentSession,
   cleanupPersistentSession,
 } from './core/persistentSessions.js'
+import { buildPersistentLinkUrlQuery } from './core/persistentLinkUrlState.js'
 
 interface MockRequest {
   params: Record<string, string>
@@ -439,10 +440,15 @@ void test('persistent session entry route keeps solo-only links in solo status e
   t.after(async () => cleanupPersistentSession(hash))
 
   await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-only')
+  const query = buildPersistentLinkUrlQuery({
+    hash,
+    entryPolicy: 'solo-only',
+    selectedOptions: {},
+  })
 
   const req = createMockReq({
     params: { hash },
-    query: { activityName },
+    query: { activityName, entryPolicy: query.get('entryPolicy') ?? '', urlHash: query.get('urlHash') ?? '' },
     cookies: { persistent_sessions: buildCookieValue(activityName, hash, teacherCode) },
   })
   const res = createMockRes()
@@ -479,10 +485,15 @@ void test('persistent session entry route returns solo-unavailable for non-solo 
   t.after(async () => cleanupPersistentSession(hash))
 
   await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-only')
+  const query = buildPersistentLinkUrlQuery({
+    hash,
+    entryPolicy: 'solo-only',
+    selectedOptions: {},
+  })
 
   const req = createMockReq({
     params: { hash },
-    query: { activityName },
+    query: { activityName, entryPolicy: query.get('entryPolicy') ?? '', urlHash: query.get('urlHash') ?? '' },
   })
   const res = createMockRes()
 
@@ -991,14 +1002,19 @@ void test('create persists non-default entry policy in metadata and list exposes
   await createHandler(createReq, createRes)
 
   assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const activityName = 'gallery-walk'
   const hash = String(createRes.jsonBody?.hash ?? '')
+  const url = String(createRes.jsonBody?.url ?? '')
   t.after(async () => cleanupPersistentSession(hash))
 
   const stored = await getPersistentSession(hash)
   assert.equal(stored?.entryPolicy, 'solo-allowed')
+  assert.match(url, new RegExp(`^/activity/${activityName}/${hash}\\?.*entryPolicy=solo-allowed.*urlHash=[a-f0-9]{16}`))
 
   const cookie = createRes.cookies.get('persistent_sessions')
   assert.ok(cookie)
+
+  await cleanupPersistentSession(hash)
 
   const listHandler = getRoute(app, 'GET', '/api/persistent-session/list')
   const listReq = createMockReq({
@@ -1018,6 +1034,53 @@ void test('create persists non-default entry policy in metadata and list exposes
   const sessionsList = Array.isArray(listRes.jsonBody?.sessions) ? listRes.jsonBody.sessions : []
   assert.equal(sessionsList.length, 1)
   assert.equal((sessionsList[0] as Record<string, unknown>).entryPolicy, 'solo-allowed')
+  assert.match(String((sessionsList[0] as Record<string, unknown>).fullUrl ?? ''), /entryPolicy=solo-allowed/)
+  assert.match(String((sessionsList[0] as Record<string, unknown>).fullUrl ?? ''), /urlHash=[a-f0-9]{16}/)
+})
+
+void test('persistent session entry route honors signed query entryPolicy after persistent metadata is missing', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'java-string-practice',
+      teacherCode: 'signed-solo-link',
+      entryPolicy: 'solo-allowed',
+    },
+  })
+  const createRes = createMockRes()
+
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  const url = new URL(`https://bits.example${String(createRes.jsonBody?.url ?? '')}`)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await cleanupPersistentSession(hash)
+
+  const entryHandler = getRoute(app, 'GET', '/api/persistent-session/:hash/entry')
+  const entryReq = createMockReq({
+    params: { hash },
+    query: {
+      activityName: 'java-string-practice',
+      entryPolicy: url.searchParams.get('entryPolicy') ?? '',
+      urlHash: url.searchParams.get('urlHash') ?? '',
+    },
+  })
+  const entryRes = createMockRes()
+
+  await entryHandler(entryReq, entryRes)
+
+  assert.equal(entryRes.statusCode, 200, JSON.stringify(entryRes.jsonBody))
+  assert.equal(entryRes.jsonBody?.entryPolicy, 'solo-allowed')
+  assert.equal(entryRes.jsonBody?.entryOutcome, 'continue-solo')
 })
 
 void test('getOrCreateActivePersistentSession updates stored entry policy when an existing permalink is reused', async (t) => {
@@ -1083,6 +1146,11 @@ void test('authenticate rejects teacher auth for solo-only permalinks without mu
   t.after(async () => cleanupPersistentSession(hash))
 
   await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-only')
+  const query = buildPersistentLinkUrlQuery({
+    hash,
+    entryPolicy: 'solo-only',
+    selectedOptions: {},
+  })
 
   const handler = getRoute(app, 'POST', '/api/persistent-session/authenticate')
   const req = createMockReq({
@@ -1090,6 +1158,8 @@ void test('authenticate rejects teacher auth for solo-only permalinks without mu
       activityName,
       hash,
       teacherCode,
+      entryPolicy: query.get('entryPolicy') ?? '',
+      urlHash: query.get('urlHash') ?? '',
     },
   })
   const res = createMockRes()

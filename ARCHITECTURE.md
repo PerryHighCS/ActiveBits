@@ -202,6 +202,7 @@ Sessions are stored in-memory with a TTL (time-to-live). Each session has:
 ### Persistent Sessions
 Permanent sessions use HMAC-SHA256 authentication:
 - **Hash Format**: 20 characters of `salt(8 hex) + hmac(12 hex)` derived from `activityName|hashedTeacherCode|salt`
+- **Generic permalink URL state**: generic persistent links now also carry signed query state for permalink meaning (`entryPolicy`, plus selected deep-link options) via a short `urlHash`; the URL is the source of truth for those settings, and missing/invalid signed state falls back to `instructor-required` / "Live Only"
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
 - **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
 - **Query Parameters**: Activities can use URL query params for deep linking (e.g., `/activity/algorithm-demo/abc123?algorithm=merge-sort`)

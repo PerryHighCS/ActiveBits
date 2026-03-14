@@ -7,6 +7,7 @@ import {
   buildPersistentSessionApiUrl,
   buildSessionEntryApiUrl,
   cleanExpiredSessions,
+  getPersistentLinkControlStateFromSearch,
   normalizePersistentPresentationUrl,
   getPersistentSelectedOptionsFromSearchForActivity,
   getPersistentSelectedOptionsFromSearch,
@@ -153,6 +154,17 @@ void test('buildPersistentTeacherManagePath drops permalink query for started sy
 void test('buildPersistentTeacherManagePath preserves query for non-syncdeck activities', () => {
   const path = buildPersistentTeacherManagePath('raffle', 'session-123', '?foo=bar')
   assert.equal(path, '/manage/raffle/session-123?foo=bar')
+})
+
+void test('getPersistentLinkControlStateFromSearch parses signed permalink control params', () => {
+  assert.deepEqual(
+    getPersistentLinkControlStateFromSearch('?entryPolicy=solo-allowed&urlHash=A53762A75A8CC2E5'),
+    { entryPolicy: 'solo-allowed', urlHash: 'a53762a75a8cc2e5' },
+  )
+  assert.deepEqual(
+    getPersistentLinkControlStateFromSearch('?entryPolicy=not-real&urlHash=bad'),
+    { entryPolicy: 'instructor-required', urlHash: null },
+  )
 })
 
 void test('getSessionPresentationUrlForTeacherRedirect returns validated session presentationUrl', () => {

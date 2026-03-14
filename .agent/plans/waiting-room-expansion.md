@@ -630,6 +630,7 @@ that path ships.
 - [x] Add entry-policy control to permalink creation UI
 - [x] Ensure entry-policy controls expose accessible names, state, and keyboard interaction
 - [x] Persist selected entry policy in permalink metadata
+- Current status: generic permalinks now also carry signed query state for permalink meaning (`entryPolicy` + `urlHash` alongside selected deep-link params). Runtime persistent-session metadata may still mirror that policy for convenience while a live session exists, but generic permalink entry/auth now treats verified URL state as the source of truth and falls back to `Live Only` when signed state is missing or invalid.
 - [x] Expose entry policy in session-entry/waiting-room API payloads
 - [x] Define API error/response shape for server-enforced policy rejections
 - [x] Gate Phase 1 UI/API exposure until Phase 3 resolver support exists, or land them together

@@ -6,7 +6,10 @@ import type {
 } from '../../../../types/waitingRoom.js'
 import WaitingRoomContent from './WaitingRoomContent'
 import { getActivity, loadActivityWaitingRoomFields } from '@src/activities'
-import { getPersistentSelectedOptionsFromSearchForActivity } from './sessionRouterUtils'
+import {
+  getPersistentLinkControlStateFromSearch,
+  getPersistentSelectedOptionsFromSearchForActivity,
+} from './sessionRouterUtils'
 import {
   buildWaitingRoomStorageKey,
   getWaitingRoomInitialValues,
@@ -199,6 +202,7 @@ export default function WaitingRoom({
         activity?.deepLinkOptions,
         activityName,
       )
+      const persistentLinkControlState = getPersistentLinkControlStateFromSearch(queryString)
 
       const authenticateResponse = await fetch(buildPersistentAuthenticateApiUrl(), {
         method: 'POST',
@@ -211,6 +215,8 @@ export default function WaitingRoom({
           hash,
           teacherCode: normalizedTeacherCode,
           selectedOptions,
+          entryPolicy: persistentLinkControlState.entryPolicy,
+          urlHash: persistentLinkControlState.urlHash,
         }),
       })
 

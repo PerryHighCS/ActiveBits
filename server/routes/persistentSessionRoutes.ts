@@ -12,6 +12,13 @@ import {
   resolvePersistentSessionEntryPolicy,
 } from '../core/persistentSessions.js'
 import {
+  buildPersistentLinkUrlQuery,
+  computePersistentLinkUrlHash,
+  normalizePersistentLinkSelectedOptions,
+  verifyPersistentLinkUrlHash,
+  type PersistentLinkUrlState,
+} from '../core/persistentLinkUrlState.js'
+import {
   buildSoloOnlyPolicyRejection,
   type PersistentSessionPolicyRejectionPayload,
 } from '../core/persistentSessionPolicyUtils.js'
@@ -23,11 +30,14 @@ import {
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
 const MAX_TEACHER_CODE_LENGTH = 100
+const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY = 'instructor-required'
 
 interface CookieSessionEntry {
   key: string
   teacherCode: unknown
   selectedOptions?: Record<string, unknown>
+  entryPolicy?: unknown
+  urlHash?: unknown
 }
 
 interface CookieParseResult {
@@ -96,6 +106,10 @@ function toSelectedOptions(value: unknown): Record<string, unknown> {
   return isPlainObject(value) ? value : {}
 }
 
+function toSelectedOptionStrings(value: unknown): Record<string, string> {
+  return normalizePersistentLinkSelectedOptions(toSelectedOptions(value))
+}
+
 function parsePersistentSessionsCookie(cookieValue: unknown, context = 'persistent_sessions'): CookieParseResult {
   if (cookieValue == null) {
     return { sessions: [], corrupted: false, error: null }
@@ -120,6 +134,8 @@ function parsePersistentSessionsCookie(cookieValue: unknown, context = 'persiste
         key: String(entry.key),
         teacherCode: entry.teacherCode,
         selectedOptions: toSelectedOptions(entry.selectedOptions),
+        entryPolicy: entry.entryPolicy,
+        urlHash: entry.urlHash,
       }))
     return { sessions, corrupted: false, error: null }
   }
@@ -158,6 +174,81 @@ function getValidatedPersistentSessionCookieEntry(
   return verifyTeacherCodeWithHash(activityName, hash, teacherCode).valid ? entry : null
 }
 
+function getPersistentLinkSelectedOptionsFromQuery(query: RequestLike['query']): Record<string, string> {
+  const selectedOptions: Record<string, string> = {}
+
+  for (const [key, value] of Object.entries(query)) {
+    if (key === 'activityName' || key === 'entryPolicy' || key === 'urlHash') {
+      continue
+    }
+
+    const normalizedValue = getQueryString(value)?.trim()
+    if (normalizedValue) {
+      selectedOptions[key] = normalizedValue
+    }
+  }
+
+  return selectedOptions
+}
+
+function getVerifiedPersistentLinkUrlStateFromQuery(
+  hash: string,
+  query: RequestLike['query'],
+): PersistentLinkUrlState | null {
+  const entryPolicy = getQueryString(query.entryPolicy)
+  const urlHash = getQueryString(query.urlHash)?.trim() ?? ''
+  if (!entryPolicy || !urlHash) {
+    return null
+  }
+
+  const state = {
+    entryPolicy: resolvePersistentSessionEntryPolicy(entryPolicy),
+    selectedOptions: getPersistentLinkSelectedOptionsFromQuery(query),
+  } satisfies PersistentLinkUrlState
+
+  return verifyPersistentLinkUrlHash(hash, state, urlHash) ? state : null
+}
+
+function getVerifiedPersistentLinkUrlStateFromCookieEntry(
+  hash: string,
+  entry: CookieSessionEntry | null,
+): PersistentLinkUrlState | null {
+  if (!entry) {
+    return null
+  }
+
+  const entryPolicy = resolvePersistentSessionEntryPolicy(entry.entryPolicy)
+  const urlHash = typeof entry.urlHash === 'string' ? entry.urlHash.trim() : ''
+  if (!urlHash) {
+    return null
+  }
+
+  const state = {
+    entryPolicy,
+    selectedOptions: toSelectedOptionStrings(entry.selectedOptions),
+  } satisfies PersistentLinkUrlState
+
+  return verifyPersistentLinkUrlHash(hash, state, urlHash) ? state : null
+}
+
+function buildPersistentSessionRelativeUrl(
+  activityName: string,
+  hash: string,
+  state: PersistentLinkUrlState | null,
+): string {
+  const baseUrl = `/activity/${activityName}/${hash}`
+  if (!state) {
+    return baseUrl
+  }
+
+  const params = buildPersistentLinkUrlQuery({
+    hash,
+    entryPolicy: state.entryPolicy,
+    selectedOptions: state.selectedOptions,
+  })
+  return `${baseUrl}?${params.toString()}`
+}
+
 export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersistentSessionRoutesOptions): void {
   app.get('/api/persistent-session/list', async (req, res) => {
     try {
@@ -176,16 +267,17 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
           const [activityName, hash] = parts
           const host = req.get('x-forwarded-host') ?? req.get('host')
           const protocol = req.get('x-forwarded-proto') ?? req.protocol
-          const persistentSession = await getPersistentSession(hash)
           const validatedEntry = getValidatedPersistentSessionCookieEntry([entry], activityName, hash)
+          const cookieUrlState = getVerifiedPersistentLinkUrlStateFromCookieEntry(hash, validatedEntry)
+          const relativeUrl = buildPersistentSessionRelativeUrl(activityName, hash, cookieUrlState)
           return {
             activityName,
             hash,
             teacherCode: validatedEntry?.teacherCode,
-            entryPolicy: resolvePersistentSessionEntryPolicy(persistentSession?.entryPolicy),
-            selectedOptions: entry.selectedOptions || {},
-            url: `/activity/${activityName}/${hash}`,
-            fullUrl: host ? `${protocol}://${host}/activity/${activityName}/${hash}` : null,
+            entryPolicy: cookieUrlState?.entryPolicy ?? DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
+            selectedOptions: cookieUrlState?.selectedOptions ?? (entry.selectedOptions || {}),
+            url: relativeUrl,
+            fullUrl: host ? `${protocol}://${host}${relativeUrl}` : null,
           }
         }))).filter(Boolean)
 
@@ -231,12 +323,23 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
 
     const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
     const cookieKey = `${activityName}:${hash}`
+    const query = buildPersistentLinkUrlQuery({
+      hash,
+      entryPolicy,
+      selectedOptions,
+    })
 
     const existingIndex = sessionEntries.findIndex((entry) => entry.key === cookieKey)
     if (existingIndex !== -1) {
       sessionEntries.splice(existingIndex, 1)
     }
-    sessionEntries.push({ key: cookieKey, teacherCode, selectedOptions })
+    sessionEntries.push({
+      key: cookieKey,
+      teacherCode,
+      selectedOptions,
+      entryPolicy,
+      urlHash: query.get('urlHash') ?? undefined,
+    })
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
     }
@@ -250,7 +353,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       httpOnly: true,
     })
 
-    res.json({ url: `/activity/${activityName}/${hash}`, hash })
+    res.json({ url: `/activity/${activityName}/${hash}?${query.toString()}`, hash })
   })
 
   app.post('/api/persistent-session/authenticate', async (req, res) => {
@@ -259,6 +362,8 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const hash = getBodyString(body, 'hash')
     const teacherCode = getBodyString(body, 'teacherCode')
     const bodySelectedOptions = toSelectedOptions(body.selectedOptions)
+    const bodyEntryPolicy = resolvePersistentSessionEntryPolicy(body.entryPolicy)
+    const bodyUrlHash = getBodyString(body, 'urlHash')?.trim() ?? ''
 
     if (!activityName || !hash || !teacherCode) {
       res.status(400).json({ error: 'Missing activityName, hash, or teacherCode' })
@@ -286,12 +391,22 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    const persistentSession = await getPersistentSession(hash)
-    const normalizedEntryPolicy = resolvePersistentSessionEntryPolicy(persistentSession?.entryPolicy)
+    const verifiedBodyUrlState =
+      bodyUrlHash
+        ? ({
+          entryPolicy: bodyEntryPolicy,
+          selectedOptions: normalizePersistentLinkSelectedOptions(bodySelectedOptions),
+        } satisfies PersistentLinkUrlState)
+        : null
+    const hasValidBodyUrlState = verifiedBodyUrlState != null && verifyPersistentLinkUrlHash(hash, verifiedBodyUrlState, bodyUrlHash)
+    const normalizedEntryPolicy = hasValidBodyUrlState
+      ? verifiedBodyUrlState.entryPolicy
+      : DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY
     if (normalizedEntryPolicy === 'solo-only') {
       res.status(409).json(buildSoloOnlyPolicyRejection() satisfies PersistentSessionPolicyRejectionPayload)
       return
     }
+    const persistentSession = await getPersistentSession(hash)
 
     const cookieName = 'persistent_sessions'
     let { sessions: sessionEntries } = parsePersistentSessionsCookie(
@@ -302,6 +417,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const existingIndex = sessionEntries.findIndex((entry) => entry.key === cookieKey)
     const existingEntry = getValidatedPersistentSessionCookieEntry(sessionEntries, activityName, hash)
     const existingSelectedOptions = toSelectedOptions(existingEntry?.selectedOptions)
+    const existingUrlState = getVerifiedPersistentLinkUrlStateFromCookieEntry(hash, existingEntry)
 
     if (existingIndex !== -1) {
       sessionEntries.splice(existingIndex, 1)
@@ -310,12 +426,20 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       Object.keys(existingSelectedOptions).length > 0
         ? existingSelectedOptions
         : bodySelectedOptions
+    const finalEntryPolicy = existingUrlState?.entryPolicy ?? (hasValidBodyUrlState ? verifiedBodyUrlState.entryPolicy : normalizedEntryPolicy)
+    const finalUrlState = {
+      entryPolicy: finalEntryPolicy,
+      selectedOptions: normalizePersistentLinkSelectedOptions(finalSelectedOptions),
+    } satisfies PersistentLinkUrlState
+    const finalUrlHash = computePersistentLinkUrlHash(hash, finalUrlState)
     sessionEntries.push({
       key: cookieKey,
       teacherCode,
       // Preserve existing cookie options when available; otherwise bootstrap from the permalink URL
       // params submitted during teacher authentication on a new device.
       selectedOptions: finalSelectedOptions,
+      entryPolicy: finalEntryPolicy,
+      urlHash: finalUrlHash,
     })
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
@@ -354,14 +478,19 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       'persistent_sessions (/api/persistent-session/:hash)',
     )
     const hasTeacherCookie = getValidatedPersistentSessionCookieEntry(sessionEntries, activityName, hash) != null
+    const verifiedUrlState = getVerifiedPersistentLinkUrlStateFromQuery(hash, req.query)
     const entryContext = await loadPersistentSessionEntryGatewayContext({
       activityName,
       hash,
       hasTeacherCookie,
+      entryPolicyOverride: verifiedUrlState?.entryPolicy,
       sessions,
     })
 
-    const queryParams = Object.fromEntries(Object.entries(req.query).filter(([key]) => key !== 'activityName'))
+    const queryParams = verifiedUrlState?.selectedOptions
+      ?? Object.fromEntries(
+        Object.entries(req.query).filter(([key]) => key !== 'activityName' && key !== 'entryPolicy' && key !== 'urlHash'),
+      )
 
     res.json({
       activityName: entryContext.activityName,
@@ -393,11 +522,13 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       'persistent_sessions (/api/persistent-session/:hash/entry)',
     )
     const hasTeacherCookie = getValidatedPersistentSessionCookieEntry(sessionEntries, activityName, hash) != null
+    const verifiedUrlState = getVerifiedPersistentLinkUrlStateFromQuery(hash, req.query)
 
     res.json(await loadPersistentSessionEntryStatus({
       activityName,
       hash,
       hasTeacherCookie,
+      entryPolicyOverride: verifiedUrlState?.entryPolicy,
       sessions,
     }))
   })

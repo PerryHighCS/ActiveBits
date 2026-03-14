@@ -316,6 +316,16 @@ void test('buildPersistentLinkUrl appends query only for legacy or append-query 
   assert.equal(
     buildPersistentLinkUrl(
       'https://bits.example',
+      '/activity/java-string-practice/hash3?entryPolicy=solo-allowed&urlHash=abcd1234abcd1234',
+      { topic: 'arrays' },
+      null,
+    ),
+    'https://bits.example/activity/java-string-practice/hash3?entryPolicy=solo-allowed&urlHash=abcd1234abcd1234&topic=arrays',
+  )
+
+  assert.equal(
+    buildPersistentLinkUrl(
+      'https://bits.example',
       '/activity/syncdeck/hash2?presentationUrl=https%3A%2F%2Fslides.example&urlHash=abcd',
       { presentationUrl: 'https://tamper.example' },
       {
