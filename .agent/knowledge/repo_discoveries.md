@@ -159,6 +159,22 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: server | activities
+- Discovery: Duplicate student-socket eviction now also lives in shared server code. `server/core/participantSockets.ts` centralizes the “same session + same participant ID replaces older socket” rule, and the Java plus traveling-salesman routes now delegate to it.
+- Why it matters: This keeps one more part of the accepted-participant lifecycle aligned across the activities already on the shared path. The same participant ID now implies the same duplicate-connection replacement behavior without each route carrying its own close-loop implementation.
+- Evidence: `server/core/participantSockets.ts`; `server/participantSockets.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/shared.ts`
+- Follow-up action: Reuse this helper anywhere session-bound participant sockets should be single-owner by `participantId`, and avoid reintroducing route-local duplicate-close loops unless an activity genuinely needs a different replacement policy.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Area: activities | server
+- Discovery: Python List Practice is no longer fully outside the shared participant contract on the server side. Its websocket join, stats updates, disconnect handling, and normalized stored student records now use shared-style participant IDs and activity-owned wrappers around the common session participant helpers, and the student client now accepts a server-issued `studentId` message.
+- Why it matters: This closes one of the explicit remaining gaps from the plan without forcing a waiting-room UI migration for the activity. Python List Practice can now participate in the same broader participant-ID/reconnect direction as the Java and traveling-salesman activities, while still keeping its own activity-specific UI flow for now.
+- Evidence: `activities/python-list-practice/server/studentParticipants.ts`; `activities/python-list-practice/server/studentParticipants.test.ts`; `activities/python-list-practice/server/routes.ts`; `activities/python-list-practice/client/student/PythonListPractice.tsx`
+- Follow-up action: If Python List Practice later adopts waiting-room entry, reuse the existing shared participant path instead of introducing another activity-local server identity lifecycle.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: client | server | activities
 - Discovery: The live entry-participant handoff now mints shared `participantId` before activity-specific websocket join. `java-string-practice` and `java-format-practice` can carry that ID into their first live-session websocket URL instead of waiting for the activity route to assign and echo a new one after connection.
 - Why it matters: This is the first shared path where participant identity exists before activity-specific join logic runs, which narrows the gap between “waiting-room accepted entry” and “activity-owned participant registration” without yet forcing every activity onto one registration service.

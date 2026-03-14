@@ -225,6 +225,16 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
     (evt: MessageEvent<string>) => {
       try {
         const msg = JSON.parse(evt.data) as WebSocketMessage
+        if (msg.type === 'studentId') {
+          const nextStudentId = typeof msg.payload?.studentId === 'string' ? msg.payload.studentId : null
+          if (nextStudentId) {
+            setStudentId(nextStudentId)
+            if (sessionId) {
+              localStorage.setItem(`python-list-practice-id-${sessionId}`, nextStudentId)
+            }
+          }
+          return
+        }
         if (msg.type === 'questionTypesUpdate') {
           const payload = msg.payload as { selectedQuestionTypes?: unknown } | undefined
           const types = Array.isArray(payload?.selectedQuestionTypes)
@@ -236,7 +246,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
         console.error('WS message error', err)
       }
     },
-    [applySelectedTypes],
+    [applySelectedTypes, sessionId],
   )
 
   const handleStudentOpen = useCallback(() => {
