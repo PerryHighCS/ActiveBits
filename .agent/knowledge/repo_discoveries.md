@@ -215,6 +215,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: server
+- Discovery: Persistent entry-participant handoff storage now enforces the same bounds as live-session handoff: a max of 100 tokens per persistent session, an 8KB serialized payload limit, and prune-oldest behavior when capacity is exceeded. Oversized payloads surface as typed `413` errors from the persistent entry-participant POST route.
+- Why it matters: This closes an unbounded metadata-growth path on persistent permalink flows and keeps live/persistent handoff behavior aligned under abuse or accidental oversized payloads.
+- Evidence: `server/core/persistentSessions.ts`; `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`
+- Follow-up action: If limits change, update both live-session and persistent-session entry-participant modules together to preserve parity.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: client | activities
 - Discovery: The already-migrated Java activities now share one client-side post-handoff identity helper in `entryParticipantIdentityUtils.ts`. That helper consumes waiting-room handoff values, prefers existing session-local identity when present, persists accepted preflight identity into local storage for reconnect, and avoids `java-format-practice` minting a one-off client-generated participant ID during manual name submit.
 - Why it matters: This does not finish the cross-activity participant contract, but it does tighten the current “after handoff, before websocket” behavior into one reusable rule for the migrated activities. It makes the remaining gap clearer: the branch now lacks a shared server-accepted participant contract, not a shared client hydration pattern.

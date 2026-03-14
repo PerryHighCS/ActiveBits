@@ -846,6 +846,92 @@ void test('persistent entry participant store route rejects invalid persistent s
   assert.deepEqual(res.jsonBody, { error: 'invalid persistent session' })
 })
 
+void test('persistent entry participant store route rejects oversized payloads', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const activityName = 'java-string-practice'
+  const teacherCode = 'persistent-entry-participant-oversized'
+  const { hash } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash)
+
+  const storeHandler = getRoute(app, 'POST', '/api/persistent-session/:hash/entry-participant')
+  const res = createMockRes()
+  await storeHandler(createMockReq({
+    params: { hash },
+    query: { activityName },
+    body: {
+      values: {
+        displayName: 'x'.repeat(9000),
+      },
+    },
+  }), res)
+
+  assert.equal(res.statusCode, 413)
+  assert.deepEqual(res.jsonBody, { error: 'entry participant payload too large' })
+})
+
+void test('persistent entry participant store route prunes oldest tokens when limit is exceeded', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const activityName = 'java-string-practice'
+  const teacherCode = 'persistent-entry-participant-prune'
+  const { hash } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+  await getOrCreateActivePersistentSession(activityName, hash)
+
+  const storeHandler = getRoute(app, 'POST', '/api/persistent-session/:hash/entry-participant')
+  const consumeHandler = getRoute(app, 'GET', '/api/persistent-session/:hash/entry-participant/:token')
+  const tokens: string[] = []
+
+  for (let index = 0; index < 101; index += 1) {
+    const storeRes = createMockRes()
+    await storeHandler(createMockReq({
+      params: { hash },
+      query: { activityName },
+      body: {
+        values: {
+          displayName: `Student-${index}`,
+        },
+      },
+    }), storeRes)
+
+    assert.equal(storeRes.statusCode, 200)
+    const token = storeRes.jsonBody?.entryParticipantToken
+    assert.equal(typeof token, 'string')
+    tokens.push(String(token))
+  }
+
+  const oldestRes = createMockRes()
+  await consumeHandler(createMockReq({
+    params: { hash, token: tokens[0] as string },
+    query: { activityName },
+  }), oldestRes)
+  assert.equal(oldestRes.statusCode, 404)
+  assert.deepEqual(oldestRes.jsonBody, { error: 'entry participant not found' })
+
+  const newestRes = createMockRes()
+  await consumeHandler(createMockReq({
+    params: { hash, token: tokens[100] as string },
+    query: { activityName },
+  }), newestRes)
+  assert.equal(newestRes.statusCode, 200)
+  assert.equal(
+    typeof (newestRes.jsonBody?.values as Record<string, unknown> | undefined)?.participantId,
+    'string',
+  )
+})
+
 void test('teacher lifecycle clears session on explicit end', async (t) => {
   initializePersistentStorage(null)
   const sessionMap = new Map<string, unknown>()

@@ -9,6 +9,7 @@ import {
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   getPersistentSession,
+  PersistentSessionEntryParticipantStoreError,
   storePersistentSessionEntryParticipant,
   verifyTeacherCodeWithHash,
   resolvePersistentSessionEntryPolicy,
@@ -708,6 +709,10 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       const { token, values } = await storePersistentSessionEntryParticipant(activityName, hash, body.values)
       res.json({ entryParticipantToken: token, values })
     } catch (error) {
+      if (error instanceof PersistentSessionEntryParticipantStoreError) {
+        res.status(error.statusCode).json({ error: error.message })
+        return
+      }
       console.error('Error storing persistent session entry participant:', { activityName, hash, error })
       res.status(500).json({ error: 'internal server error' })
     }

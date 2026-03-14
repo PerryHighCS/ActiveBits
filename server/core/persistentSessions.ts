@@ -39,6 +39,8 @@ const waitersByHash = new Map<string, PersistentSessionSocket[]>()
 const MAX_ATTEMPTS = 5
 const WAITER_TIMEOUT = 600_000
 const CLEANUP_INTERVAL = 60_000
+const MAX_PERSISTENT_ENTRY_PARTICIPANTS = 100
+const MAX_PERSISTENT_ENTRY_PARTICIPANT_VALUES_BYTES = 8 * 1024
 
 const DEFAULT_HMAC_SECRET = 'default-secret-change-in-production'
 const MIN_SECRET_LENGTH = 32
@@ -52,6 +54,16 @@ const waitingRoomExports = (
 
 const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY = waitingRoomExports.DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY
 const resolvePersistentSessionEntryPolicyFromTypes = waitingRoomExports.resolvePersistentSessionEntryPolicy
+
+export class PersistentSessionEntryParticipantStoreError extends Error {
+  readonly statusCode: number
+
+  constructor(message: string, statusCode: number) {
+    super(message)
+    this.name = 'PersistentSessionEntryParticipantStoreError'
+    this.statusCode = statusCode
+  }
+}
 
 function createInMemoryPersistentStore(): PersistentSessionStore {
   const memoryStore = new Map<string, unknown>()
@@ -419,6 +431,21 @@ export async function storePersistentSessionEntryParticipant(
 ): Promise<{ token: string; values: Record<string, WaitingRoomSerializableValue> }> {
   const session = await getOrCreateActivePersistentSession(activityName, hash)
   const storedEntryParticipant = storeEntryParticipant(session, values)
+
+  const valuesBytes = Buffer.byteLength(JSON.stringify(storedEntryParticipant.values), 'utf8')
+  if (valuesBytes > MAX_PERSISTENT_ENTRY_PARTICIPANT_VALUES_BYTES) {
+    delete session.entryParticipants?.[storedEntryParticipant.token]
+    throw new PersistentSessionEntryParticipantStoreError('entry participant payload too large', 413)
+  }
+
+  const tokens = Object.keys(session.entryParticipants ?? {})
+  if (tokens.length > MAX_PERSISTENT_ENTRY_PARTICIPANTS) {
+    const overflowCount = tokens.length - MAX_PERSISTENT_ENTRY_PARTICIPANTS
+    for (const token of tokens.slice(0, overflowCount)) {
+      delete session.entryParticipants?.[token]
+    }
+  }
+
   await persistentStore.set(hash, session)
 
   return storedEntryParticipant
