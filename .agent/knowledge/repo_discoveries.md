@@ -175,6 +175,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: server | activities
+- Discovery: SyncDeck student websocket reconnect now also uses an activity-owned participant helper instead of route-local `students.find(...)` mutation, and the websocket path no longer accepts client-invented IDs. Students must reconnect with a previously registered server-issued `studentId`, while stale cached IDs are treated as reconnect failures.
+- Why it matters: This tightens SyncDeck back toward the intended “server-issued participant identity” model without forcing its broader presentation/embed registration flow into the shared waiting-room contract yet. The remaining gap is narrower now: SyncDeck still owns REST registration and instructor/embed authority, but its websocket participant touch path no longer has to drift separately or silently trust arbitrary client IDs.
+- Evidence: `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/studentParticipants.test.ts`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Keep SyncDeck’s broader embedded-role and registration decisions on the presentation track, but reuse this helper path if more websocket-side participant mutation is needed before that larger design lands.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: activities | server
 - Discovery: Python List Practice is no longer fully outside the shared participant contract on the server side. Its websocket join, stats updates, disconnect handling, and normalized stored student records now use shared-style participant IDs and activity-owned wrappers around the common session participant helpers, and the student client now accepts a server-issued `studentId` message.
 - Why it matters: This closes one of the explicit remaining gaps from the plan without forcing a waiting-room UI migration for the activity. Python List Practice can now participate in the same broader participant-ID/reconnect direction as the Java and traveling-salesman activities, while still keeping its own activity-specific UI flow for now.

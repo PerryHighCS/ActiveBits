@@ -233,6 +233,14 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
       ...createSyncDeckSession('s1', 'teacher-pass'),
       data: {
         ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
         lastInstructorPayload: { type: 'slidechanged', payload: { h: 2, v: 0, f: 0 } },
       },
     },
@@ -245,7 +253,11 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
   const studentSocket = new MockSocket()
   ws.wss.clients.add(studentSocket)
 
-  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  handler?.(
+    studentSocket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-1', studentName: 'Ada Lovelace' }),
+    ws.wss,
+  )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
@@ -272,7 +284,20 @@ void test('syncdeck websocket closes duplicate student sockets for the same sess
   const app = createMockApp()
   const ws = createMockWs()
   const state = createSessionStore({
-    s1: createSyncDeckSession('s1', 'teacher-pass'),
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+      },
+    },
   })
 
   setupSyncDeckRoutes(app, state.sessions, ws)
@@ -299,6 +324,82 @@ void test('syncdeck websocket closes duplicate student sockets for the same sess
 
   assert.equal(existingSocket.ignoreDisconnect, true)
   assert.deepEqual(existingSocket.closeCalls, [{ code: 4000, reason: 'Replaced by new connection' }])
+})
+
+void test('syncdeck websocket rejects student connect without a registered studentId', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(
+    studentSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'missing-student',
+      studentName: 'Ada Lovelace',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(studentSocket.closeCalls, [{ code: 1008, reason: 'unregistered student' }])
+})
+
+void test('syncdeck websocket updates an existing student record on reconnect', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Old Name',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(
+    studentSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'student-1',
+      studentName: 'Ada Lovelace',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const students = (state.store.s1?.data as {
+    students?: Array<{ studentId: string; name: string; joinedAt: number; lastSeenAt: number }>
+  }).students ?? []
+  assert.equal(students.length, 1)
+  assert.equal(students[0]?.studentId, 'student-1')
+  assert.equal(students[0]?.name, 'Ada Lovelace')
+  assert.equal(students[0]?.joinedAt, 100)
+  assert.ok((students[0]?.lastSeenAt ?? 0) >= 110)
 })
 
 void test('syncdeck websocket sends latest state snapshot to instructor on connect', async () => {
@@ -524,6 +625,14 @@ void test('syncdeck websocket replays buffered chalkboard snapshot and delta to 
             { mode: 1, event: { type: 'erase', x: 2, y: 2, board: 0, time: 2 } },
           ],
         },
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
       },
     },
   })
@@ -535,7 +644,11 @@ void test('syncdeck websocket replays buffered chalkboard snapshot and delta to 
   const studentSocket = new MockSocket()
   ws.wss.clients.add(studentSocket)
 
-  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  handler?.(
+    studentSocket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-1', studentName: 'Ada Lovelace' }),
+    ws.wss,
+  )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
@@ -663,6 +776,14 @@ void test('syncdeck websocket caps replayed chalkboard delta from oversized pers
           snapshot: null,
           delta: oversizedDelta,
         },
+        students: [{
+          studentId: 'student-2',
+          name: 'Grace Hopper',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
       },
     },
   })
@@ -674,7 +795,11 @@ void test('syncdeck websocket caps replayed chalkboard delta from oversized pers
   const studentSocket = new MockSocket()
   ws.wss.clients.add(studentSocket)
 
-  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  handler?.(
+    studentSocket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-2', studentName: 'Grace Hopper' }),
+    ws.wss,
+  )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })

@@ -1161,7 +1161,20 @@ const SyncDeckStudent: FC = () => {
         setConnectionState('connected')
         setStatusMessage('Connected. Waiting for instructor sync…')
       },
-      onClose: () => {
+      onClose: (event) => {
+        if (event.code === 1008 && (event.reason === 'missing studentId' || event.reason === 'unregistered student')) {
+          if (typeof window !== 'undefined' && sessionId) {
+            window.sessionStorage.removeItem(`syncdeck_student_name_${sessionId}`)
+            window.sessionStorage.removeItem(`syncdeck_student_id_${sessionId}`)
+          }
+          setRegisteredStudentName('')
+          setRegisteredStudentId('')
+          setJoinError('Please re-enter your name to rejoin this presentation.')
+          setConnectionState('disconnected')
+          setStatusMessage('Reconnect required before instructor sync can resume.')
+          return
+        }
+
         setConnectionState('disconnected')
         setStatusMessage('Reconnecting to instructor sync…')
       },

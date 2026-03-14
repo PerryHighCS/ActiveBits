@@ -5,7 +5,6 @@ import {
   resolvePersistentSessionSecret,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
-import { generateParticipantId } from 'activebits-server/core/participantIds.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -14,6 +13,7 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../shared/revealSyncProtocol.js'
+import { connectSyncDeckStudent, registerSyncDeckStudent } from './studentParticipants.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -927,17 +927,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const name = normalizeStudentName(readStringField(req.body, 'name'))
-    const studentId = generateParticipantId()
-    const now = Date.now()
-
-    session.data.students.push({
-      studentId,
-      name,
-      joinedAt: now,
-      lastSeenAt: now,
-      lastIndices: null,
-      lastStudentStateAt: null,
-    })
+    const { participantId: studentId } = registerSyncDeckStudent(session.data.students, name)
     await sessions.set(session.id, session)
     await broadcastStudentsToInstructors(session.id)
 
@@ -1051,25 +1041,24 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
-      if (client.studentId) {
-        const now = Date.now()
-        const existingStudent = session.data.students.find((student) => student.studentId === client.studentId)
-        if (existingStudent) {
-          existingStudent.lastSeenAt = now
-          existingStudent.name = client.studentName ?? existingStudent.name
-        } else {
-          session.data.students.push({
-            studentId: client.studentId,
-            name: client.studentName ?? 'Student',
-            joinedAt: now,
-            lastSeenAt: now,
-            lastIndices: null,
-            lastStudentStateAt: null,
-          })
-        }
-        await sessions.set(session.id, session)
-        closeDuplicateParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, client)
+      if (!client.studentId) {
+        socket.close(1008, 'missing studentId')
+        return
       }
+
+      const connectedStudent = connectSyncDeckStudent(
+        session.data.students,
+        client.studentId,
+        client.studentName ?? 'Student',
+      )
+      if (!connectedStudent) {
+        socket.close(1008, 'unregistered student')
+        return
+      }
+
+      client.studentId = connectedStudent.participantId
+      await sessions.set(session.id, session)
+      closeDuplicateParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, client)
 
       if (session.data.lastInstructorPayload != null) {
         if (session.data.lastInstructorStatePayload != null && !parseChalkboardCommand(session.data.lastInstructorStatePayload)) {
