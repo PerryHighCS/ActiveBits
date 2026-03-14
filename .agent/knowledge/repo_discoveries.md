@@ -139,7 +139,15 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: `server/core/sessionParticipants.ts` now also exposes shared accepted-participant lookup via `findSessionParticipant(...)`, and the migrated Java activity progress endpoints use it instead of route-local `find(...)` logic.
 - Why it matters: This extends the shared participant contract one step past websocket join. Waiting-room-issued or reconnected `participantId` is now the first lookup key for later progress updates too, while legacy name-only fallback remains explicitly opt-in for older sessions.
 - Evidence: `server/core/sessionParticipants.ts`; `server/sessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`
-- Follow-up action: Reuse the same helper anywhere post-entry activity routes need to resolve an already-accepted participant, and only keep name fallback where backward compatibility with older unnamed records is still necessary.
+- Follow-up action: Reuse the same helper anywhere post-entry activity routes need to resolve an already-accepted participant, and only keep name fallback where backward compatibility with older unnamed records is still necessary. When more routes need to mutate accepted participants, prefer the shared update helper over open-coding lookup plus `lastSeen` mutations.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Area: server | activities
+- Discovery: Shared participant handling now extends beyond lookup into later accepted-participant state updates. `updateSessionParticipant(...)` in `server/core/sessionParticipants.ts` is now used for Java progress updates plus traveling-salesman disconnect/route-submission paths, so those routes all touch `lastSeen` and resolve participants through the same post-handoff rules.
+- Why it matters: This pushes the shared participant contract further past entry and reconnect. More of the “already accepted participant” lifecycle now uses one helper instead of each activity route choosing its own lookup/update semantics.
+- Evidence: `server/core/sessionParticipants.ts`; `server/sessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`; `activities/traveling-salesman/server/routes/students.ts`
+- Follow-up action: Keep moving remaining post-entry mutation routes onto this helper where it fits, but stop short of forcing activities with different participant models onto it until the broader accepted-entry service is designed.
 - Owner: Codex
 
 - Date: 2026-03-14
