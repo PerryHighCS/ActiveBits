@@ -70,6 +70,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: The next true unification step is backend-side, not router-side: collapse the parallel entry-status endpoints into one shared gateway abstraction once participant handoff and role inheritance rules are stable enough.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: server
+- Discovery: Even though join-code and permalink entry still use different REST endpoints, their entry-status payload assembly no longer lives in separate route-local logic. `server/core/entryStatus.ts` now builds both the direct-session and persistent-session gateway decisions.
+- Why it matters: This is the first backend-side unification seam for the waiting-room gateway. It reduces the risk that one entry surface drifts on `presentationMode` or destination rules while the other keeps evolving.
+- Evidence: `server/core/entryStatus.ts`; `server/core/sessions.ts`; `server/routes/persistentSessionRoutes.ts`; `server/sessionEntryRoutes.test.ts`; `server/persistentSessionRoutes.test.ts`
+- Follow-up action: Move shared lookup/normalization around that builder next if we want one true gateway service instead of just one shared decision function.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Area: client | activities
 - Discovery: Waiting-room exit now writes collected values into a shared sessionStorage handoff keyed by destination (`session` or `solo`), and `java-string-practice` consumes that handoff's `displayName` to skip its duplicate live-session name prompt when preflight already captured it.

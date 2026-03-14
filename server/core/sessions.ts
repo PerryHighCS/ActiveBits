@@ -8,6 +8,7 @@ import { SessionCache } from './sessionCache.js'
 import { normalizeSessionData } from './sessionNormalization.js'
 import { getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
 import { consumeSessionEntryParticipant, storeSessionEntryParticipant } from './sessionEntryParticipants.js'
+import { buildSessionEntryStatus } from './entryStatus.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
@@ -282,12 +283,13 @@ export function setupSessionRoutes(app: {
     const activityName = typeof session.type === 'string' ? session.type : ''
     const waitingRoomFieldCount = activityName ? getActivityWaitingRoomFieldCount(activityName) : 0
     const payload = {
-      sessionId,
-      activityName,
-      waitingRoomFieldCount,
-      resolvedRole: 'student',
-      entryOutcome: 'join-live',
-      presentationMode: waitingRoomFieldCount > 0 ? 'render-ui' : 'pass-through',
+      ...buildSessionEntryStatus({
+        sessionId,
+        activityName,
+        waitingRoomFieldCount,
+        resolvedRole: 'student',
+        entryOutcome: 'join-live',
+      }),
     } satisfies SessionEntryStatus & Record<string, unknown>
     res.json(payload)
   })

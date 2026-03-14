@@ -594,7 +594,7 @@ this plan that a separate architecture record becomes useful.
 - [x] Document destination transitions for `wait`, `join-live`, `continue-solo`, and `solo-unavailable`
 - [x] Document presentation-mode rules for `render-ui` vs `pass-through`
 - [ ] Define how permalink and ad-hoc join-code entry both route through the same waiting-room gateway
-  Current status: direct `/:sessionId` and permalink `/activity/:activityName/:hash` entry now both ask the server for an entry-status payload before the router decides whether to wait, preflight, join live, or continue solo. They still use separate backend endpoints and storage lookups rather than one fully shared gateway service, but the client-side flow shape is now aligned.
+  Current status: direct `/:sessionId` and permalink `/activity/:activityName/:hash` entry both ask the server for an entry-status payload before the router decides whether to wait, preflight, join live, or continue solo. Those payloads are now assembled through a shared server-side entry-status builder, but they still use separate backend endpoints and storage lookups rather than one fully shared gateway service.
 
 ### Phase 1 - Persistent link creation flow
 
@@ -633,7 +633,7 @@ that path ships.
 - [x] Implement instructor-cookie and instructor-code role resolution for standalone entry
 - [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
 - [ ] Route ad-hoc join-code entry through the same waiting-room gateway / resolver path as permalink entry
-  Current status: direct `/:sessionId` joins fetch `/api/session/:sessionId/entry` first, and permalink entry now fetches `/api/persistent-session/:hash/entry` first. `SessionRouter` uses those server-backed entry-status payloads to decide whether to render the shared `WaitingRoom` shell or pass straight through before fetching full session data. The remaining gap is that join-code and permalink entry still use parallel entry endpoints instead of one fully unified gateway/participant handoff service.
+  Current status: direct `/:sessionId` joins fetch `/api/session/:sessionId/entry` first, and permalink entry fetches `/api/persistent-session/:hash/entry` first. `SessionRouter` uses those server-backed entry-status payloads to decide whether to render the shared `WaitingRoom` shell or pass straight through before fetching full session data, and both payloads now come from the same server-side builder. The remaining gap is that join-code and permalink entry still use parallel entry endpoints instead of one fully unified gateway/participant handoff service.
 - [x] Enforce entry policy server-side in entry/session APIs so disallowed joins are rejected even when the client is bypassed
 - [x] Preserve existing live-session behavior when instructor is present
   Detail: when a persistent session is already started and the activity declares waiting-room fields, `SessionRouter` renders `WaitingRoom` in a `join-live` preflight state instead of bypassing required field completion. When no waiting-room fields are required, student permalink entry now uses direct pass-through to the live session while teacher-cookie-managed entry still redirects to the manage dashboard.

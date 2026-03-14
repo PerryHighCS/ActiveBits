@@ -16,7 +16,7 @@ import {
   buildSoloOnlyPolicyRejection,
   type PersistentSessionPolicyRejectionPayload,
 } from '../core/persistentSessionPolicyUtils.js'
-import { resolvePersistentSessionEntryStatus } from '../core/persistentSessionEntryStatus.js'
+import { buildPersistentEntryStatus } from '../core/entryStatus.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -392,7 +392,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const cookieKey = `${activityName}:${hash}`
     const hasTeacherCookie = sessionEntries.some((entry) => entry.key === cookieKey)
 
-    res.json(resolvePersistentSessionEntryStatus({
+    res.json(buildPersistentEntryStatus({
       activityName: session.activityName,
       hash,
       entryPolicy: session.entryPolicy,

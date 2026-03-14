@@ -79,6 +79,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Owner: Codex
 
 - Date: 2026-03-14
+- Surface: internal module
+- Contract: Server-side entry-status payload assembly is now centralized in `server/core/entryStatus.ts`. Direct-session and persistent-session routes still expose different REST endpoints and source data, but they now derive `resolvedRole`, `entryOutcome`, and `presentationMode` through the same backend builder logic instead of maintaining parallel payload assembly rules in each route file.
+- Compatibility constraints: Endpoint URLs and top-level payload shapes remain unchanged for this refactor. The shared builder reduces duplication but does not yet merge the underlying session lookup and persistent-link lookup pathways.
+- Validation rules: Presentation mode must remain derived from `waitingRoomFieldCount` plus `entryOutcome`; direct session entry stays fixed to student `join-live`; persistent entry preserves `solo-only`, teacher-cookie, and solo-support rules.
+- Evidence (schema/tests/path): `server/core/entryStatus.ts`; `server/core/sessions.ts`; `server/routes/persistentSessionRoutes.ts`; `server/sessionEntryRoutes.test.ts`; `server/persistentSessionRoutes.test.ts`
+- Follow-up action: Use this shared builder as the seam for a later unified gateway service instead of reintroducing route-local entry decision logic.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Surface: REST | internal module
 - Contract: Live-session waiting-room carry-forward now uses a server-backed handoff contract. `POST /api/session/:sessionId/entry-participant` accepts `{ values }`, normalizes the serializable waiting-room fields, stores them temporarily in the session data under an opaque token, and returns `{ entryParticipantToken, values }`. `GET /api/session/:sessionId/entry-participant/:token` consumes that token once and returns `{ values }`.
 - Compatibility constraints: Solo entry still uses client-only handoff storage. Live-session activities may keep their old sessionStorage value fallback while migrating; the opaque token path is additive and does not change existing activity websocket payloads or runtime `studentId` fields.
