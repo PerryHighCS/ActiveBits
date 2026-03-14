@@ -2,11 +2,10 @@ import { activitySupportsStandalonePermalink, getActivityWaitingRoomFieldCount }
 import {
   getOrCreateActivePersistentSession,
   resetPersistentSession,
+  resolvePersistentSessionEntryPolicy,
 } from './persistentSessions.js'
 import { buildPersistentEntryStatus } from './entryStatus.js'
 import type { PersistentSessionEntryStatus } from '../../types/waitingRoom.js'
-
-const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY: PersistentSessionEntryStatus['entryPolicy'] = 'instructor-required'
 
 interface SessionStoreLike {
   get(id: string): Promise<unknown | null>
@@ -47,7 +46,7 @@ export async function loadPersistentSessionEntryGatewayContext({
 
   return {
     activityName: session.activityName,
-    entryPolicy: entryPolicyOverride ?? DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
+    entryPolicy: entryPolicyOverride ?? resolvePersistentSessionEntryPolicy(session.entryPolicy),
     isStarted: Boolean(session.sessionId),
     sessionId: session.sessionId,
     hasTeacherCookie,

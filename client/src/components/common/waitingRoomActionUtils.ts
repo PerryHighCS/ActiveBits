@@ -1,5 +1,5 @@
 import type { WaitingRoomFieldConfig } from '../../../../types/waitingRoom.js'
-import type { WaitingRoomFieldValueMap } from './waitingRoomFormUtils'
+import type { WaitingRoomFieldErrorMap } from './waitingRoomFormUtils'
 import type { PersistentSessionEntryOutcome } from './persistentSessionEntryPolicyUtils'
 
 export interface WaitingRoomPrimaryActionResolution {
@@ -23,7 +23,7 @@ export function resolveWaitingRoomPrimaryAction({
   startedSessionId,
 }: {
   waitingRoomFields: readonly WaitingRoomFieldConfig[]
-  waitingRoomErrors: WaitingRoomFieldValueMap
+  waitingRoomErrors: WaitingRoomFieldErrorMap
   entryOutcome: PersistentSessionEntryOutcome
   startedSessionId?: string
 }): WaitingRoomPrimaryActionResolution {
