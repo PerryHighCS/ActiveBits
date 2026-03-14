@@ -1,18 +1,10 @@
 import type { ActivityRegistryEntry, ActivityUtility } from '../../../../types/activity.js'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
-import * as waitingRoomModule from '../../../../types/waitingRoom.js'
+import { resolvePersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { normalizeSelectedOptions } from './manageDashboardUtils'
 import { isValidHttpUrl } from './urlValidationUtils'
 
 export const CACHE_TTL = 1000 * 60 * 60 * 12
-
-const waitingRoomExports = (
-  (waitingRoomModule as unknown as { default?: unknown }).default ?? waitingRoomModule
-) as {
-  resolvePersistentSessionEntryPolicy: (value: unknown) => PersistentSessionEntryPolicy
-}
-
-const resolvePersistentSessionEntryPolicy = waitingRoomExports.resolvePersistentSessionEntryPolicy
 
 export interface SessionCacheStorage {
   length: number
@@ -265,7 +257,7 @@ export function getStandaloneHomeActivities(activityList: readonly ActivityRegis
 export function getHomeUtilityActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {
   return activityList.filter((activity) =>
     Array.isArray(activity.utilities)
-    && activity.utilities.some((utility) => utility.surfaces?.includes('home')),
+    && activity.utilities.some((utility) => utility.surfaces?.includes('home') === true),
   )
 }
 
@@ -280,7 +272,7 @@ export function findUtilityRouteMatch(
 ): UtilityRouteMatch | null {
   for (const activity of activityList) {
     const utility = activity.utilities?.find((entry) => entry.path === pathname)
-    if (utility) {
+    if (utility !== undefined) {
       return { activity, utility }
     }
   }
