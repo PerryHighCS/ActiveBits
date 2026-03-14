@@ -37,6 +37,7 @@ import type { PersistentSessionEntryOutcome } from './persistentSessionEntryPoli
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { getWaitingRoomViewModel } from './waitingRoomViewUtils'
 import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorResponse } from './persistentSessionAuthUtils'
+import { resolveWaitingRoomPrimaryAction } from './waitingRoomActionUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -398,14 +399,15 @@ export default function WaitingRoom({
   }
 
   const handleContinueSolo = () => {
-    const nextTouchedFields = waitingRoomFields.reduce<Record<string, boolean>>((fields, field) => {
-      fields[field.id] = true
-      return fields
-    }, {})
-    setTouchedFields(nextTouchedFields)
+    const actionResolution = resolveWaitingRoomPrimaryAction({
+      waitingRoomFields,
+      waitingRoomErrors,
+      entryOutcome,
+    })
+    setTouchedFields(actionResolution.touchedFields)
 
-    if (Object.keys(waitingRoomErrors).length > 0) {
-      setError('Please complete the required details before continuing.')
+    if (actionResolution.errorMessage) {
+      setError(actionResolution.errorMessage)
       return
     }
 
@@ -421,33 +423,36 @@ export default function WaitingRoom({
   }
 
   const handleJoinLive = async () => {
-    const nextTouchedFields = waitingRoomFields.reduce<Record<string, boolean>>((fields, field) => {
-      fields[field.id] = true
-      return fields
-    }, {})
-    setTouchedFields(nextTouchedFields)
+    const actionResolution = resolveWaitingRoomPrimaryAction({
+      waitingRoomFields,
+      waitingRoomErrors,
+      entryOutcome,
+      startedSessionId,
+    })
+    setTouchedFields(actionResolution.touchedFields)
 
-    if (Object.keys(waitingRoomErrors).length > 0) {
-      setError('Please complete the required details before joining.')
+    if (actionResolution.errorMessage) {
+      setError(actionResolution.errorMessage)
       return
     }
 
-    if (!startedSessionId) {
+    const liveSessionId = startedSessionId
+    if (!liveSessionId) {
       setError('Live session is unavailable right now. Please refresh and try again.')
       return
     }
 
     if (onJoinLive) {
-      await persistServerBackedSessionEntryParticipantHandoff(startedSessionId)
+      await persistServerBackedSessionEntryParticipantHandoff(liveSessionId)
       onJoinLive()
       return
     }
 
     const queryString = typeof window !== 'undefined' ? window.location.search : ''
-    await persistServerBackedSessionEntryParticipantHandoff(startedSessionId)
+    await persistServerBackedSessionEntryParticipantHandoff(liveSessionId)
     if (!hasNavigatedRef.current) {
       hasNavigatedRef.current = true
-      void navigate(`/${startedSessionId}${queryString}`)
+      void navigate(`/${liveSessionId}${queryString}`)
     }
   }
 
