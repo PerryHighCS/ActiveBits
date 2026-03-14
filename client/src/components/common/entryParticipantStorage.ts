@@ -178,11 +178,11 @@ export function buildSessionEntryParticipantConsumeApiUrl(sessionId: string, tok
   return `/api/session/${encodeURIComponent(sessionId)}/entry-participant/${encodeURIComponent(token)}`
 }
 
-export async function consumeEntryParticipantDisplayName(
+export async function consumeResolvedEntryParticipantValues(
   storage: EntryParticipantStorageLike,
   { activityName, sessionId, isSoloSession }: EntryParticipantLookupParams,
   fetchImpl: EntryParticipantFetchLike | null = typeof fetch === 'function' ? fetch.bind(globalThis) as EntryParticipantFetchLike : null,
-): Promise<string | null> {
+): Promise<EntryParticipantValueMap | null> {
   const storageKey = isSoloSession
     ? buildSoloEntryParticipantStorageKey(activityName)
     : (sessionId ? buildSessionEntryParticipantStorageKey(activityName, sessionId) : null)
@@ -198,7 +198,7 @@ export async function consumeEntryParticipantDisplayName(
 
   if (handoff.kind === 'values') {
     storage.removeItem(storageKey)
-    return getEntryParticipantDisplayName(handoff.values)
+    return handoff.values
   }
 
   if (!sessionId || fetchImpl == null) {
@@ -218,9 +218,9 @@ export async function consumeEntryParticipantDisplayName(
 
     const payload = (await response.json()) as EntryParticipantFetchResponse
     storage.removeItem(storageKey)
-    return getEntryParticipantDisplayName(normalizeEntryParticipantValues(
+    return normalizeEntryParticipantValues(
       isRecord(payload.values) ? payload.values : {},
-    ))
+    )
   } catch {
     return null
   }
@@ -234,4 +234,30 @@ export function getEntryParticipantDisplayName(values: EntryParticipantValueMap 
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+export function getEntryParticipantParticipantId(values: EntryParticipantValueMap | null): string | null {
+  const value = values?.participantId
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export async function consumeEntryParticipantDisplayName(
+  storage: EntryParticipantStorageLike,
+  params: EntryParticipantLookupParams,
+  fetchImpl?: EntryParticipantFetchLike | null,
+): Promise<string | null> {
+  return getEntryParticipantDisplayName(await consumeResolvedEntryParticipantValues(storage, params, fetchImpl))
+}
+
+export async function consumeEntryParticipantParticipantId(
+  storage: EntryParticipantStorageLike,
+  params: EntryParticipantLookupParams,
+  fetchImpl?: EntryParticipantFetchLike | null,
+): Promise<string | null> {
+  return getEntryParticipantParticipantId(await consumeResolvedEntryParticipantValues(storage, params, fetchImpl))
 }

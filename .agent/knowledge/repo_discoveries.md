@@ -78,6 +78,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Decide whether the next participant-context step should extend the same handoff beyond `displayName` or pivot to shared `participantId` acceptance/reconnect before broadening activity adoption.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: client | server | activities
+- Discovery: The live entry-participant handoff now mints shared `participantId` before activity-specific websocket join. `java-string-practice` and `java-format-practice` can carry that ID into their first live-session websocket URL instead of waiting for the activity route to assign and echo a new one after connection.
+- Why it matters: This is the first shared path where participant identity exists before activity-specific join logic runs, which narrows the gap between “waiting-room accepted entry” and “activity-owned participant registration” without yet forcing every activity onto one registration service.
+- Evidence: `server/core/sessionEntryParticipants.ts`; `server/core/participantIds.ts`; `client/src/components/common/entryParticipantStorage.ts`; `activities/java-string-practice/client/student/JavaStringPractice.tsx`; `activities/java-format-practice/client/student/JavaFormatPractice.tsx`; `.agent/plans/waiting-room-expansion.md`
+- Follow-up action: Extend the same accepted-entry `participantId` model to more activities only after deciding whether shared reconnect semantics or a unified registration endpoint is the next abstraction boundary.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Area: client | activities
 - Discovery: `consumeEntryParticipantDisplayName(...)` now gives activities one shared way to read waiting-room `displayName` handoff data for either live-session or solo entry, and `java-format-practice` is the second activity to adopt it.

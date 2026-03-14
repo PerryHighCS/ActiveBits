@@ -7,8 +7,11 @@ import {
   buildSoloEntryParticipantStorageKey,
   buildEntryParticipantStorageKey,
   consumeEntryParticipantDisplayName,
+  consumeEntryParticipantParticipantId,
+  consumeResolvedEntryParticipantValues,
   consumeEntryParticipantValues,
   getEntryParticipantDisplayName,
+  getEntryParticipantParticipantId,
   persistEntryParticipantToken,
   persistEntryParticipantValues,
   type EntryParticipantStorageLike,
@@ -96,6 +99,12 @@ void test('getEntryParticipantDisplayName returns trimmed display names only', (
   assert.equal(getEntryParticipantDisplayName({ team: 'blue' }), null)
 })
 
+void test('getEntryParticipantParticipantId returns trimmed participant IDs only', () => {
+  assert.equal(getEntryParticipantParticipantId({ participantId: '  abc123  ' }), 'abc123')
+  assert.equal(getEntryParticipantParticipantId({ participantId: '   ' }), null)
+  assert.equal(getEntryParticipantParticipantId({ displayName: 'Ada' }), null)
+})
+
 void test('consumeEntryParticipantDisplayName reads local session or solo handoff values', async () => {
   const storage = createStorage()
 
@@ -159,4 +168,65 @@ void test('consumeEntryParticipantDisplayName can resolve a server-backed token 
   )
   assert.deepEqual(requests, ['/api/session/session-2/entry-participant/token-123'])
   assert.equal(storage.getItem(storageKey), null)
+})
+
+void test('consumeResolvedEntryParticipantValues returns the full server-backed handoff payload', async () => {
+  const storage = createStorage()
+  const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-3')
+  persistEntryParticipantToken(storage, storageKey, 'token-xyz')
+
+  const values = await consumeResolvedEntryParticipantValues(
+    storage,
+    {
+      activityName: 'java-string-practice',
+      sessionId: 'session-3',
+      isSoloSession: false,
+    },
+    async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          values: {
+            displayName: 'Grace',
+            participantId: 'pid-1',
+          },
+        }
+      },
+    }),
+  )
+
+  assert.deepEqual(values, {
+    displayName: 'Grace',
+    participantId: 'pid-1',
+  })
+})
+
+void test('consumeEntryParticipantParticipantId reads a server-backed participant ID handoff', async () => {
+  const storage = createStorage()
+  const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-4')
+  persistEntryParticipantToken(storage, storageKey, 'token-pid')
+
+  assert.equal(
+    await consumeEntryParticipantParticipantId(
+      storage,
+      {
+        activityName: 'java-string-practice',
+        sessionId: 'session-4',
+        isSoloSession: false,
+      },
+      async () => ({
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            values: {
+              participantId: 'participant-42',
+            },
+          }
+        },
+      }),
+    ),
+    'participant-42',
+  )
 })

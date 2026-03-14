@@ -2,7 +2,10 @@ import { useState, useEffect, useRef, useCallback, type KeyboardEvent, type Mous
 import InterleavedOutputGrid from '../components/InterleavedOutputGrid';
 import ExpectedOutputGrid from '../components/ExpectedOutputGrid';
 import { useNavigate } from 'react-router-dom';
-import { consumeEntryParticipantDisplayName } from '@src/components/common/entryParticipantStorage';
+import {
+  consumeEntryParticipantDisplayName,
+  consumeEntryParticipantParticipantId,
+} from '@src/components/common/entryParticipantStorage';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
@@ -218,11 +221,15 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     let isCancelled = false;
 
     void (async () => {
-      const preflightDisplayName = await consumeEntryParticipantDisplayName(window.sessionStorage, {
+      const entryLookup = {
         activityName: 'java-format-practice',
         sessionId,
         isSoloSession,
-      });
+      } as const;
+      const [preflightDisplayName, preflightParticipantId] = await Promise.all([
+        consumeEntryParticipantDisplayName(window.sessionStorage, entryLookup),
+        consumeEntryParticipantParticipantId(window.sessionStorage, entryLookup),
+      ]);
 
       if (isCancelled) {
         return;
@@ -245,6 +252,10 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
 
       if (preflightDisplayName) {
         setStudentName(preflightDisplayName);
+        if (preflightParticipantId) {
+          setStudentId(preflightParticipantId);
+          localStorage.setItem(`student-id-${sessionId}`, preflightParticipantId);
+        }
         localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName);
         setNameSubmitted(true);
       }

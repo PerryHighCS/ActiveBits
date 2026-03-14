@@ -5,6 +5,7 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
   consumeEntryParticipantDisplayName,
+  consumeEntryParticipantParticipantId,
 } from '@src/components/common/entryParticipantStorage'
 import type {
   FeedbackState,
@@ -100,11 +101,15 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
     let isCancelled = false
 
     void (async () => {
-      const preflightDisplayName = await consumeEntryParticipantDisplayName(window.sessionStorage, {
+      const entryLookup = {
         activityName: 'java-string-practice',
         sessionId,
         isSoloSession,
-      })
+      } as const
+      const [preflightDisplayName, preflightParticipantId] = await Promise.all([
+        consumeEntryParticipantDisplayName(window.sessionStorage, entryLookup),
+        consumeEntryParticipantParticipantId(window.sessionStorage, entryLookup),
+      ])
       if (isCancelled) {
         return
       }
@@ -127,6 +132,10 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
 
       if (preflightDisplayName) {
         setStudentName(preflightDisplayName)
+        if (preflightParticipantId) {
+          setStudentId(preflightParticipantId)
+          localStorage.setItem(`student-id-${sessionId}`, preflightParticipantId)
+        }
         localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName)
         setNameSubmitted(true)
       }

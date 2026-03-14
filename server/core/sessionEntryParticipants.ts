@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto'
 import type { SessionRecord } from './sessions.js'
 import type { WaitingRoomSerializableValue } from '../../types/waitingRoom.js'
+import { generateParticipantId } from './participantIds.js'
 
 export type SessionEntryParticipantValues = Record<string, WaitingRoomSerializableValue>
 
@@ -65,11 +66,18 @@ export function storeSessionEntryParticipant(
   values: unknown,
 ): { token: string; values: SessionEntryParticipantValues } {
   const normalizedValues = normalizeSessionEntryParticipantValues(values)
+  const participantId = typeof normalizedValues.participantId === 'string' && normalizedValues.participantId.trim().length > 0
+    ? normalizedValues.participantId.trim()
+    : generateParticipantId()
   const container = getSessionEntryParticipantContainer(session)
   const token = generateEntryParticipantToken()
   container.entryParticipants ??= {}
-  container.entryParticipants[token] = normalizedValues
-  return { token, values: normalizedValues }
+  const storedValues = {
+    ...normalizedValues,
+    participantId,
+  }
+  container.entryParticipants[token] = storedValues
+  return { token, values: storedValues }
 }
 
 export function consumeSessionEntryParticipant(
