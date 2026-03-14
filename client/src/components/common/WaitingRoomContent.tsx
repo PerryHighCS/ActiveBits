@@ -209,7 +209,7 @@ export default function WaitingRoomContent({
           </div>
         )}
 
-        {viewModel.showTeacherSection && allowTeacherSection && (
+        {viewModel.showTeacherSection && allowTeacherSection && !isSoloOnlyMode && (
           <div className="border-t-2 border-gray-200 pt-6 mt-6">
             <p className="text-center text-gray-700 mb-4 font-semibold">
               {entryOutcome === 'continue-solo' ? 'Want to start a live session instead?' : 'Are you the teacher?'}
@@ -237,13 +237,6 @@ export default function WaitingRoomContent({
                 {isSubmitting ? 'Verifying...' : entryOutcome === 'join-live' ? 'Open Manage Dashboard' : 'Start Activity'}
               </Button>
             </form>
-
-            {isSoloOnlyMode && (
-              <p className="text-xs text-gray-500 text-center mt-4">
-                This link is configured for solo use only, so live teacher startup is unavailable here.
-              </p>
-            )}
-
             {hasTeacherCookie && (
               <p className="text-xs text-gray-500 text-center mt-4">
                 Tip: Your browser remembers your teacher code for this link
@@ -253,9 +246,9 @@ export default function WaitingRoomContent({
         )}
       </div>
 
-      {showShareUrl && (
+      {showShareUrl && !isSoloOnlyMode && hasTeacherCookie && (
         <div className="mt-6 text-center text-sm text-gray-500">
-          <p>Share this URL with your students:</p>
+          <p>Share this link:</p>
           <code className="bg-gray-100 px-3 py-1 rounded mt-1 inline-block text-xs">{shareUrl}</code>
         </div>
       )}
