@@ -10,17 +10,26 @@ interface MockResponse {
   json(payload: Record<string, unknown>): void
 }
 
-type RouteHandler = (req: { params: { sessionId: string } }, res: MockResponse) => void | Promise<void>
+type MockRequest = { params: Record<string, string>; body?: Record<string, unknown> }
+type RouteHandler = (req: MockRequest, res: MockResponse) => void | Promise<void>
 
 function createMockApp(): {
   get: (path: string, handler: RouteHandler) => void
+  post: (path: string, handler: RouteHandler) => void
   delete: (path: string, handler: RouteHandler) => void
-  routes: { get: Map<string, RouteHandler>; delete: Map<string, RouteHandler> }
+  routes: { get: Map<string, RouteHandler>; post: Map<string, RouteHandler>; delete: Map<string, RouteHandler> }
 } {
-  const routes = { get: new Map<string, RouteHandler>(), delete: new Map<string, RouteHandler>() }
+  const routes = {
+    get: new Map<string, RouteHandler>(),
+    post: new Map<string, RouteHandler>(),
+    delete: new Map<string, RouteHandler>(),
+  }
   return {
     get(path: string, handler: RouteHandler) {
       routes.get.set(path, handler)
+    },
+    post(path: string, handler: RouteHandler) {
+      routes.post.set(path, handler)
     },
     delete(path: string, handler: RouteHandler) {
       routes.delete.set(path, handler)
@@ -43,10 +52,10 @@ function createMockResponse(): MockResponse {
   }
 }
 
-function getRoute(app: ReturnType<typeof createMockApp>, path: string): RouteHandler {
-  const handler = app.routes.get.get(path)
+function getRoute(app: ReturnType<typeof createMockApp>, method: 'get' | 'post', path: string): RouteHandler {
+  const handler = app.routes[method].get(path)
   if (!handler) {
-    throw new Error(`Route GET ${path} not registered`)
+    throw new Error(`Route ${method.toUpperCase()} ${path} not registered`)
   }
   return handler
 }
@@ -74,10 +83,10 @@ void test('session entry route returns render-ui for activities with waiting-roo
     close: async () => {},
   }
   const app = createMockApp()
-  setupSessionRoutes(app, sessions)
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
 
   const res = createMockResponse()
-  await getRoute(app, '/api/session/:sessionId/entry')({ params: { sessionId: 'session-1' } }, res)
+  await getRoute(app, 'get', '/api/session/:sessionId/entry')({ params: { sessionId: 'session-1' } }, res)
 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.jsonBody, {
@@ -103,10 +112,10 @@ void test('session entry route returns pass-through for activities without waiti
     close: async () => {},
   }
   const app = createMockApp()
-  setupSessionRoutes(app, sessions)
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
 
   const res = createMockResponse()
-  await getRoute(app, '/api/session/:sessionId/entry')({ params: { sessionId: 'session-2' } }, res)
+  await getRoute(app, 'get', '/api/session/:sessionId/entry')({ params: { sessionId: 'session-2' } }, res)
 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.jsonBody, {
@@ -132,11 +141,63 @@ void test('session entry route returns 404 for missing sessions', async () => {
     close: async () => {},
   }
   const app = createMockApp()
-  setupSessionRoutes(app, sessions)
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
 
   const res = createMockResponse()
-  await getRoute(app, '/api/session/:sessionId/entry')({ params: { sessionId: 'missing' } }, res)
+  await getRoute(app, 'get', '/api/session/:sessionId/entry')({ params: { sessionId: 'missing' } }, res)
 
   assert.equal(res.statusCode, 404)
   assert.deepEqual(res.jsonBody, { error: 'invalid session' })
+})
+
+void test('session entry participant routes store and consume waiting-room values by token', async () => {
+  await initializeActivityRegistry()
+  const session = createSessionRecord('session-3', 'java-string-practice')
+  const sessionMap = new Map<string, SessionRecord>([['session-3', session]])
+  const sessions = {
+    get: async (id: string) => sessionMap.get(id) ?? null,
+    set: async (id: string, nextSession: SessionRecord) => {
+      sessionMap.set(id, nextSession)
+    },
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const storeRes = createMockResponse()
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant')({
+    params: { sessionId: 'session-3' },
+    body: {
+      values: {
+        displayName: 'Ada',
+        ignored: () => 'x',
+      },
+    },
+  }, storeRes)
+
+  assert.equal(storeRes.statusCode, 200)
+  const token = typeof storeRes.jsonBody?.entryParticipantToken === 'string' ? storeRes.jsonBody.entryParticipantToken : null
+  assert.equal(typeof token, 'string')
+  assert.deepEqual(storeRes.jsonBody?.values, { displayName: 'Ada' })
+
+  const consumeRes = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
+    params: { sessionId: 'session-3', token: token as string },
+  }, consumeRes)
+
+  assert.equal(consumeRes.statusCode, 200)
+  assert.deepEqual(consumeRes.jsonBody, { values: { displayName: 'Ada' } })
+
+  const missingRes = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
+    params: { sessionId: 'session-3', token: token as string },
+  }, missingRes)
+
+  assert.equal(missingRes.statusCode, 404)
+  assert.deepEqual(missingRes.jsonBody, { error: 'entry participant not found' })
 })

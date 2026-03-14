@@ -70,6 +70,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Extend the same handoff to more activities or replace it with a shared server-backed participant-entry contract once `participantId` issuance and reconnect semantics are designed.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Area: client | server | activities
+- Discovery: Live-session waiting-room carry-forward is no longer limited to raw browser storage. `WaitingRoom` now posts live-entry values to a temporary server-backed session handoff store, keeps only an opaque token in sessionStorage, and `java-string-practice` / `java-format-practice` consume `displayName` through that token-backed path on startup.
+- Why it matters: This is the first real move from “client sessionStorage is the handoff system” toward a shared server-backed participant-entry contract, while still keeping the migration surface narrow enough for the already-adopted activities.
+- Evidence: `server/core/sessionEntryParticipants.ts`; `server/core/sessions.ts`; `server/sessionEntryRoutes.test.ts`; `client/src/components/common/entryParticipantStorage.ts`; `client/src/components/common/WaitingRoom.tsx`; `activities/java-string-practice/client/student/JavaStringPractice.tsx`; `activities/java-format-practice/client/student/JavaFormatPractice.tsx`
+- Follow-up action: Decide whether the next participant-context step should extend the same handoff beyond `displayName` or pivot to shared `participantId` acceptance/reconnect before broadening activity adoption.
+- Owner: Codex
+
 - Date: 2026-03-13
 - Area: client | activities
 - Discovery: `consumeEntryParticipantDisplayName(...)` now gives activities one shared way to read waiting-room `displayName` handoff data for either live-session or solo entry, and `java-format-practice` is the second activity to adopt it.

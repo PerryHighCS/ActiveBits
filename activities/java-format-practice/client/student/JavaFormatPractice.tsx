@@ -215,32 +215,44 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
       return;
     }
 
-    const preflightDisplayName = consumeEntryParticipantDisplayName(window.sessionStorage, {
-      activityName: 'java-format-practice',
-      sessionId,
-      isSoloSession,
-    });
+    let isCancelled = false;
 
-    if (isSoloSession) {
-      setStudentName(preflightDisplayName ?? 'Solo Student');
-      setNameSubmitted(true);
-      return;
-    }
+    void (async () => {
+      const preflightDisplayName = await consumeEntryParticipantDisplayName(window.sessionStorage, {
+        activityName: 'java-format-practice',
+        sessionId,
+        isSoloSession,
+      });
 
-    const savedName = localStorage.getItem(`student-name-${sessionId}`);
-    const savedId = localStorage.getItem(`student-id-${sessionId}`);
-    if (savedName) {
-      setStudentName(savedName);
-      setStudentId(savedId);
-      setNameSubmitted(true);
-      return;
-    }
+      if (isCancelled) {
+        return;
+      }
 
-    if (preflightDisplayName) {
-      setStudentName(preflightDisplayName);
-      localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName);
-      setNameSubmitted(true);
-    }
+      if (isSoloSession) {
+        setStudentName(preflightDisplayName ?? 'Solo Student');
+        setNameSubmitted(true);
+        return;
+      }
+
+      const savedName = localStorage.getItem(`student-name-${sessionId}`);
+      const savedId = localStorage.getItem(`student-id-${sessionId}`);
+      if (savedName) {
+        setStudentName(savedName);
+        setStudentId(savedId);
+        setNameSubmitted(true);
+        return;
+      }
+
+      if (preflightDisplayName) {
+        setStudentName(preflightDisplayName);
+        localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName);
+        setNameSubmitted(true);
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [sessionId, isSoloSession]);
 
   useEffect(() => {

@@ -97,32 +97,43 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
       return
     }
 
-    const preflightDisplayName = consumeEntryParticipantDisplayName(window.sessionStorage, {
-      activityName: 'java-string-practice',
-      sessionId,
-      isSoloSession,
-    })
+    let isCancelled = false
 
-    if (isSoloSession) {
-      setStudentName(preflightDisplayName ?? 'Solo Student')
-      setNameSubmitted(true)
-      return
-    }
+    void (async () => {
+      const preflightDisplayName = await consumeEntryParticipantDisplayName(window.sessionStorage, {
+        activityName: 'java-string-practice',
+        sessionId,
+        isSoloSession,
+      })
+      if (isCancelled) {
+        return
+      }
 
-    if (sessionId == null) return
-    const savedName = localStorage.getItem(`student-name-${sessionId}`)
-    const savedId = localStorage.getItem(`student-id-${sessionId}`)
-    if (savedName) {
-      setStudentName(savedName)
-      setStudentId(savedId)
-      setNameSubmitted(true)
-      return
-    }
+      if (isSoloSession) {
+        setStudentName(preflightDisplayName ?? 'Solo Student')
+        setNameSubmitted(true)
+        return
+      }
 
-    if (preflightDisplayName) {
-      setStudentName(preflightDisplayName)
-      localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName)
-      setNameSubmitted(true)
+      if (sessionId == null) return
+      const savedName = localStorage.getItem(`student-name-${sessionId}`)
+      const savedId = localStorage.getItem(`student-id-${sessionId}`)
+      if (savedName) {
+        setStudentName(savedName)
+        setStudentId(savedId)
+        setNameSubmitted(true)
+        return
+      }
+
+      if (preflightDisplayName) {
+        setStudentName(preflightDisplayName)
+        localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName)
+        setNameSubmitted(true)
+      }
+    })()
+
+    return () => {
+      isCancelled = true
     }
   }, [isSoloSession, sessionId])
 

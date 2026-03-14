@@ -17,7 +17,9 @@ import {
   type WaitingRoomFieldValueMap,
 } from './waitingRoomFormUtils'
 import {
+  buildSessionEntryParticipantSubmitApiUrl,
   buildEntryParticipantStorageKey,
+  persistEntryParticipantToken,
   persistEntryParticipantValues,
   type EntryParticipantDestinationType,
 } from './entryParticipantStorage'
@@ -359,6 +361,42 @@ export default function WaitingRoom({
     persistEntryParticipantValues(window.sessionStorage, storageKey, waitingRoomValues)
   }
 
+  const persistServerBackedSessionEntryParticipantHandoff = async (destinationId: string) => {
+    if (typeof window === 'undefined' || window.sessionStorage == null) {
+      return
+    }
+
+    const storageKey = buildEntryParticipantStorageKey(activityName, 'session', destinationId)
+
+    try {
+      const response = await fetch(buildSessionEntryParticipantSubmitApiUrl(destinationId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          values: waitingRoomValues,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to store waiting-room handoff (${response.status})`)
+      }
+
+      const payload = await response.json() as { entryParticipantToken?: unknown }
+      const token = typeof payload.entryParticipantToken === 'string' ? payload.entryParticipantToken.trim() : ''
+      if (!token) {
+        throw new Error('Missing entry participant token')
+      }
+
+      persistEntryParticipantToken(window.sessionStorage, storageKey, token)
+    } catch (error) {
+      console.warn('[WaitingRoom] Failed to store session entry participant on server, falling back to client handoff:', error)
+      persistEntryParticipantValues(window.sessionStorage, storageKey, waitingRoomValues)
+    }
+  }
+
   const handleContinueSolo = () => {
     const nextTouchedFields = waitingRoomFields.reduce<Record<string, boolean>>((fields, field) => {
       fields[field.id] = true
@@ -382,7 +420,7 @@ export default function WaitingRoom({
     }
   }
 
-  const handleJoinLive = () => {
+  const handleJoinLive = async () => {
     const nextTouchedFields = waitingRoomFields.reduce<Record<string, boolean>>((fields, field) => {
       fields[field.id] = true
       return fields
@@ -400,13 +438,13 @@ export default function WaitingRoom({
     }
 
     if (onJoinLive) {
-      persistEntryParticipantHandoff('session', startedSessionId)
+      await persistServerBackedSessionEntryParticipantHandoff(startedSessionId)
       onJoinLive()
       return
     }
 
     const queryString = typeof window !== 'undefined' ? window.location.search : ''
-    persistEntryParticipantHandoff('session', startedSessionId)
+    await persistServerBackedSessionEntryParticipantHandoff(startedSessionId)
     if (!hasNavigatedRef.current) {
       hasNavigatedRef.current = true
       void navigate(`/${startedSessionId}${queryString}`)

@@ -8,10 +8,26 @@ export interface EntryParticipantStorageLike {
 
 export type EntryParticipantValueMap = Record<string, WaitingRoomSerializableValue>
 export type EntryParticipantDestinationType = 'session' | 'solo'
+type EntryParticipantHandoff =
+  | { kind: 'values'; values: EntryParticipantValueMap }
+  | { kind: 'token'; token: string }
+
 export interface EntryParticipantLookupParams {
   activityName: string
   sessionId?: string
   isSoloSession: boolean
+}
+
+interface EntryParticipantFetchResponse {
+  values?: unknown
+}
+
+export interface EntryParticipantFetchLike {
+  (input: string, init?: RequestInit): Promise<{
+    ok: boolean
+    status: number
+    json(): Promise<unknown>
+  }>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -44,6 +60,18 @@ function normalizeEntryParticipantValues(values: Record<string, unknown>): Entry
   ) as EntryParticipantValueMap
 }
 
+function isEntryParticipantHandoff(value: unknown): value is EntryParticipantHandoff {
+  if (!isRecord(value) || typeof value.kind !== 'string') {
+    return false
+  }
+
+  if (value.kind === 'values') {
+    return isRecord(value.values)
+  }
+
+  return value.kind === 'token' && typeof value.token === 'string'
+}
+
 export function buildEntryParticipantStorageKey(
   activityName: string,
   destinationType: EntryParticipantDestinationType,
@@ -67,9 +95,60 @@ export function persistEntryParticipantValues(
   onWarn: (message: string, error: unknown) => void = console.warn,
 ): void {
   try {
-    storage.setItem(storageKey, JSON.stringify(normalizeEntryParticipantValues(values)))
+    storage.setItem(storageKey, JSON.stringify({
+      kind: 'values',
+      values: normalizeEntryParticipantValues(values),
+    } satisfies EntryParticipantHandoff))
   } catch (error) {
     onWarn('[EntryParticipantStorage] Failed to persist entry participant values:', error)
+  }
+}
+
+export function persistEntryParticipantToken(
+  storage: EntryParticipantStorageLike,
+  storageKey: string,
+  token: string,
+  onWarn: (message: string, error: unknown) => void = console.warn,
+): void {
+  try {
+    storage.setItem(storageKey, JSON.stringify({
+      kind: 'token',
+      token,
+    } satisfies EntryParticipantHandoff))
+  } catch (error) {
+    onWarn('[EntryParticipantStorage] Failed to persist entry participant token:', error)
+  }
+}
+
+function readEntryParticipantHandoff(
+  storage: EntryParticipantStorageLike,
+  storageKey: string,
+  onWarn: (message: string, error: unknown) => void = console.warn,
+): EntryParticipantHandoff | null {
+  const raw = storage.getItem(storageKey)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!isEntryParticipantHandoff(parsed)) {
+      storage.removeItem(storageKey)
+      return null
+    }
+
+    if (parsed.kind === 'values') {
+      return {
+        kind: 'values',
+        values: normalizeEntryParticipantValues(parsed.values),
+      }
+    }
+
+    return parsed
+  } catch (error) {
+    storage.removeItem(storageKey)
+    onWarn('[EntryParticipantStorage] Failed to parse entry participant values:', error)
+    return null
   }
 }
 
@@ -78,22 +157,71 @@ export function consumeEntryParticipantValues(
   storageKey: string,
   onWarn: (message: string, error: unknown) => void = console.warn,
 ): EntryParticipantValueMap | null {
-  const raw = storage.getItem(storageKey)
-  if (!raw) {
+  const handoff = readEntryParticipantHandoff(storage, storageKey, onWarn)
+  if (!handoff) {
+    return null
+  }
+
+  if (handoff.kind !== 'values') {
     return null
   }
 
   storage.removeItem(storageKey)
+  return handoff.values
+}
+
+export function buildSessionEntryParticipantSubmitApiUrl(sessionId: string): string {
+  return `/api/session/${encodeURIComponent(sessionId)}/entry-participant`
+}
+
+export function buildSessionEntryParticipantConsumeApiUrl(sessionId: string, token: string): string {
+  return `/api/session/${encodeURIComponent(sessionId)}/entry-participant/${encodeURIComponent(token)}`
+}
+
+export async function consumeEntryParticipantDisplayName(
+  storage: EntryParticipantStorageLike,
+  { activityName, sessionId, isSoloSession }: EntryParticipantLookupParams,
+  fetchImpl: EntryParticipantFetchLike | null = typeof fetch === 'function' ? fetch.bind(globalThis) as EntryParticipantFetchLike : null,
+): Promise<string | null> {
+  const storageKey = isSoloSession
+    ? buildSoloEntryParticipantStorageKey(activityName)
+    : (sessionId ? buildSessionEntryParticipantStorageKey(activityName, sessionId) : null)
+
+  if (!storageKey) {
+    return null
+  }
+
+  const handoff = readEntryParticipantHandoff(storage, storageKey)
+  if (!handoff) {
+    return null
+  }
+
+  if (handoff.kind === 'values') {
+    storage.removeItem(storageKey)
+    return getEntryParticipantDisplayName(handoff.values)
+  }
+
+  if (!sessionId || fetchImpl == null) {
+    return null
+  }
 
   try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!isRecord(parsed)) {
+    const response = await fetchImpl(buildSessionEntryParticipantConsumeApiUrl(sessionId, handoff.token), {
+      credentials: 'include',
+    })
+    if (!response.ok) {
+      if (response.status === 404) {
+        storage.removeItem(storageKey)
+      }
       return null
     }
 
-    return normalizeEntryParticipantValues(parsed)
-  } catch (error) {
-    onWarn('[EntryParticipantStorage] Failed to parse entry participant values:', error)
+    const payload = (await response.json()) as EntryParticipantFetchResponse
+    storage.removeItem(storageKey)
+    return getEntryParticipantDisplayName(normalizeEntryParticipantValues(
+      isRecord(payload.values) ? payload.values : {},
+    ))
+  } catch {
     return null
   }
 }
@@ -106,19 +234,4 @@ export function getEntryParticipantDisplayName(values: EntryParticipantValueMap 
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
-}
-
-export function consumeEntryParticipantDisplayName(
-  storage: EntryParticipantStorageLike,
-  { activityName, sessionId, isSoloSession }: EntryParticipantLookupParams,
-): string | null {
-  const storageKey = isSoloSession
-    ? buildSoloEntryParticipantStorageKey(activityName)
-    : (sessionId ? buildSessionEntryParticipantStorageKey(activityName, sessionId) : null)
-
-  if (!storageKey) {
-    return null
-  }
-
-  return getEntryParticipantDisplayName(consumeEntryParticipantValues(storage, storageKey))
 }

@@ -615,10 +615,9 @@ that path ships.
 - [x] Support required text/select-style field validation
 - [x] Ensure built-in and custom waiting-room controls meet accessibility semantics and keyboard requirements
 - [ ] Retain preflight form state across destination transitions (for example `wait -> join-live`) and carry collected data forward when entry proceeds
-  Current status: started persistent sessions with waiting-room fields now stay inside the same `WaitingRoom` shell and reuse the stored preflight form state for `join-live`, but downstream join flow still does not submit/store that data beyond local sessionStorage.
+  Current status: started persistent sessions with waiting-room fields now stay inside the same `WaitingRoom` shell and reuse the stored preflight form state for `join-live`. Live-session handoff now stores waiting-room values server-side behind an opaque session token before entry proceeds, while solo carry-forward still uses client storage only.
 - [ ] Submit/store preflight data for later entry flow use
-  Current status: waiting-room `join-live` and `continue-solo` actions now copy collected values into a shared client-side entry handoff store keyed by destination, and `java-string-practice` consumes `displayName` from that handoff to skip its duplicate name gate. Server-backed participant storage and broader activity adoption are still outstanding.
-  Update: `java-format-practice` now consumes the same `displayName` handoff, and `java-string-practice` also honors it on solo entry instead of always forcing `Solo Student`.
+  Current status: waiting-room `join-live` now posts collected values to a server-backed session entry-participant store and leaves only an opaque token in client storage, while `continue-solo` still uses client-side handoff values. `java-string-practice` and `java-format-practice` both consume `displayName` from that live-session server-backed handoff (with client-value fallback) to skip their duplicate name gates. Shared `participantId` issuance/storage and broader activity adoption are still outstanding.
 - [ ] Add clear [TEST] logging for expected error-path tests
 - [ ] Add tests for required-field blocking, validation behavior, accessibility-critical control states, and wait-to-entry state carry-forward
 

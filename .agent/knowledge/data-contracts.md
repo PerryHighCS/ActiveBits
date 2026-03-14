@@ -69,6 +69,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Collapse permalink and join-code entry onto one shared gateway service once server-backed participant handoff/storage is designed, so both surfaces stop carrying parallel entry payloads.
 - Owner: Codex
 
+- Date: 2026-03-14
+- Surface: REST | internal module
+- Contract: Live-session waiting-room carry-forward now uses a server-backed handoff contract. `POST /api/session/:sessionId/entry-participant` accepts `{ values }`, normalizes the serializable waiting-room fields, stores them temporarily in the session data under an opaque token, and returns `{ entryParticipantToken, values }`. `GET /api/session/:sessionId/entry-participant/:token` consumes that token once and returns `{ values }`.
+- Compatibility constraints: Solo entry still uses client-only handoff storage. Live-session activities may keep their old sessionStorage value fallback while migrating; the opaque token path is additive and does not change existing activity websocket payloads or runtime `studentId` fields.
+- Validation rules: Missing sessions return `404 { error: 'invalid session' }`; missing or already-consumed tokens return `404 { error: 'entry participant not found' }`; non-serializable values are dropped during normalization before storage; successful consume removes the stored token entry.
+- Evidence (schema/tests/path): `server/core/sessionEntryParticipants.ts`; `server/core/sessions.ts`; `server/sessionEntryRoutes.test.ts`; `client/src/components/common/entryParticipantStorage.ts`; `client/src/components/common/WaitingRoom.tsx`; `activities/java-string-practice/client/student/JavaStringPractice.tsx`; `activities/java-format-practice/client/student/JavaFormatPractice.tsx`
+- Follow-up action: Extend this contract beyond `displayName` and live-session handoff only when shared participant identity and reconnect ownership are finalized, so we do not ossify an incomplete participant schema too early.
+- Owner: Codex
+
 - Date: 2026-02-23
 - Surface: REST
 - Contract: Activity-specific deep-link URL generation contract for SyncDeck uses `POST /api/syncdeck/generate-url` with request body `{ activityName: 'syncdeck', teacherCode: string, selectedOptions: { presentationUrl?: string } }` and returns `{ hash: string, url: string }` where `url` is the authoritative persistent activity URL including validated query params (`presentationUrl`) plus integrity metadata (`urlHash`).

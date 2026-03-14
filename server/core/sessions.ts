@@ -7,6 +7,7 @@ import type { SessionLike } from './valkeyStore.js'
 import { SessionCache } from './sessionCache.js'
 import { normalizeSessionData } from './sessionNormalization.js'
 import { getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
+import { consumeSessionEntryParticipant, storeSessionEntryParticipant } from './sessionEntryParticipants.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
@@ -267,6 +268,7 @@ export async function createSession(
 
 export function setupSessionRoutes(app: {
   get(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
+  post(path: string, handler: (req: { params: { sessionId: string }; body?: unknown }, res: ResponseLike) => void | Promise<void>): void
   delete(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
 }, sessions: SessionStore, wss: WsServerLike | null = null): void {
   app.get('/api/session/:sessionId/entry', async (req, res) => {
@@ -298,6 +300,48 @@ export function setupSessionRoutes(app: {
       return
     }
     res.json({ session })
+  })
+
+  app.post('/api/session/:sessionId/entry-participant', async (req, res) => {
+    const { sessionId } = req.params
+    const session = await sessions.get(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    try {
+      const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
+      const { token, values } = storeSessionEntryParticipant(session, body.values)
+      await sessions.set(sessionId, session)
+      res.json({ entryParticipantToken: token, values })
+    } catch (error) {
+      console.error('Error storing session entry participant:', { sessionId, error })
+      res.status(500).json({ error: 'internal server error' })
+    }
+  })
+
+  app.get('/api/session/:sessionId/entry-participant/:token', async (req, res) => {
+    const { sessionId, token } = req.params as { sessionId: string; token: string }
+    const session = await sessions.get(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    try {
+      const values = consumeSessionEntryParticipant(session, token)
+      if (!values) {
+        res.status(404).json({ error: 'entry participant not found' })
+        return
+      }
+
+      await sessions.set(sessionId, session)
+      res.json({ values })
+    } catch (error) {
+      console.error('Error consuming session entry participant:', { sessionId, error })
+      res.status(500).json({ error: 'internal server error' })
+    }
   })
 
   app.delete('/api/session/:sessionId', async (req, res) => {

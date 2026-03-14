@@ -1,12 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildSessionEntryParticipantConsumeApiUrl,
   buildSessionEntryParticipantStorageKey,
+  buildSessionEntryParticipantSubmitApiUrl,
   buildSoloEntryParticipantStorageKey,
   buildEntryParticipantStorageKey,
   consumeEntryParticipantDisplayName,
   consumeEntryParticipantValues,
   getEntryParticipantDisplayName,
+  persistEntryParticipantToken,
   persistEntryParticipantValues,
   type EntryParticipantStorageLike,
 } from './entryParticipantStorage'
@@ -61,6 +64,17 @@ void test('persistEntryParticipantValues and consumeEntryParticipantValues round
   assert.equal(storage.getItem(storageKey), null)
 })
 
+void test('buildSessionEntryParticipant submit/consume URLs encode session and token values', () => {
+  assert.equal(
+    buildSessionEntryParticipantSubmitApiUrl('session/1'),
+    '/api/session/session%2F1/entry-participant',
+  )
+  assert.equal(
+    buildSessionEntryParticipantConsumeApiUrl('session/1', 'token 2'),
+    '/api/session/session%2F1/entry-participant/token%202',
+  )
+})
+
 void test('consumeEntryParticipantValues drops malformed payloads after removing them from storage', () => {
   const storage = createStorage()
   const storageKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-2')
@@ -82,7 +96,7 @@ void test('getEntryParticipantDisplayName returns trimmed display names only', (
   assert.equal(getEntryParticipantDisplayName({ team: 'blue' }), null)
 })
 
-void test('consumeEntryParticipantDisplayName reads the correct session or solo handoff key', () => {
+void test('consumeEntryParticipantDisplayName reads local session or solo handoff values', async () => {
   const storage = createStorage()
 
   persistEntryParticipantValues(
@@ -97,7 +111,7 @@ void test('consumeEntryParticipantDisplayName reads the correct session or solo 
   )
 
   assert.equal(
-    consumeEntryParticipantDisplayName(storage, {
+    await consumeEntryParticipantDisplayName(storage, {
       activityName: 'java-string-practice',
       sessionId: 'session-1',
       isSoloSession: false,
@@ -105,11 +119,44 @@ void test('consumeEntryParticipantDisplayName reads the correct session or solo 
     'Ada',
   )
   assert.equal(
-    consumeEntryParticipantDisplayName(storage, {
+    await consumeEntryParticipantDisplayName(storage, {
       activityName: 'java-string-practice',
       sessionId: 'solo-java-string-practice',
       isSoloSession: true,
     }),
     'Grace',
   )
+})
+
+void test('consumeEntryParticipantDisplayName can resolve a server-backed token handoff for session entry', async () => {
+  const storage = createStorage()
+  const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-2')
+  persistEntryParticipantToken(storage, storageKey, 'token-123')
+
+  const requests: string[] = []
+  const fetchImpl = async (input: string) => {
+    requests.push(input)
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          values: {
+            displayName: 'Ada Lovelace',
+          },
+        }
+      },
+    }
+  }
+
+  assert.equal(
+    await consumeEntryParticipantDisplayName(storage, {
+      activityName: 'java-string-practice',
+      sessionId: 'session-2',
+      isSoloSession: false,
+    }, fetchImpl),
+    'Ada Lovelace',
+  )
+  assert.deepEqual(requests, ['/api/session/session-2/entry-participant/token-123'])
+  assert.equal(storage.getItem(storageKey), null)
 })
