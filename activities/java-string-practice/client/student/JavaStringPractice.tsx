@@ -4,10 +4,9 @@ import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
-  consumeResolvedEntryParticipantValues,
-  getEntryParticipantDisplayName,
-  getEntryParticipantParticipantId,
-} from '@src/components/common/entryParticipantStorage'
+  persistSessionParticipantIdentity,
+  resolveInitialEntryParticipantIdentity,
+} from '@src/components/common/entryParticipantIdentityUtils'
 import type {
   FeedbackState,
   JavaStringAnswer,
@@ -91,54 +90,27 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
   }, [])
 
   useEffect(() => {
-    if (typeof window === 'undefined' || window.sessionStorage == null) {
-      if (isSoloSession) {
-        setStudentName('Solo Student')
-        setNameSubmitted(true)
-      }
+    if (typeof window === 'undefined') {
       return
     }
 
     let isCancelled = false
 
     void (async () => {
-      const entryLookup = {
+      const identity = await resolveInitialEntryParticipantIdentity({
         activityName: 'java-string-practice',
         sessionId,
         isSoloSession,
-      } as const
-      const preflightValues = await consumeResolvedEntryParticipantValues(window.sessionStorage, entryLookup)
-      const preflightDisplayName = getEntryParticipantDisplayName(preflightValues)
-      const preflightParticipantId = getEntryParticipantParticipantId(preflightValues)
+        localStorage: window.localStorage,
+        sessionStorage: window.sessionStorage,
+      })
       if (isCancelled) {
         return
       }
 
-      if (isSoloSession) {
-        setStudentName(preflightDisplayName ?? 'Solo Student')
-        setNameSubmitted(true)
-        return
-      }
-
-      if (sessionId == null) return
-      const savedName = localStorage.getItem(`student-name-${sessionId}`)
-      const savedId = localStorage.getItem(`student-id-${sessionId}`)
-      if (savedName) {
-        setStudentName(savedName)
-        setStudentId(savedId)
-        setNameSubmitted(true)
-        return
-      }
-
-      if (preflightDisplayName) {
-        setStudentName(preflightDisplayName)
-        if (preflightParticipantId) {
-          setStudentId(preflightParticipantId)
-          localStorage.setItem(`student-id-${sessionId}`, preflightParticipantId)
-        }
-        localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName)
-        setNameSubmitted(true)
-      }
+      setStudentName(identity.studentName)
+      setStudentId(identity.studentId)
+      setNameSubmitted(identity.nameSubmitted)
     })()
 
     return () => {
@@ -327,7 +299,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
               onSubmit={(event) => {
                 event.preventDefault()
                 if (studentName.trim() && sessionId) {
-                  localStorage.setItem(`student-name-${sessionId}`, studentName.trim())
+                  persistSessionParticipantIdentity(window.localStorage, sessionId, studentName.trim(), studentId)
                   setNameSubmitted(true)
                 }
               }}

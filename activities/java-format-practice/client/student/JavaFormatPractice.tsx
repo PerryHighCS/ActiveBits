@@ -3,10 +3,9 @@ import InterleavedOutputGrid from '../components/InterleavedOutputGrid';
 import ExpectedOutputGrid from '../components/ExpectedOutputGrid';
 import { useNavigate } from 'react-router-dom';
 import {
-  consumeResolvedEntryParticipantValues,
-  getEntryParticipantDisplayName,
-  getEntryParticipantParticipantId,
-} from '@src/components/common/entryParticipantStorage';
+  persistSessionParticipantIdentity,
+  resolveInitialEntryParticipantIdentity,
+} from '@src/components/common/entryParticipantIdentityUtils';
 import '../components/styles.css';
 import ChallengeSelector from '../components/ChallengeSelector';
 import CharacterGrid from '../components/CharacterGrid';
@@ -211,54 +210,28 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
 
   // Initialize student name for non-solo sessions
   useEffect(() => {
-    if (typeof window === 'undefined' || window.sessionStorage == null) {
-      if (isSoloSession) {
-        setStudentName('Solo Student');
-        setNameSubmitted(true);
-      }
+    if (typeof window === 'undefined') {
       return;
     }
 
     let isCancelled = false;
 
     void (async () => {
-      const entryLookup = {
+      const identity = await resolveInitialEntryParticipantIdentity({
         activityName: 'java-format-practice',
         sessionId,
         isSoloSession,
-      } as const;
-      const preflightValues = await consumeResolvedEntryParticipantValues(window.sessionStorage, entryLookup);
-      const preflightDisplayName = getEntryParticipantDisplayName(preflightValues);
-      const preflightParticipantId = getEntryParticipantParticipantId(preflightValues);
+        localStorage: window.localStorage,
+        sessionStorage: window.sessionStorage,
+      });
 
       if (isCancelled) {
         return;
       }
 
-      if (isSoloSession) {
-        setStudentName(preflightDisplayName ?? 'Solo Student');
-        setNameSubmitted(true);
-        return;
-      }
-
-      const savedName = localStorage.getItem(`student-name-${sessionId}`);
-      const savedId = localStorage.getItem(`student-id-${sessionId}`);
-      if (savedName) {
-        setStudentName(savedName);
-        setStudentId(savedId);
-        setNameSubmitted(true);
-        return;
-      }
-
-      if (preflightDisplayName) {
-        setStudentName(preflightDisplayName);
-        if (preflightParticipantId) {
-          setStudentId(preflightParticipantId);
-          localStorage.setItem(`student-id-${sessionId}`, preflightParticipantId);
-        }
-        localStorage.setItem(`student-name-${sessionId}`, preflightDisplayName);
-        setNameSubmitted(true);
-      }
+      setStudentName(identity.studentName);
+      setStudentId(identity.studentId);
+      setNameSubmitted(identity.nameSubmitted);
     })();
 
     return () => {
@@ -412,12 +385,9 @@ export default function JavaFormatPractice({ sessionData }: JavaFormatPracticePr
     }
 
     setStudentName(name);
-    localStorage.setItem(`student-name-${sessionId}`, name);
-
-    // Generate a student ID
-    const id = `${name}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    setStudentId(id);
-    localStorage.setItem(`student-id-${sessionId}`, id);
+    if (sessionId) {
+      persistSessionParticipantIdentity(window.localStorage, sessionId, name, studentId);
+    }
 
     setNameSubmitted(true);
   };

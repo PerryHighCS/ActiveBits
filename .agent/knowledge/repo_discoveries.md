@@ -127,6 +127,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | activities
+- Discovery: The already-migrated Java activities now share one client-side post-handoff identity helper in `entryParticipantIdentityUtils.ts`. That helper consumes waiting-room handoff values, prefers existing session-local identity when present, persists accepted preflight identity into local storage for reconnect, and avoids `java-format-practice` minting a one-off client-generated participant ID during manual name submit.
+- Why it matters: This does not finish the cross-activity participant contract, but it does tighten the current “after handoff, before websocket” behavior into one reusable rule for the migrated activities. It makes the remaining gap clearer: the branch now lacks a shared server-accepted participant contract, not a shared client hydration pattern.
+- Evidence: `client/src/components/common/entryParticipantIdentityUtils.ts`; `client/src/components/common/entryParticipantIdentityUtils.test.ts`; `activities/java-string-practice/client/student/JavaStringPractice.tsx`; `activities/java-format-practice/client/student/JavaFormatPractice.tsx`
+- Follow-up action: Reuse this helper for any additional activities that adopt waiting-room identity before the server-side accepted-entry contract is finalized, and replace it later if a broader shared participant bootstrap flow becomes authoritative.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: client | server | activities
 - Discovery: The live entry-participant handoff now mints shared `participantId` before activity-specific websocket join. `java-string-practice` and `java-format-practice` can carry that ID into their first live-session websocket URL instead of waiting for the activity route to assign and echo a new one after connection.
 - Why it matters: This is the first shared path where participant identity exists before activity-specific join logic runs, which narrows the gap between “waiting-room accepted entry” and “activity-owned participant registration” without yet forcing every activity onto one registration service.
