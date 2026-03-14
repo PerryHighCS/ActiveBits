@@ -21,6 +21,32 @@ export interface ConnectSessionParticipantResult<TParticipant extends SessionPar
   isNew: boolean
 }
 
+export interface FindSessionParticipantParams<TParticipant extends SessionParticipantIdentity> {
+  participants: TParticipant[]
+  participantId: string | null
+  participantName?: string | null
+  allowLegacyUnnamedMatch?: boolean
+}
+
+export function findSessionParticipant<TParticipant extends SessionParticipantIdentity>({
+  participants,
+  participantId,
+  participantName = null,
+  allowLegacyUnnamedMatch = false,
+}: FindSessionParticipantParams<TParticipant>): TParticipant | undefined {
+  if (participantId) {
+    return participants.find((participant) => participant.id === participantId)
+  }
+
+  if (!participantName) {
+    return undefined
+  }
+
+  return participants.find((participant) =>
+    participant.name === participantName && (!allowLegacyUnnamedMatch || participant.id == null || participant.id === ''),
+  )
+}
+
 export function connectSessionParticipant<TParticipant extends SessionParticipantIdentity>({
   participants,
   participantId,
@@ -30,11 +56,12 @@ export function connectSessionParticipant<TParticipant extends SessionParticipan
   createParticipant,
   generateParticipantId,
 }: ConnectSessionParticipantParams<TParticipant>): ConnectSessionParticipantResult<TParticipant> {
-  const existingParticipant = participantId
-    ? participants.find((participant) => participant.id === participantId)
-    : participants.find((participant) =>
-        participant.name === participantName && (!allowLegacyUnnamedMatch || participant.id == null || participant.id === ''),
-      )
+  const existingParticipant = findSessionParticipant({
+    participants,
+    participantId,
+    participantName,
+    allowLegacyUnnamedMatch,
+  })
 
   if (existingParticipant) {
     existingParticipant.connected = true

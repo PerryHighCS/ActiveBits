@@ -135,6 +135,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: server | activities
+- Discovery: `server/core/sessionParticipants.ts` now also exposes shared accepted-participant lookup via `findSessionParticipant(...)`, and the migrated Java activity progress endpoints use it instead of route-local `find(...)` logic.
+- Why it matters: This extends the shared participant contract one step past websocket join. Waiting-room-issued or reconnected `participantId` is now the first lookup key for later progress updates too, while legacy name-only fallback remains explicitly opt-in for older sessions.
+- Evidence: `server/core/sessionParticipants.ts`; `server/sessionParticipants.test.ts`; `activities/java-string-practice/server/routes.ts`; `activities/java-format-practice/server/routes.ts`
+- Follow-up action: Reuse the same helper anywhere post-entry activity routes need to resolve an already-accepted participant, and only keep name fallback where backward compatibility with older unnamed records is still necessary.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: client | server | activities
 - Discovery: The live entry-participant handoff now mints shared `participantId` before activity-specific websocket join. `java-string-practice` and `java-format-practice` can carry that ID into their first live-session websocket URL instead of waiting for the activity route to assign and echo a new one after connection.
 - Why it matters: This is the first shared path where participant identity exists before activity-specific join logic runs, which narrows the gap between “waiting-room accepted entry” and “activity-owned participant registration” without yet forcing every activity onto one registration service.

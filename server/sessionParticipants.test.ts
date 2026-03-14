@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { connectSessionParticipant } from './core/sessionParticipants.js'
+import { connectSessionParticipant, findSessionParticipant } from './core/sessionParticipants.js'
 
 interface TestParticipant {
   id?: string
@@ -73,4 +73,40 @@ void test('connectSessionParticipant creates a new participant when none match',
     joined: 40,
     lastSeen: 40,
   })
+})
+
+void test('findSessionParticipant prefers participantId and can fall back to unnamed legacy match by name', () => {
+  const participants: TestParticipant[] = [
+    { id: 'student-1', name: 'Ada', connected: true, joined: 10, lastSeen: 10 },
+    { name: 'Grace', connected: false, joined: 12, lastSeen: 12 },
+  ]
+
+  assert.equal(
+    findSessionParticipant({
+      participants,
+      participantId: 'student-1',
+      participantName: 'Wrong Name',
+    }),
+    participants[0],
+  )
+
+  assert.equal(
+    findSessionParticipant({
+      participants,
+      participantId: null,
+      participantName: 'Grace',
+      allowLegacyUnnamedMatch: true,
+    }),
+    participants[1],
+  )
+
+  assert.equal(
+    findSessionParticipant({
+      participants,
+      participantId: null,
+      participantName: 'Ada',
+      allowLegacyUnnamedMatch: true,
+    }),
+    undefined,
+  )
 })

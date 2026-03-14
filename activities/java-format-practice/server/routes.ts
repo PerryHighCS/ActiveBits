@@ -1,7 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { generateParticipantId } from 'activebits-server/core/participantIds.js'
-import { connectSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
+import { connectSessionParticipant, findSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
@@ -320,7 +320,13 @@ export default function setupJavaFormatPracticeRoutes(
     }
 
     const studentId = typeof body.studentId === 'string' ? body.studentId : null
-    const student = session.data.students.find((entry) => entry.id === studentId)
+    const studentName = validateStudentName(body.studentName)
+    const student = findSessionParticipant({
+      participants: session.data.students,
+      participantId: studentId,
+      participantName: studentName,
+      allowLegacyUnnamedMatch: true,
+    })
     if (student) {
       student.stats = stats
       student.lastSeen = Date.now()
