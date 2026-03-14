@@ -3,6 +3,7 @@ import type { TravelingSalesmanRouteApp, TravelingSalesmanSessionStore } from '.
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers } from './shared.js'
+import { findSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -313,4 +314,3 @@ export default function registerAlgorithmRoutes(
     res.json({ success: true })
   })
 }
-import { findSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
