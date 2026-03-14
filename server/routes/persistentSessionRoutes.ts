@@ -1,6 +1,4 @@
 import {
-  activitySupportsSoloMode,
-  getActivityWaitingRoomFieldCount,
   getAllowedActivities,
   isValidActivity,
 } from '../activities/activityRegistry.js'
@@ -9,14 +7,16 @@ import {
   getOrCreateActivePersistentSession,
   getPersistentSession,
   verifyTeacherCodeWithHash,
-  resetPersistentSession,
   resolvePersistentSessionEntryPolicy,
 } from '../core/persistentSessions.js'
 import {
   buildSoloOnlyPolicyRejection,
   type PersistentSessionPolicyRejectionPayload,
 } from '../core/persistentSessionPolicyUtils.js'
-import { buildPersistentEntryStatus } from '../core/entryStatus.js'
+import {
+  loadPersistentSessionEntryGatewayContext,
+  loadPersistentSessionEntryStatus,
+} from '../core/persistentSessionEntryGateway.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -331,32 +331,28 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    let session = await getOrCreateActivePersistentSession(activityName, hash)
-
-    if (session.sessionId) {
-      const backingSession = await sessions.get(session.sessionId)
-      if (backingSession == null) {
-        await resetPersistentSession(hash)
-        session = await getOrCreateActivePersistentSession(activityName, hash)
-      }
-    }
-
     const { sessions: sessionEntries, corrupted: cookieCorrupted } = parsePersistentSessionsCookie(
       req.cookies?.persistent_sessions,
       'persistent_sessions (/api/persistent-session/:hash)',
     )
     const cookieKey = `${activityName}:${hash}`
     const hasTeacherCookie = sessionEntries.some((entry) => entry.key === cookieKey)
+    const entryContext = await loadPersistentSessionEntryGatewayContext({
+      activityName,
+      hash,
+      hasTeacherCookie,
+      sessions,
+    })
 
     const queryParams = Object.fromEntries(Object.entries(req.query).filter(([key]) => key !== 'activityName'))
 
     res.json({
-      activityName: session.activityName,
-      entryPolicy: resolvePersistentSessionEntryPolicy(session.entryPolicy),
-      hasTeacherCookie,
+      activityName: entryContext.activityName,
+      entryPolicy: entryContext.entryPolicy,
+      hasTeacherCookie: entryContext.hasTeacherCookie,
       cookieCorrupted,
-      isStarted: Boolean(session.sessionId),
-      sessionId: session.sessionId,
+      isStarted: entryContext.isStarted,
+      sessionId: entryContext.sessionId,
       queryParams,
     })
   })
@@ -375,16 +371,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    let session = await getOrCreateActivePersistentSession(activityName, hash)
-
-    if (session.sessionId) {
-      const backingSession = await sessions.get(session.sessionId)
-      if (backingSession == null) {
-        await resetPersistentSession(hash)
-        session = await getOrCreateActivePersistentSession(activityName, hash)
-      }
-    }
-
     const { sessions: sessionEntries } = parsePersistentSessionsCookie(
       req.cookies?.persistent_sessions,
       'persistent_sessions (/api/persistent-session/:hash/entry)',
@@ -392,15 +378,11 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const cookieKey = `${activityName}:${hash}`
     const hasTeacherCookie = sessionEntries.some((entry) => entry.key === cookieKey)
 
-    res.json(buildPersistentEntryStatus({
-      activityName: session.activityName,
+    res.json(await loadPersistentSessionEntryStatus({
+      activityName,
       hash,
-      entryPolicy: session.entryPolicy,
-      isStarted: Boolean(session.sessionId),
-      sessionId: session.sessionId,
       hasTeacherCookie,
-      activitySupportsSolo: activitySupportsSoloMode(session.activityName),
-      waitingRoomFieldCount: getActivityWaitingRoomFieldCount(session.activityName),
+      sessions,
     }))
   })
 
