@@ -51,6 +51,7 @@ ActiveBits/
 6. Teacher can access the session at any time via their link ( `/activity/{activityName}/{hash}` )
 7. Auto-authentication using teacher code cookie
 8. Download CSV backup of all permanent links
+9. For `solo-allowed` links with no active live session, the waiting room remains visible so students can choose solo mode and instructors without a remembered cookie can still enter the teacher code to start a new live session
 
 ### Student Flow
 1. Receive session ID or permanent link from teacher

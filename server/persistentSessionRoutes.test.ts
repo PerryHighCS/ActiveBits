@@ -1020,6 +1020,21 @@ void test('create persists non-default entry policy in metadata and list exposes
   assert.equal((sessionsList[0] as Record<string, unknown>).entryPolicy, 'solo-allowed')
 })
 
+void test('getOrCreateActivePersistentSession updates stored entry policy when an existing permalink is reused', async (t) => {
+  initializePersistentStorage(null)
+
+  const activityName = 'gallery-walk'
+  const teacherCode = 'reused-policy-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'instructor-required')
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+
+  const stored = await getPersistentSession(hash)
+  assert.equal(stored?.entryPolicy, 'solo-allowed')
+})
+
 void test('persistent session list omits remembered teacherCode when the cookie entry no longer validates', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

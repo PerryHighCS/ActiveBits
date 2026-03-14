@@ -239,16 +239,17 @@ export async function getOrCreateActivePersistentSession(
   activityName: string,
   hash: string,
   hashedTeacherCode: string | null = null,
-  entryPolicy: PersistentSessionEntryPolicy = DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
+  entryPolicy?: PersistentSessionEntryPolicy,
 ): Promise<PersistentSession> {
   let session = await persistentStore.get(hash)
   let shouldPersist = false
+  const normalizedRequestedEntryPolicy = entryPolicy === undefined ? undefined : resolvePersistentSessionEntryPolicy(entryPolicy)
 
   if (!session) {
     session = {
       activityName,
       hashedTeacherCode,
-      entryPolicy,
+      entryPolicy: normalizedRequestedEntryPolicy ?? DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
       createdAt: Date.now(),
       sessionId: null,
       teacherSocketId: null,
@@ -265,9 +266,12 @@ export async function getOrCreateActivePersistentSession(
     shouldPersist = true
   }
 
-  const normalizedEntryPolicy = resolvePersistentSessionEntryPolicy(session.entryPolicy)
-  if (session.entryPolicy !== normalizedEntryPolicy) {
-    session.entryPolicy = normalizedEntryPolicy
+  const normalizedStoredEntryPolicy = resolvePersistentSessionEntryPolicy(session.entryPolicy)
+  if (normalizedRequestedEntryPolicy !== undefined && normalizedStoredEntryPolicy !== normalizedRequestedEntryPolicy) {
+    session.entryPolicy = normalizedRequestedEntryPolicy
+    shouldPersist = true
+  } else if (session.entryPolicy !== normalizedStoredEntryPolicy) {
+    session.entryPolicy = normalizedStoredEntryPolicy
     shouldPersist = true
   }
 

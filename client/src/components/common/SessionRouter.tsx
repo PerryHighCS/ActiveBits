@@ -243,21 +243,6 @@ const SessionRouter = () => {
   }, [activityName, hash, navigate, persistentSessionEntryStatus?.isStarted])
 
   useEffect(() => {
-    if (!hash || !activityName || !persistentSessionEntryStatus) {
-      return
-    }
-
-    if (
-      persistentSessionEntryStatus.entryOutcome !== 'continue-solo'
-      || persistentSessionEntryStatus.presentationMode !== 'pass-through'
-    ) {
-      return
-    }
-
-    void navigate(`/solo/${activityName}${getWindowSearch()}`, { replace: true })
-  }, [activityName, hash, navigate, persistentSessionEntryStatus])
-
-  useEffect(() => {
     if (!hash || !activityName || !persistentSessionEntryStatus?.isStarted || !persistentSessionEntryStatus.sessionId) {
       return
     }
@@ -377,10 +362,6 @@ const SessionRouter = () => {
           </p>
         </div>
       )
-    }
-
-    if (persistentEntryOutcome === 'continue-solo') {
-      return <div className="text-center">Redirecting to solo mode...</div>
     }
 
     if (persistentSessionEntryStatus.isStarted && persistentSessionEntryStatus.sessionId) {

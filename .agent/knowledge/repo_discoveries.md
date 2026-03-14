@@ -231,6 +231,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-14
+- Area: client | permalink entry
+- Discovery: `solo-allowed` permalinks should stay on the waiting room when no live session is active instead of auto-redirecting immediately to `/solo/...`.
+- Why it matters: The waiting room is the only shared surface where both sides of the “live or solo” choice are available at once: students can continue solo, while instructors without a remembered cookie still need the teacher-code form to start a live session. Auto-redirecting to solo makes that teacher-start path unreachable.
+- Evidence: `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/WaitingRoom.tsx`
+- Follow-up action: Keep `continue-solo` as a waiting-room state for permalink entry and only navigate to `/solo/...` after the student explicitly chooses that action.
+- Owner: Codex
+
+- Date: 2026-03-14
 - Area: server | activities
 - Discovery: `server/core/sessionParticipants.ts` now also exposes shared accepted-participant lookup via `findSessionParticipant(...)`, and the migrated Java activity progress endpoints use it instead of route-local `find(...)` logic.
 - Why it matters: This extends the shared participant contract one step past websocket join. Waiting-room-issued or reconnected `participantId` is now the first lookup key for later progress updates too, while legacy name-only fallback remains explicitly opt-in for older sessions.
