@@ -14,6 +14,8 @@ export interface AcceptedEntryParticipantSessionLike {
   data: unknown
 }
 
+const MAX_ACCEPTED_ENTRY_PARTICIPANTS = 100
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -60,6 +62,19 @@ export function acceptEntryParticipant(
   const container = getAcceptedEntryParticipantContainer(session)
   container.acceptedEntryParticipants ??= {}
   container.acceptedEntryParticipants[participantId] = record
+
+  const acceptedEntries = Object.entries(container.acceptedEntryParticipants)
+  if (acceptedEntries.length > MAX_ACCEPTED_ENTRY_PARTICIPANTS) {
+    const overflowCount = acceptedEntries.length - MAX_ACCEPTED_ENTRY_PARTICIPANTS
+    const tokensToPrune = acceptedEntries
+      .sort(([, left], [, right]) => left.acceptedAt - right.acceptedAt)
+      .slice(0, overflowCount)
+
+    for (const [id] of tokensToPrune) {
+      delete container.acceptedEntryParticipants[id]
+    }
+  }
+
   return record
 }
 

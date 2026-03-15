@@ -51,3 +51,21 @@ void test('resolveAcceptedEntryParticipantName prefers explicit fallback names b
   assert.equal(resolveAcceptedEntryParticipantName(session, 'participant-1', null), 'Ada')
   assert.equal(resolveAcceptedEntryParticipantName(session, 'missing', null), null)
 })
+
+void test('acceptEntryParticipant prunes oldest accepted-entry records when capacity is exceeded', () => {
+  const session = createSessionRecord('session-4')
+
+  for (let index = 0; index < 101; index += 1) {
+    acceptEntryParticipant(session, {
+      participantId: `participant-${index}`,
+      displayName: `Student ${index}`,
+    }, index)
+  }
+
+  assert.equal(findAcceptedEntryParticipant(session, 'participant-0'), null)
+  assert.deepEqual(findAcceptedEntryParticipant(session, 'participant-100'), {
+    participantId: 'participant-100',
+    displayName: 'Student 100',
+    acceptedAt: 100,
+  })
+})
