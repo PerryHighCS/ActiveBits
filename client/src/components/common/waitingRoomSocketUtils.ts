@@ -56,7 +56,7 @@ export function attachWaitingRoomSocketHandlers({
   const navigateOnce = (path: string) => {
     if (hasNavigatedRef.current) return
     hasNavigatedRef.current = true
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+    if (ws.readyState === 1 /* OPEN */ || ws.readyState === 0 /* CONNECTING */) {
       ws.close()
     }
     void navigate(path)
