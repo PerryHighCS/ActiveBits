@@ -23,6 +23,8 @@ interface ResolveInitialEntryParticipantIdentityParams extends EntryParticipantL
   soloDisplayName?: string
 }
 
+type StorageWarnHandler = (message: string, error: unknown) => void
+
 function getStoredString(storage: EntryParticipantStorageLike, key: string): string | null {
   const value = storage.getItem(key)
   if (typeof value !== 'string') {
@@ -38,14 +40,25 @@ export function persistSessionParticipantIdentity(
   sessionId: string,
   studentName: string,
   studentId: string | null,
+  onWarn: StorageWarnHandler = console.warn,
 ): void {
   persistSessionParticipantContext(storage, sessionId, {
     studentName,
     studentId,
-  })
-  storage.setItem(`student-name-${sessionId}`, studentName)
+  }, onWarn)
+
+  try {
+    storage.setItem(`student-name-${sessionId}`, studentName)
+  } catch (error) {
+    onWarn('[EntryParticipantIdentity] Failed to persist student name:', error)
+  }
+
   if (studentId) {
-    storage.setItem(`student-id-${sessionId}`, studentId)
+    try {
+      storage.setItem(`student-id-${sessionId}`, studentId)
+    } catch (error) {
+      onWarn('[EntryParticipantIdentity] Failed to persist student id:', error)
+    }
   }
 }
 

@@ -43,6 +43,32 @@ void test('persistSessionParticipantIdentity stores session participant name and
   })
 })
 
+void test('persistSessionParticipantIdentity degrades gracefully when storage writes throw', () => {
+  const warnings: Array<{ message: string; error: unknown }> = []
+  const storage: EntryParticipantStorageLike = {
+    getItem() {
+      return null
+    },
+    setItem() {
+      throw new Error('quota exceeded')
+    },
+    removeItem() {
+      // no-op
+    },
+  }
+
+  assert.doesNotThrow(() => {
+    persistSessionParticipantIdentity(storage, 'session-throw', 'Ada', 'participant-1', (message, error) => {
+      warnings.push({ message, error })
+    })
+  })
+
+  assert.equal(warnings.length, 3)
+  assert.match(warnings[0]?.message ?? '', /session participant context/i)
+  assert.match(warnings[1]?.message ?? '', /student name/i)
+  assert.match(warnings[2]?.message ?? '', /student id/i)
+})
+
 void test('resolveInitialEntryParticipantIdentity prefers stored live-session identity', async () => {
   const localStorage = createStorage()
   const sessionStorage = createStorage()
