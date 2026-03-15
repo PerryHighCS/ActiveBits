@@ -178,8 +178,8 @@ export function buildSessionEntryParticipantSubmitApiUrl(sessionId: string): str
   return `/api/session/${encodeURIComponent(sessionId)}/entry-participant`
 }
 
-export function buildSessionEntryParticipantConsumeApiUrl(sessionId: string, token: string): string {
-  return `/api/session/${encodeURIComponent(sessionId)}/entry-participant/${encodeURIComponent(token)}`
+export function buildSessionEntryParticipantConsumeApiUrl(sessionId: string): string {
+  return `/api/session/${encodeURIComponent(sessionId)}/entry-participant/consume`
 }
 
 export function buildPersistentEntryParticipantSubmitApiUrl(hash: string, activityName: string): string {
@@ -187,9 +187,9 @@ export function buildPersistentEntryParticipantSubmitApiUrl(hash: string, activi
   return `/api/persistent-session/${encodeURIComponent(hash)}/entry-participant?${query.toString()}`
 }
 
-export function buildPersistentEntryParticipantConsumeApiUrl(hash: string, token: string, activityName: string): string {
+export function buildPersistentEntryParticipantConsumeApiUrl(hash: string, activityName: string): string {
   const query = new URLSearchParams({ activityName })
-  return `/api/persistent-session/${encodeURIComponent(hash)}/entry-participant/${encodeURIComponent(token)}?${query.toString()}`
+  return `/api/persistent-session/${encodeURIComponent(hash)}/entry-participant/consume?${query.toString()}`
 }
 
 export async function consumeResolvedEntryParticipantValues(
@@ -222,16 +222,21 @@ export async function consumeResolvedEntryParticipantValues(
   try {
     const apiUrl = isSoloSession
       ? (typeof handoff.persistentHash === 'string' && handoff.persistentHash.length > 0
-        ? buildPersistentEntryParticipantConsumeApiUrl(handoff.persistentHash, handoff.token, activityName)
+        ? buildPersistentEntryParticipantConsumeApiUrl(handoff.persistentHash, activityName)
         : null)
-      : (sessionId ? buildSessionEntryParticipantConsumeApiUrl(sessionId, handoff.token) : null)
+      : (sessionId ? buildSessionEntryParticipantConsumeApiUrl(sessionId) : null)
 
     if (!apiUrl) {
       return null
     }
 
     const response = await fetchImpl(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
       credentials: 'include',
+      body: JSON.stringify({ token: handoff.token }),
     })
     if (!response.ok) {
       if (response.status === 404) {

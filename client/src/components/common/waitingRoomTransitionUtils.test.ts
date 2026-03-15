@@ -62,6 +62,19 @@ void test('resolveWaitingRoomMessageTransition does not promote to join-live wit
   })
 })
 
+void test('resolveWaitingRoomMessageTransition does not promote solo-only students to join-live when session starts', () => {
+  assert.deepEqual(resolveWaitingRoomMessageTransition({
+    message: { type: 'session-started', sessionId: 'session-1' },
+    teacherAuthRequested: false,
+    activityName: 'java-string-practice',
+    queryString: '?foo=bar',
+    currentEntryOutcome: 'wait',
+    currentEntryPolicy: 'solo-only',
+  }), {
+    navigateTo: '/session-1?foo=bar',
+  })
+})
+
 void test('resolveWaitingRoomMessageTransition routes teachers to manage when requested auth started the session', () => {
   assert.deepEqual(resolveWaitingRoomMessageTransition({
     message: { type: 'session-started', sessionId: 'session-1' },

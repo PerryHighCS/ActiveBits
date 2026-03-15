@@ -69,14 +69,14 @@ void test('persistEntryParticipantValues and consumeEntryParticipantValues round
   assert.equal(storage.getItem(storageKey), null)
 })
 
-void test('buildSessionEntryParticipant submit/consume URLs encode session and token values', () => {
+void test('buildSessionEntryParticipant submit/consume URLs encode session values', () => {
   assert.equal(
     buildSessionEntryParticipantSubmitApiUrl('session/1'),
     '/api/session/session%2F1/entry-participant',
   )
   assert.equal(
-    buildSessionEntryParticipantConsumeApiUrl('session/1', 'token 2'),
-    '/api/session/session%2F1/entry-participant/token%202',
+    buildSessionEntryParticipantConsumeApiUrl('session/1'),
+    '/api/session/session%2F1/entry-participant/consume',
   )
 })
 
@@ -86,8 +86,8 @@ void test('buildPersistentEntryParticipant submit/consume URLs encode hash and p
     '/api/persistent-session/hash%2F1/entry-participant?activityName=java-string-practice',
   )
   assert.equal(
-    buildPersistentEntryParticipantConsumeApiUrl('hash/1', 'token 2', 'java-string-practice'),
-    '/api/persistent-session/hash%2F1/entry-participant/token%202?activityName=java-string-practice',
+    buildPersistentEntryParticipantConsumeApiUrl('hash/1', 'java-string-practice'),
+    '/api/persistent-session/hash%2F1/entry-participant/consume?activityName=java-string-practice',
   )
 })
 
@@ -155,9 +155,9 @@ void test('consumeEntryParticipantDisplayName can resolve a server-backed token 
   const storageKey = buildSoloEntryParticipantStorageKey('java-string-practice')
   persistEntryParticipantToken(storage, storageKey, 'token-solo', { persistentHash: 'hash-123' })
 
-  const requests: string[] = []
-  const fetchImpl = async (input: string) => {
-    requests.push(input)
+  const requests: Array<{ input: string; init?: RequestInit }> = []
+  const fetchImpl = async (input: string, init?: RequestInit) => {
+    requests.push({ input, init })
     return {
       ok: true,
       status: 200,
@@ -179,9 +179,11 @@ void test('consumeEntryParticipantDisplayName can resolve a server-backed token 
     }, fetchImpl),
     'Solo Ada',
   )
-  assert.deepEqual(requests, [
-    '/api/persistent-session/hash-123/entry-participant/token-solo?activityName=java-string-practice',
-  ])
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0]?.input, '/api/persistent-session/hash-123/entry-participant/consume?activityName=java-string-practice')
+  assert.equal(requests[0]?.init?.method, 'POST')
+  assert.equal(requests[0]?.init?.credentials, 'include')
+  assert.equal(requests[0]?.init?.body, JSON.stringify({ token: 'token-solo' }))
   assert.equal(storage.getItem(storageKey), null)
 })
 
@@ -190,9 +192,9 @@ void test('consumeEntryParticipantDisplayName can resolve a server-backed token 
   const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-2')
   persistEntryParticipantToken(storage, storageKey, 'token-123')
 
-  const requests: string[] = []
-  const fetchImpl = async (input: string) => {
-    requests.push(input)
+  const requests: Array<{ input: string; init?: RequestInit }> = []
+  const fetchImpl = async (input: string, init?: RequestInit) => {
+    requests.push({ input, init })
     return {
       ok: true,
       status: 200,
@@ -214,7 +216,11 @@ void test('consumeEntryParticipantDisplayName can resolve a server-backed token 
     }, fetchImpl),
     'Ada Lovelace',
   )
-  assert.deepEqual(requests, ['/api/session/session-2/entry-participant/token-123'])
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0]?.input, '/api/session/session-2/entry-participant/consume')
+  assert.equal(requests[0]?.init?.method, 'POST')
+  assert.equal(requests[0]?.init?.credentials, 'include')
+  assert.equal(requests[0]?.init?.body, JSON.stringify({ token: 'token-123' }))
   assert.equal(storage.getItem(storageKey), null)
 })
 

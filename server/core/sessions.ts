@@ -272,6 +272,10 @@ export async function createSession(
   return session
 }
 
+function setNoStore(response: ResponseLike): void {
+  response.set?.('Cache-Control', 'no-store')
+}
+
 export function setupSessionRoutes(app: {
   get(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
   post(path: string, handler: (req: { params: { sessionId: string }; body?: unknown }, res: ResponseLike) => void | Promise<void>): void
@@ -310,6 +314,7 @@ export function setupSessionRoutes(app: {
   })
 
   app.post('/api/session/:sessionId/entry-participant', async (req, res) => {
+    setNoStore(res)
     const { sessionId } = req.params
     const session = await sessions.get(sessionId)
     if (!session) {
@@ -332,8 +337,9 @@ export function setupSessionRoutes(app: {
     }
   })
 
-  app.get('/api/session/:sessionId/entry-participant/:token', async (req, res) => {
-    const { sessionId, token } = req.params as { sessionId: string; token: string }
+  app.post('/api/session/:sessionId/entry-participant/consume', async (req, res) => {
+    setNoStore(res)
+    const { sessionId } = req.params as { sessionId: string }
     const session = await sessions.get(sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
@@ -341,6 +347,8 @@ export function setupSessionRoutes(app: {
     }
 
     try {
+      const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
+      const token = typeof body.token === 'string' ? body.token : ''
       const values = consumeSessionEntryParticipant(session, token)
       if (!values) {
         res.status(404).json({ error: 'entry participant not found' })
@@ -386,5 +394,6 @@ export function setupSessionRoutes(app: {
 
 interface ResponseLike {
   status(code: number): ResponseLike
+  set?(field: string, value: string): ResponseLike
   json(payload: Record<string, unknown>): void
 }

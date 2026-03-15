@@ -72,6 +72,7 @@ interface RequestLike {
 
 interface ResponseLike {
   status(code: number): ResponseLike
+  set?(field: string, value: string): ResponseLike
   json(payload: unknown): void
   cookie(name: string, value: string, options: Record<string, unknown>): void
 }
@@ -84,6 +85,10 @@ interface AppLike {
 interface RegisterPersistentSessionRoutesOptions {
   app: AppLike
   sessions: SessionStoreLike
+}
+
+function setNoStore(response: ResponseLike): void {
+  response.set?.('Cache-Control', 'no-store')
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -686,6 +691,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
   })
 
   app.post('/api/persistent-session/:hash/entry-participant', async (req, res) => {
+    setNoStore(res)
     const hash = req.params.hash
     const activityName = getQueryString(req.query.activityName)
 
@@ -718,7 +724,8 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     }
   })
 
-  app.get('/api/persistent-session/:hash/entry-participant/:token', async (req, res) => {
+  app.post('/api/persistent-session/:hash/entry-participant/consume', async (req, res) => {
+    setNoStore(res)
     const hash = req.params.hash
     const activityName = getQueryString(req.query.activityName)
 
@@ -738,7 +745,8 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     }
 
     try {
-      const token = req.params.token
+      const body = isPlainObject(req.body) ? req.body : {}
+      const token = getBodyString(body, 'token')
       if (!token) {
         res.status(404).json({ error: 'entry participant not found' })
         return

@@ -6,7 +6,9 @@ import { setupSessionRoutes, type SessionRecord } from './core/sessions.js'
 interface MockResponse {
   statusCode: number
   jsonBody: Record<string, unknown> | null
+  headers: Record<string, string>
   status(code: number): MockResponse
+  set(field: string, value: string): MockResponse
   json(payload: Record<string, unknown>): void
 }
 
@@ -42,8 +44,13 @@ function createMockResponse(): MockResponse {
   return {
     statusCode: 200,
     jsonBody: null,
+    headers: {},
     status(code: number) {
       this.statusCode = code
+      return this
+    },
+    set(field: string, value: string) {
+      this.headers[field.toLowerCase()] = value
       return this
     },
     json(payload: Record<string, unknown>) {
@@ -206,6 +213,7 @@ void test('session entry participant routes store and consume waiting-room value
   }, storeRes)
 
   assert.equal(storeRes.statusCode, 200)
+  assert.equal(storeRes.headers['cache-control'], 'no-store')
   const token = typeof storeRes.jsonBody?.entryParticipantToken === 'string' ? storeRes.jsonBody.entryParticipantToken : null
   assert.equal(typeof token, 'string')
   const participantId = typeof (storeRes.jsonBody?.values as Record<string, unknown> | undefined)?.participantId === 'string'
@@ -221,11 +229,13 @@ void test('session entry participant routes store and consume waiting-room value
   )
 
   const consumeRes = createMockResponse()
-  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
-    params: { sessionId: 'session-3', token: token as string },
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant/consume')({
+    params: { sessionId: 'session-3' },
+    body: { token: token as string },
   }, consumeRes)
 
   assert.equal(consumeRes.statusCode, 200)
+  assert.equal(consumeRes.headers['cache-control'], 'no-store')
   assert.deepEqual(
     consumeRes.jsonBody,
     {
@@ -249,8 +259,9 @@ void test('session entry participant routes store and consume waiting-room value
   )
 
   const missingRes = createMockResponse()
-  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
-    params: { sessionId: 'session-3', token: token as string },
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant/consume')({
+    params: { sessionId: 'session-3' },
+    body: { token: token as string },
   }, missingRes)
 
   assert.equal(missingRes.statusCode, 404)
@@ -289,8 +300,9 @@ void test('session entry participant consume route trims tokens and rejects blan
   const token = String(storeRes.jsonBody?.entryParticipantToken)
 
   const trimmedConsumeRes = createMockResponse()
-  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
-    params: { sessionId: 'session-4', token: `  ${token}  ` },
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant/consume')({
+    params: { sessionId: 'session-4' },
+    body: { token: `  ${token}  ` },
   }, trimmedConsumeRes)
 
   assert.equal(trimmedConsumeRes.statusCode, 200)
@@ -300,8 +312,9 @@ void test('session entry participant consume route trims tokens and rejects blan
   )
 
   const blankConsumeRes = createMockResponse()
-  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
-    params: { sessionId: 'session-4', token: '   ' },
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant/consume')({
+    params: { sessionId: 'session-4' },
+    body: { token: '   ' },
   }, blankConsumeRes)
 
   assert.equal(blankConsumeRes.statusCode, 404)
@@ -357,8 +370,9 @@ void test('session entry participant consume route returns 404 for missing sessi
   setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
 
   const res = createMockResponse()
-  await getRoute(app, 'get', '/api/session/:sessionId/entry-participant/:token')({
-    params: { sessionId: 'missing', token: 'token-1' },
+  await getRoute(app, 'post', '/api/session/:sessionId/entry-participant/consume')({
+    params: { sessionId: 'missing' },
+    body: { token: 'token-1' },
   }, res)
 
   assert.equal(res.statusCode, 404)

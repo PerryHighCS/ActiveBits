@@ -26,7 +26,9 @@ interface MockResponse {
   statusCode: number
   cookies: Map<string, { value: string; options: Record<string, unknown> }>
   jsonBody: Record<string, unknown> | null
+  headers: Record<string, string>
   status(code: number): MockResponse
+  set(field: string, value: string): MockResponse
   json(payload: Record<string, unknown>): Record<string, unknown>
   cookie(name: string, value: string, options: Record<string, unknown>): void
 }
@@ -85,8 +87,13 @@ function createMockRes(): MockResponse {
     statusCode: 200,
     cookies: new Map(),
     jsonBody: null,
+    headers: {},
     status(code: number) {
       this.statusCode = code
+      return this
+    },
+    set(field: string, value: string) {
+      this.headers[field.toLowerCase()] = value
       return this
     },
     json(payload: Record<string, unknown>) {
@@ -794,18 +801,21 @@ void test('persistent entry participant routes store and consume values by token
   }), storeRes)
 
   assert.equal(storeRes.statusCode, 200)
+  assert.equal(storeRes.headers['cache-control'], 'no-store')
   const token = typeof storeRes.jsonBody?.entryParticipantToken === 'string' ? storeRes.jsonBody.entryParticipantToken : null
   assert.equal(typeof token, 'string')
   assert.equal(typeof (storeRes.jsonBody?.values as Record<string, unknown> | undefined)?.participantId, 'string')
 
-  const consumeHandler = getRoute(app, 'GET', '/api/persistent-session/:hash/entry-participant/:token')
+  const consumeHandler = getRoute(app, 'POST', '/api/persistent-session/:hash/entry-participant/consume')
   const consumeRes = createMockRes()
   await consumeHandler(createMockReq({
-    params: { hash, token: String(token) },
+    params: { hash },
     query: { activityName },
+    body: { token: String(token) },
   }), consumeRes)
 
   assert.equal(consumeRes.statusCode, 200)
+  assert.equal(consumeRes.headers['cache-control'], 'no-store')
   assert.deepEqual(consumeRes.jsonBody, {
     values: {
       displayName: 'Ada',
@@ -815,8 +825,9 @@ void test('persistent entry participant routes store and consume values by token
 
   const missingRes = createMockRes()
   await consumeHandler(createMockReq({
-    params: { hash, token: String(token) },
+    params: { hash },
     query: { activityName },
+    body: { token: String(token) },
   }), missingRes)
 
   assert.equal(missingRes.statusCode, 404)
@@ -891,7 +902,7 @@ void test('persistent entry participant store route prunes oldest tokens when li
   await getOrCreateActivePersistentSession(activityName, hash)
 
   const storeHandler = getRoute(app, 'POST', '/api/persistent-session/:hash/entry-participant')
-  const consumeHandler = getRoute(app, 'GET', '/api/persistent-session/:hash/entry-participant/:token')
+  const consumeHandler = getRoute(app, 'POST', '/api/persistent-session/:hash/entry-participant/consume')
   const tokens: string[] = []
 
   for (let index = 0; index < 101; index += 1) {
@@ -914,16 +925,18 @@ void test('persistent entry participant store route prunes oldest tokens when li
 
   const oldestRes = createMockRes()
   await consumeHandler(createMockReq({
-    params: { hash, token: tokens[0] as string },
+    params: { hash },
     query: { activityName },
+    body: { token: tokens[0] as string },
   }), oldestRes)
   assert.equal(oldestRes.statusCode, 404)
   assert.deepEqual(oldestRes.jsonBody, { error: 'entry participant not found' })
 
   const newestRes = createMockRes()
   await consumeHandler(createMockReq({
-    params: { hash, token: tokens[100] as string },
+    params: { hash },
     query: { activityName },
+    body: { token: tokens[100] as string },
   }), newestRes)
   assert.equal(newestRes.statusCode, 200)
   assert.equal(
