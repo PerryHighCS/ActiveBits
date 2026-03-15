@@ -62,7 +62,7 @@ export function connectAcceptedSessionParticipant<TParticipant extends SessionPa
 
   const result = connectSessionParticipant({
     participants,
-    participantId,
+    participantId: normalizedParticipantId || null,
     participantName: resolvedParticipantName,
     now,
     allowLegacyUnnamedMatch,

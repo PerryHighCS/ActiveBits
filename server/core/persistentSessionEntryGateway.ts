@@ -46,7 +46,7 @@ export async function loadPersistentSessionEntryGatewayContext({
 
   return {
     activityName: session.activityName,
-    entryPolicy: entryPolicyOverride ?? resolvePersistentSessionEntryPolicy(session.entryPolicy),
+    entryPolicy: resolvePersistentSessionEntryPolicy(entryPolicyOverride ?? session.entryPolicy),
     isStarted: Boolean(session.sessionId),
     sessionId: session.sessionId,
     hasTeacherCookie,

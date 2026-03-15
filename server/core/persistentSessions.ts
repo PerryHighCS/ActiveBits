@@ -1,6 +1,10 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto'
-import type { PersistentSessionEntryPolicy, WaitingRoomSerializableValue } from '../../types/waitingRoom.js'
-import * as waitingRoomModule from '../../types/waitingRoom.js'
+import {
+  DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
+  resolvePersistentSessionEntryPolicy as resolvePersistentSessionEntryPolicyFromTypes,
+  type PersistentSessionEntryPolicy,
+  type WaitingRoomSerializableValue,
+} from '../../types/waitingRoom.js'
 import { consumeEntryParticipant, storeEntryParticipant } from './entryParticipants.js'
 import { ValkeyPersistentStore } from './valkeyStore.js'
 
@@ -44,16 +48,6 @@ const MAX_PERSISTENT_ENTRY_PARTICIPANT_VALUES_BYTES = 8 * 1024
 
 const DEFAULT_HMAC_SECRET = 'default-secret-change-in-production'
 const MIN_SECRET_LENGTH = 32
-
-const waitingRoomExports = (
-  (waitingRoomModule as unknown as { default?: unknown }).default ?? waitingRoomModule
-) as {
-  DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY: PersistentSessionEntryPolicy
-  resolvePersistentSessionEntryPolicy: (value: unknown) => PersistentSessionEntryPolicy
-}
-
-const DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY = waitingRoomExports.DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY
-const resolvePersistentSessionEntryPolicyFromTypes = waitingRoomExports.resolvePersistentSessionEntryPolicy
 
 export class PersistentSessionEntryParticipantStoreError extends Error {
   readonly statusCode: number

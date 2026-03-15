@@ -123,3 +123,34 @@ void test('connectAcceptedSessionParticipant returns null when neither explicit 
   assert.equal(result, null)
   assert.deepEqual(participants, [])
 })
+
+void test('connectAcceptedSessionParticipant trims participantId before reconnect matching', () => {
+  const session = createSessionRecord('session-5')
+  const existingParticipant: TestParticipant = {
+    id: 'participant-1',
+    name: 'Casey',
+    connected: false,
+    lastSeen: 20,
+  }
+  const participants: TestParticipant[] = [existingParticipant]
+
+  const result = connectAcceptedSessionParticipant({
+    session,
+    participants,
+    participantId: '  participant-1  ',
+    participantName: null,
+    createParticipant: (participantId, participantName, now) => ({
+      id: participantId,
+      name: participantName,
+      connected: true,
+      lastSeen: now,
+    }),
+    generateParticipantId: () => 'generated-id',
+  })
+
+  assert.equal(result?.participantId, 'participant-1')
+  assert.equal(result?.participantName, 'Casey')
+  assert.equal(result?.isNew, false)
+  assert.equal(participants.length, 1)
+  assert.equal(participants[0]?.id, 'participant-1')
+})
