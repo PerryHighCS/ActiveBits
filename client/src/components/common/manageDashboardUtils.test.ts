@@ -2,11 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildPersistentLinkUrl,
+  buildManageDashboardUtilityUrl,
   buildPersistentSessionKey,
   buildQueryString,
   buildSoloLink,
   describeSelectedOptions,
+  filterPersistentEntryPolicyOptionsForActivity,
   initializeDeepLinkOptions,
+  normalizePersistentEntryPolicyForActivity,
   normalizeSelectedOptions,
   parseCreateSessionBootstrap,
   parseDeepLinkGenerator,
@@ -105,6 +108,39 @@ void test('validateDeepLinkSelection enforces URL validator options', () => {
 
 void test('buildPersistentSessionKey creates stable map keys', () => {
   assert.equal(buildPersistentSessionKey('raffle', 'abc123'), 'raffle:abc123')
+})
+
+void test('buildManageDashboardUtilityUrl normalizes relative utility paths and preserves absolute URLs', () => {
+  assert.equal(
+    buildManageDashboardUtilityUrl('https://bits.example', '/util/gallery-walk/viewer'),
+    'https://bits.example/util/gallery-walk/viewer',
+  )
+  assert.equal(
+    buildManageDashboardUtilityUrl('https://bits.example', 'util/gallery-walk/viewer'),
+    'https://bits.example/util/gallery-walk/viewer',
+  )
+  assert.equal(
+    buildManageDashboardUtilityUrl('https://bits.example', 'https://docs.example/guide'),
+    'https://docs.example/guide',
+  )
+})
+
+void test('filterPersistentEntryPolicyOptionsForActivity keeps only live-only for non-solo activities', () => {
+  const options = [
+    { value: 'instructor-required', label: 'Live Only', description: 'wait' },
+    { value: 'solo-allowed', label: 'Live Or Solo', description: 'mixed' },
+    { value: 'solo-only', label: 'Solo Only', description: 'solo' },
+  ] as const
+
+  assert.deepEqual(filterPersistentEntryPolicyOptionsForActivity(options, false), [options[0]])
+  assert.deepEqual(filterPersistentEntryPolicyOptionsForActivity(options, true), [...options])
+})
+
+void test('normalizePersistentEntryPolicyForActivity falls back to live-only when solo is unsupported', () => {
+  assert.equal(normalizePersistentEntryPolicyForActivity('solo-only', false), 'instructor-required')
+  assert.equal(normalizePersistentEntryPolicyForActivity('solo-allowed', false), 'instructor-required')
+  assert.equal(normalizePersistentEntryPolicyForActivity('instructor-required', false), 'instructor-required')
+  assert.equal(normalizePersistentEntryPolicyForActivity('solo-only', true), 'solo-only')
 })
 
 void test('parseDeepLinkGenerator validates and normalizes generator metadata', () => {
@@ -311,6 +347,16 @@ void test('buildPersistentLinkUrl appends query only for legacy or append-query 
   assert.equal(
     buildPersistentLinkUrl('https://bits.example', '/activity/raffle/hash1', { topic: 'arrays' }, null),
     'https://bits.example/activity/raffle/hash1?topic=arrays',
+  )
+
+  assert.equal(
+    buildPersistentLinkUrl(
+      'https://bits.example',
+      '/activity/java-string-practice/hash3?entryPolicy=solo-allowed&urlHash=abcd1234abcd1234',
+      { topic: 'arrays' },
+      null,
+    ),
+    'https://bits.example/activity/java-string-practice/hash3?entryPolicy=solo-allowed&urlHash=abcd1234abcd1234&topic=arrays',
   )
 
   assert.equal(

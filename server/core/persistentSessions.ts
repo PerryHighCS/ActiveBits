@@ -1,12 +1,21 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto'
+import {
+  DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
+  resolvePersistentSessionEntryPolicy as resolvePersistentSessionEntryPolicyFromTypes,
+  type PersistentSessionEntryPolicy,
+  type WaitingRoomSerializableValue,
+} from '../../types/waitingRoom.js'
+import { consumeEntryParticipant, storeEntryParticipant } from './entryParticipants.js'
 import { ValkeyPersistentStore } from './valkeyStore.js'
 
 interface PersistentSession {
   activityName: string
   hashedTeacherCode: string | null
+  entryPolicy?: PersistentSessionEntryPolicy
   createdAt: number
   sessionId: string | null
   teacherSocketId: string | null
+  entryParticipants?: Record<string, Record<string, WaitingRoomSerializableValue>>
   [key: string]: unknown
 }
 
@@ -34,9 +43,21 @@ const waitersByHash = new Map<string, PersistentSessionSocket[]>()
 const MAX_ATTEMPTS = 5
 const WAITER_TIMEOUT = 600_000
 const CLEANUP_INTERVAL = 60_000
+const MAX_PERSISTENT_ENTRY_PARTICIPANTS = 100
+const MAX_PERSISTENT_ENTRY_PARTICIPANT_VALUES_BYTES = 8 * 1024
 
 const DEFAULT_HMAC_SECRET = 'default-secret-change-in-production'
 const MIN_SECRET_LENGTH = 32
+
+export class PersistentSessionEntryParticipantStoreError extends Error {
+  readonly statusCode: number
+
+  constructor(message: string, statusCode: number) {
+    super(message)
+    this.name = 'PersistentSessionEntryParticipantStoreError'
+    this.statusCode = statusCode
+  }
+}
 
 function createInMemoryPersistentStore(): PersistentSessionStore {
   const memoryStore = new Map<string, unknown>()
@@ -171,6 +192,10 @@ export function resolvePersistentSessionSecret(): string {
 
 const HMAC_SECRET = resolvePersistentSessionSecret()
 
+export function resolvePersistentSessionEntryPolicy(value: unknown): PersistentSessionEntryPolicy {
+  return resolvePersistentSessionEntryPolicyFromTypes(value)
+}
+
 export function hashTeacherCode(teacherCode: string): string {
   return createHash('sha256').update(teacherCode).digest('hex')
 }
@@ -228,18 +253,22 @@ export async function getOrCreateActivePersistentSession(
   activityName: string,
   hash: string,
   hashedTeacherCode: string | null = null,
+  entryPolicy?: PersistentSessionEntryPolicy,
 ): Promise<PersistentSession> {
   let session = await persistentStore.get(hash)
+  let shouldPersist = false
+  const normalizedRequestedEntryPolicy = entryPolicy === undefined ? undefined : resolvePersistentSessionEntryPolicy(entryPolicy)
 
   if (!session) {
     session = {
       activityName,
       hashedTeacherCode,
+      entryPolicy: normalizedRequestedEntryPolicy ?? DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY,
       createdAt: Date.now(),
       sessionId: null,
       teacherSocketId: null,
     }
-    await persistentStore.set(hash, session)
+    shouldPersist = true
     waitersByHash.set(hash, [])
     ensureCleanupTimer()
   } else if (!waitersByHash.has(hash)) {
@@ -248,6 +277,19 @@ export async function getOrCreateActivePersistentSession(
 
   if (hashedTeacherCode && !session.hashedTeacherCode) {
     session.hashedTeacherCode = hashedTeacherCode
+    shouldPersist = true
+  }
+
+  const normalizedStoredEntryPolicy = resolvePersistentSessionEntryPolicy(session.entryPolicy)
+  if (normalizedRequestedEntryPolicy !== undefined && normalizedStoredEntryPolicy !== normalizedRequestedEntryPolicy) {
+    session.entryPolicy = normalizedRequestedEntryPolicy
+    shouldPersist = true
+  } else if (session.entryPolicy !== normalizedStoredEntryPolicy) {
+    session.entryPolicy = normalizedStoredEntryPolicy
+    shouldPersist = true
+  }
+
+  if (shouldPersist) {
     await persistentStore.set(hash, session)
   }
 
@@ -374,6 +416,51 @@ export async function cleanupPersistentSession(hash: string): Promise<void> {
     clearInterval(cleanupTimer)
     cleanupTimer = null
   }
+}
+
+export async function storePersistentSessionEntryParticipant(
+  activityName: string,
+  hash: string,
+  values: unknown,
+): Promise<{ token: string; values: Record<string, WaitingRoomSerializableValue> }> {
+  const session = await getOrCreateActivePersistentSession(activityName, hash)
+  const storedEntryParticipant = storeEntryParticipant(session, values)
+
+  const valuesBytes = Buffer.byteLength(JSON.stringify(storedEntryParticipant.values), 'utf8')
+  if (valuesBytes > MAX_PERSISTENT_ENTRY_PARTICIPANT_VALUES_BYTES) {
+    delete session.entryParticipants?.[storedEntryParticipant.token]
+    throw new PersistentSessionEntryParticipantStoreError('entry participant payload too large', 413)
+  }
+
+  const tokens = Object.keys(session.entryParticipants ?? {})
+  if (tokens.length > MAX_PERSISTENT_ENTRY_PARTICIPANTS) {
+    const overflowCount = tokens.length - MAX_PERSISTENT_ENTRY_PARTICIPANTS
+    for (const token of tokens.slice(0, overflowCount)) {
+      delete session.entryParticipants?.[token]
+    }
+  }
+
+  await persistentStore.set(hash, session)
+
+  return storedEntryParticipant
+}
+
+export async function consumePersistentSessionEntryParticipant(
+  hash: string,
+  token: string,
+): Promise<Record<string, WaitingRoomSerializableValue> | null> {
+  const session = await persistentStore.get(hash)
+  if (!session) {
+    return null
+  }
+
+  const values = consumeEntryParticipant(session, token)
+  if (!values) {
+    return null
+  }
+
+  await persistentStore.set(hash, session)
+  return values
 }
 
 let cleanupTimer: NodeJS.Timeout | null = null

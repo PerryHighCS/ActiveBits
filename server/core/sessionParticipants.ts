@@ -1,0 +1,152 @@
+export interface SessionParticipantIdentity {
+  id?: string
+  name: string
+  connected?: boolean
+  lastSeen?: number
+}
+
+export interface ConnectSessionParticipantParams<TParticipant extends SessionParticipantIdentity> {
+  participants: TParticipant[]
+  participantId: string | null
+  participantName: string
+  now?: number
+  allowLegacyUnnamedMatch?: boolean
+  createParticipant: (participantId: string, participantName: string, now: number) => TParticipant
+  generateParticipantId: () => string
+}
+
+export interface ConnectSessionParticipantResult<TParticipant extends SessionParticipantIdentity> {
+  participant: TParticipant
+  participantId: string
+  isNew: boolean
+}
+
+export interface UpdateSessionParticipantParams<TParticipant extends SessionParticipantIdentity>
+  extends FindSessionParticipantParams<TParticipant> {
+  now?: number
+  update: (participant: TParticipant) => void
+}
+
+export interface DisconnectSessionParticipantParams<TParticipant extends SessionParticipantIdentity>
+  extends FindSessionParticipantParams<TParticipant> {
+  now?: number
+}
+
+export interface FindSessionParticipantParams<TParticipant extends SessionParticipantIdentity> {
+  participants: TParticipant[]
+  participantId: string | null
+  participantName?: string | null
+  allowLegacyUnnamedMatch?: boolean
+}
+
+export function findSessionParticipant<TParticipant extends SessionParticipantIdentity>({
+  participants,
+  participantId,
+  participantName = null,
+  allowLegacyUnnamedMatch = false,
+}: FindSessionParticipantParams<TParticipant>): TParticipant | undefined {
+  if (participantId) {
+    return participants.find((participant) => participant.id === participantId)
+  }
+
+  if (!participantName) {
+    return undefined
+  }
+
+  if (!allowLegacyUnnamedMatch) {
+    return undefined
+  }
+
+  return participants.find((participant) =>
+    participant.name === participantName && (participant.id == null || participant.id === ''),
+  )
+}
+
+export function updateSessionParticipant<TParticipant extends SessionParticipantIdentity>({
+  participants,
+  participantId,
+  participantName = null,
+  allowLegacyUnnamedMatch = false,
+  now = Date.now(),
+  update,
+}: UpdateSessionParticipantParams<TParticipant>): TParticipant | undefined {
+  const participant = findSessionParticipant({
+    participants,
+    participantId,
+    participantName,
+    allowLegacyUnnamedMatch,
+  })
+
+  if (!participant) {
+    return undefined
+  }
+
+  participant.lastSeen = now
+  update(participant)
+  return participant
+}
+
+export function disconnectSessionParticipant<TParticipant extends SessionParticipantIdentity>({
+  participants,
+  participantId,
+  participantName = null,
+  allowLegacyUnnamedMatch = false,
+  now = Date.now(),
+}: DisconnectSessionParticipantParams<TParticipant>): TParticipant | undefined {
+  return updateSessionParticipant({
+    participants,
+    participantId,
+    participantName,
+    allowLegacyUnnamedMatch,
+    now,
+    update: (participant) => {
+      participant.connected = false
+    },
+  })
+}
+
+export function connectSessionParticipant<TParticipant extends SessionParticipantIdentity>({
+  participants,
+  participantId,
+  participantName,
+  now = Date.now(),
+  allowLegacyUnnamedMatch = false,
+  createParticipant,
+  generateParticipantId,
+}: ConnectSessionParticipantParams<TParticipant>): ConnectSessionParticipantResult<TParticipant> {
+  const existingParticipant = findSessionParticipant({
+    participants,
+    participantId,
+    participantName,
+    allowLegacyUnnamedMatch,
+  })
+
+  if (existingParticipant) {
+    existingParticipant.connected = true
+    existingParticipant.lastSeen = now
+
+    const resolvedParticipantId = typeof existingParticipant.id === 'string' && existingParticipant.id.length > 0
+      ? existingParticipant.id
+      : generateParticipantId()
+
+    if (existingParticipant.id !== resolvedParticipantId) {
+      existingParticipant.id = resolvedParticipantId
+    }
+
+    return {
+      participant: existingParticipant,
+      participantId: resolvedParticipantId,
+      isNew: false,
+    }
+  }
+
+  const nextParticipantId = generateParticipantId()
+  const nextParticipant = createParticipant(nextParticipantId, participantName, now)
+  participants.push(nextParticipant)
+
+  return {
+    participant: nextParticipant,
+    participantId: nextParticipantId,
+    isNew: true,
+  }
+}

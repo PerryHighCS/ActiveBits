@@ -160,7 +160,12 @@ void test('client registry-style config parsing skips invalid config modules wit
           name: 'Good',
           description: 'valid config',
           color: 'blue',
-          soloMode: true,
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
         },
       },
       '@activities/bad/activity.config.ts': {
@@ -169,7 +174,12 @@ void test('client registry-style config parsing skips invalid config modules wit
           name: 'Bad',
           description: 'invalid config',
           color: 'red',
-          soloMode: false,
+          standaloneEntry: {
+            enabled: false,
+            supportsDirectPath: false,
+            supportsPermalink: false,
+            showOnHome: false,
+          },
           deepLinkGenerator: {
             endpoint: '/api/bad',
             mode: 'wrong-mode',

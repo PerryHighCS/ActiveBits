@@ -231,4 +231,16 @@ export async function runActivityDeepLinkPreflight(
   return await resolved.runDeepLinkPreflight(preflight, rawValue)
 }
 
+export async function loadActivityWaitingRoomFields(
+  activityId: string,
+): Promise<NonNullable<ActivityClientModule['waitingRoomFields']>> {
+  const clientLoader = findClientLoader(activityId)
+  if (!clientLoader) {
+    return {}
+  }
+
+  const resolved = await resolveClientModule(clientLoader)
+  return resolved.waitingRoomFields ?? {}
+}
+
 export default activities

@@ -1,52 +1,199 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import Button from '../ui/Button'
-import { getActivity } from '@src/activities'
-import { getPersistentSelectedOptionsFromSearchForActivity } from './sessionRouterUtils'
+import type {
+  WaitingRoomFieldConfig,
+  WaitingRoomFieldComponentProps,
+} from '../../../../types/waitingRoom.js'
+import WaitingRoomContent from './WaitingRoomContent'
+import { getActivity, loadActivityWaitingRoomFields } from '@src/activities'
+import {
+  getPersistentLinkControlStateFromSearch,
+  getPersistentSelectedOptionsFromSearchForActivity,
+} from './sessionRouterUtils'
+import {
+  buildWaitingRoomStorageKey,
+  getWaitingRoomInitialValues,
+  persistWaitingRoomValues,
+  readWaitingRoomValues,
+  validateWaitingRoomValues,
+  type WaitingRoomFieldValueMap,
+} from './waitingRoomFormUtils'
+import {
+  buildPersistentEntryParticipantSubmitApiUrl,
+  buildSessionEntryParticipantSubmitApiUrl,
+  buildEntryParticipantStorageKey,
+} from './entryParticipantStorage'
 import {
   buildPersistentAuthenticateApiUrl,
-  buildPersistentTeacherCodeApiUrl,
   buildPersistentSessionWsUrl,
-  getWaiterMessage,
-  isWaitingRoomMessage,
-  parseWaitingRoomMessage,
-  type WaitingRoomMessage,
 } from './waitingRoomUtils'
+import type { PersistentSessionEntryOutcome } from './persistentSessionEntryPolicyUtils'
+import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
+import { resolvePersistentSessionAuthFailure, type PersistentSessionAuthErrorResponse } from './persistentSessionAuthUtils'
+import { resolveWaitingRoomPrimaryAction } from './waitingRoomActionUtils'
+import { persistWaitingRoomServerBackedHandoff } from './waitingRoomHandoffUtils'
+import { resolveWaitingRoomTeacherSubmitResult } from './waitingRoomTeacherSubmitUtils'
+import { attachWaitingRoomSocketHandlers } from './waitingRoomSocketUtils'
 
 interface WaitingRoomProps {
   activityName: string
   hash: string
   hasTeacherCookie: boolean
+  entryOutcome?: PersistentSessionEntryOutcome
+  entryPolicy?: PersistentSessionEntryPolicy
+  startedSessionId?: string
+  allowTeacherSection?: boolean
+  showShareUrl?: boolean
+  onJoinLive?: () => void
 }
 
-interface TeacherAuthenticateResponse {
-  error?: string
+interface TeacherAuthenticateResponse extends PersistentSessionAuthErrorResponse {
   isStarted?: boolean
   sessionId?: string | null
 }
 
+const EMPTY_WAITING_ROOM_FIELDS: readonly WaitingRoomFieldConfig[] = []
+const EMPTY_CUSTOM_FIELD_COMPONENTS: Record<string, ComponentType<WaitingRoomFieldComponentProps>> = {}
+
 /**
  * WaitingRoom component for persistent sessions
- * Shows waiting students count and allows teacher to enter code to start session
+ * Shows waiting students count and allows teacher to enter code to start session.
  */
-export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: WaitingRoomProps) {
+export default function WaitingRoom({
+  activityName,
+  hash,
+  hasTeacherCookie,
+  entryOutcome = 'wait',
+  entryPolicy,
+  startedSessionId,
+  allowTeacherSection = true,
+  showShareUrl = true,
+  onJoinLive,
+}: WaitingRoomProps) {
+  const activity = getActivity(activityName)
+  const waitingRoomFields = activity?.waitingRoom?.fields ?? EMPTY_WAITING_ROOM_FIELDS
   const [waiterCount, setWaiterCount] = useState(0)
   const [teacherCode, setTeacherCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [currentEntryOutcome, setCurrentEntryOutcome] = useState<PersistentSessionEntryOutcome>(entryOutcome)
+  const [currentStartedSessionId, setCurrentStartedSessionId] = useState<string | undefined>(startedSessionId)
+  const [waitingRoomValues, setWaitingRoomValues] = useState<WaitingRoomFieldValueMap>({})
+  const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({})
+  const [customFieldComponents, setCustomFieldComponents] = useState<Record<string, ComponentType<WaitingRoomFieldComponentProps>>>(EMPTY_CUSTOM_FIELD_COMPONENTS)
+  const [customFieldLoadError, setCustomFieldLoadError] = useState<string | null>(null)
   const shouldAutoAuthRef = useRef(hasTeacherCookie)
+  const currentEntryOutcomeRef = useRef<PersistentSessionEntryOutcome>(entryOutcome)
+  const currentEntryPolicyRef = useRef<PersistentSessionEntryPolicy | undefined>(entryPolicy)
   const hasNavigatedRef = useRef(false)
   const teacherAuthRequestedRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
   const navigate = useNavigate()
+  const effectiveEntryOutcome: PersistentSessionEntryOutcome = (
+    currentEntryOutcome === 'join-live' && !currentStartedSessionId
+  ) ? 'continue-solo' : currentEntryOutcome
+  const isWaitingForTeacher = currentEntryOutcome === 'wait'
+  const shouldListenForSessionUpdates = entryPolicy === 'solo-allowed'
+    && (currentEntryOutcome === 'continue-solo' || currentEntryOutcome === 'join-live')
+  const shouldKeepWaitingRoomSocketOpen = isWaitingForTeacher || shouldListenForSessionUpdates
 
   useEffect(() => {
-    shouldAutoAuthRef.current = hasTeacherCookie
-  }, [hasTeacherCookie])
+    setCurrentEntryOutcome(entryOutcome)
+    currentEntryOutcomeRef.current = entryOutcome
+  }, [entryOutcome])
+
+  useEffect(() => {
+    setCurrentStartedSessionId(startedSessionId)
+  }, [startedSessionId])
+
+  useEffect(() => {
+    currentEntryOutcomeRef.current = currentEntryOutcome
+  }, [currentEntryOutcome])
+
+  useEffect(() => {
+    currentEntryPolicyRef.current = entryPolicy
+  }, [entryPolicy])
+
+  const closeSocketQuietly = (socket: WebSocket | null) => {
+    if (!socket) {
+      return
+    }
+
+    socket.onclose = null
+    socket.onerror = null
+
+    if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) {
+      socket.close()
+    }
+  }
+
+  useEffect(() => {
+    shouldAutoAuthRef.current = hasTeacherCookie && entryPolicy !== 'solo-only'
+  }, [entryPolicy, hasTeacherCookie])
+
+  useEffect(() => {
+    const storageKey = buildWaitingRoomStorageKey(activityName, hash)
+    const storedValues = typeof window !== 'undefined' && window.sessionStorage != null
+      ? readWaitingRoomValues(window.sessionStorage, storageKey, waitingRoomFields)
+      : null
+
+    setWaitingRoomValues(getWaitingRoomInitialValues(waitingRoomFields, storedValues))
+    setTouchedFields({})
+  }, [activityName, hash, waitingRoomFields])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.sessionStorage == null) {
+      return
+    }
+
+    const storageKey = buildWaitingRoomStorageKey(activityName, hash)
+    if (waitingRoomFields.length === 0) {
+      window.sessionStorage.removeItem(storageKey)
+      return
+    }
+
+    persistWaitingRoomValues(window.sessionStorage, storageKey, waitingRoomFields, waitingRoomValues)
+  }, [activityName, hash, waitingRoomFields, waitingRoomValues])
+
+  useEffect(() => {
+    const hasCustomFields = waitingRoomFields.some((field) => field.type === 'custom')
+    if (!hasCustomFields) {
+      setCustomFieldComponents(EMPTY_CUSTOM_FIELD_COMPONENTS)
+      setCustomFieldLoadError(null)
+      return
+    }
+
+    let isCancelled = false
+    setCustomFieldLoadError(null)
+
+    void loadActivityWaitingRoomFields(activityName)
+      .then((loadedFields) => {
+        if (!isCancelled) {
+          setCustomFieldComponents(loadedFields)
+        }
+      })
+      .catch((error) => {
+        console.error('[WaitingRoom] Failed to load custom waiting-room fields:', error)
+        if (!isCancelled) {
+          setCustomFieldComponents(EMPTY_CUSTOM_FIELD_COMPONENTS)
+          setCustomFieldLoadError('Custom waiting-room fields are unavailable right now.')
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [activityName, waitingRoomFields])
 
   useEffect(() => {
     setError(null)
     teacherAuthRequestedRef.current = false
+
+    if (!shouldKeepWaitingRoomSocketOpen) {
+      closeSocketQuietly(wsRef.current)
+      wsRef.current = null
+      return undefined
+    }
 
     if (typeof window === 'undefined') {
       return undefined
@@ -55,85 +202,30 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
     const wsUrl = buildPersistentSessionWsUrl(window.location, hash, activityName)
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
-
-    const navigateOnce = (path: string) => {
-      if (hasNavigatedRef.current) return
-      hasNavigatedRef.current = true
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close()
-      }
-      void navigate(path)
-    }
-
-    ws.onopen = () => {
-      setError(null)
-
-      if (shouldAutoAuthRef.current) {
-        fetch(buildPersistentTeacherCodeApiUrl(hash, activityName), {
-          credentials: 'include',
-        })
-          .then((response) => response.json())
-          .then((data: { teacherCode?: string }) => {
-            if (!data.teacherCode) return
-
-            try {
-              ws.send(
-                JSON.stringify({
-                  type: 'verify-teacher-code',
-                  teacherCode: data.teacherCode,
-                }),
-              )
-            } catch (sendError) {
-              console.error('Failed to send teacher code over WS:', sendError)
-            }
-          })
-          .catch((fetchError) => console.error('Failed to fetch teacher code:', fetchError))
-      }
-    }
-
-    ws.onmessage = (event) => {
-      const rawMessage = parseWaitingRoomMessage(String(event.data))
-      if (!rawMessage) {
-        console.error('Failed to parse WebSocket message:', event.data)
-        return
-      }
-      if (!isWaitingRoomMessage(rawMessage)) {
-        return
-      }
-
-      if (hasNavigatedRef.current) {
-        return
-      }
-
-      const queryString = typeof window !== 'undefined' ? window.location.search : ''
-      handleWaitingRoomMessage({
-        message: rawMessage,
-        setWaiterCount,
-        setError,
-        setIsSubmitting,
-        teacherAuthRequestedRef,
-        navigateOnce,
-        activityName,
-        queryString,
-      })
-    }
-
-    ws.onerror = () => {
-      if (hasNavigatedRef.current) return
-      setError('Connection error.')
-    }
-
-    ws.onclose = () => {
-      if (hasNavigatedRef.current) return
-      setError('Connection closed.')
-    }
+    attachWaitingRoomSocketHandlers({
+      ws,
+      shouldAutoAuth: shouldAutoAuthRef.current,
+      hash,
+      activityName,
+      queryString: typeof window !== 'undefined' ? window.location.search : '',
+      currentEntryOutcomeRef,
+      currentEntryPolicyRef,
+      hasNavigatedRef,
+      teacherAuthRequestedRef,
+      setWaiterCount,
+      setError,
+      setIsSubmitting,
+      setEntryOutcome: setCurrentEntryOutcome,
+      setStartedSessionId: setCurrentStartedSessionId,
+      navigate,
+    })
 
     return () => {
-      if (ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
-        ws.close()
-      }
+      closeSocketQuietly(ws)
     }
-  }, [activityName, hash, navigate])
+  }, [activityName, hash, navigate, shouldKeepWaitingRoomSocketOpen])
+
+  const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
 
   const handleTeacherCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -142,14 +234,15 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
     teacherAuthRequestedRef.current = true
 
     const normalizedTeacherCode = teacherCode.trim()
+    const queryString = typeof window !== 'undefined' ? window.location.search : ''
 
     try {
-      const queryString = typeof window !== 'undefined' ? window.location.search : ''
       const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
         queryString,
-        getActivity(activityName)?.deepLinkOptions,
+        activity?.deepLinkOptions,
         activityName,
       )
+      const persistentLinkControlState = getPersistentLinkControlStateFromSearch(queryString)
 
       const authenticateResponse = await fetch(buildPersistentAuthenticateApiUrl(), {
         method: 'POST',
@@ -162,25 +255,54 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
           hash,
           teacherCode: normalizedTeacherCode,
           selectedOptions,
+          entryPolicy: persistentLinkControlState.entryPolicy,
+          urlHash: persistentLinkControlState.urlHash,
         }),
       })
 
       if (!authenticateResponse.ok) {
         const payload = (await authenticateResponse.json().catch(() => ({}))) as TeacherAuthenticateResponse
-        throw new Error(payload.error || 'Invalid teacher code')
+        throw new Error(resolvePersistentSessionAuthFailure(payload).message)
       }
 
       const payload = (await authenticateResponse.json()) as TeacherAuthenticateResponse
-      if (payload.isStarted && typeof payload.sessionId === 'string' && payload.sessionId.length > 0) {
-        const queryString = typeof window !== 'undefined' ? window.location.search : ''
-        const teacherPath = `/manage/${activityName}/${payload.sessionId}${queryString}`
+      const submissionResolution = resolveWaitingRoomTeacherSubmitResult({
+        payload,
+        activityName,
+        queryString,
+        normalizedTeacherCode,
+        hasOpenSocket: wsRef.current?.readyState === WebSocket.OPEN,
+      })
+
+      if (typeof submissionResolution.navigateTo === 'string') {
         if (!hasNavigatedRef.current) {
           hasNavigatedRef.current = true
-          if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+          if (submissionResolution.closeSocket && wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
             wsRef.current.close()
           }
-          void navigate(teacherPath)
+          void navigate(submissionResolution.navigateTo)
         }
+        return
+      }
+
+      if (typeof submissionResolution.sendVerifyTeacherCode === 'string' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'verify-teacher-code',
+            teacherCode: submissionResolution.sendVerifyTeacherCode,
+          }),
+        )
+        return
+      }
+
+      if (submissionResolution.clearTeacherAuthRequested) {
+        teacherAuthRequestedRef.current = false
+      }
+      if (typeof submissionResolution.isSubmitting === 'boolean') {
+        setIsSubmitting(submissionResolution.isSubmitting)
+      }
+      if (typeof submissionResolution.errorMessage === 'string') {
+        setError(submissionResolution.errorMessage)
         return
       }
     } catch (authenticateError) {
@@ -189,122 +311,126 @@ export default function WaitingRoom({ activityName, hash, hasTeacherCookie }: Wa
       teacherAuthRequestedRef.current = false
       return
     }
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'verify-teacher-code',
-          teacherCode: normalizedTeacherCode,
-        }),
-      )
-    } else {
-      setError('Not connected. Please refresh the page.')
-      setIsSubmitting(false)
-      teacherAuthRequestedRef.current = false
-    }
   }
 
-  const activityDisplayName = getActivity(activityName)?.name || activityName
+  const handleFieldChange = (fieldId: string, value: WaitingRoomFieldValueMap[string]) => {
+    setWaitingRoomValues((current) => ({
+      ...current,
+      [fieldId]: value,
+    }))
+  }
+
+  const handleFieldBlur = (fieldId: string) => {
+    setTouchedFields((current) => ({
+      ...current,
+      [fieldId]: true,
+    }))
+  }
+
+  const activityDisplayName = activity?.name || activityName
   const shareUrl = typeof window !== 'undefined' ? window.location.href : ''
 
-  return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] max-w-2xl mx-auto p-6">
-      <div className="bg-white rounded-lg shadow-lg p-8 w-full border-2 border-gray-200">
-        <h1 className="text-3xl font-bold text-center mb-2 text-gray-800">{activityDisplayName}</h1>
-
-        <div className="text-center mb-6">
-          <p className="text-lg text-gray-600 mb-2">Waiting for teacher to start the activity</p>
-          <p className="text-2xl font-bold text-blue-600">{getWaiterMessage(waiterCount)}</p>
-        </div>
-
-        <div className="border-t-2 border-gray-200 pt-6 mt-6">
-          <p className="text-center text-gray-700 mb-4 font-semibold">Are you the teacher?</p>
-
-          <form onSubmit={handleTeacherCodeSubmit} className="flex flex-col items-center gap-4">
-            <input
-              type="password"
-              placeholder="Enter teacher code"
-              value={teacherCode}
-              onChange={(event) => setTeacherCode(event.target.value)}
-              className="border-2 border-gray-300 rounded px-4 py-2 w-full max-w-xs text-center focus:outline-none focus:border-blue-500"
-              disabled={isSubmitting}
-              autoComplete="off"
-            />
-
-            {error && <p className="text-red-600 text-sm">{error}</p>}
-
-            <Button
-              type="submit"
-              disabled={isSubmitting || !teacherCode.trim()}
-            >
-              {isSubmitting ? 'Verifying...' : 'Start Activity'}
-            </Button>
-          </form>
-
-          {hasTeacherCookie && (
-            <p className="text-xs text-gray-500 text-center mt-4">
-              Tip: Your browser remembers your teacher code for this link
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-6 text-center text-sm text-gray-500">
-        <p>Share this URL with your students:</p>
-        <code className="bg-gray-100 px-3 py-1 rounded mt-1 inline-block text-xs">{shareUrl}</code>
-      </div>
-    </div>
-  )
-}
-
-interface HandleWaitingRoomMessageParams {
-  message: WaitingRoomMessage
-  setWaiterCount: (count: number) => void
-  setError: (error: string | null) => void
-  setIsSubmitting: (isSubmitting: boolean) => void
-  teacherAuthRequestedRef: { current: boolean }
-  navigateOnce: (path: string) => void
-  activityName: string
-  queryString: string
-}
-
-function handleWaitingRoomMessage({
-  message,
-  setWaiterCount,
-  setError,
-  setIsSubmitting,
-  teacherAuthRequestedRef,
-  navigateOnce,
-  activityName,
-  queryString,
-}: HandleWaitingRoomMessageParams): void {
-  if (message.type === 'waiter-count') {
-    setWaiterCount(message.count)
-    return
+  const persistServerBackedSessionEntryParticipantHandoff = async (destinationId: string) => {
+    await persistWaitingRoomServerBackedHandoff({
+      storage: typeof window !== 'undefined' ? window.sessionStorage : null,
+      participantContextStorage: typeof window !== 'undefined' ? window.localStorage : null,
+      storageKey: buildEntryParticipantStorageKey(activityName, 'session', destinationId),
+      values: waitingRoomValues,
+      submitApiUrl: buildSessionEntryParticipantSubmitApiUrl(destinationId),
+      sessionParticipantContextSessionId: destinationId,
+    })
   }
 
-  if (message.type === 'session-started') {
-    if (teacherAuthRequestedRef.current) {
-      navigateOnce(`/manage/${activityName}/${message.sessionId}${queryString}`)
-    } else {
-      navigateOnce(`/${message.sessionId}${queryString}`)
+  const persistServerBackedSoloEntryParticipantHandoff = async () => {
+    await persistWaitingRoomServerBackedHandoff({
+      storage: typeof window !== 'undefined' ? window.sessionStorage : null,
+      storageKey: buildEntryParticipantStorageKey(activityName, 'solo', activityName),
+      values: waitingRoomValues,
+      submitApiUrl: buildPersistentEntryParticipantSubmitApiUrl(hash, activityName),
+      persistentHash: hash,
+    })
+  }
+
+  const handleContinueSolo = async () => {
+    const actionResolution = resolveWaitingRoomPrimaryAction({
+      waitingRoomFields,
+      waitingRoomErrors,
+      entryOutcome: effectiveEntryOutcome,
+    })
+    setTouchedFields(actionResolution.touchedFields)
+
+    if (actionResolution.errorMessage) {
+      setError(actionResolution.errorMessage)
+      return
     }
-    return
+
+    const queryString = typeof window !== 'undefined' ? window.location.search : ''
+    await persistServerBackedSoloEntryParticipantHandoff()
+    closeSocketQuietly(wsRef.current)
+    if (!hasNavigatedRef.current) {
+      hasNavigatedRef.current = true
+      void navigate(`/solo/${activityName}${queryString}`)
+    }
   }
 
-  if (message.type === 'session-ended') {
-    navigateOnce('/session-ended')
-    return
+  const handleJoinLive = async () => {
+    const actionResolution = resolveWaitingRoomPrimaryAction({
+      waitingRoomFields,
+      waitingRoomErrors,
+      entryOutcome: effectiveEntryOutcome,
+      startedSessionId: currentStartedSessionId,
+    })
+    setTouchedFields(actionResolution.touchedFields)
+
+    if (actionResolution.errorMessage) {
+      setError(actionResolution.errorMessage)
+      return
+    }
+
+    const liveSessionId = currentStartedSessionId
+    if (!liveSessionId) {
+      setError('Live session is unavailable right now. Please refresh and try again.')
+      return
+    }
+
+    if (onJoinLive) {
+      await persistServerBackedSessionEntryParticipantHandoff(liveSessionId)
+      onJoinLive()
+      return
+    }
+
+    const queryString = typeof window !== 'undefined' ? window.location.search : ''
+    await persistServerBackedSessionEntryParticipantHandoff(liveSessionId)
+    if (!hasNavigatedRef.current) {
+      hasNavigatedRef.current = true
+      void navigate(`/${liveSessionId}${queryString}`)
+    }
   }
 
-  if (message.type === 'teacher-authenticated') {
-    navigateOnce(`/manage/${activityName}/${message.sessionId}${queryString}`)
-    return
-  }
-
-  if (message.type === 'teacher-code-error') {
-    setError(message.error)
-    setIsSubmitting(false)
-    teacherAuthRequestedRef.current = false
-  }
+  return (
+    <WaitingRoomContent
+      activityDisplayName={activityDisplayName}
+      waiterCount={waiterCount}
+      error={error}
+      isSubmitting={isSubmitting}
+      waitingRoomFields={waitingRoomFields}
+      waitingRoomValues={waitingRoomValues}
+      touchedFields={touchedFields}
+      waitingRoomErrors={waitingRoomErrors}
+      customFieldComponents={customFieldComponents}
+      customFieldLoadError={customFieldLoadError}
+      entryOutcome={effectiveEntryOutcome}
+      entryPolicy={entryPolicy}
+      allowTeacherSection={allowTeacherSection}
+      showShareUrl={showShareUrl}
+      hasTeacherCookie={hasTeacherCookie}
+      teacherCode={teacherCode}
+      shareUrl={shareUrl}
+      onTeacherCodeChange={setTeacherCode}
+      onTeacherCodeSubmit={handleTeacherCodeSubmit}
+      onPrimaryAction={effectiveEntryOutcome === 'join-live' ? handleJoinLive : handleContinueSolo}
+      onFieldChange={handleFieldChange}
+      onFieldBlur={handleFieldBlur}
+    />
+  )
 }

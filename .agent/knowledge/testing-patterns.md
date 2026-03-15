@@ -15,6 +15,96 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For waiting-room entry logic, put the outcome matrix in small shared server/client helpers and test those helpers directly before relying on route/component integration coverage.
+- Why it helps: The important regressions here are policy/output combinations (`wait`, `join-live`, `continue-solo`, `solo-unavailable`, `render-ui`, `pass-through`) and one-shot handoff semantics, which are easier to exercise exhaustively in helper tests than through brittle full-component flows.
+- Example (file/path): `server/entryStatus.test.ts`; `server/sessionEntryParticipants.test.ts`; `client/src/components/common/entryParticipantStorage.test.ts`
+- Failure signal: A new policy branch or handoff behavior changes the resolved outcome/presentation or token cleanup semantics without any route/component snapshot obviously failing.
+- Follow-up action: Keep helper-level matrix coverage current as new entry outcomes or handoff semantics are added, then add integration tests only for the riskiest UI or API glue.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: integration
+- Pattern: When a server test intentionally triggers noisy warning/error output on waiting-room entry paths, add a short `[TEST]` console marker immediately before the trigger so expected parse/auth noise is distinguishable from real regressions in the test log.
+- Why it helps: Waiting-room and permalink tests now intentionally exercise corrupted-cookie and similar failure paths; explicit markers make the resulting server logs legible during focused runs and in broader sandbox fallback gates.
+- Example (file/path): `server/persistentSessionRoutes.test.ts`
+- Failure signal: Test output includes scary-looking parse/auth error logs with no nearby indication that the noise was intentionally triggered by the test.
+- Follow-up action: Add the same marker pattern to future waiting-room tests that intentionally produce console noise, especially around cookie parsing, auth failures, or storage fallbacks.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For shared components that are hard to import in the Node test runner because their container pulls Vite-only activity loading, extract a pure presentational seam and test that seam with `react-dom/server` markup assertions first.
+- Why it helps: This gives us real accessibility and control-state coverage without forcing a new browser harness or trying to mock `import.meta.glob` inside the existing Node-based client suite.
+- Example (file/path): `client/src/components/common/WaitingRoomContent.tsx`; `client/src/components/common/WaitingRoomContent.test.tsx`
+- Failure signal: Important ARIA wiring or disabled-state regressions slip through because the only directly testable surface is a low-level helper, while the container component remains too heavy for the current test runner.
+- Follow-up action: Use this seam pattern sparingly for high-value shared containers, then add fuller interaction tests later if the runtime boundary becomes easier to exercise.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For `WaitingRoom` carry-forward behavior, extract the persistence branch into a helper that owns the “store server-backed token or fall back to local values” decision, then test that helper directly instead of trying to drive the whole container through storage and network state.
+- Why it helps: The riskiest regression in this area is not the visual shell, it is whether entry data is preserved correctly when the server handoff succeeds, fails, or returns malformed payload. A focused helper test covers that contract cheaply and keeps the current Node client suite sufficient without jumping to Playwright.
+- Example (file/path): `client/src/components/common/waitingRoomHandoffUtils.ts`; `client/src/components/common/waitingRoomHandoffUtils.test.ts`
+- Failure signal: Waiting-room carry-forward silently stops preserving data after a failed handoff write, or starts storing raw values when an opaque token should have been written, without any render-only test noticing.
+- Follow-up action: Reuse this seam-first pattern for other `WaitingRoom` transition branches, especially websocket-driven wait-state decisions, before considering a heavier browser harness.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For `WaitingRoom` websocket message handling, move the message-to-transition decision into a helper that returns navigation, error, submit-state, or waiter-count updates, then test that matrix directly.
+- Why it helps: It covers the highest-risk wait-state behavior, like teacher-authenticated routing and teacher-code rejection recovery, without trying to spin up the full websocket lifecycle inside the shared component test.
+- Example (file/path): `client/src/components/common/waitingRoomTransitionUtils.ts`; `client/src/components/common/waitingRoomTransitionUtils.test.ts`
+- Failure signal: Wait-state routing regresses, but render-only and storage-only tests still pass because the bug lives in message interpretation rather than UI presentation.
+- Follow-up action: Keep the remaining websocket-specific tests focused on lifecycle wiring, such as open/close/error behavior, and only escalate to a browser harness if those cases cannot be covered cleanly through helper seams plus existing route tests.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For heavy submit handlers inside `WaitingRoom`, extract just the post-request decision matrix instead of the whole network flow. Cover the branch between manage redirect, websocket verification, and user-facing error states with a pure helper.
+- Why it helps: It captures the real product risk in teacher-code submission without forcing the client suite to mock the entire fetch + websocket + navigation stack inside the shared container.
+- Example (file/path): `client/src/components/common/waitingRoomTeacherSubmitUtils.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.test.ts`
+- Failure signal: Teacher-code submit starts routing to the wrong destination or leaves the wrong error/submitting state behind, while fetch/auth helper tests still pass.
+- Follow-up action: Treat the remaining uncovered portion as container wiring. If that wiring becomes important enough to test, prefer one higher-level interaction layer instead of continuing to split out tiny helpers.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For websocket `onopen` branches that recover remembered teacher auth, extract the “fetch remembered code then send verification” flow into a small helper and test success, missing-data, fetch-failure, and send-failure cases directly.
+- Why it helps: This covers the last substantial async branch inside `WaitingRoom` without introducing a browser harness just to exercise cookie-backed teacher auto-auth.
+- Example (file/path): `client/src/components/common/waitingRoomAutoAuthUtils.ts`; `client/src/components/common/waitingRoomAutoAuthUtils.test.ts`
+- Failure signal: Teacher-cookie auto-auth silently stops sending verification, or starts throwing on fetch/send failures, while message-transition and render tests still pass.
+- Follow-up action: After this seam, be cautious about further extraction. The remaining websocket lifecycle cases are likely better treated as either accepted container risk or a reason to add a higher-level harness later.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: When the remaining untested logic in a heavy shared component is the websocket handler wiring itself, extract one attachment helper that owns `onopen`, `onmessage`, `onerror`, and `onclose` setup and test that at the event-handler level.
+- Why it helps: This is the last efficient seam before a higher-level harness. It verifies the actual lifecycle wiring while still avoiding a browser runner and without fragmenting the component into many smaller helpers that only mirror individual lines.
+- Example (file/path): `client/src/components/common/waitingRoomSocketUtils.ts`; `client/src/components/common/waitingRoomSocketUtils.test.ts`
+- Failure signal: The component’s websocket lifecycle behavior regresses even though the smaller decision helpers still pass, because handlers were attached incorrectly or navigation/error behavior changed at the wiring layer.
+- Follow-up action: Treat the remaining uncovered behavior as true container integration. If confidence beyond this point is required, prefer an explicit interaction harness decision over more helper extraction.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: unit
+- Pattern: For activity-owned reconnect/recovery behavior that hangs off websocket close events, extract the close-decision logic into a tiny activity-local helper and test that helper directly instead of trying to simulate the whole websocket lifecycle in the component test.
+- Why it helps: It keeps the test focused on the product contract change, like “stale server-issued identity should clear cached registration and require rejoin,” without depending on browser WebSocket mocks or the full student component state machine.
+- Example (file/path): `activities/syncdeck/client/student/reconnectUtils.ts`; `activities/syncdeck/client/student/reconnectUtils.test.ts`
+- Failure signal: Recovery copy/state regressions slip through because the only available tests cover low-level URL builders or large render snapshots, not the close-event decision itself.
+- Follow-up action: Reuse this pattern for other activity-owned reconnect paths when the decision surface is stable and the container wiring is much heavier than the rule being tested.
+- Owner: Codex
+
+- Date: 2026-03-13
+- Scope: integration
+- Pattern: In sandboxed agent environments where some server tests fail during local port binding or related host restrictions, use `npm run test:codex` as the validation gate and record the skipped full-suite limitation alongside targeted checks for the touched server surface.
+- Why it helps: It preserves a strong merge gate (`typecheck`, `lint`, client tests, non-port server tests, activities tests) without misattributing environment-specific failures in unrelated server files to the active change.
+- Example (file/path): `package.json` (`test:codex`); waiting-room entry-policy slice validated with `node --import tsx --test server/persistentSessionRoutes.test.ts`
+- Failure signal: Full `npm test` fails in sandbox with unrelated server test files such as `server/galleryWalkRoutes.test.ts`, `server/sessionStore.test.ts`, or `server/statusRoute.test.ts`, while `npm run test:codex` passes.
+- Follow-up action: When working outside the sandbox, rerun full `npm test`; inside the sandbox, keep adding focused tests for modified server files so behavior changes are still covered.
+- Owner: Codex
+
 - Date: 2026-03-05
 - Scope: unit
 - Pattern: Prefer behavior-driven assertions over source-text matching (for example, avoid `readFileSync` + regex checks against component source strings).
@@ -31,4 +121,13 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Example (file/path): `server/activities/activityRegistry.ts`; `server/activities/activityRegistry.test.ts`
 - Failure signal: CI fails with `[ERROR] Failed to load config for activity "...test-activity..."` followed by `ENOENT ... activity.config.js` and a fatal production exit during unrelated server tests.
 - Follow-up action: Prefer temp fixtures outside the auto-discovered `activities/` root when possible, or mark them `isDev` and clean up deterministically.
+- Owner: Codex
+
+- Date: 2026-03-14
+- Scope: e2e
+- Pattern: Treat the `live/solo` permalink waiting-room transition as a strong first Playwright candidate if the repo adds browser-level coverage later, but do not block fixes on that harness while the seam suite still covers the logic reliably.
+- Why it helps: This flow crosses the exact boundaries that are awkward in the current Node client runner: same-browser student/instructor reuse, teacher-code auth, websocket-driven state flips from solo to live join and back again, and permalink-specific router behavior while the same waiting-room screen stays mounted.
+- Example (file/path): `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/waitingRoomSocketUtils.test.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.test.ts`
+- Failure signal: Manual browser testing finds regressions in the `live/solo` permalink flow even though the helper/unit suite still passes, especially around teacher auth after a student has used the link, or around regaining solo/live actions after session state changes.
+- Follow-up action: If or when Playwright is introduced, make this one of the first scenarios: student opens `live/solo` permalink, teacher starts live, student sees `Join Session`, teacher ends live before join, student regains solo action, and a second instructor can still reach the teacher-code path.
 - Owner: Codex

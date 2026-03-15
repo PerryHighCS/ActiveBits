@@ -43,6 +43,18 @@ export type DeepLinkOptions = Record<string, DeepLinkOption>
 export type DeepLinkSelection = Record<string, string>
 export type DeepLinkValidationErrors = Record<string, string>
 
+export interface PersistentEntryPolicyOptionLike {
+  value: 'instructor-required' | 'solo-allowed' | 'solo-only'
+  label: string
+  description: string
+}
+
+export interface ManageDashboardUtilityLike {
+  label: string
+  path: string
+  description?: string
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -257,6 +269,39 @@ export function buildSoloLink(
   return `${origin}/solo/${activityId}${buildQueryString(selectedOptions)}`
 }
 
+export function buildManageDashboardUtilityUrl(origin: string, path: string): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path
+  }
+
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${origin}${normalizedPath}`
+}
+
+export function filterPersistentEntryPolicyOptionsForActivity<T extends PersistentEntryPolicyOptionLike>(
+  options: readonly T[],
+  activitySupportsSolo: boolean,
+): T[] {
+  if (activitySupportsSolo) {
+    return [...options]
+  }
+
+  return options.filter((option) => option.value === 'instructor-required')
+}
+
+export function normalizePersistentEntryPolicyForActivity<
+  T extends PersistentEntryPolicyOptionLike['value'],
+>(
+  entryPolicy: T,
+  activitySupportsSolo: boolean,
+): T | 'instructor-required' {
+  if (activitySupportsSolo) {
+    return entryPolicy
+  }
+
+  return entryPolicy === 'instructor-required' ? entryPolicy : 'instructor-required'
+}
+
 export function buildPersistentSessionKey(activityName: string, hash: string): string {
   return `${activityName}:${hash}`
 }
@@ -270,7 +315,17 @@ export function buildPersistentLinkUrl(
   const absoluteUrl = /^https?:\/\//i.test(urlFromServer) ? urlFromServer : `${origin}${urlFromServer}`
 
   if (deepLinkGenerator == null || deepLinkGenerator.mode === 'append-query') {
-    return `${absoluteUrl}${buildQueryString(selectedOptions)}`
+    const mergedUrl = new URL(absoluteUrl, origin || 'http://localhost')
+    for (const [key, value] of Object.entries(selectedOptions || {})) {
+      if (value != null && value !== '') {
+        mergedUrl.searchParams.set(key, toStringValue(value))
+      }
+    }
+    return /^https?:\/\//i.test(urlFromServer)
+      ? mergedUrl.toString()
+      : `${mergedUrl.pathname}${mergedUrl.search}${mergedUrl.hash}`.startsWith('/')
+        ? `${origin}${mergedUrl.pathname}${mergedUrl.search}${mergedUrl.hash}`
+        : mergedUrl.toString()
   }
 
   return absoluteUrl

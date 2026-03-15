@@ -147,7 +147,7 @@ export default {
 };
 ```
 
-Keep metadata (id/name/description/color/soloMode + optional soloModeMeta overrides) in `activity.config.ts` to avoid dueling sources of truth. The client entry is lazy-loaded via `React.lazy`, so keep it side-effect free and focused on exporting the components/footer. The loader merges `{...config, ...clientEntry}` at runtime, and each activity builds into its own chunk (`activity-<id>-<hash>.js`).
+Keep metadata (id/name/description/color plus standalone-entry capability declarations) in `activity.config.ts` to avoid dueling sources of truth. The client entry is lazy-loaded via `React.lazy`, so keep it side-effect free and focused on exporting the components/footer. The loader merges `{...config, ...clientEntry}` at runtime, and each activity builds into its own chunk (`activity-<id>-<hash>.js`).
 
 ### Step 5: Create Server Routes
 
@@ -241,11 +241,11 @@ export default {
   name: 'Quiz',
   description: 'Ask students questions and collect responses',
   color: 'purple',
-  soloMode: false,
-  soloModeMeta: {
-    title: 'Quiz practice',
-    description: 'Shown instead of description for Solo Bits cards (optional)',
-    buttonText: 'Copy Quiz Solo Link',
+  standaloneEntry: {
+    enabled: false,
+    supportsDirectPath: false,
+    supportsPermalink: false,
+    showOnHome: false,
   },
   // Optional: Define query parameters for deep linking (e.g., permanent links that pre-configure settings)
   deepLinkOptions: {
@@ -370,13 +370,13 @@ No central registry updates are needed; activities are auto-discovered from `act
 7. **Use SessionHeader** - All manager components should use the unified SessionHeader
 8. **Handle session termination** - Student components should use useSessionEndedHandler hook
 
-## Solo Mode Activities
+## Standalone Activities
 
-Solo mode allows students to practice activities independently without a teacher managing a session. Activities with `soloMode: true` appear in the "Solo Bits" section on the join page.
+Standalone activities allow students to practice independently without a teacher managing a live session. Shared config now distinguishes between direct `/solo/:activityId` routes, standalone-capable permalinks, and utility routes.
 
 ### When to Use Solo Mode
 
-Enable solo mode (`soloMode: true`) for activities that:
+Enable standalone entry for activities that:
 - Focus on individual practice and skill building
 - Don't require teacher orchestration or real-time management
 - Can function entirely client-side or with minimal server interaction
@@ -391,7 +391,12 @@ export const practiceActivity = {
   description: 'Individual skill practice',
   ManagerComponent: () => <div>This activity is solo-only</div>,
   StudentComponent: PracticeComponent,
-  soloMode: true,  // Shows in Solo Bits
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   color: 'green',
   footerContent: null,
 };
@@ -403,23 +408,57 @@ export const practiceActivity = {
 - Store state in localStorage if persistence is needed
 - Server routes are optional for fully client-side activities
 
-### Customizing Solo Mode Labels
+### Customizing Standalone Labels
 
-Provide an optional `soloModeMeta` object in `activity.config.ts` to override the Solo Bits card title/description and the "Copy Solo Practice Link" button text on the management dashboard:
+Provide an optional `standaloneEntry` block to declare how standalone entry works and to customize shared standalone card labels:
 
 ```typescript
 export default {
   // ...
-  soloMode: true,
-  soloModeMeta: {
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: false,
+    showOnHome: false,
     title: 'Review Gallery Walk Feedback',
     description: 'Upload a .gw file to see the comments left for you.',
-    buttonText: 'Copy Feedback Review Link',
   },
 };
 ```
 
-If omitted, the UI falls back to `name`, `description`, and the default button label.
+`standaloneEntry.title` and `standaloneEntry.description` are used by shared standalone UI when present.
+
+### Adding Utility Links
+
+If an activity needs a special-purpose route that is not the standard permalink flow, declare it with top-level `utilities`:
+
+```typescript
+export default {
+  // ...
+  utilities: [
+    {
+      id: 'gallery-walk-review-copy',
+      label: 'Copy Gallery Walk Review Link',
+      action: 'copy-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload a .gw file to review exported feedback.',
+      surfaces: ['manage'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+    {
+      id: 'gallery-walk-review-home',
+      label: 'Gallery Walk Review',
+      action: 'go-to-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload a .gw file to review exported feedback.',
+      surfaces: ['home'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+  ],
+};
+```
+
+Use `action: 'copy-url'` for dashboard copy buttons and `action: 'go-to-url'` for navigable utility cards. Keep utilities activity-specific and use them for special tools rather than for normal student entry.
 
 ### Deep Linking in Solo Mode
 

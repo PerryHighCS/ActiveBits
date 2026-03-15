@@ -31,14 +31,13 @@ void test('buildStudentWebSocketUrl includes student identity query params', () 
     sessionId: 'session-123',
     presentationUrl: 'https://slides.example/deck',
     studentId: 'student-abc',
-    studentName: 'Ada Lovelace',
     protocol: 'https:',
     host: 'activebits.example',
   })
 
   assert.equal(
     url,
-    'wss://activebits.example/ws/syncdeck?sessionId=session-123&studentId=student-abc&studentName=Ada+Lovelace',
+    'wss://activebits.example/ws/syncdeck?sessionId=session-123&studentId=student-abc',
   )
 })
 
@@ -47,7 +46,6 @@ void test('buildStudentWebSocketUrl returns null when student id is missing', ()
     sessionId: 'session-123',
     presentationUrl: 'https://slides.example/deck',
     studentId: '',
-    studentName: 'Ada Lovelace',
     protocol: 'https:',
     host: 'activebits.example',
   })

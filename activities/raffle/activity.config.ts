@@ -5,7 +5,12 @@ const raffleConfig: ActivityConfig = {
   name: 'Raffle',
   description: 'Students scan a QR code to receive a unique ticket',
   color: 'red',
-  soloMode: false,
+  standaloneEntry: {
+    enabled: false,
+    supportsDirectPath: false,
+    supportsPermalink: false,
+    showOnHome: false,
+  },
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',
 }

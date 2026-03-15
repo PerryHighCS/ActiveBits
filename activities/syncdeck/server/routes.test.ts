@@ -1,4 +1,5 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import { acceptEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   generatePersistentHash,
   getOrCreateActivePersistentSession,
@@ -168,6 +169,8 @@ function createSyncDeckSession(id: string, instructorPasscode = 'passcode-1'): S
 
 class MockSocket implements ActiveBitsWebSocket {
   sessionId?: string | null
+  studentId?: string | null
+  ignoreDisconnect?: boolean
   isAlive?: boolean
   clientIp?: string
   readyState = 1
@@ -231,6 +234,14 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
       ...createSyncDeckSession('s1', 'teacher-pass'),
       data: {
         ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
         lastInstructorPayload: { type: 'slidechanged', payload: { h: 2, v: 0, f: 0 } },
       },
     },
@@ -243,7 +254,11 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
   const studentSocket = new MockSocket()
   ws.wss.clients.add(studentSocket)
 
-  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  handler?.(
+    studentSocket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-1', studentName: 'Ada Lovelace' }),
+    ws.wss,
+  )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
@@ -264,6 +279,166 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
         JSON.stringify(asRecord(entry.payload)?.payload) === JSON.stringify({ h: 2, v: 0, f: 0 }),
     ),
   )
+})
+
+void test('syncdeck websocket closes duplicate student sockets for the same session participant', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const existingSocket = new MockSocket()
+  existingSocket.sessionId = 's1'
+  existingSocket.studentId = 'student-1'
+  const replacementSocket = new MockSocket()
+  ws.wss.clients.add(existingSocket)
+  ws.wss.clients.add(replacementSocket)
+
+  handler?.(
+    replacementSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'student-1',
+      studentName: 'Ada Lovelace',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(existingSocket.ignoreDisconnect, true)
+  assert.deepEqual(existingSocket.closeCalls, [{ code: 4000, reason: 'Replaced by new connection' }])
+})
+
+void test('syncdeck websocket rejects student connect without a registered studentId', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(
+    studentSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'missing-student',
+      studentName: 'Ada Lovelace',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(studentSocket.closeCalls, [{ code: 1008, reason: 'unregistered student' }])
+})
+
+void test('syncdeck websocket updates an existing student record on reconnect', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Old Name',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+      },
+    },
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(
+    studentSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'student-1',
+      studentName: 'Ada Lovelace',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const students = (state.store.s1?.data as {
+    students?: Array<{ studentId: string; name: string; joinedAt: number; lastSeenAt: number }>
+  }).students ?? []
+  assert.equal(students.length, 1)
+  assert.equal(students[0]?.studentId, 'student-1')
+  assert.equal(students[0]?.name, 'Old Name')
+  assert.equal(students[0]?.joinedAt, 100)
+  assert.ok((students[0]?.lastSeenAt ?? 0) >= 110)
+})
+
+void test('syncdeck websocket creates a student from accepted entry when no prior registration exists', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createSyncDeckSession('s1', 'teacher-pass')
+  acceptEntryParticipant(session, {
+    participantId: 'participant-1',
+    displayName: 'Ada Lovelace',
+  }, 100)
+  const state = createSessionStore({
+    s1: session,
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(
+    studentSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'participant-1',
+    }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(studentSocket.closeCalls, [])
+  const students = (state.store.s1?.data as {
+    students?: Array<{ studentId: string; name: string }>
+  }).students ?? []
+  assert.equal(students.length, 1)
+  assert.equal(students[0]?.studentId, 'participant-1')
+  assert.equal(students[0]?.name, 'Ada Lovelace')
 })
 
 void test('syncdeck websocket sends latest state snapshot to instructor on connect', async () => {
@@ -489,6 +664,14 @@ void test('syncdeck websocket replays buffered chalkboard snapshot and delta to 
             { mode: 1, event: { type: 'erase', x: 2, y: 2, board: 0, time: 2 } },
           ],
         },
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
       },
     },
   })
@@ -500,7 +683,11 @@ void test('syncdeck websocket replays buffered chalkboard snapshot and delta to 
   const studentSocket = new MockSocket()
   ws.wss.clients.add(studentSocket)
 
-  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  handler?.(
+    studentSocket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-1', studentName: 'Ada Lovelace' }),
+    ws.wss,
+  )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
@@ -628,6 +815,14 @@ void test('syncdeck websocket caps replayed chalkboard delta from oversized pers
           snapshot: null,
           delta: oversizedDelta,
         },
+        students: [{
+          studentId: 'student-2',
+          name: 'Grace Hopper',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
       },
     },
   })
@@ -639,7 +834,11 @@ void test('syncdeck websocket caps replayed chalkboard delta from oversized pers
   const studentSocket = new MockSocket()
   ws.wss.clients.add(studentSocket)
 
-  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  handler?.(
+    studentSocket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-2', studentName: 'Grace Hopper' }),
+    ws.wss,
+  )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   const delivered = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: unknown })
@@ -1436,7 +1635,7 @@ void test('instructor-passcode route rejects forged cookie key with wrong teache
   assert.deepEqual(res.body, { error: 'forbidden' })
 })
 
-void test('register-student route creates a student record for valid syncdeck session', async () => {
+void test('embedded-context route resolves teacher role from valid instructor passcode', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({
@@ -1444,53 +1643,121 @@ void test('register-student route creates a student record for valid syncdeck se
   })
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
-  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
   assert.equal(typeof handler, 'function')
 
   const res = createResponse()
   await handler?.(
     createRequest(
       { sessionId: 's1' },
-      {
-        name: 'Ada Lovelace',
-      },
+      { instructorPasscode: 'teacher-passcode-1' },
     ),
     res,
   )
 
   assert.equal(res.statusCode, 200)
-  const payload = res.body as { studentId?: unknown; name?: unknown }
-  assert.equal(typeof payload.studentId, 'string')
-  assert.ok((payload.studentId as string).length > 0)
-  assert.equal(payload.name, 'Ada Lovelace')
-
-  const students = (storeState.store.s1?.data as { students?: Array<{ name?: string }> }).students ?? []
-  assert.equal(students.length, 1)
-  assert.equal(students[0]?.name, 'Ada Lovelace')
+  assert.deepEqual(res.body, { resolvedRole: 'teacher' })
 })
 
-void test('register-student route returns 404 for invalid session', async () => {
+void test('embedded-context route does not authenticate teacher when instructorPasscode is missing or blank', async () => {
   const app = createMockApp()
   const ws = createMockWs()
-  const storeState = createSessionStore({})
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'Student'),
+  })
   setupSyncDeckRoutes(app, storeState.sessions, ws)
 
-  const handler = app.handlers.post['/api/syncdeck/:sessionId/register-student']
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
+  assert.equal(typeof handler, 'function')
+
+  const missingRes = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+    ),
+    missingRes,
+  )
+
+  assert.equal(missingRes.statusCode, 403)
+  assert.deepEqual(missingRes.body, { error: 'forbidden' })
+
+  const blankRes = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: '   ' },
+    ),
+    blankRes,
+  )
+
+  assert.equal(blankRes.statusCode, 403)
+  assert.deepEqual(blankRes.body, { error: 'forbidden' })
+})
+
+void test('embedded-context route resolves student role from registered student id', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
   assert.equal(typeof handler, 'function')
 
   const res = createResponse()
   await handler?.(
     createRequest(
-      { sessionId: 'missing' },
-      {
-        name: 'Student',
-      },
+      { sessionId: 's1' },
+      { studentId: 'student-1' },
     ),
     res,
   )
 
-  assert.equal(res.statusCode, 404)
-  assert.deepEqual(res.body, { error: 'invalid session' })
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    resolvedRole: 'student',
+    studentId: 'student-1',
+    studentName: 'Ada Lovelace',
+  })
+})
+
+void test('embedded-context route rejects unknown parent identity', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-context']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { studentId: 'missing-student' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, { error: 'forbidden' })
 })
 
 void test('create route initializes syncdeck session state', async () => {

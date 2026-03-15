@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-03-14
+- Area: devcontainer privilege model
+- Threat or risk: Granting `SYS_ADMIN` and disabling AppArmor/seccomp in the default devcontainer materially increases local container privilege and can surprise contributors or CI-like environments that expect the repo's base dev setup to stay constrained.
+- Control or mitigation: The default devcontainer stays least-privilege, and the elevated settings now live in a separate opt-in profile at `.devcontainer/privileged/devcontainer.json` via `.devcontainer/docker-compose.privileged.yml`.
+- Residual risk: Contributors who choose the privileged profile still accept a wider local attack surface and weaker isolation for that container.
+- Validation (test/review/path): `.devcontainer/docker-compose.yml`; `.devcontainer/docker-compose.privileged.yml`; `.devcontainer/privileged/devcontainer.json`; `README.md`
+- Follow-up action: Keep any future privileged devcontainer changes opt-in, and document the specific local tool class that requires them instead of broadening the default container.
+- Owner: Codex
+
 - Date: 2026-02-23
 - Area: persistent link deep-link parameters
 - Threat or risk: Generic persistent-link deep-link options are appended as query params and are not integrity-protected by the existing `/api/persistent-session/create` flow. A teacher-facing URL parameter such as `presentationUrl` can be modified by URL tampering if an activity trusts it directly.
@@ -32,4 +41,3 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Validation (test/review/path): `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/server/routes.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `activities/syncdeck/server/routes.test.ts`; `npm test`.
 - Follow-up action: Add optional hostname/domain allowlist policy if deployment requires restricting presentation origins.
 - Owner: Codex
-

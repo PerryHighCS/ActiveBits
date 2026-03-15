@@ -38,12 +38,14 @@ interface ActivityConfigLike extends Record<string, unknown> {
   description?: string
   color?: string
   serverEntry?: string
-  soloMode?: boolean
   isDev?: boolean
-  soloModeMeta?: {
+  standaloneEntry?: {
+    enabled?: boolean
+    supportsDirectPath?: boolean
+    supportsPermalink?: boolean
+    showOnHome?: boolean
     title?: string
     description?: string
-    buttonText?: string
   } | null
 }
 
@@ -208,24 +210,23 @@ void test('all activity configs have required fields', async () => {
     assert.ok(config.description, `${activityId}: config has 'description' field`)
     assert.ok(config.color, `${activityId}: config has 'color' field`)
     assert.ok(config.serverEntry, `${activityId}: config has 'serverEntry' field`)
-    assert.equal(typeof config.soloMode, 'boolean', `${activityId}: config.soloMode is a boolean`)
-    if (config.soloModeMeta !== undefined) {
-      assert.equal(
-        typeof config.soloModeMeta,
-        'object',
-        `${activityId}: config.soloModeMeta is an object when provided`,
-      )
-      if (config.soloModeMeta) {
-        const { title, description, buttonText } = config.soloModeMeta
-        if (title !== undefined) {
-          assert.equal(typeof title, 'string', `${activityId}: soloModeMeta.title must be a string`)
-        }
-        if (description !== undefined) {
-          assert.equal(typeof description, 'string', `${activityId}: soloModeMeta.description must be a string`)
-        }
-        if (buttonText !== undefined) {
-          assert.equal(typeof buttonText, 'string', `${activityId}: soloModeMeta.buttonText must be a string`)
-        }
+    assert.equal(typeof config.standaloneEntry, 'object', `${activityId}: config.standaloneEntry is an object`)
+    if (config.standaloneEntry) {
+      assert.equal(typeof config.standaloneEntry.enabled, 'boolean', `${activityId}: standaloneEntry.enabled must be a boolean`)
+      if (config.standaloneEntry.supportsDirectPath !== undefined) {
+        assert.equal(typeof config.standaloneEntry.supportsDirectPath, 'boolean', `${activityId}: standaloneEntry.supportsDirectPath must be a boolean`)
+      }
+      if (config.standaloneEntry.supportsPermalink !== undefined) {
+        assert.equal(typeof config.standaloneEntry.supportsPermalink, 'boolean', `${activityId}: standaloneEntry.supportsPermalink must be a boolean`)
+      }
+      if (config.standaloneEntry.showOnHome !== undefined) {
+        assert.equal(typeof config.standaloneEntry.showOnHome, 'boolean', `${activityId}: standaloneEntry.showOnHome must be a boolean`)
+      }
+      if (config.standaloneEntry.title !== undefined) {
+        assert.equal(typeof config.standaloneEntry.title, 'string', `${activityId}: standaloneEntry.title must be a string`)
+      }
+      if (config.standaloneEntry.description !== undefined) {
+        assert.equal(typeof config.standaloneEntry.description, 'string', `${activityId}: standaloneEntry.description must be a string`)
       }
     }
   }
@@ -250,7 +251,12 @@ void test('registerActivityRoutes resolves server entry extension during mixed m
   name: 'Test TS Activity',
   description: 'A test TypeScript activity',
   color: 'teal',
-  soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   serverEntry: './server/routes.js',
 };`
     )
@@ -321,7 +327,12 @@ void test('initializeActivityRegistry filters dev activities in production mode'
   name: 'Test Dev Activity',
   description: 'A test dev activity',
   color: 'blue',
-  soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   isDev: true,
   clientEntry: './client/index.jsx',
   serverEntry: './server/routes.js',
@@ -373,7 +384,12 @@ void test('initializeActivityRegistry preserves dev activities in development mo
   name: 'Test Dev Activity 2',
   description: 'A test dev activity',
   color: 'green',
-  soloMode: false,
+  standaloneEntry: {
+    enabled: false,
+    supportsDirectPath: false,
+    supportsPermalink: false,
+    showOnHome: false,
+  },
   isDev: true,
   clientEntry: './client/index.jsx',
   serverEntry: './server/routes.js',
@@ -540,7 +556,12 @@ void test('initializeActivityRegistry rejects schema-invalid activity config in 
   name: 'Test Invalid Schema Activity',
   description: 'Valid syntax but invalid shared contract',
   color: 'orange',
-  soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   serverEntry: './server/routes.js',
   deepLinkGenerator: {
     endpoint: '/api/test',
@@ -654,7 +675,12 @@ void test('initializeActivityRegistry handles missing isDev flag (defaults to pr
   name: 'Test Activity No Flag',
   description: 'A test activity without isDev flag',
   color: 'purple',
-  soloMode: true,
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   clientEntry: './client/index.jsx',
   serverEntry: './server/routes.js',
 };`

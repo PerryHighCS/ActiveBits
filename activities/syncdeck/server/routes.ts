@@ -5,6 +5,7 @@ import {
   resolvePersistentSessionSecret,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
+import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -12,6 +13,7 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../shared/revealSyncProtocol.js'
+import { connectSyncDeckStudent } from './studentParticipants.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -57,6 +59,12 @@ interface SyncDeckStudent {
   lastStudentStateAt: number | null
 }
 
+interface SyncDeckEmbeddedEntryContextResponse {
+  resolvedRole: 'teacher' | 'student'
+  studentId?: string
+  studentName?: string
+}
+
 interface SyncDeckEmbeddedActivity {
   embeddedId: string
   activityType: string
@@ -97,7 +105,6 @@ interface SyncDeckSocket extends ActiveBitsWebSocket {
   isInstructor?: boolean
   sessionId?: string | null
   studentId?: string | null
-  studentName?: string | null
 }
 
 interface SyncDeckWsMessage {
@@ -236,6 +243,17 @@ function normalizeStudentEntry(value: unknown): SyncDeckStudent | null {
     lastIndices: normalizeSlideIndices(value.lastIndices),
     lastStudentStateAt: normalizeNullableFiniteNumber(value.lastStudentStateAt),
   }
+}
+
+function findSyncDeckStudentById(
+  students: SyncDeckStudent[],
+  studentId: string | null,
+): SyncDeckStudent | null {
+  if (!studentId) {
+    return null
+  }
+
+  return students.find((student) => student.studentId === studentId) ?? null
 }
 
 function normalizeEmbeddedActivityEntry(value: unknown): SyncDeckEmbeddedActivity | null {
@@ -419,8 +437,16 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
       : extractIndicesFromInstructorPayload(normalizedLastInstructorPayload)
         ? normalizedLastInstructorPayload
         : null
+  const preservedAcceptedEntryParticipants = isPlainObject(source.acceptedEntryParticipants)
+    ? source.acceptedEntryParticipants
+    : undefined
+  const preservedEntryParticipants = isPlainObject(source.entryParticipants)
+    ? source.entryParticipants
+    : undefined
 
   return {
+    ...(preservedAcceptedEntryParticipants ? { acceptedEntryParticipants: preservedAcceptedEntryParticipants } : {}),
+    ...(preservedEntryParticipants ? { entryParticipants: preservedEntryParticipants } : {}),
     presentationUrl: typeof source.presentationUrl === 'string' ? source.presentationUrl : null,
     instructorPasscode:
       typeof source.instructorPasscode === 'string' && source.instructorPasscode.length > 0
@@ -606,6 +632,19 @@ function normalizeStudentName(value: unknown): string {
   }
 
   return trimmed.slice(0, 80)
+}
+
+function normalizeInstructorPasscode(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > MAX_TEACHER_CODE_LENGTH) {
+    return null
+  }
+
+  return trimmed
 }
 
 function asSyncDeckSession(session: SessionRecord | null): SyncDeckSession | null {
@@ -909,7 +948,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
   })
 
-  app.post('/api/syncdeck/:sessionId/register-student', async (req, res) => {
+  app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
     const sessionId = req.params.sessionId
     if (!sessionId) {
       const response = res as unknown as JsonResponse
@@ -924,23 +963,29 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const name = normalizeStudentName(readStringField(req.body, 'name'))
-    const studentId = randomBytes(8).toString('hex')
-    const now = Date.now()
+    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+    if (instructorPasscode && verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      const response = res as unknown as JsonResponse
+      const payload: SyncDeckEmbeddedEntryContextResponse = { resolvedRole: 'teacher' }
+      response.json(payload)
+      return
+    }
 
-    session.data.students.push({
-      studentId,
-      name,
-      joinedAt: now,
-      lastSeenAt: now,
-      lastIndices: null,
-      lastStudentStateAt: null,
-    })
-    await sessions.set(session.id, session)
-    await broadcastStudentsToInstructors(session.id)
+    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
+    const student = findSyncDeckStudentById(session.data.students, studentId)
+    if (student) {
+      const response = res as unknown as JsonResponse
+      const payload: SyncDeckEmbeddedEntryContextResponse = {
+        resolvedRole: 'student',
+        studentId: student.studentId,
+        studentName: student.name,
+      }
+      response.json(payload)
+      return
+    }
 
     const response = res as unknown as JsonResponse
-    response.json({ studentId, name })
+    response.status(403).json({ error: 'forbidden' })
   })
 
   app.post('/api/syncdeck/:sessionId/configure', async (req, res) => {
@@ -1006,7 +1051,6 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     client.sessionId = query.get('sessionId')
     client.isInstructor = false
     client.studentId = normalizeStudentId(query.get('studentId'))
-    client.studentName = normalizeStudentName(query.get('studentName'))
 
     const sessionId = client.sessionId
     if (!sessionId) {
@@ -1049,24 +1093,23 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
-      if (client.studentId) {
-        const now = Date.now()
-        const existingStudent = session.data.students.find((student) => student.studentId === client.studentId)
-        if (existingStudent) {
-          existingStudent.lastSeenAt = now
-          existingStudent.name = client.studentName ?? existingStudent.name
-        } else {
-          session.data.students.push({
-            studentId: client.studentId,
-            name: client.studentName ?? 'Student',
-            joinedAt: now,
-            lastSeenAt: now,
-            lastIndices: null,
-            lastStudentStateAt: null,
-          })
-        }
-        await sessions.set(session.id, session)
+      if (!client.studentId) {
+        socket.close(1008, 'missing studentId')
+        return
       }
+
+      const connectedStudent = connectSyncDeckStudent(
+        session,
+        client.studentId,
+      )
+      if (!connectedStudent) {
+        socket.close(1008, 'unregistered student')
+        return
+      }
+
+      client.studentId = connectedStudent.participantId
+      await sessions.set(session.id, session)
+      closeDuplicateParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, client)
 
       if (session.data.lastInstructorPayload != null) {
         if (session.data.lastInstructorStatePayload != null && !parseChalkboardCommand(session.data.lastInstructorStatePayload)) {

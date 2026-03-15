@@ -1,5 +1,6 @@
-import crypto from 'node:crypto'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
+import { generateParticipantId } from 'activebits-server/core/participantIds.js'
+import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import type { WsRouter } from '../../../../types/websocket.js'
 import type {
   TravelingSalesmanSession,
@@ -25,35 +26,14 @@ interface BroadcastRouteRecord {
  * Generate unique student ID
  */
 export function generateStudentId(_name: string): string {
-  if (typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  const timestamp = Date.now().toString(36)
-  const random = crypto.randomBytes(8).toString('hex')
-  return `${timestamp}-${random}`
+  return generateParticipantId()
 }
 
 /**
  * Close duplicate WebSocket connections for same student
  */
 export function closeDuplicateStudentSockets(ws: WsRouter, currentSocket: TravelingSalesmanSocket): void {
-  if (!currentSocket.sessionId || !currentSocket.studentId) return
-
-  for (const client of ws.wss.clients as Set<TravelingSalesmanSocket>) {
-    if (
-      client !== currentSocket &&
-      client.readyState === 1 &&
-      client.sessionId === currentSocket.sessionId &&
-      client.studentId === currentSocket.studentId
-    ) {
-      client.ignoreDisconnect = true
-      try {
-        client.close(4000, 'Replaced by new connection')
-      } catch (err) {
-        console.error('Failed to close duplicate socket:', err)
-      }
-    }
-  }
+  closeDuplicateParticipantSockets(ws.wss.clients as Set<TravelingSalesmanSocket>, currentSocket)
 }
 
 export function createBroadcastHelpers(sessions: TravelingSalesmanSessionStore, ws: WsRouter) {

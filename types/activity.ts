@@ -1,4 +1,8 @@
 import type { ComponentType, LazyExoticComponent, ReactNode } from 'react'
+import type {
+  ActivityWaitingRoomConfig,
+  WaitingRoomFieldComponentProps,
+} from './waitingRoom.js'
 
 export type ActivityRenderableComponent =
   | ComponentType<unknown>
@@ -48,18 +52,33 @@ export interface ActivityCreateSessionBootstrapConfig {
   sessionStorage?: ActivityCreateSessionBootstrapSessionStorageEntry[]
 }
 
+export interface ActivityUtility {
+  id: string
+  label: string
+  action: 'copy-url' | 'go-to-url'
+  path: string
+  description?: string
+  surfaces?: Array<'manage' | 'home'>
+  standaloneSessionId?: string
+}
+
+export interface ActivityStandaloneEntryConfig {
+  enabled: boolean
+  supportsDirectPath?: boolean
+  supportsPermalink?: boolean
+  showOnHome?: boolean
+  title?: string
+  description?: string
+}
+
 export interface ActivityConfig {
   id: string
   name: string
   title?: string
   description: string
   color: string
-  soloMode: boolean
-  soloModeMeta?: {
-    title?: string
-    description?: string
-    buttonText?: string
-  }
+  standaloneEntry: ActivityStandaloneEntryConfig
+  utilities?: ActivityUtility[]
   deepLinkOptions?: Record<string, ActivityDeepLinkOption>
   deepLinkGenerator?: {
     endpoint: string
@@ -74,6 +93,7 @@ export interface ActivityConfig {
   manageLayout?: {
     expandShell?: boolean
   }
+  waitingRoom?: ActivityWaitingRoomConfig
   isDev?: boolean
   clientEntry?: string
   serverEntry?: string
@@ -89,6 +109,7 @@ export interface ActivityClientModule {
     preflight: ActivityDeepLinkPreflightConfig,
     rawValue: string,
   ) => Promise<ActivityDeepLinkPreflightResult>
+  waitingRoomFields?: Record<string, ComponentType<WaitingRoomFieldComponentProps>>
 }
 
 export interface ActivityRegistryEntry extends ActivityConfig {

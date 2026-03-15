@@ -51,6 +51,7 @@ ActiveBits/
 6. Teacher can access the session at any time via their link ( `/activity/{activityName}/{hash}` )
 7. Auto-authentication using teacher code cookie
 8. Download CSV backup of all permanent links
+9. For `solo-allowed` links with no active live session, the waiting room remains visible so students can choose solo mode and instructors without a remembered cookie can still enter the teacher code to start a new live session
 
 ### Student Flow
 1. Receive session ID or permanent link from teacher
@@ -85,12 +86,34 @@ export default {
   name: 'Display Name',         // Human-readable name
   description: 'Brief description', // Shown in dashboard
   color: 'blue',                // Accent color for activity card
-  soloMode: false,              // Allow solo practice without teacher
-  soloModeMeta: {               // Optional: customize Solo Bits/manager labels
-    title: 'Solo Card Title',
-    description: 'Solo mode description',
-    buttonText: 'Copy Solo Link',
+  standaloneEntry: {            // Explicit standalone-entry capabilities
+    enabled: false,
+    supportsDirectPath: false,  // Supports /solo/:activityId
+    supportsPermalink: false,   // Supports standalone-capable permalinks
+    showOnHome: false,          // Show in the home-page standalone section
+    title: 'Standalone Card Title',
+    description: 'Standalone entry description',
   },
+  utilities: [                  // Optional: extra utility routes/actions
+    {
+      id: 'gallery-walk-review-copy',
+      label: 'Copy Gallery Walk Review Link',
+      action: 'copy-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload and review feedback that was left for you.',
+      surfaces: ['manage'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+    {
+      id: 'gallery-walk-review-home',
+      label: 'Gallery Walk Review',
+      action: 'go-to-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload and review feedback that was left for you.',
+      surfaces: ['home'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+  ],
   // Optional: shared permanent-link modal options and server-side link generation
   deepLinkOptions: {
     presentationUrl: {
@@ -144,33 +167,43 @@ Routes are automatically generated in `App.tsx` based on registered activities:
 
 See **[ADDING_ACTIVITIES.md](ADDING_ACTIVITIES.md)** for a complete step-by-step tutorial with working code examples.
 
-## Solo Mode
+## Standalone Entry
 
-Solo mode enables students to practice activities independently without requiring a teacher to manage a session. This feature provides self-paced learning opportunities directly from the join page.
+Standalone entry enables students to use certain activities without requiring a teacher-managed live session. Shared config now distinguishes between:
+- direct standalone routes at `/solo/:activityId`
+- standalone-capable permalinks
+- utility routes that are not normal student-entry flows
 
 ### Configuration
 
-Enable solo mode by setting `soloMode: true` in the activity configuration:
+Declare standalone capabilities in the activity configuration:
 
 ```typescript
 export const myActivity = {
   id: 'my-activity',
   name: 'My Activity',
-  soloMode: true,  // Appears in "Solo Bits" section
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   // ... other config
 };
 ```
 
 ### How It Works
 
-1. **Display**: Activities with `soloMode: true` appear as clickable cards in the "Solo Bits" section on the join page (`/`)
+1. **Display**: Activities with `standaloneEntry.showOnHome: true` and `supportsDirectPath: true` appear as clickable cards in the standalone section on the join page (`/`)
    - Cards display in a responsive 3-column grid on medium screens and larger (1 column on mobile)
    - Each card shows the activity name, description, and clickable area to launch the activity
 2. **Session ID Format**: Solo sessions use the format `solo-{activity-id}` (e.g., `solo-java-string-practice`)
 3. **No Teacher Required**: Students can start practicing immediately without a teacher-managed session
 4. **Client-Side State**: Solo activities typically use `localStorage` for progress persistence
-5. **Custom Labels**: Optional `soloModeMeta` lets each activity override the Solo Bits card title/description and the dashboard "Copy Solo…" button text
-6. **Deep Linking Support**: Solo mode supports query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort` auto-selects the merge sort algorithm
+5. **Utilities**: Optional top-level `utilities` lets an activity expose dashboard and home-page tools without overloading permalink or standalone-entry semantics
+6. **Deep Linking Support**: Direct standalone routes can still support query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort`
+
+Activities can also support standalone via permalink without supporting `/solo/:activityId`. SyncDeck is the motivating example for that split.
 
 ### Solo Mode vs. Teacher Mode
 
@@ -201,6 +234,7 @@ Sessions are stored in-memory with a TTL (time-to-live). Each session has:
 ### Persistent Sessions
 Permanent sessions use HMAC-SHA256 authentication:
 - **Hash Format**: 20 characters of `salt(8 hex) + hmac(12 hex)` derived from `activityName|hashedTeacherCode|salt`
+- **Generic permalink URL state**: generic persistent links now also carry signed query state for permalink meaning (`entryPolicy`, plus selected deep-link options) via a short `urlHash`; the URL is the source of truth for those settings, and missing/invalid signed state falls back to `instructor-required` / "Live Only"
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
 - **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
 - **Query Parameters**: Activities can use URL query params for deep linking (e.g., `/activity/algorithm-demo/abc123?algorithm=merge-sort`)

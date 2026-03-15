@@ -2,6 +2,11 @@ import type { FC } from 'react'
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import {
+  persistSessionParticipantIdentity,
+  readStoredSessionParticipantIdentity,
+  resolveInitialEntryParticipantIdentity,
+} from '@src/components/common/entryParticipantIdentityUtils'
 import '../styles.css'
 import NameForm from './components/NameForm.js'
 import ControlsPanel from './components/ControlsPanel.js'
@@ -63,12 +68,18 @@ const toListValues = (values: unknown[] | undefined): (string | number)[] =>
   Array.isArray(values) ? values.filter(isListValue) : []
 
 const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
-  const [studentName, setStudentName] = useState('')
-  const [submittedName, setSubmittedName] = useState<string | undefined>(undefined)
-  const [studentId, setStudentId] = useState<string | undefined>(undefined)
   const attachSessionEndedHandler = useSessionEndedHandler()
   const sessionId = sessionData?.sessionId
   const isSolo = !sessionId || sessionId.startsWith('solo-')
+  const initialIdentity = (
+    typeof window !== 'undefined'
+    && sessionId
+    && !isSolo
+  ) ? readStoredSessionParticipantIdentity(window.localStorage, sessionId) : null
+  const [studentName, setStudentName] = useState(initialIdentity?.studentName ?? '')
+  const [submittedName, setSubmittedName] = useState<string | undefined>(initialIdentity?.studentName ?? undefined)
+  const [studentId, setStudentId] = useState<string | undefined>(initialIdentity?.studentId ?? undefined)
+  const [identityResolved, setIdentityResolved] = useState(Boolean(initialIdentity))
   const [allowedTypes, setAllowedTypes] = useState<Set<AllowedType>>(() => new Set(['all']))
   const [challenge, setChallenge] = useState<Challenge | null>(null)
   const [answer, setAnswer] = useState('')
@@ -147,19 +158,42 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
   }, [])
 
   useEffect(() => {
-    if (sessionId == null) return
-    const storedName = localStorage.getItem(`python-list-practice-name-${sessionId}`)
-    const storedId = localStorage.getItem(`python-list-practice-id-${sessionId}`)
-    if (storedName) {
-      setStudentName(storedName)
+    if (typeof window === 'undefined') {
+      return
     }
-    if (storedName && storedId) {
-      setSubmittedName(storedName)
-      setStudentId(storedId)
-    } else if (storedId && !storedName) {
-      setStudentId(storedId)
+
+    let isCancelled = false
+
+    void (async () => {
+      try {
+        const identity = await resolveInitialEntryParticipantIdentity({
+          activityName: 'python-list-practice',
+          sessionId,
+          isSoloSession: isSolo,
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+          soloDisplayName: 'Solo Student',
+        })
+        if (isCancelled) {
+          return
+        }
+
+        setStudentName(identity.studentName)
+        setSubmittedName(identity.studentName || undefined)
+        setStudentId(identity.studentId ?? undefined)
+      } catch (err) {
+        console.error('Failed to resolve initial participant identity:', err)
+      } finally {
+        if (!isCancelled) {
+          setIdentityResolved(true)
+        }
+      }
+    })()
+
+    return () => {
+      isCancelled = true
     }
-  }, [sessionId])
+  }, [isSolo, sessionId])
 
   useEffect(() => {
     if (showNext !== true && answerInputRef.current != null) {
@@ -196,9 +230,6 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
         ? crypto.randomUUID()
         : `stu-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     setStudentId(generated)
-    if (sessionId) {
-      localStorage.setItem(`python-list-practice-id-${sessionId}`, generated)
-    }
     return generated
   }, [studentId, sessionId])
 
@@ -212,9 +243,8 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
       }
       setSubmittedName(sanitized)
       const id = ensureStudentId()
-      if (sessionId) {
-        localStorage.setItem(`python-list-practice-name-${sessionId}`, sanitized)
-        localStorage.setItem(`python-list-practice-id-${sessionId}`, id)
+      if (sessionId && typeof window !== 'undefined') {
+        persistSessionParticipantIdentity(window.localStorage, sessionId, sanitized, id)
       }
       setError(null)
     },
@@ -225,6 +255,21 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
     (evt: MessageEvent<string>) => {
       try {
         const msg = JSON.parse(evt.data) as WebSocketMessage
+        if (msg.type === 'studentId') {
+          const nextStudentId = typeof msg.payload?.studentId === 'string' ? msg.payload.studentId : null
+          if (nextStudentId) {
+            setStudentId(nextStudentId)
+            if (sessionId && typeof window !== 'undefined') {
+              persistSessionParticipantIdentity(
+                window.localStorage,
+                sessionId,
+                submittedName?.trim() || studentName.trim(),
+                nextStudentId,
+              )
+            }
+          }
+          return
+        }
         if (msg.type === 'questionTypesUpdate') {
           const payload = msg.payload as { selectedQuestionTypes?: unknown } | undefined
           const types = Array.isArray(payload?.selectedQuestionTypes)
@@ -236,7 +281,7 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
         console.error('WS message error', err)
       }
     },
-    [applySelectedTypes],
+    [applySelectedTypes, sessionId],
   )
 
   const handleStudentOpen = useCallback(() => {
@@ -273,6 +318,17 @@ const PythonListPractice: FC<StudentProps> = ({ sessionData }) => {
       disconnectStudentWs()
     }
   }, [sessionId, isSolo, connectStudentWs, disconnectStudentWs])
+
+  if (isSolo !== true && identityResolved !== true) {
+    return (
+      <div className="python-list-bg flex items-center justify-center px-4">
+        <div className="python-list-join">
+          <h1 className="text-2xl font-bold mb-4 text-center text-emerald-900">Python List Practice</h1>
+          <p className="text-sm text-emerald-800 text-center mb-4">Rejoining session...</p>
+        </div>
+      </div>
+    )
+  }
 
   const isListBuildVariant = challenge?.variant === 'insert-final' || challenge?.variant === 'list-final'
 

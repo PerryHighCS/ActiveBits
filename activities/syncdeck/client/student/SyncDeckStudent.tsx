@@ -1,11 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
+  consumeResolvedEntryParticipantValues,
+  getEntryParticipantDisplayName,
+  getEntryParticipantParticipantId,
+} from '@src/components/common/entryParticipantStorage'
+import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
+import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
+import { resolveSyncDeckStudentIdentity } from './entryIdentityUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
@@ -647,14 +654,12 @@ export function buildStudentWebSocketUrl(params: {
   sessionId?: string | null
   presentationUrl?: string | null
   studentId?: string | null
-  studentName?: string | null
   protocol?: string | null
   host?: string | null
 }): string | null {
   const sessionId = typeof params.sessionId === 'string' ? params.sessionId.trim() : ''
   const presentationUrl = typeof params.presentationUrl === 'string' ? params.presentationUrl.trim() : ''
   const studentId = typeof params.studentId === 'string' ? params.studentId.trim() : ''
-  const studentName = typeof params.studentName === 'string' ? params.studentName.trim() : ''
   const protocol = typeof params.protocol === 'string' ? params.protocol : ''
   const host = typeof params.host === 'string' ? params.host.trim() : ''
 
@@ -666,7 +671,6 @@ export function buildStudentWebSocketUrl(params: {
   const queryParams = new URLSearchParams({
     sessionId,
     studentId,
-    studentName: studentName || 'Student',
   })
 
   return `${wsProtocol}//${host}/ws/syncdeck?${queryParams.toString()}`
@@ -758,10 +762,8 @@ const SyncDeckStudent: FC = () => {
   const [connectionState, setConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [isBacktrackOptOut, setIsBacktrackOptOut] = useState(false)
-  const [studentNameInput, setStudentNameInput] = useState('')
   const [registeredStudentName, setRegisteredStudentName] = useState('')
   const [registeredStudentId, setRegisteredStudentId] = useState('')
-  const [isRegisteringStudent, setIsRegisteringStudent] = useState(false)
   const [joinError, setJoinError] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const pendingPayloadQueueRef = useRef<unknown[]>([])
@@ -797,13 +799,52 @@ const SyncDeckStudent: FC = () => {
       return
     }
 
+    let isCancelled = false
     const storedName = getStoredStudentName(sessionId)
     const storedStudentId = getStoredStudentId(sessionId)
-    setStudentNameInput(storedName)
 
-    if (storedName.length > 0 && storedStudentId.length > 0) {
-      setRegisteredStudentName(storedName)
-      setRegisteredStudentId(storedStudentId)
+    void (async () => {
+      const acceptedValues =
+        typeof window !== 'undefined' && window.sessionStorage != null
+          ? await consumeResolvedEntryParticipantValues(window.sessionStorage, {
+            activityName: 'syncdeck',
+            sessionId,
+            isSoloSession: false,
+          })
+          : null
+
+      if (isCancelled) {
+        return
+      }
+
+      const resolvedIdentity = resolveSyncDeckStudentIdentity({
+        studentName: storedName,
+        studentId: storedStudentId,
+      }, {
+        displayName: getEntryParticipantDisplayName(acceptedValues),
+        participantId: getEntryParticipantParticipantId(acceptedValues),
+      })
+
+      setRegisteredStudentName(resolvedIdentity.studentName)
+      setRegisteredStudentId(resolvedIdentity.studentId)
+      setJoinError(
+        resolvedIdentity.needsWaitingRoomRestart
+          ? 'This presentation now requires entry through the waiting room.'
+          : null,
+      )
+
+      if (
+        typeof window !== 'undefined'
+        && resolvedIdentity.studentName.length > 0
+        && resolvedIdentity.studentId.length > 0
+      ) {
+        window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, resolvedIdentity.studentName)
+        window.sessionStorage.setItem(`syncdeck_student_id_${sessionId}`, resolvedIdentity.studentId)
+      }
+    })()
+
+    return () => {
+      isCancelled = true
     }
   }, [sessionId])
 
@@ -1147,11 +1188,10 @@ const SyncDeckStudent: FC = () => {
       sessionId,
       presentationUrl,
       studentId: registeredStudentId,
-      studentName: registeredStudentName,
       protocol: window.location.protocol,
       host: window.location.host,
     })
-  }, [sessionId, presentationUrl, registeredStudentId, registeredStudentName])
+  }, [sessionId, presentationUrl, registeredStudentId])
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs, socketRef: studentSocketRef } =
     useResilientWebSocket({
@@ -1161,9 +1201,23 @@ const SyncDeckStudent: FC = () => {
         setConnectionState('connected')
         setStatusMessage('Connected. Waiting for instructor sync…')
       },
-      onClose: () => {
+      onClose: (event) => {
+        const closeDecision = resolveSyncDeckStudentCloseDecision(event)
+        if (closeDecision.clearCachedIdentity) {
+          if (typeof window !== 'undefined' && sessionId) {
+            window.sessionStorage.removeItem(`syncdeck_student_name_${sessionId}`)
+            window.sessionStorage.removeItem(`syncdeck_student_id_${sessionId}`)
+          }
+          setRegisteredStudentName('')
+          setRegisteredStudentId('')
+          setJoinError(closeDecision.joinError)
+          setConnectionState('disconnected')
+          setStatusMessage(closeDecision.statusMessage)
+          return
+        }
+
         setConnectionState('disconnected')
-        setStatusMessage('Reconnecting to instructor sync…')
+        setStatusMessage(closeDecision.statusMessage)
       },
       onMessage: handleWsMessage,
       attachSessionEndedHandler,
@@ -1264,7 +1318,13 @@ const SyncDeckStudent: FC = () => {
   }, [sessionId, isWaitingForConfiguration])
 
   useEffect(() => {
-    if (!sessionId || !presentationUrl || presentationUrlError || registeredStudentName.trim().length === 0) {
+    if (
+      !sessionId
+      || !presentationUrl
+      || presentationUrlError
+      || registeredStudentName.trim().length === 0
+      || registeredStudentId.trim().length === 0
+    ) {
       disconnectStudentWs()
       return undefined
     }
@@ -1274,62 +1334,6 @@ const SyncDeckStudent: FC = () => {
       disconnectStudentWs()
     }
   }, [sessionId, presentationUrl, presentationUrlError, registeredStudentName, registeredStudentId, connectStudentWs, disconnectStudentWs])
-
-  const handleNameSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
-    if (!sessionId || !presentationUrl || isRegisteringStudent) {
-      return
-    }
-
-    const normalized = studentNameInput.trim().slice(0, 80)
-    if (normalized.length === 0) {
-      setJoinError('Please enter your name before joining.')
-      return
-    }
-
-    setIsRegisteringStudent(true)
-    setJoinError(null)
-    try {
-      const response = await fetch(`/api/syncdeck/${sessionId}/register-student`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ name: normalized }),
-      })
-
-      if (!response.ok) {
-        setJoinError('Unable to join this presentation right now. Please try again.')
-        return
-      }
-
-      const payload = (await response.json()) as { studentId?: unknown; name?: unknown }
-      const nextStudentId = typeof payload.studentId === 'string' ? payload.studentId.trim() : ''
-      const nextStudentName =
-        typeof payload.name === 'string' && payload.name.trim().length > 0
-          ? payload.name.trim().slice(0, 80)
-          : normalized
-
-      if (nextStudentId.length === 0) {
-        setJoinError('Unable to join this presentation right now. Please try again.')
-        return
-      }
-
-      if (typeof window !== 'undefined') {
-        window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, nextStudentName)
-        window.sessionStorage.setItem(`syncdeck_student_id_${sessionId}`, nextStudentId)
-      }
-
-      setRegisteredStudentName(nextStudentName)
-      setRegisteredStudentId(nextStudentId)
-      setJoinError(null)
-    } catch {
-      setJoinError('Unable to join this presentation right now. Please try again.')
-    } finally {
-      setIsRegisteringStudent(false)
-    }
-  }
 
   const handleIframeLoad = useCallback(() => {
     hasSeenIframeReadySignalRef.current = false
@@ -1396,33 +1400,27 @@ const SyncDeckStudent: FC = () => {
     )
   }
 
-  if (registeredStudentName.trim().length === 0) {
+  if (registeredStudentName.trim().length === 0 || registeredStudentId.trim().length === 0) {
     return (
       <div className="fixed inset-0 z-10 bg-white flex items-center justify-center p-6">
-        <form onSubmit={handleNameSubmit} className="w-full max-w-md border border-gray-200 rounded p-4 space-y-3">
-          <h1 className="text-xl font-bold text-gray-800">Join SyncDeck</h1>
-          <label className="block text-sm text-gray-700">
-            <span className="block font-semibold mb-1">Your Name</span>
-            <input
-              type="text"
-              value={studentNameInput}
-              onChange={(event) => setStudentNameInput(event.target.value)}
-              className="w-full border-2 border-gray-300 rounded px-3 py-2"
-              placeholder="Enter your name"
-              maxLength={80}
-              required
-              autoFocus
-            />
-          </label>
+        <div className="w-full max-w-md border border-gray-200 rounded p-4 space-y-3">
+          <h1 className="text-xl font-bold text-gray-800">Return to Waiting Room</h1>
+          <p className="text-sm text-gray-700">
+            SyncDeck now expects student entry to come through the waiting room before the presentation loads.
+          </p>
           {joinError ? <p className="text-sm text-red-600">{joinError}</p> : null}
           <button
-            type="submit"
-            disabled={isRegisteringStudent}
+            type="button"
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                window.location.reload()
+              }
+            }}
             className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700"
           >
-            {isRegisteringStudent ? 'Joining…' : 'Join Presentation'}
+            Reload Entry Flow
           </button>
-        </form>
+        </div>
       </div>
     )
   }

@@ -5,7 +5,12 @@ const wwwSimConfig: ActivityConfig = {
   name: 'WWW Simulation',
   description: 'Simulate IP-based discovery and HTTP interactions',
   color: 'yellow',
-  soloMode: false,
+  standaloneEntry: {
+    enabled: false,
+    supportsDirectPath: false,
+    supportsPermalink: false,
+    showOnHome: false,
+  },
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',
 }

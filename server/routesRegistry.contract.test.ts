@@ -99,6 +99,8 @@ void test('persistent routes register expected endpoints and cookie parser', asy
   assert.ok(getPaths.includes('/api/persistent-session/:hash/teacher-code'))
   assert.ok(postPaths.includes('/api/persistent-session/create'))
   assert.ok(postPaths.includes('/api/persistent-session/authenticate'))
+  assert.ok(postPaths.includes('/api/persistent-session/update'))
+  assert.ok(postPaths.includes('/api/persistent-session/remove'))
 })
 
 void test('activity registry exports expected API surface', async () => {

@@ -1,18 +1,26 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  activitySupportsDirectStandalonePath,
+  activitySupportsStandalonePermalink,
   buildTeacherManagePathFromSession,
+  buildPersistentSessionEntryApiUrl,
   buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
+  buildSessionEntryApiUrl,
   cleanExpiredSessions,
+  findUtilityRouteMatch,
+  getHomeUtilityActivities,
+  getPersistentLinkControlStateFromSearch,
   normalizePersistentPresentationUrl,
   getPersistentSelectedOptionsFromSearchForActivity,
   getPersistentSelectedOptionsFromSearch,
   getPersistentQuerySuffix,
   getSessionPresentationUrlForTeacherRedirect,
-  getSoloActivities,
+  getStandaloneHomeActivities,
   isJoinSessionId,
   readCachedSession,
+  shouldShowStandaloneActivityOnHome,
 } from './sessionRouterUtils'
 
 interface MockStorage {
@@ -53,6 +61,7 @@ void test('cleanExpiredSessions removes stale and malformed session-* entries on
     'session-valid': JSON.stringify({ timestamp: now - 100 }),
     'session-expired': JSON.stringify({ timestamp: now - 50_000 }),
     'session-invalid': 'not-json',
+    'session-participant:session-valid': JSON.stringify({ studentName: 'Ada', studentId: 'participant-1' }),
     other: JSON.stringify({ timestamp: 1 }),
   })
 
@@ -61,6 +70,7 @@ void test('cleanExpiredSessions removes stale and malformed session-* entries on
   assert.equal(storage.getItem('session-valid') !== null, true)
   assert.equal(storage.getItem('session-expired'), null)
   assert.equal(storage.getItem('session-invalid'), null)
+  assert.equal(storage.getItem('session-participant:session-valid') !== null, true)
   assert.equal(storage.getItem('other') !== null, true)
   assert.ok(logs.some((entry) => entry.includes('Expiring session-expired')))
   assert.ok(logs.some((entry) => entry.includes('Removing invalid entry session-invalid')))
@@ -106,6 +116,36 @@ void test('buildPersistentSessionApiUrl replaces existing activityName in search
   assert.equal(url, '/api/persistent-session/abc123?activityName=new-name&mode=solo')
 })
 
+void test('buildPersistentSessionEntryApiUrl targets the server-backed permalink entry route', () => {
+  const url = buildPersistentSessionEntryApiUrl('abc/123', 'merge&sort', '?mode=review')
+  assert.equal(
+    url,
+    '/api/persistent-session/abc%2F123/entry?mode=review&activityName=merge%26sort',
+  )
+})
+
+void test('buildSessionEntryApiUrl encodes raw session identifiers for the join entry route', () => {
+  assert.equal(
+    buildSessionEntryApiUrl('session/1?x y'),
+    '/api/session/session%2F1%3Fx%20y/entry',
+  )
+})
+
+void test('buildPersistentTeacherManagePath preserves query params for most activities but clears syncdeck bootstrap params', () => {
+  assert.equal(
+    buildPersistentTeacherManagePath('raffle', 'session-1', '?foo=bar'),
+    '/manage/raffle/session-1?foo=bar',
+  )
+  assert.equal(
+    buildPersistentTeacherManagePath('syncdeck', 'session-1', '?presentationUrl=https%3A%2F%2Fslides.example'),
+    '/manage/syncdeck/session-1',
+  )
+})
+
+void test('buildSessionEntryApiUrl encodes the session ID for join entry lookups', () => {
+  assert.equal(buildSessionEntryApiUrl('ab/c 123'), '/api/session/ab%2Fc%20123/entry')
+})
+
 void test('buildPersistentTeacherManagePath drops permalink query for started syncdeck sessions', () => {
   const path = buildPersistentTeacherManagePath(
     'syncdeck',
@@ -119,6 +159,17 @@ void test('buildPersistentTeacherManagePath drops permalink query for started sy
 void test('buildPersistentTeacherManagePath preserves query for non-syncdeck activities', () => {
   const path = buildPersistentTeacherManagePath('raffle', 'session-123', '?foo=bar')
   assert.equal(path, '/manage/raffle/session-123?foo=bar')
+})
+
+void test('getPersistentLinkControlStateFromSearch parses signed permalink control params', () => {
+  assert.deepEqual(
+    getPersistentLinkControlStateFromSearch('?entryPolicy=solo-allowed&urlHash=A53762A75A8CC2E5'),
+    { entryPolicy: 'solo-allowed', urlHash: 'a53762a75a8cc2e5' },
+  )
+  assert.deepEqual(
+    getPersistentLinkControlStateFromSearch('?entryPolicy=not-real&urlHash=bad'),
+    { entryPolicy: 'instructor-required', urlHash: null },
+  )
 })
 
 void test('getSessionPresentationUrlForTeacherRedirect returns validated session presentationUrl', () => {
@@ -282,11 +333,128 @@ void test('isJoinSessionId requires a full non-zero hex string', () => {
   assert.equal(isJoinSessionId(''), false)
 })
 
-void test('getSoloActivities filters activity list to solo-mode entries', () => {
-  const result = getSoloActivities([
-    { id: 'a', name: 'A', description: 'A', color: 'blue', soloMode: true },
-    { id: 'b', name: 'B', description: 'B', color: 'green', soloMode: false },
+void test('standalone activity helpers respect direct-path, permalink, and home visibility flags', () => {
+  const directHome = {
+    id: 'a',
+    name: 'A',
+    description: 'A',
+    color: 'blue',
+    standaloneEntry: {
+      enabled: true,
+      supportsDirectPath: true,
+      supportsPermalink: true,
+      showOnHome: true,
+    },
+  }
+  const permalinkOnly = {
+    id: 'b',
+    name: 'B',
+    description: 'B',
+    color: 'green',
+    standaloneEntry: {
+      enabled: true,
+      supportsDirectPath: false,
+      supportsPermalink: true,
+      showOnHome: false,
+    },
+  }
+
+  assert.equal(activitySupportsDirectStandalonePath(directHome), true)
+  assert.equal(activitySupportsStandalonePermalink(directHome), true)
+  assert.equal(shouldShowStandaloneActivityOnHome(directHome), true)
+
+  assert.equal(activitySupportsDirectStandalonePath(permalinkOnly), false)
+  assert.equal(activitySupportsStandalonePermalink(permalinkOnly), true)
+  assert.equal(shouldShowStandaloneActivityOnHome(permalinkOnly), false)
+
+  assert.deepEqual(getStandaloneHomeActivities([directHome, permalinkOnly]).map((activity) => activity.id), ['a'])
+})
+
+void test('getHomeUtilityActivities returns activities with home-visible utilities', () => {
+  const result = getHomeUtilityActivities([
+    {
+      id: 'gallery-walk',
+      name: 'Gallery Walk',
+      description: 'G',
+      color: 'blue',
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
+      utilities: [
+        {
+          id: 'gallery-walk-review-home',
+          label: 'Gallery Walk Review',
+          action: 'go-to-url',
+          path: '/util/gallery-walk/viewer',
+          surfaces: ['home'],
+          standaloneSessionId: 'solo-gallery-walk',
+        },
+      ],
+    },
+    {
+      id: 'syncdeck',
+      name: 'SyncDeck',
+      description: 'S',
+      color: 'indigo',
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
+      utilities: [
+        { id: 'hidden', label: 'Hidden Utility', action: 'go-to-url', path: '/tool', surfaces: ['manage'] },
+      ],
+    },
   ])
 
-  assert.deepEqual(result.map((activity) => activity.id), ['a'])
+  assert.deepEqual(result.map((activity) => activity.id), ['gallery-walk'])
+})
+
+void test('findUtilityRouteMatch resolves configured utility paths', () => {
+  const match = findUtilityRouteMatch([
+    {
+      id: 'gallery-walk',
+      name: 'Gallery Walk',
+      description: 'G',
+      color: 'blue',
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
+      utilities: [
+        {
+          id: 'gallery-walk-review-copy',
+          label: 'Copy Gallery Walk Review Link',
+          action: 'copy-url',
+          path: '/util/gallery-walk/viewer',
+          surfaces: ['manage'],
+          standaloneSessionId: 'solo-gallery-walk',
+        },
+      ],
+    },
+    {
+      id: 'syncdeck',
+      name: 'SyncDeck',
+      description: 'S',
+      color: 'indigo',
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
+    },
+  ], '/util/gallery-walk/viewer')
+
+  assert.equal(match?.activity.id, 'gallery-walk')
+  assert.equal(match?.utility.id, 'gallery-walk-review-copy')
+  assert.equal(match?.utility.label, 'Copy Gallery Walk Review Link')
+  assert.equal(match?.utility.standaloneSessionId, 'solo-gallery-walk')
+  assert.equal(findUtilityRouteMatch([], '/util/gallery-walk/viewer'), null)
 })

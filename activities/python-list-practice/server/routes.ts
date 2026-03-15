@@ -8,6 +8,12 @@ import type {
   PythonListPracticeStudent,
 } from '../pythonListPracticeTypes.js'
 import { sanitizeQuestionTypes, validateName, validateStats, validateStudentId } from './routeUtils.js'
+import {
+  connectPythonListPracticeStudent,
+  disconnectPythonListPracticeStudent,
+  normalizePythonListPracticeStudent,
+  updatePythonListPracticeStudentStats,
+} from './studentParticipants.js'
 
 interface JsonResponse {
   status(code: number): JsonResponse
@@ -54,14 +60,13 @@ function normalizeSessionData(data: unknown): PythonListPracticeSessionData {
           const name = validateName(student.name)
           if (!name) return null
           return {
-            id:
-              typeof student.id === 'string'
-                ? student.id
-                : `${name}-${Date.now().toString(36)}`,
-            name,
-            stats: validateStats(student.stats) ?? defaultStats,
-            connected: Boolean(student.connected),
-            lastSeen: typeof student.lastSeen === 'number' ? student.lastSeen : undefined,
+            ...normalizePythonListPracticeStudent({
+              id: typeof student.id === 'string' ? student.id : null,
+              name,
+              stats: validateStats(student.stats) ?? defaultStats,
+              connected: Boolean(student.connected),
+              lastSeen: typeof student.lastSeen === 'number' ? student.lastSeen : undefined,
+            }),
           } as PythonListPracticeStudent
         })
         .filter((student): student is PythonListPracticeStudent => Boolean(student))
@@ -200,24 +205,11 @@ export default function setupPythonListPracticeRoutes(
       return
     }
 
-    const student = session.data.students.find(
-      (s) =>
-        (studentId != null && s.id === studentId) ||
-        (studentName != null && s.name === studentName && (s.id == null || s.id === '')),
-    )
-
-    if (student) {
-      student.stats = stats
-      student.lastSeen = Date.now()
-    } else {
-      session.data.students.push({
-        id: studentId || `${studentName}-${Date.now().toString(36)}`,
-        name: studentName || 'Student',
-        stats,
-        connected: true,
-        lastSeen: Date.now(),
-      })
-    }
+    updatePythonListPracticeStudentStats(session.data.students, {
+      participantId: studentId,
+      participantName: studentName,
+      stats,
+    })
 
     await sessions.set(session.id, session)
     await broadcast('studentsUpdate', { students: session.data.students }, session.id)
@@ -289,28 +281,41 @@ export default function setupPythonListPracticeRoutes(
           await sessions.get(client.sessionId!),
         )
         if (session) {
-          const existing = session.data.students.find(
-            (s) =>
-              (client.studentId != null && s.id === client.studentId) ||
-              (client.studentName != null && s.name === client.studentName && (s.id == null || s.id === '')),
+          const result = connectPythonListPracticeStudent(
+            session,
+            client.studentId ?? null,
+            client.studentName ?? null,
           )
-
-          if (existing) {
-            existing.connected = true
-            existing.lastSeen = Date.now()
-          } else {
-            const newStudent: PythonListPracticeStudent = {
-              id: client.studentId || `${client.studentName || 'student'}-${Date.now().toString(36)}`,
-              name: client.studentName || 'Student',
-              stats: { ...defaultStats },
-              connected: true,
-              lastSeen: Date.now(),
+          if (!result) {
+            try {
+              if (client.readyState === 1) {
+                client.send(
+                  JSON.stringify({
+                    type: 'error',
+                    payload: {
+                      code: 'waiting-room-required',
+                      message: 'Student identity not accepted. Rejoin from the waiting room.',
+                    },
+                  }),
+                )
+              }
+            } catch (err) {
+              console.error('WS send failed', err)
             }
-            session.data.students.push(newStudent)
+            client.close(1008, 'waiting-room-required')
+            return
           }
+          const { participantId, participantName } = result
+          client.studentName = participantName
+          client.studentId = participantId
 
           await sessions.set(session.id, session)
           await broadcast('studentsUpdate', { students: session.data.students }, session.id)
+          try {
+            client.send(JSON.stringify({ type: 'studentId', payload: { studentId: participantId } }))
+          } catch (err) {
+            console.error('WS send failed', err)
+          }
           await sendQuestionTypesSnapshot()
 
           client.on('close', () => {
@@ -319,9 +324,12 @@ export default function setupPythonListPracticeRoutes(
                 await sessions.get(client.sessionId!),
               )
               if (sess) {
-                const student = sess.data.students.find((s) => s.name === client.studentName)
+                const student = disconnectPythonListPracticeStudent(
+                  sess.data.students,
+                  client.studentId ?? null,
+                  client.studentName ?? null,
+                )
                 if (student) {
-                  student.connected = false
                   await sessions.set(sess.id, sess)
                   await broadcast('studentsUpdate', { students: sess.data.students }, sess.id)
                 }

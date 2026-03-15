@@ -1,0 +1,60 @@
+{
+  "name": "ActiveBits (Privileged Dev Container)",
+  "dockerComposeFile": [
+    "../docker-compose.yml",
+    "../docker-compose.privileged.yml"
+  ],
+  "service": "app",
+  "workspaceFolder": "/workspaces/ActiveBits",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    },
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "vscode"
+    }
+  },
+  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && npm install --workspaces --include-workspace-root",
+  "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Setup script failed'",
+  "forwardPorts": [
+    6379,
+    3000,
+    5173
+  ],
+  "portsAttributes": {
+    "3000": {
+      "label": "ActiveBits Server",
+      "onAutoForward": "openBrowser",
+      "protocol": "http",
+      "requireLocalPort": false
+    },
+    "5173": {
+      "label": "Vite Dev Server",
+      "onAutoForward": "silent",
+      "protocol": "http",
+      "requireLocalPort": false
+    },
+    "6379": {
+      "label": "Valkey",
+      "onAutoForward": "silent"
+    }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.env.linux": {
+          "VALKEY_URL": "redis://valkey:6379",
+          "HOST": "0.0.0.0"
+        }
+      },
+      "extensions": [
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  },
+  "remoteUser": "vscode"
+}

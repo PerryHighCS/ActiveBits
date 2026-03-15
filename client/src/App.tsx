@@ -80,6 +80,7 @@ function AppShell() {
 
           <Route path="/activity/:activityName/:hash" element={<SessionRouter />} />
           <Route path="/solo/:soloActivityId" element={<SessionRouter />} />
+          <Route path="/util/:utilityActivityId/:utilityId" element={<SessionRouter />} />
 
           <Route path="/:sessionId" element={<SessionRouter />} />
           <Route path="/" element={<SessionRouter />} />

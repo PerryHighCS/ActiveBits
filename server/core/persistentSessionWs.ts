@@ -14,6 +14,7 @@ import {
 } from './persistentSessions.js'
 import { createSession } from './sessions.js'
 import type { SessionStore as CoreSessionStore } from './sessions.js'
+import { buildSoloOnlyPolicyRejection } from './persistentSessionPolicyUtils.js'
 
 const OPEN_SOCKET_STATE = 1
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -157,6 +158,16 @@ async function handleTeacherCodeVerification(
       JSON.stringify({
         type: 'teacher-code-error',
         error: 'Session not found',
+      }),
+    )
+    return
+  }
+
+  if (persistentSession.entryPolicy === 'solo-only') {
+    socket.send(
+      JSON.stringify({
+        type: 'teacher-code-error',
+        ...buildSoloOnlyPolicyRejection(),
       }),
     )
     return

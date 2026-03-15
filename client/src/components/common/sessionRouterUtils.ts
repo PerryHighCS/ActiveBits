@@ -1,4 +1,5 @@
-import type { ActivityRegistryEntry } from '../../../../types/activity.js'
+import type { ActivityRegistryEntry, ActivityUtility } from '../../../../types/activity.js'
+import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { normalizeSelectedOptions } from './manageDashboardUtils'
 import { isValidHttpUrl } from './urlValidationUtils'
 
@@ -36,7 +37,7 @@ function getSessionStorageKeys(storage: SessionCacheStorage): string[] {
 
   for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index)
-    if (key && key.startsWith('session-')) {
+    if (key && key.startsWith('session-') && !key.startsWith('session-participant:')) {
       keys.push(key)
     }
   }
@@ -94,6 +95,30 @@ export function buildPersistentSessionApiUrl(hash: string, activityName: string,
   const query = new URLSearchParams(search)
   query.set('activityName', activityName)
   return `/api/persistent-session/${encodeURIComponent(hash)}?${query.toString()}`
+}
+
+export function buildPersistentSessionEntryApiUrl(hash: string, activityName: string, search: string): string {
+  const query = new URLSearchParams(search)
+  query.set('activityName', activityName)
+  return `/api/persistent-session/${encodeURIComponent(hash)}/entry?${query.toString()}`
+}
+
+export function getPersistentLinkControlStateFromSearch(search: string): {
+  entryPolicy: PersistentSessionEntryPolicy
+  urlHash: string | null
+} {
+  const params = new URLSearchParams(search)
+  const entryPolicy = resolvePersistentSessionEntryPolicy(params.get('entryPolicy'))
+  const candidateUrlHash = params.get('urlHash')?.trim() ?? ''
+
+  return {
+    entryPolicy,
+    urlHash: /^[a-f0-9]{16}$/i.test(candidateUrlHash) ? candidateUrlHash.toLowerCase() : null,
+  }
+}
+
+export function buildSessionEntryApiUrl(sessionId: string): string {
+  return `/api/session/${encodeURIComponent(sessionId)}/entry`
 }
 
 export function buildPersistentTeacherManagePath(activityName: string, sessionId: string, queryString: string): string {
@@ -212,6 +237,44 @@ export function isJoinSessionId(input: string): boolean {
   return !/^0+$/i.test(value)
 }
 
-export function getSoloActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {
-  return activityList.filter((activity) => activity.soloMode)
+export function activitySupportsDirectStandalonePath(activity: ActivityRegistryEntry): boolean {
+  return activity.standaloneEntry?.enabled === true && activity.standaloneEntry.supportsDirectPath === true
+}
+
+export function activitySupportsStandalonePermalink(activity: ActivityRegistryEntry): boolean {
+  return activity.standaloneEntry?.enabled === true && activity.standaloneEntry.supportsPermalink === true
+}
+
+export function shouldShowStandaloneActivityOnHome(activity: ActivityRegistryEntry): boolean {
+  return activitySupportsDirectStandalonePath(activity) && activity.standaloneEntry?.showOnHome === true
+}
+
+export function getStandaloneHomeActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {
+  return activityList.filter((activity) => shouldShowStandaloneActivityOnHome(activity))
+}
+
+export function getHomeUtilityActivities(activityList: readonly ActivityRegistryEntry[]): ActivityRegistryEntry[] {
+  return activityList.filter((activity) =>
+    Array.isArray(activity.utilities)
+    && activity.utilities.some((utility) => utility.surfaces?.includes('home') === true),
+  )
+}
+
+export interface UtilityRouteMatch {
+  activity: ActivityRegistryEntry
+  utility: ActivityUtility
+}
+
+export function findUtilityRouteMatch(
+  activityList: readonly ActivityRegistryEntry[],
+  pathname: string,
+): UtilityRouteMatch | null {
+  for (const activity of activityList) {
+    const utility = activity.utilities?.find((entry) => entry.path === pathname)
+    if (utility !== undefined) {
+      return { activity, utility }
+    }
+  }
+
+  return null
 }
