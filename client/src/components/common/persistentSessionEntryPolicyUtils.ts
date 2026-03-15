@@ -4,14 +4,10 @@ import type {
   WaitingRoomPresentationMode,
   WaitingRoomResolvedRole,
 } from '../../../../types/waitingRoom.js'
-
-const DEFAULT_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
-
-function normalizePersistentSessionEntryPolicy(value: unknown): PersistentSessionEntryPolicy {
-  return value === 'solo-allowed' || value === 'solo-only' || value === 'instructor-required'
-    ? value
-    : DEFAULT_ENTRY_POLICY
-}
+import {
+  DEFAULT_PERSISTENT_SESSION_ENTRY_POLICY as DEFAULT_ENTRY_POLICY,
+  resolvePersistentSessionEntryPolicy as normalizePersistentSessionEntryPolicy,
+} from '../../../../types/waitingRoom.js'
 
 export interface PersistentSessionEntryPolicyOption {
   value: PersistentSessionEntryPolicy
