@@ -3,6 +3,16 @@ set -e
 
 echo "🔧 Setting up ActiveBits development environment..."
 
+desired_npm_version="11.11.1"
+
+if command -v npm >/dev/null 2>&1; then
+  current_npm_version="$(npm --version 2>/dev/null || true)"
+  if [ "$current_npm_version" != "$desired_npm_version" ]; then
+    echo "⏳ npm $desired_npm_version required; current version is ${current_npm_version:-missing}. Updating..."
+    npm install -g "npm@$desired_npm_version"
+  fi
+fi
+
 # Fallback: some devcontainer feature combinations can skip installRg.
 if ! command -v rg >/dev/null 2>&1; then
   echo "⏳ ripgrep (rg) not found; installing..."
