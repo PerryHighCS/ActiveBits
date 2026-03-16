@@ -16,14 +16,21 @@ run_with_available_privilege() {
 }
 
 if command -v npm >/dev/null 2>&1; then
-  current_npm_version="$(npm --version 2>/dev/null || true)"
+  current_npm_version="$(npm --version || true)"
   if [ "$current_npm_version" != "$desired_npm_version" ]; then
     echo "⏳ npm $desired_npm_version required; current version is ${current_npm_version:-missing}. Updating..."
-    if ! npm install -g "npm@$desired_npm_version" 2>/dev/null; then
+    if ! npm install -g "npm@$desired_npm_version"; then
       echo "ℹ️ Retrying npm update with elevated permissions..."
       if ! run_with_available_privilege npm install -g "npm@$desired_npm_version"; then
         echo "⚠️ Unable to update npm automatically (no root/sudo). Continuing with npm ${current_npm_version:-missing}."
       fi
+    fi
+
+    updated_npm_version="$(npm --version || true)"
+    if [ "$updated_npm_version" = "$desired_npm_version" ]; then
+      echo "✅ npm is now $updated_npm_version"
+    else
+      echo "⚠️ npm update attempted but current version is ${updated_npm_version:-missing}."
     fi
   fi
 fi
