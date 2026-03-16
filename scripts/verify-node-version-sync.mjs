@@ -1,18 +1,41 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = process.cwd();
+const scriptFilePath = fileURLToPath(import.meta.url);
+const scriptDir = dirname(scriptFilePath);
+const repoRoot = resolve(scriptDir, '..');
 const nvmrcPath = resolve(repoRoot, '.nvmrc');
 
 function readJson(path) {
-  return JSON.parse(readFileSync(path, 'utf8'));
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to read ${path}: ${message}`);
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid JSON in ${path}: ${message}`);
+  }
 }
 
 function normalizeNodeVersion(value) {
   return String(value).trim().replace(/^v/i, '');
 }
 
-const nvmrcRaw = readFileSync(nvmrcPath, 'utf8');
+let nvmrcRaw;
+try {
+  nvmrcRaw = readFileSync(nvmrcPath, 'utf8');
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[node-version-sync] Unable to read .nvmrc at ${nvmrcPath}: ${message}`);
+  process.exit(1);
+}
 const nvmrcVersion = normalizeNodeVersion(nvmrcRaw);
 
 if (!nvmrcVersion) {
@@ -32,7 +55,14 @@ const mismatches = [];
 
 for (const manifestPath of manifestPaths) {
   const fullPath = resolve(repoRoot, manifestPath);
-  const manifest = readJson(fullPath);
+  let manifest;
+  try {
+    manifest = readJson(fullPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[node-version-sync] ${message}`);
+    process.exit(1);
+  }
   const actual = manifest?.engines?.node;
 
   if (actual !== expectedRange) {
