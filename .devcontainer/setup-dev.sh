@@ -3,6 +3,11 @@ set -e
 
 echo "🔧 Setting up ActiveBits development environment..."
 
+skip_valkey_wait=false
+if [ "$1" = "--no-wait-valkey" ]; then
+  skip_valkey_wait=true
+fi
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 package_json_path="$repo_root/package.json"
@@ -74,14 +79,18 @@ if ! command -v rg >/dev/null 2>&1; then
   fi
 fi
 
-# If redis-cli is available, wait for Valkey; otherwise skip gracefully
+# If redis-cli is available, optionally wait for Valkey readiness.
 if command -v redis-cli >/dev/null 2>&1; then
-  echo "⏳ Waiting for Valkey to be ready..."
-  until redis-cli -h valkey ping 2>/dev/null | grep -q PONG; do
-    echo "Valkey is unavailable - sleeping"
-    sleep 1
-  done
-  echo "✅ Valkey is ready!"
+  if [ "$skip_valkey_wait" = true ]; then
+    echo "ℹ️ Skipping Valkey readiness wait (--no-wait-valkey)."
+  else
+    echo "⏳ Waiting for Valkey to be ready..."
+    until redis-cli -h valkey ping 2>/dev/null | grep -q PONG; do
+      echo "Valkey is unavailable - sleeping"
+      sleep 1
+    done
+    echo "✅ Valkey is ready!"
+  fi
 else
   echo "ℹ️ redis-cli not found; skipping Valkey readiness check."
 fi

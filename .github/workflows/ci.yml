@@ -14,8 +14,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24.14.0
+          node-version-file: .nvmrc
           cache: npm
+
+      - name: Verify Node version sync
+        run: npm run verify:node-version-sync
 
       - name: Install dependencies
         run: |
