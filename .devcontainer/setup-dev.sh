@@ -13,9 +13,9 @@ desired_npm_version="$default_npm_version"
 # Keep npm pinning in one place by reading packageManager from root package.json.
 if command -v node >/dev/null 2>&1 && [ -f "$package_json_path" ]; then
   configured_npm_version="$({
-    node -e "
+    PACKAGE_JSON_PATH="$package_json_path" node -e "
 const fs = require('fs');
-const filePath = process.argv[1];
+const filePath = process.env.PACKAGE_JSON_PATH;
 try {
   const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   const packageManager = parsed.packageManager;
@@ -24,7 +24,7 @@ try {
     if (match) process.stdout.write(match[1]);
   }
 } catch {}
-" "$package_json_path"
+"
   } || true)"
 
   if [ -n "$configured_npm_version" ]; then
