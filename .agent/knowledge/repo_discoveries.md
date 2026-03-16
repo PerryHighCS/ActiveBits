@@ -30,6 +30,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: When raising the repo Node floor, update all workspace manifests in the same change and only document exceptions if a package is intentionally published or used outside the monorepo.
 - Owner: Codex
 
+- Date: 2026-03-16
+- Area: tooling
+- Discovery: `.devcontainer/setup-dev.sh` runs as the configured `remoteUser`, so global npm upgrades must retry with `sudo` when the base image’s global prefix is root-owned.
+- Why it matters: With `set -e`, a plain `npm install -g npm@...` can abort devcontainer creation for the default `vscode` user even though `sudo` is available in the image.
+- Evidence: `.devcontainer/devcontainer.json`; `.devcontainer/setup-dev.sh`
+- Follow-up action: Keep devcontainer bootstrap steps privilege-aware whenever they write outside the workspace or the user’s home directory.
+- Owner: Codex
+
 - Date: 2026-03-14
 - Area: server | activities
 - Discovery: WebSocket student-join handlers that rely on accepted-entry identity should fail closed when identity cannot be resolved. `java-format-practice`, `java-string-practice`, `traveling-salesman`, and `python-list-practice` now send an explicit WS error payload and close with code `1008`/reason `waiting-room-required` instead of returning early and leaving an unresolved socket connected.

@@ -5,23 +5,36 @@ echo "🔧 Setting up ActiveBits development environment..."
 
 desired_npm_version="11.11.1"
 
+run_with_available_privilege() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    return 1
+  fi
+}
+
 if command -v npm >/dev/null 2>&1; then
   current_npm_version="$(npm --version 2>/dev/null || true)"
   if [ "$current_npm_version" != "$desired_npm_version" ]; then
     echo "⏳ npm $desired_npm_version required; current version is ${current_npm_version:-missing}. Updating..."
-    npm install -g "npm@$desired_npm_version"
+    if ! npm install -g "npm@$desired_npm_version" 2>/dev/null; then
+      echo "ℹ️ Retrying npm update with elevated permissions..."
+      if ! run_with_available_privilege npm install -g "npm@$desired_npm_version"; then
+        echo "⚠️ Unable to update npm automatically (no root/sudo). Continuing with npm ${current_npm_version:-missing}."
+      fi
+    fi
   fi
 fi
 
 # Fallback: some devcontainer feature combinations can skip installRg.
 if ! command -v rg >/dev/null 2>&1; then
   echo "⏳ ripgrep (rg) not found; installing..."
-  if [ "$(id -u)" -eq 0 ]; then
-    apt-get update && apt-get install -y ripgrep
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo apt-get update && sudo apt-get install -y ripgrep
-  else
+  if ! run_with_available_privilege apt-get update; then
     echo "⚠️ Unable to install ripgrep automatically (no root/sudo)."
+  elif ! run_with_available_privilege apt-get install -y ripgrep; then
+    echo "⚠️ Unable to install ripgrep automatically."
   fi
 fi
 
