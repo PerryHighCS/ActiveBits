@@ -3,7 +3,36 @@ set -e
 
 echo "🔧 Setting up ActiveBits development environment..."
 
-desired_npm_version="11.11.1"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+package_json_path="$repo_root/package.json"
+
+default_npm_version="11.11.1"
+desired_npm_version="$default_npm_version"
+
+# Keep npm pinning in one place by reading packageManager from root package.json.
+if command -v node >/dev/null 2>&1 && [ -f "$package_json_path" ]; then
+  configured_npm_version="$({
+    node -e "
+const fs = require('fs');
+const filePath = process.argv[1];
+try {
+  const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  const packageManager = parsed.packageManager;
+  if (typeof packageManager === 'string') {
+    const match = packageManager.match(/^npm@(.+)$/);
+    if (match) process.stdout.write(match[1]);
+  }
+} catch {}
+" "$package_json_path"
+  } || true)"
+
+  if [ -n "$configured_npm_version" ]; then
+    desired_npm_version="$configured_npm_version"
+  else
+    echo "ℹ️ packageManager npm version not found in package.json; using fallback npm $default_npm_version"
+  fi
+fi
 
 run_with_available_privilege() {
   if [ "$(id -u)" -eq 0 ]; then
