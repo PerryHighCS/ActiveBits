@@ -21,6 +21,7 @@
         "test:activities:scope:hb": "sh scripts/with-heartbeat.sh \"activities scope test\" npm run test:activities:scope",
         "test:activities:activity:hb": "sh scripts/with-heartbeat.sh \"activity test\" npm run test:activities:activity",
         "verify:deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
+        "verify:node-version-sync": "node scripts/verify-node-version-sync.mjs",
         "verify:server": "node --import tsx scripts/verify-server.ts",
         "verify:source-extensions": "bash scripts/verify-no-js-sources.sh",
         "typecheck": "npm run typecheck --workspaces --if-present",
@@ -36,18 +37,19 @@
     "author": "",
     "license": "MIT",
     "description": "",
+    "packageManager": "npm@11.11.1",
     "engines": {
-        "node": ">=22"
+        "node": ">=24"
     },
     "dependencies": {
         "express": "^5.1.0",
-        "vite": "^7.2.2",
         "ws": "^8.18.3"
     },
     "devDependencies": {
         "@types/node": "^25.2.1",
         "concurrently": "^9.1.2",
         "tsx": "^4.20.6",
-        "typescript": "^5.9.3"
+        "typescript": "^5.9.3",
+        "vite": "^7.0.0"
     }
 }

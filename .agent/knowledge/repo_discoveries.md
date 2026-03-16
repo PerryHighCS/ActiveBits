@@ -14,6 +14,30 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-16
+- Area: tooling
+- Discovery: Both devcontainer profiles should treat `.devcontainer/setup-dev.sh` as the single source of truth for npm bootstrapping, with each `postCreateCommand` delegating version enforcement to that script before running workspace installs.
+- Why it matters: Keeping the npm pin in multiple `devcontainer.json` files and `setup-dev.sh` creates drift risk during future Node/npm upgrades and makes local container setup harder to reason about.
+- Evidence: `.devcontainer/devcontainer.json`; `.devcontainer/privileged/devcontainer.json`; `.devcontainer/setup-dev.sh`
+- Follow-up action: If future bootstrap requirements are added for both container creation and startup, prefer extending `setup-dev.sh` or a helper it calls instead of duplicating literals in devcontainer metadata.
+- Owner: Codex
+
+- Date: 2026-03-16
+- Area: tooling
+- Discovery: Workspace engine constraints should stay identical across the root, `client`, `server`, and `activities` manifests. A looser child-package range is misleading because npm workspace installs are gated by the root `engines.node` value first.
+- Why it matters: Contributors and CI can waste time reasoning about Node versions that appear supported in a child package but are impossible to use from the monorepo root.
+- Evidence: `package.json`; `client/package.json`; `server/package.json`; `activities/package.json`
+- Follow-up action: When raising the repo Node floor, update all workspace manifests in the same change and only document exceptions if a package is intentionally published or used outside the monorepo.
+- Owner: Codex
+
+- Date: 2026-03-16
+- Area: tooling
+- Discovery: `.devcontainer/setup-dev.sh` runs as the configured `remoteUser`, so global npm upgrades must retry with `sudo` when the base image’s global prefix is root-owned.
+- Why it matters: With `set -e`, a plain `npm install -g npm@...` can abort devcontainer creation for the default `vscode` user even though `sudo` is available in the image.
+- Evidence: `.devcontainer/devcontainer.json`; `.devcontainer/setup-dev.sh`
+- Follow-up action: Keep devcontainer bootstrap steps privilege-aware whenever they write outside the workspace or the user’s home directory.
+- Owner: Codex
+
 - Date: 2026-03-14
 - Area: server | activities
 - Discovery: WebSocket student-join handlers that rely on accepted-entry identity should fail closed when identity cannot be resolved. `java-format-practice`, `java-string-practice`, `traveling-salesman`, and `python-list-practice` now send an explicit WS error payload and close with code `1008`/reason `waiting-room-required` instead of returning early and leaving an unresolved socket connected.

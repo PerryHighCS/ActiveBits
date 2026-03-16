@@ -8,13 +8,14 @@
   "workspaceFolder": "/workspaces/ActiveBits",
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "22"
+      "version": "24"
     },
+    "ghcr.io/devcontainers-extra/features/ripgrep:1": {},
     "ghcr.io/devcontainers/features/common-utils:2": {
       "username": "vscode"
     }
   },
-  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && npm install --workspaces --include-workspace-root",
+  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && bash .devcontainer/setup-dev.sh --no-wait-valkey && npm install --workspaces --include-workspace-root",
   "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Setup script failed'",
   "forwardPorts": [
     6379,
