@@ -3,6 +3,18 @@ set -e
 
 echo "🔧 Setting up ActiveBits development environment..."
 
+# Fallback: some devcontainer feature combinations can skip installRg.
+if ! command -v rg >/dev/null 2>&1; then
+  echo "⏳ ripgrep (rg) not found; installing..."
+  if [ "$(id -u)" -eq 0 ]; then
+    apt-get update && apt-get install -y ripgrep
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y ripgrep
+  else
+    echo "⚠️ Unable to install ripgrep automatically (no root/sudo)."
+  fi
+fi
+
 # If redis-cli is available, wait for Valkey; otherwise skip gracefully
 if command -v redis-cli >/dev/null 2>&1; then
   echo "⏳ Waiting for Valkey to be ready..."
