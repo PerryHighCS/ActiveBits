@@ -15,7 +15,7 @@
     "monitor:valkey": "node --import tsx monitor-valkey.ts"
   },
   "engines": {
-    "node": ">=24.14.0"
+    "node": ">=24"
   },
   "keywords": [],
   "author": "",

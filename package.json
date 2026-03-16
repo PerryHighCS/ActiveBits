@@ -39,7 +39,7 @@
     "description": "",
     "packageManager": "npm@11.11.1",
     "engines": {
-        "node": ">=24.14.0"
+        "node": ">=24"
     },
     "dependencies": {
         "express": "^5.1.0",

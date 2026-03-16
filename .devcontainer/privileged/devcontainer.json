@@ -8,7 +8,7 @@
   "workspaceFolder": "/workspaces/ActiveBits",
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "24.14.0"
+      "version": "24"
     },
     "ghcr.io/devcontainers-extra/features/ripgrep:1": {},
     "ghcr.io/devcontainers/features/common-utils:2": {
