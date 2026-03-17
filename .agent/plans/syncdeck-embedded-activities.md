@@ -867,7 +867,7 @@ session.data.embeddedActivities: Record<instanceKey, {
     console/chat feed to validate manager/student channel wiring without activity-specific logic.
   - Keep it intentionally thin and non-production (`isDev: true`); use it to exercise generic
     embedded contracts before validating the first real rollout activity (Video Sync).
-- [ ] Server tests: concurrent instance creation, per-key deduplication, parent-cull cascades
+- [x] Server tests: concurrent instance creation, per-key deduplication, parent-cull cascades
       to all child sessions, broadcast shape includes instanceKey.
 - [x] Add `embeddedActivities` map to session state snapshot for late-joining students.
 

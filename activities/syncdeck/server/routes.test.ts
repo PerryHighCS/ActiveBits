@@ -58,9 +58,10 @@ function createResponse(): MockResponse {
 }
 
 function createMockApp() {
-  const handlers: { get: Record<string, RouteHandler>; post: Record<string, RouteHandler> } = {
+  const handlers: { get: Record<string, RouteHandler>; post: Record<string, RouteHandler>; delete: Record<string, RouteHandler> } = {
     get: {},
     post: {},
+    delete: {},
   }
 
   return {
@@ -70,6 +71,9 @@ function createMockApp() {
     },
     post(path: string, handler: RouteHandler) {
       handlers.post[path] = handler
+    },
+    delete(path: string, handler: RouteHandler) {
+      handlers.delete[path] = handler
     },
   }
 }
@@ -2095,6 +2099,199 @@ void test('embedded-activity entry route issues a fresh token for a registered p
   assert.equal(typeof body.entryParticipantToken, 'string')
   assert.equal(body.values.participantId, 'student-1')
   assert.equal(body.values.displayName, 'Ada Lovelace')
+})
+
+void test('embedded-activity start route supports concurrent instances under different keys', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+  assert.equal(typeof handler, 'function')
+
+  const res1 = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: 'teacher-passcode-1', activityId: 'video-sync', instanceKey: 'video-sync:3:0' },
+    ),
+    res1,
+  )
+
+  const res2 = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: 'teacher-passcode-1', activityId: 'embedded-test', instanceKey: 'embedded-test:5:0' },
+    ),
+    res2,
+  )
+
+  assert.equal(res1.statusCode, 200)
+  assert.equal(res2.statusCode, 200)
+
+  const body1 = res1.body as { childSessionId: string; instanceKey: string }
+  const body2 = res2.body as { childSessionId: string; instanceKey: string }
+  assert.notEqual(body1.childSessionId, body2.childSessionId)
+
+  const parentSession = storeState.store.s1 as SessionRecord & {
+    data: { embeddedActivities: Record<string, { childSessionId: string; activityId: string }> }
+  }
+  assert.equal(parentSession.data.embeddedActivities['video-sync:3:0']?.activityId, 'video-sync')
+  assert.equal(parentSession.data.embeddedActivities['embedded-test:5:0']?.activityId, 'embedded-test')
+  assert.ok(storeState.store[body1.childSessionId])
+  assert.ok(storeState.store[body2.childSessionId])
+})
+
+void test('embedded-activity start is idempotent per key even when a concurrent instance exists for a different key', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'video-sync:3:0': {
+            childSessionId: 'CHILD:s1:abc12:video-sync',
+            activityId: 'video-sync',
+            startedAt: 100,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+
+  // Second start for the already-running key should be idempotent.
+  const resIdempotent = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: 'teacher-passcode-1', activityId: 'video-sync', instanceKey: 'video-sync:3:0' },
+    ),
+    resIdempotent,
+  )
+
+  // A new key for a different position should succeed independently.
+  const resNew = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: 'teacher-passcode-1', activityId: 'video-sync', instanceKey: 'video-sync:7:0' },
+    ),
+    resNew,
+  )
+
+  assert.equal(resIdempotent.statusCode, 200)
+  assert.deepEqual(resIdempotent.body, {
+    childSessionId: 'CHILD:s1:abc12:video-sync',
+    instanceKey: 'video-sync:3:0',
+  })
+
+  assert.equal(resNew.statusCode, 200)
+  const newBody = resNew.body as { childSessionId: string; instanceKey: string }
+  assert.equal(newBody.instanceKey, 'video-sync:7:0')
+  assert.match(newBody.childSessionId, /^CHILD:s1:[a-f0-9]{5}:video-sync$/)
+
+  const parentSession = storeState.store.s1 as SessionRecord & {
+    data: { embeddedActivities: Record<string, { childSessionId: string }> }
+  }
+  assert.equal(parentSession.data.embeddedActivities['video-sync:3:0']?.childSessionId, 'CHILD:s1:abc12:video-sync')
+  assert.equal(parentSession.data.embeddedActivities['video-sync:7:0']?.childSessionId, newBody.childSessionId)
+})
+
+void test('delete-session route cascades deletion of all child sessions', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const child1Id = 'CHILD:s1:abc12:video-sync'
+  const child2Id = 'CHILD:s1:abc13:embedded-test'
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'video-sync:3:0': {
+            childSessionId: child1Id,
+            activityId: 'video-sync',
+            startedAt: 110,
+            owner: 'syncdeck-instructor',
+          },
+          'embedded-test:5:0': {
+            childSessionId: child2Id,
+            activityId: 'embedded-test',
+            startedAt: 120,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    [child1Id]: { id: child1Id, type: 'video-sync', created: 1, lastActivity: 1, data: {} },
+    [child2Id]: { id: child2Id, type: 'embedded-test', created: 1, lastActivity: 1, data: {} },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.delete['/api/syncdeck/:sessionId']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  studentSocket.sessionId = 's1'
+  ws.wss.clients.add(studentSocket)
+
+  const res = createResponse()
+  await handler?.(
+    createRequest({ sessionId: 's1' }, { instructorPasscode: 'teacher-passcode-1' }),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { success: true, deleted: 's1' })
+
+  // Both child sessions must be gone.
+  assert.equal(storeState.store[child1Id], undefined)
+  assert.equal(storeState.store[child2Id], undefined)
+
+  // The parent session must be gone.
+  assert.equal(storeState.store.s1, undefined)
+
+  // Connected clients must receive a session-ended signal.
+  assert.ok(studentSocket.sent.some((entry) => {
+    const parsed = JSON.parse(entry) as { type?: string }
+    return parsed.type === 'session-ended'
+  }))
+})
+
+void test('delete-session route requires valid instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.delete['/api/syncdeck/:sessionId']
+  assert.equal(typeof handler, 'function')
+
+  const resMissing = createResponse()
+  await handler?.(createRequest({ sessionId: 's1' }, {}), resMissing)
+  assert.equal(resMissing.statusCode, 403)
+
+  const resWrong = createResponse()
+  await handler?.(
+    createRequest({ sessionId: 's1' }, { instructorPasscode: 'wrong-passcode' }),
+    resWrong,
+  )
+  assert.equal(resWrong.statusCode, 403)
+
+  // Session must still exist after rejected attempts.
+  assert.ok(storeState.store.s1)
 })
 
 void test('create route initializes syncdeck session state', async () => {

@@ -63,7 +63,7 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - [x] Child entry pass-through for `join-live` + zero waiting-room fields
         - [x] Add dev-only `embedded-test` activity for generic embedded contract validation
         - [x] `embeddedActivities` map in session state snapshot for late-joining students
-        - [ ] Server tests: concurrent instances, per-key dedup, parent-cull cascades all children
+        - [x] Server tests: concurrent instances, per-key dedup, parent-cull cascades all children
     - Phase 2 — Manager host overlay
         - Owner: SyncDeck manager UI lead (assign before start)
         - PR scope: manager overlay rendering + running activities panel + manager-side WS wiring + manager tests

@@ -47,6 +47,7 @@ interface RouteRequest {
 interface SyncDeckRouteApp {
   get(path: string, handler: (req: RouteRequest, res: JsonResponse) => void | Promise<void>): void
   post(path: string, handler: (req: RouteRequest, res: JsonResponse) => void | Promise<void>): void
+  delete(path: string, handler: (req: RouteRequest, res: JsonResponse) => void | Promise<void>): void
 }
 
 interface SyncDeckInstructorState {
@@ -1272,6 +1273,48 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     broadcastEmbeddedActivityEnd(session, instanceKey, existing.childSessionId)
 
     res.json({ ok: true, instanceKey, childSessionId: existing.childSessionId })
+  })
+
+  app.delete('/api/syncdeck/:sessionId', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    // Delete all embedded child sessions before removing the parent.
+    const childSessionIds = Object.values(session.data.embeddedActivities).map((record) => record.childSessionId)
+    await Promise.all(childSessionIds.map((childSessionId) => sessions.delete(childSessionId)))
+
+    // Notify connected clients that the parent session has ended.
+    if (sessions.publishBroadcast) {
+      await sessions.publishBroadcast('session-ended', { sessionId })
+    } else {
+      for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+        if (peer.readyState === WS_OPEN_READY_STATE && peer.sessionId === sessionId) {
+          try {
+            peer.send(JSON.stringify({ type: 'session-ended' }))
+          } catch {
+            // Socket may have closed concurrently; swallow send failures.
+          }
+        }
+      }
+    }
+
+    await sessions.delete(sessionId)
+    res.json({ success: true, deleted: sessionId })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-activity/entry', async (req, res) => {
