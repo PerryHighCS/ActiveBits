@@ -6,7 +6,13 @@ import {
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
-import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
+import {
+  createSession,
+  generateHexId,
+  type SessionRecord,
+  type SessionStore,
+} from 'activebits-server/core/sessions.js'
+import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
@@ -65,17 +71,14 @@ interface SyncDeckEmbeddedEntryContextResponse {
   studentName?: string
 }
 
-interface SyncDeckEmbeddedActivity {
-  embeddedId: string
-  activityType: string
-  sessionId: string | null
-  slideIndex: { h: number; v: number } | null
-  displayName: string
-  createdAt: number
-  status: 'planned' | 'active' | 'ended'
-  startedAt: number | null
-  endedAt: number | null
+interface SyncDeckEmbeddedActivityRecord {
+  childSessionId: string
+  activityId: string
+  startedAt: number
+  owner: string
 }
+
+type SyncDeckEmbeddedActivitiesMap = Record<string, SyncDeckEmbeddedActivityRecord>
 
 interface SyncDeckChalkboardBuffer {
   snapshot: string | null
@@ -93,7 +96,7 @@ interface SyncDeckSessionData extends Record<string, unknown> {
   chalkboard: SyncDeckChalkboardBuffer
   drawingToolMode: SyncDeckDrawingToolMode
   students: SyncDeckStudent[]
-  embeddedActivities: SyncDeckEmbeddedActivity[]
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap
 }
 
 interface SyncDeckSession extends SessionRecord {
@@ -124,6 +127,8 @@ const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
 const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const MAX_CHALKBOARD_DELTA_STROKES = 200
+const EMBEDDED_CHILD_SESSION_PREFIX = 'CHILD'
+const SYNCDECK_EMBEDDED_OWNER = 'syncdeck-instructor'
 const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === '1'
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS = 5 * 60 * 1000
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_MAX_KEYS = 500
@@ -214,20 +219,6 @@ function normalizeSlideIndices(value: unknown): { h: number; v: number; f: numbe
   return { h, v, f }
 }
 
-function normalizeEmbeddedSlideIndex(value: unknown): { h: number; v: number } | null {
-  if (!isPlainObject(value)) {
-    return null
-  }
-
-  const h = normalizeNullableFiniteNumber(value.h)
-  const v = normalizeNullableFiniteNumber(value.v)
-  if (h == null || v == null) {
-    return null
-  }
-
-  return { h, v }
-}
-
 function normalizeStudentEntry(value: unknown): SyncDeckStudent | null {
   if (!isPlainObject(value)) {
     return null
@@ -263,33 +254,6 @@ function findSyncDeckStudentById(
   return students.find((student) => student.studentId === studentId) ?? null
 }
 
-function normalizeEmbeddedActivityEntry(value: unknown): SyncDeckEmbeddedActivity | null {
-  if (!isPlainObject(value)) {
-    return null
-  }
-
-  const embeddedId = typeof value.embeddedId === 'string' ? value.embeddedId.trim() : ''
-  if (embeddedId.length === 0) {
-    return null
-  }
-
-  const activityType = typeof value.activityType === 'string' && value.activityType.trim().length > 0 ? value.activityType.trim() : 'unknown'
-  const displayName = typeof value.displayName === 'string' && value.displayName.trim().length > 0 ? value.displayName.trim() : activityType
-  const status = value.status === 'active' || value.status === 'ended' || value.status === 'planned' ? value.status : 'planned'
-
-  return {
-    embeddedId,
-    activityType,
-    sessionId: typeof value.sessionId === 'string' && value.sessionId.trim().length > 0 ? value.sessionId.trim() : null,
-    slideIndex: normalizeEmbeddedSlideIndex(value.slideIndex),
-    displayName,
-    createdAt: normalizeFiniteNumber(value.createdAt, Date.now()),
-    status,
-    startedAt: normalizeNullableFiniteNumber(value.startedAt),
-    endedAt: normalizeNullableFiniteNumber(value.endedAt),
-  }
-}
-
 function normalizeStudents(value: unknown): SyncDeckStudent[] {
   if (!Array.isArray(value)) {
     return []
@@ -306,20 +270,67 @@ function normalizeStudents(value: unknown): SyncDeckStudent[] {
   return students
 }
 
-function normalizeEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivity[] {
-  if (!Array.isArray(value)) {
-    return []
+function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivityRecord | null {
+  if (!isPlainObject(value)) {
+    return null
   }
 
-  const activities: SyncDeckEmbeddedActivity[] = []
-  for (const entry of value) {
-    const normalized = normalizeEmbeddedActivityEntry(entry)
-    if (normalized) {
-      activities.push(normalized)
+  const childSessionId = typeof value.childSessionId === 'string' ? value.childSessionId.trim() : ''
+  const activityId = typeof value.activityId === 'string' ? value.activityId.trim() : ''
+  if (childSessionId.length === 0 || activityId.length === 0) {
+    return null
+  }
+
+  return {
+    childSessionId,
+    activityId,
+    startedAt: normalizeFiniteNumber(value.startedAt, Date.now()),
+    owner:
+      typeof value.owner === 'string' && value.owner.trim().length > 0
+        ? value.owner.trim()
+        : SYNCDECK_EMBEDDED_OWNER,
+  }
+}
+
+function normalizeEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivitiesMap {
+  const normalized: SyncDeckEmbeddedActivitiesMap = {}
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (!isPlainObject(entry)) {
+        continue
+      }
+      const instanceKey = typeof entry.embeddedId === 'string' ? entry.embeddedId.trim() : ''
+      const activityId = typeof entry.activityType === 'string' ? entry.activityType.trim() : ''
+      if (instanceKey.length === 0 || activityId.length === 0) {
+        continue
+      }
+      const sessionId = typeof entry.sessionId === 'string' && entry.sessionId.trim().length > 0
+        ? entry.sessionId.trim()
+        : instanceKey
+      normalized[instanceKey] = {
+        childSessionId: sessionId,
+        activityId,
+        startedAt: normalizeFiniteNumber(entry.createdAt, Date.now()),
+        owner: 'legacy',
+      }
     }
+    return normalized
   }
 
-  return activities
+  if (!isPlainObject(value)) {
+    return normalized
+  }
+
+  for (const [instanceKey, entry] of Object.entries(value)) {
+    const normalizedEntry = normalizeEmbeddedActivityRecord(entry)
+    if (!normalizedEntry || instanceKey.trim().length === 0) {
+      continue
+    }
+    normalized[instanceKey.trim()] = normalizedEntry
+  }
+
+  return normalized
 }
 
 function normalizeChalkboardSnapshot(value: unknown): string | null {
@@ -811,6 +822,78 @@ function verifyInstructorPasscode(expected: string, candidate: string): boolean 
   }
 }
 
+function normalizeInstanceKey(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > 200) {
+    return null
+  }
+
+  return trimmed
+}
+
+function normalizeActivityId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0 || trimmed.length > 100 || trimmed === 'syncdeck') {
+    return null
+  }
+
+  return trimmed
+}
+
+async function createEmbeddedChildSession(
+  sessions: Pick<SessionStore, 'get' | 'set'>,
+  parentSessionId: string,
+  activityId: string,
+  instanceKey: string,
+): Promise<SessionRecord> {
+  const childId = await generateHexId(sessions)
+  const sessionId = `${EMBEDDED_CHILD_SESSION_PREFIX}:${parentSessionId}:${childId}:${activityId}`
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: sessionId,
+    type: activityId,
+    created: now,
+    lastActivity: now,
+    data: {
+      embeddedParentSessionId: parentSessionId,
+      embeddedInstanceKey: instanceKey,
+    },
+  }
+  await sessions.set(sessionId, session)
+  return session
+}
+
+function buildEmbeddedActivityStartPayload(
+  instanceKey: string,
+  activityId: string,
+  childSessionId: string,
+  entryParticipantToken: string | null,
+): Record<string, unknown> {
+  return {
+    type: 'embedded-activity-start',
+    instanceKey,
+    activityId,
+    childSessionId,
+    entryParticipantToken,
+  }
+}
+
+function buildEmbeddedActivityEndPayload(instanceKey: string, childSessionId: string): Record<string, unknown> {
+  return {
+    type: 'embedded-activity-end',
+    instanceKey,
+    childSessionId,
+  }
+}
+
 function computeUrlHash(persistentHash: string, presentationUrl: string): string {
   return createHmac('sha256', HMAC_SECRET).update(`${persistentHash}|${presentationUrl}`).digest('hex').substring(0, 16)
 }
@@ -876,6 +959,67 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       } catch {
         // Ignore socket send failures.
       }
+    }
+  }
+
+  const broadcastEmbeddedActivityEnd = (session: SyncDeckSession, instanceKey: string, childSessionId: string): void => {
+    const payload = buildEmbeddedActivityEndPayload(instanceKey, childSessionId)
+    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+      if (peer.readyState !== WS_OPEN_READY_STATE || peer.sessionId !== session.id) {
+        continue
+      }
+      sendSyncDeckState(peer, payload)
+    }
+  }
+
+  const broadcastEmbeddedActivityStart = async (
+    session: SyncDeckSession,
+    instanceKey: string,
+    activityId: string,
+    childSessionId: string,
+  ): Promise<void> => {
+    const childSession = await sessions.get(childSessionId)
+    if (!childSession) {
+      return
+    }
+
+    const connectedStudents = new Map<string, SyncDeckStudent>()
+    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+      if (
+        peer.readyState !== WS_OPEN_READY_STATE ||
+        peer.sessionId !== session.id ||
+        peer.isInstructor !== false ||
+        typeof peer.studentId !== 'string'
+      ) {
+        continue
+      }
+      const student = findSyncDeckStudentById(session.data.students, peer.studentId)
+      if (student) {
+        connectedStudents.set(student.studentId, student)
+      }
+    }
+
+    const tokensByStudentId = new Map<string, string>()
+    for (const student of connectedStudents.values()) {
+      const stored = storeSessionEntryParticipant(childSession, {
+        participantId: student.studentId,
+        displayName: student.name,
+      })
+      tokensByStudentId.set(student.studentId, stored.token)
+    }
+    await sessions.set(childSession.id, childSession)
+
+    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+      if (peer.readyState !== WS_OPEN_READY_STATE || peer.sessionId !== session.id) {
+        continue
+      }
+
+      const entryParticipantToken = peer.isInstructor
+        ? null
+        : typeof peer.studentId === 'string'
+          ? tokensByStudentId.get(peer.studentId) ?? null
+          : null
+      sendSyncDeckState(peer, buildEmbeddedActivityStartPayload(instanceKey, activityId, childSessionId, entryParticipantToken))
     }
   }
 
@@ -1046,6 +1190,146 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const response = res as unknown as JsonResponse
     response.status(403).json({ error: 'forbidden' })
+  })
+
+  app.post('/api/syncdeck/:sessionId/embedded-activity/start', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+    const activityId = normalizeActivityId(readStringField(req.body, 'activityId'))
+    const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+    if (!activityId || !instanceKey) {
+      res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+
+    const existing = session.data.embeddedActivities[instanceKey]
+    if (existing) {
+      res.json({ childSessionId: existing.childSessionId, instanceKey })
+      return
+    }
+
+    const childSession = await createEmbeddedChildSession(sessions, session.id, activityId, instanceKey)
+    session.data.embeddedActivities[instanceKey] = {
+      childSessionId: childSession.id,
+      activityId,
+      startedAt: Date.now(),
+      owner: SYNCDECK_EMBEDDED_OWNER,
+    }
+    await sessions.set(session.id, session)
+    await broadcastEmbeddedActivityStart(session, instanceKey, activityId, childSession.id)
+
+    res.json({ childSessionId: childSession.id, instanceKey })
+  })
+
+  app.post('/api/syncdeck/:sessionId/embedded-activity/end', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+    const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+    if (!instanceKey) {
+      res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+
+    const existing = session.data.embeddedActivities[instanceKey]
+    if (!existing) {
+      res.status(404).json({ error: 'embedded activity not found' })
+      return
+    }
+
+    delete session.data.embeddedActivities[instanceKey]
+    await sessions.set(session.id, session)
+    await sessions.delete(existing.childSessionId)
+    broadcastEmbeddedActivityEnd(session, instanceKey, existing.childSessionId)
+
+    res.json({ ok: true, instanceKey, childSessionId: existing.childSessionId })
+  })
+
+  app.post('/api/syncdeck/:sessionId/embedded-activity/entry', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
+    const requestedChildSessionId = normalizeInstanceKey(readStringField(req.body, 'childSessionId'))
+    if (!instanceKey) {
+      res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+
+    const embeddedActivity = session.data.embeddedActivities[instanceKey]
+    if (!embeddedActivity) {
+      res.status(404).json({ error: 'embedded activity not found' })
+      return
+    }
+    if (requestedChildSessionId && requestedChildSessionId !== embeddedActivity.childSessionId) {
+      res.status(404).json({ error: 'embedded activity not found' })
+      return
+    }
+
+    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
+    const student = findSyncDeckStudentById(session.data.students, studentId)
+    if (!student) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const childSession = await sessions.get(embeddedActivity.childSessionId)
+    if (!childSession) {
+      res.status(404).json({ error: 'invalid child session' })
+      return
+    }
+
+    const stored = storeSessionEntryParticipant(childSession, {
+      participantId: student.studentId,
+      displayName: student.name,
+    })
+    await sessions.set(childSession.id, childSession)
+
+    res.json({
+      resolvedRole: 'student',
+      instanceKey,
+      childSessionId: childSession.id,
+      entryParticipantToken: stored.token,
+      values: stored.values,
+    })
   })
 
   app.post('/api/syncdeck/:sessionId/configure', async (req, res) => {

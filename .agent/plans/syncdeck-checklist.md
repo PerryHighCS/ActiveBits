@@ -55,13 +55,14 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - PR scope: SyncDeck server routes/state + shared entry-handoff integration + server tests
         - Exit criteria: start/end/late-join issuance flows implemented, child pass-through decision enforced, server tests green
         - Validation: `npm test --workspace server` then full `npm test`
-        - [ ] Child session ID shape (`CHILD:{parentId}:{childId}:{activityId}`)
-        - [ ] `POST /api/syncdeck/:sessionId/embedded-activity/start` (instanceKey-keyed, idempotent)
-        - [ ] `POST /api/syncdeck/:sessionId/embedded-activity/end` (ends one instance by instanceKey)
-        - [ ] Parent-context-validated embedded child entry issuance for late join/reconnect
-        - [ ] Child sessions reuse shared `/api/session/:sessionId/entry` and entry-participant consume flow
-        - [ ] Child entry pass-through for `join-live` + zero waiting-room fields
-        - [ ] `embeddedActivities` map in session state snapshot for late-joining students
+        - [x] Child session ID shape (`CHILD:{parentId}:{childId}:{activityId}`)
+        - [x] `POST /api/syncdeck/:sessionId/embedded-activity/start` (instanceKey-keyed, idempotent)
+        - [x] `POST /api/syncdeck/:sessionId/embedded-activity/end` (ends one instance by instanceKey)
+        - [x] Parent-context-validated embedded child entry issuance for late join/reconnect
+        - [x] Child sessions reuse shared `/api/session/:sessionId/entry` and entry-participant consume flow
+        - [x] Child entry pass-through for `join-live` + zero waiting-room fields
+        - [ ] Add dev-only `embedded-test` activity for generic embedded contract validation
+        - [x] `embeddedActivities` map in session state snapshot for late-joining students
         - [ ] Server tests: concurrent instances, per-key dedup, parent-cull cascades all children
     - Phase 2 — Manager host overlay
         - Owner: SyncDeck manager UI lead (assign before start)

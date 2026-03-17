@@ -852,17 +852,24 @@ session.data.embeddedActivities: Record<instanceKey, {
 - [x] Add `ActivityConfig.embeddedRuntime.instructorGated?: 'runtime' | 'waiting-room'` to shared type/schema (omitted = open).
 
 ### Phase 1 — Server foundation
-- [ ] Add child session ID shape to `session` module.
-- [ ] Implement `POST .../embedded-activity/start` (instanceKey-keyed, idempotent per key,
+- [x] Add child session ID shape to `session` module.
+- [x] Implement `POST .../embedded-activity/start` (instanceKey-keyed, idempotent per key,
   creates child session, adds to `embeddedActivities` map, broadcasts with instanceKey,
   generates per-student child entry handoff tokens).
-- [ ] Implement `POST .../embedded-activity/end` (ends one instance by instanceKey, broadcasts).
-- [ ] Implement parent-context-validated embedded entry issuance for late join/reconnect.
-- [ ] Reuse shared child-session `GET /entry` and `entry-participant/consume` routes instead of adding a parallel claim API.
-- [ ] Enforce immediate pass-through when child entry resolves to `join-live` with `waitingRoomFieldCount === 0`.
+- [x] Implement `POST .../embedded-activity/end` (ends one instance by instanceKey, broadcasts).
+- [x] Implement parent-context-validated embedded entry issuance for late join/reconnect.
+- [x] Reuse shared child-session `GET /entry` and `entry-participant/consume` routes instead of adding a parallel claim API.
+- [x] Enforce immediate pass-through when child entry resolves to `join-live` with `waitingRoomFieldCount === 0`.
+- [ ] Add a dev-only `embedded-test` activity for contract/integration validation.
+  - Student view: mostly static; shows passed `displayName` and `participantId`, plus a simple
+    message surface from manager → student and student → manager.
+  - Manager view: mostly static; shows connected students, participant IDs, and a lightweight
+    console/chat feed to validate manager/student channel wiring without activity-specific logic.
+  - Keep it intentionally thin and non-production (`isDev: true`); use it to exercise generic
+    embedded contracts before validating the first real rollout activity (Video Sync).
 - [ ] Server tests: concurrent instance creation, per-key deduplication, parent-cull cascades
       to all child sessions, broadcast shape includes instanceKey.
-- [ ] Add `embeddedActivities` map to session state snapshot for late-joining students.
+- [x] Add `embeddedActivities` map to session state snapshot for late-joining students.
 
 ### Phase 2 — Manager host overlay
 - [ ] Add `embeddedActivities: Map<instanceKey, ...>` state to `SyncDeckManager`.
