@@ -4,17 +4,17 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
   buildEntryParticipantStorageKey,
-  consumeResolvedEntryParticipantValues,
-  getEntryParticipantDisplayName,
-  getEntryParticipantParticipantId,
   persistEntryParticipantToken,
 } from '@src/components/common/entryParticipantStorage'
+import {
+  persistSessionParticipantIdentity,
+  resolveInitialEntryParticipantIdentity,
+} from '@src/components/common/entryParticipantIdentityUtils'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
 import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
-import { resolveSyncDeckStudentIdentity } from './entryIdentityUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
@@ -744,24 +744,6 @@ export function resolveConfiguredPresentationOrigin(params: {
   }
 }
 
-function getStoredStudentName(sessionId: string): string {
-  if (typeof window === 'undefined') {
-    return ''
-  }
-
-  const stored = window.sessionStorage.getItem(`syncdeck_student_name_${sessionId}`)
-  return typeof stored === 'string' ? stored.trim() : ''
-}
-
-function getStoredStudentId(sessionId: string): string {
-  if (typeof window === 'undefined') {
-    return ''
-  }
-
-  const stored = window.sessionStorage.getItem(`syncdeck_student_id_${sessionId}`)
-  return typeof stored === 'string' ? stored.trim() : ''
-}
-
 function isSyncToInstructorCommand(rawPayload: unknown): boolean {
   if (!isPlainObject(rawPayload)) {
     return false
@@ -1099,51 +1081,46 @@ const SyncDeckStudent: FC = () => {
   }, [])
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId || typeof window === 'undefined') {
       return
     }
 
     let isCancelled = false
-    const storedName = getStoredStudentName(sessionId)
-    const storedStudentId = getStoredStudentId(sessionId)
 
     void (async () => {
-      const acceptedValues =
-        typeof window !== 'undefined' && window.sessionStorage != null
-          ? await consumeResolvedEntryParticipantValues(window.sessionStorage, {
-            activityName: 'syncdeck',
-            sessionId,
-            isSoloSession: false,
-          })
-          : null
+      const resolvedIdentity = await resolveInitialEntryParticipantIdentity({
+        activityName: 'syncdeck',
+        sessionId,
+        isSoloSession: false,
+        localStorage: window.localStorage,
+        sessionStorage: window.sessionStorage,
+      })
 
       if (isCancelled) {
         return
       }
 
-      const resolvedIdentity = resolveSyncDeckStudentIdentity({
-        studentName: storedName,
-        studentId: storedStudentId,
-      }, {
-        displayName: getEntryParticipantDisplayName(acceptedValues),
-        participantId: getEntryParticipantParticipantId(acceptedValues),
-      })
+      const resolvedStudentName = resolvedIdentity.studentName.trim()
+      const resolvedStudentId = (resolvedIdentity.studentId ?? '').trim()
 
-      setRegisteredStudentName(resolvedIdentity.studentName)
-      setRegisteredStudentId(resolvedIdentity.studentId)
+      setRegisteredStudentName(resolvedStudentName)
+      setRegisteredStudentId(resolvedStudentId)
       setJoinError(
-        resolvedIdentity.needsWaitingRoomRestart
+        resolvedStudentName.length === 0 || resolvedStudentId.length === 0
           ? 'This presentation now requires entry through the waiting room.'
           : null,
       )
 
-      if (
-        typeof window !== 'undefined'
-        && resolvedIdentity.studentName.length > 0
-        && resolvedIdentity.studentId.length > 0
-      ) {
-        window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, resolvedIdentity.studentName)
-        window.sessionStorage.setItem(`syncdeck_student_id_${sessionId}`, resolvedIdentity.studentId)
+      if (resolvedStudentName.length > 0 && resolvedStudentId.length > 0) {
+        persistSessionParticipantIdentity(
+          window.localStorage,
+          sessionId,
+          resolvedStudentName,
+          resolvedStudentId,
+        )
+
+        window.sessionStorage.setItem(`syncdeck_student_name_${sessionId}`, resolvedStudentName)
+        window.sessionStorage.setItem(`syncdeck_student_id_${sessionId}`, resolvedStudentId)
       }
     })()
 
