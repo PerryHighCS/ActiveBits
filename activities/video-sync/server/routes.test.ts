@@ -9,7 +9,7 @@ import {
 } from 'activebits-server/core/persistentSessions.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupVideoSyncRoutes, { waitForManagerAuthMessage } from './routes.js'
+import setupVideoSyncRoutes, { waitForInstructorAuthMessage } from './routes.js'
 
 const TEST_INSTRUCTOR_PASSCODE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const ALT_TEST_INSTRUCTOR_PASSCODE = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -665,7 +665,7 @@ void test('session get route returns projected playback without persisting ordin
         positionSec: number
         isPlaying: boolean
         playbackRate: 1
-        updatedBy: 'manager' | 'system'
+        updatedBy: 'instructor' | 'system'
         serverTimestampMs: number
       }
     }).state = {
@@ -676,7 +676,7 @@ void test('session get route returns projected playback without persisting ordin
       positionSec: 5,
       isPlaying: true,
       playbackRate: 1,
-      updatedBy: 'manager',
+      updatedBy: 'instructor',
       serverTimestampMs: 10_000,
     }
     const storeState = createSessionStore({ s1: session })
@@ -750,7 +750,7 @@ void test('session get route persists the session when projected playback reache
         positionSec: number
         isPlaying: boolean
         playbackRate: 1
-        updatedBy: 'manager' | 'system'
+        updatedBy: 'instructor' | 'system'
         serverTimestampMs: number
       }
     }).state = {
@@ -761,7 +761,7 @@ void test('session get route persists the session when projected playback reache
       positionSec: 5,
       isPlaying: true,
       playbackRate: 1,
-      updatedBy: 'manager',
+      updatedBy: 'instructor',
       serverTimestampMs: 10_000,
     }
     const storeState = createSessionStore({ s1: session })
@@ -1297,7 +1297,7 @@ void test('command route updates playback and emits extensible envelope', async 
   const updated = storeState.store.s1?.data as Record<string, unknown>
   const state = updated.state as Record<string, unknown>
   assert.equal(state.isPlaying, true)
-  assert.equal(state.updatedBy, 'manager')
+  assert.equal(state.updatedBy, 'instructor')
 
   assert.equal(storeState.published.length, 1)
   const message = storeState.published[0]?.message as Record<string, unknown>
@@ -1540,7 +1540,7 @@ void test('instructor-passcode route ignores malformed persistent teacher cookie
   }
 })
 
-void test('manager websocket rejects connections without a valid instructor passcode', async () => {
+void test('instructor websocket rejects connections without a valid instructor passcode', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
@@ -1553,7 +1553,7 @@ void test('manager websocket rejects connections without a valid instructor pass
   const recorder = createMockSocket()
   handler?.(recorder.socket, new URLSearchParams({
     sessionId: 's1',
-    role: 'manager',
+    role: 'instructor',
   }))
   recorder.emit('message', JSON.stringify({
     type: 'authenticate',
@@ -1565,7 +1565,7 @@ void test('manager websocket rejects connections without a valid instructor pass
   assert.deepEqual(recorder.sent, [])
 })
 
-void test('manager websocket rejects oversized instructor passcodes before verification', async () => {
+void test('instructor websocket rejects oversized instructor passcodes before verification', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
@@ -1578,7 +1578,7 @@ void test('manager websocket rejects oversized instructor passcodes before verif
   const recorder = createMockSocket()
   handler?.(recorder.socket, new URLSearchParams({
     sessionId: 's1',
-    role: 'manager',
+    role: 'instructor',
   }))
   recorder.emit('message', JSON.stringify({
     type: 'authenticate',
@@ -1591,9 +1591,9 @@ void test('manager websocket rejects oversized instructor passcodes before verif
   assert.deepEqual(recorder.sent, [])
 })
 
-void test('waitForManagerAuthMessage closes when auth does not arrive in time', async () => {
+void test('waitForInstructorAuthMessage closes when auth does not arrive in time', async () => {
   const recorder = createMockSocket()
-  const authPromise = waitForManagerAuthMessage(recorder.socket, 5)
+  const authPromise = waitForInstructorAuthMessage(recorder.socket, 5)
 
   await new Promise((resolve) => setTimeout(resolve, 20))
   const authMessage = await authPromise
@@ -1603,7 +1603,69 @@ void test('waitForManagerAuthMessage closes when auth does not arrive in time', 
   assert.deepEqual(recorder.sent, [])
 })
 
-void test('manager websocket accepts connections with a valid instructor passcode', async () => {
+void test('instructor websocket accepts connections with a valid instructor passcode', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 's1',
+    role: 'instructor',
+  }))
+  recorder.emit('message', JSON.stringify({
+    type: 'authenticate',
+    instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
+  }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(recorder.closed, null)
+  assert.equal(recorder.sent.length, 2)
+  const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { role?: string } }
+  assert.equal(payload.type, 'state-snapshot')
+  assert.equal(payload.payload?.role, 'instructor')
+  const telemetryEnvelope = JSON.parse(recorder.sent[1] ?? '{}') as { type?: string; payload?: { reason?: string } }
+  assert.equal(telemetryEnvelope.type, 'telemetry-update')
+  assert.equal(telemetryEnvelope.payload?.reason, 'connection-change')
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
+void test('instructor websocket accepts uppercase instructor passcodes by canonicalizing hex casing', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
+
+  const handler = ws.registered['/ws/video-sync']
+  assert.equal(typeof handler, 'function')
+
+  const recorder = createMockSocket()
+  handler?.(recorder.socket, new URLSearchParams({
+    sessionId: 's1',
+    role: 'instructor',
+  }))
+  recorder.emit('message', JSON.stringify({
+    type: 'authenticate',
+    instructorPasscode: TEST_INSTRUCTOR_PASSCODE.toUpperCase(),
+  }))
+
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(recorder.closed, null)
+  assert.equal(recorder.sent.length, 2)
+  recorder.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+})
+
+void test('legacy manager websocket role is normalized to instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
@@ -1626,41 +1688,8 @@ void test('manager websocket accepts connections with a valid instructor passcod
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   assert.equal(recorder.closed, null)
-  assert.equal(recorder.sent.length, 2)
-  const payload = JSON.parse(recorder.sent[0] ?? '{}') as { type?: string; payload?: { role?: string } }
-  assert.equal(payload.type, 'state-snapshot')
-  assert.equal(payload.payload?.role, 'manager')
-  const telemetryEnvelope = JSON.parse(recorder.sent[1] ?? '{}') as { type?: string; payload?: { reason?: string } }
-  assert.equal(telemetryEnvelope.type, 'telemetry-update')
-  assert.equal(telemetryEnvelope.payload?.reason, 'connection-change')
-  recorder.emit('close')
-  await new Promise((resolve) => setTimeout(resolve, 0))
-})
-
-void test('manager websocket accepts uppercase instructor passcodes by canonicalizing hex casing', async () => {
-  const app = createMockApp()
-  const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', TEST_INSTRUCTOR_PASSCODE) })
-
-  setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
-
-  const handler = ws.registered['/ws/video-sync']
-  assert.equal(typeof handler, 'function')
-
-  const recorder = createMockSocket()
-  handler?.(recorder.socket, new URLSearchParams({
-    sessionId: 's1',
-    role: 'manager',
-  }))
-  recorder.emit('message', JSON.stringify({
-    type: 'authenticate',
-    instructorPasscode: TEST_INSTRUCTOR_PASSCODE.toUpperCase(),
-  }))
-
-  await new Promise((resolve) => setTimeout(resolve, 0))
-
-  assert.equal(recorder.closed, null)
-  assert.equal(recorder.sent.length, 2)
+  const payload = JSON.parse(recorder.sent[0] ?? '{}') as { payload?: { role?: string } }
+  assert.equal(payload.payload?.role, 'instructor')
   recorder.emit('close')
   await new Promise((resolve) => setTimeout(resolve, 0))
 })
@@ -1973,7 +2002,7 @@ void test('heartbeat broadcasts projected playback without persisting transient 
         positionSec: number
         isPlaying: boolean
         playbackRate: 1
-        updatedBy: 'manager' | 'system'
+        updatedBy: 'instructor' | 'system'
         serverTimestampMs: number
       }
     }).state = {
@@ -1984,7 +2013,7 @@ void test('heartbeat broadcasts projected playback without persisting transient 
       positionSec: 5,
       isPlaying: true,
       playbackRate: 1,
-      updatedBy: 'manager',
+      updatedBy: 'instructor',
       serverTimestampMs: nowMs,
     }
     const storeState = createSessionStore({ s1: session }, { valkeyStore: createMockVideoSyncValkeyStore() })
@@ -2086,7 +2115,7 @@ void test('heartbeat persists the session when playback reaches stopSec', { conc
         positionSec: number
         isPlaying: boolean
         playbackRate: 1
-        updatedBy: 'manager' | 'system'
+        updatedBy: 'instructor' | 'system'
         serverTimestampMs: number
       }
     }).state = {
@@ -2097,7 +2126,7 @@ void test('heartbeat persists the session when playback reaches stopSec', { conc
       positionSec: 5,
       isPlaying: true,
       playbackRate: 1,
-      updatedBy: 'manager',
+      updatedBy: 'instructor',
       serverTimestampMs: nowMs,
     }
     const storeState = createSessionStore({ s1: session })

@@ -153,7 +153,7 @@ export function buildManagerWsUrl(params: {
   }
 
   const protocol = params.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${params.location.host}/ws/video-sync?sessionId=${encodeURIComponent(params.sessionId)}&role=manager`
+  return `${protocol}//${params.location.host}/ws/video-sync?sessionId=${encodeURIComponent(params.sessionId)}&role=instructor`
 }
 
 export function createManagerWsAuthMessage(instructorPasscode: string | null | undefined): string | null {

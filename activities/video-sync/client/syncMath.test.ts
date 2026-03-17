@@ -18,7 +18,7 @@ function createState(overrides: Partial<VideoSyncState> = {}): VideoSyncState {
     positionSec: 10,
     isPlaying: false,
     playbackRate: 1,
-    updatedBy: 'manager',
+    updatedBy: 'instructor',
     serverTimestampMs: 1_000,
     ...overrides,
   }

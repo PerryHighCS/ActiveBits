@@ -64,7 +64,7 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
         positionSec: 18,
         isPlaying: true,
         playbackRate: 1,
-        updatedBy: 'manager',
+        updatedBy: 'instructor',
         serverTimestampMs: 1234,
       },
       telemetry: {
@@ -87,7 +87,7 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
         positionSec: 18,
         isPlaying: true,
         playbackRate: 1,
-        updatedBy: 'manager',
+        updatedBy: 'instructor',
         serverTimestampMs: 1234,
       },
       telemetry: {
@@ -112,6 +112,38 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
       },
     }),
     null,
+  )
+})
+
+void test('parseVideoSyncStateMessagePayload normalizes legacy manager updates to instructor', () => {
+  assert.deepEqual(
+    parseVideoSyncStateMessagePayload({
+      state: {
+        provider: 'youtube',
+        videoId: 'abcdefghijk',
+        startSec: 12,
+        stopSec: null,
+        positionSec: 18,
+        isPlaying: true,
+        playbackRate: 1,
+        updatedBy: 'manager',
+        serverTimestampMs: 1234,
+      },
+    }),
+    {
+      state: {
+        provider: 'youtube',
+        videoId: 'abcdefghijk',
+        startSec: 12,
+        stopSec: null,
+        positionSec: 18,
+        isPlaying: true,
+        playbackRate: 1,
+        updatedBy: 'instructor',
+        serverTimestampMs: 1234,
+      },
+      telemetry: undefined,
+    },
   )
 })
 

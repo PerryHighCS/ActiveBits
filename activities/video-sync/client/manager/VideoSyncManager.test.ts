@@ -120,7 +120,7 @@ void test('buildManagerWsUrl omits instructor credentials from the websocket URL
         host: 'bits.example.test',
       },
     }),
-    'wss://bits.example.test/ws/video-sync?sessionId=session-123&role=manager',
+    'wss://bits.example.test/ws/video-sync?sessionId=session-123&role=instructor',
   )
 })
 

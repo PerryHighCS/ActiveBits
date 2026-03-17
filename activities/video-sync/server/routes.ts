@@ -6,7 +6,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 
-type VideoSyncRole = 'manager' | 'student'
+type VideoSyncRole = 'instructor' | 'student'
 type VideoSyncCommandType = 'play' | 'pause' | 'seek'
 type VideoSyncEventType = 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'load-failure'
 
@@ -18,7 +18,7 @@ interface VideoSyncState {
   positionSec: number
   isPlaying: boolean
   playbackRate: 1
-  updatedBy: 'manager' | 'system'
+  updatedBy: 'instructor' | 'system'
   serverTimestampMs: number
 }
 
@@ -97,7 +97,7 @@ interface VideoSyncSocket extends ActiveBitsWebSocket {
   videoSyncRole?: VideoSyncRole
 }
 
-interface VideoSyncManagerAuthMessage {
+interface VideoSyncInstructorAuthMessage {
   type: 'authenticate'
   instructorPasscode: string
 }
@@ -144,7 +144,7 @@ const INSTRUCTOR_PASSCODE_LENGTH = 32
 const INSTRUCTOR_PASSCODE_PATTERN = /^[a-f0-9]{32}$/i
 const UNSYNCED_STUDENTS_KEY_PREFIX = 'video-sync:unsynced:'
 const UNSYNCED_STUDENTS_KEY_TTL_MS = UNSYNC_STALE_MS + 1_000
-const DEFAULT_MANAGER_AUTH_TIMEOUT_MS = 5_000
+const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const provider = 'youtube'
 const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
@@ -155,6 +155,10 @@ const unsyncedStudentPruneTimersBySession = new Map<string, ReturnType<typeof se
 interface CookieSessionEntry {
   key: string
   teacherCode: unknown
+}
+
+function isInstructorRoleParam(role: string | null): boolean {
+  return role === 'instructor' || role === 'manager'
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -343,7 +347,10 @@ function normalizeState(raw: unknown): VideoSyncState {
     positionSec: clampSeconds(toFiniteNumber(source.positionSec, 0)),
     isPlaying: source.isPlaying === true,
     playbackRate: 1,
-    updatedBy: source.updatedBy === 'manager' ? 'manager' : 'system',
+    updatedBy:
+      source.updatedBy === 'instructor' || source.updatedBy === 'manager'
+        ? 'instructor'
+        : 'system',
     serverTimestampMs: normalizedServerTimestampMs,
   }
 }
@@ -443,7 +450,7 @@ function normalizeDriftSec(value: unknown): number | null {
   return clampSeconds(Math.abs(value))
 }
 
-function parseManagerAuthMessage(raw: unknown): VideoSyncManagerAuthMessage | null {
+function parseInstructorAuthMessage(raw: unknown): VideoSyncInstructorAuthMessage | null {
   let text: string | null = null
 
   if (typeof raw === 'string') {
@@ -480,15 +487,18 @@ function parseManagerAuthMessage(raw: unknown): VideoSyncManagerAuthMessage | nu
   }
 }
 
-function getManagerAuthTimeoutMs(): number {
-  const rawValue = process.env.ACTIVEBITS_VIDEO_SYNC_MANAGER_AUTH_TIMEOUT_MS
+function getInstructorAuthTimeoutMs(): number {
+  // Temporary compatibility shim for mixed deploys; owner: Codex; cleanup: remove once all callers use ACTIVEBITS_VIDEO_SYNC_INSTRUCTOR_AUTH_TIMEOUT_MS.
+  const rawValue =
+    process.env.ACTIVEBITS_VIDEO_SYNC_INSTRUCTOR_AUTH_TIMEOUT_MS ??
+    process.env.ACTIVEBITS_VIDEO_SYNC_MANAGER_AUTH_TIMEOUT_MS
   const parsed = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MANAGER_AUTH_TIMEOUT_MS
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS
 }
 
-export function waitForManagerAuthMessage(
+export function waitForInstructorAuthMessage(
   socket: ActiveBitsWebSocket,
-  timeoutMs = getManagerAuthTimeoutMs(),
+  timeoutMs = getInstructorAuthTimeoutMs(),
 ): Promise<unknown | null> {
   return new Promise<unknown | null>((resolve) => {
     let settled = false
@@ -1369,7 +1379,7 @@ export default function setupVideoSyncRoutes(
       positionSec: parsedSource.source.startSec,
       isPlaying: false,
       playbackRate: 1,
-      updatedBy: 'manager',
+      updatedBy: 'instructor',
       serverTimestampMs: now,
     }
     data.telemetry.error = { code: null, message: null }
@@ -1425,7 +1435,7 @@ export default function setupVideoSyncRoutes(
         ...data.state,
         positionSec: clamped,
         isPlaying: true,
-        updatedBy: 'manager',
+        updatedBy: 'instructor',
         serverTimestampMs: now,
       }
     } else if (body.type === 'pause') {
@@ -1437,7 +1447,7 @@ export default function setupVideoSyncRoutes(
         ...data.state,
         positionSec: clamped,
         isPlaying: false,
-        updatedBy: 'manager',
+        updatedBy: 'instructor',
         serverTimestampMs: now,
       }
     } else {
@@ -1449,7 +1459,7 @@ export default function setupVideoSyncRoutes(
         ...data.state,
         positionSec: clamped,
         isPlaying: false,
-        updatedBy: 'manager',
+        updatedBy: 'instructor',
         serverTimestampMs: now,
       }
     }
@@ -1556,8 +1566,8 @@ export default function setupVideoSyncRoutes(
     }
 
     const typedSocket = socket as VideoSyncSocket
-    const managerAuthMessagePromise = roleParam === 'manager'
-      ? waitForManagerAuthMessage(typedSocket)
+    const instructorAuthMessagePromise = isInstructorRoleParam(roleParam)
+      ? waitForInstructorAuthMessage(typedSocket)
       : null
     let cleanedUp = false
     const handleSocketClosed = () => {
@@ -1612,21 +1622,21 @@ export default function setupVideoSyncRoutes(
         return
       }
 
-      if (roleParam === 'manager') {
-        const rawAuthMessage = await managerAuthMessagePromise
+      if (isInstructorRoleParam(roleParam)) {
+        const rawAuthMessage = await instructorAuthMessagePromise
         if (cleanedUp || typedSocket.readyState !== WS_OPEN_READY_STATE) {
           handleSocketClosed()
           return
         }
 
-        const authMessage = parseManagerAuthMessage(rawAuthMessage)
+        const authMessage = parseInstructorAuthMessage(rawAuthMessage)
         if (!authMessage || !verifyInstructorPasscode(session.data.instructorPasscode, authMessage.instructorPasscode)) {
           typedSocket.close(1008, 'Forbidden')
           return
         }
       }
 
-      const role: VideoSyncRole = roleParam === 'manager' ? 'manager' : 'student'
+      const role: VideoSyncRole = isInstructorRoleParam(roleParam) ? 'instructor' : 'student'
       typedSocket.sessionId = sessionId
       typedSocket.videoSyncRole = role
 

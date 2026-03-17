@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-17
+- Area: activities | interoperability
+- Discovery: `video-sync` now uses `instructor` as its canonical elevated websocket role and state-author identity so embedded SyncDeck presentations can pass a shared instructor role into Video Sync, but the server/client still accept legacy `manager` protocol values and normalize them to `instructor` during the rollout.
+- Why it matters: Cross-activity embedding can rely on one elevated-role name, while mixed deployments or persisted pre-migration sessions do not break if an older client still sends `role=manager` or an older payload reports `updatedBy: 'manager'`.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`; `activities/video-sync/client/protocol.ts`; `activities/video-sync/client/protocol.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`
+- Follow-up action: Remove the `manager` compatibility path once all deployed Video Sync clients and persisted sessions have been rotated to the `instructor` protocol naming.
+- Owner: Codex
+
+- Date: 2026-03-17
 - Area: activities | waiting-room
 - Discovery: `video-sync` now follows the shared waiting-room identity contract on the student side: the activity declares a required `displayName` field, and the student client resolves/persists a stable participant identity through `resolveInitialEntryParticipantIdentity(...)` and session participant context instead of inventing a fresh telemetry-only ID every mount.
 - Why it matters: This brings Video Sync onto the same preflight identity path as the other migrated session-backed activities, so telemetry and reconnect-friendly local context can reuse waiting-room-issued `participantId` values. It also narrows the remaining gap: Video Sync still keeps its websocket/session authorization model activity-owned rather than enforcing accepted-entry identity on join.

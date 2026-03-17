@@ -13,7 +13,7 @@ export interface VideoSyncState {
   positionSec: number
   isPlaying: boolean
   playbackRate: 1
-  updatedBy: 'manager' | 'system'
+  updatedBy: 'instructor' | 'system'
   serverTimestampMs: number
 }
 
@@ -69,6 +69,14 @@ function isNullableFiniteNumber(value: unknown): value is number | null {
   return value === null || isFiniteNumber(value)
 }
 
+function normalizeUpdatedBy(value: unknown): VideoSyncState['updatedBy'] | null {
+  if (value === 'instructor' || value === 'manager') {
+    return 'instructor'
+  }
+
+  return value === 'system' ? 'system' : null
+}
+
 export function isVideoSyncState(value: unknown): value is VideoSyncState {
   if (!isRecord(value)) {
     return false
@@ -82,7 +90,7 @@ export function isVideoSyncState(value: unknown): value is VideoSyncState {
     isFiniteNumber(value.positionSec) &&
     typeof value.isPlaying === 'boolean' &&
     value.playbackRate === 1 &&
-    (value.updatedBy === 'manager' || value.updatedBy === 'system') &&
+    normalizeUpdatedBy(value.updatedBy) != null &&
     isFiniteNumber(value.serverTimestampMs)
   )
 }
@@ -141,7 +149,12 @@ export function parseVideoSyncStateMessagePayload(payload: unknown): VideoSyncSt
   }
 
   return {
-    state: isVideoSyncState(payload.state) ? payload.state : undefined,
+    state: isVideoSyncState(payload.state)
+      ? {
+        ...payload.state,
+        updatedBy: normalizeUpdatedBy(payload.state.updatedBy) ?? 'system',
+      }
+      : undefined,
     telemetry: isVideoSyncTelemetry(payload.telemetry) ? payload.telemetry : undefined,
   }
 }
