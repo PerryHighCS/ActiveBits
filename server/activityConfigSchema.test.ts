@@ -166,7 +166,7 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
           },
         },
         'bad-config-2',
-    ),
+      ),
     /responseField/,
   )
 
