@@ -139,6 +139,9 @@ export default {
         responseField: 'instructorPasscode',
       },
     ],
+    historyState: [
+      'instructorPasscode',
+    ],
   },
   manageDashboard: { // optional shared dashboard hints/capabilities
     customPersistentLinkBuilder: true, // activity-owned persistent-link UI in dashboard modal
@@ -147,6 +150,13 @@ export default {
   serverEntry: './server/routes.ts', // Server routes
 };
 ```
+
+`createSessionBootstrap` supports two persistence channels:
+
+- `sessionStorage`: Array of `{ keyPrefix, responseField }` entries. Each matching string field from the create-session API response is written to browser sessionStorage using `${keyPrefix}${sessionId}` as the key.
+- `historyState`: Array of response field names. Matching fields are attached to React Router navigation state when transitioning from `/manage/:activityId` to `/manage/:activityId/:sessionId`.
+
+Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` when the value should still be recoverable after reloads or later manager re-entry in the same tab.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript
