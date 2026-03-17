@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-17
+- Area: activities | waiting-room | syncdeck
+- Discovery: SyncDeck embedded-activity planning should build on the waiting-room expansion that is already in the repo: `POST /api/syncdeck/:sessionId/embedded-context` proves inherited parent teacher/student identity, while child session entry should continue through the shared session entry gateway and entry-participant handoff contracts instead of inventing a separate child claim/join API.
+- Why it matters: Reusing the shipped waiting-room seams keeps embedded child launch compatible with accepted-entry identity, extra waiting-room fields, and late-join flows. It also avoids creating a second incompatible entry model just for SyncDeck overlays.
+- Evidence: `activities/syncdeck/client/shared/embeddedContextUtils.ts`; `activities/syncdeck/server/routes.ts`; `.agent/plans/waiting-room-expansion.md`; `.agent/knowledge/data-contracts.md`
+- Follow-up action: When implementing embedded child launch, treat parent-context proof plus shared `GET /api/session/:sessionId/entry` and entry-participant consume routes as the default integration path; only add SyncDeck-specific embedded endpoints where they issue or transport inherited context, not where they replace the child activity's normal entry gateway.
+- Owner: Codex
+
+- Date: 2026-03-17
 - Area: activities | interoperability
 - Discovery: `video-sync` now uses `instructor` as its canonical elevated websocket role and state-author identity so embedded SyncDeck presentations can pass a shared instructor role into Video Sync, but the server/client still accept legacy `manager` protocol values and normalize them to `instructor` during the rollout.
 - Why it matters: Cross-activity embedding can rely on one elevated-role name, while mixed deployments or persisted pre-migration sessions do not break if an older client still sends `role=manager` or an older payload reports `updatedBy: 'manager'`.

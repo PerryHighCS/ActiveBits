@@ -58,8 +58,9 @@ Instructor clicks **"End Activity"** in the SyncDeck header. The button:
 ### Goals
 - Let presentations launch embedded ActiveBits activities via slide events or a header picker.
 - Keep embedded sessions linked to the parent SyncDeck session (child session lifecycle tied to parent).
-- Distribute per-student claim tokens over the parent WebSocket so students auto-join
-  the child session with identity-mapped seating.
+- Reuse the waiting-room entry gateway and accepted-entry handoff for child entry so
+  students inherit parent identity without a second teacher-code prompt or a parallel
+  child join protocol.
 - Prevent duplicate child sessions when multiple instructors are connected (first-caller ownership).
 - Support instructor reporting after embedded sessions.
 
@@ -72,8 +73,11 @@ Tracked in `syncdeck-checklist.md` under "Embedded activities".
 - Embedded-activity protocol documentation is a required prerequisite, not optional implementation cleanup.
 - The documented protocol must explicitly cover transport boundaries, message envelope shape,
   activity/session routing, and whether multiplexing is supported.
-- Activation and claim flow for embedded sessions must be specified before implementation;
-  the current child-session handoff over the parent WebSocket remains a candidate design until finalized.
+- Embedded child entry must build on the existing waiting-room entry/handoff contracts and the
+  SyncDeck parent `embedded-context` proof route; any parent-WebSocket token broadcast is only
+  a transport detail layered on top of those existing contracts.
+- Solo embedded launches must follow the existing `standaloneEntry` capability contract rather
+  than introducing a SyncDeck-specific solo-mode flag.
 - Multi-instructor arbitration uses first-caller ownership (server `embeddedActivityOwner` field);
   subsequent instructor calls receive `409 Conflict` with `alreadyStarted: true`.
 - Activity Containment Policy must be preserved: SyncDeck code uses only `activityConfig`

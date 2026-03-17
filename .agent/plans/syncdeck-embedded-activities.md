@@ -44,6 +44,9 @@ Key design questions that must be resolved before implementation:
 - The child activity session uses the normal ActiveBits session system
   (WebSocket, session API, `useResilientWebSocket`), so the activity code itself requires
   no embedded-mode awareness beyond receiving a `sessionId`.
+- The completed waiting-room expansion already provides shared entry-status and
+  entry-participant handoff paths. Embedded child entry should build on those
+  contracts instead of introducing a separate child-session join protocol.
 - The presentation iframe stays mounted underneath the activity overlay, so dismissal is
   instant (no reload needed when the instructor moves off).
 - Origin isolation is trivially correct: host page talks to its own origin for the child
@@ -179,23 +182,28 @@ check the `syncState` value if relevant to their behavior.
 ### Solo mode: separate activation path
 
 When the student is in `solo` sync state (no instructor), slide-triggered activities
-cannot use the child session / claim token flow — there is no instructor to have started
-the child session, and no parent SyncDeck session in the normal sense.
+cannot use the managed child-session handoff flow — there is no instructor to have started
+the child session, and no parent-managed child entry to inherit.
 
 Solo activation path:
 1. Student enters a slide with embedded activity metadata.
 2. The SyncDeck host detects `syncState === 'solo'`.
 3. Instead of waiting for `embedded-activity-start` from the server, the host:
-   a. Checks whether the activity supports solo mode (`activityConfig.soloMode === true`).
-   b. If yes: mounts the activity iframe at the activity's solo session URL
-      (`/solo/{activityId}` or equivalent), passing no claim token.
-      The activity initializes exactly as it would from the join page Solo Bits card.
-   c. If no: shows an informational message ("This activity requires a live session").
+  a. Checks the activity's existing `standaloneEntry` contract.
+  b. If `standaloneEntry.enabled === true` and `supportsDirectPath === true`: mounts the
+    activity iframe at the direct standalone URL (`/solo/{activityId}`), passing no
+    embedded entry token. The activity initializes exactly as it would from the join page.
+  c. If standalone support exists only through permalink or other activity-specific entry
+    surfaces, defer automatic slide-triggered solo launch until that launcher contract is
+    defined; for now show an informational message rather than inventing a SyncDeck-only
+    `soloMode` flag.
+  d. If standalone entry is not supported: shows an informational message
+    ("This activity requires a live session").
 4. Solo activity iframes are local to the student browser and create no server child session.
 5. The host sends `syncContext` with `syncState: 'solo'` after mount.
 
 Solo activity state is local (no cross-student session), so there is no `embedded-activity-start`
-broadcast and no claim token flow.
+broadcast and no embedded entry-token flow.
 
 ---
 
@@ -305,11 +313,69 @@ running and which child session ID corresponds to each instance.
 
 ---
 
-## Student Claim Flow
+## Embedded Entry / Handoff Flow
 
 Students are already connected to the parent SyncDeck session by WebSocket.
-Getting them atomically into the child session requires a claim token so they do not
-need to enter a passcode or navigate manually.
+The waiting-room expansion already established two reusable entry seams:
+
+- server-backed `entryParticipantToken` handoff for child session entry
+- accepted-entry / server-issued participant identity for activities that opt into it
+
+Embedded child entry should reuse those seams so students do not re-enter teacher codes,
+and so child activities still flow through the normal entry gateway when they require
+additional waiting-room fields.
+
+### Finalized rule: pass-through vs waiting-room UI
+
+For embedded child launch, keep one gateway path but branch presentation mode by the
+existing shared entry contract:
+
+- If `entryOutcome === 'join-live'` and `waitingRoomFieldCount === 0`, child launch is
+  immediate pass-through (no waiting-room pause in the overlay).
+- If `waitingRoomFieldCount > 0` or `entryOutcome === 'wait'`, render the shared
+  waiting-room UI in the overlay.
+
+This preserves fast launch for activities that need no extra preflight fields while still
+allowing child activities with required waiting-room fields to collect inputs through the
+same shared system.
+
+### Finalized rule: instructor control for synchronous activities
+
+Pass-through does not imply student autonomy. Activities that require synchronized
+instructor control must still start in instructor-gated mode after entry:
+
+- Student can enter the child session immediately when pass-through applies.
+- Runtime interaction remains controlled by instructor-owned state transitions
+  (for example: paused/locked until instructor starts).
+- SyncDeck host navigation/boundary controls remain authoritative for deck progression
+  while overlays are active.
+
+This keeps waiting-room latency low without weakening synchronous classroom control.
+
+### Finalized contract: activity capability shape
+
+Use an explicit activity-level capability in `ActivityConfig`:
+
+```ts
+embeddedRuntime?: {
+  instructorGated?: boolean
+}
+```
+
+Contract semantics:
+
+- Default when omitted: `instructorGated = false`.
+- `instructorGated: false`: child follows the normal embedded pass-through behavior.
+- `instructorGated: true`: child may still launch via pass-through, but student interaction
+  starts in instructor-owned gated state and is only released by instructor runtime actions.
+
+Implementation notes:
+
+- Add this field to `types/activity.ts` and `types/activityConfigSchema.ts`.
+- Keep the field generic and activity-agnostic; no activity-specific conditionals in shared
+  modules.
+- Sync-required activities opt in by setting `embeddedRuntime.instructorGated: true` in their
+  own `activity.config.ts`.
 
 ### Proposed flow
 
@@ -319,9 +385,11 @@ need to enter a passcode or navigate manually.
 3. Server:
    a. Creates child session (`POST /api/{activityId}/create` internally).
    b. Adds entry to `session.data.embeddedActivities[instanceKey]`.
-   c. Generates a short-lived (60 s) per-connection claim token for every currently
-      connected student socket (stored server-side, keyed by token).
-   d. Broadcasts to the parent session WebSocket (per-student, each with their own token):
+  c. Snapshots current parent-session identity for each connected student from the
+    existing SyncDeck roster (`studentId`, `studentName`) and uses the shared
+    waiting-room handoff store to mint a short-lived `entryParticipantToken` for
+    the child session.
+  d. Broadcasts to the parent session WebSocket (per-student, each with their own token):
       ```json
       {
         "type": "embedded-activity-start",
@@ -329,21 +397,33 @@ need to enter a passcode or navigate manually.
           "instanceKey": "raffle:5:0",
           "activityId": "raffle",
           "childSessionId": "CHILD:...",
-          "claimToken": "abc123"
+       "entryParticipantToken": "abc123"
         }
       }
       ```
-      The instructor receives `claimToken: null` (they get a manager join instead).
+    The instructor receives `entryParticipantToken: null` because manager launch uses
+    parent teacher-context validation, not student handoff.
 4. Student client receives the broadcast → adds entry to local `embeddedActivities` map →
    evaluates overlay visibility for their current slide position.
-   If visible, renders iframe loading: `/{childSessionId}?claimToken=abc123`
-5. The activity student component (or session router) exchanges the claim token for
-   a seat via `GET /api/syncdeck/{childSessionId}/claim?token=abc123`.
-   Server validates token, marks student as joined, returns session data.
+  If visible, renders the normal child session route and passes the handoff token through
+  the same storage/query path used by the shared waiting-room code.
+5. The child session uses the existing waiting-room gateway:
+  a. `GET /api/session/{childSessionId}/entry` resolves whether the child can pass through
+    or must render waiting-room UI in the overlay.
+  b. When `entryOutcome === 'join-live'` and `waitingRoomFieldCount === 0`, the existing
+    handoff consume path redeems the
+    `entryParticipantToken` and the activity proceeds as a normal child session.
+  c. If the child activity declares additional waiting-room fields not satisfied by the
+    inherited parent context, the shared waiting-room UI renders inside the overlay and
+    can prefill inherited values such as `displayName` when appropriate.
+  d. For synchronous child activities, immediate pass-through still lands in
+    instructor-gated runtime state (students connected, but control stays instructor-owned
+    until explicit start/release).
 6. New students who join the parent session after the activity starts receive the full
    `session.data.embeddedActivities` map in the initial session snapshot and hydrate
-   their local map immediately — claim tokens for late joiners are issued on demand
-   at claim time (see open question 3).
+  their local map immediately — embedded entry tokens for late joiners are issued on demand
+  through a parent-context-validated SyncDeck route rather than by reusing the original
+  startup token (see open question 3).
 
 ---
 
@@ -456,7 +536,7 @@ so clients can route to the correct overlay.
 
 | Message type | Direction | Description |
 |---|---|---|
-| `embedded-activity-start` | server → clients | Announces a new child session; includes `instanceKey`, `activityId`, `childSessionId`, per-student `claimToken` |
+| `embedded-activity-start` | server → clients | Announces a new child session; includes `instanceKey`, `activityId`, `childSessionId`, and per-student `entryParticipantToken` when immediately available |
 | `embedded-activity-end` | server → clients | One instance ended; clients remove the overlay matching `instanceKey` |
 
 Late-joining students receive the full `embeddedActivities` map in the initial session state
@@ -497,7 +577,7 @@ The manager header needs:
 
 The student shell (`SyncDeckStudent.tsx`) needs:
 
-1. State: `embeddedActivities: Map<instanceKey, { childSessionId, activityId, claimToken }>`
+1. State: `embeddedActivities: Map<instanceKey, { childSessionId, activityId, entryParticipantToken? }>`
 2. On `embedded-activity-start`: add entry to the map → evaluate which overlay to show.
 3. On `embedded-activity-end`: remove entry from the map by `instanceKey` → re-evaluate.
 4. On initial session fetch: if `session.data.embeddedActivities` is populated, hydrate
@@ -556,11 +636,12 @@ being tracked in `SyncDeckStudent` — no new state source is needed.
 ### Solo activity overlays
 
 - When `syncState === 'solo'` and the student enters a slide with activity metadata:
-  - Host checks `activityConfig.soloMode`.
-  - If `true`: mounts the activity iframe at the solo session URL; no claim token; no
-    child session created on the server.
-  - If `false`: shows a static "This activity requires a live session" notice in place
-    of an overlay.
+  - Host checks `activityConfig.standaloneEntry`.
+  - If direct standalone entry is supported: mounts the activity iframe at the standalone
+    session URL; no embedded entry token; no child session created on the server.
+  - If standalone entry is unsupported or only available through permalink semantics that
+    do not yet have an embedded launcher contract: shows a static "This activity requires a
+    live session" notice in place of an overlay.
 - Solo activity iframes are independent of the `embeddedActivities` server map.
   The student host tracks them in a separate local-only `soloOverlays` map keyed by
   `instanceKey`, so they can be mounted/unmounted on slide navigation without server
@@ -586,9 +667,14 @@ POST /api/syncdeck/:sessionId/embedded-activity/end
   Ends child session for instanceKey, removes from embeddedActivities map,
   broadcasts embedded-activity-end with instanceKey.
 
-GET  /api/syncdeck/:childSessionId/claim
-  Query: ?token=...
-  Validates claim token, returns child session data for student auto-join.
+POST /api/syncdeck/:sessionId/embedded-activity/entry
+  Body: { instanceKey, childSessionId?, studentId? }
+  Validates parent identity using the existing SyncDeck embedded-context rules and issues
+  a fresh child `entryParticipantToken` for late joiners/reconnects.
+
+Child-session entry then reuses the existing shared routes:
+- `GET /api/session/:childSessionId/entry`
+- `POST /api/session/:childSessionId/entry-participant/consume`
 ```
 
 Session state shape change:
@@ -635,31 +721,34 @@ session.data.embeddedActivities: Record<instanceKey, {
 ## Open Questions (resolve before each phase begins)
 
 1. **Activity iframe URL shape**: Should the embedded activity student iframe load the
-   normal `/{childSessionId}` route and use the claim token as a query param?
-   Or should there be a dedicated `/embedded/{childSessionId}?claimToken=...` route
-   that skips the join-page UI? The latter avoids the student seeing a join UI briefly.
+  normal `/{childSessionId}` route and pass the shared `entryParticipantToken` through the
+  same storage/query path used by `WaitingRoom`, or should there be a dedicated embedded
+  route that still terminates in the shared child-session entry gateway? Either way, the
+  child must not bypass `GET /api/session/:childSessionId/entry` when waiting-room fields
+  are required.
 
 2. **Activity iframe sizing**: Full overlay (covers presentation entirely) or partial
    (e.g., centered card)? Full overlay is simpler and avoids activity content being
    cut off on small screens. Recommendation: full overlay with a subtle presentation
    background visible at the edges via padding/border.
 
-3. **Claim token expiry behavior**: If a student is offline when the activity starts
-   and comes back after the 60 s claim window, do they join without a claim token
-   (as a late joiner, getting an auto-assigned anonymous seat) or are they locked out?
-   Recommendation: late joiners get an auto-assigned seat; claim tokens only
-   enable identity-mapped seating.
+3. **Embedded entry token expiry / late join behavior**: If a student is offline when the
+  activity starts and comes back after the original token window, should the host request a
+  fresh child `entryParticipantToken` using the parent's validated SyncDeck identity, or
+  should the child fall back to anonymous/manual entry? Recommendation: issue a fresh token
+  on demand through SyncDeck's parent-context proof route so late joiners preserve inherited
+  identity instead of dropping to anonymous seating.
 
 4. **Activity manager in the child session**: Does the instructor get a manager view
    inside the activity overlay, or do they get a student view? The instructor needs
    the manager view to see responses. The `POST /api/syncdeck/.../embedded-activity/start`
    flow should create a manager-capable join token for the initiating instructor.
 
-5. **Student names in child session**: Child session should inherit student names/IDs
-   from the parent SyncDeck session so activity results can be correlated back to
-   students. Mechanism: when creating child session, server seeds child session student
-   roster from parent session snapshot. Claim tokens carry the student's parent-session
-   name/id as part of the token payload.
+5. **Student names and accepted-entry identity in child session**: Child session should
+  inherit student names/IDs from the parent SyncDeck session so activity results can be
+  correlated back to students. Mechanism: when creating child handoff tokens, seed the
+  child session's shared waiting-room/accepted-entry path with inherited parent identity
+  rather than inventing a parallel child-seat claim model.
 
 6. **Deck metadata format**: How does a slide author specify an embedded activity
    in the reveal.js HTML? Options: `data-activity-id="raffle"` attribute on the section,
@@ -676,7 +765,7 @@ session.data.embeddedActivities: Record<instanceKey, {
    matching the instructor's current slide.
 
 9. **Synchronized video as a child session vs. a direct embed**: Synced video may not
-   need the full claim-token/session-join flow if it's purely read-only state relay.
+  need the full shared handoff/session-join flow if it's purely read-only state relay.
    Evaluate whether video sync warrants a lightweight "broadcast-only" child session
    type that skips student identity tracking entirely, reducing overhead for sessions
    with many concurrent video-slide students.
@@ -701,6 +790,18 @@ session.data.embeddedActivities: Record<instanceKey, {
     solo sessions per student (no server coordination). Shared solo experiences should be
     structured as a separate managed-session flow.
 
+12. **Child waiting-room fields beyond inherited parent data**: If the child activity
+  declares required waiting-room fields beyond the inherited `displayName`/identity
+  coming from the parent SyncDeck session, should embedded launch be limited to activities
+  with no extra fields, or should the shared waiting-room UI render inside the overlay?
+  Recommendation: reuse the shared waiting-room UI inside the overlay and prefill whatever
+  inherited values are available rather than introducing a second child-entry UI system.
+
+13. **Synchronous child gating rollout**: Initial rollout starts with Video Sync by setting
+  `embeddedRuntime.instructorGated: true` in `activities/video-sync/activity.config.ts`.
+  Follow-up decision: define release criteria for adding/removing gated rollout on other
+  embedded activities.
+
 ---
 
 ## Delivery Phases
@@ -708,15 +809,19 @@ session.data.embeddedActivities: Record<instanceKey, {
 ### Phase 0 — Design confirmation
 - [ ] Resolve all open questions above.
 - [ ] Update `reveal-iframe-sync-message-schema.md` with `activityRequest` action.
-- [ ] Define claim token server schema and child session state fields in `data-contracts.md`.
+- [ ] Define embedded entry-token / parent-context proof contracts and child session state fields in `data-contracts.md`.
+- [ ] Document pass-through rule explicitly: `join-live` + zero waiting-room fields skips waiting-room UI.
+- [ ] Add `ActivityConfig.embeddedRuntime.instructorGated?: boolean` to shared type/schema with default `false`.
 
 ### Phase 1 — Server foundation
 - [ ] Add child session ID shape to `session` module.
 - [ ] Implement `POST .../embedded-activity/start` (instanceKey-keyed, idempotent per key,
-      creates child session, adds to `embeddedActivities` map, broadcasts with instanceKey,
-      generates per-student claim tokens).
+  creates child session, adds to `embeddedActivities` map, broadcasts with instanceKey,
+  generates per-student child entry handoff tokens).
 - [ ] Implement `POST .../embedded-activity/end` (ends one instance by instanceKey, broadcasts).
-- [ ] Implement `GET .../claim` endpoint (validate token, return session data).
+- [ ] Implement parent-context-validated embedded entry issuance for late join/reconnect.
+- [ ] Reuse shared child-session `GET /entry` and `entry-participant/consume` routes instead of adding a parallel claim API.
+- [ ] Enforce immediate pass-through when child entry resolves to `join-live` with `waitingRoomFieldCount === 0`.
 - [ ] Server tests: concurrent instance creation, per-key deduplication, parent-cull cascades
       to all child sessions, broadcast shape includes instanceKey.
 - [ ] Add `embeddedActivities` map to session state snapshot for late-joining students.
@@ -750,13 +855,21 @@ session.data.embeddedActivities: Record<instanceKey, {
       and instructor indices on every position update.
 - [ ] Send `activebits-embedded` / `syncContext` postMessage to activity iframe after mount
       and on each sync state change.
-- [ ] Solo overlay path: detect `syncState === 'solo'`, check `activityConfig.soloMode`,
-      mount solo session URL or show informational notice.
+- [ ] Solo overlay path: detect `syncState === 'solo'`, honor the existing
+  `activityConfig.standaloneEntry` contract, mount direct standalone URL when supported,
+  otherwise show informational notice.
 - [ ] Local `soloOverlays` map (separate from `embeddedActivities`) for solo instances.
 - [ ] Handle late-join path (hydrate from `session.data.embeddedActivities` map).
 - [ ] Student tests: position-based overlay selection, stack transitions, late-join hydration,
       navigation controls enabled/disabled per capability flags, overlay changes on nav,
       sync context postMessage content for each sync state, solo activation path.
+
+### Phase 3.5 — Synchronous activity control hardening
+- [ ] Read `activityConfig.embeddedRuntime.instructorGated` from embedded child metadata.
+- [ ] For sync-required embedded activities, ensure server/runtime starts in instructor-owned
+  control state even when child entry uses pass-through.
+- [ ] Tests: pass-through child launch does not show waiting-room UI for zero-field activities,
+  but students remain gated until instructor release/start in synchronous activities.
 
 ### Phase 4 — Slide-event activation
 - [ ] Define deck slide metadata format (`data-activity-id` attribute).
