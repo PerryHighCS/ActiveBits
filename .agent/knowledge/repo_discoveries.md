@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-17
+- Area: activities | embedded | testing
+- Discovery: The new `embedded-test` activity is the repo's thin dev-only harness for embedded activity contract validation. It is intentionally static, uses accepted-entry student identity on the websocket path, and exposes only a minimal manager/student roster-plus-chat surface to verify inherited identity, connection state, and child websocket isolation without coupling SyncDeck to a real rollout activity.
+- Why it matters: Future embedded-activity work can validate generic lifecycle and identity behavior against a controlled target before debugging Video Sync or other real activity logic. Keeping the harness `isDev: true` also prevents it from leaking into production activity discovery.
+- Evidence: `activities/embedded-test/activity.config.ts`; `activities/embedded-test/client/manager/EmbeddedTestManager.tsx`; `activities/embedded-test/client/student/EmbeddedTestStudent.tsx`; `activities/embedded-test/server/routes.ts`; `activities/embedded-test/server/routes.test.ts`
+- Follow-up action: Use `embedded-test` first when exercising generic embedded launch/entry/reconnect flows, then confirm the same seams against the first real rollout activity rather than adding feature logic to the harness.
+- Owner: Codex
+
+- Date: 2026-03-17
 - Area: activities | syncdeck | contracts
 - Discovery: SyncDeck embedded-activity Phase 0 contracts now explicitly separate transport responsibilities: parent SyncDeck websocket carries only lifecycle envelopes keyed by `instanceKey`, while each running child activity keeps an independent activity websocket (no multiplexed parent relay). The shared activity config contract also gained `embeddedRuntime.instructorGated?: 'runtime' | 'waiting-room'` so shared code can distinguish runtime gating from waiting-room hold behavior.
 - Why it matters: This locks down Activity Containment boundaries before implementation and prevents accidental protocol coupling where SyncDeck starts relaying activity-specific realtime payloads. The enum contract gives activity teams a shared, metadata-driven way to preserve instructor control while still distinguishing pass-through runtime hold from waiting-room hold semantics.

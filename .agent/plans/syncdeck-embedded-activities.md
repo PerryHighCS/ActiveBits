@@ -860,7 +860,7 @@ session.data.embeddedActivities: Record<instanceKey, {
 - [x] Implement parent-context-validated embedded entry issuance for late join/reconnect.
 - [x] Reuse shared child-session `GET /entry` and `entry-participant/consume` routes instead of adding a parallel claim API.
 - [x] Enforce immediate pass-through when child entry resolves to `join-live` with `waitingRoomFieldCount === 0`.
-- [ ] Add a dev-only `embedded-test` activity for contract/integration validation.
+- [x] Add a dev-only `embedded-test` activity for contract/integration validation.
   - Student view: mostly static; shows passed `displayName` and `participantId`, plus a simple
     message surface from manager → student and student → manager.
   - Manager view: mostly static; shows connected students, participant IDs, and a lightweight
