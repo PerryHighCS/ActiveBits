@@ -876,14 +876,14 @@ session.data.embeddedActivities: Record<instanceKey, {
 - [x] Handle `embedded-activity-start` / `embedded-activity-end` WebSocket messages
       (keyed by instanceKey).
 - [x] Render activity iframe overlay(s) on top of presentation iframe.
-- [ ] Running-activities panel in header: per-instance name, status dot, end control
+- [x] Running-activities panel in header: per-instance name, status dot, end control
       with inline confirmation (lists all instances regardless of instructor's current slide).
 - [x] Manager overlay selection follows instructor's current slide position (same
       position-based rule as student overlay); always renders ManagerComponent for the matched instance.
 - [x] Host-rendered navigation chevrons (z:20, above activity iframe) active when overlay
       is shown; send prev/next/slide commands to presentation iframe via postMessage.
 - [x] Chevrons hidden when no overlay is active.
-- [ ] Manager tests: multi-instance panel state, individual end control, overlay lifecycle,
+- [x] Manager tests: multi-instance panel state, individual end control, overlay lifecycle,
       navigation commands reach presentation iframe while overlay is active.
 
 ### Phase 3 — Student host overlay

@@ -430,6 +430,8 @@ interface SyncDeckEmbeddedLifecyclePayload {
   childSessionId: string
 }
 
+type SyncDeckManagerOverlayNavigationDirection = 'prev' | 'next' | 'slide'
+
 function buildSyncDeckPasscodeKey(sessionId: string): string {
   return `${SYNCDECK_PASSCODE_KEY_PREFIX}${sessionId}`
 }
@@ -655,6 +657,30 @@ export function resolveManagerActiveEmbeddedInstanceKey(
   }
 
   return selected
+}
+
+export function resolveManagerEmbeddedInstanceStatus(
+  instanceKey: string,
+  activeInstanceKey: string | null,
+): 'active' | 'idle' {
+  return activeInstanceKey != null && instanceKey === activeInstanceKey ? 'active' : 'idle'
+}
+
+export function buildManagerOverlayNavigationCommand(
+  direction: SyncDeckManagerOverlayNavigationDirection,
+): Record<string, unknown> {
+  return buildRevealCommandMessage(direction, {})
+}
+
+export function resolveNextPendingEmbeddedEndConfirmation(
+  currentPending: string | null,
+  targetInstanceKey: string,
+): { nextPending: string | null; shouldEnd: boolean } {
+  if (currentPending === targetInstanceKey) {
+    return { nextPending: null, shouldEnd: true }
+  }
+
+  return { nextPending: targetInstanceKey, shouldEnd: false }
 }
 
 export function evaluateRestoreSuppressionForOutboundState(params: {
@@ -1205,6 +1231,7 @@ const SyncDeckManager: FC = () => {
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const [isEmbeddedPanelOpen, setIsEmbeddedPanelOpen] = useState(false)
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
+  const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
   const [instructorIndicesState, setInstructorIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [isPresentationPaused, setIsPresentationPaused] = useState(false)
@@ -1416,6 +1443,11 @@ const SyncDeckManager: FC = () => {
           if (statePayload != null) {
             const embeddedLifecyclePayload = parseEmbeddedLifecyclePayload(statePayload)
             if (embeddedLifecyclePayload) {
+              if (embeddedLifecyclePayload.type === 'embedded-activity-end') {
+                setPendingEmbeddedEndConfirmInstanceKey((current) =>
+                  current === embeddedLifecyclePayload.instanceKey ? null : current,
+                )
+              }
               setEmbeddedActivities((current) =>
                 applySyncDeckEmbeddedLifecyclePayload(current, embeddedLifecyclePayload),
               )
@@ -2400,7 +2432,19 @@ const SyncDeckManager: FC = () => {
     }
 
     targetWindow.postMessage(
-      buildRevealCommandMessage(direction, {}),
+      buildManagerOverlayNavigationCommand(direction),
+      presentationOrigin,
+    )
+  }
+
+  const sendEmbeddedOverlaySlideCommand = (): void => {
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow || !presentationOrigin) {
+      return
+    }
+
+    targetWindow.postMessage(
+      buildManagerOverlayNavigationCommand('slide'),
       presentationOrigin,
     )
   }
@@ -2430,11 +2474,22 @@ const SyncDeckManager: FC = () => {
         delete next[instanceKey]
         return next
       })
+      setPendingEmbeddedEndConfirmInstanceKey((current) => (current === instanceKey ? null : current))
     } catch {
       // Keep UI stable if end fails; WS lifecycle update will eventually reconcile.
     } finally {
       setEndingEmbeddedInstanceKey(null)
     }
+  }
+
+  const handleEmbeddedEndControlClick = (instanceKey: string): void => {
+    const next = resolveNextPendingEmbeddedEndConfirmation(pendingEmbeddedEndConfirmInstanceKey, instanceKey)
+    setPendingEmbeddedEndConfirmInstanceKey(next.nextPending)
+    if (!next.shouldEnd) {
+      return
+    }
+
+    void endEmbeddedActivity(instanceKey)
   }
 
   const showStartAnyway =
@@ -2595,19 +2650,36 @@ const SyncDeckManager: FC = () => {
               <div className="space-y-2">
                 {Object.entries(embeddedActivities).map(([instanceKey, record]) => (
                   <div key={instanceKey} className="rounded border border-gray-200 p-2">
-                    <p className="text-sm font-medium text-gray-800">{record.activityId}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-gray-800">{record.activityId}</p>
+                      {resolveManagerEmbeddedInstanceStatus(instanceKey, activeEmbeddedInstanceKey) === 'active' ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-emerald-700" aria-label="Active overlay">
+                          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                          Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs text-gray-500" aria-label="Idle overlay">
+                          <span className="inline-block h-2 w-2 rounded-full bg-gray-400" />
+                          Idle
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-600">{instanceKey}</p>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-xs text-gray-600 truncate">{record.childSessionId}</span>
                       <button
                         type="button"
                         onClick={() => {
-                          void endEmbeddedActivity(instanceKey)
+                          handleEmbeddedEndControlClick(instanceKey)
                         }}
                         disabled={endingEmbeddedInstanceKey === instanceKey}
                         className="px-2 py-1 rounded border border-red-600 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
                       >
-                        {endingEmbeddedInstanceKey === instanceKey ? 'Ending…' : 'End'}
+                        {endingEmbeddedInstanceKey === instanceKey
+                          ? 'Ending…'
+                          : pendingEmbeddedEndConfirmInstanceKey === instanceKey
+                            ? 'Confirm end'
+                            : 'End'}
                       </button>
                     </div>
                   </div>
@@ -2725,6 +2797,14 @@ const SyncDeckManager: FC = () => {
                           aria-label="Next slide"
                         >
                           ▶
+                        </button>
+                        <button
+                          type="button"
+                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100"
+                          onClick={sendEmbeddedOverlaySlideCommand}
+                          aria-label="Slide command"
+                        >
+                          ⦿
                         </button>
                         <button
                           type="button"

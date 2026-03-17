@@ -25,6 +25,9 @@ import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
 import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
 import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
+import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
+import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
+import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -377,6 +380,33 @@ void test('resolveManagerActiveEmbeddedInstanceKey picks instance anchored to cu
   )
 
   assert.equal(selected, 'embedded-test:3:1')
+})
+
+void test('resolveManagerEmbeddedInstanceStatus marks only selected instance as active', () => {
+  assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'video-sync:3:0'), 'active')
+  assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'embedded-test:3:0'), 'idle')
+  assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', null), 'idle')
+})
+
+void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for prev/next/slide', () => {
+  const prev = buildManagerOverlayNavigationCommand('prev') as { payload?: { name?: unknown } }
+  const next = buildManagerOverlayNavigationCommand('next') as { payload?: { name?: unknown } }
+  const slide = buildManagerOverlayNavigationCommand('slide') as { payload?: { name?: unknown } }
+
+  assert.equal(prev.payload?.name, 'prev')
+  assert.equal(next.payload?.name, 'next')
+  assert.equal(slide.payload?.name, 'slide')
+})
+
+void test('resolveNextPendingEmbeddedEndConfirmation requires two clicks before ending', () => {
+  const first = resolveNextPendingEmbeddedEndConfirmation(null, 'video-sync:3:0')
+  assert.deepEqual(first, { nextPending: 'video-sync:3:0', shouldEnd: false })
+
+  const second = resolveNextPendingEmbeddedEndConfirmation(first.nextPending, 'video-sync:3:0')
+  assert.deepEqual(second, { nextPending: null, shouldEnd: true })
+
+  const switchTarget = resolveNextPendingEmbeddedEndConfirmation('video-sync:3:0', 'embedded-test:5:0')
+  assert.deepEqual(switchTarget, { nextPending: 'embedded-test:5:0', shouldEnd: false })
 })
 
 void test('extractIndicesFromRevealPayload reads indices from state payload top-level index fields', () => {
