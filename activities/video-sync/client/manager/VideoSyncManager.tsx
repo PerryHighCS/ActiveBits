@@ -121,6 +121,9 @@ export function resolveBootstrapInstructorPasscode(params: {
 } {
   const fromLocationState = readBootstrapInstructorPasscode(params.locationState)
   if (fromLocationState != null) {
+    if (params.sessionId) {
+      consumeCreateSessionBootstrapPayload('video-sync', params.sessionId)
+    }
     return {
       instructorPasscode: fromLocationState,
       shouldClearLocationState: true,

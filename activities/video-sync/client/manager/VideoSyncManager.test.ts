@@ -81,6 +81,29 @@ void test('resolveBootstrapInstructorPasscode clears history state only for navi
   )
 })
 
+void test('resolveBootstrapInstructorPasscode clears same-tab fallback cache when location state is used', () => {
+  storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
+    instructorPasscode: 'cached-passcode',
+  })
+
+  assert.deepEqual(
+    resolveBootstrapInstructorPasscode({
+      locationState: {
+        createSessionPayload: {
+          instructorPasscode: 'teacher-passcode',
+        },
+      },
+      sessionId: 'session-123',
+    }),
+    {
+      instructorPasscode: 'teacher-passcode',
+      shouldClearLocationState: true,
+    },
+  )
+
+  assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
+})
+
 void test('resolveBootstrapInstructorPasscode preserves same-tab bootstrap payloads without navigation cleanup', () => {
   storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
     instructorPasscode: 'teacher-passcode',
