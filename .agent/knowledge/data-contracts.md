@@ -15,6 +15,17 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-17
+- Surface: REST | websocket | activity interface
+- Contract: SyncDeck embedded child launch reuses waiting-room entry contracts plus parent-context proof. Parent session validates inherited role/identity through `POST /api/syncdeck/:sessionId/embedded-context`, child entry uses the shared child gateway (`GET /api/session/:childSessionId/entry` + entry-participant token consume), and parent SyncDeck state exposes an `embeddedActivities` map keyed by `instanceKey` (`{activityId}:{h}:{v}` or `{activityId}:global`).
+- Contract update: Embedded pass-through is explicit: when child entry resolves to `entryOutcome: 'join-live'` and `waitingRoomFieldCount === 0`, overlay launch skips waiting-room UI by default. Two gating modes override this: `instructorGated: 'runtime'` skips waiting-room UI but holds students in instructor-owned state inside the activity; `instructorGated: 'waiting-room'` forces the waiting-room hold UI even with zero fields.
+- Contract update: Multiplexing is not supported for embedded child activity realtime traffic. SyncDeck parent websocket only carries lifecycle envelopes (`embedded-activity-start` / `embedded-activity-end` keyed by `instanceKey`), while each active child activity/session maintains its own websocket connection to that activity server path.
+- Compatibility constraints: Embedded launch must not introduce a parallel child claim API that bypasses shared waiting-room/accepted-entry seams. Parent websocket lifecycle envelopes must remain activity-agnostic and include `instanceKey`, `activityId`, and `childSessionId`; per-student `entryParticipantToken` remains nullable (for example manager role).
+- Validation rules: `embeddedActivities` snapshot entries are map values shaped as `{ childSessionId, activityId, startedAt, owner }`. Late join/reconnect must request a fresh entry-participant token through parent-context-validated SyncDeck issuance instead of reusing an expired startup token.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/shared/embeddedContextUtils.ts`; `server/sessionEntryRoutes.test.ts`; `.agent/plans/syncdeck-embedded-activities.md`; `types/activity.ts`; `types/activityConfigSchema.ts`
+- Follow-up action: Phase 1 should formalize lifecycle message payload interfaces in shared SyncDeck types and add server tests covering per-instance deduplication, owner arbitration, late-join token issuance, and parent-cull child teardown.
+- Owner: Codex
+
 - Date: 2026-03-03
 - Surface: internal module
 - Contract: `activities/video-sync` treats a valid YouTube video ID as exactly 11 URL-safe characters (`[A-Za-z0-9_-]{11}`) in both client-side URL parsing and server-side source validation.

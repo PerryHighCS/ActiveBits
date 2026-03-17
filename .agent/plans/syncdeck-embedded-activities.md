@@ -101,6 +101,9 @@ which navigation controls are enabled. No new state source is needed.
   above the activity but below the header.
 - Manager gets free h and v navigation (no boundary restrictions); all four chevrons are
   always enabled.
+- The active manager overlay shows the `ManagerComponent` for the instance anchored to the
+  instructor's current slide position (same position-based selection as student overlays).
+  The running-activities panel lists all instances for end-control regardless of position.
 - Chevrons send `prev` / `next` / navigation `slide` commands to the presentation iframe.
 - The presentation iframe stays mounted underneath (pointer-events: none) for instant
   return once the overlay is removed.
@@ -358,24 +361,31 @@ Use an explicit activity-level capability in `ActivityConfig`:
 
 ```ts
 embeddedRuntime?: {
-  instructorGated?: boolean
+  instructorGated?: 'runtime' | 'waiting-room'
 }
 ```
 
 Contract semantics:
 
-- Default when omitted: `instructorGated = false`.
-- `instructorGated: false`: child follows the normal embedded pass-through behavior.
-- `instructorGated: true`: child may still launch via pass-through, but student interaction
-  starts in instructor-owned gated state and is only released by instructor runtime actions.
+- Default when omitted: no gating — child passes through and activity starts immediately.
+- `instructorGated: 'runtime'`: pass-through entry (no waiting-room UI pause), but student
+  lands in an instructor-owned held state *inside* the activity. Interaction is blocked until
+  the instructor explicitly starts or releases (e.g. presses play in Video Sync).
+- `instructorGated: 'waiting-room'`: always force-show the waiting-room hold UI in the
+  overlay, even when `waitingRoomFieldCount === 0`. Students are held at the waiting-room
+  gate until the instructor releases them from there — the original SyncDeck hold-at-door
+  behaviour.
+
+The two modes are distinct and non-exclusive in purpose — `'runtime'` gates *inside* the
+activity after entry; `'waiting-room'` gates *before* entry. Video Sync uses `'runtime'`.
 
 Implementation notes:
 
-- Add this field to `types/activity.ts` and `types/activityConfigSchema.ts`.
+- This field lives in `types/activity.ts` and is validated by `types/activityConfigSchema.ts`.
 - Keep the field generic and activity-agnostic; no activity-specific conditionals in shared
   modules.
-- Sync-required activities opt in by setting `embeddedRuntime.instructorGated: true` in their
-  own `activity.config.ts`.
+- Activities opt in by setting `embeddedRuntime.instructorGated` in their own
+  `activity.config.ts`.
 
 ### Proposed flow
 
@@ -555,6 +565,8 @@ The manager header needs:
    - Each end control: `aria-label="End {activityName}"`, inline confirmation before calling end.
    - If only one instance is running the panel can be condensed to a single-line chip.
    - The panel must not block access to other header controls (sync toggle, chalkboard, etc.).
+   - Lists all instances regardless of the instructor's current slide position; navigating
+     to an activity's anchored slide is how the instructor accesses its manager view.
 
 2. **"Activities" button** (manual trigger path) — opens a slide-in picker panel.
    Lower priority than slide-event trigger; can be deferred to Phase 5.
@@ -595,8 +607,6 @@ Mapping rule:
 - An instance with key `{activityId}:global` is shown regardless of the student's position.
 - If the student is on a slide with no matching running instance, no overlay is shown and
   the presentation is unobstructed.
-- If multiple instances match (unlikely but possible with stacked globals), show the most
-  recently started one; this can be refined later.
 
 The student's current slide position comes from the `reveal-sync` `state` messages already
 being tracked in `SyncDeckStudent` — no new state source is needed.
@@ -604,7 +614,9 @@ being tracked in `SyncDeckStudent` — no new state source is needed.
 ### Overlay rendering
 
 - Each visible overlay is an absolutely-positioned iframe over the presentation container.
-- `position: absolute; inset: 0; z-index: 10`.
+- `position: absolute; inset: var(--embedded-overlay-gutter, 64px); z-index: 10`.
+- Use responsive gutters so navigation controls always have breathing room
+  (recommended: desktop `64px`, tablet `48px`, mobile `40px`).
 - At most one overlay is visible at a time per the selection rule above (the map may have
   multiple entries, but only the matching one is rendered visible).
 
@@ -720,98 +732,124 @@ session.data.embeddedActivities: Record<instanceKey, {
 
 ## Open Questions (resolve before each phase begins)
 
-1. **Activity iframe URL shape**: Should the embedded activity student iframe load the
-  normal `/{childSessionId}` route and pass the shared `entryParticipantToken` through the
-  same storage/query path used by `WaitingRoom`, or should there be a dedicated embedded
-  route that still terminates in the shared child-session entry gateway? Either way, the
-  child must not bypass `GET /api/session/:childSessionId/entry` when waiting-room fields
-  are required.
+1. **Activity iframe URL shape (RESOLVED)**: Use the normal child session route
+  `/{childSessionId}` for embedded overlays; do not introduce a dedicated embedded route.
+  The host passes `entryParticipantToken` through the same storage/query path used by
+  `WaitingRoom`, and child entry always goes through
+  `GET /api/session/:childSessionId/entry` + shared consume flow.
+  This keeps embedded behavior aligned with existing entry contracts and avoids parallel
+  routing logic.
 
-2. **Activity iframe sizing**: Full overlay (covers presentation entirely) or partial
-   (e.g., centered card)? Full overlay is simpler and avoids activity content being
-   cut off on small screens. Recommendation: full overlay with a subtle presentation
-   background visible at the edges via padding/border.
+2. **Activity iframe sizing (RESOLVED)**: Use a full-coverage overlay model with
+  reserved margin gutters for presentation-direction controls.
+  Implementation guidance:
+  - Overlay remains the primary full-screen interaction surface.
+  - Apply responsive inset margins (desktop `64px`, tablet `48px`, mobile `40px`) so
+    host-rendered chevrons stay visible/clickable without covering activity UI.
+  - Keep the presentation subtly visible in those gutters to maintain orientation.
 
-3. **Embedded entry token expiry / late join behavior**: If a student is offline when the
-  activity starts and comes back after the original token window, should the host request a
-  fresh child `entryParticipantToken` using the parent's validated SyncDeck identity, or
-  should the child fall back to anonymous/manual entry? Recommendation: issue a fresh token
-  on demand through SyncDeck's parent-context proof route so late joiners preserve inherited
-  identity instead of dropping to anonymous seating.
+3. **Embedded entry token expiry / late join behavior (RESOLVED)**: Issue a fresh
+  `entryParticipantToken` on demand through SyncDeck's parent-context proof route
+  (`POST /api/syncdeck/:sessionId/embedded-activity/entry`). Late joiners always preserve
+  inherited identity; there is no fallback to anonymous/manual entry for students who
+  already have a parent-session identity.
 
-4. **Activity manager in the child session**: Does the instructor get a manager view
-   inside the activity overlay, or do they get a student view? The instructor needs
-   the manager view to see responses. The `POST /api/syncdeck/.../embedded-activity/start`
-   flow should create a manager-capable join token for the initiating instructor.
+4. **Activity manager in the child session (RESOLVED)**: The instructor always gets the
+   `ManagerComponent` view inside the child overlay. The `embedded-activity/start` flow
+   must issue a manager-role token or indicator alongside the per-student entry tokens so
+   the instructor's overlay mounts `ManagerComponent` rather than `StudentComponent`.
 
-5. **Student names and accepted-entry identity in child session**: Child session should
-  inherit student names/IDs from the parent SyncDeck session so activity results can be
-  correlated back to students. Mechanism: when creating child handoff tokens, seed the
-  child session's shared waiting-room/accepted-entry path with inherited parent identity
-  rather than inventing a parallel child-seat claim model.
+5. **Student names and accepted-entry identity in child session (RESOLVED)**: Inherit
+  student names/IDs from the parent SyncDeck session. When minting child
+  `entryParticipantToken` values the server seeds the child session's accepted-entry path
+  with the parent-session student identity (`studentId`, `displayName`) from the SyncDeck
+  roster, so activity results can be correlated back to students without a separate
+  identity-collection step.
 
-6. **Deck metadata format**: How does a slide author specify an embedded activity
-   in the reveal.js HTML? Options: `data-activity-id="raffle"` attribute on the section,
-   or a JSON block in speaker notes. Data attributes are simpler to author and parse.
+6. **Deck metadata format (RESOLVED)**: Slide authors specify an embedded activity using
+   a `data-activity-id="raffle"` attribute on the `<section>` element. Speaker-note JSON
+   blocks are not used. Data attributes are the simplest authoring and parsing surface.
 
-7. **Multiple overlays on the same slide**: If a student is on a slide with two running
-   global activities (edge case), which one is shown? Recommendation: show the most
-   recently started; revisit if use cases require multiple simultaneous overlays.
+7. **Multiple activities on the same slide (RESOLVED)**: Only one activity is permitted
+   per slide position. If a horizontal slide needs multiple activities they must be placed
+   on separate vertical slides in a stack — each `<section>` with its own
+   `data-activity-id` and its own anchored `instanceKey`. The server enforces one active
+   instance per `instanceKey`; the design does not support concurrent overlays at the
+   same `h:v` position.
 
-8. **Student-choice stack: instructor's overlay vs. student's overlay**: When the instructor
-   is on (h=3, v=0) and a student is on (h=3, v=1) with its own activity, does the
-   instructor's manager view show both activities in the running-activities panel?
-   Recommendation: yes — manager panel lists all running instances, not just the one
-   matching the instructor's current slide.
+8. **Instructor overlay selection (RESOLVED)**: The manager overlay follows the same
+   position-based selection rule as the student overlay. Because manager activity views
+   are full-screen, the instructor sees one `ManagerComponent` at a time — the one
+   anchored to their current slide position. To manage a specific activity the instructor
+   navigates to its anchored slide. The running-activities panel in the header lists all
+   instances for end-control and awareness regardless of the instructor's position.
 
-9. **Synchronized video as a child session vs. a direct embed**: Synced video may not
-  need the full shared handoff/session-join flow if it's purely read-only state relay.
-   Evaluate whether video sync warrants a lightweight "broadcast-only" child session
-   type that skips student identity tracking entirely, reducing overhead for sessions
-   with many concurrent video-slide students.
+9. **Synchronized video — lightweight sessions (DEFERRED)**: A "broadcast-only" child
+  session type that skips student identity tracking could reduce overhead for high-
+  student-count video slides. The current implementation uses the standard child-session
+  model for all activities including Video Sync. A future plan item should evaluate
+  whether a lightweight session type is worth introducing once the standard path is
+  proven at classroom scale.
 
-10. **Sync state transition while activity iframe is mounted**: If a student is
-    `synchronized` when an activity mounts and then navigates backward (becoming `behind`),
-    the `syncContext` postMessage is re-sent. But should the overlay remain visible or be
-    dismissed? Options:
-    - Keep visible (student stays in the activity regardless of position drift; activity
-      updates its own UI based on sync context). Cleaner for activities that support
-      async participation (late submissions, replay).
-    - Dismiss when student navigates off the anchored slide (current design: overlay
-      selection is position-based). Re-mounting on return means the activity reinitializes.
-    Recommendation: keep the current position-based dismiss for slide-anchored instances.
-    For `global` instances (manual trigger, no position anchor), keep the overlay visible
-    regardless of student position drift.
+10. **Overlay lifecycle on slide navigation (RESOLVED)**: Use position-based dismiss.
+    Navigating away from a slide-anchored activity unmounts the overlay; navigating back
+    remounts and reinitializes it — equivalent to a page reload. This is the accepted
+    behavior: reinit on return is predictable and keeps state management simple.
+    For `global` instances (manual trigger, no position anchor) the overlay persists
+    across all slide positions until the instructor explicitly ends the activity.
 
-11. **Solo mode and slide-triggered activities — does the solo activity share state across
-    solo students?**: If two students are both in solo mode and both arrive at a slide with
-    a raffle, do they each get their own isolated solo session (fully local), or should they
-    share a single child session seeded without an instructor? Recommendation: fully isolated
-    solo sessions per student (no server coordination). Shared solo experiences should be
-    structured as a separate managed-session flow.
+11. **Solo mode — shared vs. isolated state (RESOLVED)**: Solo activity instances are
+    fully isolated per student with no server coordination. Two solo students on the same
+    slide each get their own independent local session. Synchronous shared solo experiences
+    (e.g., a raffle seeded without an instructor) are not supported in the current design
+    and are deferred to a future plan item.
 
-12. **Child waiting-room fields beyond inherited parent data**: If the child activity
-  declares required waiting-room fields beyond the inherited `displayName`/identity
-  coming from the parent SyncDeck session, should embedded launch be limited to activities
-  with no extra fields, or should the shared waiting-room UI render inside the overlay?
-  Recommendation: reuse the shared waiting-room UI inside the overlay and prefill whatever
-  inherited values are available rather than introducing a second child-entry UI system.
+12. **Child waiting-room fields beyond inherited parent data (RESOLVED)**: The shared
+  waiting-room UI renders inside the overlay. Inherited parent values (e.g. `displayName`)
+  are prefilled from the parent SyncDeck session. Name-field editing in the child overlay
+  is permitted — the child `participantId` remains stable so activity results stay
+  attributable, and the edited name scopes only to that child session (it is not
+  back-propagated to the parent SyncDeck session). If a future need arises to sync name
+  changes back to the parent roster, that should be designed as an explicit back-propagation
+  step rather than implicit shared mutation.
 
-13. **Synchronous child gating rollout**: Initial rollout starts with Video Sync by setting
-  `embeddedRuntime.instructorGated: true` in `activities/video-sync/activity.config.ts`.
-  Follow-up decision: define release criteria for adding/removing gated rollout on other
-  embedded activities.
+13. **Synchronous child gating rollout (RESOLVED)**: `instructorGated` is an enum
+  (`'runtime' | 'waiting-room'`, omitted = open) distinguishing two hold mechanisms.
+  Initial rollout uses Video Sync with `instructorGated: 'runtime'`.
+
+  Release criteria for `'runtime'` mode (applies to Video Sync and any activity where
+  the hold happens *inside* the activity after entry):
+  1. No waiting-room UI shown in the overlay before student entry (pass-through confirmed).
+  2. Students land in instructor-owned held state and cannot interact until an explicit
+     instructor start/release action (runtime gate enforced). Criteria 1 and 2 describe
+     the same mode and are not exclusive — both must pass together.
+
+  Release criteria for `'waiting-room'` mode (applies to activities where the hold
+  should happen *before* entry, at the waiting-room gate):
+  1. Waiting-room hold UI renders in the overlay regardless of field count.
+  2. Students are held until the instructor releases them from the waiting-room control.
+
+  Shared release criteria for both modes:
+  3. **Non-gated regression clean**: omitted/open activities continue to pass through
+     without any gating overhead.
+  4. **Config-only change**: gating logic reads exclusively from
+     `activityConfig.embeddedRuntime.instructorGated`; no activity-specific conditionals
+     in shared SyncDeck modules.
+  5. **Mode removal safe**: removing the field or changing its value does not strand or
+     break students in sessions already in progress.
+  6. **New activity opt-in requires no shared-module edits**: an activity adopts a mode
+     by setting the field in its own `activity.config.ts` only.
 
 ---
 
 ## Delivery Phases
 
 ### Phase 0 — Design confirmation
-- [ ] Resolve all open questions above.
-- [ ] Update `reveal-iframe-sync-message-schema.md` with `activityRequest` action.
-- [ ] Define embedded entry-token / parent-context proof contracts and child session state fields in `data-contracts.md`.
-- [ ] Document pass-through rule explicitly: `join-live` + zero waiting-room fields skips waiting-room UI.
-- [ ] Add `ActivityConfig.embeddedRuntime.instructorGated?: boolean` to shared type/schema with default `false`.
+- [x] Resolve all open questions above.
+- [x] Update `reveal-iframe-sync-message-schema.md` with `activityRequest` action.
+- [x] Define embedded entry-token / parent-context proof contracts and child session state fields in `data-contracts.md`.
+- [x] Document pass-through rule explicitly: `join-live` + zero waiting-room fields skips waiting-room UI.
+- [x] Add `ActivityConfig.embeddedRuntime.instructorGated?: 'runtime' | 'waiting-room'` to shared type/schema (omitted = open).
 
 ### Phase 1 — Server foundation
 - [ ] Add child session ID shape to `session` module.
@@ -832,7 +870,9 @@ session.data.embeddedActivities: Record<instanceKey, {
       (keyed by instanceKey).
 - [ ] Render activity iframe overlay(s) on top of presentation iframe.
 - [ ] Running-activities panel in header: per-instance name, status dot, end control
-      with inline confirmation.
+      with inline confirmation (lists all instances regardless of instructor's current slide).
+- [ ] Manager overlay selection follows instructor's current slide position (same
+      position-based rule as student overlay); always renders ManagerComponent for the matched instance.
 - [ ] Host-rendered navigation chevrons (z:20, above activity iframe) active when overlay
       is shown; send prev/next/slide commands to presentation iframe via postMessage.
 - [ ] Chevrons hidden when no overlay is active.
@@ -844,8 +884,8 @@ session.data.embeddedActivities: Record<instanceKey, {
 - [ ] Handle `embedded-activity-start` / `embedded-activity-end` WebSocket messages.
 - [ ] Overlay selection logic: match instance key's `h:v` anchor to student's current slide
       position; fall through to `global` instances when no position match.
-- [ ] Render only the matching overlay; keep non-matching instances mounted-but-hidden
-      or unmounted (evaluate memory tradeoff — unmounted is simpler).
+- [ ] Render only the matching overlay; unmount non-matching instances
+      (navigate-away dismiss is equivalent to reload on return — accepted behavior).
 - [ ] Host-rendered navigation chevrons (z:20) active when overlay is shown, driven by
       `canGoBack`/`canGoForward`/`canGoUp`/`canGoDown` from presentation iframe state.
       Disabled chevrons set `disabled` + `aria-disabled="true"`.
@@ -866,10 +906,12 @@ session.data.embeddedActivities: Record<instanceKey, {
 
 ### Phase 3.5 — Synchronous activity control hardening
 - [ ] Read `activityConfig.embeddedRuntime.instructorGated` from embedded child metadata.
-- [ ] For sync-required embedded activities, ensure server/runtime starts in instructor-owned
-  control state even when child entry uses pass-through.
-- [ ] Tests: pass-through child launch does not show waiting-room UI for zero-field activities,
-  but students remain gated until instructor release/start in synchronous activities.
+- [ ] For `instructorGated: 'runtime'`: pass-through entry, activity starts in instructor-owned
+  held state; students cannot interact until instructor start/release.
+- [ ] For `instructorGated: 'waiting-room'`: force-show waiting-room hold UI in overlay even
+  when `waitingRoomFieldCount === 0`; hold until instructor releases from waiting-room control.
+- [ ] Tests: `'runtime'` — no waiting-room UI + gated-state enforced together; `'waiting-room'`
+  — hold UI renders with zero fields; open (omitted) — pass-through with no gating overhead.
 
 ### Phase 4 — Slide-event activation
 - [ ] Define deck slide metadata format (`data-activity-id` attribute).

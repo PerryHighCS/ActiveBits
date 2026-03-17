@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-17
+- Area: activities | syncdeck | contracts
+- Discovery: SyncDeck embedded-activity Phase 0 contracts now explicitly separate transport responsibilities: parent SyncDeck websocket carries only lifecycle envelopes keyed by `instanceKey`, while each running child activity keeps an independent activity websocket (no multiplexed parent relay). The shared activity config contract also gained `embeddedRuntime.instructorGated?: 'runtime' | 'waiting-room'` so shared code can distinguish runtime gating from waiting-room hold behavior.
+- Why it matters: This locks down Activity Containment boundaries before implementation and prevents accidental protocol coupling where SyncDeck starts relaying activity-specific realtime payloads. The enum contract gives activity teams a shared, metadata-driven way to preserve instructor control while still distinguishing pass-through runtime hold from waiting-room hold semantics.
+- Evidence: `.agent/knowledge/data-contracts.md`; `types/activity.ts`; `types/activityConfigSchema.ts`; `server/activityConfigSchema.test.ts`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
+- Follow-up action: During Phase 1/3.5, keep websocket payloads activity-agnostic on the parent channel and read `embeddedRuntime.instructorGated` from config metadata rather than adding activity-specific conditionals in shared SyncDeck modules.
+- Owner: Codex
+
+- Date: 2026-03-17
 - Area: activities | waiting-room | syncdeck
 - Discovery: SyncDeck embedded-activity planning should build on the waiting-room expansion that is already in the repo: `POST /api/syncdeck/:sessionId/embedded-context` proves inherited parent teacher/student identity, while child session entry should continue through the shared session entry gateway and entry-participant handoff contracts instead of inventing a separate child claim/join API.
 - Why it matters: Reusing the shipped waiting-room seams keeps embedded child launch compatible with accepted-entry identity, extra waiting-room fields, and late-join flows. It also avoids creating a second incompatible entry model just for SyncDeck overlays.

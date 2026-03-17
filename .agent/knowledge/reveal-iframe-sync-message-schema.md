@@ -297,6 +297,28 @@ Host can request a status snapshot via `action: "requestState"`.
 
 ## Iframe → Host Messages
 
+### `activityRequest`
+
+Sent when slide metadata requests an embedded activity launch (for example on slide enter).
+This message is emitted by `reveal-iframe-sync` and consumed by SyncDeck host surfaces,
+which may prompt the instructor before launching.
+
+```json
+{
+  "action": "activityRequest",
+  "payload": {
+    "activityId": "video-sync",
+    "activityOptions": {},
+    "trigger": "slide-enter"
+  }
+}
+```
+
+Payload fields:
+- `activityId` (string): registered activity ID requested by slide metadata.
+- `activityOptions` (object): optional config payload from slide metadata.
+- `trigger` (string): request source reason (initial value: `slide-enter`).
+
 ### `ready`
 
 Sent on init (if `autoAnnounceReady`) and when role changes.

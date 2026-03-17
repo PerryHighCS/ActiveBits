@@ -61,6 +61,9 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
           },
         ],
       },
+      embeddedRuntime: {
+        instructorGated: 'runtime',
+      },
       waitingRoom: {
         fields: [
           {
@@ -100,6 +103,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
     responseField: 'instructorPasscode',
   })
   assert.deepEqual(parsed.createSessionBootstrap?.historyState, ['instructorPasscode'])
+  assert.equal(parsed.embeddedRuntime?.instructorGated, 'runtime')
   assert.deepEqual(parsed.utilities, [
     {
       id: 'gallery-walk-review-copy',
@@ -280,6 +284,29 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
         'bad-config-6',
       ),
     /historyState/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad7',
+          name: 'Bad7',
+          description: 'desc',
+          color: 'navy',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          embeddedRuntime: {
+            instructorGated: true,
+          },
+        },
+        'bad-config-7',
+      ),
+    /embeddedRuntime.*instructorGated.*runtime.*waiting-room/,
   )
 })
 

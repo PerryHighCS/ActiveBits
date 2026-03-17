@@ -72,6 +72,10 @@ export interface ActivityStandaloneEntryConfig {
   description?: string
 }
 
+export interface ActivityEmbeddedRuntimeConfig {
+  instructorGated?: 'runtime' | 'waiting-room'
+}
+
 export interface ActivityConfig {
   id: string
   name: string
@@ -94,6 +98,7 @@ export interface ActivityConfig {
   manageLayout?: {
     expandShell?: boolean
   }
+  embeddedRuntime?: ActivityEmbeddedRuntimeConfig
   waitingRoom?: ActivityWaitingRoomConfig
   isDev?: boolean
   clientEntry?: string

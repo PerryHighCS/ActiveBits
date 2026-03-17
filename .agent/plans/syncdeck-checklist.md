@@ -40,16 +40,16 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
       - PR scope: docs + shared type/schema contract only
       - Exit criteria: contract docs updated, schema/type additions agreed, open-question list reduced to implementation-only items
       - Validation: `npm run lint` + `npm run typecheck`
-        - [ ] Resolve open questions in the plan (13 questions, see plan doc)
-        - [ ] Update `reveal-iframe-sync-message-schema.md` with `activityRequest` action
-        - [ ] Define embedded entry-token, parent-context proof, and `embeddedActivities` map shapes in `data-contracts.md`
-        - [ ] Document pass-through rule for `join-live` + zero waiting-room fields
-        - [ ] Add `ActivityConfig.embeddedRuntime.instructorGated?: boolean` in shared type/schema (default `false`)
-        - [ ] Document embedded-activity transport boundaries and whether multiplexing is supported
-        - [ ] If multiplexing is supported, define the activity/session routing envelope explicitly
-        - [ ] If multiplexing is not supported, document separate websocket requirements per activity/session
-        - [ ] Finalize inherited child-entry flow for already-connected parent-session users
-        - [ ] Finalize multi-instructor create/retry/cancel ownership rules
+        - [x] Resolve open questions in the plan (all 13 resolved, see plan doc)
+        - [x] Update `reveal-iframe-sync-message-schema.md` with `activityRequest` action
+        - [x] Define embedded entry-token, parent-context proof, and `embeddedActivities` map shapes in `data-contracts.md`
+        - [x] Document pass-through rule for `join-live` + zero waiting-room fields
+        - [x] Add `ActivityConfig.embeddedRuntime.instructorGated?: 'runtime' | 'waiting-room'` in shared type/schema (omitted = open)
+        - [x] Document embedded-activity transport boundaries and whether multiplexing is supported
+        - [x] If multiplexing is supported, define the activity/session routing envelope explicitly (N/A: multiplexing is not supported)
+        - [x] If multiplexing is not supported, document separate websocket requirements per activity/session
+        - [x] Finalize inherited child-entry flow for already-connected parent-session users
+        - [x] Finalize multi-instructor create/retry/cancel ownership rules
     - Phase 1 — Server foundation
         - Owner: Embedded server lead (assign before start)
         - PR scope: SyncDeck server routes/state + shared entry-handoff integration + server tests
@@ -70,7 +70,10 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - Validation: `npm test --workspace activities -- syncdeck` then full `npm test`
         - [ ] `embeddedActivities` map state + WebSocket message handling (keyed by instanceKey)
         - [ ] Activity iframe overlay(s) rendered over presentation iframe
-        - [ ] Running-activities panel in header (per-instance name, status dot, end control)
+        - [ ] Running-activities panel in header (per-instance name, status dot, end control;
+              lists all instances regardless of instructor's current slide)
+        - [ ] Manager overlay selection follows instructor's current slide position
+              (same position-based rule as student; renders ManagerComponent)
         - [ ] Host-rendered navigation chevrons (z:20, above overlay) sending postMessage
               prev/next/slide commands to presentation iframe; hidden when no overlay active
         - [ ] Manager tests: multi-instance panel, individual end control, overlay lifecycle,
@@ -100,7 +103,7 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - Exit criteria: capability-driven gating works end-to-end and first activity rollout is production-safe
         - Validation: `npm test --workspace activities -- video-sync` and `npm test --workspace activities -- syncdeck` then full `npm test`
         - [ ] Read `activityConfig.embeddedRuntime.instructorGated` in embedded launch/runtime path
-        - [ ] Initial rollout uses Video Sync first (`activities/video-sync/activity.config.ts` sets `embeddedRuntime.instructorGated: true`)
+        - [ ] Initial rollout uses Video Sync first (`activities/video-sync/activity.config.ts` sets `embeddedRuntime.instructorGated: 'runtime'`)
         - [ ] Sync-required activities start in instructor-owned control state even with pass-through
         - [ ] Tests prove no waiting-room pause for zero-field children and preserved instructor gating
     - Phase 4 — Slide-event activation

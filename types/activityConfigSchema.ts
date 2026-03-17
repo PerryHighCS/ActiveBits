@@ -256,6 +256,31 @@ function parseManageLayout(raw: unknown, context: string): ActivityConfig['manag
   }
 }
 
+function parseEmbeddedRuntime(raw: unknown, context: string): ActivityConfig['embeddedRuntime'] {
+  if (raw == null) {
+    return undefined
+  }
+  if (!isRecord(raw)) {
+    throw new Error(`${context}: "embeddedRuntime" must be an object when provided`)
+  }
+
+  const instructorGatedRaw = raw.instructorGated
+  if (instructorGatedRaw !== undefined && instructorGatedRaw !== null) {
+    if (instructorGatedRaw !== 'runtime' && instructorGatedRaw !== 'waiting-room') {
+      throw new Error(
+        `${context}.embeddedRuntime: "instructorGated" must be "runtime" or "waiting-room" when provided`,
+      )
+    }
+  }
+  const instructorGated =
+    instructorGatedRaw === 'runtime' || instructorGatedRaw === 'waiting-room'
+      ? instructorGatedRaw
+      : undefined
+  return {
+    ...(instructorGated !== undefined ? { instructorGated } : {}),
+  }
+}
+
 function parseUtilities(raw: unknown, context: string): ActivityUtility[] | undefined {
   if (raw == null) {
     return undefined
@@ -477,6 +502,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const utilities = parseUtilities(rawConfig.utilities, context)
   const manageDashboard = parseManageDashboard(rawConfig.manageDashboard, context)
   const manageLayout = parseManageLayout(rawConfig.manageLayout, context)
+  const embeddedRuntime = parseEmbeddedRuntime(rawConfig.embeddedRuntime, context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)
 
   assignOptionalField(parsed, 'title', title)
@@ -489,6 +515,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   assignOptionalField(parsed, 'utilities', utilities)
   assignOptionalField(parsed, 'manageDashboard', manageDashboard)
   assignOptionalField(parsed, 'manageLayout', manageLayout)
+  assignOptionalField(parsed, 'embeddedRuntime', embeddedRuntime)
   assignOptionalField(parsed, 'waitingRoom', waitingRoom)
 
   return parsed
