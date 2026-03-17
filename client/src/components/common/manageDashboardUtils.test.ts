@@ -482,6 +482,36 @@ void test('buildCreateSessionBootstrapHistoryState keeps only declared history-s
     ),
     null,
   )
+
+  const inheritedPayload = Object.create({ instructorPasscode: 'inherited-passcode' }) as Record<string, unknown>
+  inheritedPayload.id = 'session-123'
+  assert.equal(
+    buildCreateSessionBootstrapHistoryState(
+      {
+        historyState: ['instructorPasscode'],
+        sessionStorage: [
+          { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
+        ],
+      },
+      inheritedPayload,
+    ),
+    null,
+  )
+
+  assert.equal(
+    buildCreateSessionBootstrapHistoryState(
+      {
+        historyState: ['instructorPasscode'],
+        sessionStorage: [
+          { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
+        ],
+      },
+      {
+        instructorPasscode: undefined,
+      },
+    ),
+    null,
+  )
 })
 
 void test('buildPersistentLinkUrl appends query only for legacy or append-query mode', () => {

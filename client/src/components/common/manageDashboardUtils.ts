@@ -217,8 +217,11 @@ export function buildCreateSessionBootstrapHistoryState(
   }
 
   const historyStatePayload = createSessionBootstrap.historyState.reduce<Record<string, unknown>>((accumulator, field) => {
-    if (field in payload) {
-      accumulator[field] = payload[field]
+    if (Object.hasOwn(payload, field)) {
+      const value = payload[field]
+      if (value !== undefined) {
+        accumulator[field] = value
+      }
     }
     return accumulator
   }, {})
