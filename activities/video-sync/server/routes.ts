@@ -1570,12 +1570,18 @@ export default function setupVideoSyncRoutes(
       ? waitForInstructorAuthMessage(typedSocket)
       : null
     let cleanedUp = false
+    let isSubscribed = false
     const handleSocketClosed = () => {
       if (cleanedUp) {
         return
       }
       cleanedUp = true
 
+      if (!isSubscribed) {
+        return
+      }
+
+      isSubscribed = false
       removeSubscriber(sessionId, typedSocket)
       void (async () => {
         const currentSession = await getVideoSyncSession(sessions, sessionId)
@@ -1647,6 +1653,7 @@ export default function setupVideoSyncRoutes(
 
       ensureBroadcastSubscription(sessionId)
       upsertSubscriber(sessionId, typedSocket)
+      isSubscribed = true
       ensureHeartbeat(sessions, ws, sessionId)
 
       const data = ensureVideoSyncSessionData(session)

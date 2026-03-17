@@ -1543,7 +1543,7 @@ void test('instructor-passcode route ignores malformed persistent teacher cookie
 void test('instructor websocket rejects connections without a valid instructor passcode', async () => {
   const app = createMockApp()
   const ws = createMockWs()
-  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') }, { valkeyStore: createMockVideoSyncValkeyStore() })
 
   setupVideoSyncRoutes(app, storeState.sessions, ws as unknown as WsRouter)
 
@@ -1563,6 +1563,13 @@ void test('instructor websocket rejects connections without a valid instructor p
 
   assert.deepEqual(recorder.closed, { code: 1008, reason: 'Forbidden' })
   assert.deepEqual(recorder.sent, [])
+  assert.equal(storeState.published.length, 0)
+  const persisted = storeState.store.s1?.data as {
+    telemetry: {
+      connections: { activeCount: number }
+    }
+  }
+  assert.equal(persisted.telemetry.connections.activeCount, 0)
 })
 
 void test('instructor websocket rejects oversized instructor passcodes before verification', async () => {
