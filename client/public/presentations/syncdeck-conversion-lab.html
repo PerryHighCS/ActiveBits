@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SyncDeck Conversion Lab</title>
+    <style>
+      :root {
+        --bg: #f4f1ea;
+        --ink: #19243a;
+        --muted: #5e6b7f;
+        --card: #fffdfa;
+        --line: #d5ccb7;
+        --accent: #1f8f7a;
+        --accent-2: #e06c2d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        background:
+          radial-gradient(circle at 15% 10%, #ffffffaa 0 12%, transparent 13%),
+          radial-gradient(circle at 88% 74%, #e9dbc2 0 18%, transparent 19%),
+          linear-gradient(130deg, #ede6d8 0%, #f7f4ee 52%, #ece6d9 100%);
+        color: var(--ink);
+      }
+
+      .wrap {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+      }
+
+      .topbar {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        border-bottom: 2px solid var(--line);
+        background: #fff8ea;
+      }
+
+      .btn {
+        border: 1px solid #32435f;
+        background: #fff;
+        color: #243449;
+        border-radius: 999px;
+        padding: 0.45rem 0.9rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+      }
+
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .btn.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #f8fffd;
+      }
+
+      .btn.alt {
+        background: #fff4eb;
+        border-color: #b15a2d;
+        color: #7a371b;
+      }
+
+      .status {
+        margin-left: auto;
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+
+      .stage {
+        display: grid;
+        place-items: center;
+        padding: 1.25rem;
+      }
+
+      .slide {
+        width: min(980px, 100%);
+        min-height: min(620px, calc(100vh - 210px));
+        border: 2px solid var(--line);
+        border-radius: 20px;
+        background: var(--card);
+        padding: clamp(1rem, 2vw, 2rem);
+        box-shadow: 0 18px 40px #7b6d5233;
+        display: grid;
+        gap: 1rem;
+        align-content: start;
+      }
+
+      .meta {
+        display: flex;
+        gap: 0.7rem;
+        flex-wrap: wrap;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+
+      .chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.2rem 0.65rem;
+        background: #fff;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.5rem, 3.4vw, 2.6rem);
+        line-height: 1.1;
+      }
+
+      p {
+        margin: 0;
+        line-height: 1.45;
+      }
+
+      .grid {
+        display: grid;
+        gap: 0.65rem;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      }
+
+      .panel {
+        border: 1px dashed #9aa4b3;
+        border-radius: 12px;
+        padding: 0.8rem;
+        background: #fcfbf8;
+      }
+
+      .panel strong {
+        color: #12364e;
+      }
+
+      .foot {
+        padding: 0.65rem 1rem 1rem;
+        color: #647388;
+        font-size: 0.9rem;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .log {
+        width: min(980px, 100%);
+        margin: 0 auto;
+        border: 1px solid #d3d6dc;
+        border-radius: 12px;
+        padding: 0.7rem;
+        background: #f8fafc;
+        color: #334155;
+        font-size: 0.86rem;
+        max-height: 120px;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="topbar">
+        <button class="btn" id="prevBtn">Previous</button>
+        <button class="btn" id="nextBtn">Next</button>
+        <button class="btn" id="upBtn">Up</button>
+        <button class="btn" id="downBtn">Down</button>
+        <button class="btn alt" id="toggleOverviewBtn">Toggle Storyboard Flag</button>
+        <button class="btn primary" id="requestActivityBtn">Request Activity</button>
+        <div class="status" id="status">Initializing…</div>
+      </div>
+
+      <main class="stage">
+        <section class="slide" id="slide"></section>
+      </main>
+
+      <div class="log" id="log"></div>
+      <div class="foot">
+        SyncDeck Conversion Lab deck. Emits reveal-sync ready/state envelopes and optional activityRequest on slide entry.
+      </div>
+    </div>
+
+    <script>
+      ;(() => {
+        const deckId = 'syncdeck-conversion-lab'
+        const source = 'reveal-iframe-sync'
+        const version = '2.0.0'
+
+        const slides = [
+          {
+            h: 0,
+            v: 0,
+            title: 'SyncDeck Conversion Lab',
+            body: 'Use this deck to validate manager and student host overlays while activities migrate to embedded mode.',
+            checklist: [
+              'Manager/student navigation sync',
+              'Overlay visibility by h:v anchor',
+              'Late-join hydration behavior',
+            ],
+          },
+          {
+            h: 1,
+            v: 0,
+            title: 'Global Smoke Slide',
+            body: 'No activity request here. Verify pure navigation and status updates.',
+            checklist: [
+              'canGoBack/canGoForward flips at boundaries',
+              'State envelopes continue after local navigation',
+            ],
+          },
+          {
+            h: 2,
+            v: 0,
+            title: 'Embedded Test Harness',
+            body: 'Anchored request for embedded-test activity at 2:0.',
+            activity: {
+              activityId: 'embedded-test',
+              trigger: 'slide-enter',
+              activityOptions: {
+                prompt: 'embedded contract smoke check',
+              },
+            },
+            checklist: [
+              'Start once, verify dedup by instanceKey',
+              'Manager panel shows running instance',
+              'Student overlay appears on 2:0',
+            ],
+          },
+          {
+            h: 2,
+            v: 1,
+            title: 'Vertical Choice A',
+            body: 'Vertical stack sibling for position-based overlay switching.',
+            activity: {
+              activityId: 'raffle',
+              trigger: 'slide-enter',
+              activityOptions: {
+                title: 'Vertical stack raffle branch',
+              },
+            },
+            checklist: [
+              'Different overlay than 2:0',
+              'Student can move between 2:0 and 2:1 to swap overlays',
+            ],
+          },
+          {
+            h: 2,
+            v: 2,
+            title: 'Vertical Choice B',
+            body: 'Second vertical branch using algorithm-demo for conversion checks.',
+            activity: {
+              activityId: 'algorithm-demo',
+              trigger: 'slide-enter',
+              activityOptions: {
+                seed: 'syncdeck-ui-check',
+              },
+            },
+            checklist: [
+              'Host chevrons up/down state transitions',
+              'overlay switches on v changes',
+            ],
+          },
+          {
+            h: 3,
+            v: 0,
+            title: 'Synchronous Candidate',
+            body: 'Use this for future instructor-gated runtime behavior checks.',
+            activity: {
+              activityId: 'video-sync',
+              trigger: 'slide-enter',
+              activityOptions: {
+                mode: 'conversion-smoke',
+              },
+            },
+            checklist: [
+              'syncContext updates while navigating',
+              'End control dismisses one instance only',
+            ],
+          },
+          {
+            h: 4,
+            v: 0,
+            title: 'Manual Trigger Lab',
+            body: 'No auto activity request. Use the Request Activity button to emit activityRequest manually.',
+            checklist: [
+              'Manual request payload path',
+              'Repeated manual requests for idempotency checks',
+            ],
+          },
+          {
+            h: 5,
+            v: 0,
+            title: 'Wrap Up / Rejoin Test',
+            body: 'Use this endpoint slide for reconnect, refresh, and late-join validation.',
+            checklist: [
+              'Reconnect while activity active',
+              'Hydrate embeddedActivities from session snapshot',
+            ],
+          },
+        ]
+
+        const byKey = new Map(slides.map((s) => [`${s.h}:${s.v}`, s]))
+
+        const state = {
+          role: 'student',
+          indexh: 0,
+          indexv: 0,
+          indexf: 0,
+          overview: false,
+        }
+
+        const statusEl = document.getElementById('status')
+        const slideEl = document.getElementById('slide')
+        const logEl = document.getElementById('log')
+
+        const prevBtn = document.getElementById('prevBtn')
+        const nextBtn = document.getElementById('nextBtn')
+        const upBtn = document.getElementById('upBtn')
+        const downBtn = document.getElementById('downBtn')
+        const toggleOverviewBtn = document.getElementById('toggleOverviewBtn')
+        const requestActivityBtn = document.getElementById('requestActivityBtn')
+
+        function log(message, details) {
+          const ts = new Date().toLocaleTimeString()
+          const line = details ? `${ts} ${message} ${JSON.stringify(details)}` : `${ts} ${message}`
+          const div = document.createElement('div')
+          div.textContent = line
+          logEl.prepend(div)
+        }
+
+        function envelope(action, payload) {
+          return {
+            type: 'reveal-sync',
+            version,
+            action,
+            deckId,
+            role: state.role,
+            source,
+            ts: Date.now(),
+            payload,
+          }
+        }
+
+        function send(action, payload) {
+          const msg = envelope(action, payload)
+          window.parent.postMessage(msg, '*')
+          log('sent', { action, payload })
+        }
+
+        function getSlide(h, v) {
+          return byKey.get(`${h}:${v}`) || null
+        }
+
+        function hasVertical(h, v) {
+          return byKey.has(`${h}:${v}`)
+        }
+
+        function maxH() {
+          return Math.max(...slides.map((s) => s.h))
+        }
+
+        function maxVFor(h) {
+          const verticals = slides.filter((s) => s.h === h).map((s) => s.v)
+          return verticals.length ? Math.max(...verticals) : 0
+        }
+
+        function capabilities() {
+          return {
+            canGoBack: state.indexh > 0 || state.indexv > 0,
+            canGoForward: state.indexh < maxH() || state.indexv < maxVFor(state.indexh),
+            canGoUp: state.indexv > 0,
+            canGoDown: hasVertical(state.indexh, state.indexv + 1),
+          }
+        }
+
+        function navigation() {
+          const caps = capabilities()
+          return {
+            current: { h: state.indexh, v: state.indexv, f: state.indexf },
+            ...caps,
+          }
+        }
+
+        function renderSlide() {
+          const current = getSlide(state.indexh, state.indexv)
+          if (!current) {
+            slideEl.innerHTML = '<h1>Missing slide definition</h1>'
+            return
+          }
+
+          const activityBlock = current.activity
+            ? `
+              <div class="panel">
+                <strong>Activity Anchor:</strong> ${current.activity.activityId}<br />
+                <strong>Trigger:</strong> ${current.activity.trigger}
+              </div>
+            `
+            : '<div class="panel"><strong>Activity Anchor:</strong> none</div>'
+
+          const items = (current.checklist || [])
+            .map((item) => `<div class="panel">${item}</div>`)
+            .join('')
+
+          slideEl.innerHTML = `
+            <div class="meta">
+              <span class="chip">h:${state.indexh}</span>
+              <span class="chip">v:${state.indexv}</span>
+              <span class="chip">role:${state.role}</span>
+              <span class="chip">overview:${String(state.overview)}</span>
+            </div>
+            <h1>${current.title}</h1>
+            <p>${current.body}</p>
+            ${activityBlock}
+            <div class="grid two">${items}</div>
+          `
+
+          const caps = capabilities()
+          prevBtn.disabled = !caps.canGoBack
+          nextBtn.disabled = !caps.canGoForward
+          upBtn.disabled = !caps.canGoUp
+          downBtn.disabled = !caps.canGoDown
+
+          statusEl.textContent = `Slide ${state.indexh}:${state.indexv} | role ${state.role} | canGoBack ${caps.canGoBack} | canGoForward ${caps.canGoForward}`
+
+          send('state', {
+            indices: { h: state.indexh, v: state.indexv, f: state.indexf },
+            navigation: navigation(),
+            capabilities: capabilities(),
+            overview: state.overview,
+            revealState: {
+              indexh: state.indexh,
+              indexv: state.indexv,
+              indexf: state.indexf,
+              overview: state.overview,
+              storyboardDisplayed: state.overview,
+            },
+          })
+
+          if (current.activity && current.activity.trigger === 'slide-enter') {
+            send('activityRequest', {
+              activityId: current.activity.activityId,
+              trigger: 'slide-enter',
+              activityOptions: current.activity.activityOptions || {},
+            })
+          }
+        }
+
+        function clampToExisting() {
+          if (!getSlide(state.indexh, state.indexv)) {
+            state.indexv = 0
+          }
+          if (!getSlide(state.indexh, state.indexv)) {
+            state.indexh = 0
+            state.indexv = 0
+          }
+        }
+
+        function goPrev() {
+          if (state.indexv > 0) {
+            state.indexv -= 1
+          } else if (state.indexh > 0) {
+            state.indexh -= 1
+            state.indexv = 0
+          }
+          clampToExisting()
+          renderSlide()
+        }
+
+        function goNext() {
+          if (hasVertical(state.indexh, state.indexv + 1)) {
+            state.indexv += 1
+          } else if (state.indexh < maxH()) {
+            state.indexh += 1
+            state.indexv = 0
+          }
+          clampToExisting()
+          renderSlide()
+        }
+
+        function goUp() {
+          if (state.indexv > 0) {
+            state.indexv -= 1
+            renderSlide()
+          }
+        }
+
+        function goDown() {
+          if (hasVertical(state.indexh, state.indexv + 1)) {
+            state.indexv += 1
+            renderSlide()
+          }
+        }
+
+        function applySetState(nextState) {
+          const h = Number.isFinite(nextState?.indexh) ? Number(nextState.indexh) : state.indexh
+          const v = Number.isFinite(nextState?.indexv) ? Number(nextState.indexv) : state.indexv
+          const f = Number.isFinite(nextState?.indexf) ? Number(nextState.indexf) : state.indexf
+
+          state.indexh = h
+          state.indexv = v
+          state.indexf = f
+          if (typeof nextState?.overview === 'boolean') {
+            state.overview = nextState.overview
+          }
+          clampToExisting()
+          renderSlide()
+        }
+
+        function handleCommand(command) {
+          const name = command?.name
+          const payload = command?.payload || {}
+
+          switch (name) {
+            case 'next':
+              goNext()
+              return
+            case 'prev':
+              goPrev()
+              return
+            case 'up':
+              goUp()
+              return
+            case 'down':
+              goDown()
+              return
+            case 'slide': {
+              const h = Number.isFinite(payload?.h) ? Number(payload.h) : state.indexh
+              const v = Number.isFinite(payload?.v) ? Number(payload.v) : 0
+              state.indexh = h
+              state.indexv = v
+              if (Number.isFinite(payload?.f)) {
+                state.indexf = Number(payload.f)
+              }
+              clampToExisting()
+              renderSlide()
+              return
+            }
+            case 'setState':
+              applySetState(payload?.state || {})
+              return
+            case 'setRole':
+              if (payload?.role === 'student' || payload?.role === 'instructor') {
+                state.role = payload.role
+                renderSlide()
+              }
+              return
+            case 'toggleOverview':
+              state.overview = !state.overview
+              renderSlide()
+              return
+            case 'showOverview':
+              state.overview = true
+              renderSlide()
+              return
+            case 'hideOverview':
+              state.overview = false
+              renderSlide()
+              return
+            default:
+              log('ignored command', { name })
+          }
+        }
+
+        window.addEventListener('message', (event) => {
+          const data = event.data
+          if (!data || typeof data !== 'object' || data.type !== 'reveal-sync') {
+            return
+          }
+
+          if (data.action === 'command' && data.payload) {
+            handleCommand(data.payload)
+          }
+        })
+
+        prevBtn.addEventListener('click', goPrev)
+        nextBtn.addEventListener('click', goNext)
+        upBtn.addEventListener('click', goUp)
+        downBtn.addEventListener('click', goDown)
+        toggleOverviewBtn.addEventListener('click', () => {
+          state.overview = !state.overview
+          renderSlide()
+        })
+        requestActivityBtn.addEventListener('click', () => {
+          const current = getSlide(state.indexh, state.indexv)
+          const fallback = {
+            activityId: 'embedded-test',
+            trigger: 'manual-button',
+            activityOptions: {
+              fromDeck: true,
+              h: state.indexh,
+              v: state.indexv,
+            },
+          }
+          const activity = current?.activity || fallback
+          send('activityRequest', {
+            activityId: activity.activityId,
+            trigger: 'manual-button',
+            activityOptions: {
+              ...(activity.activityOptions || {}),
+              manual: true,
+            },
+          })
+        })
+
+        send('ready', {
+          indices: { h: state.indexh, v: state.indexv, f: state.indexf },
+          navigation: navigation(),
+          capabilities: capabilities(),
+          revealState: {
+            indexh: state.indexh,
+            indexv: state.indexv,
+            indexf: state.indexf,
+          },
+        })
+
+        renderSlide()
+      })()
+    </script>
+  </body>
+</html>
