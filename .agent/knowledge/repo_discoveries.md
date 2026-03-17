@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-17
+- Area: activities | syncdeck | manager-overlay
+- Discovery: SyncDeck manager now keeps a local `embeddedActivities` keyed map hydrated from both session bootstrap data and `embedded-activity-start`/`embedded-activity-end` websocket lifecycle payloads. The active manager overlay is selected by parsing `instanceKey` anchors (`activityId:h:v`) against the current instructor slide indices, and when active it renders an iframe to `/manage/:activityId/:childSessionId` with host-side prev/next overlay navigation controls.
+- Why it matters: This establishes the manager-side embedded orchestration seam for Phase 2 without coupling generic host logic to activity-specific protocols. It also ensures late-reconnect managers can recover running embedded instances from persisted session state before new websocket lifecycle events arrive.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `.agent/plans/syncdeck-checklist.md`; `.agent/plans/syncdeck-embedded-activities.md`
+- Follow-up action: Finish the remaining Phase 2 items by adding richer running-panel status semantics and interaction-focused tests that exercise panel controls and overlay navigation behavior end-to-end.
+- Owner: Codex
+
+- Date: 2026-03-17
 - Area: activities | embedded | testing
 - Discovery: The new `embedded-test` activity is the repo's thin dev-only harness for embedded activity contract validation. It is intentionally static, uses accepted-entry student identity on the websocket path, and exposes only a minimal manager/student roster-plus-chat surface to verify inherited identity, connection state, and child websocket isolation without coupling SyncDeck to a real rollout activity.
 - Why it matters: Future embedded-activity work can validate generic lifecycle and identity behavior against a controlled target before debugging Video Sync or other real activity logic. Keeping the harness `isDev: true` also prevents it from leaking into production activity discovery.

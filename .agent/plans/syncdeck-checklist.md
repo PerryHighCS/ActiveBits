@@ -69,13 +69,13 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - PR scope: manager overlay rendering + running activities panel + manager-side WS wiring + manager tests
         - Exit criteria: manager can launch/view/end per-instance overlays with working nav controls and tests
         - Validation: `npm test --workspace activities -- syncdeck` then full `npm test`
-        - [ ] `embeddedActivities` map state + WebSocket message handling (keyed by instanceKey)
-        - [ ] Activity iframe overlay(s) rendered over presentation iframe
+          - [x] `embeddedActivities` map state + WebSocket message handling (keyed by instanceKey)
+          - [x] Activity iframe overlay(s) rendered over presentation iframe
         - [ ] Running-activities panel in header (per-instance name, status dot, end control;
               lists all instances regardless of instructor's current slide)
-        - [ ] Manager overlay selection follows instructor's current slide position
+          - [x] Manager overlay selection follows instructor's current slide position
               (same position-based rule as student; renders ManagerComponent)
-        - [ ] Host-rendered navigation chevrons (z:20, above overlay) sending postMessage
+          - [x] Host-rendered navigation chevrons (z:20, above overlay) sending postMessage
               prev/next/slide commands to presentation iframe; hidden when no overlay active
         - [ ] Manager tests: multi-instance panel, individual end control, overlay lifecycle,
               navigation commands reach presentation iframe while overlay is active

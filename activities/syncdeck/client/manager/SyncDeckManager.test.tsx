@@ -22,6 +22,9 @@ import { validatePresentationUrl } from './SyncDeckManager.js'
 import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
 import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
 import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
+import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
+import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
+import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -45,6 +48,7 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   )
 
   assert.match(html, /Join Code:/i)
+  assert.match(html, /Running activities:/i)
   assert.match(html, /session-123/i)
   assert.match(html, /Copy Join URL/i)
   assert.match(html, /End Session/i)
@@ -308,6 +312,71 @@ void test('extractSyncDeckStatePayload ignores non-syncdeck-state message', () =
   })
 
   assert.equal(extracted, null)
+})
+
+void test('normalizeSyncDeckEmbeddedActivities filters invalid records', () => {
+  const normalized = normalizeSyncDeckEmbeddedActivities({
+    'video-sync:3:0': {
+      childSessionId: 'CHILD:s1:abc12:video-sync',
+      activityId: 'video-sync',
+      startedAt: 123,
+      owner: 'syncdeck-instructor',
+    },
+    bad: {
+      childSessionId: '',
+      activityId: 'video-sync',
+    },
+  })
+
+  assert.deepEqual(Object.keys(normalized), ['video-sync:3:0'])
+  assert.equal(normalized['video-sync:3:0']?.activityId, 'video-sync')
+})
+
+void test('applySyncDeckEmbeddedLifecyclePayload applies start and end lifecycle updates', () => {
+  const started = applySyncDeckEmbeddedLifecyclePayload(
+    {},
+    {
+      type: 'embedded-activity-start',
+      instanceKey: 'video-sync:3:0',
+      activityId: 'video-sync',
+      childSessionId: 'CHILD:s1:abc12:video-sync',
+    },
+  )
+
+  assert.equal(started['video-sync:3:0']?.childSessionId, 'CHILD:s1:abc12:video-sync')
+
+  const ended = applySyncDeckEmbeddedLifecyclePayload(
+    started,
+    {
+      type: 'embedded-activity-end',
+      instanceKey: 'video-sync:3:0',
+      childSessionId: 'CHILD:s1:abc12:video-sync',
+    },
+  )
+
+  assert.deepEqual(ended, {})
+})
+
+void test('resolveManagerActiveEmbeddedInstanceKey picks instance anchored to current slide position', () => {
+  const selected = resolveManagerActiveEmbeddedInstanceKey(
+    {
+      'video-sync:2:0': {
+        childSessionId: 'CHILD:s1:abc12:video-sync',
+        activityId: 'video-sync',
+        startedAt: 100,
+        owner: 'syncdeck-instructor',
+      },
+      'embedded-test:3:1': {
+        childSessionId: 'CHILD:s1:abc13:embedded-test',
+        activityId: 'embedded-test',
+        startedAt: 200,
+        owner: 'syncdeck-instructor',
+      },
+    },
+    { h: 3, v: 1, f: 0 },
+  )
+
+  assert.equal(selected, 'embedded-test:3:1')
 })
 
 void test('extractIndicesFromRevealPayload reads indices from state payload top-level index fields', () => {
