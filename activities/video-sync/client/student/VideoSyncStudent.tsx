@@ -1,4 +1,9 @@
 import Button from '@src/components/ui/Button'
+import {
+  persistSessionParticipantIdentity,
+  resolveInitialEntryParticipantIdentity,
+  type ResolvedEntryParticipantIdentity,
+} from '@src/components/common/entryParticipantIdentityUtils'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
@@ -83,6 +88,26 @@ function createStudentClientId(): string {
 
   const random = Math.random().toString(36).slice(2)
   return `student-${Date.now()}-${random}`
+}
+
+interface VideoSyncStudentIdentity {
+  studentName: string
+  studentId: string
+  nameSubmitted: boolean
+}
+
+export function finalizeVideoSyncStudentIdentity(
+  identity: ResolvedEntryParticipantIdentity,
+  createStudentId: () => string = createStudentClientId,
+): VideoSyncStudentIdentity {
+  const normalizedStudentName = identity.studentName.trim()
+  const normalizedStudentId = typeof identity.studentId === 'string' ? identity.studentId.trim() : ''
+
+  return {
+    studentName: normalizedStudentName || 'Student',
+    studentId: normalizedStudentId || createStudentId(),
+    nameSubmitted: identity.nameSubmitted || normalizedStudentName.length > 0,
+  }
 }
 
 const BLOCKED_STUDENT_OVERLAY_KEYS = new Set<string>([
@@ -240,6 +265,11 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [playerReady, setPlayerReady] = useState(false)
   const [hasStartedInstructorPlayback, setHasStartedInstructorPlayback] = useState(false)
+  const [studentIdentity, setStudentIdentity] = useState<VideoSyncStudentIdentity>(() => ({
+    studentName: 'Student',
+    studentId: createStudentClientId(),
+    nameSubmitted: false,
+  }))
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -248,7 +278,49 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const lastUnsyncReportAtRef = useRef(0)
   const isLocallyUnsyncedRef = useRef(false)
   const autoplayCheckTimerRef = useRef<number | null>(null)
-  const studentClientIdRef = useRef(createStudentClientId())
+  const studentIdentityRef = useRef<VideoSyncStudentIdentity>(studentIdentity)
+
+  useEffect(() => {
+    studentIdentityRef.current = studentIdentity
+  }, [studentIdentity])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !sessionId) {
+      return
+    }
+
+    let isCancelled = false
+
+    void (async () => {
+      try {
+        const resolvedIdentity = await resolveInitialEntryParticipantIdentity({
+          activityName: 'video-sync',
+          sessionId,
+          isSoloSession: false,
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+        })
+        if (isCancelled) {
+          return
+        }
+
+        const finalizedIdentity = finalizeVideoSyncStudentIdentity(resolvedIdentity)
+        persistSessionParticipantIdentity(
+          window.localStorage,
+          sessionId,
+          finalizedIdentity.studentName,
+          finalizedIdentity.studentId,
+        )
+        setStudentIdentity(finalizedIdentity)
+      } catch (error) {
+        console.error('Failed to resolve initial participant identity for video-sync:', error)
+      }
+    })()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [sessionId])
 
   const reportEvent = useCallback(async (
     eventType: 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'load-failure',
@@ -261,7 +333,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   ): Promise<void> => {
     await reportVideoSyncStudentEvent({
       sessionId,
-      studentId: studentClientIdRef.current,
+      studentId: studentIdentityRef.current.studentId,
       eventType,
       driftSec: options?.driftSec,
       correctionResult: options?.correctionResult,

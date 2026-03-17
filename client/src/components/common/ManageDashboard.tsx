@@ -9,8 +9,6 @@ import {
   buildPersistentLinkUrl,
   buildManageDashboardUtilityUrl,
   buildPersistentSessionKey,
-  buildQueryString,
-  buildSoloLink,
   storeCreateSessionBootstrapPayload,
   buildCreateSessionBootstrapHistoryState,
   describeSelectedOptions,

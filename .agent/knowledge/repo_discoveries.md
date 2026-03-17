@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-17
+- Area: activities | waiting-room
+- Discovery: `video-sync` now follows the shared waiting-room identity contract on the student side: the activity declares a required `displayName` field, and the student client resolves/persists a stable participant identity through `resolveInitialEntryParticipantIdentity(...)` and session participant context instead of inventing a fresh telemetry-only ID every mount.
+- Why it matters: This brings Video Sync onto the same preflight identity path as the other migrated session-backed activities, so telemetry and reconnect-friendly local context can reuse waiting-room-issued `participantId` values. It also narrows the remaining gap: Video Sync still keeps its websocket/session authorization model activity-owned rather than enforcing accepted-entry identity on join.
+- Evidence: `activities/video-sync/activity.config.ts`; `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/client/student/VideoSyncStudent.test.ts`; `client/src/components/common/entryParticipantIdentityUtils.ts`; `.agent/plans/waiting-room-expansion.md`
+- Follow-up action: If Video Sync later needs server-enforced waiting-room identity, extend the same participantId into its websocket or event-ingestion authority model instead of reintroducing client-generated student IDs.
+- Owner: Codex
+
 - Date: 2026-03-04
 - Area: activities
 - Discovery: `video-sync` students intentionally keep a blackout overlay until the instructor has explicitly started playback. A session with a configured `videoId` but `isPlaying === false` and `positionSec === startSec` is still considered "not started", so permanent-link bootstrap flows must send an initial `play` transition instead of only saving config.

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { clearAutoplayCheckTimer } from './VideoSyncStudent.js'
+import { finalizeVideoSyncStudentIdentity } from './VideoSyncStudent.js'
 import { getStudentPlaybackSyncAction } from './VideoSyncStudent.js'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
@@ -63,6 +64,39 @@ void test('hasInstructorPlaybackStarted is false before playback begins', () => 
       isPlaying: false,
     }),
     false,
+  )
+})
+
+void test('finalizeVideoSyncStudentIdentity prefers waiting-room identity when available', () => {
+  assert.deepEqual(
+    finalizeVideoSyncStudentIdentity({
+      studentName: '  Ada Lovelace  ',
+      studentId: '  participant-1  ',
+      nameSubmitted: true,
+    }),
+    {
+      studentName: 'Ada Lovelace',
+      studentId: 'participant-1',
+      nameSubmitted: true,
+    },
+  )
+})
+
+void test('finalizeVideoSyncStudentIdentity creates a stable fallback student id when waiting-room identity is absent', () => {
+  assert.deepEqual(
+    finalizeVideoSyncStudentIdentity(
+      {
+        studentName: '',
+        studentId: null,
+        nameSubmitted: false,
+      },
+      () => 'generated-student-id',
+    ),
+    {
+      studentName: 'Student',
+      studentId: 'generated-student-id',
+      nameSubmitted: false,
+    },
   )
 })
 

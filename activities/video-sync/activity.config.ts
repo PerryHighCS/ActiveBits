@@ -5,7 +5,23 @@ const videoSyncConfig: ActivityConfig = {
   name: 'Video Sync',
   description: 'Synchronized YouTube playback for whole-class instruction',
   color: 'rose',
-  soloMode: false,
+  standaloneEntry: {
+    enabled: false,
+    supportsDirectPath: false,
+    supportsPermalink: false,
+    showOnHome: false,
+  },
+  waitingRoom: {
+    fields: [
+      {
+        id: 'displayName',
+        label: 'Display Name',
+        type: 'text',
+        required: true,
+        placeholder: 'Your name',
+      },
+    ],
+  },
   deepLinkOptions: {
     sourceUrl: {
       label: 'YouTube URL',
