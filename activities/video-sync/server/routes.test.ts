@@ -155,6 +155,20 @@ function createSocketRecorder(sessionId: string) {
   }
 }
 
+async function waitForCondition(
+  predicate: () => boolean,
+  timeoutMs: number,
+  pollIntervalMs = 5,
+): Promise<void> {
+  const startedAt = Date.now()
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`[TEST] Timed out waiting for condition after ${timeoutMs}ms`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+  }
+}
+
 function createMockVideoSyncValkeyStore() {
   const entries = new Map<string, { value: string; expiresAt: number }>()
 
@@ -1600,9 +1614,9 @@ void test('instructor websocket rejects oversized instructor passcodes before ve
 
 void test('waitForInstructorAuthMessage closes when auth does not arrive in time', async () => {
   const recorder = createMockSocket()
-  const authPromise = waitForInstructorAuthMessage(recorder.socket, 5)
+  const authPromise = waitForInstructorAuthMessage(recorder.socket, 75)
 
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  await waitForCondition(() => recorder.closed != null, 1000)
   const authMessage = await authPromise
 
   assert.equal(authMessage, null)

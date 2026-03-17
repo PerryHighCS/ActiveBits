@@ -230,6 +230,20 @@ function computeUrlHash(persistentHash: string, presentationUrl: string): string
   return createHmac('sha256', HMAC_SECRET).update(`${persistentHash}|${presentationUrl}`).digest('hex').substring(0, 16)
 }
 
+async function waitForCondition(
+  predicate: () => boolean,
+  timeoutMs: number,
+  pollIntervalMs = 5,
+): Promise<void> {
+  const startedAt = Date.now()
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`[TEST] Timed out waiting for condition after ${timeoutMs}ms`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+  }
+}
+
 void test('setupSyncDeckRoutes registers syncdeck websocket namespace', () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -500,9 +514,9 @@ void test('syncdeck websocket sends latest state snapshot to instructor on conne
 
 void test('waitForInstructorAuthMessage closes when auth does not arrive in time', async () => {
   const instructorSocket = new MockSocket()
-  const authPromise = waitForInstructorAuthMessage(instructorSocket, 5)
+  const authPromise = waitForInstructorAuthMessage(instructorSocket, 75)
 
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  await waitForCondition(() => instructorSocket.closeCalls.length === 1, 1000)
   const authMessage = await authPromise
 
   assert.equal(authMessage, null)
