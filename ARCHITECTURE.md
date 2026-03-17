@@ -132,6 +132,17 @@ export default {
       timeoutMs: 4000,
     },
   },
+  createSessionBootstrap: { // optional: persist create-session response fields for manager entry
+    sessionStorage: [
+      {
+        keyPrefix: 'my_activity_instructor_',
+        responseField: 'instructorPasscode',
+      },
+    ],
+    historyState: [
+      'instructorPasscode',
+    ],
+  },
   manageDashboard: { // optional shared dashboard hints/capabilities
     customPersistentLinkBuilder: true, // activity-owned persistent-link UI in dashboard modal
   },
@@ -139,6 +150,13 @@ export default {
   serverEntry: './server/routes.ts', // Server routes
 };
 ```
+
+`createSessionBootstrap` supports two persistence channels:
+
+- `sessionStorage`: Array of `{ keyPrefix, responseField }` entries. Each matching string field from the create-session API response is written to browser sessionStorage using `${keyPrefix}${sessionId}` as the key.
+- `historyState`: Array of response field names. Matching fields are attached to React Router navigation state when transitioning from `/manage/:activityId` to `/manage/:activityId/:sessionId`.
+
+Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` when the value should still be recoverable after reloads or later manager re-entry in the same tab.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript
@@ -236,6 +254,7 @@ Permanent sessions use HMAC-SHA256 authentication:
 - **Hash Format**: 20 characters of `salt(8 hex) + hmac(12 hex)` derived from `activityName|hashedTeacherCode|salt`
 - **Generic permalink URL state**: generic persistent links now also carry signed query state for permalink meaning (`entryPolicy`, plus selected deep-link options) via a short `urlHash`; the URL is the source of truth for those settings, and missing/invalid signed state falls back to `instructor-required` / "Live Only"
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
+- **Activity Manager Credentials**: Activities that expose manager-only controls should derive any session-scoped manager credential from create-session bootstrap data and/or teacher-cookie-validated recovery routes instead of trusting a client-selected websocket/API role
 - **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
 - **Query Parameters**: Activities can use URL query params for deep linking (e.g., `/activity/algorithm-demo/abc123?algorithm=merge-sort`)
   - Server passes all query params to activities via `queryParams` object

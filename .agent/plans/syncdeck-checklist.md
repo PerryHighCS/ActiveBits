@@ -14,6 +14,10 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - with id and parentid as session ids
         - server does not cull children until parent is culled
         - student ids/names synced to parent session
+    - [ ] Document embedded-activity protocol before implementation
+        - define transport model and whether embedded activities use separate sockets or a multiplexed socket
+        - if multiplexing is allowed, define the message envelope for activity/session routing explicitly
+        - if multiplexing is not allowed, document that separate websocket connections per activity/session are required
     - [ ] Define embedded-activity activation/claim flow for already-connected parent-session users
         - evaluate persistent-link-like flow vs session-connected flow
         - candidate: instructor requests child session over parent websocket, then joins child session

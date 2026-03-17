@@ -47,6 +47,11 @@ interface SyncDeckStateSnapshotMessage {
   payload?: unknown
 }
 
+interface SyncDeckInstructorAuthMessage {
+  type: 'authenticate'
+  instructorPasscode: string
+}
+
 interface RevealCommandPayload {
   [key: string]: unknown
 }
@@ -91,6 +96,37 @@ interface RevealSyncStatePayload {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function buildSyncDeckInstructorWsUrl(params: {
+  sessionId: string | null | undefined
+  location: Pick<Location, 'protocol' | 'host'> | null | undefined
+  isConfigurePanelOpen: boolean
+}): string | null {
+  if (!params.sessionId || params.location == null || params.isConfigurePanelOpen) {
+    return null
+  }
+
+  const protocol = params.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const query = new URLSearchParams({
+    sessionId: params.sessionId,
+    role: 'instructor',
+  })
+  return `${protocol}//${params.location.host}/ws/syncdeck?${query.toString()}`
+}
+
+export function createSyncDeckInstructorWsAuthMessage(
+  instructorPasscode: string | null | undefined,
+): string | null {
+  if (typeof instructorPasscode !== 'string' || instructorPasscode.length === 0) {
+    return null
+  }
+
+  const message: SyncDeckInstructorAuthMessage = {
+    type: 'authenticate',
+    instructorPasscode,
+  }
+  return JSON.stringify(message)
 }
 
 function stripOverviewFromStateEnvelope(data: unknown): unknown {
@@ -1170,24 +1206,27 @@ const SyncDeckManager: FC = () => {
   }, [presentationUrlError, isConfigurePanelOpen])
 
   const buildInstructorWsUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelOpen) {
+    if (typeof window === 'undefined') {
       return null
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams({
+    return buildSyncDeckInstructorWsUrl({
       sessionId,
-      role: 'instructor',
-      instructorPasscode,
+      location: window.location,
+      isConfigurePanelOpen,
     })
-    return `${protocol}//${window.location.host}/ws/syncdeck?${params.toString()}`
-  }, [sessionId, instructorPasscode, isConfigurePanelOpen])
+  }, [sessionId, isConfigurePanelOpen])
 
   const { connect: connectInstructorWs, disconnect: disconnectInstructorWs, socketRef: instructorSocketRef } =
     useResilientWebSocket({
       buildUrl: buildInstructorWsUrl,
       shouldReconnect: Boolean(sessionId && instructorPasscode && !isConfigurePanelOpen),
-      onOpen: () => {
+      onOpen: (_event, ws) => {
+        const authMessage = createSyncDeckInstructorWsAuthMessage(instructorPasscode)
+        if (authMessage != null) {
+          ws.send(authMessage)
+        }
+
         if (disconnectStatusTimeoutRef.current != null) {
           clearTimeout(disconnectStatusTimeoutRef.current)
           disconnectStatusTimeoutRef.current = null

@@ -696,6 +696,22 @@ export function resolveIframePostMessageTargetOrigin(params: {
   return configuredOrigin || null
 }
 
+export function resolveConfiguredPresentationOrigin(params: {
+  presentationUrl?: string | null
+  presentationUrlError?: string | null
+}): string | null {
+  const presentationUrl = typeof params.presentationUrl === 'string' ? params.presentationUrl.trim() : ''
+  if (!presentationUrl || params.presentationUrlError != null || !validatePresentationUrl(presentationUrl)) {
+    return null
+  }
+
+  try {
+    return new URL(presentationUrl).origin
+  } catch {
+    return null
+  }
+}
+
 function getStoredStudentName(sessionId: string): string {
   if (typeof window === 'undefined') {
     return ''
@@ -848,17 +864,6 @@ const SyncDeckStudent: FC = () => {
     }
   }, [sessionId])
 
-  const presentationOrigin = useMemo(() => {
-    if (!presentationUrl || !validatePresentationUrl(presentationUrl)) {
-      return null
-    }
-
-    try {
-      return new URL(presentationUrl).origin
-    } catch {
-      return null
-    }
-  }, [presentationUrl])
   const presentationUrlError = useMemo(
     () => (presentationUrl
       ? getStudentPresentationCompatibilityError({
@@ -868,6 +873,13 @@ const SyncDeckStudent: FC = () => {
       })
       : null),
     [presentationUrl],
+  )
+  const presentationOrigin = useMemo(
+    () => resolveConfiguredPresentationOrigin({
+      presentationUrl,
+      presentationUrlError,
+    }),
+    [presentationUrl, presentationUrlError],
   )
 
   const getIframeRuntimeOrigin = useCallback((): string | null => {

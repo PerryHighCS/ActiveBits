@@ -42,6 +42,10 @@ Future planning is currently organized into three tracks:
   - Parent/child IDs are session IDs.
   - Server does not cull children until parent is culled.
   - Student identities/names sync from parent session.
+- Define websocket/session transport model for embedded activities.
+  - Current ActiveBits websocket handling is path-scoped per activity and each socket binds to a single `sessionId`.
+  - Current activity protocols are not documented as safe for multiplexing multiple activities or multiple sessions over one underlying websocket.
+  - Embedded-activity work must either keep separate websocket connections per activity/session or introduce a documented multiplexing envelope and routing model.
 - Define embedded-activity activation/claim flow for already-connected sessions.
   - Evaluate whether this should mirror persistent-link activation, or use a parent-session-connected flow.
   - Candidate approach: instructor requests child session creation over parent websocket, then joins child session.
@@ -55,6 +59,8 @@ Future planning is currently organized into three tracks:
 
 ### Notes
 - Session-linking, lifecycle, and reporting contracts should be specified before implementation.
+- Embedded-activity protocol documentation is a required prerequisite, not optional implementation cleanup.
+- The documented protocol must explicitly cover transport boundaries, message envelope shape, activity/session routing, and whether multiplexing is supported.
 - Activation/claim protocol for embedded sessions should be specified before implementation; current websocket child-session handoff idea is only a candidate design.
 - Multi-instructor arbitration/locking rules should be specified before implementation to avoid duplicate child sessions.
 

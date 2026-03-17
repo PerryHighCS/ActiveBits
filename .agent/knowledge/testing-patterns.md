@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-03-04
+- Scope: integration
+- Pattern: Session-store mocks for route tests should return deep clones from `get()` and store clones on `set()` when production storage serializes records between calls.
+- Why it helps: Returning the same object by reference can make normalization or projection tests appear to "persist" changes even when the route never calls `sessions.set(...)`, which hides real persistence bugs and diverges from Valkey-backed behavior.
+- Example (file/path): `activities/video-sync/server/routes.test.ts`
+- Failure signal: Tests that inspect the backing mock store pass despite zero `set()` calls after a read-only route mutates the fetched session object.
+- Follow-up action: Pair cloned-store mocks with explicit `set()` call assertions when a test cares about persistence versus response-only normalization; for `video-sync` session reads, expect `set()` when normalization repairs persisted fields, but not for ordinary projection-only reads.
+- Owner: Codex
+
 - Date: 2026-03-14
 - Scope: unit
 - Pattern: For waiting-room entry logic, put the outcome matrix in small shared server/client helpers and test those helpers directly before relying on route/component integration coverage.
@@ -130,4 +139,13 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Example (file/path): `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/waitingRoomSocketUtils.test.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.test.ts`
 - Failure signal: Manual browser testing finds regressions in the `live/solo` permalink flow even though the helper/unit suite still passes, especially around teacher auth after a student has used the link, or around regaining solo/live actions after session state changes.
 - Follow-up action: If or when Playwright is introduced, make this one of the first scenarios: student opens `live/solo` permalink, teacher starts live, student sees `Join Session`, teacher ends live before join, student regains solo action, and a second instructor can still reach the teacher-code path.
+- Owner: Codex
+
+- Date: 2026-03-17
+- Scope: unit
+- Pattern: Avoid mutating `process.env` inside individual `node:test` cases unless the file is explicitly serialized; when timeout/config overrides are needed, prefer direct event simulation or function parameters.
+- Why it helps: Node test files run concurrently by default, so one test's temporary env override can leak into unrelated websocket/auth tests and create flaky failures that look like product regressions.
+- Example (file/path): `activities/syncdeck/server/routes.test.ts`
+- Failure signal: Seemingly unrelated tests start timing out or taking alternate auth paths only when a specific env-mutating test is present.
+- Follow-up action: Replace env overrides with local simulation (`emit('close')`, explicit timeout args where exposed), or mark the suite/test non-concurrent only when unavoidable.
 - Owner: Codex
