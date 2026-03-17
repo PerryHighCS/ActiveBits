@@ -2288,12 +2288,9 @@ const SyncDeckManager: FC = () => {
             return
           }
 
-          const shouldLaunch = typeof window === 'undefined'
-            ? true
-            : window.confirm(`Launch ${startRequest.activityId} for ${startRequest.instanceKey}?`)
-          if (!shouldLaunch) {
+          if (embeddedActivities[startRequest.instanceKey]) {
             setStartError(null)
-            setStartSuccess('Launch canceled.')
+            setStartSuccess(null)
             return
           }
 
@@ -2525,6 +2522,7 @@ const SyncDeckManager: FC = () => {
       window.removeEventListener('message', handleMessage)
     }
   }, [
+    embeddedActivities,
     isConfigurePanelOpen,
     launchEmbeddedActivityFromRequest,
     presentationOrigin,
