@@ -122,6 +122,7 @@ const WS_OPEN_READY_STATE = 1
 const SYNCDECK_WS_UPDATE_TYPE = 'syncdeck-state-update'
 const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
+const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const MAX_CHALKBOARD_DELTA_STROKES = 200
 const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === '1'
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS = 5 * 60 * 1000
@@ -609,6 +610,47 @@ function parseInstructorAuthMessage(raw: unknown): SyncDeckInstructorAuthMessage
   }
 }
 
+function getInstructorAuthTimeoutMs(): number {
+  const rawValue = process.env.ACTIVEBITS_SYNCDECK_INSTRUCTOR_AUTH_TIMEOUT_MS
+  const parsed = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS
+}
+
+export function waitForInstructorAuthMessage(
+  socket: ActiveBitsWebSocket,
+  timeoutMs = getInstructorAuthTimeoutMs(),
+): Promise<unknown | null> {
+  return new Promise<unknown | null>((resolve) => {
+    let settled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      settle(null)
+      socket.close(1008, 'auth timeout')
+    }, timeoutMs)
+
+    const settle = (value: unknown | null) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timeoutId != null) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      resolve(value)
+    }
+
+    socket.once('message', (raw: unknown) => {
+      settle(raw)
+    })
+    socket.once('close', () => {
+      settle(null)
+    })
+    socket.once('error', () => {
+      settle(null)
+    })
+  })
+}
+
 function sendSyncDeckState(socket: ActiveBitsWebSocket, payload: unknown): void {
   if (socket.readyState !== WS_OPEN_READY_STATE) {
     return
@@ -1078,26 +1120,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const role = query.get('role')
     const instructorAuthMessagePromise = role === 'instructor'
-      ? new Promise<unknown | null>((resolve) => {
-        let settled = false
-        const settle = (value: unknown | null) => {
-          if (settled) {
-            return
-          }
-          settled = true
-          resolve(value)
-        }
-
-        socket.once('message', (raw: unknown) => {
-          settle(raw)
-        })
-        socket.once('close', () => {
-          settle(null)
-        })
-        socket.once('error', () => {
-          settle(null)
-        })
-      })
+      ? waitForInstructorAuthMessage(socket)
       : null
 
     ;(async () => {

@@ -9,7 +9,7 @@ import {
 } from 'activebits-server/core/persistentSessions.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupVideoSyncRoutes from './routes.js'
+import setupVideoSyncRoutes, { waitForManagerAuthMessage } from './routes.js'
 
 const TEST_INSTRUCTOR_PASSCODE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const ALT_TEST_INSTRUCTOR_PASSCODE = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -131,6 +131,10 @@ function createMockSocket() {
       },
       close(code?: number, reason?: string) {
         closed = { code, reason }
+      },
+      terminate() {},
+      ping(_data?: string | Buffer | ArrayBuffer | Buffer[], _mask?: boolean, cb?: (err: Error) => void) {
+        cb?.(new Error('not implemented'))
       },
     },
   }
@@ -1584,6 +1588,18 @@ void test('manager websocket rejects oversized instructor passcodes before verif
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   assert.deepEqual(recorder.closed, { code: 1008, reason: 'Forbidden' })
+  assert.deepEqual(recorder.sent, [])
+})
+
+void test('waitForManagerAuthMessage closes when auth does not arrive in time', async () => {
+  const recorder = createMockSocket()
+  const authPromise = waitForManagerAuthMessage(recorder.socket, 5)
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const authMessage = await authPromise
+
+  assert.equal(authMessage, null)
+  assert.deepEqual(recorder.closed, { code: 1008, reason: 'Auth timeout' })
   assert.deepEqual(recorder.sent, [])
 })
 

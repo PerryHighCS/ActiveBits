@@ -144,6 +144,7 @@ const INSTRUCTOR_PASSCODE_LENGTH = 32
 const INSTRUCTOR_PASSCODE_PATTERN = /^[a-f0-9]{32}$/i
 const UNSYNCED_STUDENTS_KEY_PREFIX = 'video-sync:unsynced:'
 const UNSYNCED_STUDENTS_KEY_TTL_MS = UNSYNC_STALE_MS + 1_000
+const DEFAULT_MANAGER_AUTH_TIMEOUT_MS = 5_000
 const provider = 'youtube'
 const subscribersBySession = new Map<string, Set<VideoSyncSocket>>()
 const heartbeatTimers = new Map<string, ReturnType<typeof setInterval>>()
@@ -477,6 +478,47 @@ function parseManagerAuthMessage(raw: unknown): VideoSyncManagerAuthMessage | nu
     type: 'authenticate',
     instructorPasscode,
   }
+}
+
+function getManagerAuthTimeoutMs(): number {
+  const rawValue = process.env.ACTIVEBITS_VIDEO_SYNC_MANAGER_AUTH_TIMEOUT_MS
+  const parsed = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MANAGER_AUTH_TIMEOUT_MS
+}
+
+export function waitForManagerAuthMessage(
+  socket: ActiveBitsWebSocket,
+  timeoutMs = getManagerAuthTimeoutMs(),
+): Promise<unknown | null> {
+  return new Promise<unknown | null>((resolve) => {
+    let settled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      settle(null)
+      socket.close(1008, 'Auth timeout')
+    }, timeoutMs)
+
+    const settle = (value: unknown | null) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timeoutId != null) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      resolve(value)
+    }
+
+    socket.once('message', (raw: unknown) => {
+      settle(raw)
+    })
+    socket.once('close', () => {
+      settle(null)
+    })
+    socket.once('error', () => {
+      settle(null)
+    })
+  })
 }
 
 function getUnsyncedStudentsKey(sessionId: string): string {
@@ -1515,26 +1557,7 @@ export default function setupVideoSyncRoutes(
 
     const typedSocket = socket as VideoSyncSocket
     const managerAuthMessagePromise = roleParam === 'manager'
-      ? new Promise<unknown | null>((resolve) => {
-        let settled = false
-        const settle = (value: unknown | null) => {
-          if (settled) {
-            return
-          }
-          settled = true
-          resolve(value)
-        }
-
-        typedSocket.once('message', (raw: unknown) => {
-          settle(raw)
-        })
-        typedSocket.once('close', () => {
-          settle(null)
-        })
-        typedSocket.once('error', () => {
-          settle(null)
-        })
-      })
+      ? waitForManagerAuthMessage(typedSocket)
       : null
     let cleanedUp = false
     const handleSocketClosed = () => {

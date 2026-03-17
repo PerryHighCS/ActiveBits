@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import test from 'node:test'
 import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../../types/websocket.js'
-import setupSyncDeckRoutes from './routes.js'
+import setupSyncDeckRoutes, { waitForInstructorAuthMessage } from './routes.js'
 
 const HMAC_SECRET = resolvePersistentSessionSecret()
 
@@ -495,6 +495,17 @@ void test('syncdeck websocket sends latest state snapshot to instructor on conne
         JSON.stringify(asRecord(entry.payload)?.payload) === JSON.stringify({ h: 5, v: 1, f: 0 }),
     ),
   )
+})
+
+void test('waitForInstructorAuthMessage closes when auth does not arrive in time', async () => {
+  const instructorSocket = new MockSocket()
+  const authPromise = waitForInstructorAuthMessage(instructorSocket, 5)
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const authMessage = await authPromise
+
+  assert.equal(authMessage, null)
+  assert.deepEqual(instructorSocket.closeCalls, [{ code: 1008, reason: 'auth timeout' }])
 })
 
 void test('syncdeck websocket sends latest position snapshot to instructor when last payload is non-position', async () => {
