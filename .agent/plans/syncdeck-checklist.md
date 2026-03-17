@@ -114,7 +114,7 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - Validation: `npm test --workspace activities -- syncdeck` then full `npm test`
         - [ ] Deck slide metadata format (`data-activity-id` attribute)
         - [ ] `reveal-iframe-sync` plugin emits `activityRequest` on slide-enter
-        - [ ] Manager handles `activityRequest` → "Launch Activity?" prompt
+        - [x] Manager handles `activityRequest` → "Launch Activity?" prompt
     - Phase 5 — Activity picker (manual trigger from header)
         - Owner: SyncDeck manager UI lead (assign before start)
         - PR scope: picker UI + metadata-driven launch wiring + picker tests

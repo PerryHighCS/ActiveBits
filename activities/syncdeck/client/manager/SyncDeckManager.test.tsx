@@ -28,6 +28,7 @@ import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
 import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
 import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
 import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
+import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -694,4 +695,64 @@ void test('applyChalkboardSnapshotFallback does not replace non-empty chalkboard
 
   assert.equal(result.restoredSnapshotStorage, null)
   assert.equal(result.relayPayload.payload?.payload?.storage, '[{"width":960,"height":700,"data":[]}]')
+})
+
+void test('resolveManagerActivityRequestStartInput resolves anchored and global instance keys', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'embedded-test',
+        indices: { h: 2, v: 1, f: 0 },
+      },
+      null,
+    ),
+    {
+      activityId: 'embedded-test',
+      instanceKey: 'embedded-test:2:1',
+    },
+  )
+
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'raffle',
+      },
+      null,
+    ),
+    {
+      activityId: 'raffle',
+      instanceKey: 'raffle:global',
+    },
+  )
+})
+
+void test('resolveManagerActivityRequestStartInput prefers explicit instanceKey and falls back to instructor indices', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'video-sync',
+        instanceKey: 'video-sync:global',
+      },
+      { h: 6, v: 2, f: 0 },
+    ),
+    {
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:global',
+    },
+  )
+
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'algorithm-demo',
+      },
+      { h: 6, v: 2, f: 0 },
+    ),
+    {
+      activityId: 'algorithm-demo',
+      instanceKey: 'algorithm-demo:6:2',
+    },
+  )
+
+  assert.equal(resolveManagerActivityRequestStartInput({ activityId: '' }, { h: 1, v: 0, f: 0 }), null)
 })

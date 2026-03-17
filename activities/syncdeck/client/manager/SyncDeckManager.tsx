@@ -84,6 +84,12 @@ interface RevealSyncEnvelope {
   payload?: unknown
 }
 
+interface RevealActivityRequestPayload {
+  activityId?: unknown
+  instanceKey?: unknown
+  indices?: unknown
+}
+
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
 interface RelayCommandPayloadEnvelope {
   name?: unknown
@@ -850,6 +856,56 @@ function parseRevealSyncEnvelope(data: unknown): RevealSyncEnvelope | null {
   }
 
   return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
+}
+
+function normalizeActivityId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function buildAnchoredInstanceKey(activityId: string, indices: { h: number; v: number; f: number }): string {
+  return `${activityId}:${indices.h}:${indices.v}`
+}
+
+export function resolveManagerActivityRequestStartInput(
+  rawPayload: unknown,
+  fallbackInstructorIndices: { h: number; v: number; f: number } | null,
+): { activityId: string; instanceKey: string } | null {
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const payload = rawPayload as RevealActivityRequestPayload
+  const activityId = normalizeActivityId(payload.activityId)
+  if (!activityId) {
+    return null
+  }
+
+  const requestedInstanceKey = typeof payload.instanceKey === 'string' ? payload.instanceKey.trim() : ''
+  if (requestedInstanceKey.length > 0) {
+    return {
+      activityId,
+      instanceKey: requestedInstanceKey,
+    }
+  }
+
+  const requestedIndices = normalizeIndices(payload.indices)
+  const resolvedIndices = requestedIndices ?? fallbackInstructorIndices
+  if (!resolvedIndices) {
+    return {
+      activityId,
+      instanceKey: `${activityId}:global`,
+    }
+  }
+
+  return {
+    activityId,
+    instanceKey: buildAnchoredInstanceKey(activityId, resolvedIndices),
+  }
 }
 
 function isRevealSyncEnvelopeData(data: unknown): data is RevealSyncEnvelope {
@@ -1960,6 +2016,56 @@ const SyncDeckManager: FC = () => {
     )
   }, [presentationOrigin, armRestoreSuppression])
 
+  const launchEmbeddedActivityFromRequest = useCallback(
+    async (request: { activityId: string; instanceKey: string }): Promise<void> => {
+      if (!sessionId) {
+        setStartError('Cannot launch embedded activity without a SyncDeck session id.')
+        setStartSuccess(null)
+        return
+      }
+
+      if (!instructorPasscode) {
+        setStartError('Instructor passcode missing. Refresh SyncDeck manager and try again.')
+        setStartSuccess(null)
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instructorPasscode,
+            activityId: request.activityId,
+            instanceKey: request.instanceKey,
+          }),
+        })
+
+        if (!response.ok) {
+          let message = 'Unable to launch embedded activity.'
+          try {
+            const payload = (await response.json()) as { error?: string }
+            if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
+              message = payload.error
+            }
+          } catch {
+            // keep default message
+          }
+          setStartError(message)
+          setStartSuccess(null)
+          return
+        }
+
+        setStartError(null)
+        setStartSuccess(`Launched ${request.activityId} (${request.instanceKey}).`)
+      } catch {
+        setStartError('Unable to launch embedded activity.')
+        setStartSuccess(null)
+      }
+    },
+    [sessionId, instructorPasscode],
+  )
+
   const startSession = useCallback(async (options?: { automatic?: boolean }): Promise<void> => {
     const automaticStart = options?.automatic === true
 
@@ -2169,6 +2275,30 @@ const SyncDeckManager: FC = () => {
             receivedVersion: compatibility.receivedVersion,
             action: envelope.action,
           })
+        }
+
+        if (envelope.action === 'activityRequest') {
+          const startRequest = resolveManagerActivityRequestStartInput(
+            envelope.payload,
+            lastInstructorIndicesRef.current,
+          )
+          if (!startRequest) {
+            setStartError('Ignored activity request with missing activity id.')
+            setStartSuccess(null)
+            return
+          }
+
+          const shouldLaunch = typeof window === 'undefined'
+            ? true
+            : window.confirm(`Launch ${startRequest.activityId} for ${startRequest.instanceKey}?`)
+          if (!shouldLaunch) {
+            setStartError(null)
+            setStartSuccess('Launch canceled.')
+            return
+          }
+
+          void launchEmbeddedActivityFromRequest(startRequest)
+          return
         }
       }
 
@@ -2396,6 +2526,7 @@ const SyncDeckManager: FC = () => {
     }
   }, [
     isConfigurePanelOpen,
+    launchEmbeddedActivityFromRequest,
     presentationOrigin,
     requestChalkboardStateFromInstructor,
     applyDrawingToolModeToInstructorIframe,

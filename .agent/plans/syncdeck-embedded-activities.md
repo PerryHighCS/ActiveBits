@@ -924,7 +924,7 @@ session.data.embeddedActivities: Record<instanceKey, {
 - [ ] Define deck slide metadata format (`data-activity-id` attribute).
 - [ ] Update `reveal-iframe-sync` plugin to emit `activityRequest` on slide-enter.
 - [ ] Update `reveal-iframe-sync-message-schema.md`.
-- [ ] Manager: handle `activityRequest` → show "Launch Activity?" prompt.
+- [x] Manager: handle `activityRequest` → show "Launch Activity?" prompt.
 - [ ] Integration test: slide navigation → activityRequest → prompt → launch → overlay.
 
 ### Phase 5 — Activity picker (manual trigger)

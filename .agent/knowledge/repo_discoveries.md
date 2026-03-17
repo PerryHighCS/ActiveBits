@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-17
+- Area: activities | syncdeck | slide-activation
+- Discovery: SyncDeck manager now consumes `reveal-sync` `activityRequest` messages from the presentation iframe, resolves `activityId` plus instance key (explicit `instanceKey`, payload `indices`, fallback instructor indices, otherwise `:global`), prompts instructor confirmation, and then calls `POST /api/syncdeck/:sessionId/embedded-activity/start`.
+- Why it matters: This wires the first end-to-end launch seam for Phase 4 from deck events to server-backed embedded child session creation while preserving instructor confirmation and existing dedup semantics on the server.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `.agent/plans/syncdeck-checklist.md`; `.agent/plans/syncdeck-embedded-activities.md`
+- Follow-up action: Complete remaining Phase 4 work by finalizing deck metadata/plugin emission conventions and adding integration coverage for request→prompt→launch→overlay flow.
+- Owner: Codex
+
+- Date: 2026-03-17
 - Area: activities | syncdeck | student-overlay
 - Discovery: SyncDeck student now hydrates `embeddedActivities` from `session.data.embeddedActivities`, applies `embedded-activity-start`/`embedded-activity-end` websocket lifecycle payloads, and selects the active embedded overlay by matching `instanceKey` slide anchors against local student indices. The student host also extracts `canGoBack`/`canGoForward` from reveal state messages, renders host-layer navigation controls over the embedded iframe, and emits `activebits-embedded/syncContext` postMessages with `solo|synchronized|behind|ahead|vertical` state.
 - Why it matters: This establishes the student-side Phase 3 host-overlay seam with late-join hydration and capability-driven navigation while keeping reveal transport and embedded activity transport separated.
