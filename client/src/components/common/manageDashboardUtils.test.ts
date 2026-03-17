@@ -383,6 +383,44 @@ void test('storeCreateSessionBootstrapPayload expires abandoned same-tab payload
   )
 })
 
+void test('consumeCreateSessionBootstrapPayload prunes unrelated expired entries without requiring a new write', () => {
+  const createdAtMs = 2_000
+  const expiredNowMs = createdAtMs + 5 * 60 * 1000 + 1
+
+  storeCreateSessionBootstrapPayload(
+    'video-sync',
+    'session-expired-abandoned',
+    {
+      id: 'session-expired-abandoned',
+      instructorPasscode: 'teacher-passcode-expired',
+    },
+    createdAtMs,
+  )
+
+  storeCreateSessionBootstrapPayload(
+    'video-sync',
+    'session-fresh',
+    {
+      id: 'session-fresh',
+      instructorPasscode: 'teacher-passcode-fresh',
+    },
+    expiredNowMs,
+  )
+
+  assert.deepEqual(
+    consumeCreateSessionBootstrapPayload('video-sync', 'session-fresh', expiredNowMs),
+    {
+      id: 'session-fresh',
+      instructorPasscode: 'teacher-passcode-fresh',
+    },
+  )
+
+  assert.equal(
+    consumeCreateSessionBootstrapPayload('video-sync', 'session-expired-abandoned', expiredNowMs),
+    null,
+  )
+})
+
 void test('storeCreateSessionBootstrapPayload evicts oldest abandoned entries when the same-tab cache is full', () => {
   for (let index = 0; index <= 100; index += 1) {
     storeCreateSessionBootstrapPayload(

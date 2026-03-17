@@ -186,7 +186,6 @@ export function storeCreateSessionBootstrapPayload(
   payload: Record<string, unknown>,
   nowMs = Date.now(),
 ): void {
-  pruneCreateSessionBootstrapPayloads(nowMs)
   createSessionBootstrapPayloads.set(`${activityId}:${sessionId}`, {
     payload,
     createdAtMs: nowMs,
@@ -199,12 +198,9 @@ export function consumeCreateSessionBootstrapPayload(
   sessionId: string,
   nowMs = Date.now(),
 ): Record<string, unknown> | null {
+  pruneCreateSessionBootstrapPayloads(nowMs)
   const key = `${activityId}:${sessionId}`
   const entry = createSessionBootstrapPayloads.get(key) ?? null
-  if (entry && nowMs - entry.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
-    createSessionBootstrapPayloads.delete(key)
-    return null
-  }
 
   const payload = entry?.payload ?? null
   createSessionBootstrapPayloads.delete(key)
