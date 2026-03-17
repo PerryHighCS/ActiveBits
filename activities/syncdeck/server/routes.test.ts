@@ -196,6 +196,7 @@ class MockSocket implements ActiveBitsWebSocket {
 
   close(code?: number, reason?: string): void {
     this.closeCalls.push({ code, reason })
+    this.readyState = 3
   }
 
   terminate(): void {
@@ -508,6 +509,36 @@ void test('waitForInstructorAuthMessage closes when auth does not arrive in time
   assert.deepEqual(instructorSocket.closeCalls, [{ code: 1008, reason: 'auth timeout' }])
 })
 
+void test('syncdeck websocket does not issue forbidden close after auth wait resolves on closed socket', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const instructorSocket = new MockSocket()
+  ws.wss.clients.add(instructorSocket)
+
+  handler?.(
+    instructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+    }),
+    ws.wss,
+  )
+
+  instructorSocket.readyState = 3
+  instructorSocket.emit('close')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(instructorSocket.closeCalls, [])
+})
+
 void test('syncdeck websocket sends latest position snapshot to instructor when last payload is non-position', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -561,7 +592,20 @@ void test('syncdeck websocket relays instructor updates to students in session',
   const app = createMockApp()
   const ws = createMockWs()
   const state = createSessionStore({
-    s1: createSyncDeckSession('s1', 'teacher-pass'),
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+      },
+    },
   })
 
   setupSyncDeckRoutes(app, state.sessions, ws)
@@ -582,7 +626,15 @@ void test('syncdeck websocket relays instructor updates to students in session',
     ws.wss,
   )
   emitInstructorAuth(instructorSocket, 'teacher-pass')
-  handler?.(studentSocket, new URLSearchParams({ sessionId: 's1' }), ws.wss)
+  handler?.(
+    studentSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      studentId: 'student-1',
+      studentName: 'Ada Lovelace',
+    }),
+    ws.wss,
+  )
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   instructorSocket.emit(
@@ -1060,7 +1112,20 @@ void test('syncdeck websocket broadcasts student presence count to instructor', 
   const app = createMockApp()
   const ws = createMockWs()
   const state = createSessionStore({
-    s1: createSyncDeckSession('s1', 'teacher-pass'),
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Student',
+          joinedAt: 100,
+          lastSeenAt: 100,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+      },
+    },
   })
 
   setupSyncDeckRoutes(app, state.sessions, ws)

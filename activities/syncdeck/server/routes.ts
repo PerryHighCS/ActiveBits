@@ -1132,6 +1132,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
       if (role === 'instructor') {
         const rawAuthMessage = await instructorAuthMessagePromise
+        if (socket.readyState !== WS_OPEN_READY_STATE) {
+          return
+        }
         const authMessage = parseInstructorAuthMessage(rawAuthMessage)
         if (!authMessage || !verifyInstructorPasscode(session.data.instructorPasscode, authMessage.instructorPasscode)) {
           socket.close(1008, 'forbidden')
