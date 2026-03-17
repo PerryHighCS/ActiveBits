@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-17
+- Area: activities | syncdeck | student-overlay
+- Discovery: SyncDeck student now hydrates `embeddedActivities` from `session.data.embeddedActivities`, applies `embedded-activity-start`/`embedded-activity-end` websocket lifecycle payloads, and selects the active embedded overlay by matching `instanceKey` slide anchors against local student indices. The student host also extracts `canGoBack`/`canGoForward` from reveal state messages, renders host-layer navigation controls over the embedded iframe, and emits `activebits-embedded/syncContext` postMessages with `solo|synchronized|behind|ahead|vertical` state.
+- Why it matters: This establishes the student-side Phase 3 host-overlay seam with late-join hydration and capability-driven navigation while keeping reveal transport and embedded activity transport separated.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `.agent/plans/syncdeck-checklist.md`; `.agent/plans/syncdeck-embedded-activities.md`
+- Follow-up action: Complete the remaining solo activation path by reading `standaloneEntry` capability metadata and mounting direct `/solo/:activityId` routes when supported, then expand tests for stack transitions and solo launch behavior.
+- Owner: Codex
+
+- Date: 2026-03-17
 - Area: activities | syncdeck | manager-overlay
 - Discovery: SyncDeck manager now keeps a local `embeddedActivities` keyed map hydrated from both session bootstrap data and `embedded-activity-start`/`embedded-activity-end` websocket lifecycle payloads. The active manager overlay is selected by parsing `instanceKey` anchors (`activityId:h:v`) against the current instructor slide indices, and when active it renders an iframe to `/manage/:activityId/:childSessionId` with host-side prev/next overlay navigation controls.
 - Why it matters: This establishes the manager-side embedded orchestration seam for Phase 2 without coupling generic host logic to activity-specific protocols. It also ensures late-reconnect managers can recover running embedded instances from persisted session state before new websocket lifecycle events arrive.

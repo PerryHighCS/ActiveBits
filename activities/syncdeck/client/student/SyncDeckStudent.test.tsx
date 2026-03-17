@@ -13,6 +13,12 @@ import { shouldSuppressForwardInstructorSync } from './SyncDeckStudent.js'
 import { shouldResetBacktrackOptOutByMaxPosition } from './SyncDeckStudent.js'
 import { extractIndicesFromRevealStateMessage } from './SyncDeckStudent.js'
 import { resolveInboundPayloadType } from './SyncDeckStudent.js'
+import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckStudent.js'
+import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckStudent.js'
+import { resolveStudentActiveEmbeddedInstanceKey } from './SyncDeckStudent.js'
+import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent.js'
+import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
+import { buildStudentEmbeddedSyncContextMessage } from './SyncDeckStudent.js'
 import { MIXED_CONTENT_PRESENTATION_ERROR } from '../shared/presentationUrlCompatibility.js'
 
 void test('SyncDeckStudent renders join guidance copy', () => {
@@ -642,4 +648,107 @@ void test('shouldResetBacktrackOptOutByMaxPosition does not reset when student r
   )
 
   assert.equal(result, false)
+})
+
+void test('normalizeSyncDeckEmbeddedActivities filters invalid records', () => {
+  const normalized = normalizeSyncDeckEmbeddedActivities({
+    'video-sync:3:0': {
+      childSessionId: 'CHILD:parent:child1:video-sync',
+      activityId: 'video-sync',
+      startedAt: 42,
+      owner: 'inst-a',
+    },
+    'invalid:1:0': {
+      childSessionId: '',
+      activityId: 'video-sync',
+    },
+  })
+
+  assert.deepEqual(Object.keys(normalized), ['video-sync:3:0'])
+})
+
+void test('applySyncDeckEmbeddedLifecyclePayload applies start and end updates', () => {
+  const started = applySyncDeckEmbeddedLifecyclePayload({}, {
+    type: 'embedded-activity-start',
+    instanceKey: 'video-sync:3:0',
+    childSessionId: 'CHILD:parent:child1:video-sync',
+    activityId: 'video-sync',
+  })
+  assert.equal(started['video-sync:3:0']?.childSessionId, 'CHILD:parent:child1:video-sync')
+
+  const ended = applySyncDeckEmbeddedLifecyclePayload(started, {
+    type: 'embedded-activity-end',
+    instanceKey: 'video-sync:3:0',
+    childSessionId: 'CHILD:parent:child1:video-sync',
+  })
+
+  assert.equal(ended['video-sync:3:0'], undefined)
+})
+
+void test('resolveStudentActiveEmbeddedInstanceKey selects activity for student h:v position', () => {
+  const map = {
+    'raffle:2:0': {
+      childSessionId: 'CHILD:parent:a:raffle',
+      activityId: 'raffle',
+      startedAt: 10,
+      owner: 'inst',
+    },
+    'video-sync:3:1': {
+      childSessionId: 'CHILD:parent:b:video-sync',
+      activityId: 'video-sync',
+      startedAt: 20,
+      owner: 'inst',
+    },
+  }
+
+  assert.equal(
+    resolveStudentActiveEmbeddedInstanceKey(map, { h: 3, v: 1, f: 0 }),
+    'video-sync:3:1',
+  )
+  assert.equal(resolveStudentActiveEmbeddedInstanceKey(map, { h: 5, v: 0, f: 0 }), null)
+})
+
+void test('extractNavigationCapabilitiesFromStateMessage reads canGoBack/canGoForward from state payload', () => {
+  const capabilities = extractNavigationCapabilitiesFromStateMessage({
+    type: 'reveal-sync',
+    action: 'state',
+    payload: {
+      navigation: {
+        canGoBack: false,
+        canGoForward: true,
+      },
+    },
+  })
+
+  assert.deepEqual(capabilities, {
+    canGoBack: false,
+    canGoForward: true,
+  })
+})
+
+void test('computeStudentEmbeddedSyncState resolves synchronized, vertical, behind, ahead, and solo', () => {
+  assert.equal(computeStudentEmbeddedSyncState({ h: 3, v: 0 }, { h: 3, v: 0 }), 'synchronized')
+  assert.equal(computeStudentEmbeddedSyncState({ h: 3, v: 1 }, { h: 3, v: 0 }), 'vertical')
+  assert.equal(computeStudentEmbeddedSyncState({ h: 2, v: 0 }, { h: 3, v: 0 }), 'behind')
+  assert.equal(computeStudentEmbeddedSyncState({ h: 4, v: 0 }, { h: 3, v: 0 }), 'ahead')
+  assert.equal(computeStudentEmbeddedSyncState({ h: 4, v: 0 }, null), 'solo')
+})
+
+void test('buildStudentEmbeddedSyncContextMessage emits expected activebits-embedded syncContext payload', () => {
+  const message = buildStudentEmbeddedSyncContextMessage(
+    'vertical',
+    { h: 3, v: 1, f: 0 },
+    { h: 3, v: 0, f: 0 },
+  )
+
+  assert.deepEqual(message, {
+    type: 'activebits-embedded',
+    action: 'syncContext',
+    payload: {
+      syncState: 'vertical',
+      studentIndices: { h: 3, v: 1, f: 0 },
+      instructorIndices: { h: 3, v: 0, f: 0 },
+      role: 'student',
+    },
+  })
 })

@@ -3,9 +3,11 @@ import { useLocation, useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
+  buildEntryParticipantStorageKey,
   consumeResolvedEntryParticipantValues,
   getEntryParticipantDisplayName,
   getEntryParticipantParticipantId,
+  persistEntryParticipantToken,
 } from '@src/components/common/entryParticipantStorage'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
@@ -21,6 +23,7 @@ interface SessionResponsePayload {
   session?: {
     data?: {
       presentationUrl?: unknown
+      embeddedActivities?: unknown
     }
   }
 }
@@ -65,6 +68,35 @@ interface RevealStateIndicesPayload {
 }
 
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
+
+interface SyncDeckEmbeddedActivityRecord {
+  childSessionId: string
+  activityId: string
+  startedAt: number
+  owner: string
+}
+
+type SyncDeckEmbeddedActivitiesMap = Record<string, SyncDeckEmbeddedActivityRecord>
+
+interface SyncDeckEmbeddedInstancePosition {
+  h: number
+  v: number
+}
+
+interface SyncDeckEmbeddedLifecyclePayload {
+  type: 'embedded-activity-start' | 'embedded-activity-end'
+  instanceKey: string
+  activityId?: string
+  childSessionId: string
+  entryParticipantToken?: string
+}
+
+export type SyncDeckStudentSyncState = 'solo' | 'synchronized' | 'behind' | 'ahead' | 'vertical'
+
+interface NavigationCapabilities {
+  canGoBack: boolean
+  canGoForward: boolean
+}
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 
@@ -767,6 +799,234 @@ export function shouldResetBacktrackOptOutByMaxPosition(
   return compareIndices(studentPosition, maxPosition) >= 0
 }
 
+function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivityRecord | null {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const candidate = value as Record<string, unknown>
+  const childSessionId = typeof candidate.childSessionId === 'string' ? candidate.childSessionId.trim() : ''
+  const activityId = typeof candidate.activityId === 'string' ? candidate.activityId.trim() : ''
+  if (!childSessionId || !activityId) {
+    return null
+  }
+
+  return {
+    childSessionId,
+    activityId,
+    startedAt: typeof candidate.startedAt === 'number' && Number.isFinite(candidate.startedAt) ? candidate.startedAt : Date.now(),
+    owner: typeof candidate.owner === 'string' ? candidate.owner : 'syncdeck-instructor',
+  }
+}
+
+export function normalizeSyncDeckEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivitiesMap {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  const normalized: SyncDeckEmbeddedActivitiesMap = {}
+  for (const [instanceKey, record] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof instanceKey !== 'string' || instanceKey.trim().length === 0) {
+      continue
+    }
+
+    const normalizedRecord = normalizeEmbeddedActivityRecord(record)
+    if (!normalizedRecord) {
+      continue
+    }
+
+    normalized[instanceKey] = normalizedRecord
+  }
+
+  return normalized
+}
+
+function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmbeddedInstancePosition | null {
+  const segments = instanceKey.split(':')
+  if (segments.length < 3) {
+    return null
+  }
+
+  const hSegment = segments.at(-2)
+  const vSegment = segments.at(-1)
+  if (typeof hSegment !== 'string' || typeof vSegment !== 'string') {
+    return null
+  }
+
+  const h = Number.parseInt(hSegment, 10)
+  const v = Number.parseInt(vSegment, 10)
+  if (!Number.isFinite(h) || !Number.isFinite(v)) {
+    return null
+  }
+
+  return { h, v }
+}
+
+function parseEmbeddedLifecyclePayload(payload: unknown): SyncDeckEmbeddedLifecyclePayload | null {
+  if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null
+  }
+
+  const candidate = payload as Record<string, unknown>
+  const payloadType = candidate.type
+  if (payloadType !== 'embedded-activity-start' && payloadType !== 'embedded-activity-end') {
+    return null
+  }
+
+  const instanceKey = typeof candidate.instanceKey === 'string' ? candidate.instanceKey.trim() : ''
+  const childSessionId = typeof candidate.childSessionId === 'string' ? candidate.childSessionId.trim() : ''
+  if (!instanceKey || !childSessionId) {
+    return null
+  }
+
+  const activityId = typeof candidate.activityId === 'string' ? candidate.activityId.trim() : undefined
+  const entryParticipantToken = typeof candidate.entryParticipantToken === 'string' ? candidate.entryParticipantToken.trim() : undefined
+
+  return {
+    type: payloadType,
+    instanceKey,
+    activityId,
+    childSessionId,
+    ...(entryParticipantToken ? { entryParticipantToken } : {}),
+  }
+}
+
+export function applySyncDeckEmbeddedLifecyclePayload(
+  current: SyncDeckEmbeddedActivitiesMap,
+  payload: SyncDeckEmbeddedLifecyclePayload,
+): SyncDeckEmbeddedActivitiesMap {
+  if (payload.type === 'embedded-activity-end') {
+    const next = { ...current }
+    delete next[payload.instanceKey]
+    return next
+  }
+
+  if (!payload.activityId) {
+    return current
+  }
+
+  return {
+    ...current,
+    [payload.instanceKey]: {
+      childSessionId: payload.childSessionId,
+      activityId: payload.activityId,
+      startedAt: Date.now(),
+      owner: 'syncdeck-instructor',
+    },
+  }
+}
+
+export function resolveStudentActiveEmbeddedInstanceKey(
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap,
+  studentIndices: { h: number; v: number; f: number } | null,
+): string | null {
+  if (!studentIndices) {
+    return null
+  }
+
+  let selected: string | null = null
+  for (const [instanceKey, record] of Object.entries(embeddedActivities)) {
+    const position = parseSyncDeckEmbeddedInstancePosition(instanceKey)
+    if (!position) {
+      continue
+    }
+    if (position.h !== studentIndices.h || position.v !== studentIndices.v) {
+      continue
+    }
+
+    const selectedRecord = selected ? embeddedActivities[selected] : null
+    if (!selectedRecord || record.startedAt > selectedRecord.startedAt) {
+      selected = instanceKey
+    }
+  }
+
+  return selected
+}
+
+export function extractNavigationCapabilitiesFromStateMessage(rawPayload: unknown): NavigationCapabilities | null {
+  if (rawPayload == null || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
+    return null
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  if (message.type !== 'reveal-sync') {
+    return null
+  }
+
+  if (message.action !== 'state' && message.action !== 'ready') {
+    return null
+  }
+
+  const payload = message.payload != null && typeof message.payload === 'object' && !Array.isArray(message.payload)
+    ? message.payload as Record<string, unknown>
+    : null
+  if (!payload) {
+    return null
+  }
+
+  const navigation = payload.navigation != null && typeof payload.navigation === 'object' && !Array.isArray(payload.navigation)
+    ? payload.navigation as Record<string, unknown>
+    : null
+  const capabilities = payload.capabilities != null && typeof payload.capabilities === 'object' && !Array.isArray(payload.capabilities)
+    ? payload.capabilities as Record<string, unknown>
+    : null
+
+  const source = navigation ?? capabilities
+  if (!source) {
+    return null
+  }
+
+  const canGoBack = typeof source.canGoBack === 'boolean' ? source.canGoBack
+    : typeof source.canGoLeft === 'boolean' ? source.canGoLeft : null
+  const canGoForward = typeof source.canGoForward === 'boolean' ? source.canGoForward
+    : typeof source.canGoRight === 'boolean' ? source.canGoRight : null
+
+  if (canGoBack === null && canGoForward === null) {
+    return null
+  }
+
+  return {
+    canGoBack: canGoBack ?? true,
+    canGoForward: canGoForward ?? true,
+  }
+}
+
+export function computeStudentEmbeddedSyncState(
+  studentIndices: { h: number; v: number } | null,
+  instructorIndices: { h: number; v: number } | null,
+): SyncDeckStudentSyncState {
+  if (!instructorIndices || !studentIndices) {
+    return 'solo'
+  }
+
+  if (studentIndices.h === instructorIndices.h) {
+    return studentIndices.v === instructorIndices.v ? 'synchronized' : 'vertical'
+  }
+
+  return studentIndices.h < instructorIndices.h ? 'behind' : 'ahead'
+}
+
+export function buildStudentEmbeddedSyncContextMessage(
+  syncState: SyncDeckStudentSyncState,
+  studentIndices: { h: number; v: number; f: number } | null,
+  instructorIndices: { h: number; v: number; f: number } | null,
+): Record<string, unknown> {
+  return {
+    type: 'activebits-embedded',
+    action: 'syncContext',
+    payload: {
+      syncState,
+      studentIndices: studentIndices
+        ? { h: studentIndices.h, v: studentIndices.v, f: studentIndices.f }
+        : null,
+      instructorIndices: instructorIndices
+        ? { h: instructorIndices.h, v: instructorIndices.v, f: instructorIndices.f }
+        : null,
+      role: 'student',
+    },
+  }
+}
+
 const SyncDeckStudent: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
@@ -794,6 +1054,11 @@ const SyncDeckStudent: FC = () => {
   const studentBacktrackOptOutRef = useRef(false)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
   const attachSessionEndedHandler = useSessionEndedHandler()
+  const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
+  const [studentIndicesState, setStudentIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
+  const [navigationCapabilities, setNavigationCapabilities] = useState<NavigationCapabilities | null>(null)
+  const [soloOverlays, setSoloOverlays] = useState<Record<string, { activityId: string; notice?: string }>>({})
+  const embeddedActivityIframeRef = useRef<HTMLIFrameElement | null>(null)
 
   useEffect(() => {
     syncDebugEnabledRef.current = isSyncDeckDebugEnabled()
@@ -808,6 +1073,29 @@ const SyncDeckStudent: FC = () => {
       event,
       ...details,
     })
+  }, [])
+
+  const sendSyncContextToEmbeddedIframe = useCallback((): void => {
+    const target = embeddedActivityIframeRef.current?.contentWindow
+    if (!target) {
+      return
+    }
+
+    const syncState = computeStudentEmbeddedSyncState(
+      localStudentIndicesRef.current,
+      lastInstructorIndicesRef.current,
+    )
+    const msg = buildStudentEmbeddedSyncContextMessage(
+      syncState,
+      localStudentIndicesRef.current,
+      lastInstructorIndicesRef.current,
+    )
+
+    try {
+      target.postMessage(msg, window.location.origin)
+    } catch {
+      // ignore postMessage errors
+    }
   }, [])
 
   useEffect(() => {
@@ -1003,6 +1291,31 @@ const SyncDeckStudent: FC = () => {
           return
         }
 
+        const embeddedLifecyclePayload = parseEmbeddedLifecyclePayload(parsed.payload)
+        if (embeddedLifecyclePayload) {
+          if (
+            embeddedLifecyclePayload.type === 'embedded-activity-start' &&
+            embeddedLifecyclePayload.activityId &&
+            embeddedLifecyclePayload.entryParticipantToken &&
+            typeof window !== 'undefined' &&
+            window.sessionStorage != null
+          ) {
+            persistEntryParticipantToken(
+              window.sessionStorage,
+              buildEntryParticipantStorageKey(
+                embeddedLifecyclePayload.activityId,
+                'session',
+                embeddedLifecyclePayload.childSessionId,
+              ),
+              embeddedLifecyclePayload.entryParticipantToken,
+            )
+          }
+          setEmbeddedActivities((current) =>
+            applySyncDeckEmbeddedLifecyclePayload(current, embeddedLifecyclePayload),
+          )
+          return
+        }
+
         if (isRevealSyncMessage(parsed.payload)) {
           const compatibility = assessRevealSyncProtocolCompatibility(parsed.payload.version)
           if (!compatibility.compatible) {
@@ -1089,11 +1402,12 @@ const SyncDeckStudent: FC = () => {
         }
 
         setStatusMessage('Receiving instructor sync…')
+        sendSyncContextToEmbeddedIframe()
       } catch {
         return
       }
     },
-    [applyDrawingToolModeToIframe, sendPayloadToIframe, setBacktrackOptOut, traceSync],
+    [applyDrawingToolModeToIframe, sendPayloadToIframe, sendSyncContextToEmbeddedIframe, setBacktrackOptOut, traceSync],
   )
 
   const replayLatestInstructorSyncToIframe = useCallback(() => {
@@ -1148,6 +1462,7 @@ const SyncDeckStudent: FC = () => {
       if (localIndices) {
         const previousLocalIndices = localStudentIndicesRef.current
         localStudentIndicesRef.current = localIndices
+        setStudentIndicesState(localIndices)
 
         const instructorIndices = lastInstructorIndicesRef.current
         const maxPosition = lastEffectiveMaxPositionRef.current ?? instructorIndices
@@ -1164,6 +1479,13 @@ const SyncDeckStudent: FC = () => {
         if (shouldResetBacktrackOptOutByMaxPosition(studentBacktrackOptOutRef.current, localIndices, maxPosition)) {
           setBacktrackOptOut(false)
         }
+
+        sendSyncContextToEmbeddedIframe()
+      }
+
+      const capabilities = extractNavigationCapabilitiesFromStateMessage(event.data)
+      if (capabilities) {
+        setNavigationCapabilities(capabilities)
       }
 
       if (!hasSeenIframeReadySignalRef.current && isRevealSyncMessage(event.data)) {
@@ -1189,7 +1511,14 @@ const SyncDeckStudent: FC = () => {
     return () => {
       window.removeEventListener('message', handleIframeMessage)
     }
-  }, [applyDrawingToolModeToIframe, replayLatestInstructorSyncToIframe, sendPayloadToIframe, setBacktrackOptOut, traceSync])
+  }, [
+    applyDrawingToolModeToIframe,
+    replayLatestInstructorSyncToIframe,
+    sendPayloadToIframe,
+    sendSyncContextToEmbeddedIframe,
+    setBacktrackOptOut,
+    traceSync,
+  ])
 
   const buildStudentWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined') {
@@ -1267,6 +1596,12 @@ const SyncDeckStudent: FC = () => {
         }
 
         if (!isCancelled) {
+          const existingEmbeddedActivities = normalizeSyncDeckEmbeddedActivities(
+            payload.session?.data?.embeddedActivities,
+          )
+          if (Object.keys(existingEmbeddedActivities).length > 0) {
+            setEmbeddedActivities(existingEmbeddedActivities)
+          }
           setPresentationUrl(configuredPresentationUrl)
           setIsWaitingForConfiguration(false)
           setError(null)
@@ -1381,6 +1716,50 @@ const SyncDeckStudent: FC = () => {
     setBacktrackOptOut(false)
   }, [sendPayloadToIframe, setBacktrackOptOut])
 
+  const activeEmbeddedInstanceKey = resolveStudentActiveEmbeddedInstanceKey(
+    embeddedActivities,
+    studentIndicesState,
+  )
+  const activeEmbeddedActivity = activeEmbeddedInstanceKey
+    ? (embeddedActivities[activeEmbeddedInstanceKey] ?? null)
+    : null
+  const activeSoloOverlay = activeEmbeddedInstanceKey
+    ? null
+    : (studentIndicesState ? (soloOverlays[`${studentIndicesState.h}:${studentIndicesState.v}`] ?? null) : null)
+
+  const syncState = computeStudentEmbeddedSyncState(
+    studentIndicesState,
+    lastInstructorIndicesRef.current,
+  )
+
+  useEffect(() => {
+    if (syncState !== 'solo' && Object.keys(soloOverlays).length > 0) {
+      setSoloOverlays({})
+    }
+  }, [soloOverlays, syncState])
+
+  useEffect(() => {
+    sendSyncContextToEmbeddedIframe()
+  }, [activeEmbeddedInstanceKey, sendSyncContextToEmbeddedIframe, studentIndicesState, syncState])
+
+  const sendStudentOverlayNavigation = useCallback((direction: 'prev' | 'next') => {
+    sendPayloadToIframe(buildRevealCommandMessage(direction, {}))
+  }, [sendPayloadToIframe])
+
+  const handleStudentOverlayBack = useCallback(() => {
+    if (navigationCapabilities?.canGoBack === false) {
+      return
+    }
+    sendStudentOverlayNavigation('prev')
+  }, [navigationCapabilities?.canGoBack, sendStudentOverlayNavigation])
+
+  const handleStudentOverlayForward = useCallback(() => {
+    if (navigationCapabilities?.canGoForward === false) {
+      return
+    }
+    sendStudentOverlayNavigation('next')
+  }, [navigationCapabilities?.canGoForward, sendStudentOverlayNavigation])
+
   if (!sessionId) {
     return (
       <div className="p-6 max-w-3xl mx-auto space-y-3">
@@ -1475,7 +1854,7 @@ const SyncDeckStudent: FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 w-full overflow-hidden bg-white">
+      <div className="relative flex-1 min-h-0 w-full overflow-hidden bg-white">
         <iframe
           ref={iframeRef}
           title="SyncDeck Student Presentation"
@@ -1485,6 +1864,58 @@ const SyncDeckStudent: FC = () => {
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
           onLoad={handleIframeLoad}
         />
+
+        {activeEmbeddedActivity ? (
+          <div className="absolute inset-0 z-10">
+            <iframe
+              ref={embeddedActivityIframeRef}
+              title={`Embedded ${activeEmbeddedActivity.activityId} activity`}
+              src={`/${encodeURIComponent(activeEmbeddedActivity.childSessionId)}`}
+              className="w-full h-full border-0"
+              allow="fullscreen"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+              onLoad={sendSyncContextToEmbeddedIframe}
+            />
+          </div>
+        ) : null}
+
+        {!activeEmbeddedActivity && activeSoloOverlay ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/95 p-6">
+            <div className="max-w-lg rounded-lg border border-gray-300 bg-white p-4 shadow-sm space-y-3 text-center">
+              <h2 className="text-lg font-semibold text-gray-900">Solo Embedded Activity</h2>
+              <p className="text-sm text-gray-700">
+                {activeSoloOverlay.notice ?? 'This activity requires a live session. Solo launch is not available on this slide.'}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {activeEmbeddedActivity ? (
+          <>
+            <button
+              type="button"
+              onClick={handleStudentOverlayBack}
+              disabled={navigationCapabilities?.canGoBack === false}
+              aria-disabled={navigationCapabilities?.canGoBack === false}
+              aria-label="Previous slide"
+              title="Previous slide"
+              className="absolute left-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ◀
+            </button>
+            <button
+              type="button"
+              onClick={handleStudentOverlayForward}
+              disabled={navigationCapabilities?.canGoForward === false}
+              aria-disabled={navigationCapabilities?.canGoForward === false}
+              aria-label="Next slide"
+              title="Next slide"
+              className="absolute right-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ▶
+            </button>
+          </>
+        ) : null}
       </div>
     </div>
   )

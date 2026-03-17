@@ -887,26 +887,26 @@ session.data.embeddedActivities: Record<instanceKey, {
       navigation commands reach presentation iframe while overlay is active.
 
 ### Phase 3 — Student host overlay
-- [ ] Add `embeddedActivities: Map<instanceKey, ...>` state to `SyncDeckStudent`.
-- [ ] Handle `embedded-activity-start` / `embedded-activity-end` WebSocket messages.
-- [ ] Overlay selection logic: match instance key's `h:v` anchor to student's current slide
+- [x] Add `embeddedActivities: Map<instanceKey, ...>` state to `SyncDeckStudent`.
+- [x] Handle `embedded-activity-start` / `embedded-activity-end` WebSocket messages.
+- [x] Overlay selection logic: match instance key's `h:v` anchor to student's current slide
       position; fall through to `global` instances when no position match.
-- [ ] Render only the matching overlay; unmount non-matching instances
+- [x] Render only the matching overlay; unmount non-matching instances
       (navigate-away dismiss is equivalent to reload on return — accepted behavior).
-- [ ] Host-rendered navigation chevrons (z:20) active when overlay is shown, driven by
+- [x] Host-rendered navigation chevrons (z:20) active when overlay is shown, driven by
       `canGoBack`/`canGoForward`/`canGoUp`/`canGoDown` from presentation iframe state.
       Disabled chevrons set `disabled` + `aria-disabled="true"`.
-- [ ] Re-evaluate overlay selection on each incoming presentation `state` message
+- [x] Re-evaluate overlay selection on each incoming presentation `state` message
       (student navigating h/v while overlay is active changes which overlay is shown).
-- [ ] Compute sync state (`solo | synchronized | behind | ahead | vertical`) from student
+- [x] Compute sync state (`solo | synchronized | behind | ahead | vertical`) from student
       and instructor indices on every position update.
-- [ ] Send `activebits-embedded` / `syncContext` postMessage to activity iframe after mount
+- [x] Send `activebits-embedded` / `syncContext` postMessage to activity iframe after mount
       and on each sync state change.
 - [ ] Solo overlay path: detect `syncState === 'solo'`, honor the existing
   `activityConfig.standaloneEntry` contract, mount direct standalone URL when supported,
   otherwise show informational notice.
-- [ ] Local `soloOverlays` map (separate from `embeddedActivities`) for solo instances.
-- [ ] Handle late-join path (hydrate from `session.data.embeddedActivities` map).
+- [x] Local `soloOverlays` map (separate from `embeddedActivities`) for solo instances.
+- [x] Handle late-join path (hydrate from `session.data.embeddedActivities` map).
 - [ ] Student tests: position-based overlay selection, stack transitions, late-join hydration,
       navigation controls enabled/disabled per capability flags, overlay changes on nav,
       sync context postMessage content for each sync state, solo activation path.

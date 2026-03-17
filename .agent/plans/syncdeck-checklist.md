@@ -84,17 +84,17 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - PR scope: student overlay selection + student WS wiring + sync-context messaging + student tests
         - Exit criteria: student overlay routing works for anchored/global instances, late-join hydration works, tests cover nav/sync behavior
         - Validation: `npm test --workspace activities -- syncdeck` then full `npm test`
-        - [ ] `embeddedActivities` map state + WebSocket message handling
-        - [ ] Overlay selection: match instanceKey anchor `h:v` to student's current slide position;
+          - [x] `embeddedActivities` map state + WebSocket message handling
+          - [x] Overlay selection: match instanceKey anchor `h:v` to student's current slide position;
               re-evaluate on every incoming presentation state message
-        - [ ] Host-rendered navigation chevrons driven by canGo* capability flags from presentation
+          - [x] Host-rendered navigation chevrons driven by canGo* capability flags from presentation
               iframe state; disabled chevrons set disabled + aria-disabled
-        - [ ] Sync state computation (solo/synchronized/behind/ahead/vertical) from student
+          - [x] Sync state computation (solo/synchronized/behind/ahead/vertical) from student
               vs. instructor indices; `syncContext` postMessage sent to activity iframe on
               mount and each change
           - [ ] Solo overlay path: `standaloneEntry` check → direct standalone URL or informational notice;
             local `soloOverlays` map separate from `embeddedActivities`
-        - [ ] Late-join path from `session.data.embeddedActivities` map
+        - [x] Late-join path from `session.data.embeddedActivities` map
         - [ ] Student tests: position-based selection, stack transitions, capability-driven
               chevron enable/disable, overlay changes on nav, sync context postMessage
               for each sync state, solo activation path, late-join hydration
