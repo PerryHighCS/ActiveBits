@@ -59,13 +59,41 @@ function createMockResponse(): MockResponse {
   }
 }
 
-function getRoute(app: ReturnType<typeof createMockApp>, method: 'get' | 'post', path: string): RouteHandler {
+function getRoute(app: ReturnType<typeof createMockApp>, method: 'get' | 'post' | 'delete', path: string): RouteHandler {
   const handler = app.routes[method].get(path)
   if (!handler) {
     throw new Error(`Route ${method.toUpperCase()} ${path} not registered`)
   }
   return handler
 }
+
+void test('session delete route rejects embedded child sessions', async () => {
+  await initializeActivityRegistry()
+
+  let deleted = false
+  const sessions = {
+    get: async (id: string) => id === 'CHILD:parent:abc12:embedded-test' ? createSessionRecord(id, 'embedded-test') : null,
+    set: async () => {},
+    delete: async () => {
+      deleted = true
+      return true
+    },
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'delete', '/api/session/:sessionId')({ params: { sessionId: 'CHILD:parent:abc12:embedded-test' } }, res)
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.jsonBody, { error: 'embedded child sessions must be ended by the parent session' })
+  assert.equal(deleted, false)
+})
 
 function createSessionRecord(id: string, type: string): SessionRecord {
   return {

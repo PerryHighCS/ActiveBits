@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-18
+- Area: client+server | embedded-session-ownership
+- Discovery: Embedded child sessions (`CHILD:...`) are now explicitly parent-owned at both UI and API layers: shared `SessionHeader` auto-detects child session ids and hides join-code/end-session controls, and shared `DELETE /api/session/:sessionId` rejects child session ids with a 403 so only parent-session flows (for example SyncDeck embedded end route) can terminate them.
+- Why it matters: This prevents embedded activity manager UIs from accidentally exposing destructive controls that break parent orchestration guarantees, while preserving a single authoritative end path in the parent session.
+- Evidence: `client/src/components/common/SessionHeader.tsx`; `client/src/components/common/SessionHeader.test.tsx`; `server/core/sessions.ts`; `server/sessionEntryRoutes.test.ts`
+- Follow-up action: Add explicit instructor lock/hold capabilities as a separate feature instead of overloading session-end controls inside embedded managers.
+- Owner: Codex
+
 - Date: 2026-03-17
 - Area: activities | syncdeck | slide-activation
 - Discovery: SyncDeck manager now consumes `reveal-sync` `activityRequest` messages from the presentation iframe, resolves `activityId` plus instance key (explicit `instanceKey`, payload `indices`, fallback instructor indices, otherwise `:global`), prompts instructor confirmation, and then calls `POST /api/syncdeck/:sessionId/embedded-activity/start`.

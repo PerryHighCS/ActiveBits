@@ -62,6 +62,8 @@ interface WsServerLike {
   clients: Iterable<WsClient>
 }
 
+const EMBEDDED_CHILD_SESSION_PREFIX = 'CHILD:'
+
 class InMemorySessionStore implements SessionStore {
   public readonly ttlMs: number
   private readonly store: Record<string, SessionRecord>
@@ -369,6 +371,11 @@ export function setupSessionRoutes(app: {
     const session = await sessions.get(sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    if (sessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
+      res.status(403).json({ error: 'embedded child sessions must be ended by the parent session' })
       return
     }
 

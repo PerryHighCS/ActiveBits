@@ -11,6 +11,10 @@ export interface SessionHeaderProps {
   onEndSession?: () => void | Promise<void>
 }
 
+export function isEmbeddedChildSessionId(sessionId?: string): boolean {
+  return typeof sessionId === 'string' && sessionId.startsWith('CHILD:')
+}
+
 /**
  * SessionHeader - Reusable header for activity manager pages
  * Shows activity name, join code, join URL, and end session button
@@ -24,6 +28,7 @@ export default function SessionHeader({ activityName, sessionId, onEndSession, s
 
   const studentJoinUrl =
     sessionId && typeof window !== 'undefined' ? `${window.location.origin}/${sessionId}` : ''
+  const embeddedChildSession = isEmbeddedChildSessionId(sessionId)
 
   const copyLink = () => copyToClipboard(studentJoinUrl)
   const copyCode = () => copyToClipboard(sessionId)
@@ -38,6 +43,19 @@ export default function SessionHeader({ activityName, sessionId, onEndSession, s
     return (
       <div className="bg-white border-b border-gray-200 px-6 py-4 mb-4">
         <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
+      </div>
+    )
+  }
+
+  if (embeddedChildSession) {
+    return (
+      <div className="bg-white border-b border-gray-200 px-6 py-4 mb-6">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-bold text-gray-800">{activityName}</h1>
+          <p className="text-sm text-gray-600">
+            Embedded session managed by parent SyncDeck session. Join code and end session controls are disabled here.
+          </p>
+        </div>
       </div>
     )
   }
