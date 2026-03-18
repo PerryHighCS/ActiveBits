@@ -29,6 +29,9 @@ import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
 import { shouldPreferInstructorOverlaySelection } from './SyncDeckStudent.js'
 import { buildStudentEmbeddedSyncContextMessage } from './SyncDeckStudent.js'
+import { resolveStudentSoloActivityRequestInputs } from './SyncDeckStudent.js'
+import { resolveStudentSoloActivityRequest } from './SyncDeckStudent.js'
+import { applyStudentSoloActivityRequest } from './SyncDeckStudent.js'
 import { MIXED_CONTENT_PRESENTATION_ERROR } from '../shared/presentationUrlCompatibility.js'
 import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from '../shared/embeddedOverlayNavigation.js'
 
@@ -1245,6 +1248,101 @@ void test('buildStudentEmbeddedSyncContextMessage emits expected activebits-embe
       studentIndices: { h: 3, v: 1, f: 0 },
       instructorIndices: { h: 3, v: 0, f: 0 },
       role: 'student',
+    },
+  })
+})
+
+void test('resolveStudentSoloActivityRequestInputs parses primary and stack slide requests with de-duped slide keys', () => {
+  const requests = resolveStudentSoloActivityRequestInputs(
+    {
+      activityId: 'raffle',
+      indices: { h: 2, v: 0, f: 0 },
+      standaloneEntry: { enabled: true, supportsDirectPath: true },
+      stackRequests: [
+        {
+          activityId: 'video-sync',
+          indices: { h: 2, v: 1, f: 0 },
+          standaloneEntry: { enabled: false, supportsDirectPath: false },
+        },
+        {
+          activityId: 'embedded-test',
+          indices: { h: 2, v: 1, f: 0 },
+          standaloneEntry: { enabled: true, supportsDirectPath: true },
+        },
+      ],
+    },
+    null,
+  )
+
+  assert.deepEqual(requests, [
+    {
+      activityId: 'raffle',
+      indices: { h: 2, v: 0, f: 0 },
+      standaloneEntry: { enabled: true, supportsDirectPath: true },
+    },
+    {
+      activityId: 'embedded-test',
+      indices: { h: 2, v: 1, f: 0 },
+      standaloneEntry: { enabled: true, supportsDirectPath: true },
+    },
+  ])
+})
+
+void test('resolveStudentSoloActivityRequest prefers request matching current student slide', () => {
+  const request = resolveStudentSoloActivityRequest(
+    {
+      activityId: 'raffle',
+      indices: { h: 2, v: 0, f: 0 },
+      stackRequests: [
+        {
+          activityId: 'embedded-test',
+          indices: { h: 2, v: 1, f: 0 },
+          standaloneEntry: { enabled: true, supportsDirectPath: true },
+        },
+      ],
+    },
+    { h: 2, v: 1, f: 0 },
+  )
+
+  assert.deepEqual(request, {
+    activityId: 'embedded-test',
+    indices: { h: 2, v: 1, f: 0 },
+    standaloneEntry: { enabled: true, supportsDirectPath: true },
+  })
+})
+
+void test('applyStudentSoloActivityRequest creates direct standalone overlay when request metadata supports direct solo path', () => {
+  const overlays = applyStudentSoloActivityRequest(
+    {},
+    {
+      activityId: 'embedded-test',
+      indices: { h: 4, v: 0, f: 0 },
+      standaloneEntry: { enabled: true, supportsDirectPath: true },
+    },
+  )
+
+  assert.deepEqual(overlays, {
+    '4:0': {
+      activityId: 'embedded-test',
+      src: '/solo/embedded-test',
+    },
+  })
+})
+
+void test('applyStudentSoloActivityRequest falls back to live-session notice when request metadata does not support direct solo path', () => {
+  const overlays = applyStudentSoloActivityRequest(
+    {},
+    {
+      activityId: 'video-sync',
+      indices: { h: 5, v: 0, f: 0 },
+      standaloneEntry: { enabled: false, supportsDirectPath: false },
+    },
+  )
+
+  assert.deepEqual(overlays, {
+    '5:0': {
+      activityId: 'video-sync',
+      notice: 'This activity requires a live session.',
     },
   })
 })

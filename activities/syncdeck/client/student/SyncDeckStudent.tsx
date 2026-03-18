@@ -71,6 +71,13 @@ interface RevealStateIndicesPayload {
   studentBoundary?: unknown
 }
 
+interface RevealActivityRequestPayload {
+  activityId?: unknown
+  indices?: unknown
+  stackRequests?: unknown
+  standaloneEntry?: unknown
+}
+
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
 interface SyncDeckEmbeddedActivityRecord {
@@ -102,6 +109,27 @@ interface NavigationCapabilities {
   canGoForward: boolean
   canGoUp: boolean
   canGoDown: boolean
+}
+
+interface SyncDeckSoloOverlayRecord {
+  activityId: string
+  src?: string
+  notice?: string
+}
+
+type SyncDeckSoloOverlaysMap = Record<string, SyncDeckSoloOverlayRecord>
+
+interface SyncDeckSoloActivityRequest {
+  activityId: string
+  indices: {
+    h: number
+    v: number
+    f: number
+  }
+  standaloneEntry?: {
+    enabled: boolean
+    supportsDirectPath: boolean
+  }
 }
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
@@ -189,6 +217,145 @@ function isRevealSyncMessage(value: unknown): value is RevealSyncEnvelope {
   }
 
   return value.type === 'reveal-sync' && typeof value.action === 'string'
+}
+
+function normalizeActivityId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function resolveSoloOverlaySlideKey(indices: { h: number; v: number }): string {
+  return `${indices.h}:${indices.v}`
+}
+
+function normalizeStandaloneEntryContract(value: unknown): {
+  enabled: boolean
+  supportsDirectPath: boolean
+} | null {
+  if (!isPlainObject(value)) {
+    return null
+  }
+
+  return {
+    enabled: value.enabled === true,
+    supportsDirectPath: value.supportsDirectPath === true,
+  }
+}
+
+export function resolveStudentSoloActivityRequestInputs(
+  rawPayload: unknown,
+  fallbackStudentIndices: { h: number; v: number; f: number } | null,
+): SyncDeckSoloActivityRequest[] {
+  if (!isPlainObject(rawPayload)) {
+    return []
+  }
+
+  const payload = rawPayload as RevealActivityRequestPayload
+
+  const parseRequest = (requestPayload: unknown): SyncDeckSoloActivityRequest | null => {
+    if (!isPlainObject(requestPayload)) {
+      return null
+    }
+
+    const request = requestPayload as RevealActivityRequestPayload
+    const activityId = normalizeActivityId(request.activityId)
+    if (!activityId) {
+      return null
+    }
+
+    const indices = normalizeIndices(request.indices) ?? fallbackStudentIndices
+    if (!indices) {
+      return null
+    }
+
+    const standaloneEntry = normalizeStandaloneEntryContract(request.standaloneEntry)
+
+    return {
+      activityId,
+      indices,
+      ...(standaloneEntry ? { standaloneEntry } : {}),
+    }
+  }
+
+  const requests: SyncDeckSoloActivityRequest[] = []
+  const primary = parseRequest(payload)
+  if (primary) {
+    requests.push(primary)
+  }
+
+  if (Array.isArray(payload.stackRequests)) {
+    for (const stackRequest of payload.stackRequests) {
+      const parsed = parseRequest(stackRequest)
+      if (parsed) {
+        requests.push(parsed)
+      }
+    }
+  }
+
+  const dedupedBySlide = new Map<string, SyncDeckSoloActivityRequest>()
+  for (const request of requests) {
+    dedupedBySlide.set(resolveSoloOverlaySlideKey(request.indices), request)
+  }
+
+  return [...dedupedBySlide.values()]
+}
+
+export function resolveStudentSoloActivityRequest(
+  rawPayload: unknown,
+  fallbackStudentIndices: { h: number; v: number; f: number } | null,
+): SyncDeckSoloActivityRequest | null {
+  const requests = resolveStudentSoloActivityRequestInputs(rawPayload, fallbackStudentIndices)
+  if (requests.length === 0) {
+    return null
+  }
+
+  if (fallbackStudentIndices) {
+    const matchingCurrentSlide = requests.find(
+      (request) => request.indices.h === fallbackStudentIndices.h && request.indices.v === fallbackStudentIndices.v,
+    )
+    if (matchingCurrentSlide) {
+      return matchingCurrentSlide
+    }
+  }
+
+  return requests[0] ?? null
+}
+
+export function applyStudentSoloActivityRequest(
+  current: SyncDeckSoloOverlaysMap,
+  request: SyncDeckSoloActivityRequest,
+): SyncDeckSoloOverlaysMap {
+  const slideKey = resolveSoloOverlaySlideKey(request.indices)
+  const directStandaloneSupported = request.standaloneEntry
+    ? request.standaloneEntry.enabled && request.standaloneEntry.supportsDirectPath
+    : true
+
+  const nextOverlay: SyncDeckSoloOverlayRecord = directStandaloneSupported
+    ? {
+      activityId: request.activityId,
+      src: `/solo/${encodeURIComponent(request.activityId)}`,
+    }
+    : {
+      activityId: request.activityId,
+      notice: 'This activity requires a live session.',
+    }
+
+  if (
+    current[slideKey]?.activityId === nextOverlay.activityId
+    && current[slideKey]?.src === nextOverlay.src
+    && current[slideKey]?.notice === nextOverlay.notice
+  ) {
+    return current
+  }
+
+  return {
+    ...current,
+    [slideKey]: nextOverlay,
+  }
 }
 
 export function resolveInboundPayloadType(rawPayload: unknown): string {
@@ -1369,7 +1536,7 @@ const SyncDeckStudent: FC = () => {
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const [studentIndicesState, setStudentIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
   const [navigationCapabilities, setNavigationCapabilities] = useState<NavigationCapabilities | null>(null)
-  const [soloOverlays, setSoloOverlays] = useState<Record<string, { activityId: string; notice?: string }>>({})
+  const [soloOverlays, setSoloOverlays] = useState<SyncDeckSoloOverlaysMap>({})
   const embeddedActivityIframeRef = useRef<HTMLIFrameElement | null>(null)
 
   useEffect(() => {
@@ -1848,6 +2015,19 @@ const SyncDeckStudent: FC = () => {
       }
 
       if (isRevealSyncMessage(event.data)) {
+        if (event.data.action === 'activityRequest') {
+          const currentSyncState = computeStudentEmbeddedSyncState(
+            localStudentIndicesRef.current,
+            lastInstructorIndicesRef.current,
+          )
+          if (currentSyncState === 'solo') {
+            const soloRequest = resolveStudentSoloActivityRequest(event.data.payload, localStudentIndicesRef.current)
+            if (soloRequest) {
+              setSoloOverlays((current) => applyStudentSoloActivityRequest(current, soloRequest))
+            }
+          }
+        }
+
         const compatibility = assessRevealSyncProtocolCompatibility(event.data.version)
         if (!compatibility.compatible) {
           traceSync('warn_inbound_iframe_payload_incompatible_protocol', {
@@ -2460,14 +2640,30 @@ const SyncDeckStudent: FC = () => {
         ) : null}
 
         {!activeEmbeddedActivity && activeSoloOverlay ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/95 p-6">
-            <div className="max-w-lg rounded-lg border border-gray-300 bg-white p-4 shadow-sm space-y-3 text-center">
-              <h2 className="text-lg font-semibold text-gray-900">Solo Embedded Activity</h2>
-              <p className="text-sm text-gray-700">
-                {activeSoloOverlay.notice ?? 'This activity requires a live session. Solo launch is not available on this slide.'}
-              </p>
+          activeSoloOverlay.src ? (
+            <div className="absolute inset-0 z-10 bg-white p-14">
+              <div className="w-full h-full rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+                <iframe
+                  ref={embeddedActivityIframeRef}
+                  title={`Solo ${activeSoloOverlay.activityId} activity`}
+                  src={activeSoloOverlay.src}
+                  className="w-full h-full border-0"
+                  allow="fullscreen"
+                  sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                  onLoad={sendSyncContextToEmbeddedIframe}
+                />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/95 p-6">
+              <div className="max-w-lg rounded-lg border border-gray-300 bg-white p-4 shadow-sm space-y-3 text-center">
+                <h2 className="text-lg font-semibold text-gray-900">Solo Embedded Activity</h2>
+                <p className="text-sm text-gray-700">
+                  {activeSoloOverlay.notice ?? 'This activity requires a live session. Solo launch is not available on this slide.'}
+                </p>
+              </div>
+            </div>
+          )
         ) : null}
 
         {!activeEmbeddedActivity && showInstructorPendingActivityNotice ? (
@@ -2485,7 +2681,7 @@ const SyncDeckStudent: FC = () => {
           </div>
         ) : null}
 
-        {activeEmbeddedActivity ? (
+        {activeEmbeddedActivity || activeSoloOverlay?.src ? (
           <>
             <button
               type="button"

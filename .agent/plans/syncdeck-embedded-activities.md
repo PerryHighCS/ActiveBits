@@ -902,7 +902,7 @@ session.data.embeddedActivities: Record<instanceKey, {
       and instructor indices on every position update.
 - [x] Send `activebits-embedded` / `syncContext` postMessage to activity iframe after mount
       and on each sync state change.
-- [ ] Solo overlay path: detect `syncState === 'solo'`, honor the existing
+- [x] Solo overlay path: detect `syncState === 'solo'`, honor the existing
   `activityConfig.standaloneEntry` contract, mount direct standalone URL when supported,
   otherwise show informational notice.
 - [x] Local `soloOverlays` map (separate from `embeddedActivities`) for solo instances.
@@ -910,6 +910,8 @@ session.data.embeddedActivities: Record<instanceKey, {
 - [ ] Student tests: position-based overlay selection, stack transitions, late-join hydration,
       navigation controls enabled/disabled per capability flags, overlay changes on nav,
       sync context postMessage content for each sync state, solo activation path.
+  - [x] Added unit coverage for solo activation request parsing, current-slide selection,
+    and direct-path vs informational-notice behavior in `SyncDeckStudent.test.tsx`.
 
 ### Phase 3.5 — Synchronous activity control hardening
 - [x] Embedded child sessions (`CHILD:*`) cannot be ended directly via shared
