@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SyncDeck Conversion Lab</title>
+    <link
+      rel="stylesheet"
+      href="https://perryhighcs.github.io/SyncDeck-Reveal/dist/syncdeck-reveal.css"
+    />
     <style>
       :root {
         --bg: #f4f1ea;
@@ -85,6 +89,41 @@
         padding: 1.25rem;
       }
 
+      .deck-frame {
+        width: min(980px, 100%);
+        aspect-ratio: 16 / 9;
+        min-height: min(620px, calc(100vh - 220px));
+        border: 2px solid var(--line);
+        border-radius: 20px;
+        background: var(--card);
+        box-shadow: 0 18px 40px #7b6d5233;
+        padding: 0.35rem;
+      }
+
+      .reveal {
+        width: 100%;
+        height: 100%;
+        border-radius: 16px;
+        overflow: hidden;
+      }
+
+      .reveal .slides section {
+        text-align: left;
+        color: var(--ink);
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+      }
+
+      .reveal .slides section h2 {
+        margin: 0 0 0.8rem;
+        font-size: clamp(1.5rem, 3.2vw, 2.4rem);
+        line-height: 1.15;
+        color: #12364e;
+      }
+
+      .reveal .slides section p {
+        margin: 0 0 0.9rem;
+      }
+
       .slide {
         width: min(980px, 100%);
         min-height: min(620px, calc(100vh - 210px));
@@ -150,10 +189,6 @@
         font-size: 0.9rem;
       }
 
-      .hidden {
-        display: none;
-      }
-
       .log {
         width: min(980px, 100%);
         margin: 0 auto;
@@ -181,146 +216,171 @@
       </div>
 
       <main class="stage">
-        <section class="slide" id="slide"></section>
+        <div class="deck-frame">
+          <div class="reveal">
+            <div class="slides">
+              <section>
+                <div class="meta">
+                  <span class="chip">h:0</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>SyncDeck Conversion Lab</h2>
+                <p>
+                  Use this deck to validate manager and student host overlays while activities migrate to
+                  embedded mode.
+                </p>
+                <div class="grid two">
+                  <div class="panel">Manager and student navigation sync</div>
+                  <div class="panel">Overlay visibility by h:v anchor</div>
+                  <div class="panel">Late-join hydration behavior</div>
+                </div>
+              </section>
+
+              <section>
+                <div class="meta">
+                  <span class="chip">h:1</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>Global Smoke Slide</h2>
+                <p>No activity request here. Verify pure navigation and status updates.</p>
+                <div class="grid two">
+                  <div class="panel">canGoBack and canGoForward flip at boundaries</div>
+                  <div class="panel">State envelopes continue after local navigation</div>
+                </div>
+              </section>
+
+              <section>
+                <section
+                  data-activity-id="embedded-test"
+                  data-activity-trigger="slide-enter"
+                  data-activity-options='{"prompt":"embedded contract smoke check"}'
+                >
+                  <div class="meta">
+                    <span class="chip">h:2</span>
+                    <span class="chip">v:0</span>
+                  </div>
+                  <h2>Embedded Test Harness</h2>
+                  <p>Anchored request for embedded-test activity at 2:0.</p>
+                  <div class="panel">
+                    <strong>Activity Anchor:</strong> embedded-test<br />
+                    <strong>Trigger:</strong> slide-enter
+                  </div>
+                  <div class="grid two">
+                    <div class="panel">Start once, verify dedup by instanceKey</div>
+                    <div class="panel">Manager panel shows running instance</div>
+                    <div class="panel">Student overlay appears on 2:0</div>
+                  </div>
+                </section>
+
+                <section
+                  data-activity-id="raffle"
+                  data-activity-trigger="slide-enter"
+                  data-activity-options='{"title":"Vertical stack raffle branch"}'
+                >
+                  <div class="meta">
+                    <span class="chip">h:2</span>
+                    <span class="chip">v:1</span>
+                  </div>
+                  <h2>Vertical Choice A</h2>
+                  <p>Vertical stack sibling for position-based overlay switching.</p>
+                  <div class="panel">
+                    <strong>Activity Anchor:</strong> raffle<br />
+                    <strong>Trigger:</strong> slide-enter
+                  </div>
+                  <div class="grid two">
+                    <div class="panel">Different overlay than 2:0</div>
+                    <div class="panel">Move between 2:0 and 2:1 to swap overlays</div>
+                  </div>
+                </section>
+
+                <section
+                  data-activity-id="algorithm-demo"
+                  data-activity-trigger="slide-enter"
+                  data-activity-options='{"seed":"syncdeck-ui-check"}'
+                >
+                  <div class="meta">
+                    <span class="chip">h:2</span>
+                    <span class="chip">v:2</span>
+                  </div>
+                  <h2>Vertical Choice B</h2>
+                  <p>Second vertical branch using algorithm-demo for conversion checks.</p>
+                  <div class="panel">
+                    <strong>Activity Anchor:</strong> algorithm-demo<br />
+                    <strong>Trigger:</strong> slide-enter
+                  </div>
+                  <div class="grid two">
+                    <div class="panel">Host chevrons up and down state transitions</div>
+                    <div class="panel">Overlay switches on vertical changes</div>
+                  </div>
+                </section>
+              </section>
+
+              <section
+                data-activity-id="video-sync"
+                data-activity-trigger="slide-enter"
+                data-activity-options='{"mode":"conversion-smoke"}'
+              >
+                <div class="meta">
+                  <span class="chip">h:3</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>Synchronous Candidate</h2>
+                <p>Use this for future instructor-gated runtime behavior checks.</p>
+                <div class="panel">
+                  <strong>Activity Anchor:</strong> video-sync<br />
+                  <strong>Trigger:</strong> slide-enter
+                </div>
+                <div class="grid two">
+                  <div class="panel">syncContext updates while navigating</div>
+                  <div class="panel">End control dismisses one instance only</div>
+                </div>
+              </section>
+
+              <section>
+                <div class="meta">
+                  <span class="chip">h:4</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>Manual Trigger Lab</h2>
+                <p>
+                  No auto activity request. Use the Request Activity button to emit activityRequest manually.
+                </p>
+                <div class="grid two">
+                  <div class="panel">Manual request payload path</div>
+                  <div class="panel">Repeated manual requests for idempotency checks</div>
+                </div>
+              </section>
+
+              <section>
+                <div class="meta">
+                  <span class="chip">h:5</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>Wrap Up / Rejoin Test</h2>
+                <p>Use this endpoint slide for reconnect, refresh, and late-join validation.</p>
+                <div class="grid two">
+                  <div class="panel">Reconnect while activity active</div>
+                  <div class="panel">Hydrate embeddedActivities from session snapshot</div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
       </main>
 
       <div class="log" id="log"></div>
       <div class="foot">
-        SyncDeck Conversion Lab deck. Emits reveal-sync ready/state envelopes and optional activityRequest on slide entry.
+        SyncDeck Conversion Lab deck. Powered by hosted SyncDeck Reveal runtime with manual activityRequest controls.
       </div>
     </div>
 
+    <script src="https://perryhighcs.github.io/SyncDeck-Reveal/dist/syncdeck-reveal.js"></script>
     <script>
       ;(() => {
         const deckId = 'syncdeck-conversion-lab'
-        const source = 'reveal-iframe-sync'
-        const version = '2.0.0'
-
-        const slides = [
-          {
-            h: 0,
-            v: 0,
-            title: 'SyncDeck Conversion Lab',
-            body: 'Use this deck to validate manager and student host overlays while activities migrate to embedded mode.',
-            checklist: [
-              'Manager/student navigation sync',
-              'Overlay visibility by h:v anchor',
-              'Late-join hydration behavior',
-            ],
-          },
-          {
-            h: 1,
-            v: 0,
-            title: 'Global Smoke Slide',
-            body: 'No activity request here. Verify pure navigation and status updates.',
-            checklist: [
-              'canGoBack/canGoForward flips at boundaries',
-              'State envelopes continue after local navigation',
-            ],
-          },
-          {
-            h: 2,
-            v: 0,
-            title: 'Embedded Test Harness',
-            body: 'Anchored request for embedded-test activity at 2:0.',
-            activity: {
-              activityId: 'embedded-test',
-              trigger: 'slide-enter',
-              activityOptions: {
-                prompt: 'embedded contract smoke check',
-              },
-            },
-            checklist: [
-              'Start once, verify dedup by instanceKey',
-              'Manager panel shows running instance',
-              'Student overlay appears on 2:0',
-            ],
-          },
-          {
-            h: 2,
-            v: 1,
-            title: 'Vertical Choice A',
-            body: 'Vertical stack sibling for position-based overlay switching.',
-            activity: {
-              activityId: 'raffle',
-              trigger: 'slide-enter',
-              activityOptions: {
-                title: 'Vertical stack raffle branch',
-              },
-            },
-            checklist: [
-              'Different overlay than 2:0',
-              'Student can move between 2:0 and 2:1 to swap overlays',
-            ],
-          },
-          {
-            h: 2,
-            v: 2,
-            title: 'Vertical Choice B',
-            body: 'Second vertical branch using algorithm-demo for conversion checks.',
-            activity: {
-              activityId: 'algorithm-demo',
-              trigger: 'slide-enter',
-              activityOptions: {
-                seed: 'syncdeck-ui-check',
-              },
-            },
-            checklist: [
-              'Host chevrons up/down state transitions',
-              'overlay switches on v changes',
-            ],
-          },
-          {
-            h: 3,
-            v: 0,
-            title: 'Synchronous Candidate',
-            body: 'Use this for future instructor-gated runtime behavior checks.',
-            activity: {
-              activityId: 'video-sync',
-              trigger: 'slide-enter',
-              activityOptions: {
-                mode: 'conversion-smoke',
-              },
-            },
-            checklist: [
-              'syncContext updates while navigating',
-              'End control dismisses one instance only',
-            ],
-          },
-          {
-            h: 4,
-            v: 0,
-            title: 'Manual Trigger Lab',
-            body: 'No auto activity request. Use the Request Activity button to emit activityRequest manually.',
-            checklist: [
-              'Manual request payload path',
-              'Repeated manual requests for idempotency checks',
-            ],
-          },
-          {
-            h: 5,
-            v: 0,
-            title: 'Wrap Up / Rejoin Test',
-            body: 'Use this endpoint slide for reconnect, refresh, and late-join validation.',
-            checklist: [
-              'Reconnect while activity active',
-              'Hydrate embeddedActivities from session snapshot',
-            ],
-          },
-        ]
-
-        const byKey = new Map(slides.map((s) => [`${s.h}:${s.v}`, s]))
-
-        const state = {
-          role: 'student',
-          indexh: 0,
-          indexv: 0,
-          indexf: 0,
-          overview: false,
-        }
+        let lastSlideEnterRequestKey = null
 
         const statusEl = document.getElementById('status')
-        const slideEl = document.getElementById('slide')
         const logEl = document.getElementById('log')
 
         const prevBtn = document.getElementById('prevBtn')
@@ -338,271 +398,349 @@
           logEl.prepend(div)
         }
 
-        function envelope(action, payload) {
+        function getSyncApi() {
+          if (!window.RevealIframeSyncAPI) {
+            return null
+          }
+          return window.RevealIframeSyncAPI
+        }
+
+        function currentIndices() {
+          const reveal = window.Reveal
+          const indices = reveal && typeof reveal.getIndices === 'function' ? reveal.getIndices() : {}
           return {
-            type: 'reveal-sync',
-            version,
-            action,
-            deckId,
-            role: state.role,
-            source,
-            ts: Date.now(),
-            payload,
+            h: Number.isFinite(indices?.h) ? Number(indices.h) : 0,
+            v: Number.isFinite(indices?.v) ? Number(indices.v) : 0,
+            f: Number.isFinite(indices?.f) ? Number(indices.f) : -1,
           }
         }
 
-        function send(action, payload) {
-          const msg = envelope(action, payload)
-          window.parent.postMessage(msg, '*')
+        function parseJsonAttribute(raw, fallback = {}) {
+          if (typeof raw !== 'string' || raw.trim().length === 0) {
+            return fallback
+          }
+
+          try {
+            const parsed = JSON.parse(raw)
+            return parsed && typeof parsed === 'object' ? parsed : fallback
+          } catch {
+            return fallback
+          }
+        }
+
+        function getActivityRequestFromSlide(slide) {
+          if (!slide) {
+            return null
+          }
+
+          const activityId = slide.getAttribute('data-activity-id')
+          if (!activityId) {
+            return null
+          }
+
+          return {
+            activityId,
+            trigger: slide.getAttribute('data-activity-trigger') || 'slide-enter',
+            activityOptions: parseJsonAttribute(slide.getAttribute('data-activity-options'), {}),
+          }
+        }
+
+        function getCurrentSlideActivityRequest() {
+          const reveal = window.Reveal
+          const slide = reveal && typeof reveal.getCurrentSlide === 'function' ? reveal.getCurrentSlide() : null
+          return getActivityRequestFromSlide(slide)
+        }
+
+        function getSlideElementByIndices(indicesOverride) {
+          const indices = indicesOverride || currentIndices()
+          const slidesRoot = document.querySelector('.reveal .slides')
+          if (!(slidesRoot instanceof HTMLElement)) {
+            return null
+          }
+
+          const horizontalSlides = Array.from(slidesRoot.children).filter((node) => {
+            return node instanceof HTMLElement && node.tagName.toLowerCase() === 'section'
+          })
+
+          const horizontalSlide = horizontalSlides[indices.h]
+          if (!(horizontalSlide instanceof HTMLElement)) {
+            return null
+          }
+
+          const verticalSlides = Array.from(horizontalSlide.children).filter((node) => {
+            return node instanceof HTMLElement && node.tagName.toLowerCase() === 'section'
+          })
+
+          if (verticalSlides.length === 0) {
+            return horizontalSlide
+          }
+
+          if (indices.v < 0 || indices.v >= verticalSlides.length) {
+            return null
+          }
+
+          const verticalSlide = verticalSlides[indices.v]
+          return verticalSlide instanceof HTMLElement ? verticalSlide : null
+        }
+
+        function sendCustom(action, payload) {
+          const syncApi = getSyncApi()
+          if (!syncApi || typeof syncApi.sendCustom !== 'function') {
+            log('sync api unavailable', { action })
+            return
+          }
+
+          syncApi.sendCustom(action, payload)
           log('sent', { action, payload })
         }
 
-        function getSlide(h, v) {
-          return byKey.get(`${h}:${v}`) || null
+        function buildAnchoredInstanceKey(activityId, indices) {
+          return `${activityId}:${indices.h}:${indices.v}`
         }
 
-        function hasVertical(h, v) {
-          return byKey.has(`${h}:${v}`)
-        }
-
-        function maxH() {
-          return Math.max(...slides.map((s) => s.h))
-        }
-
-        function maxVFor(h) {
-          const verticals = slides.filter((s) => s.h === h).map((s) => s.v)
-          return verticals.length ? Math.max(...verticals) : 0
-        }
-
-        function capabilities() {
-          return {
-            canGoBack: state.indexh > 0 || state.indexv > 0,
-            canGoForward: state.indexh < maxH() || state.indexv < maxVFor(state.indexh),
-            canGoUp: state.indexv > 0,
-            canGoDown: hasVertical(state.indexh, state.indexv + 1),
+        function listVerticalStackActivityRequests(indicesOverride, slideOverride) {
+          const indices = indicesOverride || currentIndices()
+          const resolvedSlide = slideOverride || getSlideElementByIndices(indices)
+          if (!(resolvedSlide instanceof HTMLElement)) {
+            return []
           }
-        }
 
-        function navigation() {
-          const caps = capabilities()
-          return {
-            current: { h: state.indexh, v: state.indexv, f: state.indexf },
-            ...caps,
+          const stackRoot = resolvedSlide.parentElement
+          if (!(stackRoot instanceof HTMLElement) || stackRoot.tagName.toLowerCase() !== 'section') {
+            return []
           }
+
+          const verticalSlides = Array.from(stackRoot.children).filter((node) => {
+            return node instanceof HTMLElement && node.tagName.toLowerCase() === 'section'
+          })
+          if (verticalSlides.length <= 1) {
+            return []
+          }
+
+          return verticalSlides
+            .map((slide, vIndex) => {
+              const activity = getActivityRequestFromSlide(slide)
+              if (!activity) {
+                return null
+              }
+
+              const requestIndices = {
+                h: indices.h,
+                v: vIndex,
+                f: -1,
+              }
+
+              return {
+                activityId: activity.activityId,
+                trigger: activity.trigger,
+                activityOptions: activity.activityOptions,
+                indices: requestIndices,
+                instanceKey: buildAnchoredInstanceKey(activity.activityId, requestIndices),
+              }
+            })
+            .filter(Boolean)
         }
 
-        function renderSlide() {
-          const current = getSlide(state.indexh, state.indexv)
-          if (!current) {
-            slideEl.innerHTML = '<h1>Missing slide definition</h1>'
+        function emitActivityRequest(payload, indicesOverride) {
+          const indices = indicesOverride || currentIndices()
+          const resolvedSlide = getSlideElementByIndices(indices)
+          const basePayload = {
+            ...payload,
+            indices,
+          }
+
+          const primaryInstanceKey =
+            typeof payload?.activityId === 'string' && payload.activityId.length > 0
+              ? buildAnchoredInstanceKey(payload.activityId, indices)
+              : null
+
+          if (typeof payload?.activityId === 'string' && payload.activityId.length > 0) {
+            basePayload.instanceKey = buildAnchoredInstanceKey(payload.activityId, indices)
+          }
+
+          const stackRequests = listVerticalStackActivityRequests(indices, resolvedSlide).filter((request) => {
+            return request.instanceKey !== primaryInstanceKey
+          })
+          if (stackRequests.length > 0) {
+            basePayload.stackRequests = stackRequests
+          }
+
+          sendCustom('activityRequest', {
+            ...basePayload,
+          })
+        }
+
+        function emitSlideEnterActivityRequest(indicesOverride, slideOverride) {
+          const indices = indicesOverride || currentIndices()
+          const resolvedSlide = slideOverride || getSlideElementByIndices(indices)
+          if (!resolvedSlide) {
+            return { attempted: false, emitted: false }
+          }
+
+          const activity = getActivityRequestFromSlide(resolvedSlide)
+          if (!activity) {
+            return { attempted: true, emitted: false }
+          }
+
+          emitActivityRequest(activity, indices)
+          return { attempted: true, emitted: true }
+        }
+
+        function maybeEmitSlideEnterActivityRequest(indicesOverride) {
+          const indices = indicesOverride || currentIndices()
+          const slideKey = `${indices.h}:${indices.v}`
+          if (lastSlideEnterRequestKey === slideKey) {
             return
           }
 
-          const activityBlock = current.activity
-            ? `
-              <div class="panel">
-                <strong>Activity Anchor:</strong> ${current.activity.activityId}<br />
-                <strong>Trigger:</strong> ${current.activity.trigger}
-              </div>
-            `
-            : '<div class="panel"><strong>Activity Anchor:</strong> none</div>'
+          const requestResult = emitSlideEnterActivityRequest(indices)
+          if (requestResult.attempted) {
+            lastSlideEnterRequestKey = slideKey
+          }
+        }
 
-          const items = (current.checklist || [])
-            .map((item) => `<div class="panel">${item}</div>`)
-            .join('')
+        function extractInboundCommandTargetIndices(messageData) {
+          if (!messageData || typeof messageData !== 'object') {
+            return null
+          }
 
-          slideEl.innerHTML = `
-            <div class="meta">
-              <span class="chip">h:${state.indexh}</span>
-              <span class="chip">v:${state.indexv}</span>
-              <span class="chip">role:${state.role}</span>
-              <span class="chip">overview:${String(state.overview)}</span>
-            </div>
-            <h1>${current.title}</h1>
-            <p>${current.body}</p>
-            ${activityBlock}
-            <div class="grid two">${items}</div>
-          `
+          if (messageData.type !== 'reveal-sync' || messageData.action !== 'command') {
+            return null
+          }
 
-          const caps = capabilities()
-          prevBtn.disabled = !caps.canGoBack
-          nextBtn.disabled = !caps.canGoForward
-          upBtn.disabled = !caps.canGoUp
-          downBtn.disabled = !caps.canGoDown
+          const command = messageData.payload
+          if (!command || typeof command !== 'object') {
+            return null
+          }
 
-          statusEl.textContent = `Slide ${state.indexh}:${state.indexv} | role ${state.role} | canGoBack ${caps.canGoBack} | canGoForward ${caps.canGoForward}`
+          const commandName = command.name
+          if (commandName !== 'setState' && commandName !== 'syncToInstructor') {
+            return null
+          }
 
-          send('state', {
-            indices: { h: state.indexh, v: state.indexv, f: state.indexf },
-            navigation: navigation(),
-            capabilities: capabilities(),
-            overview: state.overview,
-            revealState: {
-              indexh: state.indexh,
-              indexv: state.indexv,
-              indexf: state.indexf,
-              overview: state.overview,
-              storyboardDisplayed: state.overview,
+          const state = command.payload && typeof command.payload === 'object' ? command.payload.state : null
+          if (!state || typeof state !== 'object') {
+            return null
+          }
+
+          const h = Number(state.indexh)
+          const v = Number(state.indexv)
+          const f = Number(state.indexf)
+          if (!Number.isFinite(h) || !Number.isFinite(v)) {
+            return null
+          }
+
+          return {
+            h,
+            v,
+            f: Number.isFinite(f) ? f : -1,
+          }
+        }
+
+        function updateUiFromStatus() {
+          const syncApi = getSyncApi()
+          const status = syncApi && typeof syncApi.getStatus === 'function' ? syncApi.getStatus() : null
+          const nav = status?.navigation || null
+          const indices = nav?.current || currentIndices()
+          const role = status?.role || (syncApi && typeof syncApi.getRole === 'function' ? syncApi.getRole() : 'standalone')
+
+          if (nav) {
+            prevBtn.disabled = nav.canGoBack === false
+            nextBtn.disabled = nav.canGoForward === false
+            upBtn.disabled = nav.canGoUp === false
+            downBtn.disabled = nav.canGoDown === false
+          }
+
+          statusEl.textContent = `Slide ${indices.h}:${indices.v} | role ${role} | canGoBack ${nav ? String(nav.canGoBack) : '?'} | canGoForward ${nav ? String(nav.canGoForward) : '?'}`
+          maybeEmitSlideEnterActivityRequest(indices)
+        }
+
+        function toggleStoryboard() {
+          window.dispatchEvent(new CustomEvent('reveal-storyboard-toggle'))
+        }
+
+        function initDeck() {
+          if (typeof window.initSyncDeckReveal !== 'function') {
+            statusEl.textContent = 'initSyncDeckReveal unavailable'
+            return
+          }
+
+          window.initSyncDeckReveal({
+            deckId,
+            iframeSyncOverrides: {
+              hostOrigin: '*',
+              allowedOrigins: ['*'],
+            },
+            revealOverrides: {
+              embedded: true,
+              controls: true,
+              progress: true,
+              hash: false,
+            },
+            afterInit: (reveal) => {
+              log('deck initialized', { version: window.RevealIframeSyncAPI?.version ?? null })
+
+              reveal.on('ready', () => {
+                updateUiFromStatus()
+              })
+
+              reveal.on('slidechanged', (event) => {
+                updateUiFromStatus()
+              })
+
+              reveal.on('fragmentshown', updateUiFromStatus)
+              reveal.on('fragmenthidden', updateUiFromStatus)
+
+              window.addEventListener('reveal-iframesync-status', updateUiFromStatus)
+              window.addEventListener('message', (event) => {
+                const commandIndices = extractInboundCommandTargetIndices(event.data)
+                if (commandIndices) {
+                  maybeEmitSlideEnterActivityRequest(commandIndices)
+                }
+              })
+              updateUiFromStatus()
             },
           })
-
-          if (current.activity && current.activity.trigger === 'slide-enter') {
-            send('activityRequest', {
-              activityId: current.activity.activityId,
-              trigger: 'slide-enter',
-              activityOptions: current.activity.activityOptions || {},
-            })
-          }
         }
 
-        function clampToExisting() {
-          if (!getSlide(state.indexh, state.indexv)) {
-            state.indexv = 0
-          }
-          if (!getSlide(state.indexh, state.indexv)) {
-            state.indexh = 0
-            state.indexv = 0
-          }
-        }
-
-        function goPrev() {
-          if (state.indexv > 0) {
-            state.indexv -= 1
-          } else if (state.indexh > 0) {
-            state.indexh -= 1
-            state.indexv = 0
-          }
-          clampToExisting()
-          renderSlide()
-        }
-
-        function goNext() {
-          if (hasVertical(state.indexh, state.indexv + 1)) {
-            state.indexv += 1
-          } else if (state.indexh < maxH()) {
-            state.indexh += 1
-            state.indexv = 0
-          }
-          clampToExisting()
-          renderSlide()
-        }
-
-        function goUp() {
-          if (state.indexv > 0) {
-            state.indexv -= 1
-            renderSlide()
-          }
-        }
-
-        function goDown() {
-          if (hasVertical(state.indexh, state.indexv + 1)) {
-            state.indexv += 1
-            renderSlide()
-          }
-        }
-
-        function applySetState(nextState) {
-          const h = Number.isFinite(nextState?.indexh) ? Number(nextState.indexh) : state.indexh
-          const v = Number.isFinite(nextState?.indexv) ? Number(nextState.indexv) : state.indexv
-          const f = Number.isFinite(nextState?.indexf) ? Number(nextState.indexf) : state.indexf
-
-          state.indexh = h
-          state.indexv = v
-          state.indexf = f
-          if (typeof nextState?.overview === 'boolean') {
-            state.overview = nextState.overview
-          }
-          clampToExisting()
-          renderSlide()
-        }
-
-        function handleCommand(command) {
-          const name = command?.name
-          const payload = command?.payload || {}
-
-          switch (name) {
-            case 'next':
-              goNext()
-              return
-            case 'prev':
-              goPrev()
-              return
-            case 'up':
-              goUp()
-              return
-            case 'down':
-              goDown()
-              return
-            case 'slide': {
-              const h = Number.isFinite(payload?.h) ? Number(payload.h) : state.indexh
-              const v = Number.isFinite(payload?.v) ? Number(payload.v) : 0
-              state.indexh = h
-              state.indexv = v
-              if (Number.isFinite(payload?.f)) {
-                state.indexf = Number(payload.f)
-              }
-              clampToExisting()
-              renderSlide()
-              return
-            }
-            case 'setState':
-              applySetState(payload?.state || {})
-              return
-            case 'setRole':
-              if (payload?.role === 'student' || payload?.role === 'instructor') {
-                state.role = payload.role
-                renderSlide()
-              }
-              return
-            case 'toggleOverview':
-              state.overview = !state.overview
-              renderSlide()
-              return
-            case 'showOverview':
-              state.overview = true
-              renderSlide()
-              return
-            case 'hideOverview':
-              state.overview = false
-              renderSlide()
-              return
-            default:
-              log('ignored command', { name })
-          }
-        }
-
-        window.addEventListener('message', (event) => {
-          const data = event.data
-          if (!data || typeof data !== 'object' || data.type !== 'reveal-sync') {
-            return
-          }
-
-          if (data.action === 'command' && data.payload) {
-            handleCommand(data.payload)
+        prevBtn.addEventListener('click', () => {
+          if (window.Reveal && typeof window.Reveal.prev === 'function') {
+            window.Reveal.prev()
           }
         })
-
-        prevBtn.addEventListener('click', goPrev)
-        nextBtn.addEventListener('click', goNext)
-        upBtn.addEventListener('click', goUp)
-        downBtn.addEventListener('click', goDown)
+        nextBtn.addEventListener('click', () => {
+          if (window.Reveal && typeof window.Reveal.next === 'function') {
+            window.Reveal.next()
+          }
+        })
+        upBtn.addEventListener('click', () => {
+          if (window.Reveal && typeof window.Reveal.up === 'function') {
+            window.Reveal.up()
+          }
+        })
+        downBtn.addEventListener('click', () => {
+          if (window.Reveal && typeof window.Reveal.down === 'function') {
+            window.Reveal.down()
+          }
+        })
         toggleOverviewBtn.addEventListener('click', () => {
-          state.overview = !state.overview
-          renderSlide()
+          toggleStoryboard()
+          updateUiFromStatus()
         })
         requestActivityBtn.addEventListener('click', () => {
-          const current = getSlide(state.indexh, state.indexv)
+          const current = getCurrentSlideActivityRequest()
+          const indices = currentIndices()
           const fallback = {
             activityId: 'embedded-test',
             trigger: 'manual-button',
             activityOptions: {
               fromDeck: true,
-              h: state.indexh,
-              v: state.indexv,
+              h: indices.h,
+              v: indices.v,
             },
           }
-          const activity = current?.activity || fallback
-          send('activityRequest', {
+          const activity = current || fallback
+          emitActivityRequest({
             activityId: activity.activityId,
             trigger: 'manual-button',
             activityOptions: {
@@ -612,18 +750,7 @@
           })
         })
 
-        send('ready', {
-          indices: { h: state.indexh, v: state.indexv, f: state.indexf },
-          navigation: navigation(),
-          capabilities: capabilities(),
-          revealState: {
-            indexh: state.indexh,
-            indexv: state.indexv,
-            indexf: state.indexf,
-          },
-        })
-
-        renderSlide()
+        initDeck()
       })()
     </script>
   </body>

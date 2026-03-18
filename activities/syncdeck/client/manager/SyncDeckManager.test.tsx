@@ -27,8 +27,12 @@ import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
 import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
 import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
 import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
+import { buildManagerOverlaySetStateCommand } from './SyncDeckManager.js'
+import { buildManagerResyncCommandForInstanceKey } from './SyncDeckManager.js'
+import { resolveManagerOverlayNavigationBaseIndices } from './SyncDeckManager.js'
 import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
+import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
@@ -191,6 +195,16 @@ void test('evaluateRestoreSuppressionForOutboundState drops and releases when re
   })
 
   assert.deepEqual(result, { shouldDrop: true, shouldRelease: true })
+})
+
+void test('evaluateRestoreSuppressionForOutboundState keeps suppression armed when outbound state is ahead of target', () => {
+  const result = evaluateRestoreSuppressionForOutboundState({
+    suppressOutboundUntilRestore: true,
+    restoreTargetIndices: { h: 2, v: 0, f: 0 },
+    instructorIndices: { h: 3, v: 0, f: 0 },
+  })
+
+  assert.deepEqual(result, { shouldDrop: true, shouldRelease: false })
 })
 
 void test('buildClearBoundaryCommandMessage emits clearBoundary command', () => {
@@ -391,17 +405,85 @@ void test('resolveManagerEmbeddedInstanceStatus marks only selected instance as 
 })
 
 void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for four directions and slide', () => {
-  const prev = buildManagerOverlayNavigationCommand('prev') as { payload?: { name?: unknown } }
-  const next = buildManagerOverlayNavigationCommand('next') as { payload?: { name?: unknown } }
+  const left = buildManagerOverlayNavigationCommand('left') as { payload?: { name?: unknown } }
+  const right = buildManagerOverlayNavigationCommand('right') as { payload?: { name?: unknown } }
   const up = buildManagerOverlayNavigationCommand('up') as { payload?: { name?: unknown } }
   const down = buildManagerOverlayNavigationCommand('down') as { payload?: { name?: unknown } }
   const slide = buildManagerOverlayNavigationCommand('slide') as { payload?: { name?: unknown } }
 
-  assert.equal(prev.payload?.name, 'prev')
-  assert.equal(next.payload?.name, 'next')
+  assert.equal(left.payload?.name, 'left')
+  assert.equal(right.payload?.name, 'right')
   assert.equal(up.payload?.name, 'up')
   assert.equal(down.payload?.name, 'down')
   assert.equal(slide.payload?.name, 'slide')
+})
+
+void test('buildManagerOverlaySetStateCommand builds a setState envelope with explicit indices', () => {
+  const command = buildManagerOverlaySetStateCommand({ h: 3, v: 1, f: 0 }) as {
+    payload?: { name?: unknown; payload?: { state?: { indexh?: unknown; indexv?: unknown; indexf?: unknown } } }
+  }
+
+  assert.equal(command.payload?.name, 'setState')
+  assert.deepEqual(command.payload?.payload?.state, {
+    indexh: 3,
+    indexv: 1,
+    indexf: 0,
+  })
+})
+
+void test('buildManagerResyncCommandForInstanceKey builds setState for anchored instance key', () => {
+  const command = buildManagerResyncCommandForInstanceKey('embedded-test:2:0') as {
+    payload?: { name?: unknown; payload?: { state?: { indexh?: unknown; indexv?: unknown; indexf?: unknown } } }
+  }
+
+  assert.equal(command.payload?.name, 'setState')
+  assert.deepEqual(command.payload?.payload?.state, {
+    indexh: 2,
+    indexv: 0,
+    indexf: 0,
+  })
+})
+
+void test('buildManagerResyncCommandForInstanceKey ignores non-anchored instance key', () => {
+  const command = buildManagerResyncCommandForInstanceKey('embedded-test:global')
+  assert.equal(command, null)
+})
+
+void test('resolveManagerOverlayNavigationBaseIndices falls back to active embedded anchor when current indices are unavailable', () => {
+  assert.deepEqual(
+    resolveManagerOverlayNavigationBaseIndices({
+      currentIndices: null,
+      activeEmbeddedInstanceKey: 'embedded-test:2:1',
+    }),
+    { h: 2, v: 1, f: 0 },
+  )
+})
+
+void test('resolveManagerActivityRequestBatchInputs keeps current slide primary and adds sibling stack requests', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestBatchInputs(
+      {
+        activityId: 'embedded-test',
+        indices: { h: 2, v: 0, f: 0 },
+        stackRequests: [
+          {
+            activityId: 'raffle',
+            indices: { h: 2, v: 1, f: -1 },
+          },
+          {
+            activityId: 'algorithm-demo',
+            indices: { h: 2, v: 2, f: -1 },
+          },
+        ],
+      },
+      { h: 9, v: 0, f: 0 },
+    ),
+    [
+      { activityId: 'embedded-test', instanceKey: 'embedded-test:2:0' },
+      { activityId: 'raffle', instanceKey: 'raffle:2:1' },
+      { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:2' },
+    ],
+  )
 })
 
 void test('extractManagerNavigationCapabilitiesFromRevealMessage reads four-direction navigation capabilities', () => {

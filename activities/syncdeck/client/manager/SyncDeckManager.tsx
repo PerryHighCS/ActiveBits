@@ -6,6 +6,10 @@ import {
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import {
+  deriveEmbeddedOverlayVerticalNavigationCapabilities,
+  resolveOptimisticEmbeddedOverlayIndices,
+} from '../shared/embeddedOverlayNavigation.js'
+import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
@@ -88,6 +92,7 @@ interface RevealActivityRequestPayload {
   activityId?: unknown
   instanceKey?: unknown
   indices?: unknown
+  stackRequests?: unknown
 }
 
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
@@ -436,7 +441,7 @@ interface SyncDeckEmbeddedLifecyclePayload {
   childSessionId: string
 }
 
-type SyncDeckManagerOverlayNavigationDirection = 'prev' | 'next' | 'up' | 'down' | 'slide'
+type SyncDeckManagerOverlayNavigationDirection = 'left' | 'right' | 'up' | 'down' | 'slide'
 
 interface SyncDeckManagerNavigationCapabilities {
   canGoBack: boolean
@@ -685,6 +690,55 @@ export function buildManagerOverlayNavigationCommand(
   return buildRevealCommandMessage(direction, {})
 }
 
+export function buildManagerOverlaySetStateCommand(
+  indices: { h: number; v: number; f: number },
+): Record<string, unknown> {
+  return buildRevealCommandMessage('setState', {
+    state: {
+      indexh: indices.h,
+      indexv: indices.v,
+      indexf: indices.f,
+    },
+  })
+}
+
+export function buildManagerResyncCommandForInstanceKey(instanceKey: string): Record<string, unknown> | null {
+  const position = parseSyncDeckEmbeddedInstancePosition(instanceKey)
+  if (!position) {
+    return null
+  }
+
+  return buildManagerOverlaySetStateCommand({
+    h: position.h,
+    v: position.v,
+    f: 0,
+  })
+}
+
+export function resolveManagerOverlayNavigationBaseIndices(params: {
+  currentIndices: { h: number; v: number; f: number } | null
+  activeEmbeddedInstanceKey: string | null
+}): { h: number; v: number; f: number } | null {
+  if (params.currentIndices) {
+    return params.currentIndices
+  }
+
+  if (!params.activeEmbeddedInstanceKey) {
+    return null
+  }
+
+  const position = parseSyncDeckEmbeddedInstancePosition(params.activeEmbeddedInstanceKey)
+  if (!position) {
+    return null
+  }
+
+  return {
+    h: position.h,
+    v: position.v,
+    f: 0,
+  }
+}
+
 export function extractManagerNavigationCapabilitiesFromRevealMessage(
   rawPayload: unknown,
 ): SyncDeckManagerNavigationCapabilities | null {
@@ -702,10 +756,10 @@ export function extractManagerNavigationCapabilitiesFromRevealMessage(
     return null
   }
 
-  const canGoBack = typeof source.canGoBack === 'boolean' ? source.canGoBack
-    : typeof source.canGoLeft === 'boolean' ? source.canGoLeft : null
-  const canGoForward = typeof source.canGoForward === 'boolean' ? source.canGoForward
-    : typeof source.canGoRight === 'boolean' ? source.canGoRight : null
+  const canGoBack = typeof source.canGoLeft === 'boolean' ? source.canGoLeft
+    : typeof source.canGoBack === 'boolean' ? source.canGoBack : null
+  const canGoForward = typeof source.canGoRight === 'boolean' ? source.canGoRight
+    : typeof source.canGoForward === 'boolean' ? source.canGoForward : null
   const canGoUp = typeof source.canGoUp === 'boolean' ? source.canGoUp : null
   const canGoDown = typeof source.canGoDown === 'boolean' ? source.canGoDown : null
 
@@ -744,7 +798,7 @@ export function evaluateRestoreSuppressionForOutboundState(params: {
   const hasReachedRestoreTarget =
     params.restoreTargetIndices != null &&
     params.instructorIndices != null &&
-    compareIndices(params.instructorIndices, params.restoreTargetIndices) >= 0
+    compareIndices(params.instructorIndices, params.restoreTargetIndices) === 0
 
   if (!hasReachedRestoreTarget) {
     return { shouldDrop: true, shouldRelease: false }
@@ -949,6 +1003,34 @@ export function resolveManagerActivityRequestStartInput(
     activityId,
     instanceKey: buildAnchoredInstanceKey(activityId, resolvedIndices),
   }
+}
+
+export function resolveManagerActivityRequestBatchInputs(
+  rawPayload: unknown,
+  fallbackInstructorIndices: { h: number; v: number; f: number } | null,
+): Array<{ activityId: string; instanceKey: string }> {
+  if (!isPlainObject(rawPayload)) {
+    return []
+  }
+
+  const payload = rawPayload as RevealActivityRequestPayload
+  const primary = resolveManagerActivityRequestStartInput(payload, fallbackInstructorIndices)
+
+  const parsedStackRequests = Array.isArray(payload.stackRequests)
+    ? payload.stackRequests
+      .map((entry) => resolveManagerActivityRequestStartInput(entry, fallbackInstructorIndices))
+      .filter((entry): entry is { activityId: string; instanceKey: string } => entry != null)
+    : []
+
+  const byInstanceKey = new Map<string, { activityId: string; instanceKey: string }>()
+  if (primary) {
+    byInstanceKey.set(primary.instanceKey, primary)
+  }
+  for (const request of parsedStackRequests) {
+    byInstanceKey.set(request.instanceKey, request)
+  }
+
+  return [...byInstanceKey.values()]
 }
 
 function isRevealSyncEnvelopeData(data: unknown): data is RevealSyncEnvelope {
@@ -1612,6 +1694,11 @@ const SyncDeckManager: FC = () => {
               setInstructorIndicesState(currentIndices)
               lastInstructorStatePayloadRef.current = statePayload
             }
+            console.info('[SyncDeck][ManagerInboundServerPayload]', {
+              action: revealSyncStatePayload ? revealSyncStatePayload.action : null,
+              commandName,
+              currentIndices,
+            })
             const paused = extractPausedState(statePayload)
             if (typeof paused === 'boolean') {
               setIsPresentationPaused(paused)
@@ -2322,23 +2409,51 @@ const SyncDeckManager: FC = () => {
         }
 
         if (envelope.action === 'activityRequest') {
-          const startRequest = resolveManagerActivityRequestStartInput(
+          const startRequests = resolveManagerActivityRequestBatchInputs(
             envelope.payload,
             lastInstructorIndicesRef.current,
           )
-          if (!startRequest) {
+          const primaryStartRequest = startRequests[0] ?? null
+          console.info('[SyncDeck][ManagerActivityRequestInbound]', {
+            rawPayload: envelope.payload,
+            resolvedStartRequests: startRequests,
+            instructorIndices: lastInstructorIndicesRef.current,
+            embeddedActivityKeys: Object.keys(embeddedActivities),
+          })
+          if (!primaryStartRequest) {
             setStartError('Ignored activity request with missing activity id.')
             setStartSuccess(null)
             return
           }
 
-          if (embeddedActivities[startRequest.instanceKey]) {
+          if (startRequests.length === 1 && embeddedActivities[primaryStartRequest.instanceKey]) {
+            const resyncCommand = buildManagerResyncCommandForInstanceKey(primaryStartRequest.instanceKey)
+            if (resyncCommand && presentationOrigin) {
+              presentationIframeRef.current?.contentWindow?.postMessage(resyncCommand, presentationOrigin)
+              relayInstructorPayload(resyncCommand)
+              setInstructorIndicesState(extractIndicesFromRevealPayload(resyncCommand))
+            }
+            console.info('[SyncDeck][ManagerActivityRequestSkippedExisting]', {
+              startRequest: primaryStartRequest,
+              embeddedActivityKeys: Object.keys(embeddedActivities),
+              resyncCommandName: extractRevealCommandName(resyncCommand),
+            })
             setStartError(null)
             setStartSuccess(null)
             return
           }
 
-          void launchEmbeddedActivityFromRequest(startRequest)
+          console.info('[SyncDeck][ManagerActivityRequestLaunch]', {
+            startRequests,
+          })
+          void (async () => {
+            for (const startRequest of startRequests) {
+              if (embeddedActivities[startRequest.instanceKey]) {
+                continue
+              }
+              await launchEmbeddedActivityFromRequest(startRequest)
+            }
+          })()
           return
         }
       }
@@ -2525,9 +2640,9 @@ const SyncDeckManager: FC = () => {
         )
         const payloadWithPauseState = includePausedInStateEnvelope(payloadWithInstructorIndices, pausedState)
         const sanitizedPayload = stripOverviewFromStateEnvelope(payloadWithPauseState)
+        const sanitizedIndices = extractIndicesFromRevealPayload(sanitizedPayload)
         lastInstructorPayloadRef.current = sanitizedPayload
         if (envelope?.type === 'reveal-sync' && envelope.action === 'state') {
-          const sanitizedIndices = extractIndicesFromRevealPayload(sanitizedPayload)
           if (sanitizedIndices) {
             lastInstructorStatePayloadRef.current = sanitizedPayload
           }
@@ -2558,6 +2673,14 @@ const SyncDeckManager: FC = () => {
             payload: sanitizedPayload,
           }),
         )
+        console.info('[SyncDeck][ManagerRelayOutbound]', {
+          action: envelope?.action,
+          commandName: extractRevealCommandName(event.data),
+          instructorIndices,
+          sanitizedIndices,
+          explicitBoundary: explicitBoundaryRef.current,
+          pausedState,
+        })
         traceSync('relay_outbound_iframe_payload', {
           action: envelope?.action,
         })
@@ -2602,17 +2725,61 @@ const SyncDeckManager: FC = () => {
   const runningEmbeddedActivityCount = Object.keys(embeddedActivities).length
   const activeEmbeddedInstanceKey = resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState)
   const activeEmbeddedActivity = activeEmbeddedInstanceKey ? embeddedActivities[activeEmbeddedInstanceKey] ?? null : null
+  const currentOverlayIndices = instructorIndicesState ?? lastInstructorIndicesRef.current
+  const overlayNavigationBaseIndices = resolveManagerOverlayNavigationBaseIndices({
+    currentIndices: currentOverlayIndices,
+    activeEmbeddedInstanceKey,
+  })
+  const overlayVerticalNavigationCapabilities = deriveEmbeddedOverlayVerticalNavigationCapabilities(
+    Object.keys(embeddedActivities),
+    overlayNavigationBaseIndices,
+  )
+  const canMoveBack =
+    overlayNavigationCapabilities?.canGoBack === true
+    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.h > 0 : false)
+  const canMoveForward =
+    overlayNavigationCapabilities?.canGoForward !== false
+  const canMoveUp =
+    overlayNavigationCapabilities?.canGoUp === true
+    || overlayVerticalNavigationCapabilities?.canGoUp === true
+    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v > 0 : false)
+  const canMoveDown =
+    overlayNavigationCapabilities?.canGoDown === true
+    || overlayVerticalNavigationCapabilities?.canGoDown === true
+    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false)
 
-  const sendEmbeddedOverlayNavigation = (direction: 'prev' | 'next' | 'up' | 'down'): void => {
+  const sendEmbeddedOverlayNavigation = (direction: 'left' | 'right' | 'up' | 'down'): void => {
     const targetWindow = presentationIframeRef.current?.contentWindow
     if (!targetWindow || !presentationOrigin) {
       return
     }
 
+    const optimisticIndices = resolveOptimisticEmbeddedOverlayIndices(
+      Object.keys(embeddedActivities),
+      overlayNavigationBaseIndices,
+      direction,
+    )
+
+    console.info('[SyncDeck][ManagerOverlayNav]', {
+      direction,
+      currentOverlayIndices,
+      overlayNavigationBaseIndices,
+      optimisticIndices,
+      commandName: optimisticIndices ? 'setState' : null,
+    })
+
+    if (!optimisticIndices) {
+      return
+    }
+
+    armRestoreSuppression(optimisticIndices)
+    setInstructorIndicesState(optimisticIndices)
+    const setStateCommand = buildManagerOverlaySetStateCommand(optimisticIndices)
     targetWindow.postMessage(
-      buildManagerOverlayNavigationCommand(direction),
+      setStateCommand,
       presentationOrigin,
     )
+    relayInstructorPayload(setStateCommand)
   }
 
   const sendEmbeddedOverlaySlideCommand = (): void => {
@@ -2621,10 +2788,13 @@ const SyncDeckManager: FC = () => {
       return
     }
 
+    const slideCommand = buildManagerOverlayNavigationCommand('slide')
+
     targetWindow.postMessage(
-      buildManagerOverlayNavigationCommand('slide'),
+      slideCommand,
       presentationOrigin,
     )
+    relayInstructorPayload(slideCommand)
   }
 
   const endEmbeddedActivity = async (instanceKey: string): Promise<void> => {
@@ -2951,66 +3121,71 @@ const SyncDeckManager: FC = () => {
                 />
 
                 {activeEmbeddedActivity && (
-                  <div className="absolute inset-8 z-20 rounded-lg border border-gray-200 bg-white shadow-2xl overflow-hidden">
-                    <div className="h-10 px-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-gray-800 truncate">
-                          Embedded Manager: {activeEmbeddedActivity.activityId}
-                        </p>
-                        <p className="text-xs text-gray-600 truncate">{activeEmbeddedInstanceKey}</p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                          onClick={() => sendEmbeddedOverlayNavigation('prev')}
-                          aria-label="Previous slide"
-                          disabled={overlayNavigationCapabilities?.canGoBack === false}
-                        >
-                          ◀
-                        </button>
-                        <button
-                          type="button"
-                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                          onClick={() => sendEmbeddedOverlayNavigation('up')}
-                          aria-label="Move up"
-                          disabled={overlayNavigationCapabilities?.canGoUp === false}
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                          onClick={() => sendEmbeddedOverlayNavigation('next')}
-                          aria-label="Next slide"
-                          disabled={overlayNavigationCapabilities?.canGoForward === false}
-                        >
-                          ▶
-                        </button>
-                        <button
-                          type="button"
-                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                          onClick={() => sendEmbeddedOverlayNavigation('down')}
-                          aria-label="Move down"
-                          disabled={overlayNavigationCapabilities?.canGoDown === false}
-                        >
-                          ▼
-                        </button>
-                        <button
-                          type="button"
-                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100"
-                          onClick={sendEmbeddedOverlaySlideCommand}
-                          aria-label="Slide command"
-                        >
-                          ⦿
-                        </button>
+                  <div className="absolute inset-0 z-20 bg-white overflow-hidden">
+                    <div className="absolute left-4 top-4 z-30 max-w-[calc(100%-8rem)] rounded-md bg-white/92 px-3 py-2 shadow-sm ring-1 ring-black/5 backdrop-blur-sm">
+                      <p className="text-sm font-semibold text-gray-800 truncate">
+                        Embedded Manager: {activeEmbeddedActivity.activityId}
+                      </p>
+                      <p className="text-xs text-gray-600 truncate">{activeEmbeddedInstanceKey}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="absolute right-4 top-4 z-30 px-3 py-2 rounded-full bg-white/92 text-gray-800 shadow-sm ring-1 ring-black/5 hover:bg-white"
+                      onClick={sendEmbeddedOverlaySlideCommand}
+                      aria-label="Slide command"
+                      title="Slide command"
+                    >
+                      ⦿
+                    </button>
+                    <div className="absolute inset-0 p-14">
+                      <div className="w-full h-full rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+                        <iframe
+                          title={`Embedded ${activeEmbeddedActivity.activityId} manager`}
+                          src={`/manage/${encodeURIComponent(activeEmbeddedActivity.activityId)}/${encodeURIComponent(activeEmbeddedActivity.childSessionId)}`}
+                          className="w-full h-full"
+                        />
                       </div>
                     </div>
-                    <iframe
-                      title={`Embedded ${activeEmbeddedActivity.activityId} manager`}
-                      src={`/manage/${encodeURIComponent(activeEmbeddedActivity.activityId)}/${encodeURIComponent(activeEmbeddedActivity.childSessionId)}`}
-                      className="w-full h-[calc(100%-2.5rem)]"
-                    />
+                    <button
+                      type="button"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-30 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+                          onClick={() => sendEmbeddedOverlayNavigation('left')}
+                      aria-label="Move left"
+                      title="Move left"
+                      disabled={!canMoveBack}
+                    >
+                      ◀
+                    </button>
+                    <button
+                      type="button"
+                      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => sendEmbeddedOverlayNavigation('up')}
+                      aria-label="Move up"
+                      title="Move up"
+                      disabled={!canMoveUp}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 z-30 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+                          onClick={() => sendEmbeddedOverlayNavigation('right')}
+                      aria-label="Move right"
+                      title="Move right"
+                      disabled={!canMoveForward}
+                    >
+                      ▶
+                    </button>
+                    <button
+                      type="button"
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => sendEmbeddedOverlayNavigation('down')}
+                      aria-label="Move down"
+                      title="Move down"
+                      disabled={!canMoveDown}
+                    >
+                      ▼
+                    </button>
                   </div>
                 )}
               </div>

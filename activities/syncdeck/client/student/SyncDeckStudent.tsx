@@ -18,6 +18,10 @@ import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
+import {
+  deriveEmbeddedOverlayVerticalNavigationCapabilities,
+  resolveOptimisticEmbeddedOverlayIndices,
+} from '../shared/embeddedOverlayNavigation.js'
 
 interface SessionResponsePayload {
   session?: {
@@ -359,6 +363,18 @@ function buildInstructorStatePayload(
 
 function buildClearBoundaryCommand(message: RevealSyncEnvelope): RevealCommandMessage {
   return buildBoundaryCommandEnvelope(message, 'clearBoundary')
+}
+
+function buildOutboundSetStudentBoundaryCommand(
+  indices: { h: number; v: number; f: number },
+): Record<string, unknown> {
+  return buildRevealCommandMessage('setStudentBoundary', {
+    indices: {
+      h: indices.h,
+      v: 0,
+      f: CANONICAL_BOUNDARY_FRAGMENT_INDEX,
+    },
+  })
 }
 
 function buildSetStudentBoundaryCommand(
@@ -759,6 +775,20 @@ function isSyncToInstructorCommand(rawPayload: unknown): boolean {
   return (message.payload as { name?: unknown }).name === 'syncToInstructor'
 }
 
+function extractRevealCommandName(rawPayload: unknown): string | null {
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  if (message.type !== 'reveal-sync' || message.action !== 'command' || !isPlainObject(message.payload)) {
+    return null
+  }
+
+  const name = (message.payload as { name?: unknown }).name
+  return typeof name === 'string' ? name : null
+}
+
 export function shouldSuppressForwardInstructorSync(
   studentHasBacktrackOptOut: boolean,
   studentPosition: { h: number; v: number; f: number } | null,
@@ -781,6 +811,155 @@ export function shouldResetBacktrackOptOutByMaxPosition(
   }
 
   return compareIndices(studentPosition, maxPosition) >= 0
+}
+
+export function shouldEnableBacktrackOptOutOnLocalMove(params: {
+  studentHasBacktrackOptOut: boolean
+  previousLocalPosition: { h: number; v: number; f: number } | null
+  nextLocalPosition: { h: number; v: number; f: number } | null
+  maxPosition: { h: number; v: number; f: number } | null
+  instructorPosition: { h: number; v: number; f: number } | null
+}): boolean {
+  const {
+    studentHasBacktrackOptOut,
+    previousLocalPosition,
+    nextLocalPosition,
+    maxPosition,
+    instructorPosition,
+  } = params
+
+  if (studentHasBacktrackOptOut || !previousLocalPosition || !nextLocalPosition || !maxPosition) {
+    return false
+  }
+
+  // Only mark local backtrack when the student moved backward away from the effective instructor position.
+  if (compareIndices(nextLocalPosition, previousLocalPosition) >= 0) {
+    return false
+  }
+
+  if (compareIndices(nextLocalPosition, maxPosition) >= 0) {
+    return false
+  }
+
+  if (instructorPosition && compareIndices(nextLocalPosition, instructorPosition) >= 0) {
+    return false
+  }
+
+  return true
+}
+
+export function isExpectedInstructorDrivenLocalMove(
+  expectedInstructorTarget: { h: number; v: number; f: number } | null,
+  localPosition: { h: number; v: number; f: number } | null,
+): boolean {
+  if (!expectedInstructorTarget || !localPosition) {
+    return false
+  }
+
+  return compareIndices(expectedInstructorTarget, localPosition) === 0
+}
+
+export function shouldSuppressInstructorVerticalSetStateSync(
+  inboundCommandName: string | null,
+  studentPosition: { h: number; v: number; f: number } | null,
+  instructorPosition: { h: number; v: number; f: number } | null,
+): boolean {
+  if (inboundCommandName === 'up' || inboundCommandName === 'down') {
+    return true
+  }
+
+  if (inboundCommandName !== 'setState' || !studentPosition || !instructorPosition) {
+    return false
+  }
+
+  return instructorPosition.h === studentPosition.h && instructorPosition.v !== studentPosition.v
+}
+
+export function shouldSuppressInstructorRevealCommandForwarding(params: {
+  semanticInstructorCommandName: string | null
+  studentHasBacktrackOptOut: boolean
+  localStudentPosition: { h: number; v: number; f: number } | null
+  incomingInstructorIndices: { h: number; v: number; f: number } | null
+}): {
+  suppressForwardSync: boolean
+  suppressForwardSyncByBacktrack: boolean
+  suppressForwardSyncByVerticalIndependence: boolean
+} {
+  const suppressForwardSyncByBacktrack = shouldSuppressForwardInstructorSync(
+    params.studentHasBacktrackOptOut,
+    params.localStudentPosition,
+    params.incomingInstructorIndices,
+  )
+  const suppressForwardSyncByVerticalIndependence = shouldSuppressInstructorVerticalSetStateSync(
+    params.semanticInstructorCommandName,
+    params.localStudentPosition,
+    params.incomingInstructorIndices,
+  )
+
+  return {
+    suppressForwardSync: suppressForwardSyncByBacktrack || suppressForwardSyncByVerticalIndependence,
+    suppressForwardSyncByBacktrack,
+    suppressForwardSyncByVerticalIndependence,
+  }
+}
+
+export function shouldForceFollowInstructorSetState(params: {
+  semanticInstructorCommandName: string | null
+  studentHasBacktrackOptOut: boolean
+  localStudentPosition: { h: number; v: number; f: number } | null
+  previousInstructorPosition: { h: number; v: number; f: number } | null
+  instructorPosition: { h: number; v: number; f: number } | null
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap
+}): boolean {
+  const {
+    semanticInstructorCommandName,
+    studentHasBacktrackOptOut,
+    localStudentPosition,
+    previousInstructorPosition,
+    instructorPosition,
+    embeddedActivities,
+  } = params
+
+  if (semanticInstructorCommandName !== 'setState' && semanticInstructorCommandName !== 'syncToInstructor') {
+    return false
+  }
+
+  if (!instructorPosition) {
+    return false
+  }
+
+  const isVerticalInstructorMoveWithinSameStack =
+    previousInstructorPosition != null
+    && previousInstructorPosition.h === instructorPosition.h
+    && previousInstructorPosition.v !== instructorPosition.v
+
+  if (isVerticalInstructorMoveWithinSameStack) {
+    return false
+  }
+
+  if (shouldSuppressInstructorVerticalSetStateSync(semanticInstructorCommandName, localStudentPosition, instructorPosition)) {
+    return false
+  }
+
+  if (!studentHasBacktrackOptOut) {
+    return true
+  }
+
+  if (semanticInstructorCommandName === 'syncToInstructor') {
+    return true
+  }
+
+  // Rejoin authoritative setState when it lands on an anchored embedded activity.
+  if (resolveStudentActiveEmbeddedInstanceKey(embeddedActivities, instructorPosition) != null) {
+    return true
+  }
+
+  if (!localStudentPosition) {
+    return true
+  }
+
+  // Allow follow for non-forward corrections while opted out.
+  return compareIndices(instructorPosition, localStudentPosition) <= 0
 }
 
 function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivityRecord | null {
@@ -927,6 +1106,96 @@ export function resolveStudentActiveEmbeddedInstanceKey(
   return selected
 }
 
+export function resolveStudentActiveEmbeddedInstanceKeyWithFallback(
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap,
+  studentIndices: { h: number; v: number; f: number } | null,
+  fallbackIndices: { h: number; v: number; f: number } | null,
+  fallbackOnMismatch = true,
+): string | null {
+  const primary = resolveStudentActiveEmbeddedInstanceKey(embeddedActivities, studentIndices)
+  if (primary) {
+    return primary
+  }
+
+  if (studentIndices && !fallbackOnMismatch) {
+    return null
+  }
+
+  if (!fallbackIndices) {
+    return null
+  }
+
+  return resolveStudentActiveEmbeddedInstanceKey(embeddedActivities, fallbackIndices)
+}
+
+export function resolveStudentOverlayEmbeddedInstanceKey(
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap,
+  studentIndices: { h: number; v: number; f: number } | null,
+  instructorIndices: { h: number; v: number; f: number } | null,
+  options: {
+    preferInstructor: boolean
+    fallbackOnMismatch: boolean
+  },
+): string | null {
+  const primaryIndices = options.preferInstructor ? instructorIndices : studentIndices
+  const secondaryIndices = options.preferInstructor ? studentIndices : instructorIndices
+
+  const primary = resolveStudentActiveEmbeddedInstanceKey(embeddedActivities, primaryIndices)
+  if (primary) {
+    return primary
+  }
+
+  const shouldReuseSameStackFallback =
+    primaryIndices != null
+    && secondaryIndices != null
+    && primaryIndices.h === secondaryIndices.h
+
+  if (shouldReuseSameStackFallback) {
+    const sameStackFallback = resolveStudentActiveEmbeddedInstanceKey(embeddedActivities, secondaryIndices)
+    if (sameStackFallback) {
+      return sameStackFallback
+    }
+  }
+
+  return resolveStudentActiveEmbeddedInstanceKeyWithFallback(
+    embeddedActivities,
+    primaryIndices,
+    secondaryIndices,
+    options.fallbackOnMismatch,
+  )
+}
+
+export function resolveStudentOverlayNavigationBaseIndices(params: {
+  studentIndices: { h: number; v: number; f: number } | null
+  studentAnchoredInstanceKey: string | null
+  activeEmbeddedInstanceKey: string | null
+}): { h: number; v: number; f: number } | null {
+  if (
+    params.studentIndices
+    && (
+      params.studentAnchoredInstanceKey != null
+      || params.activeEmbeddedInstanceKey == null
+    )
+  ) {
+    return params.studentIndices
+  }
+
+  if (!params.activeEmbeddedInstanceKey) {
+    return params.studentIndices
+  }
+
+  const activePosition = parseSyncDeckEmbeddedInstancePosition(params.activeEmbeddedInstanceKey)
+  if (!activePosition) {
+    return params.studentIndices
+  }
+
+  return {
+    h: activePosition.h,
+    v: activePosition.v,
+    f: 0,
+  }
+}
+
 export function extractNavigationCapabilitiesFromStateMessage(rawPayload: unknown): NavigationCapabilities | null {
   if (rawPayload == null || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
     return null
@@ -960,10 +1229,10 @@ export function extractNavigationCapabilitiesFromStateMessage(rawPayload: unknow
     return null
   }
 
-  const canGoBack = typeof source.canGoBack === 'boolean' ? source.canGoBack
-    : typeof source.canGoLeft === 'boolean' ? source.canGoLeft : null
-  const canGoForward = typeof source.canGoForward === 'boolean' ? source.canGoForward
-    : typeof source.canGoRight === 'boolean' ? source.canGoRight : null
+  const canGoBack = typeof source.canGoLeft === 'boolean' ? source.canGoLeft
+    : typeof source.canGoBack === 'boolean' ? source.canGoBack : null
+  const canGoForward = typeof source.canGoRight === 'boolean' ? source.canGoRight
+    : typeof source.canGoForward === 'boolean' ? source.canGoForward : null
   const canGoUp = typeof source.canGoUp === 'boolean' ? source.canGoUp : null
   const canGoDown = typeof source.canGoDown === 'boolean' ? source.canGoDown : null
 
@@ -994,6 +1263,46 @@ export function computeStudentEmbeddedSyncState(
   return studentIndices.h < instructorIndices.h ? 'behind' : 'ahead'
 }
 
+export function shouldShowInstructorPendingActivityNotice(params: {
+  hasActiveEmbeddedActivity: boolean
+  hasActiveSoloOverlay: boolean
+  instructorAnchoredInstanceKey: string | null
+  studentIndices: { h: number; v: number; f: number } | null
+  instructorIndices: { h: number; v: number; f: number } | null
+  isBacktrackOptOut: boolean
+}): boolean {
+  if (params.hasActiveEmbeddedActivity || params.hasActiveSoloOverlay || params.isBacktrackOptOut) {
+    return false
+  }
+
+  if (params.instructorAnchoredInstanceKey == null || !params.studentIndices || !params.instructorIndices) {
+    return false
+  }
+
+  return params.studentIndices.h === params.instructorIndices.h
+}
+
+export function buildStudentLocalNavigationPayloads(params: {
+  optimisticIndices: { h: number; v: number; f: number }
+  maxPosition: { h: number; v: number; f: number } | null
+}): Record<string, unknown>[] {
+  const payloads: Record<string, unknown>[] = [
+    buildRevealCommandMessage('setState', {
+      state: {
+        indexh: params.optimisticIndices.h,
+        indexv: params.optimisticIndices.v,
+        indexf: params.optimisticIndices.f,
+      },
+    }),
+  ]
+
+  if (params.maxPosition) {
+    payloads.push(buildOutboundSetStudentBoundaryCommand(params.maxPosition))
+  }
+
+  return payloads
+}
+
 export function buildStudentEmbeddedSyncContextMessage(
   syncState: SyncDeckStudentSyncState,
   studentIndices: { h: number; v: number; f: number } | null,
@@ -1013,6 +1322,18 @@ export function buildStudentEmbeddedSyncContextMessage(
       role: 'student',
     },
   }
+}
+
+export function shouldPreferInstructorOverlaySelection(params: {
+  syncState: SyncDeckStudentSyncState
+  isBacktrackOptOut: boolean
+  suppressFallbackToInstructor: boolean
+}): boolean {
+  if (params.syncState === 'vertical') {
+    return false
+  }
+
+  return !params.isBacktrackOptOut && !params.suppressFallbackToInstructor
 }
 
 const SyncDeckStudent: FC = () => {
@@ -1039,8 +1360,11 @@ const SyncDeckStudent: FC = () => {
   const pendingDrawingToolModeRef = useRef<SyncDeckDrawingToolMode | null>(null)
   const hasSeenIframeReadySignalRef = useRef(false)
   const lastObservedIframeOriginRef = useRef<string | null>(null)
+  const suppressFallbackToInstructorRef = useRef(false)
+  const lastEmbeddedActivitiesReconcileRef = useRef<{ slideKey: string; timestamp: number } | null>(null)
   const studentBacktrackOptOutRef = useRef(false)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
+  const expectedInstructorLocalTargetRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const attachSessionEndedHandler = useSessionEndedHandler()
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const [studentIndicesState, setStudentIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
@@ -1211,6 +1535,31 @@ const SyncDeckStudent: FC = () => {
     setIsBacktrackOptOut(value)
   }, [])
 
+  const reconcileEmbeddedActivitiesSnapshot = useCallback(async (): Promise<void> => {
+    if (!sessionId) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/session/${sessionId}`)
+      if (!response.ok) {
+        return
+      }
+
+      const payload = (await response.json()) as SessionResponsePayload
+      const snapshotEmbeddedActivities = normalizeSyncDeckEmbeddedActivities(
+        payload.session?.data?.embeddedActivities,
+      )
+      setEmbeddedActivities(snapshotEmbeddedActivities)
+      console.info('[SyncDeck][StudentEmbeddedActivitiesReconcile]', {
+        slideKey: `${studentIndicesState?.h ?? 'na'}:${studentIndicesState?.v ?? 'na'}`,
+        embeddedActivityKeys: Object.keys(snapshotEmbeddedActivities),
+      })
+    } catch {
+      // Ignore snapshot refresh failures; realtime WS events remain primary source.
+    }
+  }, [sessionId, studentIndicesState?.h, studentIndicesState?.v])
+
   const applyDrawingToolModeToIframe = useCallback(
     (nextMode: SyncDeckDrawingToolMode): void => {
       const target = iframeRef.current?.contentWindow
@@ -1323,7 +1672,37 @@ const SyncDeckStudent: FC = () => {
         const instructorIndices = extractIndicesFromRevealStateMessage(parsed.payload)
         if (instructorIndices) {
           latestInstructorPayloadRef.current = parsed.payload
+          const previousInstructorIndices = lastInstructorIndicesRef.current
           lastInstructorIndicesRef.current = instructorIndices
+
+          const inboundCommandName = extractRevealCommandName(parsed.payload)
+          const semanticInstructorCommandName =
+            inboundCommandName
+            ?? (isRevealSyncMessage(parsed.payload) && parsed.payload.action === 'state' ? 'setState' : null)
+          const shouldFollowInstructorSetState = shouldForceFollowInstructorSetState({
+            semanticInstructorCommandName,
+            studentHasBacktrackOptOut: studentBacktrackOptOutRef.current,
+            localStudentPosition: localStudentIndicesRef.current,
+            previousInstructorPosition: previousInstructorIndices,
+            instructorPosition: instructorIndices,
+            embeddedActivities,
+          })
+          if (shouldFollowInstructorSetState) {
+            suppressFallbackToInstructorRef.current = false
+            setBacktrackOptOut(false)
+            localStudentIndicesRef.current = instructorIndices
+            setStudentIndicesState(instructorIndices)
+            expectedInstructorLocalTargetRef.current = instructorIndices
+          }
+          console.info('[SyncDeck][StudentInboundInstructorIndices]', {
+            inboundCommandName,
+            semanticInstructorCommandName,
+            instructorIndices,
+            shouldFollowInstructorSetState,
+            localStudentIndices: localStudentIndicesRef.current,
+            suppressFallbackToInstructor: suppressFallbackToInstructorRef.current,
+            backtrackOptOut: studentBacktrackOptOutRef.current,
+          })
         }
 
         if (isSyncToInstructorCommand(parsed.payload) && studentBacktrackOptOutRef.current) {
@@ -1366,13 +1745,38 @@ const SyncDeckStudent: FC = () => {
             return
           }
         } else {
+          const inboundCommandName = extractRevealCommandName(parsed.payload)
+          const semanticInstructorCommandName =
+            inboundCommandName
+            ?? (isRevealSyncMessage(parsed.payload) && parsed.payload.action === 'state' ? 'setState' : null)
           const incomingInstructorIndices = extractIndicesFromRevealStateMessage(parsed.payload)
-          const suppressForwardSync = shouldSuppressForwardInstructorSync(
-            studentBacktrackOptOutRef.current,
-            localStudentIndicesRef.current,
+          const {
+            suppressForwardSync,
+            suppressForwardSyncByBacktrack,
+            suppressForwardSyncByVerticalIndependence,
+          } = shouldSuppressInstructorRevealCommandForwarding({
+            semanticInstructorCommandName,
+            studentHasBacktrackOptOut: studentBacktrackOptOutRef.current,
+            localStudentPosition: localStudentIndicesRef.current,
             incomingInstructorIndices,
-          )
+          })
+          if (inboundCommandName != null || semanticInstructorCommandName != null) {
+            console.info('[SyncDeck][StudentInboundCommand]', {
+              commandName: inboundCommandName,
+              semanticCommandName: semanticInstructorCommandName,
+              incomingInstructorIndices,
+              localStudentIndices: localStudentIndicesRef.current,
+              suppressForwardSync,
+              suppressForwardSyncByBacktrack,
+              suppressForwardSyncByVerticalIndependence,
+              backtrackOptOut: studentBacktrackOptOutRef.current,
+              suppressFallbackToInstructor: suppressFallbackToInstructorRef.current,
+            })
+          }
           if (!suppressForwardSync) {
+            if (incomingInstructorIndices) {
+              expectedInstructorLocalTargetRef.current = incomingInstructorIndices
+            }
             sendPayloadToIframe(revealCommand)
             traceSync('forward_reveal_command_to_iframe', {
               action: (revealCommand as { payload?: { name?: unknown } }).payload?.name as string | undefined,
@@ -1390,7 +1794,7 @@ const SyncDeckStudent: FC = () => {
         return
       }
     },
-    [applyDrawingToolModeToIframe, sendPayloadToIframe, sendSyncContextToEmbeddedIframe, setBacktrackOptOut, traceSync],
+    [applyDrawingToolModeToIframe, embeddedActivities, sendPayloadToIframe, sendSyncContextToEmbeddedIframe, setBacktrackOptOut, traceSync],
   )
 
   const replayLatestInstructorSyncToIframe = useCallback(() => {
@@ -1409,7 +1813,21 @@ const SyncDeckStudent: FC = () => {
 
     const revealCommand = toRevealCommandMessage(payload)
     if (revealCommand != null) {
-      sendPayloadToIframe(revealCommand)
+      const inboundCommandName = extractRevealCommandName(payload)
+      const semanticInstructorCommandName =
+        inboundCommandName
+        ?? (isRevealSyncMessage(payload) && payload.action === 'state' ? 'setState' : null)
+      const incomingInstructorIndices = extractIndicesFromRevealStateMessage(payload)
+      const { suppressForwardSync } = shouldSuppressInstructorRevealCommandForwarding({
+        semanticInstructorCommandName,
+        studentHasBacktrackOptOut: studentBacktrackOptOutRef.current,
+        localStudentPosition: localStudentIndicesRef.current,
+        incomingInstructorIndices,
+      })
+
+      if (!suppressForwardSync) {
+        sendPayloadToIframe(revealCommand)
+      }
     }
   }, [sendPayloadToIframe])
 
@@ -1448,16 +1866,44 @@ const SyncDeckStudent: FC = () => {
         setStudentIndicesState(localIndices)
 
         const instructorIndices = lastInstructorIndicesRef.current
-        const maxPosition = lastEffectiveMaxPositionRef.current ?? instructorIndices
         if (
-          !studentBacktrackOptOutRef.current &&
-          previousLocalIndices != null &&
-          compareIndices(localIndices, previousLocalIndices) < 0 &&
-          maxPosition != null &&
-          compareIndices(localIndices, maxPosition) < 0
+          suppressFallbackToInstructorRef.current
+          && instructorIndices
+          && localIndices.h === instructorIndices.h
+          && localIndices.v === instructorIndices.v
+          && localIndices.f === instructorIndices.f
         ) {
+          suppressFallbackToInstructorRef.current = false
+        }
+
+        const maxPosition = lastEffectiveMaxPositionRef.current ?? instructorIndices
+        const isInstructorDrivenLocalMove = isExpectedInstructorDrivenLocalMove(
+          expectedInstructorLocalTargetRef.current,
+          localIndices,
+        )
+        const shouldEnableLocalBacktrackOptOut = shouldEnableBacktrackOptOutOnLocalMove({
+          studentHasBacktrackOptOut: studentBacktrackOptOutRef.current,
+          previousLocalPosition: previousLocalIndices,
+          nextLocalPosition: localIndices,
+          maxPosition,
+          instructorPosition: instructorIndices,
+        })
+        if (isInstructorDrivenLocalMove) {
+          expectedInstructorLocalTargetRef.current = null
+        } else if (shouldEnableLocalBacktrackOptOut) {
           setBacktrackOptOut(true)
         }
+
+        console.info('[SyncDeck][StudentLocalIndicesUpdate]', {
+          previousLocalIndices,
+          localIndices,
+          instructorIndices,
+          maxPosition,
+          isInstructorDrivenLocalMove,
+          shouldEnableLocalBacktrackOptOut,
+          backtrackOptOut: studentBacktrackOptOutRef.current,
+          suppressFallbackToInstructor: suppressFallbackToInstructorRef.current,
+        })
 
         if (shouldResetBacktrackOptOutByMaxPosition(studentBacktrackOptOutRef.current, localIndices, maxPosition)) {
           setBacktrackOptOut(false)
@@ -1582,9 +2028,7 @@ const SyncDeckStudent: FC = () => {
           const existingEmbeddedActivities = normalizeSyncDeckEmbeddedActivities(
             payload.session?.data?.embeddedActivities,
           )
-          if (Object.keys(existingEmbeddedActivities).length > 0) {
-            setEmbeddedActivities(existingEmbeddedActivities)
-          }
+          setEmbeddedActivities(existingEmbeddedActivities)
           setPresentationUrl(configuredPresentationUrl)
           setIsWaitingForConfiguration(false)
           setError(null)
@@ -1696,12 +2140,37 @@ const SyncDeckStudent: FC = () => {
       }),
     )
     localStudentIndicesRef.current = instructorIndices
+    suppressFallbackToInstructorRef.current = false
     setBacktrackOptOut(false)
   }, [sendPayloadToIframe, setBacktrackOptOut])
 
-  const activeEmbeddedInstanceKey = resolveStudentActiveEmbeddedInstanceKey(
+  const syncState = computeStudentEmbeddedSyncState(
+    studentIndicesState,
+    lastInstructorIndicesRef.current,
+  )
+  const preferInstructorOverlay = shouldPreferInstructorOverlaySelection({
+    syncState,
+    isBacktrackOptOut,
+    suppressFallbackToInstructor: suppressFallbackToInstructorRef.current,
+  })
+  const embeddedActivityKeys = Object.keys(embeddedActivities)
+  const studentAnchoredInstanceKey = resolveStudentActiveEmbeddedInstanceKey(
     embeddedActivities,
     studentIndicesState,
+  )
+  const instructorAnchoredInstanceKey = resolveStudentActiveEmbeddedInstanceKey(
+    embeddedActivities,
+    lastInstructorIndicesRef.current,
+  )
+
+  const activeEmbeddedInstanceKey = resolveStudentOverlayEmbeddedInstanceKey(
+    embeddedActivities,
+    studentIndicesState,
+    lastInstructorIndicesRef.current,
+    {
+      preferInstructor: preferInstructorOverlay,
+      fallbackOnMismatch: !preferInstructorOverlay && !suppressFallbackToInstructorRef.current,
+    },
   )
   const activeEmbeddedActivity = activeEmbeddedInstanceKey
     ? (embeddedActivities[activeEmbeddedInstanceKey] ?? null)
@@ -1709,11 +2178,88 @@ const SyncDeckStudent: FC = () => {
   const activeSoloOverlay = activeEmbeddedInstanceKey
     ? null
     : (studentIndicesState ? (soloOverlays[`${studentIndicesState.h}:${studentIndicesState.v}`] ?? null) : null)
-
-  const syncState = computeStudentEmbeddedSyncState(
-    studentIndicesState,
-    lastInstructorIndicesRef.current,
+  const showInstructorPendingActivityNotice = shouldShowInstructorPendingActivityNotice({
+    hasActiveEmbeddedActivity: activeEmbeddedActivity != null,
+    hasActiveSoloOverlay: activeSoloOverlay != null,
+    instructorAnchoredInstanceKey,
+    studentIndices: studentIndicesState,
+    instructorIndices: lastInstructorIndicesRef.current,
+    isBacktrackOptOut,
+  })
+  const overlayNavigationBaseIndices = resolveStudentOverlayNavigationBaseIndices({
+    studentIndices: studentIndicesState,
+    studentAnchoredInstanceKey,
+    activeEmbeddedInstanceKey,
+  })
+  const overlayVerticalNavigationCapabilities = deriveEmbeddedOverlayVerticalNavigationCapabilities(
+    embeddedActivityKeys,
+    overlayNavigationBaseIndices,
   )
+  const canMoveBack =
+    navigationCapabilities?.canGoBack === true
+    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.h > 0 : false)
+  const canMoveForward =
+    navigationCapabilities?.canGoForward !== false
+  const canMoveUp =
+    navigationCapabilities?.canGoUp === true
+    || overlayVerticalNavigationCapabilities?.canGoUp === true
+    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v > 0 : false)
+  const canMoveDown =
+    navigationCapabilities?.canGoDown === true
+    || overlayVerticalNavigationCapabilities?.canGoDown === true
+    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false)
+
+  useEffect(() => {
+    if (!sessionId || syncState !== 'synchronized' || activeEmbeddedInstanceKey != null || !studentIndicesState) {
+      return
+    }
+
+    const slideKey = `${studentIndicesState.h}:${studentIndicesState.v}`
+    const lastReconcile = lastEmbeddedActivitiesReconcileRef.current
+    const now = Date.now()
+    if (lastReconcile && lastReconcile.slideKey === slideKey && now - lastReconcile.timestamp < 1500) {
+      return
+    }
+
+    lastEmbeddedActivitiesReconcileRef.current = {
+      slideKey,
+      timestamp: now,
+    }
+
+    void reconcileEmbeddedActivitiesSnapshot()
+  }, [
+    activeEmbeddedInstanceKey,
+    reconcileEmbeddedActivitiesSnapshot,
+    sessionId,
+    studentIndicesState,
+    syncState,
+  ])
+
+  useEffect(() => {
+    console.info('[SyncDeck][StudentOverlaySelection]', {
+      activeEmbeddedInstanceKey,
+      activeEmbeddedActivityId: activeEmbeddedActivity?.activityId ?? null,
+      studentAnchoredInstanceKey,
+      instructorAnchoredInstanceKey,
+      embeddedActivityKeys,
+      preferInstructorOverlay,
+      studentIndicesState,
+      instructorIndices: lastInstructorIndicesRef.current,
+      syncState,
+      isBacktrackOptOut,
+      suppressFallbackToInstructor: suppressFallbackToInstructorRef.current,
+    })
+  }, [
+    activeEmbeddedActivity?.activityId,
+    activeEmbeddedInstanceKey,
+    embeddedActivityKeys,
+    instructorAnchoredInstanceKey,
+    isBacktrackOptOut,
+    preferInstructorOverlay,
+    studentAnchoredInstanceKey,
+    studentIndicesState,
+    syncState,
+  ])
 
   useEffect(() => {
     if (syncState !== 'solo' && Object.keys(soloOverlays).length > 0) {
@@ -1725,37 +2271,72 @@ const SyncDeckStudent: FC = () => {
     sendSyncContextToEmbeddedIframe()
   }, [activeEmbeddedInstanceKey, sendSyncContextToEmbeddedIframe, studentIndicesState, syncState])
 
-  const sendStudentOverlayNavigation = useCallback((direction: 'prev' | 'next' | 'up' | 'down') => {
-    sendPayloadToIframe(buildRevealCommandMessage(direction, {}))
-  }, [sendPayloadToIframe])
+  const sendStudentOverlayNavigation = useCallback((direction: 'left' | 'right' | 'up' | 'down') => {
+    const optimisticIndices = resolveOptimisticEmbeddedOverlayIndices(
+      Object.keys(embeddedActivities),
+      overlayNavigationBaseIndices,
+      direction,
+    )
+
+    console.info('[SyncDeck][StudentOverlayNavRequest]', {
+      direction,
+      overlayNavigationBaseIndices,
+      studentIndicesState,
+      studentAnchoredInstanceKey,
+      activeEmbeddedInstanceKey,
+      optimisticIndices,
+    })
+
+    if (optimisticIndices) {
+      suppressFallbackToInstructorRef.current = true
+      localStudentIndicesRef.current = optimisticIndices
+      setStudentIndicesState(optimisticIndices)
+      const maxPosition = lastEffectiveMaxPositionRef.current ?? lastInstructorIndicesRef.current
+      const payloads = buildStudentLocalNavigationPayloads({
+        optimisticIndices,
+        maxPosition,
+      })
+      for (const payload of payloads) {
+        sendPayloadToIframe(payload)
+      }
+      return
+    }
+  }, [
+    activeEmbeddedInstanceKey,
+    embeddedActivities,
+    overlayNavigationBaseIndices,
+    sendPayloadToIframe,
+    studentAnchoredInstanceKey,
+    studentIndicesState,
+  ])
 
   const handleStudentOverlayBack = useCallback(() => {
-    if (navigationCapabilities?.canGoBack === false) {
+    if (!canMoveBack) {
       return
     }
-    sendStudentOverlayNavigation('prev')
-  }, [navigationCapabilities?.canGoBack, sendStudentOverlayNavigation])
+    sendStudentOverlayNavigation('left')
+  }, [canMoveBack, sendStudentOverlayNavigation])
 
   const handleStudentOverlayForward = useCallback(() => {
-    if (navigationCapabilities?.canGoForward === false) {
+    if (!canMoveForward) {
       return
     }
-    sendStudentOverlayNavigation('next')
-  }, [navigationCapabilities?.canGoForward, sendStudentOverlayNavigation])
+    sendStudentOverlayNavigation('right')
+  }, [canMoveForward, sendStudentOverlayNavigation])
 
   const handleStudentOverlayUp = useCallback(() => {
-    if (navigationCapabilities?.canGoUp === false) {
+    if (!canMoveUp) {
       return
     }
     sendStudentOverlayNavigation('up')
-  }, [navigationCapabilities?.canGoUp, sendStudentOverlayNavigation])
+  }, [canMoveUp, sendStudentOverlayNavigation])
 
   const handleStudentOverlayDown = useCallback(() => {
-    if (navigationCapabilities?.canGoDown === false) {
+    if (!canMoveDown) {
       return
     }
     sendStudentOverlayNavigation('down')
-  }, [navigationCapabilities?.canGoDown, sendStudentOverlayNavigation])
+  }, [canMoveDown, sendStudentOverlayNavigation])
 
   if (!sessionId) {
     return (
@@ -1863,16 +2444,18 @@ const SyncDeckStudent: FC = () => {
         />
 
         {activeEmbeddedActivity ? (
-          <div className="absolute inset-0 z-10">
-            <iframe
-              ref={embeddedActivityIframeRef}
-              title={`Embedded ${activeEmbeddedActivity.activityId} activity`}
-              src={`/${encodeURIComponent(activeEmbeddedActivity.childSessionId)}`}
-              className="w-full h-full border-0"
-              allow="fullscreen"
-              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-              onLoad={sendSyncContextToEmbeddedIframe}
-            />
+          <div className="absolute inset-0 z-10 bg-white p-14">
+            <div className="w-full h-full rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+              <iframe
+                ref={embeddedActivityIframeRef}
+                title={`Embedded ${activeEmbeddedActivity.activityId} activity`}
+                src={`/${encodeURIComponent(activeEmbeddedActivity.childSessionId)}`}
+                className="w-full h-full border-0"
+                allow="fullscreen"
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                onLoad={sendSyncContextToEmbeddedIframe}
+              />
+            </div>
           </div>
         ) : null}
 
@@ -1887,13 +2470,28 @@ const SyncDeckStudent: FC = () => {
           </div>
         ) : null}
 
+        {!activeEmbeddedActivity && showInstructorPendingActivityNotice ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/92 p-6">
+            <div className="max-w-lg rounded-lg border border-amber-300 bg-amber-50 p-4 shadow-sm space-y-3 text-center">
+              <h2 className="text-lg font-semibold text-amber-900">Activity Is Starting</h2>
+              <p className="text-sm text-amber-900">
+                Your instructor is on an embedded activity slide. This activity session is not ready yet, so you are
+                viewing the presentation for now.
+              </p>
+              <p className="text-xs text-amber-800">
+                It will open automatically as soon as the instructor launches the activity for this slide.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         {activeEmbeddedActivity ? (
           <>
             <button
               type="button"
               onClick={handleStudentOverlayBack}
-              disabled={navigationCapabilities?.canGoBack === false}
-              aria-disabled={navigationCapabilities?.canGoBack === false}
+              disabled={!canMoveBack}
+              aria-disabled={!canMoveBack}
               aria-label="Previous slide"
               title="Previous slide"
               className="absolute left-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1903,8 +2501,8 @@ const SyncDeckStudent: FC = () => {
             <button
               type="button"
               onClick={handleStudentOverlayUp}
-              disabled={navigationCapabilities?.canGoUp === false}
-              aria-disabled={navigationCapabilities?.canGoUp === false}
+              disabled={!canMoveUp}
+              aria-disabled={!canMoveUp}
               aria-label="Move up"
               title="Move up"
               className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1914,8 +2512,8 @@ const SyncDeckStudent: FC = () => {
             <button
               type="button"
               onClick={handleStudentOverlayForward}
-              disabled={navigationCapabilities?.canGoForward === false}
-              aria-disabled={navigationCapabilities?.canGoForward === false}
+              disabled={!canMoveForward}
+              aria-disabled={!canMoveForward}
               aria-label="Next slide"
               title="Next slide"
               className="absolute right-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1925,8 +2523,8 @@ const SyncDeckStudent: FC = () => {
             <button
               type="button"
               onClick={handleStudentOverlayDown}
-              disabled={navigationCapabilities?.canGoDown === false}
-              aria-disabled={navigationCapabilities?.canGoDown === false}
+              disabled={!canMoveDown}
+              aria-disabled={!canMoveDown}
               aria-label="Move down"
               title="Move down"
               className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"

@@ -15,6 +15,126 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab-stack-requests
+- Discovery: The SyncDeck conversion-lab deck now emits sibling vertical activity anchors as `stackRequests` alongside the primary `activityRequest`, so entering `2:0` launches the whole `h:2` embedded stack (`2:0`, `2:1`, `2:2`) instead of only the currently visible anchor.
+- Why it matters: Student overlay arrows derive vertical reach from known embedded instance keys. Without stack bootstrapping, moving to `2:1`/`2:2` before the instructor visited each anchor left the overlay thinking the stack had ended and showed incorrect “not started” or disabled-arrow behavior.
+- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Keep deck-side stack metadata emission close to slide-activity metadata; if future decks need partial-stack launch behavior, make that an explicit per-deck policy instead of relying on missing sibling requests.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | overlay-arrow-setstate
+- Discovery: SyncDeck manager and student embedded-overlay arrows now rely only on resolved `setState` targets from local/base slide indices and no longer fall back to raw directional Reveal commands when indices are unresolved.
+- Why it matters: Raw fallback commands behave like Reveal document-order navigation, which can turn the overlay left arrow into a vertical move and leave up/down ineffective in embedded-stack flows. Explicit index targets keep host arrows aligned with the intended slide coordinates.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Preserve explicit index-driven overlay navigation unless the iframe-sync protocol later adds guaranteed strict-direction commands for horizontal and vertical movement.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | student-replay-suppression
+- Discovery: Student replay of the latest instructor payload on iframe-ready now uses the same forward-suppression policy as live inbound handling (backtrack opt-out and vertical-independence guards), so suppressed instructor commands/states are not re-applied during iframe reconnect/ready replay.
+- Why it matters: Without parity between live-forward and replay-forward paths, vertical `up/down` or stale `setState` payloads can still drag students or snap deck position unexpectedly even after live suppression logic is correct.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep replay and live-forwarding suppression paths centralized through shared helper logic to prevent policy drift.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | waiting-room | entry-participant-token-consume
+- Discovery: Entry participant token consume now deduplicates concurrent consume calls per storage key/token on the client by sharing an in-flight promise.
+- Why it matters: React StrictMode and parallel bootstrap effects can issue duplicate consume POSTs for the same token; deduping removes expected-but-noisy second-call 404s and prevents racey identity fallback behavior.
+- Evidence: `client/src/components/common/entryParticipantStorage.ts`; `client/src/components/common/entryParticipantStorage.test.ts`
+- Follow-up action: Reuse this dedupe path for any future token-backed one-time handoff consumers instead of adding local effect guards in each activity.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | student-vertical-independence
+- Discovery: Student now suppresses instructor `setState` sync when the move is vertical-only within the same horizontal stack (`h` unchanged, `v` differs), so instructor vertical navigation no longer drags student position.
+- Why it matters: Embedded stack workflows require student-controlled vertical exploration while still allowing instructor horizontal progression and explicit force-sync commands.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep vertical-independence scoped to `setState`; preserve `syncToInstructor` for explicit instructor force-sync behavior.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | manager-activity-request-resync
+- Discovery: When manager receives an `activityRequest` for an already-running anchored instance key (for example `embedded-test:2:0`), it now emits and relays an explicit `setState` resync command for that anchor instead of only logging/returning.
+- Why it matters: Re-entering an active anchored activity can otherwise skip launch and leave students stuck on an older slide if they missed a prior navigation update; resync-on-skip forces students back to the anchor so overlays reopen.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Preserve this fallback until server-side acked per-student sync state can guarantee all participants reached the anchored slide before skip-existing short-circuits.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | student-embedded-reconcile
+- Discovery: Student now reconciles `embeddedActivities` from `/api/session/:sessionId` when synchronized on a slide but no active anchored overlay is resolvable, and initial session hydration always applies the normalized embedded map (including empty snapshots).
+- Why it matters: If a websocket lifecycle start/end event is missed, stale embedded maps can persist and block overlay re-entry even when instructor/student slide indices are synchronized.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Keep realtime WS as primary, but preserve snapshot reconciliation as drift correction for reconnect/race windows.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab-command-bridge
+- Discovery: Conversion-lab now also triggers slide-enter activity emission when receiving inbound reveal `command` messages for `setState`/`syncToInstructor`, using command target indices as the source of truth.
+- Why it matters: In host-driven navigation flows, status/slidechanged events can lag or miss transient transitions; command-level bridging ensures anchored activity requests still emit when the instructor jumps back to an activity slide.
+- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`
+- Follow-up action: Keep the command bridge as a fallback path while hosted runtime event timing is validated under instructor-driven setState control.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab-activity-emit
+- Discovery: Conversion-lab now resolves activity metadata from authoritative sync indices (`h:v`) via DOM traversal instead of relying on `Reveal.getCurrentSlide()`, and slide-enter dedupe advances only after slide resolution succeeds.
+- Why it matters: Host-driven `setState` can report updated indices before `getCurrentSlide()` points at the expected nested vertical section; advancing dedupe on that transient mismatch can suppress the later valid activityRequest when returning to anchors like `2:0`.
+- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`
+- Follow-up action: Keep slide-enter request emission keyed to resolved indexed slide elements rather than runtime-current slide references in host-driven navigation scenarios.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab-events
+- Discovery: Conversion-lab slide-enter activity emission is now tied to status index transitions (`reveal-iframesync-status`/`getStatus().navigation.current`) with per-position dedupe, so host-driven `setState` navigation emits activity requests even when Reveal `slidechanged` does not fire.
+- Why it matters: Instructor overlay navigation uses `setState`; without status-based detection, returning to anchors like `2:0` can miss relaunch requests and leave students synchronized but without an active overlay.
+- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`
+- Follow-up action: Keep deck-side emission keyed to authoritative sync status and avoid relying solely on local Reveal UI events for host-driven transitions.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab
+- Discovery: The conversion-lab deck now emits `activityRequest` on every slide-enter (no permanent per-slide dedupe), relying on manager-side instanceKey idempotency to ignore duplicate starts while an anchored activity is already running.
+- Why it matters: Revisiting anchors like `2:0` or vertical branches can relaunch overlays after an earlier lifecycle end instead of silently doing nothing due to stale deck-side dedupe state.
+- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`
+- Follow-up action: Keep deck emit behavior stateless; if duplicate suppression is needed, move it to manager/server where live instance state is authoritative.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | student-follow-mode
+- Discovery: Student follow-mode now treats authoritative instructor `setState` as a forced rejoin when it targets an anchored embedded activity (or a non-forward correction), clearing backtrack opt-out and applying instructor indices locally.
+- Why it matters: Backtrack opt-out can otherwise block overlay re-entry after instructor navigation changes from `syncToInstructor` to `setState`, which prevents returning to anchored slides and vertical embedded activity anchors from reopening for following students.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: If Reveal runtime emits explicit command provenance for instructor-initiated state transitions, replace heuristic follow/force rules with provenance-based policy.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | manager-relay
+- Discovery: Manager overlay `setState` navigation now arms outbound state restore-suppression and only releases suppression when the iframe reports the exact target indices, preventing stale state echoes from overwriting just-issued backward/vertical moves (for example returning to `2:0` then moving down).
+- Why it matters: Without this guard, older iframe `state` packets can race behind a `setState` command, get relayed to the server, and make students reopen the previous anchored overlay even though instructor navigation already changed.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: If the hosted Reveal runtime later exposes a monotonic command ack id, switch suppression from index-matching heuristics to ack-driven release.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | embedded-overlays
+- Discovery: SyncDeck manager and student overlay navigation now updates local slide indices optimistically before waiting for the presentation iframe to echo a new reveal state, and the student fallback overlay resolver only falls back to instructor indices when local student indices are absent rather than merely unmatched.
+- Why it matters: This makes embedded overlays close or swap immediately when users navigate away from the anchored slide instead of lingering until an async state echo arrives, and it avoids the student fallback path re-opening overlays after local navigation has already moved off the embedded slide.
+- Evidence: `activities/syncdeck/client/shared/embeddedOverlayNavigation.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: If the hosted reveal runtime later exposes authoritative next-slide coordinates in navigation callbacks, replace the heuristic optimistic resolver with that runtime-provided destination.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | presentations
+- Discovery: `client/public/presentations/syncdeck-conversion-lab.html` now boots via hosted SyncDeck Reveal assets (`syncdeck-reveal.js` + `syncdeck-reveal.css`) and `initSyncDeckReveal({ deckId, ... })` instead of a hand-rolled postMessage simulator. Activity anchors are now encoded in slide `data-activity-*` attributes and bridged to host launches by calling `window.RevealIframeSyncAPI.sendCustom('activityRequest', ...)` on slide-enter/manual trigger.
+- Why it matters: The conversion lab now exercises the real iframe sync runtime (navigation/status semantics and role handling) while preserving embedded activity launch testing without relying on the old synthetic state emitter.
+- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`
+- Follow-up action: If hosted runtime adds native slide metadata -> `activityRequest` emission, remove the deck-side bridge helper and keep only declarative `data-activity-*` metadata.
+- Owner: Codex
+
+- Date: 2026-03-18
 - Area: client+server | embedded-session-ownership
 - Discovery: Embedded child sessions (`CHILD:...`) are now explicitly parent-owned at both UI and API layers: shared `SessionHeader` auto-detects child session ids and hides join-code/end-session controls, and shared `DELETE /api/session/:sessionId` rejects child session ids with a 403 so only parent-session flows (for example SyncDeck embedded end route) can terminate them.
 - Why it matters: This prevents embedded activity manager UIs from accidentally exposing destructive controls that break parent orchestration guarantees, while preserving a single authoritative end path in the parent session.
