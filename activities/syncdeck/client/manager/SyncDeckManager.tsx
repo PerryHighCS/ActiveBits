@@ -443,6 +443,26 @@ interface SyncDeckEmbeddedLifecyclePayload {
 
 type SyncDeckManagerOverlayNavigationDirection = 'left' | 'right' | 'up' | 'down' | 'slide'
 
+interface SyncDeckActivityPickerEntry {
+  activityId: string
+  name: string
+  description: string
+}
+
+interface SyncDeckActivityConfigModule {
+  default?: {
+    id?: string
+    name?: string
+    title?: string
+    description?: string
+  }
+}
+
+const activityPickerConfigModules =
+  typeof import.meta.glob === 'function'
+    ? import.meta.glob<SyncDeckActivityConfigModule>('@activities/*/activity.config.{js,ts}', { eager: true })
+    : {}
+
 interface SyncDeckManagerNavigationCapabilities {
   canGoBack: boolean
   canGoForward: boolean
@@ -1033,6 +1053,19 @@ export function resolveManagerActivityRequestBatchInputs(
   return [...byInstanceKey.values()]
 }
 
+export function resolveSyncDeckActivityPickerEntries(
+  entries: Array<{ id: string; name: string; description: string }>,
+): SyncDeckActivityPickerEntry[] {
+  return entries
+    .filter((entry) => entry.id !== 'syncdeck')
+    .map((entry) => ({
+      activityId: entry.id,
+      name: entry.name,
+      description: entry.description,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+}
+
 function isRevealSyncEnvelopeData(data: unknown): data is RevealSyncEnvelope {
   const envelope = parseRevealSyncEnvelope(data)
   return envelope?.type === 'reveal-sync'
@@ -1411,6 +1444,7 @@ const SyncDeckManager: FC = () => {
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const [isEmbeddedPanelOpen, setIsEmbeddedPanelOpen] = useState(false)
+  const [isActivityPickerOpen, setIsActivityPickerOpen] = useState(false)
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
   const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
@@ -2197,6 +2231,53 @@ const SyncDeckManager: FC = () => {
     [sessionId, instructorPasscode],
   )
 
+  const handleResolvedActivityRequests = useCallback((startRequests: Array<{ activityId: string; instanceKey: string }>): void => {
+    const primaryStartRequest = startRequests[0] ?? null
+    if (!primaryStartRequest) {
+      setStartError('Ignored activity request with missing activity id.')
+      setStartSuccess(null)
+      return
+    }
+
+    if (startRequests.length === 1 && embeddedActivities[primaryStartRequest.instanceKey]) {
+      const resyncCommand = buildManagerResyncCommandForInstanceKey(primaryStartRequest.instanceKey)
+      if (resyncCommand && presentationOrigin) {
+        presentationIframeRef.current?.contentWindow?.postMessage(resyncCommand, presentationOrigin)
+        relayInstructorPayload(resyncCommand)
+        setInstructorIndicesState(extractIndicesFromRevealPayload(resyncCommand))
+      }
+      console.info('[SyncDeck][ManagerActivityRequestSkippedExisting]', {
+        startRequest: primaryStartRequest,
+        embeddedActivityKeys: Object.keys(embeddedActivities),
+        resyncCommandName: extractRevealCommandName(resyncCommand),
+      })
+      setStartError(null)
+      setStartSuccess(null)
+      return
+    }
+
+    console.info('[SyncDeck][ManagerActivityRequestLaunch]', {
+      startRequests,
+    })
+    void (async () => {
+      for (const startRequest of startRequests) {
+        if (embeddedActivities[startRequest.instanceKey]) {
+          continue
+        }
+        await launchEmbeddedActivityFromRequest(startRequest)
+      }
+    })()
+  }, [embeddedActivities, launchEmbeddedActivityFromRequest, presentationOrigin, relayInstructorPayload])
+
+  const handleActivityPickerLaunch = useCallback((activityId: string): void => {
+    const startRequests = resolveManagerActivityRequestBatchInputs(
+      { activityId, indices: lastInstructorIndicesRef.current },
+      lastInstructorIndicesRef.current,
+    )
+    setIsActivityPickerOpen(false)
+    handleResolvedActivityRequests(startRequests)
+  }, [handleResolvedActivityRequests])
+
   const startSession = useCallback(async (options?: { automatic?: boolean }): Promise<void> => {
     const automaticStart = options?.automatic === true
 
@@ -2372,6 +2453,25 @@ const SyncDeckManager: FC = () => {
     }
   }, [isConfigurePanelOpen, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
 
+  const activityPickerEntries = useMemo(
+    () => resolveSyncDeckActivityPickerEntries(
+      Object.values(activityPickerConfigModules)
+        .map((moduleExports) => moduleExports.default)
+        .filter((entry): entry is NonNullable<SyncDeckActivityConfigModule['default']> => entry != null)
+        .map((entry) => ({
+          id: typeof entry.id === 'string' ? entry.id : '',
+          name: typeof entry.title === 'string' && entry.title.trim().length > 0
+            ? entry.title
+            : typeof entry.name === 'string'
+              ? entry.name
+              : '',
+          description: typeof entry.description === 'string' ? entry.description : '',
+        }))
+        .filter((entry) => entry.id.length > 0 && entry.name.length > 0 && entry.description.length > 0),
+    ),
+    [],
+  )
+
   useEffect(
     () => () => {
       if (disconnectStatusTimeoutRef.current != null) {
@@ -2413,47 +2513,13 @@ const SyncDeckManager: FC = () => {
             envelope.payload,
             lastInstructorIndicesRef.current,
           )
-          const primaryStartRequest = startRequests[0] ?? null
           console.info('[SyncDeck][ManagerActivityRequestInbound]', {
             rawPayload: envelope.payload,
             resolvedStartRequests: startRequests,
             instructorIndices: lastInstructorIndicesRef.current,
             embeddedActivityKeys: Object.keys(embeddedActivities),
           })
-          if (!primaryStartRequest) {
-            setStartError('Ignored activity request with missing activity id.')
-            setStartSuccess(null)
-            return
-          }
-
-          if (startRequests.length === 1 && embeddedActivities[primaryStartRequest.instanceKey]) {
-            const resyncCommand = buildManagerResyncCommandForInstanceKey(primaryStartRequest.instanceKey)
-            if (resyncCommand && presentationOrigin) {
-              presentationIframeRef.current?.contentWindow?.postMessage(resyncCommand, presentationOrigin)
-              relayInstructorPayload(resyncCommand)
-              setInstructorIndicesState(extractIndicesFromRevealPayload(resyncCommand))
-            }
-            console.info('[SyncDeck][ManagerActivityRequestSkippedExisting]', {
-              startRequest: primaryStartRequest,
-              embeddedActivityKeys: Object.keys(embeddedActivities),
-              resyncCommandName: extractRevealCommandName(resyncCommand),
-            })
-            setStartError(null)
-            setStartSuccess(null)
-            return
-          }
-
-          console.info('[SyncDeck][ManagerActivityRequestLaunch]', {
-            startRequests,
-          })
-          void (async () => {
-            for (const startRequest of startRequests) {
-              if (embeddedActivities[startRequest.instanceKey]) {
-                continue
-              }
-              await launchEmbeddedActivityFromRequest(startRequest)
-            }
-          })()
+          handleResolvedActivityRequests(startRequests)
           return
         }
       }
@@ -2695,8 +2761,8 @@ const SyncDeckManager: FC = () => {
     }
   }, [
     embeddedActivities,
+    handleResolvedActivityRequests,
     isConfigurePanelOpen,
-    launchEmbeddedActivityFromRequest,
     presentationOrigin,
     requestChalkboardStateFromInstructor,
     applyDrawingToolModeToInstructorIframe,
@@ -2934,6 +3000,16 @@ const SyncDeckManager: FC = () => {
               </button>
               <button
                 type="button"
+                onClick={() => setIsActivityPickerOpen((current) => !current)}
+                className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-expanded={isActivityPickerOpen}
+                aria-controls="syncdeck-activity-picker-panel"
+                disabled={isConfigurePanelOpen}
+              >
+                Activities
+              </button>
+              <button
+                type="button"
                 onClick={() => setIsStudentsPanelOpen((current) => !current)}
                 className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
               >
@@ -3019,6 +3095,42 @@ const SyncDeckManager: FC = () => {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {isActivityPickerOpen && (
+          <div
+            id="syncdeck-activity-picker-panel"
+            className="absolute right-32 top-full mt-2 w-96 rounded border border-gray-200 bg-white shadow-lg p-3 z-30"
+          >
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-gray-800">Launch Activity</h2>
+              <button
+                type="button"
+                onClick={() => setIsActivityPickerOpen(false)}
+                className="text-xs text-gray-500 hover:text-gray-800"
+              >
+                Close
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-gray-600">
+              Launches the selected activity on your current slide anchor using the same embedded start flow as deck activity requests.
+            </p>
+            <div className="max-h-80 space-y-2 overflow-y-auto">
+              {activityPickerEntries.map((entry) => (
+                <button
+                  key={entry.activityId}
+                  type="button"
+                  onClick={() => {
+                    handleActivityPickerLaunch(entry.activityId)
+                  }}
+                  className="w-full rounded border border-gray-200 px-3 py-2 text-left hover:bg-gray-50"
+                >
+                  <span className="block text-sm font-medium text-gray-800">{entry.name}</span>
+                  <span className="mt-1 block text-xs text-gray-600">{entry.description}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

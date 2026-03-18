@@ -34,6 +34,7 @@ import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
+import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -68,6 +69,8 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /Toggle chalkboard screen/i)
   assert.match(html, /Toggle pen overlay/i)
   assert.match(html, /Configure Presentation/i)
+  assert.match(html, /Activities/i)
+  assert.match(html, /aria-controls="syncdeck-activity-picker-panel"/i)
   assert.match(html, /Presentation URL/i)
   assert.match(html, /Presentation URL is required/i)
   assert.match(html, /aria-invalid="true"/i)
@@ -482,6 +485,20 @@ void test('resolveManagerActivityRequestBatchInputs keeps current slide primary 
       { activityId: 'embedded-test', instanceKey: 'embedded-test:2:0' },
       { activityId: 'raffle', instanceKey: 'raffle:2:1' },
       { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:2' },
+    ],
+  )
+})
+
+void test('resolveSyncDeckActivityPickerEntries excludes SyncDeck and sorts entries by label', () => {
+  assert.deepEqual(
+    resolveSyncDeckActivityPickerEntries([
+      { id: 'video-sync', name: 'Video Sync', description: 'Watch together' },
+      { id: 'syncdeck', name: 'SyncDeck', description: 'Host slides' },
+      { id: 'algorithm-demo', name: 'Algorithm Demo', description: 'Visualize algorithms' },
+    ]),
+    [
+      { activityId: 'algorithm-demo', name: 'Algorithm Demo', description: 'Visualize algorithms' },
+      { activityId: 'video-sync', name: 'Video Sync', description: 'Watch together' },
     ],
   )
 })

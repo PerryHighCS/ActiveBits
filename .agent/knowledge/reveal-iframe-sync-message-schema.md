@@ -303,21 +303,63 @@ Sent when slide metadata requests an embedded activity launch (for example on sl
 This message is emitted by `reveal-iframe-sync` and consumed by SyncDeck host surfaces,
 which may prompt the instructor before launching.
 
+Recommended slide metadata contract for library-side emission:
+
+```html
+<section
+  data-activity-id="video-sync"
+  data-activity-trigger="slide-enter"
+  data-activity-options='{"mode":"conversion-smoke"}'
+></section>
+```
+
+Metadata attributes:
+- `data-activity-id` (required): registered activity ID to request.
+- `data-activity-trigger` (optional): request reason. Current expected values are `slide-enter` and `manual-button`; default `slide-enter`.
+- `data-activity-options` (optional JSON object): opaque metadata forwarded to the host unchanged.
+
+When the current slide is part of a vertical stack, the library should also inspect sibling
+vertical slides under the same horizontal parent and include any sibling activity anchors as
+`stackRequests`. This lets the host launch the full embedded stack up front instead of waiting
+for the instructor to visit each sibling slide individually.
+
 ```json
 {
+  "type": "reveal-sync",
   "action": "activityRequest",
   "payload": {
     "activityId": "video-sync",
+    "indices": { "h": 3, "v": 0, "f": 0 },
+    "instanceKey": "video-sync:3:0",
     "activityOptions": {},
-    "trigger": "slide-enter"
+    "trigger": "slide-enter",
+    "stackRequests": [
+      {
+        "activityId": "raffle",
+        "indices": { "h": 3, "v": 1, "f": -1 },
+        "instanceKey": "raffle:3:1",
+        "activityOptions": {},
+        "trigger": "slide-enter"
+      }
+    ]
   }
 }
 ```
 
 Payload fields:
 - `activityId` (string): registered activity ID requested by slide metadata.
+- `indices` (object): Reveal indices for the requested anchor. Hosts currently expect concrete `h` and `v`; `f` should be included and may be normalized to `0` or `-1` depending on when the request is emitted.
+- `instanceKey` (string): stable host-facing identifier for this request. For anchored launches use `${activityId}:${h}:${v}`. If a future host/library flow needs a non-slide-anchored launch, the host may instead provide its own explicit key or fall back to `${activityId}:global`.
 - `activityOptions` (object): optional config payload from slide metadata.
 - `trigger` (string): request source reason (initial value: `slide-enter`).
+- `stackRequests` (array): optional sibling requests for the same horizontal stack. Each entry uses the same payload shape as the primary request (`activityId`, `indices`, `instanceKey`, optional `activityOptions`, optional `trigger`).
+
+Library implementation expectations:
+- Emit `activityRequest` only when the current slide actually declares `data-activity-id`.
+- Derive `instanceKey` from the emitted `activityId` and the resolved `h:v` anchor, not from fragment position.
+- When emitting a primary request for a vertically stacked slide, include sibling activity anchors from the same stack in `stackRequests`, excluding the primary request itself.
+- Preserve slide metadata payloads as opaque host input; do not make activity-specific decisions in the library.
+- Hosts may de-duplicate by `instanceKey`, so repeated emissions for the same anchored slide are expected to be idempotent.
 
 ### `ready`
 

@@ -907,7 +907,7 @@ session.data.embeddedActivities: Record<instanceKey, {
   otherwise show informational notice.
 - [x] Local `soloOverlays` map (separate from `embeddedActivities`) for solo instances.
 - [x] Handle late-join path (hydrate from `session.data.embeddedActivities` map).
-- [ ] Student tests: position-based overlay selection, stack transitions, late-join hydration,
+- [x] Student tests: position-based overlay selection, stack transitions, late-join hydration,
       navigation controls enabled/disabled per capability flags, overlay changes on nav,
       sync context postMessage content for each sync state, solo activation path.
   - [x] Added unit coverage for solo activation request parsing, current-slide selection,
@@ -933,15 +933,15 @@ session.data.embeddedActivities: Record<instanceKey, {
 ### Phase 4 — Slide-event activation
 - [ ] Define deck slide metadata format (`data-activity-id` attribute).
 - [ ] Update `reveal-iframe-sync` plugin to emit `activityRequest` on slide-enter.
-- [ ] Update `reveal-iframe-sync-message-schema.md`.
+- [x] Update `reveal-iframe-sync-message-schema.md`.
 - [x] Manager: handle `activityRequest` and launch embedded start flow.
 - [ ] Integration test: slide navigation → activityRequest → prompt → launch → overlay.
 
 ### Phase 5 — Activity picker (manual trigger)
-- [ ] Add "Activities" button to SyncDeck header.
-- [ ] Implement activity picker panel using registered `activityConfig` metadata only.
-- [ ] Wire picker selection → same start flow as slide-event trigger.
-- [ ] Picker tests.
+- [x] Add "Activities" button to SyncDeck header.
+- [x] Implement activity picker panel using registered `activityConfig` metadata only.
+- [x] Wire picker selection → same start flow as slide-event trigger.
+- [x] Picker tests.
 
 ### Phase 6 — Reporting
 - [ ] Define `reportEndpoint` optional field in `ActivityConfig` and schema.

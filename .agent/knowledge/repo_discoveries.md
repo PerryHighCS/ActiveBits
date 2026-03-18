@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-18
+- Area: client | syncdeck | activity-picker-metadata
+- Discovery: SyncDeck's manager-side manual activity picker should source its launch list from activity config metadata via a local guarded `import.meta.glob(...)` read, not from the client activity registry module.
+- Why it matters: The client registry eagerly uses Vite-only `import.meta.glob`, which breaks the Node-based activities test runner when imported directly into `SyncDeckManager`. A local guarded metadata read keeps the picker metadata-only, satisfies the activity-containment rule, and preserves server-render/unit test compatibility.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: If other activity-owned manager views need config-only metadata, prefer the same guarded local pattern or extract a test-safe config loader instead of importing the full client registry.
+- Owner: Codex
+
+- Date: 2026-03-18
 - Area: client | syncdeck | conversion-lab-stack-requests
 - Discovery: The SyncDeck conversion-lab deck now emits sibling vertical activity anchors as `stackRequests` alongside the primary `activityRequest`, so entering `2:0` launches the whole `h:2` embedded stack (`2:0`, `2:1`, `2:2`) instead of only the currently visible anchor.
 - Why it matters: Student overlay arrows derive vertical reach from known embedded instance keys. Without stack bootstrapping, moving to `2:1`/`2:2` before the instructor visited each anchor left the overlay thinking the stack had ended and showed incorrect “not started” or disabled-arrow behavior.
