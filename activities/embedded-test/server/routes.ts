@@ -65,6 +65,19 @@ function normalizeParticipantName(value: unknown): string {
   return trimmed.length > 0 ? trimmed.slice(0, 80) : 'Student'
 }
 
+function normalizeOptionalParticipantName(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  return normalizeParticipantName(trimmed)
+}
+
 function normalizeParticipantId(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null
@@ -242,7 +255,7 @@ export default function setupEmbeddedTestRoutes(app: EmbeddedTestRouteApp, sessi
 
     if (!client.isInstructor) {
       const participantId = normalizeParticipantId(queryParams.get('studentId'))
-      const participantName = normalizeMessageText(queryParams.get('studentName'))
+      const participantName = normalizeOptionalParticipantName(queryParams.get('studentName'))
 
       const adapters = session.data.students.map((student) => ({
         id: student.studentId,

@@ -231,3 +231,39 @@ void test('embedded-test websocket connects accepted-entry student and broadcast
   assert.equal(latest?.participants?.[0]?.connected, true)
   assert.equal(latest?.messages?.[0]?.text, 'hello manager')
 })
+
+void test('embedded-test websocket applies participant name limits instead of chat message limits', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const session = createEmbeddedTestSession('s1')
+  acceptEntryParticipant(session, {
+    participantId: 'student-1',
+    displayName: 'Accepted Entry Name',
+  })
+  const storeState = createSessionStore({ s1: session })
+  setupEmbeddedTestRoutes(app, storeState.sessions, ws)
+
+  const handler = ws.registered['/ws/embedded-test']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  const overlongStudentName = `  ${'A'.repeat(120)}  `
+  if (handler) {
+    await Promise.resolve(
+      handler(
+        studentSocket,
+        new URLSearchParams({
+          sessionId: 's1',
+          studentId: 'student-1',
+          studentName: overlongStudentName,
+        }),
+        ws.wss,
+      ),
+    )
+  }
+
+  const savedStudent = (storeState.store.s1?.data as { students?: Array<{ name: string }> }).students?.[0]
+  assert.equal(savedStudent?.name, 'A'.repeat(80))
+})

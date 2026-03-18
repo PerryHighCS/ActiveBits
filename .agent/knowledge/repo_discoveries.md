@@ -1163,3 +1163,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `server/core/sessions.ts`; `client/src/components/common/sessionHeaderUtils.ts`; `client/src/components/common/SessionHeader.tsx`; `activities/embedded-test/client/manager/EmbeddedTestManager.tsx`
 - Follow-up action: When adding new embedded child manager UIs, check for any activity-owned end-session buttons that bypass `SessionHeader` and guard them explicitly.
 - Owner: Codex
+
+- Date: 2026-03-18
+- Area: activities | embedded-test | websocket participant identity
+- Discovery: Student websocket `studentName` query params for `embedded-test` should be normalized with participant/display-name rules, not chat-message rules. Missing names must stay `null` so accepted-entry fallback still resolves the authoritative display name, while explicit names should still be trimmed to the tighter participant cap.
+- Why it matters: Reusing a chat sanitizer (`normalizeMessageText`) allows unexpectedly long names into persisted session state and blurs the boundary between message content and participant identity constraints.
+- Evidence: `activities/embedded-test/server/routes.ts`; `activities/embedded-test/server/routes.test.ts`; `server/core/acceptedSessionParticipants.ts`
+- Follow-up action: When adding websocket or REST student join paths in other activities, prefer a dedicated optional participant-name normalizer instead of reusing message-body sanitizers.
+- Owner: Codex
