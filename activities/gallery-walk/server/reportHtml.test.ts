@@ -110,6 +110,9 @@ void test('buildGalleryWalkStructuredReportSection returns aggregate-friendly st
   assert.deepEqual(section.supportsScopes, ['activity-session', 'student-cross-activity', 'session-summary'])
   assert.equal(section.students?.[0]?.studentId, 'studentA')
   assert.equal(section.summaryCards?.[0]?.metrics?.[0]?.label, 'Feedback Entries')
+  assert.equal(section.scopeBlocks?.['session-summary']?.[0]?.type, 'rich-text')
+  assert.equal(section.scopeBlocks?.['activity-session']?.[0]?.type, 'table')
+  assert.equal(section.studentScopeBlocks?.studentA?.[1]?.type, 'table')
   assert.deepEqual(section.payload.stats, {
     reviewees: {
       studentA: 1,

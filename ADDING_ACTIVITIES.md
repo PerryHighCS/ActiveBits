@@ -283,6 +283,10 @@ export default {
   // Embedded reports should download as a single self-contained HTML file with inline data,
   // styles, and scripts so instructors can open them offline and switch between class and
   // per-student views without additional requests.
+  // For SyncDeck aggregate reports, pair this with structured report data that can expose
+  // generic `scopeBlocks` / `studentScopeBlocks` (for example rich text or tables) so the
+  // parent report shell can render richer activity-owned content without importing activity
+  // implementation code.
   reportEndpoint: '/api/quiz/:sessionId/report',
   clientEntry: './client/index.ts',  // or .tsx if using JSX in footerContent
   serverEntry: './server/routes.ts',

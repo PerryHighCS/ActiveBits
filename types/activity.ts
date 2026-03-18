@@ -97,6 +97,31 @@ export interface ActivityReportSummaryCard {
   metrics?: ActivityReportSummaryMetric[]
 }
 
+export interface ActivityReportRichTextBlock {
+  id: string
+  type: 'rich-text'
+  title?: string
+  paragraphs: string[]
+}
+
+export interface ActivityReportTableRow {
+  id: string
+  cells: string[]
+}
+
+export interface ActivityReportTableBlock {
+  id: string
+  type: 'table'
+  title?: string
+  columns: string[]
+  rows: ActivityReportTableRow[]
+  emptyMessage?: string
+}
+
+export type ActivityReportBlock =
+  | ActivityReportRichTextBlock
+  | ActivityReportTableBlock
+
 export interface ActivityStructuredReportSection {
   activityId: string
   childSessionId: string
@@ -106,6 +131,8 @@ export interface ActivityStructuredReportSection {
   supportsScopes: ActivityReportScope[]
   students?: ActivityReportStudentRef[]
   summaryCards?: ActivityReportSummaryCard[]
+  scopeBlocks?: Partial<Record<ActivityReportScope, ActivityReportBlock[]>>
+  studentScopeBlocks?: Record<string, ActivityReportBlock[]>
   payload: Record<string, unknown>
 }
 

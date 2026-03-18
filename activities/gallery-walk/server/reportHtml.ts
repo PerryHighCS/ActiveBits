@@ -1,4 +1,10 @@
-import type { ActivityStructuredReportSection, ActivityReportStudentRef, ActivityReportSummaryCard } from '../../../types/activity.js'
+import type {
+  ActivityReportBlock,
+  ActivityStructuredReportSection,
+  ActivityReportStudentRef,
+  ActivityReportSummaryCard,
+  ActivityReportTableRow,
+} from '../../../types/activity.js'
 
 interface RevieweeRecord {
   name: string
@@ -63,6 +69,87 @@ function toSummaryCards(bundle: GalleryWalkReportBundle): ActivityReportSummaryC
   ]
 }
 
+function buildFeedbackTableRows(
+  bundle: GalleryWalkReportBundle,
+  feedbackEntries: FeedbackEntry[],
+): ActivityReportTableRow[] {
+  return feedbackEntries.map((entry) => ({
+    id: entry.id,
+    cells: [
+      entry.fromNameSnapshot,
+      bundle.reviewees[entry.to]?.projectTitle
+        ? `${bundle.reviewees[entry.to]?.name ?? entry.to} - ${bundle.reviewees[entry.to]?.projectTitle ?? ''}`
+        : bundle.reviewees[entry.to]?.name ?? entry.to,
+      entry.message,
+      normalizeStyleLabel(entry.styleId),
+    ],
+  }))
+}
+
+function normalizeStyleLabel(styleId: string): string {
+  const label = styleId.trim().replace(/[-_]+/g, ' ')
+  if (label.length === 0) {
+    return 'Unstyled'
+  }
+
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+function buildScopeBlocks(bundle: GalleryWalkReportBundle): Partial<Record<'activity-session' | 'session-summary', ActivityReportBlock[]>> {
+  return {
+    'session-summary': [
+      {
+        id: 'gallery-walk-session-summary',
+        type: 'rich-text',
+        title: 'Snapshot',
+        paragraphs: [
+          `Stage: ${bundle.stage}.`,
+          `${bundle.feedback.length} feedback entr${bundle.feedback.length === 1 ? 'y' : 'ies'} captured across ${Object.keys(bundle.reviewees).length} student project${Object.keys(bundle.reviewees).length === 1 ? '' : 's'}.`,
+        ],
+      },
+    ],
+    'activity-session': [
+      {
+        id: 'gallery-walk-activity-feedback-table',
+        type: 'table',
+        title: 'Feedback Log',
+        columns: ['Reviewer', 'Recipient', 'Feedback', 'Style'],
+        rows: buildFeedbackTableRows(bundle, bundle.feedback),
+        emptyMessage: 'No feedback entries were captured for this gallery walk session.',
+      },
+    ],
+  }
+}
+
+function buildStudentScopeBlocks(bundle: GalleryWalkReportBundle): Record<string, ActivityReportBlock[]> {
+  return Object.keys(bundle.reviewees).reduce<Record<string, ActivityReportBlock[]>>((accumulator, studentId) => {
+    const reviewee = bundle.reviewees[studentId]
+    const studentFeedback = bundle.feedback.filter((entry) => entry.to === studentId)
+    accumulator[studentId] = [
+      {
+        id: `gallery-walk-student-summary-${studentId}`,
+        type: 'rich-text',
+        title: 'Student Snapshot',
+        paragraphs: [
+          reviewee?.projectTitle
+            ? `${reviewee.name} submitted ${reviewee.projectTitle}.`
+            : `${reviewee?.name ?? studentId} participated in this gallery walk.`,
+          `${studentFeedback.length} feedback entr${studentFeedback.length === 1 ? 'y' : 'ies'} recorded for this student.`,
+        ],
+      },
+      {
+        id: `gallery-walk-student-feedback-${studentId}`,
+        type: 'table',
+        title: 'Feedback Received',
+        columns: ['Reviewer', 'Recipient', 'Feedback', 'Style'],
+        rows: buildFeedbackTableRows(bundle, studentFeedback),
+        emptyMessage: 'No feedback entries were recorded for this student.',
+      },
+    ]
+    return accumulator
+  }, {})
+}
+
 export function buildGalleryWalkStructuredReportSection(
   bundle: GalleryWalkReportBundle,
   params: { instanceKey: string },
@@ -80,6 +167,8 @@ export function buildGalleryWalkStructuredReportSection(
     supportsScopes: ['activity-session', 'student-cross-activity', 'session-summary'],
     students: toReportStudents(bundle),
     summaryCards: toSummaryCards(bundle),
+    scopeBlocks: buildScopeBlocks(bundle),
+    studentScopeBlocks: buildStudentScopeBlocks(bundle),
     payload: {
       stage: bundle.stage,
       config: bundle.config,

@@ -160,6 +160,49 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
     .activity-grid, .student-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
     .card, .activity-card, .student-card { padding: 16px; }
     .card h2, .activity-card h2, .student-card h2 { margin: 0 0 10px; font-size: 1.1rem; }
+    .block-stack {
+      display: grid;
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .report-block {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: #fbfdff;
+    }
+    .report-block h3 {
+      margin: 0 0 10px;
+      font-size: 1rem;
+    }
+    .report-block p {
+      margin: 0 0 10px;
+      color: var(--ink);
+      line-height: 1.5;
+    }
+    .report-block p:last-child {
+      margin-bottom: 0;
+    }
+    .table-wrap {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 480px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
     .metrics {
       display: grid;
       gap: 10px;
@@ -241,6 +284,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
 
       <div id="summary-view">
         <div class="summary-grid" id="summary-grid"></div>
+        <div class="block-stack" id="summary-block-grid"></div>
       </div>
 
       <div id="activities-view" class="hidden">
@@ -260,6 +304,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
       const summaryGrid = document.getElementById('summary-grid');
       const activityGrid = document.getElementById('activity-grid');
       const studentGrid = document.getElementById('student-grid');
+      const summaryBlockGrid = document.getElementById('summary-block-grid');
       const studentPicker = document.getElementById('student-picker');
       const studentPickerLabel = document.getElementById('student-picker-label');
       const summaryView = document.getElementById('summary-view');
@@ -282,6 +327,54 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
       const students = Array.isArray(manifest.students) ? manifest.students : [];
 
       const topCards = ${toSafeJson(topSummaryCards)};
+      const renderBlocks = (blocks) => {
+        if (!Array.isArray(blocks) || blocks.length === 0) {
+          return '';
+        }
+
+        return blocks.map((block) => {
+          if (!block || typeof block !== 'object') {
+            return '';
+          }
+
+          const title = typeof block.title === 'string' && block.title.length > 0
+            ? '<h3>' + escapeText(block.title) + '</h3>'
+            : '';
+
+          if (block.type === 'rich-text') {
+            const paragraphs = Array.isArray(block.paragraphs) ? block.paragraphs : [];
+            return '<section class="report-block">' + title +
+              (paragraphs.length > 0
+                ? paragraphs.map((paragraph) => '<p>' + escapeText(paragraph) + '</p>').join('')
+                : '<div class="empty">No details were provided for this section.</div>') +
+              '</section>';
+          }
+
+          if (block.type === 'table') {
+            const columns = Array.isArray(block.columns) ? block.columns : [];
+            const rows = Array.isArray(block.rows) ? block.rows : [];
+            const emptyMessage = typeof block.emptyMessage === 'string' && block.emptyMessage.length > 0
+              ? block.emptyMessage
+              : 'No rows were available for this section.';
+
+            return '<section class="report-block">' + title +
+              (rows.length > 0
+                ? '<div class="table-wrap"><table><thead><tr>' +
+                    columns.map((column) => '<th scope="col">' + escapeText(column) + '</th>').join('') +
+                  '</tr></thead><tbody>' +
+                    rows.map((row) => {
+                      const cells = Array.isArray(row && row.cells) ? row.cells : [];
+                      return '<tr>' + cells.map((cell) => '<td>' + escapeText(cell) + '</td>').join('') + '</tr>';
+                    }).join('') +
+                  '</tbody></table></div>'
+                : '<div class="empty">' + escapeText(emptyMessage) + '</div>') +
+              '</section>';
+          }
+
+          return '';
+        }).join('');
+      };
+
       summaryGrid.innerHTML = topCards.map((card) =>
         '<section class="card"><h2>' + escapeText(card.title) + '</h2><div class="metrics">' +
         (Array.isArray(card.metrics) ? card.metrics.map((metric) =>
@@ -289,12 +382,25 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
         ).join('') : '') +
         '</div></section>'
       ).join('');
+      summaryBlockGrid.innerHTML = activities.map((activity) => {
+        const scopeBlocks = activity.report && activity.report.scopeBlocks && activity.report.scopeBlocks['session-summary'];
+        if (!Array.isArray(scopeBlocks) || scopeBlocks.length === 0) {
+          return '';
+        }
+
+        return '<article class="card">' +
+          '<div class="badge">' + escapeText(activity.activityName || activity.activityId) + '</div>' +
+          '<h2>' + escapeText(activity.report && activity.report.title ? activity.report.title : activity.instanceKey) + '</h2>' +
+          renderBlocks(scopeBlocks) +
+        '</article>';
+      }).join('');
 
       activityGrid.innerHTML = activities.length === 0
         ? '<div class="empty">No embedded activity reports were available for this session.</div>'
         : activities.map((activity) => {
             const summaryCards = Array.isArray(activity.report && activity.report.summaryCards) ? activity.report.summaryCards : [];
             const studentsForActivity = Array.isArray(activity.report && activity.report.students) ? activity.report.students : [];
+            const scopeBlocks = activity.report && activity.report.scopeBlocks && activity.report.scopeBlocks['activity-session'];
             return '<article class="activity-card">' +
               '<div class="badge">' + escapeText(activity.activityName || activity.activityId) + '</div>' +
               '<h2>' + escapeText(activity.report && activity.report.title ? activity.report.title : activity.instanceKey) + '</h2>' +
@@ -311,6 +417,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
                     ).join('')
                   : '<div class="empty" style="margin-top:14px;">No summary cards were provided for this activity.</div>'
               ) +
+              renderBlocks(scopeBlocks) +
               '<section style="margin-top:14px;"><h3>Students in this activity</h3>' +
               (
                 studentsForActivity.length > 0
@@ -352,6 +459,9 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
             '</article>' +
             relevantActivities.map((activity) => {
               const summaryCards = Array.isArray(activity.report && activity.report.summaryCards) ? activity.report.summaryCards : [];
+              const studentScopeBlocks = activity.report
+                && activity.report.studentScopeBlocks
+                && activity.report.studentScopeBlocks[studentId];
               return '<article class="student-card">' +
                 '<div class="badge">' + escapeText(activity.activityName || activity.activityId) + '</div>' +
                 '<h2>' + escapeText(activity.report && activity.report.title ? activity.report.title : activity.instanceKey) + '</h2>' +
@@ -366,6 +476,7 @@ export function buildSyncDeckSessionReportHtml(manifest: SyncDeckSessionReportMa
                       ).join('')
                     : '<div class="empty" style="margin-top:14px;">No summary cards were provided for this activity.</div>'
                 ) +
+                renderBlocks(studentScopeBlocks) +
               '</article>';
             }).join('')
           );

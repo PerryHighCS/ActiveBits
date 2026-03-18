@@ -183,8 +183,11 @@ their internal report rendering. The shared type contract should follow this spl
 - SyncDeck chooses a report `scope` such as `activity-session`, `student-cross-activity`, or
   `session-summary`
 - each child activity contributes structured report data for its child session
-- each activity may optionally provide a `ReportSectionComponent` that renders its own section
-  inside the SyncDeck session-report shell for the requested scope
+- each child activity may contribute generic structured report blocks (`scopeBlocks`,
+  `studentScopeBlocks`) that the SyncDeck shell can render offline without understanding the
+  child activity's raw session schema
+- each activity may optionally provide a `ReportSectionComponent` later if richer client-side
+  rendering is needed inside the SyncDeck session-report shell for the requested scope
 - SyncDeck aggregates those sections through a parent-session manifest rather than trying to
   understand every activity's raw session schema directly
 

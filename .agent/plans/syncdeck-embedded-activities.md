@@ -1044,13 +1044,13 @@ session.data.embeddedActivities: Record<instanceKey, {
   registered child report sections into a parent-session manifest.
 - [x] Add session-level report download for the instructor that bundles results from every embedded
   activity in the session into one self-contained HTML file.
-- [ ] Define aggregate report UX: summary across activities, activity-by-activity drill-down, and
+- [x] Define aggregate report UX: summary across activities, activity-by-activity drill-down, and
   per-student drill-down spanning multiple embedded activities.
 - [x] Decide aggregation strategy: child activity returns structured report data and an
   activity-owned renderer that SyncDeck mounts inside the session report shell for the requested
   scope.
-- [ ] Implement first aggregate SyncDeck session report using the chosen child-report contract.
-- [ ] Tests.
+- [x] Implement first aggregate SyncDeck session report using the chosen child-report contract.
+- [x] Tests.
 
 ---
 
