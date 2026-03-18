@@ -21,7 +21,7 @@ import {
   assessRevealSyncProtocolCompatibility,
 } from '../shared/revealSyncProtocol.js'
 import { getActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
-import { getActivityConfig } from '../../../server/activities/activityRegistry.js'
+import { getActivityConfig, initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
 import { connectSyncDeckStudent } from './studentParticipants.js'
 import type { ActivityReportStudentRef, SyncDeckSessionReportManifest } from '../../../types/activity.js'
 import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './reportHtml.js'
@@ -1377,18 +1377,37 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
+    let embeddedActivityConfig = getActivityConfig(activityId)
+    if (!embeddedActivityConfig) {
+      await initializeActivityRegistry()
+      embeddedActivityConfig = getActivityConfig(activityId)
+    }
+    if (!embeddedActivityConfig) {
+      res.status(404).json({ error: 'invalid embedded activity' })
+      return
+    }
+
     const existing = session.data.embeddedActivities[instanceKey]
     if (existing) {
+      if (existing.activityId !== activityId) {
+        res.status(409).json({
+          error: 'embedded activity instance key already belongs to a different activity',
+        })
+        return
+      }
+
       const existingChildSession = await sessions.get(existing.childSessionId)
-      const managerBootstrap = existingChildSession
-        ? buildEmbeddedManagerBootstrapPayload(existingChildSession)
-        : null
-      res.json({
-        childSessionId: existing.childSessionId,
-        instanceKey,
-        ...(managerBootstrap ? { managerBootstrap } : {}),
-      })
-      return
+      if (existingChildSession) {
+        const managerBootstrap = buildEmbeddedManagerBootstrapPayload(existingChildSession)
+        res.json({
+          childSessionId: existing.childSessionId,
+          instanceKey,
+          ...(managerBootstrap ? { managerBootstrap } : {}),
+        })
+        return
+      }
+
+      delete session.data.embeddedActivities[instanceKey]
     }
 
     const childSession = await createEmbeddedChildSession(sessions, session.id, activityId, instanceKey, activityOptions)
