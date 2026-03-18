@@ -912,6 +912,9 @@ session.data.embeddedActivities: Record<instanceKey, {
       sync context postMessage content for each sync state, solo activation path.
   - [x] Added unit coverage for solo activation request parsing, current-slide selection,
     and direct-path vs informational-notice behavior in `SyncDeckStudent.test.tsx`.
+  - [x] Added unit coverage for pending-activity notice gating, `ready` navigation
+    capability alias parsing (`canGoLeft`/`canGoRight`), solo sync-context payload,
+    lifecycle no-op on malformed embedded-start payload, and solo request index fallback.
 
 ### Phase 3.5 — Synchronous activity control hardening
 - [x] Embedded child sessions (`CHILD:*`) cannot be ended directly via shared

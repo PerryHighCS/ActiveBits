@@ -29,6 +29,7 @@ import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
 import { shouldPreferInstructorOverlaySelection } from './SyncDeckStudent.js'
 import { buildStudentEmbeddedSyncContextMessage } from './SyncDeckStudent.js'
+import { shouldShowInstructorPendingActivityNotice } from './SyncDeckStudent.js'
 import { resolveStudentSoloActivityRequestInputs } from './SyncDeckStudent.js'
 import { resolveStudentSoloActivityRequest } from './SyncDeckStudent.js'
 import { applyStudentSoloActivityRequest } from './SyncDeckStudent.js'
@@ -923,6 +924,27 @@ void test('normalizeSyncDeckEmbeddedActivities filters invalid records', () => {
   assert.deepEqual(Object.keys(normalized), ['video-sync:3:0'])
 })
 
+void test('normalizeSyncDeckEmbeddedActivities preserves multiple valid late-join snapshot records', () => {
+  const normalized = normalizeSyncDeckEmbeddedActivities({
+    'raffle:2:0': {
+      childSessionId: 'CHILD:parent:r1:raffle',
+      activityId: 'raffle',
+      startedAt: 10,
+      owner: 'inst-a',
+    },
+    'video-sync:2:1': {
+      childSessionId: 'CHILD:parent:v1:video-sync',
+      activityId: 'video-sync',
+      startedAt: 20,
+      owner: 'inst-a',
+    },
+  })
+
+  assert.deepEqual(Object.keys(normalized).sort(), ['raffle:2:0', 'video-sync:2:1'])
+  assert.equal(normalized['raffle:2:0']?.activityId, 'raffle')
+  assert.equal(normalized['video-sync:2:1']?.activityId, 'video-sync')
+})
+
 void test('applySyncDeckEmbeddedLifecyclePayload applies start and end updates', () => {
   const started = applySyncDeckEmbeddedLifecyclePayload({}, {
     type: 'embedded-activity-start',
@@ -939,6 +961,25 @@ void test('applySyncDeckEmbeddedLifecyclePayload applies start and end updates',
   })
 
   assert.equal(ended['video-sync:3:0'], undefined)
+})
+
+void test('applySyncDeckEmbeddedLifecyclePayload ignores start payload missing activityId', () => {
+  const existing = {
+    'raffle:2:0': {
+      childSessionId: 'CHILD:parent:r1:raffle',
+      activityId: 'raffle',
+      startedAt: 10,
+      owner: 'syncdeck-instructor',
+    },
+  }
+
+  const next = applySyncDeckEmbeddedLifecyclePayload(existing, {
+    type: 'embedded-activity-start',
+    instanceKey: 'video-sync:3:0',
+    childSessionId: 'CHILD:parent:v1:video-sync',
+  })
+
+  assert.deepEqual(next, existing)
 })
 
 void test('resolveStudentActiveEmbeddedInstanceKey selects activity for student h:v position', () => {
@@ -962,6 +1003,28 @@ void test('resolveStudentActiveEmbeddedInstanceKey selects activity for student 
     'video-sync:3:1',
   )
   assert.equal(resolveStudentActiveEmbeddedInstanceKey(map, { h: 5, v: 0, f: 0 }), null)
+})
+
+void test('resolveStudentActiveEmbeddedInstanceKey prefers latest started overlay when multiple records share slide anchor', () => {
+  const map = {
+    'raffle:2:0': {
+      childSessionId: 'CHILD:parent:r1:raffle',
+      activityId: 'raffle',
+      startedAt: 10,
+      owner: 'inst',
+    },
+    'embedded-test:2:0': {
+      childSessionId: 'CHILD:parent:e1:embedded-test',
+      activityId: 'embedded-test',
+      startedAt: 30,
+      owner: 'inst',
+    },
+  }
+
+  assert.equal(
+    resolveStudentActiveEmbeddedInstanceKey(map, { h: 2, v: 0, f: 0 }),
+    'embedded-test:2:0',
+  )
 })
 
 void test('resolveStudentActiveEmbeddedInstanceKeyWithFallback uses fallback indices when local student indices are unavailable', () => {
@@ -1097,6 +1160,73 @@ void test('resolveStudentOverlayEmbeddedInstanceKey reuses same-stack fallback o
   )
 })
 
+void test('resolveStudentOverlayEmbeddedInstanceKey switches overlays as local navigation moves across anchored slides', () => {
+  const map = {
+    'raffle:2:0': {
+      childSessionId: 'CHILD:parent:r1:raffle',
+      activityId: 'raffle',
+      startedAt: 10,
+      owner: 'inst',
+    },
+    'video-sync:3:0': {
+      childSessionId: 'CHILD:parent:v1:video-sync',
+      activityId: 'video-sync',
+      startedAt: 20,
+      owner: 'inst',
+    },
+  }
+
+  assert.equal(
+    resolveStudentOverlayEmbeddedInstanceKey(
+      map,
+      { h: 2, v: 0, f: 0 },
+      { h: 2, v: 0, f: 0 },
+      {
+        preferInstructor: false,
+        fallbackOnMismatch: false,
+      },
+    ),
+    'raffle:2:0',
+  )
+
+  assert.equal(
+    resolveStudentOverlayEmbeddedInstanceKey(
+      map,
+      { h: 3, v: 0, f: 0 },
+      { h: 2, v: 0, f: 0 },
+      {
+        preferInstructor: false,
+        fallbackOnMismatch: false,
+      },
+    ),
+    'video-sync:3:0',
+  )
+})
+
+void test('resolveStudentOverlayEmbeddedInstanceKey falls back to instructor anchor on mismatch when fallback is enabled', () => {
+  const map = {
+    'embedded-test:4:0': {
+      childSessionId: 'CHILD:parent:e1:embedded-test',
+      activityId: 'embedded-test',
+      startedAt: 30,
+      owner: 'inst',
+    },
+  }
+
+  assert.equal(
+    resolveStudentOverlayEmbeddedInstanceKey(
+      map,
+      { h: 1, v: 0, f: 0 },
+      { h: 4, v: 0, f: 0 },
+      {
+        preferInstructor: false,
+        fallbackOnMismatch: true,
+      },
+    ),
+    'embedded-test:4:0',
+  )
+})
+
 void test('resolveStudentOverlayNavigationBaseIndices uses active embedded anchor when student is on fallback overlay', () => {
   const base = resolveStudentOverlayNavigationBaseIndices({
     studentIndices: { h: 0, v: 0, f: 0 },
@@ -1152,6 +1282,26 @@ void test('extractNavigationCapabilitiesFromStateMessage reads four-direction na
     canGoBack: false,
     canGoForward: true,
     canGoUp: false,
+    canGoDown: true,
+  })
+})
+
+void test('extractNavigationCapabilitiesFromStateMessage normalizes canGoLeft/canGoRight aliases from ready payload', () => {
+  const capabilities = extractNavigationCapabilitiesFromStateMessage({
+    type: 'reveal-sync',
+    action: 'ready',
+    payload: {
+      navigation: {
+        canGoLeft: false,
+        canGoRight: true,
+      },
+    },
+  })
+
+  assert.deepEqual(capabilities, {
+    canGoBack: false,
+    canGoForward: true,
+    canGoUp: true,
     canGoDown: true,
   })
 })
@@ -1252,6 +1402,75 @@ void test('buildStudentEmbeddedSyncContextMessage emits expected activebits-embe
   })
 })
 
+void test('buildStudentEmbeddedSyncContextMessage emits solo payload when instructor indices are absent', () => {
+  const message = buildStudentEmbeddedSyncContextMessage(
+    'solo',
+    { h: 4, v: 0, f: 0 },
+    null,
+  )
+
+  assert.deepEqual(message, {
+    type: 'activebits-embedded',
+    action: 'syncContext',
+    payload: {
+      syncState: 'solo',
+      studentIndices: { h: 4, v: 0, f: 0 },
+      instructorIndices: null,
+      role: 'student',
+    },
+  })
+})
+
+void test('shouldShowInstructorPendingActivityNotice only shows when student shares instructor horizontal position without an active overlay', () => {
+  assert.equal(
+    shouldShowInstructorPendingActivityNotice({
+      hasActiveEmbeddedActivity: false,
+      hasActiveSoloOverlay: false,
+      instructorAnchoredInstanceKey: 'raffle:3:0',
+      studentIndices: { h: 3, v: 1, f: 0 },
+      instructorIndices: { h: 3, v: 0, f: 0 },
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldShowInstructorPendingActivityNotice({
+      hasActiveEmbeddedActivity: true,
+      hasActiveSoloOverlay: false,
+      instructorAnchoredInstanceKey: 'raffle:3:0',
+      studentIndices: { h: 3, v: 1, f: 0 },
+      instructorIndices: { h: 3, v: 0, f: 0 },
+      isBacktrackOptOut: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldShowInstructorPendingActivityNotice({
+      hasActiveEmbeddedActivity: false,
+      hasActiveSoloOverlay: false,
+      instructorAnchoredInstanceKey: 'raffle:4:0',
+      studentIndices: { h: 3, v: 1, f: 0 },
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      isBacktrackOptOut: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldShowInstructorPendingActivityNotice({
+      hasActiveEmbeddedActivity: false,
+      hasActiveSoloOverlay: false,
+      instructorAnchoredInstanceKey: 'raffle:3:0',
+      studentIndices: { h: 3, v: 1, f: 0 },
+      instructorIndices: { h: 3, v: 0, f: 0 },
+      isBacktrackOptOut: true,
+    }),
+    false,
+  )
+})
+
 void test('resolveStudentSoloActivityRequestInputs parses primary and stack slide requests with de-duped slide keys', () => {
   const requests = resolveStudentSoloActivityRequestInputs(
     {
@@ -1311,6 +1530,24 @@ void test('resolveStudentSoloActivityRequest prefers request matching current st
   })
 })
 
+void test('resolveStudentSoloActivityRequestInputs falls back to provided student indices when request omits indices', () => {
+  const requests = resolveStudentSoloActivityRequestInputs(
+    {
+      activityId: 'embedded-test',
+      standaloneEntry: { enabled: true, supportsDirectPath: true },
+    },
+    { h: 6, v: 0, f: 0 },
+  )
+
+  assert.deepEqual(requests, [
+    {
+      activityId: 'embedded-test',
+      indices: { h: 6, v: 0, f: 0 },
+      standaloneEntry: { enabled: true, supportsDirectPath: true },
+    },
+  ])
+})
+
 void test('applyStudentSoloActivityRequest creates direct standalone overlay when request metadata supports direct solo path', () => {
   const overlays = applyStudentSoloActivityRequest(
     {},
@@ -1345,4 +1582,24 @@ void test('applyStudentSoloActivityRequest falls back to live-session notice whe
       notice: 'This activity requires a live session.',
     },
   })
+})
+
+void test('applyStudentSoloActivityRequest returns same map reference when overlay content is unchanged', () => {
+  const current = {
+    '5:0': {
+      activityId: 'video-sync',
+      notice: 'This activity requires a live session.',
+    },
+  }
+
+  const next = applyStudentSoloActivityRequest(
+    current,
+    {
+      activityId: 'video-sync',
+      indices: { h: 5, v: 0, f: 0 },
+      standaloneEntry: { enabled: false, supportsDirectPath: false },
+    },
+  )
+
+  assert.equal(next, current)
 })
