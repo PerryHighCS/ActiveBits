@@ -708,7 +708,7 @@ void test('resolveStudentActiveEmbeddedInstanceKey selects activity for student 
   assert.equal(resolveStudentActiveEmbeddedInstanceKey(map, { h: 5, v: 0, f: 0 }), null)
 })
 
-void test('extractNavigationCapabilitiesFromStateMessage reads canGoBack/canGoForward from state payload', () => {
+void test('extractNavigationCapabilitiesFromStateMessage reads four-direction navigation capabilities from state payload', () => {
   const capabilities = extractNavigationCapabilitiesFromStateMessage({
     type: 'reveal-sync',
     action: 'state',
@@ -716,6 +716,8 @@ void test('extractNavigationCapabilitiesFromStateMessage reads canGoBack/canGoFo
       navigation: {
         canGoBack: false,
         canGoForward: true,
+        canGoUp: false,
+        canGoDown: true,
       },
     },
   })
@@ -723,6 +725,8 @@ void test('extractNavigationCapabilitiesFromStateMessage reads canGoBack/canGoFo
   assert.deepEqual(capabilities, {
     canGoBack: false,
     canGoForward: true,
+    canGoUp: false,
+    canGoDown: true,
   })
 })
 

@@ -436,7 +436,14 @@ interface SyncDeckEmbeddedLifecyclePayload {
   childSessionId: string
 }
 
-type SyncDeckManagerOverlayNavigationDirection = 'prev' | 'next' | 'slide'
+type SyncDeckManagerOverlayNavigationDirection = 'prev' | 'next' | 'up' | 'down' | 'slide'
+
+interface SyncDeckManagerNavigationCapabilities {
+  canGoBack: boolean
+  canGoForward: boolean
+  canGoUp: boolean
+  canGoDown: boolean
+}
 
 function buildSyncDeckPasscodeKey(sessionId: string): string {
   return `${SYNCDECK_PASSCODE_KEY_PREFIX}${sessionId}`
@@ -676,6 +683,42 @@ export function buildManagerOverlayNavigationCommand(
   direction: SyncDeckManagerOverlayNavigationDirection,
 ): Record<string, unknown> {
   return buildRevealCommandMessage(direction, {})
+}
+
+export function extractManagerNavigationCapabilitiesFromRevealMessage(
+  rawPayload: unknown,
+): SyncDeckManagerNavigationCapabilities | null {
+  const envelope = parseRevealSyncEnvelope(rawPayload)
+  if (!envelope || (envelope.action !== 'state' && envelope.action !== 'ready') || !isPlainObject(envelope.payload)) {
+    return null
+  }
+
+  const payload = envelope.payload as Record<string, unknown>
+  const navigation = isPlainObject(payload.navigation) ? (payload.navigation as Record<string, unknown>) : null
+  const capabilities = isPlainObject(payload.capabilities) ? (payload.capabilities as Record<string, unknown>) : null
+  const source = navigation ?? capabilities
+
+  if (!source) {
+    return null
+  }
+
+  const canGoBack = typeof source.canGoBack === 'boolean' ? source.canGoBack
+    : typeof source.canGoLeft === 'boolean' ? source.canGoLeft : null
+  const canGoForward = typeof source.canGoForward === 'boolean' ? source.canGoForward
+    : typeof source.canGoRight === 'boolean' ? source.canGoRight : null
+  const canGoUp = typeof source.canGoUp === 'boolean' ? source.canGoUp : null
+  const canGoDown = typeof source.canGoDown === 'boolean' ? source.canGoDown : null
+
+  if (canGoBack === null && canGoForward === null && canGoUp === null && canGoDown === null) {
+    return null
+  }
+
+  return {
+    canGoBack: canGoBack ?? true,
+    canGoForward: canGoForward ?? true,
+    canGoUp: canGoUp ?? true,
+    canGoDown: canGoDown ?? true,
+  }
 }
 
 export function resolveNextPendingEmbeddedEndConfirmation(
@@ -1288,6 +1331,7 @@ const SyncDeckManager: FC = () => {
   const [isEmbeddedPanelOpen, setIsEmbeddedPanelOpen] = useState(false)
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
+  const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
   const [instructorIndicesState, setInstructorIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [isPresentationPaused, setIsPresentationPaused] = useState(false)
@@ -2299,6 +2343,11 @@ const SyncDeckManager: FC = () => {
         }
       }
 
+      const nextOverlayNavigationCapabilities = extractManagerNavigationCapabilitiesFromRevealMessage(event.data)
+      if (nextOverlayNavigationCapabilities) {
+        setOverlayNavigationCapabilities(nextOverlayNavigationCapabilities)
+      }
+
       const storyboardDisplayed = extractStoryboardDisplayed(event.data)
       if (typeof storyboardDisplayed === 'boolean') {
         setIsStoryboardOpen(storyboardDisplayed)
@@ -2554,7 +2603,7 @@ const SyncDeckManager: FC = () => {
   const activeEmbeddedInstanceKey = resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState)
   const activeEmbeddedActivity = activeEmbeddedInstanceKey ? embeddedActivities[activeEmbeddedInstanceKey] ?? null : null
 
-  const sendEmbeddedOverlayNavigation = (direction: 'prev' | 'next'): void => {
+  const sendEmbeddedOverlayNavigation = (direction: 'prev' | 'next' | 'up' | 'down'): void => {
     const targetWindow = presentationIframeRef.current?.contentWindow
     if (!targetWindow || !presentationOrigin) {
       return
@@ -2913,19 +2962,39 @@ const SyncDeckManager: FC = () => {
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100"
+                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
                           onClick={() => sendEmbeddedOverlayNavigation('prev')}
                           aria-label="Previous slide"
+                          disabled={overlayNavigationCapabilities?.canGoBack === false}
                         >
                           ◀
                         </button>
                         <button
                           type="button"
-                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100"
+                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                          onClick={() => sendEmbeddedOverlayNavigation('up')}
+                          aria-label="Move up"
+                          disabled={overlayNavigationCapabilities?.canGoUp === false}
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
                           onClick={() => sendEmbeddedOverlayNavigation('next')}
                           aria-label="Next slide"
+                          disabled={overlayNavigationCapabilities?.canGoForward === false}
                         >
                           ▶
+                        </button>
+                        <button
+                          type="button"
+                          className="px-2 py-1 rounded border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                          onClick={() => sendEmbeddedOverlayNavigation('down')}
+                          aria-label="Move down"
+                          disabled={overlayNavigationCapabilities?.canGoDown === false}
+                        >
+                          ▼
                         </button>
                         <button
                           type="button"
@@ -2934,17 +3003,6 @@ const SyncDeckManager: FC = () => {
                           aria-label="Slide command"
                         >
                           ⦿
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (activeEmbeddedInstanceKey) {
-                              void endEmbeddedActivity(activeEmbeddedInstanceKey)
-                            }
-                          }}
-                          className="px-2 py-1 rounded border border-red-600 text-sm font-semibold text-red-600 hover:bg-red-50"
-                        >
-                          End
                         </button>
                       </div>
                     </div>

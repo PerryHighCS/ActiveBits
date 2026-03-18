@@ -96,6 +96,8 @@ export type SyncDeckStudentSyncState = 'solo' | 'synchronized' | 'behind' | 'ahe
 interface NavigationCapabilities {
   canGoBack: boolean
   canGoForward: boolean
+  canGoUp: boolean
+  canGoDown: boolean
 }
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
@@ -962,14 +964,18 @@ export function extractNavigationCapabilitiesFromStateMessage(rawPayload: unknow
     : typeof source.canGoLeft === 'boolean' ? source.canGoLeft : null
   const canGoForward = typeof source.canGoForward === 'boolean' ? source.canGoForward
     : typeof source.canGoRight === 'boolean' ? source.canGoRight : null
+  const canGoUp = typeof source.canGoUp === 'boolean' ? source.canGoUp : null
+  const canGoDown = typeof source.canGoDown === 'boolean' ? source.canGoDown : null
 
-  if (canGoBack === null && canGoForward === null) {
+  if (canGoBack === null && canGoForward === null && canGoUp === null && canGoDown === null) {
     return null
   }
 
   return {
     canGoBack: canGoBack ?? true,
     canGoForward: canGoForward ?? true,
+    canGoUp: canGoUp ?? true,
+    canGoDown: canGoDown ?? true,
   }
 }
 
@@ -1719,7 +1725,7 @@ const SyncDeckStudent: FC = () => {
     sendSyncContextToEmbeddedIframe()
   }, [activeEmbeddedInstanceKey, sendSyncContextToEmbeddedIframe, studentIndicesState, syncState])
 
-  const sendStudentOverlayNavigation = useCallback((direction: 'prev' | 'next') => {
+  const sendStudentOverlayNavigation = useCallback((direction: 'prev' | 'next' | 'up' | 'down') => {
     sendPayloadToIframe(buildRevealCommandMessage(direction, {}))
   }, [sendPayloadToIframe])
 
@@ -1736,6 +1742,20 @@ const SyncDeckStudent: FC = () => {
     }
     sendStudentOverlayNavigation('next')
   }, [navigationCapabilities?.canGoForward, sendStudentOverlayNavigation])
+
+  const handleStudentOverlayUp = useCallback(() => {
+    if (navigationCapabilities?.canGoUp === false) {
+      return
+    }
+    sendStudentOverlayNavigation('up')
+  }, [navigationCapabilities?.canGoUp, sendStudentOverlayNavigation])
+
+  const handleStudentOverlayDown = useCallback(() => {
+    if (navigationCapabilities?.canGoDown === false) {
+      return
+    }
+    sendStudentOverlayNavigation('down')
+  }, [navigationCapabilities?.canGoDown, sendStudentOverlayNavigation])
 
   if (!sessionId) {
     return (
@@ -1882,6 +1902,17 @@ const SyncDeckStudent: FC = () => {
             </button>
             <button
               type="button"
+              onClick={handleStudentOverlayUp}
+              disabled={navigationCapabilities?.canGoUp === false}
+              aria-disabled={navigationCapabilities?.canGoUp === false}
+              aria-label="Move up"
+              title="Move up"
+              className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ▲
+            </button>
+            <button
+              type="button"
               onClick={handleStudentOverlayForward}
               disabled={navigationCapabilities?.canGoForward === false}
               aria-disabled={navigationCapabilities?.canGoForward === false}
@@ -1890,6 +1921,17 @@ const SyncDeckStudent: FC = () => {
               className="absolute right-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               ▶
+            </button>
+            <button
+              type="button"
+              onClick={handleStudentOverlayDown}
+              disabled={navigationCapabilities?.canGoDown === false}
+              aria-disabled={navigationCapabilities?.canGoDown === false}
+              aria-label="Move down"
+              title="Move down"
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ▼
             </button>
           </>
         ) : null}

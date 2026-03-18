@@ -29,6 +29,7 @@ import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
 import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
 import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
+import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -389,14 +390,40 @@ void test('resolveManagerEmbeddedInstanceStatus marks only selected instance as 
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', null), 'idle')
 })
 
-void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for prev/next/slide', () => {
+void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for four directions and slide', () => {
   const prev = buildManagerOverlayNavigationCommand('prev') as { payload?: { name?: unknown } }
   const next = buildManagerOverlayNavigationCommand('next') as { payload?: { name?: unknown } }
+  const up = buildManagerOverlayNavigationCommand('up') as { payload?: { name?: unknown } }
+  const down = buildManagerOverlayNavigationCommand('down') as { payload?: { name?: unknown } }
   const slide = buildManagerOverlayNavigationCommand('slide') as { payload?: { name?: unknown } }
 
   assert.equal(prev.payload?.name, 'prev')
   assert.equal(next.payload?.name, 'next')
+  assert.equal(up.payload?.name, 'up')
+  assert.equal(down.payload?.name, 'down')
   assert.equal(slide.payload?.name, 'slide')
+})
+
+void test('extractManagerNavigationCapabilitiesFromRevealMessage reads four-direction navigation capabilities', () => {
+  const capabilities = extractManagerNavigationCapabilitiesFromRevealMessage({
+    type: 'reveal-sync',
+    action: 'state',
+    payload: {
+      navigation: {
+        canGoLeft: false,
+        canGoRight: true,
+        canGoUp: false,
+        canGoDown: true,
+      },
+    },
+  })
+
+  assert.deepEqual(capabilities, {
+    canGoBack: false,
+    canGoForward: true,
+    canGoUp: false,
+    canGoDown: true,
+  })
 })
 
 void test('resolveNextPendingEmbeddedEndConfirmation requires two clicks before ending', () => {
