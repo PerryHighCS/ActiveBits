@@ -28,6 +28,7 @@ interface RouteRequest {
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): void
+  send?(payload: unknown): void
   setHeader?(name: string, value: string): void
 }
 
@@ -42,6 +43,7 @@ interface MockResponse {
   json(payload: unknown): MockResponse
   cookie(name: string, value: string, options: Record<string, unknown>): MockResponse
   setHeader(name: string, value: string): void
+  send(payload: unknown): MockResponse
 }
 
 function createResponse(): MockResponse {
@@ -55,6 +57,10 @@ function createResponse(): MockResponse {
       return this
     },
     json(payload: unknown) {
+      this.body = payload
+      return this
+    },
+    send(payload: unknown) {
       this.body = payload
       return this
     },

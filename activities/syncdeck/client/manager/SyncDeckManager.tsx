@@ -1500,6 +1500,7 @@ const SyncDeckManager: FC = () => {
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
   const [downloadingEmbeddedReportInstanceKey, setDownloadingEmbeddedReportInstanceKey] = useState<string | null>(null)
+  const [isDownloadingSessionReport, setIsDownloadingSessionReport] = useState(false)
   const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
   const [instructorIndicesState, setInstructorIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
@@ -2985,6 +2986,43 @@ const SyncDeckManager: FC = () => {
     }
   }
 
+  const downloadSessionReport = async (): Promise<void> => {
+    if (!sessionId || !instructorPasscode) {
+      return
+    }
+
+    setIsDownloadingSessionReport(true)
+    try {
+      const response = await fetch(
+        `/api/syncdeck/${encodeURIComponent(sessionId)}/report`,
+        {
+          headers: {
+            'x-syncdeck-instructor-passcode': instructorPasscode,
+          },
+        },
+      )
+      if (!response.ok) {
+        throw new Error('Failed to download SyncDeck session report')
+      }
+
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const downloadLink = document.createElement('a')
+      downloadLink.href = objectUrl
+      downloadLink.download =
+        parseDownloadFilenameFromContentDisposition(response.headers.get('Content-Disposition'))
+        ?? `syncdeck-${sessionId}.html`
+      document.body.appendChild(downloadLink)
+      downloadLink.click()
+      document.body.removeChild(downloadLink)
+      URL.revokeObjectURL(objectUrl)
+    } catch {
+      // Keep the session toolbar stable if the download fails so the instructor can retry.
+    } finally {
+      setIsDownloadingSessionReport(false)
+    }
+  }
+
   const handleEmbeddedEndControlClick = (instanceKey: string): void => {
     const next = resolveNextPendingEmbeddedEndConfirmation(pendingEmbeddedEndConfirmInstanceKey, instanceKey)
     setPendingEmbeddedEndConfirmInstanceKey(next.nextPending)
@@ -3138,6 +3176,16 @@ const SyncDeckManager: FC = () => {
               className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50"
             >
               {copiedValue === studentJoinUrl ? '✓ Copied!' : 'Copy Join URL'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void downloadSessionReport()
+              }}
+              disabled={isDownloadingSessionReport || !instructorPasscode}
+              className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isDownloadingSessionReport ? 'Downloading report…' : 'Download Session Report'}
             </button>
 
             <button

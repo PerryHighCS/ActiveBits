@@ -39,6 +39,7 @@ interface CookieSessionEntry {
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): void
+  send?(payload: unknown): void
   cookie?(name: string, value: string, options: Record<string, unknown>): void
   setHeader?(name: string, value: string): void
 }
@@ -1544,6 +1545,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const filename = buildSyncDeckReportFilename(manifest)
     res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
     res.setHeader?.('Content-Disposition', `attachment; filename="${filename}"`)
+    if (typeof res.send === 'function') {
+      res.send(html)
+      return
+    }
+
     res.json(html)
   })
 

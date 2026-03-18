@@ -63,6 +63,7 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /Running activities:/i)
   assert.match(html, /session-123/i)
   assert.match(html, /Copy Join URL/i)
+  assert.match(html, /Download Session Report/i)
   assert.match(html, /End Session/i)
   assert.match(html, /Force sync students to current position/i)
   assert.match(html, /Disable instructor sync/i)

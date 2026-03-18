@@ -1042,7 +1042,7 @@ session.data.embeddedActivities: Record<instanceKey, {
   report builders without SyncDeck importing activity-specific modules.
 - [x] Implement first `GET /api/syncdeck/:sessionId/report-manifest` route that aggregates
   registered child report sections into a parent-session manifest.
-- [ ] Add session-level report download for the instructor that bundles results from every embedded
+- [x] Add session-level report download for the instructor that bundles results from every embedded
   activity in the session into one self-contained HTML file.
 - [ ] Define aggregate report UX: summary across activities, activity-by-activity drill-down, and
   per-student drill-down spanning multiple embedded activities.
