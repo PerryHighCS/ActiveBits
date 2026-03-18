@@ -2158,6 +2158,89 @@ void test('report-manifest route aggregates structured child activity reports', 
   ])
 })
 
+void test('report route returns downloadable session-level HTML built from the manifest', async () => {
+  await initializeActivityRegistry()
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'gallery-walk:4:0': {
+            childSessionId: 'CHILD:s1:abc12:gallery-walk',
+            activityId: 'gallery-walk',
+            startedAt: 123,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    'CHILD:s1:abc12:gallery-walk': {
+      id: 'CHILD:s1:abc12:gallery-walk',
+      type: 'gallery-walk',
+      created: Date.now(),
+      lastActivity: Date.now(),
+      data: {
+        stage: 'review',
+        config: { title: 'Critique Day' },
+        reviewees: {
+          studentA: { name: 'Avery', projectTitle: 'Bridge Design' },
+        },
+        reviewers: {
+          reviewer1: { name: 'Jordan' },
+        },
+        feedback: [
+          {
+            id: 'fb-1',
+            to: 'studentA',
+            from: 'reviewer1',
+            fromNameSnapshot: 'Jordan',
+            message: 'Great use of examples.',
+            createdAt: Date.now(),
+            styleId: 'yellow',
+          },
+        ],
+        stats: {
+          reviewees: { studentA: 1 },
+          reviewers: { reviewer1: 1 },
+        },
+        embeddedLaunch: {
+          parentSessionId: 's1',
+          instanceKey: 'gallery-walk:4:0',
+          selectedOptions: {},
+        },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/report']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {},
+      { 'x-syncdeck-instructor-passcode': 'teacher-passcode-1' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.headers['Content-Type'], 'text/html; charset=utf-8')
+  assert.match(res.headers['Content-Disposition'] ?? '', /attachment; filename="syncdeck-s1\.html"/)
+  assert.equal(typeof res.body, 'string')
+  assert.match(String(res.body), /Session Summary/)
+  assert.match(String(res.body), /By Activity/)
+  assert.match(String(res.body), /By Student/)
+  assert.match(String(res.body), /Critique Day/)
+  assert.match(String(res.body), /Avery - Bridge Design/)
+})
+
 void test('embedded-activity end route removes keyed state, deletes child session, and broadcasts end', async () => {
   const app = createMockApp()
   const ws = createMockWs()

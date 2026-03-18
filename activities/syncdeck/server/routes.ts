@@ -23,6 +23,7 @@ import { getActivityReportBuilder } from '../../../server/activities/activityRep
 import { getActivityConfig } from '../../../server/activities/activityRegistry.js'
 import { connectSyncDeckStudent } from './studentParticipants.js'
 import type { ActivityReportStudentRef, SyncDeckSessionReportManifest } from '../../../types/activity.js'
+import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './reportHtml.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -840,6 +841,50 @@ function mergeReportStudents(sections: Array<{ students?: ActivityReportStudentR
   return [...byStudentId.values()]
 }
 
+async function buildSyncDeckSessionReportManifest(
+  session: SyncDeckSession,
+  sessions: SessionStore,
+): Promise<SyncDeckSessionReportManifest> {
+  const activities: SyncDeckSessionReportManifest['activities'] = []
+  for (const [instanceKey, embeddedActivity] of Object.entries(session.data.embeddedActivities)) {
+    const childSession = await sessions.get(embeddedActivity.childSessionId)
+    if (!childSession || typeof childSession.type !== 'string') {
+      continue
+    }
+
+    const builder = getActivityReportBuilder(childSession.type)
+    if (!builder) {
+      continue
+    }
+
+    const report = builder(childSession, { instanceKey })
+    if (!report) {
+      continue
+    }
+
+    const activityConfig = getActivityConfig(childSession.type)
+    activities.push({
+      activityId: embeddedActivity.activityId,
+      activityName: typeof activityConfig?.title === 'string' && activityConfig.title.trim().length > 0
+        ? activityConfig.title.trim()
+        : typeof activityConfig?.name === 'string' && activityConfig.name.trim().length > 0
+          ? activityConfig.name.trim()
+          : embeddedActivity.activityId,
+      childSessionId: embeddedActivity.childSessionId,
+      instanceKey,
+      startedAt: embeddedActivity.startedAt,
+      report,
+    })
+  }
+
+  return {
+    parentSessionId: session.id,
+    generatedAt: Date.now(),
+    activities,
+    students: mergeReportStudents(activities.map((entry) => entry.report)),
+  }
+}
+
 function toSelectedOptions(value: unknown): Record<string, unknown> {
   return isPlainObject(value) ? value : {}
 }
@@ -1471,45 +1516,35 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const activities: SyncDeckSessionReportManifest['activities'] = []
-    for (const [instanceKey, embeddedActivity] of Object.entries(session.data.embeddedActivities)) {
-      const childSession = await sessions.get(embeddedActivity.childSessionId)
-      if (!childSession || typeof childSession.type !== 'string') {
-        continue
-      }
-
-      const builder = getActivityReportBuilder(childSession.type)
-      if (!builder) {
-        continue
-      }
-
-      const report = builder(childSession, { instanceKey })
-      if (!report) {
-        continue
-      }
-
-      const activityConfig = getActivityConfig(childSession.type)
-      activities.push({
-        activityId: embeddedActivity.activityId,
-        activityName: typeof activityConfig?.title === 'string' && activityConfig.title.trim().length > 0
-          ? activityConfig.title.trim()
-          : typeof activityConfig?.name === 'string' && activityConfig.name.trim().length > 0
-            ? activityConfig.name.trim()
-            : embeddedActivity.activityId,
-        childSessionId: embeddedActivity.childSessionId,
-        instanceKey,
-        startedAt: embeddedActivity.startedAt,
-        report,
-      })
-    }
-
-    const manifest: SyncDeckSessionReportManifest = {
-      parentSessionId: session.id,
-      generatedAt: Date.now(),
-      activities,
-      students: mergeReportStudents(activities.map((entry) => entry.report)),
-    }
+    const manifest = await buildSyncDeckSessionReportManifest(session, sessions)
     res.json(manifest)
+  })
+
+  app.get('/api/syncdeck/:sessionId/report', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readHeaderField(req.headers, 'x-syncdeck-instructor-passcode'))
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const manifest = await buildSyncDeckSessionReportManifest(session, sessions)
+    const html = buildSyncDeckSessionReportHtml(manifest)
+    const filename = buildSyncDeckReportFilename(manifest)
+    res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
+    res.setHeader?.('Content-Disposition', `attachment; filename="${filename}"`)
+    res.json(html)
   })
 
   app.delete('/api/syncdeck/:sessionId', async (req, res) => {
