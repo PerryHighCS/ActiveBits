@@ -3,16 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { useClipboard } from '@src/hooks/useClipboard'
 import Button from '../ui/Button'
 import Modal from '../ui/Modal'
+import { isEmbeddedChildSessionId } from './sessionHeaderUtils'
 
 export interface SessionHeaderProps {
   activityName: string
   sessionId?: string
   simple?: boolean
   onEndSession?: () => void | Promise<void>
-}
-
-export function isEmbeddedChildSessionId(sessionId?: string): boolean {
-  return typeof sessionId === 'string' && sessionId.startsWith('CHILD:')
 }
 
 /**
