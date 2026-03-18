@@ -1,3 +1,5 @@
+import type { ActivityStructuredReportSection, ActivityReportStudentRef, ActivityReportSummaryCard } from '../../../types/activity.js'
+
 interface RevieweeRecord {
   name: string
   projectTitle?: string | null
@@ -32,6 +34,61 @@ export interface GalleryWalkReportBundle {
   stats: GalleryStats
   stage: 'gallery' | 'review'
   config: Record<string, unknown> & { title?: string }
+}
+
+function toReportStudents(bundle: GalleryWalkReportBundle): ActivityReportStudentRef[] {
+  return Object.entries(bundle.reviewees).map(([studentId, reviewee]) => ({
+    studentId,
+    displayName: reviewee.projectTitle
+      ? `${reviewee.name} - ${reviewee.projectTitle}`
+      : reviewee.name,
+  }))
+}
+
+function toSummaryCards(bundle: GalleryWalkReportBundle): ActivityReportSummaryCard[] {
+  const revieweeCount = Object.keys(bundle.reviewees).length
+  const reviewerCount = Object.keys(bundle.reviewers).length
+  const feedbackCount = bundle.feedback.length
+
+  return [
+    {
+      id: 'gallery-walk-overview',
+      title: 'Gallery Walk Overview',
+      metrics: [
+        { id: 'feedback-count', label: 'Feedback Entries', value: feedbackCount },
+        { id: 'reviewee-count', label: 'Students Reviewed', value: revieweeCount },
+        { id: 'reviewer-count', label: 'Reviewers', value: reviewerCount },
+      ],
+    },
+  ]
+}
+
+export function buildGalleryWalkStructuredReportSection(
+  bundle: GalleryWalkReportBundle,
+  params: { instanceKey: string },
+): ActivityStructuredReportSection {
+  const title = typeof bundle.config.title === 'string' && bundle.config.title.trim().length > 0
+    ? bundle.config.title.trim()
+    : 'Gallery Walk Report'
+
+  return {
+    activityId: 'gallery-walk',
+    childSessionId: bundle.sessionId,
+    instanceKey: params.instanceKey,
+    title,
+    generatedAt: bundle.exportedAt,
+    supportsScopes: ['activity-session', 'student-cross-activity', 'session-summary'],
+    students: toReportStudents(bundle),
+    summaryCards: toSummaryCards(bundle),
+    payload: {
+      stage: bundle.stage,
+      config: bundle.config,
+      reviewees: bundle.reviewees,
+      reviewers: bundle.reviewers,
+      feedback: bundle.feedback,
+      stats: bundle.stats,
+    },
+  }
 }
 
 function escapeHtml(value: unknown): string {

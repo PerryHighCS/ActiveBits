@@ -2,7 +2,12 @@ import { createSession, type SessionRecord, type SessionStore } from 'activebits
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
-import { buildGalleryWalkReportFilename, buildGalleryWalkReportHtml, type GalleryWalkReportBundle } from './reportHtml.js'
+import {
+  buildGalleryWalkReportFilename,
+  buildGalleryWalkReportHtml,
+  buildGalleryWalkStructuredReportSection,
+  type GalleryWalkReportBundle,
+} from './reportHtml.js'
 import { normalizeNoteStyleId } from '../shared/noteStyles.js'
 import { generateShortId } from '../shared/id.js'
 
@@ -172,6 +177,31 @@ function asGalleryWalkSession(session: SessionRecord | null): GalleryWalkSession
 
   session.data = normalizeSessionData(session.data)
   return session as GalleryWalkSession
+}
+
+function readEmbeddedInstanceKey(session: GalleryWalkSession): string {
+  if (!isPlainObject(session.data.embeddedLaunch)) {
+    return `gallery-walk:${session.id}`
+  }
+
+  const candidate = session.data.embeddedLaunch.instanceKey
+  return typeof candidate === 'string' && candidate.trim().length > 0
+    ? candidate.trim()
+    : `gallery-walk:${session.id}`
+}
+
+function buildGalleryWalkReportBundle(session: GalleryWalkSession): GalleryWalkReportBundle {
+  return {
+    version: 1,
+    exportedAt: Date.now(),
+    sessionId: session.id,
+    reviewees: session.data.reviewees,
+    reviewers: session.data.reviewers,
+    feedback: session.data.feedback,
+    stats: session.data.stats,
+    stage: session.data.stage,
+    config: session.data.config,
+  }
 }
 
 export function sanitizeName(value: unknown, fallback: string | null = '', maxLength = 200): string | null {
@@ -440,19 +470,29 @@ export default function setupGalleryWalkRoutes(app: GalleryWalkRouteApp, session
       return
     }
 
-    const bundle = {
-      version: 1,
-      exportedAt: Date.now(),
-      sessionId: session.id,
-      reviewees: session.data.reviewees,
-      reviewers: session.data.reviewers,
-      feedback: session.data.feedback,
-      stats: session.data.stats,
-      stage: session.data.stage,
-      config: session.data.config,
-    }
+    const bundle = buildGalleryWalkReportBundle(session)
 
     res.json(bundle)
+  })
+
+  app.get('/api/gallery-walk/:sessionId/report-data', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const session = asGalleryWalkSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const bundle = buildGalleryWalkReportBundle(session)
+    const section = buildGalleryWalkStructuredReportSection(bundle, {
+      instanceKey: readEmbeddedInstanceKey(session),
+    })
+    res.json(section)
   })
 
   app.get('/api/gallery-walk/:sessionId/report', async (req, res) => {
@@ -468,17 +508,7 @@ export default function setupGalleryWalkRoutes(app: GalleryWalkRouteApp, session
       return
     }
 
-    const bundle: GalleryWalkReportBundle = {
-      version: 1,
-      exportedAt: Date.now(),
-      sessionId: session.id,
-      reviewees: session.data.reviewees,
-      reviewers: session.data.reviewers,
-      feedback: session.data.feedback,
-      stats: session.data.stats,
-      stage: session.data.stage,
-      config: session.data.config,
-    }
+    const bundle = buildGalleryWalkReportBundle(session)
 
     const html = buildGalleryWalkReportHtml(bundle)
     const filename = buildGalleryWalkReportFilename(bundle)

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildGalleryWalkReportFilename, buildGalleryWalkReportHtml, type GalleryWalkReportBundle } from './reportHtml.js'
+import {
+  buildGalleryWalkReportFilename,
+  buildGalleryWalkReportHtml,
+  buildGalleryWalkStructuredReportSection,
+  type GalleryWalkReportBundle,
+} from './reportHtml.js'
 
 function createBundle(overrides: Partial<GalleryWalkReportBundle> = {}): GalleryWalkReportBundle {
   return {
@@ -92,4 +97,27 @@ void test('buildGalleryWalkReportHtml escapes embedded data safely', () => {
   assert.doesNotMatch(html, /<title>Unsafe <\/script> Title<\/title>/)
   assert.match(html, /Unsafe &lt;\/script&gt; Title/)
   assert.match(html, /\\u003c\/script\\u003e/)
+})
+
+void test('buildGalleryWalkStructuredReportSection returns aggregate-friendly structured data', () => {
+  const section = buildGalleryWalkStructuredReportSection(createBundle(), {
+    instanceKey: 'gallery-walk:4:0',
+  })
+
+  assert.equal(section.activityId, 'gallery-walk')
+  assert.equal(section.childSessionId, 'gw-session-1')
+  assert.equal(section.instanceKey, 'gallery-walk:4:0')
+  assert.deepEqual(section.supportsScopes, ['activity-session', 'student-cross-activity', 'session-summary'])
+  assert.equal(section.students?.[0]?.studentId, 'studentA')
+  assert.equal(section.summaryCards?.[0]?.metrics?.[0]?.label, 'Feedback Entries')
+  assert.deepEqual(section.payload.stats, {
+    reviewees: {
+      studentA: 1,
+      studentB: 1,
+    },
+    reviewers: {
+      reviewer1: 1,
+      reviewer2: 1,
+    },
+  })
 })

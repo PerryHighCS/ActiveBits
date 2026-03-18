@@ -156,3 +156,33 @@ void test('gallery-walk report route returns downloadable self-contained HTML', 
   assert.match(String(res.body), /Per Student/)
   assert.match(String(res.body), /Great use of examples\./)
 })
+
+void test('gallery-walk report-data route returns structured report section payload', async () => {
+  const app = createMockApp()
+  setupGalleryWalkRoutes(app, createSessionStore({
+    gw1: {
+      ...createGalleryWalkSession('gw1'),
+      data: {
+        ...createGalleryWalkSession('gw1').data,
+        embeddedLaunch: {
+          parentSessionId: 'parent-1',
+          instanceKey: 'gallery-walk:4:0',
+          selectedOptions: {},
+        },
+      },
+    },
+  }), createMockWs())
+
+  const handler = app.handlers.get['/api/gallery-walk/:sessionId/report-data']
+  const res = createMockResponse()
+  await handler?.({ params: { sessionId: 'gw1' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal((res.body as { activityId?: string }).activityId, 'gallery-walk')
+  assert.equal((res.body as { instanceKey?: string }).instanceKey, 'gallery-walk:4:0')
+  assert.deepEqual((res.body as { supportsScopes?: string[] }).supportsScopes, [
+    'activity-session',
+    'student-cross-activity',
+    'session-summary',
+  ])
+})
