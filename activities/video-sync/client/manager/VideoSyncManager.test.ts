@@ -16,6 +16,7 @@ import {
   readEmbeddedBootstrapSourceUrl,
   resolveBootstrapInstructorPasscode,
   sanitizeManagerApiErrorMessage,
+  shouldRenderEmbeddedManagerHeader,
   shouldCorrectManagerPlaybackDrift,
   shouldApplyManagerStateUpdate,
   shouldAutoStartBootstrapSource,
@@ -149,6 +150,12 @@ void test('readEmbeddedBootstrapSourceUrl ignores missing or invalid embedded la
   assert.equal(readEmbeddedBootstrapSourceUrl({}), null)
   assert.equal(readEmbeddedBootstrapSourceUrl({ sourceUrl: '' }), null)
   assert.equal(readEmbeddedBootstrapSourceUrl({ sourceUrl: 42 }), null)
+})
+
+void test('shouldRenderEmbeddedManagerHeader hides the manager header for embedded child sessions', () => {
+  assert.equal(shouldRenderEmbeddedManagerHeader('session-123'), true)
+  assert.equal(shouldRenderEmbeddedManagerHeader('CHILD:parent:abcde:video-sync'), false)
+  assert.equal(shouldRenderEmbeddedManagerHeader(null), true)
 })
 
 void test('buildManagerWsUrl omits instructor credentials from the websocket URL', () => {
