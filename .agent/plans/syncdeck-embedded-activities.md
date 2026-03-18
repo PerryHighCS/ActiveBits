@@ -912,6 +912,11 @@ session.data.embeddedActivities: Record<instanceKey, {
       sync context postMessage content for each sync state, solo activation path.
 
 ### Phase 3.5 — Synchronous activity control hardening
+- [x] Embedded child sessions (`CHILD:*`) cannot be ended directly via shared
+  `DELETE /api/session/:sessionId`; parent session remains the only owner of end flow.
+- [x] Shared manager header auto-hides join code and end-session controls for embedded
+  child sessions.
+- [ ] Add parent-driven instructor lock control for embedded child sessions (future push).
 - [ ] Read `activityConfig.embeddedRuntime.instructorGated` from embedded child metadata.
 - [ ] For `instructorGated: 'runtime'`: pass-through entry, activity starts in instructor-owned
   held state; students cannot interact until instructor start/release.
@@ -924,7 +929,7 @@ session.data.embeddedActivities: Record<instanceKey, {
 - [ ] Define deck slide metadata format (`data-activity-id` attribute).
 - [ ] Update `reveal-iframe-sync` plugin to emit `activityRequest` on slide-enter.
 - [ ] Update `reveal-iframe-sync-message-schema.md`.
-- [x] Manager: handle `activityRequest` → show "Launch Activity?" prompt.
+- [x] Manager: handle `activityRequest` and launch embedded start flow.
 - [ ] Integration test: slide navigation → activityRequest → prompt → launch → overlay.
 
 ### Phase 5 — Activity picker (manual trigger)

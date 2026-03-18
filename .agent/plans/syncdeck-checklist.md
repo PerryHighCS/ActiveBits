@@ -103,6 +103,10 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - PR scope: shared capability read path + first activity rollout + gating tests
         - Exit criteria: capability-driven gating works end-to-end and first activity rollout is production-safe
         - Validation: `npm test --workspace activities -- video-sync` and `npm test --workspace activities -- syncdeck` then full `npm test`
+        - [x] Embedded child sessions cannot be ended directly via `DELETE /api/session/:sessionId`
+              (must be ended from parent session flow)
+        - [x] Shared manager header hides join code and end-session controls for `CHILD:*` embedded sessions
+        - [ ] Add parent-driven instructor lock control for embedded child sessions (future push)
         - [ ] Read `activityConfig.embeddedRuntime.instructorGated` in embedded launch/runtime path
         - [ ] Initial rollout uses Video Sync first (`activities/video-sync/activity.config.ts` sets `embeddedRuntime.instructorGated: 'runtime'`)
         - [ ] Sync-required activities start in instructor-owned control state even with pass-through
@@ -114,7 +118,7 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
         - Validation: `npm test --workspace activities -- syncdeck` then full `npm test`
         - [ ] Deck slide metadata format (`data-activity-id` attribute)
         - [ ] `reveal-iframe-sync` plugin emits `activityRequest` on slide-enter
-        - [x] Manager handles `activityRequest` → "Launch Activity?" prompt
+        - [x] Manager handles `activityRequest` and launches embedded instance flow
     - Phase 5 — Activity picker (manual trigger from header)
         - Owner: SyncDeck manager UI lead (assign before start)
         - PR scope: picker UI + metadata-driven launch wiring + picker tests
