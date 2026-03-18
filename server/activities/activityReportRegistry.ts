@@ -16,6 +16,15 @@ export function registerActivityReportBuilder(activityType: string, builder: Act
     throw new Error(`registerActivityReportBuilder for "${activityType}" requires a function`)
   }
 
+  if (activityReportBuilders.has(activityType)) {
+    if ((process.env.NODE_ENV || '').startsWith('dev')) {
+      throw new Error(
+        `[activityReportRegistry] Attempted to override activity report builder for "${activityType}" in development mode`,
+      )
+    }
+    console.warn(`[activityReportRegistry] Overriding activity report builder for "${activityType}"`)
+  }
+
   activityReportBuilders.set(activityType, builder)
 }
 

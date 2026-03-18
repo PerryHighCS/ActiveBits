@@ -14,6 +14,7 @@ import {
   consumeEntryParticipantValues,
   getEntryParticipantDisplayName,
   getEntryParticipantParticipantId,
+  hasEntryParticipantHandoffStorageValue,
   persistEntryParticipantToken,
   persistEntryParticipantValues,
   type EntryParticipantStorageLike,
@@ -104,6 +105,16 @@ void test('consumeEntryParticipantValues drops malformed payloads after removing
   )
   assert.equal(storage.getItem(storageKey), null)
   assert.equal(warnings.length, 1)
+})
+
+void test('hasEntryParticipantHandoffStorageValue is a pure presence check and does not clean malformed storage', () => {
+  const storage = createStorage()
+  const storageKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-presence')
+
+  storage.setItem(storageKey, '{not-json')
+
+  assert.equal(hasEntryParticipantHandoffStorageValue(storage, storageKey), true)
+  assert.equal(storage.getItem(storageKey), '{not-json')
 })
 
 void test('getEntryParticipantDisplayName returns trimmed display names only', () => {

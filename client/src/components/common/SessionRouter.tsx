@@ -23,7 +23,7 @@ import {
 } from './sessionRouterUtils'
 import {
   buildSessionEntryParticipantStorageKey,
-  hasStoredEntryParticipantHandoff,
+  hasEntryParticipantHandoffStorageValue,
 } from './entryParticipantStorage'
 import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
 import { readSessionParticipantContext } from './sessionParticipantContext'
@@ -113,7 +113,7 @@ const SessionRouter = () => {
     && sessionEntryStatus?.sessionId != null
     && sessionEntryStatus?.activityName != null
     && window.sessionStorage != null
-  ) ? hasStoredEntryParticipantHandoff(
+  ) ? hasEntryParticipantHandoffStorageValue(
     window.sessionStorage,
     buildSessionEntryParticipantStorageKey(sessionEntryStatus.activityName, sessionEntryStatus.sessionId),
   ) : false
@@ -122,7 +122,7 @@ const SessionRouter = () => {
     && persistentSessionEntryStatus?.sessionId != null
     && activityName != null
     && window.sessionStorage != null
-  ) ? hasStoredEntryParticipantHandoff(
+  ) ? hasEntryParticipantHandoffStorageValue(
     window.sessionStorage,
     buildSessionEntryParticipantStorageKey(activityName, persistentSessionEntryStatus.sessionId),
   ) : false

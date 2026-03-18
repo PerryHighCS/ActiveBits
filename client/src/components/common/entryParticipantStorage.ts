@@ -184,6 +184,13 @@ export function hasStoredEntryParticipantHandoff(
   return readEntryParticipantHandoff(storage, storageKey, onWarn) != null
 }
 
+export function hasEntryParticipantHandoffStorageValue(
+  storage: Pick<EntryParticipantStorageLike, 'getItem'>,
+  storageKey: string,
+): boolean {
+  return storage.getItem(storageKey) != null
+}
+
 export function buildSessionEntryParticipantSubmitApiUrl(sessionId: string): string {
   return `/api/session/${encodeURIComponent(sessionId)}/entry-participant`
 }
