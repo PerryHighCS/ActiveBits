@@ -169,6 +169,25 @@ Embedded activity reports should be delivered as a single self-contained HTML do
 - support multiple views inside the same file (for example class summary and per-student drill-down)
   rather than emitting separate report files for each perspective
 
+These activity-level reports are building blocks for the higher-level SyncDeck session report.
+The parent report should eventually aggregate all embedded activities launched during a session
+into one self-contained export with:
+
+- whole-session summary across activities
+- activity-by-activity drill-down
+- per-student drill-down that can span multiple embedded activities
+
+For the aggregate path, SyncDeck should own the outer report container while activities own
+their internal report rendering. The shared type contract should follow this split:
+
+- SyncDeck chooses a report `scope` such as `activity-session`, `student-cross-activity`, or
+  `session-summary`
+- each child activity contributes structured report data for its child session
+- each activity may optionally provide a `ReportSectionComponent` that renders its own section
+  inside the SyncDeck session-report shell for the requested scope
+- SyncDeck aggregates those sections through a parent-session manifest rather than trying to
+  understand every activity's raw session schema directly
+
 ### Embedded Child Bootstrap
 
 Some parent activities launch other activities as embedded child sessions instead of routing

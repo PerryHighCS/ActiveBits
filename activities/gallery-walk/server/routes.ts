@@ -2,6 +2,7 @@ import { createSession, type SessionRecord, type SessionStore } from 'activebits
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
+import { buildGalleryWalkReportFilename, buildGalleryWalkReportHtml, type GalleryWalkReportBundle } from './reportHtml.js'
 import { normalizeNoteStyleId } from '../shared/noteStyles.js'
 import { generateShortId } from '../shared/id.js'
 
@@ -51,6 +52,8 @@ interface GalleryWalkSession extends SessionRecord {
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): JsonResponse | void
+  send?(payload: string): JsonResponse | void
+  setHeader?(name: string, value: string): void
 }
 
 interface RouteRequest {
@@ -450,6 +453,42 @@ export default function setupGalleryWalkRoutes(app: GalleryWalkRouteApp, session
     }
 
     res.json(bundle)
+  })
+
+  app.get('/api/gallery-walk/:sessionId/report', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const session = asGalleryWalkSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const bundle: GalleryWalkReportBundle = {
+      version: 1,
+      exportedAt: Date.now(),
+      sessionId: session.id,
+      reviewees: session.data.reviewees,
+      reviewers: session.data.reviewers,
+      feedback: session.data.feedback,
+      stats: session.data.stats,
+      stage: session.data.stage,
+      config: session.data.config,
+    }
+
+    const html = buildGalleryWalkReportHtml(bundle)
+    const filename = buildGalleryWalkReportFilename(bundle)
+    res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
+    res.setHeader?.('Content-Disposition', `attachment; filename="${filename}"`)
+    if (typeof res.send === 'function') {
+      res.send(html)
+      return
+    }
+    res.json({ html, filename })
   })
 
   app.post('/api/gallery-walk/:sessionId/title', async (req, res) => {

@@ -19,6 +19,7 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../shared/revealSyncProtocol.js'
+import { getActivityConfig } from '../../../server/activities/activityRegistry.js'
 import { connectSyncDeckStudent } from './studentParticipants.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
@@ -36,12 +37,14 @@ interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): void
   cookie?(name: string, value: string, options: Record<string, unknown>): void
+  setHeader?(name: string, value: string): void
 }
 
 interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
   cookies?: Record<string, unknown>
+  headers?: Record<string, unknown>
 }
 
 interface SyncDeckRouteApp {
@@ -750,6 +753,26 @@ function readObjectField(payload: unknown, key: string): Record<string, unknown>
   return isPlainObject(value) ? value : null
 }
 
+function readHeaderField(headers: Record<string, unknown> | undefined, key: string): string | null {
+  if (!headers) return null
+  const normalizedKey = key.toLowerCase()
+
+  for (const [candidateKey, value] of Object.entries(headers)) {
+    if (candidateKey.toLowerCase() !== normalizedKey) {
+      continue
+    }
+    if (typeof value === 'string') {
+      return value
+    }
+    if (Array.isArray(value)) {
+      const firstString = value.find((entry) => typeof entry === 'string')
+      return typeof firstString === 'string' ? firstString : null
+    }
+  }
+
+  return null
+}
+
 function sanitizeEmbeddedLaunchValue(value: unknown): unknown {
   if (
     value == null ||
@@ -797,6 +820,10 @@ function buildEmbeddedManagerBootstrapPayload(session: SessionRecord): SyncDeckE
   return {
     instructorPasscode,
   }
+}
+
+function buildEmbeddedActivityReportPath(reportEndpoint: string, childSessionId: string): string {
+  return reportEndpoint.replaceAll(':sessionId', encodeURIComponent(childSessionId))
 }
 
 function toSelectedOptions(value: unknown): Record<string, unknown> {
@@ -1361,6 +1388,54 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     broadcastEmbeddedActivityEnd(session, instanceKey, existing.childSessionId)
 
     res.json({ ok: true, instanceKey, childSessionId: existing.childSessionId })
+  })
+
+  app.get('/api/syncdeck/:sessionId/embedded-activity/report/:instanceKey', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readHeaderField(req.headers, 'x-syncdeck-instructor-passcode'))
+    const instanceKey = normalizeInstanceKey(req.params.instanceKey)
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+    if (!instanceKey) {
+      res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+
+    const embeddedActivity = session.data.embeddedActivities[instanceKey]
+    if (!embeddedActivity) {
+      res.status(404).json({ error: 'embedded activity not found' })
+      return
+    }
+
+    const childSession = await sessions.get(embeddedActivity.childSessionId)
+    if (!childSession) {
+      res.status(404).json({ error: 'invalid child session' })
+      return
+    }
+
+    const activityConfig = getActivityConfig(childSession.type ?? '')
+    const reportEndpoint = typeof activityConfig?.reportEndpoint === 'string' ? activityConfig.reportEndpoint.trim() : ''
+    if (reportEndpoint.length === 0) {
+      res.status(404).json({ error: 'embedded activity report unavailable' })
+      return
+    }
+
+    const location = buildEmbeddedActivityReportPath(reportEndpoint, childSession.id)
+    res.setHeader?.('Location', location)
+    res.status(302).json({ location })
   })
 
   app.delete('/api/syncdeck/:sessionId', async (req, res) => {

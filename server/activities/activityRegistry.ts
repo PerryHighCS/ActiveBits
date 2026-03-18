@@ -173,6 +173,11 @@ export function getActivityWaitingRoomFieldCount(activityName: string): number {
   return Array.isArray(fields) ? fields.length : 0
 }
 
+export function getActivityConfig(activityName: string): ActivityConfigLike | null {
+  const matchingConfig = filteredConfigs.find((config) => config.id === activityName)
+  return matchingConfig?.loadedConfig ?? null
+}
+
 export function activitySupportsStandalonePermalink(activityName: string): boolean {
   const matchingConfig = filteredConfigs.find((config) => config.id === activityName)
   const standaloneEntry = matchingConfig?.loadedConfig.standaloneEntry

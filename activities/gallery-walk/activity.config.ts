@@ -33,6 +33,7 @@ const galleryWalkConfig: ActivityConfig = {
       standaloneSessionId: 'solo-gallery-walk',
     },
   ],
+  reportEndpoint: '/api/gallery-walk/:sessionId/report',
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }

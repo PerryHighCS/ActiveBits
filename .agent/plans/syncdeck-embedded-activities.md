@@ -1025,15 +1025,27 @@ session.data.embeddedActivities: Record<instanceKey, {
 
 ### Phase 6 — Reporting
 - [x] Define `reportEndpoint` optional field in `ActivityConfig` and schema.
-- [ ] Define shared embedded report contract: activity report response is a single self-contained
+- [x] Define shared embedded report contract: activity report response is a single self-contained
   HTML document with inline data, styles, and scripts and no external asset dependencies.
-- [ ] Define shared report UX contract: one download per embedded activity, with in-report view
-  switching for whole-class summary and per-student detail instead of multiple exported files.
-- [ ] Add report download to "End Activity" confirmation step.
-- [ ] Implement `GET /api/syncdeck/.../report` proxy endpoint.
-- [ ] Each activity that supports embedded reporting implements its own report endpoint.
-- [ ] First report consumer renders both whole-class-by-activity and per-student views from the
+- [x] Define shared report UX contract for activity-local reports: one download per embedded activity,
+  with in-report view switching for whole-class summary and per-student detail instead of multiple exported files.
+- [x] Add report download to "End Activity" confirmation step.
+- [x] Implement `GET /api/syncdeck/.../report` proxy endpoint.
+- [x] Each activity that supports embedded reporting implements its own report endpoint.
+- [x] First report consumer renders both whole-class-by-activity and per-student views from the
   same embedded data payload.
+- [ ] Define SyncDeck session-report manifest contract that aggregates all embedded activities in
+  the parent session and preserves stable activity labels / instance keys.
+- [x] Define shared type contract in `types/activity.ts` for report scopes, structured child
+  report sections, SyncDeck session-report manifests, and activity-owned report section renderers.
+- [ ] Add session-level report download for the instructor that bundles results from every embedded
+  activity in the session into one self-contained HTML file.
+- [ ] Define aggregate report UX: summary across activities, activity-by-activity drill-down, and
+  per-student drill-down spanning multiple embedded activities.
+- [x] Decide aggregation strategy: child activity returns structured report data and an
+  activity-owned renderer that SyncDeck mounts inside the session report shell for the requested
+  scope.
+- [ ] Implement first aggregate SyncDeck session report using the chosen child-report contract.
 - [ ] Tests.
 
 ---

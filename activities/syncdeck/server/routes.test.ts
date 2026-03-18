@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import test from 'node:test'
 import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../../types/websocket.js'
+import { initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
 import setupSyncDeckRoutes, { waitForInstructorAuthMessage } from './routes.js'
 import '../../video-sync/server/routes.js'
 
@@ -20,11 +21,13 @@ interface RouteRequest {
   params: Record<string, string | undefined>
   body?: unknown
   cookies?: Record<string, unknown>
+  headers?: Record<string, unknown>
 }
 
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): void
+  setHeader?(name: string, value: string): void
 }
 
 type RouteHandler = (req: RouteRequest, res: JsonResponse) => Promise<void> | void
@@ -33,9 +36,11 @@ interface MockResponse {
   statusCode: number
   body: unknown
   cookies: Array<{ name: string; value: string; options: Record<string, unknown> }>
+  headers: Record<string, string>
   status(code: number): MockResponse
   json(payload: unknown): MockResponse
   cookie(name: string, value: string, options: Record<string, unknown>): MockResponse
+  setHeader(name: string, value: string): void
 }
 
 function createResponse(): MockResponse {
@@ -43,6 +48,7 @@ function createResponse(): MockResponse {
     statusCode: 200,
     body: null,
     cookies: [],
+    headers: {},
     status(code: number) {
       this.statusCode = code
       return this
@@ -54,6 +60,9 @@ function createResponse(): MockResponse {
     cookie(name: string, value: string, options: Record<string, unknown>) {
       this.cookies.push({ name, value, options })
       return this
+    },
+    setHeader(name: string, value: string) {
+      this.headers[name] = value
     },
   }
 }
@@ -100,8 +109,9 @@ function createRequest(
   params: Record<string, string>,
   body: unknown,
   cookies: Record<string, unknown> = {},
+  headers: Record<string, unknown> = {},
 ): RouteRequest {
-  return { params, body, cookies }
+  return { params, body, cookies, headers }
 }
 
 function createSessionStore(initial: Record<string, SessionRecord>) {
@@ -1986,6 +1996,63 @@ void test('embedded-activity start route is idempotent per instance key', async 
   assert.deepEqual(res.body, {
     childSessionId: 'CHILD:s1:abc12:video-sync',
     instanceKey: 'video-sync:3:0',
+  })
+})
+
+void test('embedded-activity report route redirects to the child activity report endpoint when available', async () => {
+  await initializeActivityRegistry()
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'gallery-walk:4:0': {
+            childSessionId: 'CHILD:s1:abc12:gallery-walk',
+            activityId: 'gallery-walk',
+            startedAt: 123,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    'CHILD:s1:abc12:gallery-walk': {
+      id: 'CHILD:s1:abc12:gallery-walk',
+      type: 'gallery-walk',
+      created: Date.now(),
+      lastActivity: Date.now(),
+      data: {
+        stage: 'review',
+        config: { title: 'Critique Day' },
+        reviewees: {},
+        reviewers: {},
+        feedback: [],
+        stats: { reviewees: {}, reviewers: {} },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/embedded-activity/report/:instanceKey']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1', instanceKey: 'gallery-walk:4:0' },
+      {},
+      {},
+      { 'x-syncdeck-instructor-passcode': 'teacher-passcode-1' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 302)
+  assert.equal(res.headers.Location, '/api/gallery-walk/CHILD%3As1%3Aabc12%3Agallery-walk/report')
+  assert.deepEqual(res.body, {
+    location: '/api/gallery-walk/CHILD%3As1%3Aabc12%3Agallery-walk/report',
   })
 })
 

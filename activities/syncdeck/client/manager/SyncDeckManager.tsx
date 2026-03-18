@@ -456,6 +456,7 @@ interface SyncDeckActivityPickerEntry {
   activityId: string
   name: string
   description: string
+  supportsReport: boolean
 }
 
 interface SyncDeckActivityLaunchRequest {
@@ -470,6 +471,7 @@ interface SyncDeckActivityConfigModule {
     name?: string
     title?: string
     description?: string
+    reportEndpoint?: string
   }
 }
 
@@ -821,6 +823,32 @@ export function resolveNextPendingEmbeddedEndConfirmation(
   return { nextPending: targetInstanceKey, shouldEnd: false }
 }
 
+export function activitySupportsEmbeddedReport(
+  activityId: string,
+  activityEntries: SyncDeckActivityPickerEntry[],
+): boolean {
+  return activityEntries.some((entry) => entry.activityId === activityId && entry.supportsReport)
+}
+
+export function parseDownloadFilenameFromContentDisposition(headerValue: string | null): string | null {
+  if (typeof headerValue !== 'string' || headerValue.trim().length === 0) {
+    return null
+  }
+
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+
+  const plainMatch = headerValue.match(/filename="([^"]+)"|filename=([^;]+)/i)
+  const candidate = plainMatch?.[1] ?? plainMatch?.[2] ?? null
+  return typeof candidate === 'string' && candidate.trim().length > 0 ? candidate.trim() : null
+}
+
 export function evaluateRestoreSuppressionForOutboundState(params: {
   suppressOutboundUntilRestore: boolean
   restoreTargetIndices: { h: number; v: number; f: number } | null
@@ -1077,7 +1105,7 @@ export function resolveManagerActivityRequestBatchInputs(
 }
 
 export function resolveSyncDeckActivityPickerEntries(
-  entries: Array<{ id: string; name: string; description: string }>,
+  entries: Array<{ id: string; name: string; description: string; reportEndpoint?: string }>,
 ): SyncDeckActivityPickerEntry[] {
   return entries
     .filter((entry) => entry.id !== 'syncdeck')
@@ -1085,6 +1113,7 @@ export function resolveSyncDeckActivityPickerEntries(
       activityId: entry.id,
       name: entry.name,
       description: entry.description,
+      supportsReport: typeof entry.reportEndpoint === 'string' && entry.reportEndpoint.trim().length > 0,
     }))
     .sort((left, right) => left.name.localeCompare(right.name))
 }
@@ -1470,6 +1499,7 @@ const SyncDeckManager: FC = () => {
   const [isActivityPickerOpen, setIsActivityPickerOpen] = useState(false)
   const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
+  const [downloadingEmbeddedReportInstanceKey, setDownloadingEmbeddedReportInstanceKey] = useState<string | null>(null)
   const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
   const [instructorIndicesState, setInstructorIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
@@ -2496,6 +2526,7 @@ const SyncDeckManager: FC = () => {
               ? entry.name
               : '',
           description: typeof entry.description === 'string' ? entry.description : '',
+          reportEndpoint: typeof entry.reportEndpoint === 'string' ? entry.reportEndpoint : undefined,
         }))
         .filter((entry) => entry.id.length > 0 && entry.name.length > 0 && entry.description.length > 0),
     ),
@@ -2917,6 +2948,43 @@ const SyncDeckManager: FC = () => {
     }
   }
 
+  const downloadEmbeddedActivityReport = async (instanceKey: string): Promise<void> => {
+    if (!sessionId || !instructorPasscode) {
+      return
+    }
+
+    setDownloadingEmbeddedReportInstanceKey(instanceKey)
+    try {
+      const response = await fetch(
+        `/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/report/${encodeURIComponent(instanceKey)}`,
+        {
+          headers: {
+            'x-syncdeck-instructor-passcode': instructorPasscode,
+          },
+        },
+      )
+      if (!response.ok) {
+        throw new Error('Failed to download embedded activity report')
+      }
+
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const downloadLink = document.createElement('a')
+      downloadLink.href = objectUrl
+      downloadLink.download =
+        parseDownloadFilenameFromContentDisposition(response.headers.get('Content-Disposition'))
+        ?? `${instanceKey}.html`
+      document.body.appendChild(downloadLink)
+      downloadLink.click()
+      document.body.removeChild(downloadLink)
+      URL.revokeObjectURL(objectUrl)
+    } catch {
+      // Keep the confirmation state visible so the instructor can retry the download.
+    } finally {
+      setDownloadingEmbeddedReportInstanceKey(null)
+    }
+  }
+
   const handleEmbeddedEndControlClick = (instanceKey: string): void => {
     const next = resolveNextPendingEmbeddedEndConfirmation(pendingEmbeddedEndConfirmInstanceKey, instanceKey)
     setPendingEmbeddedEndConfirmInstanceKey(next.nextPending)
@@ -3112,20 +3180,34 @@ const SyncDeckManager: FC = () => {
                     <p className="text-xs text-gray-600">{instanceKey}</p>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-xs text-gray-600 truncate">{record.childSessionId}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleEmbeddedEndControlClick(instanceKey)
-                        }}
-                        disabled={endingEmbeddedInstanceKey === instanceKey}
-                        className="px-2 py-1 rounded border border-red-600 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
-                      >
-                        {endingEmbeddedInstanceKey === instanceKey
-                          ? 'Ending…'
-                          : pendingEmbeddedEndConfirmInstanceKey === instanceKey
-                            ? 'Confirm end'
-                            : 'End'}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {pendingEmbeddedEndConfirmInstanceKey === instanceKey && activitySupportsEmbeddedReport(record.activityId, activityPickerEntries) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void downloadEmbeddedActivityReport(instanceKey)
+                            }}
+                            disabled={downloadingEmbeddedReportInstanceKey === instanceKey}
+                            className="px-2 py-1 rounded border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                          >
+                            {downloadingEmbeddedReportInstanceKey === instanceKey ? 'Downloading…' : 'Download report'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleEmbeddedEndControlClick(instanceKey)
+                          }}
+                          disabled={endingEmbeddedInstanceKey === instanceKey}
+                          className="px-2 py-1 rounded border border-red-600 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                        >
+                          {endingEmbeddedInstanceKey === instanceKey
+                            ? 'Ending…'
+                            : pendingEmbeddedEndConfirmInstanceKey === instanceKey
+                              ? 'Confirm end'
+                              : 'End'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
