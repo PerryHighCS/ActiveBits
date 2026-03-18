@@ -435,6 +435,78 @@ Implementation notes:
   through a parent-context-validated SyncDeck route rather than by reusing the original
   startup token (see open question 3).
 
+### Embedded child bootstrap payload
+
+`activityOptions` should not remain an opaque SyncDeck-only prompt payload. Embedded launch
+needs a concrete bootstrap contract analogous to permalink selected options and
+`createSessionBootstrap`, so activities can receive launch-specific data through a generic,
+activity-agnostic path.
+
+#### Decision
+
+Use a **server-persisted embedded bootstrap payload** on the child session, created by the
+SyncDeck parent at child-session start time and consumed by the child activity through the
+same broad manager bootstrap shape used for normal activity startup.
+
+#### Contract shape
+
+Parent start request:
+
+```json
+{
+  "activityId": "video-sync",
+  "instanceKey": "video-sync:3:0",
+  "activityOptions": {
+    "sourceUrl": "https://www.youtube.com/watch?v=mCq8-xTH7jA"
+  },
+  "instructorPasscode": "..."
+}
+```
+
+Stored on the child session as launch bootstrap metadata:
+
+```json
+{
+  "embeddedLaunch": {
+    "parentSessionId": "s1",
+    "instanceKey": "video-sync:3:0",
+    "selectedOptions": {
+      "sourceUrl": "https://www.youtube.com/watch?v=mCq8-xTH7jA"
+    }
+  }
+}
+```
+
+Contract rules:
+
+- `activityOptions` from slide metadata / picker launch are normalized to
+  `selectedOptions` semantics at child-session creation time.
+- The payload is stored on the child session, not only in a transient websocket envelope,
+  so reloads and late manager mounts keep the same launch context.
+- The bootstrap payload is activity-agnostic. SyncDeck stores and transports it, but does
+  not interpret activity-specific fields such as `sourceUrl`.
+- Activities consume bootstrap data through a shared bootstrap read path that is equivalent
+  in purpose to permalink `selectedOptions` / create-session bootstrap, rather than through
+  SyncDeck-specific prop drilling.
+- Child bootstrap payload must be available to the manager surface on first mount and to any
+  later remount of the same child session.
+
+#### Validation / ownership
+
+- SyncDeck validates that `activityOptions` is object-shaped and serializable before storing.
+- Activity-specific semantic validation remains owned by the child activity/server, not by
+  SyncDeck. Example: `video-sync` validates `selectedOptions.sourceUrl` as a supported
+  YouTube URL when applying bootstrap config.
+- If bootstrap payload is missing or invalid, the child activity falls back to its existing
+  empty/default startup behavior.
+
+#### Initial target
+
+- `video-sync` should consume embedded bootstrap `selectedOptions.sourceUrl` the same way its
+  permalink/bootstrap flows already consume launch source URL intent.
+- Longer term, this should become the default embedded-launch contract for any activity that
+  already has permalink/deep-link selected options.
+
 ---
 
 ## Multi-Instructor Arbitration
@@ -921,6 +993,14 @@ session.data.embeddedActivities: Record<instanceKey, {
   `DELETE /api/session/:sessionId`; parent session remains the only owner of end flow.
 - [x] Shared manager header auto-hides join code and end-session controls for embedded
   child sessions.
+- [ ] Define embedded child bootstrap payload contract (`activityOptions` → child-session
+  `embeddedLaunch.selectedOptions`) aligned with permalink/create-session bootstrap semantics.
+- [ ] Expose a shared child bootstrap read path so embedded child managers can consume launch
+  options without SyncDeck-specific wiring.
+- [ ] Apply embedded bootstrap payload in `video-sync` (`selectedOptions.sourceUrl`) as the
+  first activity using the contract.
+- [ ] Tests: SyncDeck start route persists bootstrap payload; child reload preserves it;
+  `video-sync` configures from bootstrap source URL; invalid bootstrap falls back safely.
 - [ ] Add parent-driven instructor lock control for embedded child sessions (future push).
 - [ ] Read `activityConfig.embeddedRuntime.instructorGated` from embedded child metadata.
 - [ ] For `instructorGated: 'runtime'`: pass-through entry, activity starts in instructor-owned
@@ -931,7 +1011,7 @@ session.data.embeddedActivities: Record<instanceKey, {
   — hold UI renders with zero fields; open (omitted) — pass-through with no gating overhead.
 
 ### Phase 4 — Slide-event activation
-- [ ] Define deck slide metadata format (`data-activity-id` attribute).
+- [x] Define deck slide metadata format (`data-activity-id` attribute).
 - [ ] Update `reveal-iframe-sync` plugin to emit `activityRequest` on slide-enter.
 - [x] Update `reveal-iframe-sync-message-schema.md`.
 - [x] Manager: handle `activityRequest` and launch embedded start flow.

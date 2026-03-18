@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { resolveOptimisticEmbeddedOverlayIndices } from './embeddedOverlayNavigation.js'
 import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from './embeddedOverlayNavigation.js'
+import { resolveEmbeddedOverlayVerticalMoveAllowed } from './embeddedOverlayNavigation.js'
 
 void test('resolveOptimisticEmbeddedOverlayIndices uses directional horizontal navigation across slide columns', () => {
   const instanceKeys = [
@@ -71,5 +72,49 @@ void test('deriveEmbeddedOverlayVerticalNavigationCapabilities disables down whe
   assert.deepEqual(
     deriveEmbeddedOverlayVerticalNavigationCapabilities(['embedded-test:2:0'], { h: 2, v: 0, f: 0 }),
     { canGoUp: false, canGoDown: false },
+  )
+})
+
+void test('resolveEmbeddedOverlayVerticalMoveAllowed prefers embedded anchor bounds over iframe vertical capability', () => {
+  assert.equal(
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'down',
+      iframeCapability: true,
+      derivedCapabilities: { canGoUp: true, canGoDown: false },
+      fallbackAllowed: true,
+    }),
+    false,
+  )
+
+  assert.equal(
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'up',
+      iframeCapability: false,
+      derivedCapabilities: { canGoUp: true, canGoDown: false },
+      fallbackAllowed: false,
+    }),
+    true,
+  )
+})
+
+void test('resolveEmbeddedOverlayVerticalMoveAllowed falls back to iframe capability and local default when anchors are unavailable', () => {
+  assert.equal(
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'down',
+      iframeCapability: true,
+      derivedCapabilities: null,
+      fallbackAllowed: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'up',
+      iframeCapability: null,
+      derivedCapabilities: null,
+      fallbackAllowed: true,
+    }),
+    true,
   )
 })

@@ -11,6 +11,21 @@ export interface EmbeddedOverlayVerticalNavigationCapabilities {
   canGoDown: boolean
 }
 
+export function resolveEmbeddedOverlayVerticalMoveAllowed(params: {
+  direction: 'up' | 'down'
+  iframeCapability: boolean | null
+  derivedCapabilities: EmbeddedOverlayVerticalNavigationCapabilities | null
+  fallbackAllowed: boolean
+}): boolean {
+  if (params.derivedCapabilities) {
+    return params.direction === 'up'
+      ? params.derivedCapabilities.canGoUp
+      : params.derivedCapabilities.canGoDown
+  }
+
+  return params.iframeCapability === true || params.fallbackAllowed
+}
+
 interface EmbeddedOverlayAnchor {
   h: number
   v: number

@@ -20,6 +20,7 @@ import { getStudentPresentationCompatibilityError } from '../shared/presentation
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import {
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
+  resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
 } from '../shared/embeddedOverlayNavigation.js'
 
@@ -2381,13 +2382,19 @@ const SyncDeckStudent: FC = () => {
   const canMoveForward =
     navigationCapabilities?.canGoForward !== false
   const canMoveUp =
-    navigationCapabilities?.canGoUp === true
-    || overlayVerticalNavigationCapabilities?.canGoUp === true
-    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v > 0 : false)
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'up',
+      iframeCapability: navigationCapabilities?.canGoUp ?? null,
+      derivedCapabilities: overlayVerticalNavigationCapabilities,
+      fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v > 0 : false,
+    })
   const canMoveDown =
-    navigationCapabilities?.canGoDown === true
-    || overlayVerticalNavigationCapabilities?.canGoDown === true
-    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false)
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'down',
+      iframeCapability: navigationCapabilities?.canGoDown ?? null,
+      derivedCapabilities: overlayVerticalNavigationCapabilities,
+      fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false,
+    })
 
   useEffect(() => {
     if (!sessionId || syncState !== 'synchronized' || activeEmbeddedInstanceKey != null || !studentIndicesState) {
@@ -2690,7 +2697,7 @@ const SyncDeckStudent: FC = () => {
               aria-disabled={!canMoveBack}
               aria-label="Previous slide"
               title="Previous slide"
-              className="absolute left-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="absolute left-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
               ◀
             </button>
@@ -2701,7 +2708,7 @@ const SyncDeckStudent: FC = () => {
               aria-disabled={!canMoveUp}
               aria-label="Move up"
               title="Move up"
-              className="absolute top-3 left-1/2 -translate-x-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="absolute top-3 left-1/2 -translate-x-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
               ▲
             </button>
@@ -2712,7 +2719,7 @@ const SyncDeckStudent: FC = () => {
               aria-disabled={!canMoveForward}
               aria-label="Next slide"
               title="Next slide"
-              className="absolute right-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="absolute right-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
               ▶
             </button>
@@ -2723,7 +2730,7 @@ const SyncDeckStudent: FC = () => {
               aria-disabled={!canMoveDown}
               aria-label="Move down"
               title="Move down"
-              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
               ▼
             </button>

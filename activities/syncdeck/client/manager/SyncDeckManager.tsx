@@ -7,6 +7,7 @@ import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import {
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
+  resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
 } from '../shared/embeddedOverlayNavigation.js'
 import {
@@ -2806,13 +2807,19 @@ const SyncDeckManager: FC = () => {
   const canMoveForward =
     overlayNavigationCapabilities?.canGoForward !== false
   const canMoveUp =
-    overlayNavigationCapabilities?.canGoUp === true
-    || overlayVerticalNavigationCapabilities?.canGoUp === true
-    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v > 0 : false)
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'up',
+      iframeCapability: overlayNavigationCapabilities?.canGoUp ?? null,
+      derivedCapabilities: overlayVerticalNavigationCapabilities,
+      fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v > 0 : false,
+    })
   const canMoveDown =
-    overlayNavigationCapabilities?.canGoDown === true
-    || overlayVerticalNavigationCapabilities?.canGoDown === true
-    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false)
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'down',
+      iframeCapability: overlayNavigationCapabilities?.canGoDown ?? null,
+      derivedCapabilities: overlayVerticalNavigationCapabilities,
+      fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false,
+    })
 
   const sendEmbeddedOverlayNavigation = (direction: 'left' | 'right' | 'up' | 'down'): void => {
     const targetWindow = presentationIframeRef.current?.contentWindow
@@ -3236,7 +3243,7 @@ const SyncDeckManager: FC = () => {
                     </div>
                     <button
                       type="button"
-                      className="absolute left-3 top-1/2 -translate-y-1/2 z-30 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                           onClick={() => sendEmbeddedOverlayNavigation('left')}
                       aria-label="Move left"
                       title="Move left"
@@ -3246,7 +3253,7 @@ const SyncDeckManager: FC = () => {
                     </button>
                     <button
                       type="button"
-                      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                       onClick={() => sendEmbeddedOverlayNavigation('up')}
                       aria-label="Move up"
                       title="Move up"
@@ -3256,7 +3263,7 @@ const SyncDeckManager: FC = () => {
                     </button>
                     <button
                       type="button"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 z-30 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                           onClick={() => sendEmbeddedOverlayNavigation('right')}
                       aria-label="Move right"
                       title="Move right"
@@ -3266,7 +3273,7 @@ const SyncDeckManager: FC = () => {
                     </button>
                     <button
                       type="button"
-                      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 px-3 py-2 rounded-full bg-black/60 text-white hover:bg-black/75 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                       onClick={() => sendEmbeddedOverlayNavigation('down')}
                       aria-label="Move down"
                       title="Move down"

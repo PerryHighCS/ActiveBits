@@ -318,7 +318,7 @@
               <section
                 data-activity-id="video-sync"
                 data-activity-trigger="slide-enter"
-                data-activity-options='{"mode":"conversion-smoke"}'
+                data-activity-options='{"mode":"conversion-smoke","sourceUrl":"https://www.youtube.com/watch?v=mCq8-xTH7jA"}'
               >
                 <div class="meta">
                   <span class="chip">h:3</span>
@@ -343,7 +343,8 @@
                 </div>
                 <h2>Manual Trigger Lab</h2>
                 <p>
-                  No auto activity request. Use the Request Activity button to emit activityRequest manually.
+                  Slide-enter activity requests now come from the SyncDeck Reveal library. Use the Request Activity
+                  button only for manual retry checks.
                 </p>
                 <div class="grid two">
                   <div class="panel">Manual request payload path</div>
@@ -370,7 +371,7 @@
 
       <div class="log" id="log"></div>
       <div class="foot">
-        SyncDeck Conversion Lab deck. Powered by hosted SyncDeck Reveal runtime with manual activityRequest controls.
+        SyncDeck Conversion Lab deck. Powered by hosted SyncDeck Reveal runtime with library-provided activityRequest support.
       </div>
     </div>
 
@@ -378,7 +379,6 @@
     <script>
       ;(() => {
         const deckId = 'syncdeck-conversion-lab'
-        let lastSlideEnterRequestKey = null
 
         const statusEl = document.getElementById('status')
         const logEl = document.getElementById('log')
@@ -451,38 +451,6 @@
           return getActivityRequestFromSlide(slide)
         }
 
-        function getSlideElementByIndices(indicesOverride) {
-          const indices = indicesOverride || currentIndices()
-          const slidesRoot = document.querySelector('.reveal .slides')
-          if (!(slidesRoot instanceof HTMLElement)) {
-            return null
-          }
-
-          const horizontalSlides = Array.from(slidesRoot.children).filter((node) => {
-            return node instanceof HTMLElement && node.tagName.toLowerCase() === 'section'
-          })
-
-          const horizontalSlide = horizontalSlides[indices.h]
-          if (!(horizontalSlide instanceof HTMLElement)) {
-            return null
-          }
-
-          const verticalSlides = Array.from(horizontalSlide.children).filter((node) => {
-            return node instanceof HTMLElement && node.tagName.toLowerCase() === 'section'
-          })
-
-          if (verticalSlides.length === 0) {
-            return horizontalSlide
-          }
-
-          if (indices.v < 0 || indices.v >= verticalSlides.length) {
-            return null
-          }
-
-          const verticalSlide = verticalSlides[indices.v]
-          return verticalSlide instanceof HTMLElement ? verticalSlide : null
-        }
-
         function sendCustom(action, payload) {
           const syncApi = getSyncApi()
           if (!syncApi || typeof syncApi.sendCustom !== 'function') {
@@ -492,149 +460,6 @@
 
           syncApi.sendCustom(action, payload)
           log('sent', { action, payload })
-        }
-
-        function buildAnchoredInstanceKey(activityId, indices) {
-          return `${activityId}:${indices.h}:${indices.v}`
-        }
-
-        function listVerticalStackActivityRequests(indicesOverride, slideOverride) {
-          const indices = indicesOverride || currentIndices()
-          const resolvedSlide = slideOverride || getSlideElementByIndices(indices)
-          if (!(resolvedSlide instanceof HTMLElement)) {
-            return []
-          }
-
-          const stackRoot = resolvedSlide.parentElement
-          if (!(stackRoot instanceof HTMLElement) || stackRoot.tagName.toLowerCase() !== 'section') {
-            return []
-          }
-
-          const verticalSlides = Array.from(stackRoot.children).filter((node) => {
-            return node instanceof HTMLElement && node.tagName.toLowerCase() === 'section'
-          })
-          if (verticalSlides.length <= 1) {
-            return []
-          }
-
-          return verticalSlides
-            .map((slide, vIndex) => {
-              const activity = getActivityRequestFromSlide(slide)
-              if (!activity) {
-                return null
-              }
-
-              const requestIndices = {
-                h: indices.h,
-                v: vIndex,
-                f: -1,
-              }
-
-              return {
-                activityId: activity.activityId,
-                trigger: activity.trigger,
-                activityOptions: activity.activityOptions,
-                indices: requestIndices,
-                instanceKey: buildAnchoredInstanceKey(activity.activityId, requestIndices),
-              }
-            })
-            .filter(Boolean)
-        }
-
-        function emitActivityRequest(payload, indicesOverride) {
-          const indices = indicesOverride || currentIndices()
-          const resolvedSlide = getSlideElementByIndices(indices)
-          const basePayload = {
-            ...payload,
-            indices,
-          }
-
-          const primaryInstanceKey =
-            typeof payload?.activityId === 'string' && payload.activityId.length > 0
-              ? buildAnchoredInstanceKey(payload.activityId, indices)
-              : null
-
-          if (typeof payload?.activityId === 'string' && payload.activityId.length > 0) {
-            basePayload.instanceKey = buildAnchoredInstanceKey(payload.activityId, indices)
-          }
-
-          const stackRequests = listVerticalStackActivityRequests(indices, resolvedSlide).filter((request) => {
-            return request.instanceKey !== primaryInstanceKey
-          })
-          if (stackRequests.length > 0) {
-            basePayload.stackRequests = stackRequests
-          }
-
-          sendCustom('activityRequest', {
-            ...basePayload,
-          })
-        }
-
-        function emitSlideEnterActivityRequest(indicesOverride, slideOverride) {
-          const indices = indicesOverride || currentIndices()
-          const resolvedSlide = slideOverride || getSlideElementByIndices(indices)
-          if (!resolvedSlide) {
-            return { attempted: false, emitted: false }
-          }
-
-          const activity = getActivityRequestFromSlide(resolvedSlide)
-          if (!activity) {
-            return { attempted: true, emitted: false }
-          }
-
-          emitActivityRequest(activity, indices)
-          return { attempted: true, emitted: true }
-        }
-
-        function maybeEmitSlideEnterActivityRequest(indicesOverride) {
-          const indices = indicesOverride || currentIndices()
-          const slideKey = `${indices.h}:${indices.v}`
-          if (lastSlideEnterRequestKey === slideKey) {
-            return
-          }
-
-          const requestResult = emitSlideEnterActivityRequest(indices)
-          if (requestResult.attempted) {
-            lastSlideEnterRequestKey = slideKey
-          }
-        }
-
-        function extractInboundCommandTargetIndices(messageData) {
-          if (!messageData || typeof messageData !== 'object') {
-            return null
-          }
-
-          if (messageData.type !== 'reveal-sync' || messageData.action !== 'command') {
-            return null
-          }
-
-          const command = messageData.payload
-          if (!command || typeof command !== 'object') {
-            return null
-          }
-
-          const commandName = command.name
-          if (commandName !== 'setState' && commandName !== 'syncToInstructor') {
-            return null
-          }
-
-          const state = command.payload && typeof command.payload === 'object' ? command.payload.state : null
-          if (!state || typeof state !== 'object') {
-            return null
-          }
-
-          const h = Number(state.indexh)
-          const v = Number(state.indexv)
-          const f = Number(state.indexf)
-          if (!Number.isFinite(h) || !Number.isFinite(v)) {
-            return null
-          }
-
-          return {
-            h,
-            v,
-            f: Number.isFinite(f) ? f : -1,
-          }
         }
 
         function updateUiFromStatus() {
@@ -652,7 +477,6 @@
           }
 
           statusEl.textContent = `Slide ${indices.h}:${indices.v} | role ${role} | canGoBack ${nav ? String(nav.canGoBack) : '?'} | canGoForward ${nav ? String(nav.canGoForward) : '?'}`
-          maybeEmitSlideEnterActivityRequest(indices)
         }
 
         function toggleStoryboard() {
@@ -692,12 +516,6 @@
               reveal.on('fragmenthidden', updateUiFromStatus)
 
               window.addEventListener('reveal-iframesync-status', updateUiFromStatus)
-              window.addEventListener('message', (event) => {
-                const commandIndices = extractInboundCommandTargetIndices(event.data)
-                if (commandIndices) {
-                  maybeEmitSlideEnterActivityRequest(commandIndices)
-                }
-              })
               updateUiFromStatus()
             },
           })
@@ -740,8 +558,9 @@
             },
           }
           const activity = current || fallback
-          emitActivityRequest({
+          sendCustom('activityRequest', {
             activityId: activity.activityId,
+            indices,
             trigger: 'manual-button',
             activityOptions: {
               ...(activity.activityOptions || {}),
