@@ -31,6 +31,17 @@ export interface ActivityDeepLinkPreflightResult {
   warning: string | null
 }
 
+export interface ActivityPersistentSoloLaunchParams {
+  hash: string
+  search: string
+  selectedOptions: Record<string, string>
+}
+
+export interface ActivityPersistentSoloLaunchResult {
+  sessionId?: string
+  navigateTo?: string
+}
+
 export interface ActivityPersistentLinkBuildResult {
   fullUrl: string
   hash: string
@@ -200,6 +211,9 @@ export interface ActivityClientModule {
     preflight: ActivityDeepLinkPreflightConfig,
     rawValue: string,
   ) => Promise<ActivityDeepLinkPreflightResult>
+  launchPersistentSoloEntry?: (
+    params: ActivityPersistentSoloLaunchParams,
+  ) => Promise<ActivityPersistentSoloLaunchResult>
   waitingRoomFields?: Record<string, ComponentType<WaitingRoomFieldComponentProps>>
 }
 

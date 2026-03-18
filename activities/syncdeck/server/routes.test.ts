@@ -2409,6 +2409,48 @@ void test('report route returns downloadable session-level HTML built from the m
   assert.match(String(res.body), /Avery - Bridge Design/)
 })
 
+void test('report manifest ignores legacy embedded activity entries without a real child sessionId', async () => {
+  await initializeActivityRegistry()
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: [
+          {
+            embeddedId: 'video-sync:3:0',
+            activityType: 'video-sync',
+            createdAt: Date.now(),
+          },
+        ],
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/report-manifest']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {},
+      { 'x-syncdeck-instructor-passcode': 'teacher-passcode-1' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    activities: Array<unknown>
+  }
+  assert.deepEqual(body.activities, [])
+})
+
 void test('embedded-activity end route removes keyed state, deletes child session, and broadcasts end', async () => {
   const app = createMockApp()
   const ws = createMockWs()

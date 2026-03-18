@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-18
+- Area: client | waiting-room | standalone-permalinks
+- Discovery: Persistent-link solo launches that cannot use a direct `/solo/:activityId` route should be handled through an optional activity client-module hook (`launchPersistentSoloEntry`) instead of adding activity-specific conditionals in the shared waiting-room component.
+- Why it matters: Some activities, such as SyncDeck, support solo entry from permalinks but still require activity-owned session/bootstrap work before a student can enter. Keeping that logic in the activity client module preserves the activity-containment rule while letting shared waiting-room code stay generic.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/activities/index.ts`; `activities/syncdeck/client/index.tsx`
+- Follow-up action: If another permalink-only standalone activity needs nontrivial bootstrap, implement the same hook in that activity's client module and return either a `sessionId` or explicit `navigateTo` target.
+- Owner: Codex
+
+- Date: 2026-03-18
 - Area: client | syncdeck | activity-picker-metadata
 - Discovery: SyncDeck's manager-side manual activity picker should source its launch list from activity config metadata via a local guarded `import.meta.glob(...)` read, not from the client activity registry module.
 - Why it matters: The client registry eagerly uses Vite-only `import.meta.glob`, which breaks the Node-based activities test runner when imported directly into `SyncDeckManager`. A local guarded metadata read keeps the picker metadata-only, satisfies the activity-containment rule, and preserves server-render/unit test compatibility.

@@ -5,7 +5,11 @@ import type {
   WaitingRoomFieldComponentProps,
 } from '../../../../types/waitingRoom.js'
 import WaitingRoomContent from './WaitingRoomContent'
-import { getActivity, loadActivityWaitingRoomFields } from '@src/activities'
+import {
+  getActivity,
+  launchActivityPersistentSoloEntry,
+  loadActivityWaitingRoomFields,
+} from '@src/activities'
 import {
   getPersistentLinkControlStateFromSearch,
   getPersistentSelectedOptionsFromSearchForActivity,
@@ -365,11 +369,54 @@ export default function WaitingRoom({
     }
 
     const queryString = typeof window !== 'undefined' ? window.location.search : ''
-    await persistServerBackedSoloEntryParticipantHandoff()
-    closeSocketQuietly(wsRef.current)
-    if (!hasNavigatedRef.current) {
-      hasNavigatedRef.current = true
-      void navigate(`/solo/${activityName}${queryString}`)
+    const selectedOptions = getPersistentSelectedOptionsFromSearchForActivity(
+      queryString,
+      activity?.deepLinkOptions,
+      activityName,
+    )
+    const supportsDirectSoloPath = activity?.standaloneEntry?.enabled === true
+      && activity.standaloneEntry.supportsDirectPath === true
+
+    if (supportsDirectSoloPath) {
+      await persistServerBackedSoloEntryParticipantHandoff()
+      closeSocketQuietly(wsRef.current)
+      if (!hasNavigatedRef.current) {
+        hasNavigatedRef.current = true
+        void navigate(`/solo/${activityName}${queryString}`)
+      }
+      return
+    }
+
+    try {
+      const launchResult = await launchActivityPersistentSoloEntry(activityName, {
+        hash,
+        search: queryString,
+        selectedOptions,
+      })
+
+      if (launchResult?.sessionId) {
+        await persistServerBackedSessionEntryParticipantHandoff(launchResult.sessionId)
+        closeSocketQuietly(wsRef.current)
+        if (!hasNavigatedRef.current) {
+          hasNavigatedRef.current = true
+          void navigate(`/${launchResult.sessionId}`)
+        }
+        return
+      }
+
+      if (launchResult?.navigateTo) {
+        await persistServerBackedSoloEntryParticipantHandoff()
+        closeSocketQuietly(wsRef.current)
+        if (!hasNavigatedRef.current) {
+          hasNavigatedRef.current = true
+          void navigate(launchResult.navigateTo)
+        }
+        return
+      }
+
+      setError('Solo mode is unavailable right now. Please refresh and try again.')
+    } catch (soloLaunchError) {
+      setError(soloLaunchError instanceof Error ? soloLaunchError.message : 'Solo mode is unavailable right now.')
     }
   }
 

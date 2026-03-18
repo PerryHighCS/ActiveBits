@@ -320,12 +320,13 @@ function normalizeEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivities
       }
       const instanceKey = typeof entry.embeddedId === 'string' ? entry.embeddedId.trim() : ''
       const activityId = typeof entry.activityType === 'string' ? entry.activityType.trim() : ''
+      const sessionId = typeof entry.sessionId === 'string' ? entry.sessionId.trim() : ''
       if (instanceKey.length === 0 || activityId.length === 0) {
         continue
       }
-      const sessionId = typeof entry.sessionId === 'string' && entry.sessionId.trim().length > 0
-        ? entry.sessionId.trim()
-        : instanceKey
+      if (sessionId.length === 0) {
+        continue
+      }
       normalized[instanceKey] = {
         childSessionId: sessionId,
         activityId,
