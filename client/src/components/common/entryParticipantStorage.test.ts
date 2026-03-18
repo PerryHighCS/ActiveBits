@@ -294,6 +294,79 @@ void test('consumeResolvedEntryParticipantValues only calls the server consume e
   assert.equal(storage.getItem(storageKey), null)
 })
 
+void test('consumeResolvedEntryParticipantValues deduplicates concurrent token consume requests', async () => {
+  const storage = createStorage()
+  const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-5b')
+  persistEntryParticipantToken(storage, storageKey, 'token-concurrent')
+
+  let requestCount = 0
+  let releaseFetchGate: () => void = () => {}
+  const fetchGate = new Promise<void>((resolve) => {
+    releaseFetchGate = () => {
+      resolve()
+    }
+  })
+
+  const consumeA = consumeResolvedEntryParticipantValues(
+    storage,
+    {
+      activityName: 'java-string-practice',
+      sessionId: 'session-5b',
+      isSoloSession: false,
+    },
+    async () => {
+      requestCount += 1
+      await fetchGate
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            values: {
+              displayName: 'Ada',
+              participantId: 'participant-1',
+            },
+          }
+        },
+      }
+    },
+  )
+
+  const consumeB = consumeResolvedEntryParticipantValues(
+    storage,
+    {
+      activityName: 'java-string-practice',
+      sessionId: 'session-5b',
+      isSoloSession: false,
+    },
+    async () => {
+      requestCount += 1
+      return {
+        ok: false,
+        status: 404,
+        async json() {
+          return {}
+        },
+      }
+    },
+  )
+
+  releaseFetchGate()
+
+  const [valuesA, valuesB] = await Promise.all([consumeA, consumeB])
+
+  assert.equal(requestCount, 1)
+  assert.deepEqual(valuesA, {
+    displayName: 'Ada',
+    participantId: 'participant-1',
+  })
+  assert.deepEqual(valuesB, {
+    displayName: 'Ada',
+    participantId: 'participant-1',
+  })
+  assert.equal(storage.getItem(storageKey), null)
+})
+
 void test('consumeResolvedEntryParticipantValues clears token handoff after a 404 consume response', async () => {
   const storage = createStorage()
   const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-6')

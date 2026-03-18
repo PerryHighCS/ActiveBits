@@ -30,6 +30,8 @@ export interface EntryParticipantFetchLike {
   }>
 }
 
+const pendingTokenConsumeRequests = new Map<string, Promise<EntryParticipantValueMap | null>>()
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -219,7 +221,13 @@ export async function consumeResolvedEntryParticipantValues(
     return null
   }
 
-  try {
+  const pendingRequestKey = `${storageKey}:${handoff.token}`
+  const pendingRequest = pendingTokenConsumeRequests.get(pendingRequestKey)
+  if (pendingRequest) {
+    return pendingRequest
+  }
+
+  const requestPromise = (async () => {
     const apiUrl = isSoloSession
       ? (typeof handoff.persistentHash === 'string' && handoff.persistentHash.length > 0
         ? buildPersistentEntryParticipantConsumeApiUrl(handoff.persistentHash, activityName)
@@ -250,9 +258,14 @@ export async function consumeResolvedEntryParticipantValues(
     return normalizeEntryParticipantValues(
       isRecord(payload.values) ? payload.values : {},
     )
-  } catch {
+  })().catch(() => {
     return null
-  }
+  }).finally(() => {
+    pendingTokenConsumeRequests.delete(pendingRequestKey)
+  })
+
+  pendingTokenConsumeRequests.set(pendingRequestKey, requestPromise)
+  return requestPromise
 }
 
 export function getEntryParticipantDisplayName(values: EntryParticipantValueMap | null): string | null {
