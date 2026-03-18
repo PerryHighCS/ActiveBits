@@ -13,6 +13,7 @@ import test from 'node:test'
 import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../../types/websocket.js'
 import { initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
 import setupSyncDeckRoutes, { waitForInstructorAuthMessage } from './routes.js'
+import '../../gallery-walk/server/routes.js'
 import '../../video-sync/server/routes.js'
 
 const HMAC_SECRET = resolvePersistentSessionSecret()
@@ -2054,6 +2055,107 @@ void test('embedded-activity report route redirects to the child activity report
   assert.deepEqual(res.body, {
     location: '/api/gallery-walk/CHILD%3As1%3Aabc12%3Agallery-walk/report',
   })
+})
+
+void test('report-manifest route aggregates structured child activity reports', async () => {
+  await initializeActivityRegistry()
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'gallery-walk:4:0': {
+            childSessionId: 'CHILD:s1:abc12:gallery-walk',
+            activityId: 'gallery-walk',
+            startedAt: 123,
+            owner: 'syncdeck-instructor',
+          },
+          'video-sync:3:0': {
+            childSessionId: 'CHILD:s1:def45:video-sync',
+            activityId: 'video-sync',
+            startedAt: 100,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    'CHILD:s1:abc12:gallery-walk': {
+      id: 'CHILD:s1:abc12:gallery-walk',
+      type: 'gallery-walk',
+      created: Date.now(),
+      lastActivity: Date.now(),
+      data: {
+        stage: 'review',
+        config: { title: 'Critique Day' },
+        reviewees: {
+          studentA: { name: 'Avery', projectTitle: 'Bridge Design' },
+        },
+        reviewers: {
+          reviewer1: { name: 'Jordan' },
+        },
+        feedback: [
+          {
+            id: 'fb-1',
+            to: 'studentA',
+            from: 'reviewer1',
+            fromNameSnapshot: 'Jordan',
+            message: 'Great use of examples.',
+            createdAt: Date.now(),
+            styleId: 'yellow',
+          },
+        ],
+        stats: {
+          reviewees: { studentA: 1 },
+          reviewers: { reviewer1: 1 },
+        },
+        embeddedLaunch: {
+          parentSessionId: 's1',
+          instanceKey: 'gallery-walk:4:0',
+          selectedOptions: {},
+        },
+      },
+    },
+    'CHILD:s1:def45:video-sync': {
+      id: 'CHILD:s1:def45:video-sync',
+      type: 'video-sync',
+      created: Date.now(),
+      lastActivity: Date.now(),
+      data: {},
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/report-manifest']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {},
+      { 'x-syncdeck-instructor-passcode': 'teacher-passcode-1' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    parentSessionId: string
+    activities: Array<{ activityId: string; activityName: string; report: { instanceKey: string; students?: Array<{ studentId: string }> } }>
+    students: Array<{ studentId: string; displayName?: string | null }>
+  }
+  assert.equal(body.parentSessionId, 's1')
+  assert.equal(body.activities.length, 1)
+  assert.equal(body.activities[0]?.activityId, 'gallery-walk')
+  assert.equal(body.activities[0]?.activityName, 'Gallery Walk')
+  assert.equal(body.activities[0]?.report.instanceKey, 'gallery-walk:4:0')
+  assert.deepEqual(body.students, [
+    { studentId: 'studentA', displayName: 'Avery - Bridge Design' },
+  ])
 })
 
 void test('embedded-activity end route removes keyed state, deletes child session, and broadcasts end', async () => {

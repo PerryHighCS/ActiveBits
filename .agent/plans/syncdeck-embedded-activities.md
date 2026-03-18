@@ -1038,6 +1038,10 @@ session.data.embeddedActivities: Record<instanceKey, {
   the parent session and preserves stable activity labels / instance keys.
 - [x] Define shared type contract in `types/activity.ts` for report scopes, structured child
   report sections, SyncDeck session-report manifests, and activity-owned report section renderers.
+- [x] Add server-side activity report builder registry so child activities can register structured
+  report builders without SyncDeck importing activity-specific modules.
+- [x] Implement first `GET /api/syncdeck/:sessionId/report-manifest` route that aggregates
+  registered child report sections into a parent-session manifest.
 - [ ] Add session-level report download for the instructor that bundles results from every embedded
   activity in the session into one self-contained HTML file.
 - [ ] Define aggregate report UX: summary across activities, activity-by-activity drill-down, and

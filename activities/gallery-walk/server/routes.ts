@@ -1,6 +1,7 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
   buildGalleryWalkReportFilename,
@@ -213,6 +214,18 @@ export function sanitizeName(value: unknown, fallback: string | null = '', maxLe
 
 registerSessionNormalizer('gallery-walk', (session) => {
   session.data = normalizeSessionData(session.data)
+})
+
+registerActivityReportBuilder('gallery-walk', (session, params) => {
+  const normalizedSession = asGalleryWalkSession(session)
+  if (!normalizedSession) {
+    return null
+  }
+
+  return buildGalleryWalkStructuredReportSection(
+    buildGalleryWalkReportBundle(normalizedSession),
+    { instanceKey: params.instanceKey },
+  )
 })
 
 export default function setupGalleryWalkRoutes(app: GalleryWalkRouteApp, sessions: SessionStore, ws: WsRouter): void {

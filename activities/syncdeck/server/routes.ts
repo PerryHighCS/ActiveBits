@@ -19,8 +19,10 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../shared/revealSyncProtocol.js'
+import { getActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import { getActivityConfig } from '../../../server/activities/activityRegistry.js'
 import { connectSyncDeckStudent } from './studentParticipants.js'
+import type { ActivityReportStudentRef, SyncDeckSessionReportManifest } from '../../../types/activity.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -826,6 +828,18 @@ function buildEmbeddedActivityReportPath(reportEndpoint: string, childSessionId:
   return reportEndpoint.replaceAll(':sessionId', encodeURIComponent(childSessionId))
 }
 
+function mergeReportStudents(sections: Array<{ students?: ActivityReportStudentRef[] }>): ActivityReportStudentRef[] {
+  const byStudentId = new Map<string, ActivityReportStudentRef>()
+  for (const section of sections) {
+    for (const student of section.students ?? []) {
+      if (!byStudentId.has(student.studentId)) {
+        byStudentId.set(student.studentId, student)
+      }
+    }
+  }
+  return [...byStudentId.values()]
+}
+
 function toSelectedOptions(value: unknown): Record<string, unknown> {
   return isPlainObject(value) ? value : {}
 }
@@ -1436,6 +1450,66 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const location = buildEmbeddedActivityReportPath(reportEndpoint, childSession.id)
     res.setHeader?.('Location', location)
     res.status(302).json({ location })
+  })
+
+  app.get('/api/syncdeck/:sessionId/report-manifest', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readHeaderField(req.headers, 'x-syncdeck-instructor-passcode'))
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const activities: SyncDeckSessionReportManifest['activities'] = []
+    for (const [instanceKey, embeddedActivity] of Object.entries(session.data.embeddedActivities)) {
+      const childSession = await sessions.get(embeddedActivity.childSessionId)
+      if (!childSession || typeof childSession.type !== 'string') {
+        continue
+      }
+
+      const builder = getActivityReportBuilder(childSession.type)
+      if (!builder) {
+        continue
+      }
+
+      const report = builder(childSession, { instanceKey })
+      if (!report) {
+        continue
+      }
+
+      const activityConfig = getActivityConfig(childSession.type)
+      activities.push({
+        activityId: embeddedActivity.activityId,
+        activityName: typeof activityConfig?.title === 'string' && activityConfig.title.trim().length > 0
+          ? activityConfig.title.trim()
+          : typeof activityConfig?.name === 'string' && activityConfig.name.trim().length > 0
+            ? activityConfig.name.trim()
+            : embeddedActivity.activityId,
+        childSessionId: embeddedActivity.childSessionId,
+        instanceKey,
+        startedAt: embeddedActivity.startedAt,
+        report,
+      })
+    }
+
+    const manifest: SyncDeckSessionReportManifest = {
+      parentSessionId: session.id,
+      generatedAt: Date.now(),
+      activities,
+      students: mergeReportStudents(activities.map((entry) => entry.report)),
+    }
+    res.json(manifest)
   })
 
   app.delete('/api/syncdeck/:sessionId', async (req, res) => {
