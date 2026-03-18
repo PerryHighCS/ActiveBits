@@ -8,6 +8,7 @@ import {
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import {
   createSession,
+  EMBEDDED_CHILD_SESSION_PREFIX,
   generateHexId,
   type SessionRecord,
   type SessionStore,
@@ -145,7 +146,6 @@ const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
 const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const MAX_CHALKBOARD_DELTA_STROKES = 200
-const EMBEDDED_CHILD_SESSION_PREFIX = 'CHILD'
 const SYNCDECK_EMBEDDED_OWNER = 'syncdeck-instructor'
 const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === '1'
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS = 5 * 60 * 1000
@@ -1009,7 +1009,7 @@ async function createEmbeddedChildSession(
   selectedOptions: Record<string, unknown>,
 ): Promise<SessionRecord> {
   const childId = await generateHexId(sessions)
-  const sessionId = `${EMBEDDED_CHILD_SESSION_PREFIX}:${parentSessionId}:${childId}:${activityId}`
+  const sessionId = `${EMBEDDED_CHILD_SESSION_PREFIX}${parentSessionId}:${childId}:${activityId}`
   const now = Date.now()
   const session: SessionRecord = {
     id: sessionId,

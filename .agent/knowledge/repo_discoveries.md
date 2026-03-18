@@ -1171,3 +1171,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/embedded-test/server/routes.ts`; `activities/embedded-test/server/routes.test.ts`; `server/core/acceptedSessionParticipants.ts`
 - Follow-up action: When adding websocket or REST student join paths in other activities, prefer a dedicated optional participant-name normalizer instead of reusing message-body sanitizers.
 - Owner: Codex
+
+- Date: 2026-03-18
+- Area: server | syncdeck | embedded child session ids
+- Discovery: The embedded child session prefix should include its trailing colon in the shared constant (`CHILD:`), and child-session builders should concatenate the rest of the id directly instead of appending another separator. That keeps creation and `startsWith('CHILD:')` detection aligned across server and client layers.
+- Why it matters: A bare-prefix constructor (`CHILD`) can drift from delete guards and client helpers that check for `CHILD:`; once the shared constant is corrected, any leftover `:${...}` concatenation produces malformed ids like `CHILD::parent:...`.
+- Evidence: `server/core/sessions.ts`; `activities/syncdeck/server/routes.ts`; `client/src/components/common/sessionHeaderUtils.ts`; `server/sessionEntryRoutes.test.ts`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: Prefer importing the shared prefix constant anywhere child session ids are constructed on the server, and keep client-only detection helpers keyed to the same literal.
+- Owner: Codex

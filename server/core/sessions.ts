@@ -62,7 +62,7 @@ interface WsServerLike {
   clients: Iterable<WsClient>
 }
 
-const EMBEDDED_CHILD_SESSION_PREFIX = 'CHILD:'
+export const EMBEDDED_CHILD_SESSION_PREFIX = 'CHILD:'
 
 class InMemorySessionStore implements SessionStore {
   public readonly ttlMs: number
