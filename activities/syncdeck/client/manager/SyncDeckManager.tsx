@@ -2782,21 +2782,6 @@ const SyncDeckManager: FC = () => {
     relayInstructorPayload(setStateCommand)
   }
 
-  const sendEmbeddedOverlaySlideCommand = (): void => {
-    const targetWindow = presentationIframeRef.current?.contentWindow
-    if (!targetWindow || !presentationOrigin) {
-      return
-    }
-
-    const slideCommand = buildManagerOverlayNavigationCommand('slide')
-
-    targetWindow.postMessage(
-      slideCommand,
-      presentationOrigin,
-    )
-    relayInstructorPayload(slideCommand)
-  }
-
   const endEmbeddedActivity = async (instanceKey: string): Promise<void> => {
     if (!sessionId || !instructorPasscode) {
       return
@@ -3128,15 +3113,6 @@ const SyncDeckManager: FC = () => {
                       </p>
                       <p className="text-xs text-gray-600 truncate">{activeEmbeddedInstanceKey}</p>
                     </div>
-                    <button
-                      type="button"
-                      className="absolute right-4 top-4 z-30 px-3 py-2 rounded-full bg-white/92 text-gray-800 shadow-sm ring-1 ring-black/5 hover:bg-white"
-                      onClick={sendEmbeddedOverlaySlideCommand}
-                      aria-label="Slide command"
-                      title="Slide command"
-                    >
-                      ⦿
-                    </button>
                     <div className="absolute inset-0 p-14">
                       <div className="w-full h-full rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
                         <iframe
