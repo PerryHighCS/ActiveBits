@@ -503,6 +503,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const manageDashboard = parseManageDashboard(rawConfig.manageDashboard, context)
   const manageLayout = parseManageLayout(rawConfig.manageLayout, context)
   const embeddedRuntime = parseEmbeddedRuntime(rawConfig.embeddedRuntime, context)
+  const reportEndpoint = readOptionalString(rawConfig, 'reportEndpoint', context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)
 
   assignOptionalField(parsed, 'title', title)
@@ -516,6 +517,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   assignOptionalField(parsed, 'manageDashboard', manageDashboard)
   assignOptionalField(parsed, 'manageLayout', manageLayout)
   assignOptionalField(parsed, 'embeddedRuntime', embeddedRuntime)
+  assignOptionalField(parsed, 'reportEndpoint', reportEndpoint)
   assignOptionalField(parsed, 'waitingRoom', waitingRoom)
 
   return parsed

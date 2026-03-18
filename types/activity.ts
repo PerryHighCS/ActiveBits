@@ -99,6 +99,7 @@ export interface ActivityConfig {
     expandShell?: boolean
   }
   embeddedRuntime?: ActivityEmbeddedRuntimeConfig
+  reportEndpoint?: string
   waitingRoom?: ActivityWaitingRoomConfig
   isDev?: boolean
   clientEntry?: string

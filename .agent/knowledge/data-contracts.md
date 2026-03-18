@@ -16,6 +16,16 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-03-18
+- Surface: activity interface | internal module
+- Contract: `ActivityConfig.reportEndpoint?: string` declares an activity-owned report download route that shared embedded-session surfaces such as SyncDeck can call without importing activity-specific server code. The value is metadata only; shared code treats it as an opaque non-empty string path and leaves auth, response format, and report generation semantics to the owning activity.
+- Contract update: Embedded report downloads should resolve to one self-contained HTML file per activity session. The HTML should embed all required data, styles, and scripts and support internal view switching (for example whole-class summary and per-student detail) without extra network fetches.
+- Compatibility constraints: The field is optional and additive. Activities without reporting support omit it entirely. Shared parsers remove `null` values and reject non-string shapes so config loading stays deterministic. Shared SyncDeck code may assume the route returns downloadable HTML, but it should not depend on activity-specific DOM structure inside that document.
+- Validation rules: `reportEndpoint` must be a non-empty string when present. Report documents should not depend on CDN assets, server-side templates that fetch follow-up JSON, or multiple companion files. The exported HTML should remain understandable when opened directly from disk after download.
+- Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `server/activityConfigSchema.test.ts`; `ARCHITECTURE.md`; `ADDING_ACTIVITIES.md`
+- Follow-up action: Add the SyncDeck proxy/report UI flow against this metadata before any activity-specific endpoint implementation lands, so the first runtime consumer proves the contract.
+- Owner: Codex
+
+- Date: 2026-03-18
 - Surface: REST | internal module | activity interface
 - Contract: SyncDeck embedded child launches persist a generic bootstrap envelope on the child session at `session.data.embeddedLaunch = { parentSessionId, instanceKey, selectedOptions }`. The parent `POST /api/syncdeck/:sessionId/embedded-activity/start` route sanitizes object-shaped `activityOptions` into `selectedOptions`, and child activities consume that payload through shared client bootstrap helpers instead of SyncDeck-specific props or query params.
 - Compatibility constraints: `selectedOptions` must remain activity-agnostic and JSON-serializable so any embedded activity can adopt the same bootstrap path. Missing, malformed, or non-object `activityOptions` normalize to `{}` rather than failing launch. Existing permalink/create-session bootstrap flows stay intact; embedded bootstrap is an additive read path for child-session managers.

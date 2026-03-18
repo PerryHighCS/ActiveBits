@@ -279,6 +279,11 @@ export default {
       timeoutMs: 4000,
     },
   },
+  // Optional: expose an activity-owned report download route for embedded end/report flows.
+  // Embedded reports should download as a single self-contained HTML file with inline data,
+  // styles, and scripts so instructors can open them offline and switch between class and
+  // per-student views without additional requests.
+  reportEndpoint: '/api/quiz/:sessionId/report',
   clientEntry: './client/index.ts',  // or .tsx if using JSX in footerContent
   serverEntry: './server/routes.ts',
 };

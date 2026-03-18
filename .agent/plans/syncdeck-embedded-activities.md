@@ -999,7 +999,7 @@ session.data.embeddedActivities: Record<instanceKey, {
   options without SyncDeck-specific wiring.
 - [x] Apply embedded bootstrap payload in `video-sync` (`selectedOptions.sourceUrl`) as the
   first activity using the contract.
-- [ ] Tests: SyncDeck start route persists bootstrap payload; child reload preserves it;
+- [x] Tests: SyncDeck start route persists bootstrap payload; child reload preserves it;
   `video-sync` configures from bootstrap source URL; invalid bootstrap falls back safely.
 - [ ] Add parent-driven instructor lock control for embedded child sessions (future push).
 - [ ] Read `activityConfig.embeddedRuntime.instructorGated` from embedded child metadata.
@@ -1024,10 +1024,16 @@ session.data.embeddedActivities: Record<instanceKey, {
 - [x] Picker tests.
 
 ### Phase 6 — Reporting
-- [ ] Define `reportEndpoint` optional field in `ActivityConfig` and schema.
+- [x] Define `reportEndpoint` optional field in `ActivityConfig` and schema.
+- [ ] Define shared embedded report contract: activity report response is a single self-contained
+  HTML document with inline data, styles, and scripts and no external asset dependencies.
+- [ ] Define shared report UX contract: one download per embedded activity, with in-report view
+  switching for whole-class summary and per-student detail instead of multiple exported files.
 - [ ] Add report download to "End Activity" confirmation step.
 - [ ] Implement `GET /api/syncdeck/.../report` proxy endpoint.
 - [ ] Each activity that supports embedded reporting implements its own report endpoint.
+- [ ] First report consumer renders both whole-class-by-activity and per-student views from the
+  same embedded data payload.
 - [ ] Tests.
 
 ---

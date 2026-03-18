@@ -146,6 +146,7 @@ export default {
   manageDashboard: { // optional shared dashboard hints/capabilities
     customPersistentLinkBuilder: true, // activity-owned persistent-link UI in dashboard modal
   },
+  reportEndpoint: '/api/my-activity/:sessionId/report', // optional: activity-owned embedded report download route
   clientEntry: './client/index.ts',  // Component entry (TS/TSX)
   serverEntry: './server/routes.ts', // Server routes
 };
@@ -157,6 +158,16 @@ export default {
 - `historyState`: Array of response field names. Matching fields are attached to React Router navigation state when transitioning from `/manage/:activityId` to `/manage/:activityId/:sessionId`.
 
 Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` when the value should still be recoverable after reloads or later manager re-entry in the same tab.
+
+`reportEndpoint` is optional activity metadata for embedded-session reporting. When present, SyncDeck can treat it as the child activity's authoritative download surface during embedded end/report flows instead of hard-coding per-activity routes in shared code.
+
+Embedded activity reports should be delivered as a single self-contained HTML document:
+
+- inline the report data payload in the document itself
+- inline any required CSS and JavaScript
+- avoid external fonts, CDN assets, or follow-up API calls after download
+- support multiple views inside the same file (for example class summary and per-student drill-down)
+  rather than emitting separate report files for each perspective
 
 ### Embedded Child Bootstrap
 
