@@ -364,6 +364,60 @@ void test('storeCreateSessionBootstrapPayload keeps a same-tab bootstrap payload
   assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
 })
 
+void test('consumeCreateSessionBootstrapPayload clears sessionStorage even when the same-tab cache entry exists', () => {
+  const sessionStorage = new Map<string, string>()
+  const originalWindow = globalThis.window
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: {
+        getItem(key: string) {
+          return sessionStorage.get(key) ?? null
+        },
+        setItem(key: string, value: string) {
+          sessionStorage.set(key, value)
+        },
+        removeItem(key: string) {
+          sessionStorage.delete(key)
+        },
+      },
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    storeCreateSessionBootstrapPayload('video-sync', 'session-123', {
+      id: 'session-123',
+      instructorPasscode: 'teacher-passcode',
+    }, 10)
+
+    assert.equal(
+      sessionStorage.has('create-session-bootstrap:video-sync:session-123'),
+      true,
+    )
+
+    assert.deepEqual(
+      consumeCreateSessionBootstrapPayload('video-sync', 'session-123', 10),
+      {
+        id: 'session-123',
+        instructorPasscode: 'teacher-passcode',
+      },
+    )
+
+    assert.equal(
+      sessionStorage.get('create-session-bootstrap:video-sync:session-123') ?? null,
+      null,
+    )
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
 void test('consumeCreateSessionBootstrapPayload falls back to sessionStorage for iframe/bootstrap reload contexts', () => {
   const sessionStorage = new Map<string, string>()
   const originalWindow = globalThis.window

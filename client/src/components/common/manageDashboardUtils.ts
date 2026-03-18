@@ -102,6 +102,21 @@ function persistCreateSessionBootstrapPayloadToSessionStorage(
   }
 }
 
+function clearCreateSessionBootstrapPayloadFromSessionStorage(
+  activityId: string,
+  sessionId: string,
+): void {
+  if (typeof window === 'undefined' || window.sessionStorage == null) {
+    return
+  }
+
+  try {
+    window.sessionStorage.removeItem(buildCreateSessionBootstrapStorageKey(activityId, sessionId))
+  } catch {
+    // Best-effort cleanup only; consume should still succeed from the in-memory cache.
+  }
+}
+
 function consumeCreateSessionBootstrapPayloadFromSessionStorage(
   activityId: string,
   sessionId: string,
@@ -273,6 +288,7 @@ export function consumeCreateSessionBootstrapPayload(
 
   const payload = entry?.payload ?? consumeCreateSessionBootstrapPayloadFromSessionStorage(activityId, sessionId, nowMs)
   createSessionBootstrapPayloads.delete(key)
+  clearCreateSessionBootstrapPayloadFromSessionStorage(activityId, sessionId)
   return payload
 }
 
