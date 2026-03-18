@@ -1,4 +1,5 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
 import {
   getStudentPresentationCompatibilityError,
@@ -94,6 +95,13 @@ interface RevealActivityRequestPayload {
   instanceKey?: unknown
   indices?: unknown
   stackRequests?: unknown
+  activityOptions?: unknown
+}
+
+interface SyncDeckEmbeddedActivityStartResponse {
+  childSessionId?: unknown
+  instanceKey?: unknown
+  managerBootstrap?: unknown
 }
 
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
@@ -448,6 +456,12 @@ interface SyncDeckActivityPickerEntry {
   activityId: string
   name: string
   description: string
+}
+
+interface SyncDeckActivityLaunchRequest {
+  activityId: string
+  instanceKey: string
+  activityOptions?: Record<string, unknown>
 }
 
 interface SyncDeckActivityConfigModule {
@@ -989,10 +1003,14 @@ function buildAnchoredInstanceKey(activityId: string, indices: { h: number; v: n
   return `${activityId}:${indices.h}:${indices.v}`
 }
 
+function normalizeActivityOptions(value: unknown): Record<string, unknown> | undefined {
+  return isPlainObject(value) ? value : undefined
+}
+
 export function resolveManagerActivityRequestStartInput(
   rawPayload: unknown,
   fallbackInstructorIndices: { h: number; v: number; f: number } | null,
-): { activityId: string; instanceKey: string } | null {
+): SyncDeckActivityLaunchRequest | null {
   if (!isPlainObject(rawPayload)) {
     return null
   }
@@ -1002,12 +1020,14 @@ export function resolveManagerActivityRequestStartInput(
   if (!activityId) {
     return null
   }
+  const activityOptions = normalizeActivityOptions(payload.activityOptions)
 
   const requestedInstanceKey = typeof payload.instanceKey === 'string' ? payload.instanceKey.trim() : ''
   if (requestedInstanceKey.length > 0) {
     return {
       activityId,
       instanceKey: requestedInstanceKey,
+      ...(activityOptions ? { activityOptions } : {}),
     }
   }
 
@@ -1017,19 +1037,21 @@ export function resolveManagerActivityRequestStartInput(
     return {
       activityId,
       instanceKey: `${activityId}:global`,
+      ...(activityOptions ? { activityOptions } : {}),
     }
   }
 
   return {
     activityId,
     instanceKey: buildAnchoredInstanceKey(activityId, resolvedIndices),
+    ...(activityOptions ? { activityOptions } : {}),
   }
 }
 
 export function resolveManagerActivityRequestBatchInputs(
   rawPayload: unknown,
   fallbackInstructorIndices: { h: number; v: number; f: number } | null,
-): Array<{ activityId: string; instanceKey: string }> {
+): SyncDeckActivityLaunchRequest[] {
   if (!isPlainObject(rawPayload)) {
     return []
   }
@@ -1040,10 +1062,10 @@ export function resolveManagerActivityRequestBatchInputs(
   const parsedStackRequests = Array.isArray(payload.stackRequests)
     ? payload.stackRequests
       .map((entry) => resolveManagerActivityRequestStartInput(entry, fallbackInstructorIndices))
-      .filter((entry): entry is { activityId: string; instanceKey: string } => entry != null)
+      .filter((entry): entry is SyncDeckActivityLaunchRequest => entry != null)
     : []
 
-  const byInstanceKey = new Map<string, { activityId: string; instanceKey: string }>()
+  const byInstanceKey = new Map<string, SyncDeckActivityLaunchRequest>()
   if (primary) {
     byInstanceKey.set(primary.instanceKey, primary)
   }
@@ -2183,7 +2205,7 @@ const SyncDeckManager: FC = () => {
   }, [presentationOrigin, armRestoreSuppression])
 
   const launchEmbeddedActivityFromRequest = useCallback(
-    async (request: { activityId: string; instanceKey: string }): Promise<void> => {
+    async (request: SyncDeckActivityLaunchRequest): Promise<void> => {
       if (!sessionId) {
         setStartError('Cannot launch embedded activity without a SyncDeck session id.')
         setStartSuccess(null)
@@ -2204,6 +2226,7 @@ const SyncDeckManager: FC = () => {
             instructorPasscode,
             activityId: request.activityId,
             instanceKey: request.instanceKey,
+            ...(request.activityOptions ? { activityOptions: request.activityOptions } : {}),
           }),
         })
 
@@ -2222,6 +2245,12 @@ const SyncDeckManager: FC = () => {
           return
         }
 
+        const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+        const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
+        if (childSessionId && isPlainObject(payload.managerBootstrap)) {
+          storeCreateSessionBootstrapPayload(request.activityId, childSessionId, payload.managerBootstrap)
+        }
+
         setStartError(null)
         setStartSuccess(`Launched ${request.activityId} (${request.instanceKey}).`)
       } catch {
@@ -2232,7 +2261,7 @@ const SyncDeckManager: FC = () => {
     [sessionId, instructorPasscode],
   )
 
-  const handleResolvedActivityRequests = useCallback((startRequests: Array<{ activityId: string; instanceKey: string }>): void => {
+  const handleResolvedActivityRequests = useCallback((startRequests: SyncDeckActivityLaunchRequest[]): void => {
     const primaryStartRequest = startRequests[0] ?? null
     if (!primaryStartRequest) {
       setStartError('Ignored activity request with missing activity id.')

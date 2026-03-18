@@ -13,6 +13,7 @@ import {
   parseManagerStopTimeInput,
   readBootstrapInstructorPasscode,
   readBootstrapSourceUrl,
+  readEmbeddedBootstrapSourceUrl,
   resolveBootstrapInstructorPasscode,
   sanitizeManagerApiErrorMessage,
   shouldCorrectManagerPlaybackDrift,
@@ -132,6 +133,22 @@ void test('readBootstrapSourceUrl ignores missing or empty query params', () => 
   assert.equal(readBootstrapSourceUrl(''), null)
   assert.equal(readBootstrapSourceUrl('?sourceUrl='), null)
   assert.equal(readBootstrapSourceUrl('?other=value'), null)
+})
+
+void test('readEmbeddedBootstrapSourceUrl returns sourceUrl from embedded launch selected options', () => {
+  assert.equal(
+    readEmbeddedBootstrapSourceUrl({
+      sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+    }),
+    'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+  )
+})
+
+void test('readEmbeddedBootstrapSourceUrl ignores missing or invalid embedded launch payloads', () => {
+  assert.equal(readEmbeddedBootstrapSourceUrl(null), null)
+  assert.equal(readEmbeddedBootstrapSourceUrl({}), null)
+  assert.equal(readEmbeddedBootstrapSourceUrl({ sourceUrl: '' }), null)
+  assert.equal(readEmbeddedBootstrapSourceUrl({ sourceUrl: 42 }), null)
 })
 
 void test('buildManagerWsUrl omits instructor credentials from the websocket URL', () => {

@@ -1,4 +1,4 @@
-import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import { normalizeSessionData as normalizeSessionRecord, registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import {
   findHashBySessionId,
   generatePersistentHash,
@@ -77,6 +77,16 @@ interface SyncDeckEmbeddedActivityRecord {
   activityId: string
   startedAt: number
   owner: string
+}
+
+interface SyncDeckEmbeddedLaunchPayload {
+  parentSessionId: string
+  instanceKey: string
+  selectedOptions: Record<string, unknown>
+}
+
+interface SyncDeckEmbeddedManagerBootstrapPayload {
+  instructorPasscode?: string
 }
 
 type SyncDeckEmbeddedActivitiesMap = Record<string, SyncDeckEmbeddedActivityRecord>
@@ -734,6 +744,61 @@ function readStringField(payload: unknown, key: string): string | null {
   return typeof value === 'string' ? value : null
 }
 
+function readObjectField(payload: unknown, key: string): Record<string, unknown> | null {
+  if (!isPlainObject(payload)) return null
+  const value = payload[key]
+  return isPlainObject(value) ? value : null
+}
+
+function sanitizeEmbeddedLaunchValue(value: unknown): unknown {
+  if (
+    value == null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeEmbeddedLaunchValue(entry))
+  }
+
+  if (!isPlainObject(value)) {
+    return null
+  }
+
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    const nextValue = sanitizeEmbeddedLaunchValue(entry)
+    if (nextValue !== undefined) {
+      sanitized[key] = nextValue
+    }
+  }
+
+  return sanitized
+}
+
+function sanitizeEmbeddedLaunchSelectedOptions(value: unknown): Record<string, unknown> {
+  const sanitized = sanitizeEmbeddedLaunchValue(value)
+  return isPlainObject(sanitized) ? sanitized : {}
+}
+
+function buildEmbeddedManagerBootstrapPayload(session: SessionRecord): SyncDeckEmbeddedManagerBootstrapPayload | null {
+  if (!isPlainObject(session.data)) {
+    return null
+  }
+
+  const instructorPasscode = normalizeInstructorPasscode(session.data.instructorPasscode)
+  if (!instructorPasscode) {
+    return null
+  }
+
+  return {
+    instructorPasscode,
+  }
+}
+
 function toSelectedOptions(value: unknown): Record<string, unknown> {
   return isPlainObject(value) ? value : {}
 }
@@ -854,6 +919,7 @@ async function createEmbeddedChildSession(
   parentSessionId: string,
   activityId: string,
   instanceKey: string,
+  selectedOptions: Record<string, unknown>,
 ): Promise<SessionRecord> {
   const childId = await generateHexId(sessions)
   const sessionId = `${EMBEDDED_CHILD_SESSION_PREFIX}:${parentSessionId}:${childId}:${activityId}`
@@ -866,9 +932,14 @@ async function createEmbeddedChildSession(
     data: {
       embeddedParentSessionId: parentSessionId,
       embeddedInstanceKey: instanceKey,
+      embeddedLaunch: {
+        parentSessionId,
+        instanceKey,
+        selectedOptions,
+      } satisfies SyncDeckEmbeddedLaunchPayload,
     },
   }
-  await sessions.set(sessionId, session)
+  await sessions.set(sessionId, normalizeSessionRecord(session))
   return session
 }
 
@@ -1209,6 +1280,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
     const activityId = normalizeActivityId(readStringField(req.body, 'activityId'))
     const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
+    const activityOptions = sanitizeEmbeddedLaunchSelectedOptions(readObjectField(req.body, 'activityOptions'))
     if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
       res.status(403).json({ error: 'forbidden' })
       return
@@ -1220,11 +1292,19 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const existing = session.data.embeddedActivities[instanceKey]
     if (existing) {
-      res.json({ childSessionId: existing.childSessionId, instanceKey })
+      const existingChildSession = await sessions.get(existing.childSessionId)
+      const managerBootstrap = existingChildSession
+        ? buildEmbeddedManagerBootstrapPayload(existingChildSession)
+        : null
+      res.json({
+        childSessionId: existing.childSessionId,
+        instanceKey,
+        ...(managerBootstrap ? { managerBootstrap } : {}),
+      })
       return
     }
 
-    const childSession = await createEmbeddedChildSession(sessions, session.id, activityId, instanceKey)
+    const childSession = await createEmbeddedChildSession(sessions, session.id, activityId, instanceKey, activityOptions)
     session.data.embeddedActivities[instanceKey] = {
       childSessionId: childSession.id,
       activityId,
@@ -1234,7 +1314,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     await sessions.set(session.id, session)
     await broadcastEmbeddedActivityStart(session, instanceKey, activityId, childSession.id)
 
-    res.json({ childSessionId: childSession.id, instanceKey })
+    const normalizedChildSession = await sessions.get(childSession.id)
+    const managerBootstrap = normalizedChildSession
+      ? buildEmbeddedManagerBootstrapPayload(normalizedChildSession)
+      : null
+    res.json({
+      childSessionId: childSession.id,
+      instanceKey,
+      ...(managerBootstrap ? { managerBootstrap } : {}),
+    })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-activity/end', async (req, res) => {

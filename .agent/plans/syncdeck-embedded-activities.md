@@ -993,11 +993,11 @@ session.data.embeddedActivities: Record<instanceKey, {
   `DELETE /api/session/:sessionId`; parent session remains the only owner of end flow.
 - [x] Shared manager header auto-hides join code and end-session controls for embedded
   child sessions.
-- [ ] Define embedded child bootstrap payload contract (`activityOptions` → child-session
+- [x] Define embedded child bootstrap payload contract (`activityOptions` → child-session
   `embeddedLaunch.selectedOptions`) aligned with permalink/create-session bootstrap semantics.
-- [ ] Expose a shared child bootstrap read path so embedded child managers can consume launch
+- [x] Expose a shared child bootstrap read path so embedded child managers can consume launch
   options without SyncDeck-specific wiring.
-- [ ] Apply embedded bootstrap payload in `video-sync` (`selectedOptions.sourceUrl`) as the
+- [x] Apply embedded bootstrap payload in `video-sync` (`selectedOptions.sourceUrl`) as the
   first activity using the contract.
 - [ ] Tests: SyncDeck start route persists bootstrap payload; child reload preserves it;
   `video-sync` configures from bootstrap source URL; invalid bootstrap falls back safely.

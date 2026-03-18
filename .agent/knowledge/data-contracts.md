@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-18
+- Surface: REST | internal module | activity interface
+- Contract: SyncDeck embedded child launches persist a generic bootstrap envelope on the child session at `session.data.embeddedLaunch = { parentSessionId, instanceKey, selectedOptions }`. The parent `POST /api/syncdeck/:sessionId/embedded-activity/start` route sanitizes object-shaped `activityOptions` into `selectedOptions`, and child activities consume that payload through shared client bootstrap helpers instead of SyncDeck-specific props or query params.
+- Compatibility constraints: `selectedOptions` must remain activity-agnostic and JSON-serializable so any embedded activity can adopt the same bootstrap path. Missing, malformed, or non-object `activityOptions` normalize to `{}` rather than failing launch. Existing permalink/create-session bootstrap flows stay intact; embedded bootstrap is an additive read path for child-session managers.
+- Validation rules: Parent route stores only sanitized object data; child readers treat absent or malformed `embeddedLaunch.selectedOptions` as `null`/no bootstrap; activity-specific validation still belongs inside the child activity. `video-sync` currently treats `selectedOptions.sourceUrl` as optional launch intent and falls back to its existing manual/permalink setup flow when invalid or absent.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `client/src/components/common/embeddedLaunchBootstrap.ts`; `client/src/components/common/embeddedLaunchBootstrap.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`
+- Follow-up action: Add higher-level manager tests covering bootstrap-driven auto-configuration after child reload, then document any additional shared bootstrap fields only when a second embedded activity needs them.
+- Owner: Codex
+
 - Date: 2026-03-17
 - Surface: REST | websocket | activity interface
 - Contract: SyncDeck embedded child launch reuses waiting-room entry contracts plus parent-context proof. Parent session validates inherited role/identity through `POST /api/syncdeck/:sessionId/embedded-context`, child entry uses the shared child gateway (`GET /api/session/:childSessionId/entry` + entry-participant token consume), and parent SyncDeck state exposes an `embeddedActivities` map keyed by `instanceKey` (`{activityId}:{h}:{v}` or `{activityId}:global`).

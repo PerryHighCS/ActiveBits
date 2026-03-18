@@ -158,6 +158,20 @@ export default {
 
 Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` when the value should still be recoverable after reloads or later manager re-entry in the same tab.
 
+### Embedded Child Bootstrap
+
+Some parent activities launch other activities as embedded child sessions instead of routing
+through the normal dashboard create-session flow. In that case, launch options should be
+persisted on the child session itself in a generic bootstrap envelope rather than passed
+through activity-specific props.
+
+- Parent launchers store embedded bootstrap metadata on `session.data.embeddedLaunch`.
+- The bootstrap payload is activity-agnostic and should include the parent session identity,
+  the embedded `instanceKey`, and `selectedOptions` for the child activity.
+- Child managers should read that payload through shared bootstrap helpers in the same spirit
+  as `createSessionBootstrap` or permalink `selectedOptions`, so reloads and redeploys keep
+  the launch intent intact.
+
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript
 import ManagerComp from './manager/ManagerComp';

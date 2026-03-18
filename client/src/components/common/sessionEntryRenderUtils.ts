@@ -5,6 +5,7 @@ export interface ResolveSessionJoinPreflightParams {
   presentationMode?: WaitingRoomPresentationMode
   completedJoinPreflightSessionId?: string | null
   hasStoredParticipantContext?: boolean
+  hasStoredEntryParticipantHandoff?: boolean
   allowStoredParticipantContext?: boolean
 }
 
@@ -13,6 +14,7 @@ export function shouldRenderSessionJoinPreflight({
   presentationMode,
   completedJoinPreflightSessionId,
   hasStoredParticipantContext = false,
+  hasStoredEntryParticipantHandoff = false,
   allowStoredParticipantContext = false,
 }: ResolveSessionJoinPreflightParams): boolean {
   if (!sessionId) {
@@ -20,6 +22,10 @@ export function shouldRenderSessionJoinPreflight({
   }
 
   if (presentationMode !== 'render-ui') {
+    return false
+  }
+
+  if (hasStoredEntryParticipantHandoff) {
     return false
   }
 

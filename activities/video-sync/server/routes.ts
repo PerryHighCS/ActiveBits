@@ -157,6 +157,11 @@ interface CookieSessionEntry {
   teacherCode: unknown
 }
 
+interface EmbeddedParentSessionContext {
+  parentSessionId: string
+  activityName: 'syncdeck'
+}
+
 function isInstructorRoleParam(role: string | null): boolean {
   return role === 'instructor' || role === 'manager'
 }
@@ -424,6 +429,25 @@ function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry
   }
 
   return []
+}
+
+function readEmbeddedParentSessionContext(data: unknown): EmbeddedParentSessionContext | null {
+  if (!isPlainObject(data)) {
+    return null
+  }
+
+  const parentSessionId = typeof data.embeddedParentSessionId === 'string'
+    ? data.embeddedParentSessionId.trim()
+    : ''
+
+  if (parentSessionId.length === 0) {
+    return null
+  }
+
+  return {
+    parentSessionId,
+    activityName: 'syncdeck',
+  }
 }
 
 function normalizeStudentId(value: unknown): string | null {
@@ -1205,20 +1229,31 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const persistentHash = await findHashBySessionId(sessionId)
-    if (!persistentHash) {
+    const directPersistentHash = await findHashBySessionId(sessionId)
+    const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
+    const recoveryActivityName = directPersistentHash
+      ? 'video-sync'
+      : embeddedParentContext?.activityName ?? null
+    const recoverySessionId = directPersistentHash
+      ? sessionId
+      : embeddedParentContext?.parentSessionId ?? null
+    const persistentHash = recoverySessionId
+      ? await findHashBySessionId(recoverySessionId)
+      : null
+
+    if (!persistentHash || !recoveryActivityName) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
       return
     }
 
     const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
-    const matchingEntry = sessionEntries.find((entry) => entry.key === `video-sync:${persistentHash}`)
+    const matchingEntry = sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
     if (!matchingEntry) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
       return
     }
 
-    const verifiedTeacherCode = verifyTeacherCodeWithHash('video-sync', persistentHash, String(matchingEntry.teacherCode ?? ''))
+    const verifiedTeacherCode = verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? ''))
     if (!verifiedTeacherCode.valid) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
       return

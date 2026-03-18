@@ -21,6 +21,10 @@ import {
   readCachedSession,
   type SessionCacheRecord,
 } from './sessionRouterUtils'
+import {
+  buildSessionEntryParticipantStorageKey,
+  hasStoredEntryParticipantHandoff,
+} from './entryParticipantStorage'
 import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
 import { readSessionParticipantContext } from './sessionParticipantContext'
 
@@ -104,6 +108,24 @@ const SessionRouter = () => {
     typeof window !== 'undefined'
     && persistentSessionEntryStatus?.sessionId != null
   ) ? Boolean(readSessionParticipantContext(window.localStorage, persistentSessionEntryStatus.sessionId)) : false
+  const hasStoredSessionEntryParticipantHandoff = (
+    typeof window !== 'undefined'
+    && sessionEntryStatus?.sessionId != null
+    && sessionEntryStatus?.activityName != null
+    && window.sessionStorage != null
+  ) ? hasStoredEntryParticipantHandoff(
+    window.sessionStorage,
+    buildSessionEntryParticipantStorageKey(sessionEntryStatus.activityName, sessionEntryStatus.sessionId),
+  ) : false
+  const hasStoredPersistentEntryParticipantHandoff = (
+    typeof window !== 'undefined'
+    && persistentSessionEntryStatus?.sessionId != null
+    && activityName != null
+    && window.sessionStorage != null
+  ) ? hasStoredEntryParticipantHandoff(
+    window.sessionStorage,
+    buildSessionEntryParticipantStorageKey(activityName, persistentSessionEntryStatus.sessionId),
+  ) : false
   const soloActivity = soloActivityId
     ? activities.find((entry) => entry.id === soloActivityId && activitySupportsDirectStandalonePath(entry)) ?? null
     : null
@@ -312,6 +334,7 @@ const SessionRouter = () => {
       presentationMode: sessionEntryStatus.presentationMode,
       completedJoinPreflightSessionId,
       hasStoredParticipantContext: hasStoredSessionParticipantContext,
+      hasStoredEntryParticipantHandoff: hasStoredSessionEntryParticipantHandoff,
     })) {
       return
     }
@@ -387,6 +410,7 @@ const SessionRouter = () => {
         sessionId: startedSessionId,
         presentationMode: persistentSessionEntryStatus.presentationMode,
         hasStoredParticipantContext: hasStoredPersistentSessionParticipantContext,
+        hasStoredEntryParticipantHandoff: hasStoredPersistentEntryParticipantHandoff,
         allowStoredParticipantContext: persistentSessionEntryStatus.entryPolicy === 'solo-allowed',
       })) {
         return (
@@ -531,6 +555,7 @@ const SessionRouter = () => {
     presentationMode: sessionEntryStatus.presentationMode,
     completedJoinPreflightSessionId,
     hasStoredParticipantContext: hasStoredSessionParticipantContext,
+    hasStoredEntryParticipantHandoff: hasStoredSessionEntryParticipantHandoff,
   })) {
     return (
       <WaitingRoom

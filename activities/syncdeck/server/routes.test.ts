@@ -12,6 +12,7 @@ import { createHmac } from 'node:crypto'
 import test from 'node:test'
 import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../../types/websocket.js'
 import setupSyncDeckRoutes, { waitForInstructorAuthMessage } from './routes.js'
+import '../../video-sync/server/routes.js'
 
 const HMAC_SECRET = resolvePersistentSessionSecret()
 
@@ -1894,15 +1895,24 @@ void test('embedded-activity start route creates a child session, stores keyed m
         instructorPasscode: 'teacher-passcode-1',
         activityId: 'video-sync',
         instanceKey: 'video-sync:3:0',
+        activityOptions: {
+          sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+        },
       },
     ),
     res,
   )
 
   assert.equal(res.statusCode, 200)
-  const body = res.body as { childSessionId: string; instanceKey: string }
+  const body = res.body as {
+    childSessionId: string
+    instanceKey: string
+    managerBootstrap?: { instructorPasscode?: string }
+  }
   assert.equal(body.instanceKey, 'video-sync:3:0')
   assert.match(body.childSessionId, /^CHILD:s1:[a-f0-9]{5}:video-sync$/)
+  assert.equal(typeof body.managerBootstrap?.instructorPasscode, 'string')
+  assert.equal(body.managerBootstrap?.instructorPasscode?.length, 32)
 
   const parentSession = storeState.store.s1 as SessionRecord & {
     data: { embeddedActivities: Record<string, { childSessionId: string; activityId: string; startedAt: number; owner: string }> }
@@ -1913,6 +1923,16 @@ void test('embedded-activity start route creates a child session, stores keyed m
 
   const childSession = storeState.store[body.childSessionId] as SessionRecord | undefined
   assert.equal(childSession?.type, 'video-sync')
+  assert.deepEqual(
+    asRecord(childSession?.data)?.embeddedLaunch,
+    {
+      parentSessionId: 's1',
+      instanceKey: 'video-sync:3:0',
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
+    },
+  )
 
   const instructorPayloads = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: Record<string, unknown> })
   const studentPayloads = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: Record<string, unknown> })

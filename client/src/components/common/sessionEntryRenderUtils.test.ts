@@ -67,6 +67,18 @@ void test('shouldRenderSessionJoinPreflight returns false when stored participan
   )
 })
 
+void test('shouldRenderSessionJoinPreflight returns false when entry handoff is already stored', () => {
+  assert.equal(
+    shouldRenderSessionJoinPreflight({
+      sessionId: 'abc123',
+      presentationMode: 'render-ui',
+      completedJoinPreflightSessionId: null,
+      hasStoredEntryParticipantHandoff: true,
+    }),
+    false,
+  )
+})
+
 void test('shouldRenderSessionJoinPreflight can still render when stored participant context is allowed', () => {
   assert.equal(
     shouldRenderSessionJoinPreflight({

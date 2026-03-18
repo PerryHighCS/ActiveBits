@@ -468,10 +468,12 @@ void test('resolveManagerActivityRequestBatchInputs keeps current slide primary 
       {
         activityId: 'embedded-test',
         indices: { h: 2, v: 0, f: 0 },
+        activityOptions: { prompt: 'hello' },
         stackRequests: [
           {
             activityId: 'raffle',
             indices: { h: 2, v: 1, f: -1 },
+            activityOptions: { title: 'raffle title' },
           },
           {
             activityId: 'algorithm-demo',
@@ -482,8 +484,8 @@ void test('resolveManagerActivityRequestBatchInputs keeps current slide primary 
       { h: 9, v: 0, f: 0 },
     ),
     [
-      { activityId: 'embedded-test', instanceKey: 'embedded-test:2:0' },
-      { activityId: 'raffle', instanceKey: 'raffle:2:1' },
+      { activityId: 'embedded-test', instanceKey: 'embedded-test:2:0', activityOptions: { prompt: 'hello' } },
+      { activityId: 'raffle', instanceKey: 'raffle:2:1', activityOptions: { title: 'raffle title' } },
       { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:2' },
     ],
   )
@@ -881,4 +883,22 @@ void test('resolveManagerActivityRequestStartInput prefers explicit instanceKey 
   )
 
   assert.equal(resolveManagerActivityRequestStartInput({ activityId: '' }, { h: 1, v: 0, f: 0 }), null)
+})
+
+void test('resolveManagerActivityRequestStartInput preserves activity options when present', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'video-sync',
+        indices: { h: 3, v: 0, f: 0 },
+        activityOptions: { sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA' },
+      },
+      null,
+    ),
+    {
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:3:0',
+      activityOptions: { sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA' },
+    },
+  )
 })

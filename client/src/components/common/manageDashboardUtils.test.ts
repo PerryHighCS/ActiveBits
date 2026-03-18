@@ -364,6 +364,59 @@ void test('storeCreateSessionBootstrapPayload keeps a same-tab bootstrap payload
   assert.equal(consumeCreateSessionBootstrapPayload('video-sync', 'session-123'), null)
 })
 
+void test('consumeCreateSessionBootstrapPayload falls back to sessionStorage for iframe/bootstrap reload contexts', () => {
+  const sessionStorage = new Map<string, string>()
+  const originalWindow = globalThis.window
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: {
+        getItem(key: string) {
+          return sessionStorage.get(key) ?? null
+        },
+        setItem(key: string, value: string) {
+          sessionStorage.set(key, value)
+        },
+        removeItem(key: string) {
+          sessionStorage.delete(key)
+        },
+      },
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    sessionStorage.set(
+      'create-session-bootstrap:video-sync:session-iframe',
+      JSON.stringify({
+        createdAtMs: 10,
+        payload: {
+          instructorPasscode: 'teacher-passcode',
+        },
+      }),
+    )
+
+    assert.deepEqual(
+      consumeCreateSessionBootstrapPayload('video-sync', 'session-iframe', 10),
+      {
+        instructorPasscode: 'teacher-passcode',
+      },
+    )
+
+    assert.equal(
+      sessionStorage.get('create-session-bootstrap:video-sync:session-iframe') ?? null,
+      null,
+    )
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
 void test('storeCreateSessionBootstrapPayload expires abandoned same-tab payloads after a short TTL', () => {
   const createdAtMs = 1_000
 

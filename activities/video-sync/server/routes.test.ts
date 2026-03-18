@@ -1504,6 +1504,69 @@ void test('instructor-passcode route persists normalized session data when recov
   await cleanupPersistentSession(hash)
 })
 
+void test('instructor-passcode route returns passcode for embedded child sessions when parent syncdeck teacher cookie matches', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const embeddedSession = createVideoSyncSession('CHILD:parent-syncdeck:abcde:video-sync', ALT_TEST_INSTRUCTOR_PASSCODE)
+  embeddedSession.data = {
+    ...embeddedSession.data,
+    embeddedParentSessionId: 'parent-syncdeck',
+    embeddedInstanceKey: 'video-sync:3:0',
+    embeddedLaunch: {
+      parentSessionId: 'parent-syncdeck',
+      instanceKey: 'video-sync:3:0',
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
+    },
+  }
+  const storeState = createSessionStore({
+    'CHILD:parent-syncdeck:abcde:video-sync': embeddedSession,
+    'parent-syncdeck': {
+      id: 'parent-syncdeck',
+      type: 'syncdeck',
+      created: Date.now(),
+      lastActivity: Date.now(),
+      data: {},
+    },
+  })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', teacherCode)
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 'parent-syncdeck', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 'CHILD:parent-syncdeck:abcde:video-sync' },
+      cookies: {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `syncdeck:${hash}`,
+            teacherCode,
+          },
+        ]),
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
+  await cleanupPersistentSession(hash)
+})
+
 void test('instructor-passcode route ignores malformed persistent teacher cookie without logging', async () => {
   initializePersistentStorage(null)
 

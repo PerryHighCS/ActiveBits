@@ -58,6 +58,7 @@ export interface ManageDashboardUtilityLike {
 
 const CREATE_SESSION_BOOTSTRAP_TTL_MS = 5 * 60 * 1000
 const MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS = 100
+const CREATE_SESSION_BOOTSTRAP_SESSION_STORAGE_PREFIX = 'create-session-bootstrap:'
 
 interface CreateSessionBootstrapPayloadEntry {
   payload: Record<string, unknown>
@@ -72,6 +73,73 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function toStringValue(value: unknown): string {
   return typeof value === 'string' ? value : String(value ?? '')
+}
+
+function buildCreateSessionBootstrapStorageKey(activityId: string, sessionId: string): string {
+  return `${CREATE_SESSION_BOOTSTRAP_SESSION_STORAGE_PREFIX}${activityId}:${sessionId}`
+}
+
+function persistCreateSessionBootstrapPayloadToSessionStorage(
+  activityId: string,
+  sessionId: string,
+  payload: Record<string, unknown>,
+  createdAtMs: number,
+): void {
+  if (typeof window === 'undefined' || window.sessionStorage == null) {
+    return
+  }
+
+  try {
+    window.sessionStorage.setItem(
+      buildCreateSessionBootstrapStorageKey(activityId, sessionId),
+      JSON.stringify({
+        createdAtMs,
+        payload,
+      } satisfies CreateSessionBootstrapPayloadEntry),
+    )
+  } catch (error) {
+    console.warn('[ManageDashboard] Failed to persist same-tab bootstrap payload to sessionStorage:', error)
+  }
+}
+
+function consumeCreateSessionBootstrapPayloadFromSessionStorage(
+  activityId: string,
+  sessionId: string,
+  nowMs: number,
+): Record<string, unknown> | null {
+  if (typeof window === 'undefined' || window.sessionStorage == null) {
+    return null
+  }
+
+  const storageKey = buildCreateSessionBootstrapStorageKey(activityId, sessionId)
+  const rawValue = window.sessionStorage.getItem(storageKey)
+  if (typeof rawValue !== 'string' || rawValue.length === 0) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown
+    if (
+      !isObjectRecord(parsed)
+      || typeof parsed.createdAtMs !== 'number'
+      || !Number.isFinite(parsed.createdAtMs)
+      || !isObjectRecord(parsed.payload)
+    ) {
+      window.sessionStorage.removeItem(storageKey)
+      return null
+    }
+
+    window.sessionStorage.removeItem(storageKey)
+    if (nowMs - parsed.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+      return null
+    }
+
+    return parsed.payload
+  } catch (error) {
+    window.sessionStorage.removeItem(storageKey)
+    console.warn('[ManageDashboard] Failed to parse same-tab bootstrap payload from sessionStorage:', error)
+    return null
+  }
 }
 
 export function parseDeepLinkGenerator(rawDeepLinkGenerator: unknown): DeepLinkGeneratorConfig | null {
@@ -190,6 +258,7 @@ export function storeCreateSessionBootstrapPayload(
     payload,
     createdAtMs: nowMs,
   })
+  persistCreateSessionBootstrapPayloadToSessionStorage(activityId, sessionId, payload, nowMs)
   pruneCreateSessionBootstrapPayloads(nowMs)
 }
 
@@ -202,7 +271,7 @@ export function consumeCreateSessionBootstrapPayload(
   const key = `${activityId}:${sessionId}`
   const entry = createSessionBootstrapPayloads.get(key) ?? null
 
-  const payload = entry?.payload ?? null
+  const payload = entry?.payload ?? consumeCreateSessionBootstrapPayloadFromSessionStorage(activityId, sessionId, nowMs)
   createSessionBootstrapPayloads.delete(key)
   return payload
 }

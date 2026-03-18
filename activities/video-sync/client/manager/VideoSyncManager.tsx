@@ -1,4 +1,5 @@
 import SessionHeader from '@src/components/common/SessionHeader'
+import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
@@ -104,6 +105,24 @@ export function readBootstrapInstructorPasscode(locationState: unknown): string 
 
 export function readBootstrapSourceUrl(search: string): string | null {
   const value = new URLSearchParams(search).get('sourceUrl')
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export function readEmbeddedBootstrapSourceUrl(selectedOptions: unknown): string | null {
+  if (
+    selectedOptions == null ||
+    typeof selectedOptions !== 'object' ||
+    Array.isArray(selectedOptions)
+  ) {
+    return null
+  }
+
+  const value = (selectedOptions as { sourceUrl?: unknown }).sourceUrl
   if (typeof value !== 'string') {
     return null
   }
@@ -296,6 +315,7 @@ export default function VideoSyncManager() {
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
+  const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -309,7 +329,33 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsRef = useRef(false)
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
-  const bootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
+  const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
+  const bootstrapSourceUrl = queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
+
+  useEffect(() => {
+    if (!sessionId) {
+      setEmbeddedBootstrapSourceUrl(null)
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const selectedOptions = await fetchEmbeddedLaunchSelectedOptions(sessionId)
+        if (!cancelled) {
+          setEmbeddedBootstrapSourceUrl(readEmbeddedBootstrapSourceUrl(selectedOptions))
+        }
+      } catch {
+        if (!cancelled) {
+          setEmbeddedBootstrapSourceUrl(null)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
 
   useEffect(() => {
     latestStateRef.current = state
@@ -931,7 +977,7 @@ export default function VideoSyncManager() {
           <section className="max-w-2xl border rounded p-4 space-y-3" aria-labelledby="video-sync-autostart-heading">
             <h2 id="video-sync-autostart-heading" className="text-xl font-semibold">Preparing instructor view…</h2>
             <p className="text-gray-700">
-              Loading the configured YouTube video from your permanent link and moving directly into the instructor view.
+              Loading the configured YouTube video from launch bootstrap and moving directly into the instructor view.
             </p>
             <p className="text-sm text-gray-600 break-all">{bootstrapSourceUrl}</p>
           </section>

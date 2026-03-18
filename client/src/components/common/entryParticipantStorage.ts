@@ -176,6 +176,14 @@ export function consumeEntryParticipantValues(
   return handoff.values
 }
 
+export function hasStoredEntryParticipantHandoff(
+  storage: EntryParticipantStorageLike,
+  storageKey: string,
+  onWarn: (message: string, error: unknown) => void = console.warn,
+): boolean {
+  return readEntryParticipantHandoff(storage, storageKey, onWarn) != null
+}
+
 export function buildSessionEntryParticipantSubmitApiUrl(sessionId: string): string {
   return `/api/session/${encodeURIComponent(sessionId)}/entry-participant`
 }
