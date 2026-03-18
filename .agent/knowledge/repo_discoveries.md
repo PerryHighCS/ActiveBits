@@ -1155,3 +1155,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `server/core/acceptedSessionParticipants.ts`; `server/acceptedSessionParticipants.test.ts`; `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/studentParticipants.test.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/entryIdentityUtils.ts`
 - Follow-up action: Reuse this preserved-participant-id rule for other activities whenever accepted entry should be the first authoritative source of participant identity, not just a source of fallback names.
 - Owner: Codex
+
+- Date: 2026-03-18
+- Area: activities | embedded activity manager controls
+- Discovery: `CHILD:*` session ids are hard-blocked from `DELETE /api/session/:sessionId` by the shared server session route. Embedded child managers must either hide/disable local "End Session" controls with `isEmbeddedChildSessionId()` or route termination through the parent SyncDeck embedded-session endpoint instead of calling the generic delete route directly.
+- Why it matters: Activity-owned manager UIs can bypass the shared `SessionHeader` guard and end up surfacing a button that now fails with a server-side `403` in embedded mode.
+- Evidence: `server/core/sessions.ts`; `client/src/components/common/sessionHeaderUtils.ts`; `client/src/components/common/SessionHeader.tsx`; `activities/embedded-test/client/manager/EmbeddedTestManager.tsx`
+- Follow-up action: When adding new embedded child manager UIs, check for any activity-owned end-session buttons that bypass `SessionHeader` and guard them explicitly.
+- Owner: Codex

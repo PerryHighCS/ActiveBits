@@ -1,4 +1,5 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -37,6 +38,10 @@ function parseStatePayload(raw: unknown): EmbeddedTestStatePayload | null {
   } catch {
     return null
   }
+}
+
+export function shouldRenderEmbeddedTestEndSessionButton(sessionId?: string): boolean {
+  return !isEmbeddedChildSessionId(sessionId)
 }
 
 export default function EmbeddedTestManager() {
@@ -108,6 +113,8 @@ export default function EmbeddedTestManager() {
     return <div style={{ padding: 24 }}>Missing session id.</div>
   }
 
+  const showEndSessionButton = shouldRenderEmbeddedTestEndSessionButton(sessionId)
+
   return (
     <div style={{ padding: 24, display: 'grid', gap: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
@@ -116,8 +123,15 @@ export default function EmbeddedTestManager() {
           <p style={{ margin: '6px 0 0', color: '#555' }}>
             Session {sessionId} • {connectedCount} student{connectedCount === 1 ? '' : 's'} connected
           </p>
+          {!showEndSessionButton && (
+            <p style={{ margin: '6px 0 0', color: '#555' }}>
+              Embedded session managed by parent SyncDeck session. End session is disabled here.
+            </p>
+          )}
         </div>
-        <button type="button" onClick={handleEndSession}>End Session</button>
+        {showEndSessionButton && (
+          <button type="button" onClick={handleEndSession}>End Session</button>
+        )}
       </div>
 
       <section style={{ border: '1px solid #d7d7d7', borderRadius: 12, padding: 16 }}>
