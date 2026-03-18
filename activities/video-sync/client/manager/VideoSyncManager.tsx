@@ -194,6 +194,17 @@ export function shouldRenderEmbeddedManagerHeader(sessionId: string | null | und
   return !isEmbeddedChildSessionId(sessionId ?? undefined)
 }
 
+export function shouldFetchEmbeddedBootstrapSourceUrl(params: {
+  sessionId: string | null | undefined
+  queryBootstrapSourceUrl: string | null
+}): boolean {
+  if (params.queryBootstrapSourceUrl != null) {
+    return false
+  }
+
+  return isEmbeddedChildSessionId(params.sessionId ?? undefined)
+}
+
 export function shouldAutoStartBootstrapSource(params: {
   setupMode: boolean
   bootstrapSourceUrl: string | null
@@ -338,7 +349,13 @@ export default function VideoSyncManager() {
   const bootstrapSourceUrl = queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!shouldFetchEmbeddedBootstrapSourceUrl({ sessionId, queryBootstrapSourceUrl })) {
+      setEmbeddedBootstrapSourceUrl(null)
+      return
+    }
+
+    const embeddedSessionId = sessionId
+    if (!embeddedSessionId) {
       setEmbeddedBootstrapSourceUrl(null)
       return
     }
@@ -346,7 +363,7 @@ export default function VideoSyncManager() {
     let cancelled = false
     void (async () => {
       try {
-        const selectedOptions = await fetchEmbeddedLaunchSelectedOptions(sessionId)
+        const selectedOptions = await fetchEmbeddedLaunchSelectedOptions(embeddedSessionId)
         if (!cancelled) {
           setEmbeddedBootstrapSourceUrl(readEmbeddedBootstrapSourceUrl(selectedOptions))
         }
@@ -360,7 +377,7 @@ export default function VideoSyncManager() {
     return () => {
       cancelled = true
     }
-  }, [sessionId])
+  }, [queryBootstrapSourceUrl, sessionId])
 
   useEffect(() => {
     latestStateRef.current = state
