@@ -33,6 +33,7 @@ import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
 import { buildManagerOverlaySetStateCommand } from './SyncDeckManager.js'
 import { buildManagerResyncCommandForInstanceKey } from './SyncDeckManager.js'
 import { resolveManagerOverlayNavigationBaseIndices } from './SyncDeckManager.js'
+import { resolveManagerCurrentSlideNavigationCapability } from './SyncDeckManager.js'
 import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
@@ -596,6 +597,35 @@ void test('extractManagerNavigationCapabilitiesFromRevealMessage reads four-dire
     canGoUp: false,
     canGoDown: true,
   })
+})
+
+void test('resolveManagerCurrentSlideNavigationCapability only trusts iframe capability for the active slide', () => {
+  assert.equal(
+    resolveManagerCurrentSlideNavigationCapability({
+      iframeCapability: false,
+      capabilityIndices: { h: 2, v: 0, f: 0 },
+      currentIndices: { h: 2, v: 0, f: 0 },
+    }),
+    false,
+  )
+
+  assert.equal(
+    resolveManagerCurrentSlideNavigationCapability({
+      iframeCapability: false,
+      capabilityIndices: { h: 2, v: 0, f: 0 },
+      currentIndices: { h: 2, v: 1, f: 0 },
+    }),
+    null,
+  )
+
+  assert.equal(
+    resolveManagerCurrentSlideNavigationCapability({
+      iframeCapability: true,
+      capabilityIndices: { h: 2, v: 2, f: 0 },
+      currentIndices: { h: 2, v: 2, f: 0 },
+    }),
+    true,
+  )
 })
 
 void test('resolveNextPendingEmbeddedEndConfirmation requires two clicks before ending', () => {
