@@ -88,6 +88,36 @@ void test('resolveSyncDeckPersistentLinkBuilderRequest creates a new link when e
   )
 })
 
+void test('resolveSyncDeckPersistentLinkBuilderRequest keeps update semantics when prior edit teacher code is unknown', () => {
+  assert.deepEqual(
+    resolveSyncDeckPersistentLinkBuilderRequest({
+      activityId: 'syncdeck',
+      normalizedTeacherCode: 'teacher-code',
+      normalizedPresentationUrl: 'http://localhost:3000/presentations/syncdeck-conversion-lab.html',
+      editState: {
+        hash: 'hash-123',
+        teacherCode: '',
+        entryPolicy: 'instructor-required',
+        selectedOptions: {
+          presentationUrl: 'http://localhost:5173/presentations/syncdeck-conversion-lab.html',
+        },
+      },
+    }),
+    {
+      endpoint: '/api/persistent-session/update',
+      body: {
+        activityName: 'syncdeck',
+        hash: 'hash-123',
+        teacherCode: 'teacher-code',
+        entryPolicy: 'instructor-required',
+        selectedOptions: {
+          presentationUrl: 'http://localhost:3000/presentations/syncdeck-conversion-lab.html',
+        },
+      },
+    },
+  )
+})
+
 function installDomEnvironment() {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: 'https://activebits.local/',
@@ -236,6 +266,65 @@ void test('SyncDeckPersistentLinkBuilder syncs local form state when edit hash c
     await waitFor(() => {
       assert.equal((teacherCodeInput as HTMLInputElement).value, 'teacher-two')
       assert.equal((presentationUrlInput as HTMLInputElement).value, 'https://slides.example/deck-two')
+      assert.equal((submitButton as HTMLButtonElement).disabled, true)
+      assert.notEqual(rendered.queryByText('Verify this URL before creating the link.'), null)
+    })
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('SyncDeckPersistentLinkBuilder syncs local form state when same edit hash gets refreshed', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { default: SyncDeckPersistentLinkBuilder } = await import('./SyncDeckPersistentLinkBuilder.js')
+
+  try {
+    const rendered = render(
+      React.createElement(SyncDeckPersistentLinkBuilder, {
+        activityId: 'syncdeck',
+        editState: {
+          hash: 'hash-1',
+          teacherCode: 'teacher-one',
+          entryPolicy: 'instructor-required',
+          selectedOptions: {
+            presentationUrl: 'https://slides.example/deck-one',
+          },
+        },
+        preflightRunner: async (): Promise<SyncDeckPreflightResult> => ({ valid: true, warning: null }),
+        onCreated: async () => undefined,
+      }),
+    )
+
+    const teacherCodeInput = rendered.getByLabelText(/teacher code/i)
+    const presentationUrlInput = rendered.getByLabelText(/presentation url/i)
+    const submitButton = rendered.getByRole('button', { name: /save changes/i })
+
+    fireEvent.click(rendered.getByRole('button', { name: /verify url/i }))
+
+    await waitFor(() => {
+      assert.equal((submitButton as HTMLButtonElement).disabled, false)
+    })
+
+    rendered.rerender(
+      React.createElement(SyncDeckPersistentLinkBuilder, {
+        activityId: 'syncdeck',
+        editState: {
+          hash: 'hash-1',
+          teacherCode: 'teacher-one-updated',
+          entryPolicy: 'solo-allowed',
+          selectedOptions: {
+            presentationUrl: 'https://slides.example/deck-one-updated',
+          },
+        },
+        preflightRunner: async (): Promise<SyncDeckPreflightResult> => ({ valid: true, warning: null }),
+        onCreated: async () => undefined,
+      }),
+    )
+
+    await waitFor(() => {
+      assert.equal((teacherCodeInput as HTMLInputElement).value, 'teacher-one-updated')
+      assert.equal((presentationUrlInput as HTMLInputElement).value, 'https://slides.example/deck-one-updated')
       assert.equal((submitButton as HTMLButtonElement).disabled, true)
       assert.notEqual(rendered.queryByText('Verify this URL before creating the link.'), null)
     })

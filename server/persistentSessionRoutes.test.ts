@@ -1120,6 +1120,35 @@ void test('authenticate ignores selectedOptions from invalid remembered teacher 
   })
 })
 
+void test('authenticate validates activity before canonicalizing selectedOptions', async () => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const handler = getRoute(app, 'POST', '/api/persistent-session/authenticate')
+  const body: Record<string, unknown> = {
+    activityName: 'not-a-real-activity',
+    hash: 'deadbeefdeadbeefdead',
+    teacherCode: 'teacher-code',
+  }
+
+  Object.defineProperty(body, 'selectedOptions', {
+    enumerable: true,
+    get() {
+      throw new Error('[TEST] selectedOptions should not be canonicalized for invalid activity requests')
+    },
+  })
+
+  const res = createMockRes()
+  await handler(createMockReq({ body }), res)
+
+  assert.equal(res.statusCode, 400)
+  assert.equal(res.jsonBody?.error, 'Invalid activity name')
+})
+
 void test('persistent session metadata route ignores unsigned query params that are not in canonical selectedOptions', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

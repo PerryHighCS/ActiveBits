@@ -534,7 +534,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     const activityName = getBodyString(body, 'activityName')
     const hash = getBodyString(body, 'hash')
     const teacherCode = getBodyString(body, 'teacherCode')
-    const bodySelectedOptions = getCanonicalPersistentLinkSelectedOptions(activityName ?? '', body.selectedOptions)
     const bodyEntryPolicy = resolvePersistentSessionEntryPolicy(body.entryPolicy)
     const bodyUrlHash = getBodyString(body, 'urlHash')?.trim() ?? ''
 
@@ -557,6 +556,8 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       res.status(400).json({ error: `Teacher code must be at most ${MAX_TEACHER_CODE_LENGTH} characters` })
       return
     }
+
+    const bodySelectedOptions = getCanonicalPersistentLinkSelectedOptions(activityName, body.selectedOptions)
 
     const validation = verifyTeacherCodeWithHash(activityName, hash, teacherCode)
     if (!validation.valid) {

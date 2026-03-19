@@ -37,7 +37,9 @@ export function resolveSyncDeckPersistentLinkBuilderRequest(params: {
   const normalizedExistingTeacherCode = typeof params.editState?.teacherCode === 'string'
     ? params.editState.teacherCode.trim()
     : ''
+  const hasKnownExistingTeacherCode = normalizedExistingTeacherCode.length > 0
   const shouldCreateNewLink = Boolean(params.editState?.hash)
+    && hasKnownExistingTeacherCode
     && params.normalizedTeacherCode !== normalizedExistingTeacherCode
 
   if (params.editState?.hash && !shouldCreateNewLink) {
@@ -81,6 +83,9 @@ export default function SyncDeckPersistentLinkBuilder({
   const teacherCodeInputId = useId()
   const presentationUrlInputId = useId()
   const isEditing = Boolean(editState?.hash)
+  const editTeacherCode = editState?.teacherCode ?? ''
+  const editPresentationUrl = readSelectedPresentationUrl(editState?.selectedOptions)
+  const editEntryPolicy = editState?.entryPolicy ?? null
   const [teacherCode, setTeacherCode] = useState(editState?.teacherCode ?? '')
   const [presentationUrl, setPresentationUrl] = useState(() => readSelectedPresentationUrl(editState?.selectedOptions))
   const [error, setError] = useState<string | null>(null)
@@ -91,15 +96,15 @@ export default function SyncDeckPersistentLinkBuilder({
   const [preflightValidatedUrl, setPreflightValidatedUrl] = useState<string | null>(null)
 
   useEffect(() => {
-    setTeacherCode(editState?.teacherCode ?? '')
-    setPresentationUrl(readSelectedPresentationUrl(editState?.selectedOptions))
+    setTeacherCode(editTeacherCode)
+    setPresentationUrl(editPresentationUrl)
     setError(null)
     setIsCreating(false)
     setIsPreflightChecking(false)
     setPreflightWarning(null)
     setPreflightPreviewUrl(null)
     setPreflightValidatedUrl(null)
-  }, [editState?.hash])
+  }, [editEntryPolicy, editPresentationUrl, editState?.hash, editTeacherCode])
 
   const normalizedPresentationUrl = presentationUrl.trim()
   const normalizedTeacherCode = teacherCode.trim()
