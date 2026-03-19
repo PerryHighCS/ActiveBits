@@ -23,6 +23,21 @@ void test('readEmbeddedLaunchSelectedOptions returns selected options from gener
   )
 })
 
+void test('readEmbeddedLaunchSelectedOptions returns selected options from sanitized embedded-launch payload', () => {
+  assert.deepEqual(
+    readEmbeddedLaunchSelectedOptions({
+      embeddedLaunch: {
+        selectedOptions: {
+          sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+        },
+      },
+    }),
+    {
+      sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+    },
+  )
+})
+
 void test('readEmbeddedLaunchSelectedOptions returns null for missing or malformed payloads', () => {
   assert.equal(readEmbeddedLaunchSelectedOptions(null), null)
   assert.equal(readEmbeddedLaunchSelectedOptions({}), null)

@@ -315,6 +315,34 @@ export function setupSessionRoutes(app: {
     res.json({ session })
   })
 
+  app.get('/api/session/:sessionId/embedded-launch', async (req, res) => {
+    setNoStore(res)
+    const { sessionId } = req.params
+    const session = await sessions.get(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const sessionData = session.data != null && typeof session.data === 'object'
+      ? session.data as Record<string, unknown>
+      : null
+    const embeddedLaunch = sessionData?.embeddedLaunch
+    const embeddedLaunchRecord = embeddedLaunch != null && typeof embeddedLaunch === 'object' && !Array.isArray(embeddedLaunch)
+      ? embeddedLaunch as Record<string, unknown>
+      : null
+    const selectedOptions = embeddedLaunchRecord?.selectedOptions
+    const selectedOptionsRecord = selectedOptions != null && typeof selectedOptions === 'object' && !Array.isArray(selectedOptions)
+      ? selectedOptions as Record<string, unknown>
+      : null
+
+    res.json({
+      embeddedLaunch: {
+        selectedOptions: selectedOptionsRecord,
+      },
+    })
+  })
+
   app.post('/api/session/:sessionId/entry-participant', async (req, res) => {
     setNoStore(res)
     const { sessionId } = req.params

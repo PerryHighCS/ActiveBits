@@ -185,6 +185,50 @@ void test('session entry route returns 404 for missing sessions', async () => {
   assert.deepEqual(res.jsonBody, { error: 'invalid session' })
 })
 
+void test('embedded launch route returns only selectedOptions and not raw session data', async () => {
+  await initializeActivityRegistry()
+  const session: SessionRecord = {
+    ...createSessionRecord('session-embedded', 'video-sync'),
+    data: {
+      instructorPasscode: 'secret-passcode',
+      embeddedLaunch: {
+        parentSessionId: 'parent-1',
+        instanceKey: 'video-sync:3:0',
+        selectedOptions: {
+          sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+        },
+      },
+    },
+  }
+  const sessions = {
+    get: async (id: string) => id === 'session-embedded' ? session : null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/embedded-launch')({ params: { sessionId: 'session-embedded' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.headers['cache-control'], 'no-store')
+  assert.deepEqual(res.jsonBody, {
+    embeddedLaunch: {
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
+    },
+  })
+  assert.equal('session' in (res.jsonBody ?? {}), false)
+  assert.equal(JSON.stringify(res.jsonBody).includes('secret-passcode'), false)
+})
+
 void test('session entry participant store route returns 404 for missing sessions', async () => {
   await initializeActivityRegistry()
   const sessions = {

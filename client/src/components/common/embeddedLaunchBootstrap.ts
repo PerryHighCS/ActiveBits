@@ -11,9 +11,13 @@ export function readEmbeddedLaunchBootstrapPayload(payload: unknown): EmbeddedLa
     return null
   }
 
-  const session = isObjectRecord(payload.session) ? payload.session : null
-  const data = isObjectRecord(session?.data) ? session.data : null
-  const embeddedLaunch = isObjectRecord(data?.embeddedLaunch) ? data.embeddedLaunch : null
+  const embeddedLaunch = isObjectRecord(payload.embeddedLaunch)
+    ? payload.embeddedLaunch
+    : (() => {
+      const session = isObjectRecord(payload.session) ? payload.session : null
+      const data = isObjectRecord(session?.data) ? session.data : null
+      return isObjectRecord(data?.embeddedLaunch) ? data.embeddedLaunch : null
+    })()
   const selectedOptions = isObjectRecord(embeddedLaunch?.selectedOptions) ? embeddedLaunch.selectedOptions : null
 
   return {
@@ -26,7 +30,7 @@ export function readEmbeddedLaunchSelectedOptions(payload: unknown): Record<stri
 }
 
 export async function fetchEmbeddedLaunchSelectedOptions(sessionId: string): Promise<Record<string, unknown> | null> {
-  const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`)
+  const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}/embedded-launch`)
   if (!response.ok) {
     return null
   }

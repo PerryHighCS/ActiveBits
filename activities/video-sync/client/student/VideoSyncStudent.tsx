@@ -360,7 +360,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     return () => {
       isCancelled = true
     }
-  }, [isStandaloneSession, sessionId])
+  }, [sessionId])
 
   const reportEvent = useCallback(async (
     eventType: 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'load-failure',
