@@ -167,6 +167,18 @@ export function shouldConnectVideoSyncStudentRealtime(params: {
   return Boolean(params.sessionId && params.isSessionModeResolved && !params.isStandaloneSession)
 }
 
+export function getVideoSyncStudentIdentityLookup(sessionId: string | null | undefined): {
+  sessionId?: string
+  isSoloSession: false
+} {
+  return {
+    ...(typeof sessionId === 'string' ? { sessionId } : {}),
+    // Standalone Video Sync still routes through /:sessionId, so entry-participant
+    // handoff should stay on the session-backed storage/consume path.
+    isSoloSession: false,
+  }
+}
+
 export function resetUnsyncedPlaybackTelemetry(params: {
   isLocallyUnsyncedRef: { current: boolean }
   lastUnsyncReportAtRef: { current: number }
@@ -320,10 +332,11 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
     void (async () => {
       try {
+        const identityLookup = getVideoSyncStudentIdentityLookup(sessionId)
         const resolvedIdentity = await resolveInitialEntryParticipantIdentity({
           activityName: 'video-sync',
-          sessionId,
-          isSoloSession: isStandaloneSession,
+          sessionId: identityLookup.sessionId,
+          isSoloSession: identityLookup.isSoloSession,
           localStorage: window.localStorage,
           sessionStorage: window.sessionStorage,
         })

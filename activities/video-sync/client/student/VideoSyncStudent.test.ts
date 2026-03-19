@@ -14,6 +14,7 @@ import { syncLoadedVideoSource } from './VideoSyncStudent.js'
 import { shouldInitializeYoutubePlayer } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
 import { shouldConnectVideoSyncStudentRealtime } from './VideoSyncStudent.js'
+import { getVideoSyncStudentIdentityLookup } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
 import type { YoutubePlayerLike } from '../youtubeIframeApi.js'
 
@@ -275,6 +276,16 @@ void test('shouldConnectVideoSyncStudentRealtime waits for session mode resoluti
     isStandaloneSession: false,
     isSessionModeResolved: true,
   }), true)
+})
+
+void test('getVideoSyncStudentIdentityLookup keeps standalone session handoff on the session-backed path', () => {
+  assert.deepEqual(getVideoSyncStudentIdentityLookup('session-1'), {
+    sessionId: 'session-1',
+    isSoloSession: false,
+  })
+  assert.deepEqual(getVideoSyncStudentIdentityLookup(null), {
+    isSoloSession: false,
+  })
 })
 
 void test('shouldBlockStudentOverlayKey blocks other playback-related keys', () => {
