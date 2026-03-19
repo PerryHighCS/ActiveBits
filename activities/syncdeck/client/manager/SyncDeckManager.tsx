@@ -840,6 +840,8 @@ export function resolveManagerCurrentSlideNavigationCapability(params: {
     return null
   }
 
+  // Overlay arrows follow slide-stack position, so fragment-only changes should not invalidate
+  // a vertical capability payload for the current h/v slide anchor.
   return params.capabilityIndices.h === params.currentIndices.h
     && params.capabilityIndices.v === params.currentIndices.v
     ? params.iframeCapability
