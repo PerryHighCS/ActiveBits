@@ -36,6 +36,8 @@ import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
 import { shouldPreferInstructorOverlaySelection } from './SyncDeckStudent.js'
 import { buildStudentEmbeddedSyncContextMessage } from './SyncDeckStudent.js'
 import { shouldShowInstructorPendingActivityNotice } from './SyncDeckStudent.js'
+import { buildSyncDeckSlideKey } from './SyncDeckStudent.js'
+import { hasPendingSynchronizedActivityRequestForCurrentSlide } from './SyncDeckStudent.js'
 import { resolveStudentSoloActivityRequestInputs } from './SyncDeckStudent.js'
 import { resolveStudentSoloActivityRequest } from './SyncDeckStudent.js'
 import { applyStudentSoloActivityRequest } from './SyncDeckStudent.js'
@@ -1467,6 +1469,7 @@ void test('shouldShowInstructorPendingActivityNotice only shows when student sha
       hasActiveEmbeddedActivity: false,
       hasActiveSoloOverlay: false,
       instructorAnchoredInstanceKey: 'raffle:3:0',
+      hasPendingSynchronizedActivityRequest: false,
       studentIndices: { h: 3, v: 1, f: 0 },
       instructorIndices: { h: 3, v: 0, f: 0 },
       isBacktrackOptOut: false,
@@ -1479,6 +1482,7 @@ void test('shouldShowInstructorPendingActivityNotice only shows when student sha
       hasActiveEmbeddedActivity: true,
       hasActiveSoloOverlay: false,
       instructorAnchoredInstanceKey: 'raffle:3:0',
+      hasPendingSynchronizedActivityRequest: false,
       studentIndices: { h: 3, v: 1, f: 0 },
       instructorIndices: { h: 3, v: 0, f: 0 },
       isBacktrackOptOut: false,
@@ -1491,6 +1495,7 @@ void test('shouldShowInstructorPendingActivityNotice only shows when student sha
       hasActiveEmbeddedActivity: false,
       hasActiveSoloOverlay: false,
       instructorAnchoredInstanceKey: 'raffle:4:0',
+      hasPendingSynchronizedActivityRequest: false,
       studentIndices: { h: 3, v: 1, f: 0 },
       instructorIndices: { h: 4, v: 0, f: 0 },
       isBacktrackOptOut: false,
@@ -1503,9 +1508,59 @@ void test('shouldShowInstructorPendingActivityNotice only shows when student sha
       hasActiveEmbeddedActivity: false,
       hasActiveSoloOverlay: false,
       instructorAnchoredInstanceKey: 'raffle:3:0',
+      hasPendingSynchronizedActivityRequest: false,
       studentIndices: { h: 3, v: 1, f: 0 },
       instructorIndices: { h: 3, v: 0, f: 0 },
       isBacktrackOptOut: true,
+    }),
+    false,
+  )
+})
+
+void test('shouldShowInstructorPendingActivityNotice also uses pending synchronized activity requests when the child session has not been created yet', () => {
+  assert.equal(
+    shouldShowInstructorPendingActivityNotice({
+      hasActiveEmbeddedActivity: false,
+      hasActiveSoloOverlay: false,
+      instructorAnchoredInstanceKey: null,
+      hasPendingSynchronizedActivityRequest: true,
+      studentIndices: { h: 4, v: 0, f: 0 },
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
+})
+
+void test('hasPendingSynchronizedActivityRequestForCurrentSlide only matches the current slide while the request is fresh', () => {
+  const pendingRequest = {
+    slideKey: '4:0',
+    observedAt: 10_000,
+  }
+
+  assert.equal(buildSyncDeckSlideKey({ h: 4, v: 0, f: 0 }), '4:0')
+  assert.equal(
+    hasPendingSynchronizedActivityRequestForCurrentSlide({
+      pendingRequest,
+      studentIndices: { h: 4, v: 0, f: 0 },
+      now: 12_000,
+    }),
+    true,
+  )
+  assert.equal(
+    hasPendingSynchronizedActivityRequestForCurrentSlide({
+      pendingRequest,
+      studentIndices: { h: 5, v: 0, f: 0 },
+      now: 12_000,
+    }),
+    false,
+  )
+  assert.equal(
+    hasPendingSynchronizedActivityRequestForCurrentSlide({
+      pendingRequest,
+      studentIndices: { h: 4, v: 0, f: 0 },
+      now: 19_500,
+      maxAgeMs: 8_000,
     }),
     false,
   )

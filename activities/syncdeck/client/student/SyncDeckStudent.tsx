@@ -1537,6 +1537,7 @@ export function shouldShowInstructorPendingActivityNotice(params: {
   hasActiveEmbeddedActivity: boolean
   hasActiveSoloOverlay: boolean
   instructorAnchoredInstanceKey: string | null
+  hasPendingSynchronizedActivityRequest: boolean
   studentIndices: { h: number; v: number; f: number } | null
   instructorIndices: { h: number; v: number; f: number } | null
   isBacktrackOptOut: boolean
@@ -1545,11 +1546,46 @@ export function shouldShowInstructorPendingActivityNotice(params: {
     return false
   }
 
-  if (params.instructorAnchoredInstanceKey == null || !params.studentIndices || !params.instructorIndices) {
+  if (!params.studentIndices || !params.instructorIndices) {
     return false
   }
 
-  return params.studentIndices.h === params.instructorIndices.h
+  return (
+    (params.instructorAnchoredInstanceKey != null || params.hasPendingSynchronizedActivityRequest)
+    && params.studentIndices.h === params.instructorIndices.h
+  )
+}
+
+interface PendingSynchronizedActivityRequest {
+  observedAt: number
+  slideKey: string
+}
+
+export function buildSyncDeckSlideKey(indices: { h: number; v: number; f: number } | null): string | null {
+  if (!indices) {
+    return null
+  }
+
+  return `${indices.h}:${indices.v}`
+}
+
+export function hasPendingSynchronizedActivityRequestForCurrentSlide(params: {
+  pendingRequest: PendingSynchronizedActivityRequest | null
+  studentIndices: { h: number; v: number; f: number } | null
+  now: number
+  maxAgeMs?: number
+}): boolean {
+  const currentSlideKey = buildSyncDeckSlideKey(params.studentIndices)
+  if (!currentSlideKey || !params.pendingRequest) {
+    return false
+  }
+
+  const maxAgeMs = typeof params.maxAgeMs === 'number' && params.maxAgeMs > 0 ? params.maxAgeMs : 8000
+  if (params.now - params.pendingRequest.observedAt > maxAgeMs) {
+    return false
+  }
+
+  return params.pendingRequest.slideKey === currentSlideKey
 }
 
 export function buildStudentLocalNavigationPayloads(params: {
@@ -1632,12 +1668,13 @@ const SyncDeckStudent: FC = () => {
   const hasSeenIframeReadySignalRef = useRef(false)
   const lastObservedIframeOriginRef = useRef<string | null>(null)
   const suppressFallbackToInstructorRef = useRef(false)
-  const lastEmbeddedActivitiesReconcileRef = useRef<{ slideKey: string; timestamp: number } | null>(null)
   const studentBacktrackOptOutRef = useRef(false)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
   const expectedInstructorLocalTargetRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const attachSessionEndedHandler = useSessionEndedHandler()
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
+  const [pendingSynchronizedActivityRequest, setPendingSynchronizedActivityRequest] =
+    useState<PendingSynchronizedActivityRequest | null>(null)
   const [studentIndicesState, setStudentIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
   const [navigationCapabilities, setNavigationCapabilities] = useState<NavigationCapabilities | null>(null)
   const [navigationCapabilityIndices, setNavigationCapabilityIndices] = useState<{ h: number; v: number; f: number } | null>(null)
@@ -2150,6 +2187,18 @@ const SyncDeckStudent: FC = () => {
                 ))
               })()
             }
+          } else {
+            const synchronizedRequest = resolveStudentSoloActivityRequest(
+              event.data.payload,
+              localStudentIndicesRef.current,
+            )
+            const synchronizedSlideKey = buildSyncDeckSlideKey(synchronizedRequest?.indices ?? null)
+            if (synchronizedSlideKey) {
+              setPendingSynchronizedActivityRequest({
+                slideKey: synchronizedSlideKey,
+                observedAt: Date.now(),
+              })
+            }
           }
         }
 
@@ -2515,10 +2564,16 @@ const SyncDeckStudent: FC = () => {
   const activeSoloOverlay = activeEmbeddedInstanceKey
     ? null
     : (studentIndicesState ? (soloOverlays[`${studentIndicesState.h}:${studentIndicesState.v}`] ?? null) : null)
+  const hasPendingSynchronizedActivityRequest = hasPendingSynchronizedActivityRequestForCurrentSlide({
+    pendingRequest: pendingSynchronizedActivityRequest,
+    studentIndices: studentIndicesState,
+    now: Date.now(),
+  })
   const showInstructorPendingActivityNotice = shouldShowInstructorPendingActivityNotice({
     hasActiveEmbeddedActivity: activeEmbeddedActivity != null,
     hasActiveSoloOverlay: activeSoloOverlay != null,
     instructorAnchoredInstanceKey,
+    hasPendingSynchronizedActivityRequest,
     studentIndices: studentIndicesState,
     instructorIndices: lastInstructorIndicesRef.current,
     isBacktrackOptOut,
@@ -2561,25 +2616,28 @@ const SyncDeckStudent: FC = () => {
     })
 
   useEffect(() => {
-    if (!sessionId || syncState !== 'synchronized' || activeEmbeddedInstanceKey != null || !studentIndicesState) {
+    if (
+      !sessionId
+      || syncState !== 'synchronized'
+      || activeEmbeddedInstanceKey != null
+      || !studentIndicesState
+      || !hasPendingSynchronizedActivityRequest
+    ) {
       return
-    }
-
-    const slideKey = `${studentIndicesState.h}:${studentIndicesState.v}`
-    const lastReconcile = lastEmbeddedActivitiesReconcileRef.current
-    const now = Date.now()
-    if (lastReconcile && lastReconcile.slideKey === slideKey && now - lastReconcile.timestamp < 1500) {
-      return
-    }
-
-    lastEmbeddedActivitiesReconcileRef.current = {
-      slideKey,
-      timestamp: now,
     }
 
     void reconcileEmbeddedActivitiesSnapshot()
+
+    const reconcileInterval = window.setInterval(() => {
+      void reconcileEmbeddedActivitiesSnapshot()
+    }, 1500)
+
+    return () => {
+      window.clearInterval(reconcileInterval)
+    }
   }, [
     activeEmbeddedInstanceKey,
+    hasPendingSynchronizedActivityRequest,
     reconcileEmbeddedActivitiesSnapshot,
     sessionId,
     studentIndicesState,

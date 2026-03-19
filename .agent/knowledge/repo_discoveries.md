@@ -1203,3 +1203,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/index.tsx`; `activities/syncdeck/server/routes.ts`; `activities/video-sync/client/index.ts`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/student/VideoSyncStudent.tsx`
 - Follow-up action: Reuse the same session-backed `standaloneMode` pattern for future permalink-only solo activities that need custom student runtime behavior after launch.
 - Owner: Codex
+
+- Date: 2026-03-19
+- Area: activities | syncdeck | synchronized embedded slide handoff
+- Discovery: A synchronized student can miss a newly launched embedded child session if SyncDeck does only a one-shot parent-session reconcile when the slide reports `activityRequest`. If that fetch lands before the manager finishes creating the child, the student stays on stale `embeddedActivities` until reload.
+- Why it matters: The symptom looks activity-specific because reload suddenly works, but the real bug is the race between the deck’s `activityRequest` and the parent session reflecting the new embedded child.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: When adding new embedded-slide handoffs, treat the deck’s current-slide `activityRequest` as the pending signal and keep reconciling until the expected child session appears or the request ages out.
+- Owner: Codex
