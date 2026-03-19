@@ -530,6 +530,44 @@ void test('consumeCreateSessionBootstrapPayload tolerates sessionStorage removeI
   }
 })
 
+void test('consumeCreateSessionBootstrapPayload rejects array-shaped payload entries from sessionStorage', () => {
+  const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage([
+    [
+      'create-session-bootstrap:video-sync:session-array-payload',
+      JSON.stringify({
+        createdAtMs: 10,
+        payload: ['not', 'an', 'object'],
+      }),
+    ],
+  ])
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: fakeSessionStorage,
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    assert.equal(
+      consumeCreateSessionBootstrapPayload('video-sync', 'session-array-payload', 10),
+      null,
+    )
+    assert.equal(
+      sessionStorage.get('create-session-bootstrap:video-sync:session-array-payload') ?? null,
+      null,
+    )
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
 void test('storeCreateSessionBootstrapPayload expires abandoned same-tab payloads after a short TTL', () => {
   const createdAtMs = 1_000
 

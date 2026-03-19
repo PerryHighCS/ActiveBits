@@ -71,6 +71,10 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return isObjectRecord(value) && !Array.isArray(value)
+}
+
 function toStringValue(value: unknown): string {
   return typeof value === 'string' ? value : String(value ?? '')
 }
@@ -166,10 +170,10 @@ function pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs: number): v
 
       const parsed = JSON.parse(rawValue) as unknown
       if (
-        !isObjectRecord(parsed)
+        !isPlainObjectRecord(parsed)
         || typeof parsed.createdAtMs !== 'number'
         || !Number.isFinite(parsed.createdAtMs)
-        || !isObjectRecord(parsed.payload)
+        || !isPlainObjectRecord(parsed.payload)
       ) {
         storage.removeItem(key)
         continue
@@ -227,10 +231,10 @@ function consumeCreateSessionBootstrapPayloadFromSessionStorage(
   try {
     const parsed = JSON.parse(rawValue) as unknown
     if (
-      !isObjectRecord(parsed)
+      !isPlainObjectRecord(parsed)
       || typeof parsed.createdAtMs !== 'number'
       || !Number.isFinite(parsed.createdAtMs)
-      || !isObjectRecord(parsed.payload)
+      || !isPlainObjectRecord(parsed.payload)
     ) {
       removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
       return null
