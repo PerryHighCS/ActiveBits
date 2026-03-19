@@ -229,6 +229,36 @@ void test('embedded launch route returns only selectedOptions and not raw sessio
   assert.equal(JSON.stringify(res.jsonBody).includes('secret-passcode'), false)
 })
 
+void test('embedded launch route treats array session.data as absent object data', async () => {
+  await initializeActivityRegistry()
+  const session: SessionRecord = {
+    ...createSessionRecord('session-array', 'video-sync'),
+    data: [] as unknown as Record<string, unknown>,
+  }
+  const sessions = {
+    get: async (id: string) => id === 'session-array' ? session : null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/embedded-launch')({ params: { sessionId: 'session-array' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, {
+    embeddedLaunch: {
+      selectedOptions: null,
+    },
+  })
+})
+
 void test('session entry participant store route returns 404 for missing sessions', async () => {
   await initializeActivityRegistry()
   const sessions = {

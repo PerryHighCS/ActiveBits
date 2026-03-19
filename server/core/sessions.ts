@@ -328,9 +328,7 @@ export function setupSessionRoutes(app: {
       return
     }
 
-    const sessionData = session.data != null && typeof session.data === 'object'
-      ? session.data as Record<string, unknown>
-      : null
+    const sessionData = ensurePlainObject(session.data)
     const embeddedLaunch = sessionData?.embeddedLaunch
     const embeddedLaunchRecord = embeddedLaunch != null && typeof embeddedLaunch === 'object' && !Array.isArray(embeddedLaunch)
       ? embeddedLaunch as Record<string, unknown>
