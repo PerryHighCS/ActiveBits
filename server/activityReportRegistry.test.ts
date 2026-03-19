@@ -3,10 +3,7 @@ import assert from 'node:assert/strict'
 import {
   getActivityReportBuilder,
   registerActivityReportBuilder,
-  restoreActivityReportBuildersForTests,
-  snapshotActivityReportBuildersForTests,
   type ActivityReportBuilder,
-  type ActivityReportBuilderRegistrySnapshot,
 } from './activities/activityReportRegistry.js'
 
 function createBuilder(label: string): ActivityReportBuilder {
@@ -22,7 +19,6 @@ function createBuilder(label: string): ActivityReportBuilder {
 }
 
 let activityTypeCounter = 0
-let registrySnapshot: ActivityReportBuilderRegistrySnapshot | null = null
 let originalWarn: typeof console.warn = console.warn
 
 function nextTestActivityType(label: string): string {
@@ -31,15 +27,10 @@ function nextTestActivityType(label: string): string {
 }
 
 test.beforeEach(() => {
-  registrySnapshot = snapshotActivityReportBuildersForTests()
   originalWarn = console.warn
 })
 
 test.afterEach(() => {
-  if (registrySnapshot != null) {
-    restoreActivityReportBuildersForTests(registrySnapshot)
-    registrySnapshot = null
-  }
   console.warn = originalWarn
 })
 
