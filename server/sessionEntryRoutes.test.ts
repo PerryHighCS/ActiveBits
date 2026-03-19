@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { initializeActivityRegistry } from './activities/activityRegistry.js'
-import { setupSessionRoutes, type SessionRecord } from './core/sessions.js'
+import { EMBEDDED_CHILD_SESSION_PREFIX, setupSessionRoutes, type SessionRecord } from './core/sessions.js'
 
 interface MockResponse {
   statusCode: number
@@ -187,8 +187,9 @@ void test('session entry route returns 404 for missing sessions', async () => {
 
 void test('embedded launch route returns only selectedOptions and not raw session data', async () => {
   await initializeActivityRegistry()
+  const embeddedSessionId = `${EMBEDDED_CHILD_SESSION_PREFIX}session-embedded`
   const session: SessionRecord = {
-    ...createSessionRecord('session-embedded', 'video-sync'),
+    ...createSessionRecord(embeddedSessionId, 'video-sync'),
     data: {
       instructorPasscode: 'secret-passcode',
       embeddedLaunch: {
@@ -201,7 +202,7 @@ void test('embedded launch route returns only selectedOptions and not raw sessio
     },
   }
   const sessions = {
-    get: async (id: string) => id === 'session-embedded' ? session : null,
+    get: async (id: string) => id === embeddedSessionId ? session : null,
     set: async () => {},
     delete: async () => true,
     touch: async () => true,
@@ -214,7 +215,7 @@ void test('embedded launch route returns only selectedOptions and not raw sessio
   setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
 
   const res = createMockResponse()
-  await getRoute(app, 'get', '/api/session/:sessionId/embedded-launch')({ params: { sessionId: 'session-embedded' } }, res)
+  await getRoute(app, 'get', '/api/session/:sessionId/embedded-launch')({ params: { sessionId: embeddedSessionId } }, res)
 
   assert.equal(res.statusCode, 200)
   assert.equal(res.headers['cache-control'], 'no-store')
@@ -231,12 +232,13 @@ void test('embedded launch route returns only selectedOptions and not raw sessio
 
 void test('embedded launch route treats array session.data as absent object data', async () => {
   await initializeActivityRegistry()
+  const embeddedSessionId = `${EMBEDDED_CHILD_SESSION_PREFIX}session-array`
   const session: SessionRecord = {
-    ...createSessionRecord('session-array', 'video-sync'),
+    ...createSessionRecord(embeddedSessionId, 'video-sync'),
     data: [] as unknown as Record<string, unknown>,
   }
   const sessions = {
-    get: async (id: string) => id === 'session-array' ? session : null,
+    get: async (id: string) => id === embeddedSessionId ? session : null,
     set: async () => {},
     delete: async () => true,
     touch: async () => true,
@@ -249,13 +251,38 @@ void test('embedded launch route treats array session.data as absent object data
   setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
 
   const res = createMockResponse()
-  await getRoute(app, 'get', '/api/session/:sessionId/embedded-launch')({ params: { sessionId: 'session-array' } }, res)
+  await getRoute(app, 'get', '/api/session/:sessionId/embedded-launch')({ params: { sessionId: embeddedSessionId } }, res)
 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.jsonBody, {
     embeddedLaunch: {
       selectedOptions: null,
     },
+  })
+})
+
+void test('embedded launch route rejects non-child session ids', async () => {
+  await initializeActivityRegistry()
+  const session = createSessionRecord('session-parent', 'video-sync')
+  const sessions = {
+    get: async (id: string) => id === 'session-parent' ? session : null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/embedded-launch')({ params: { sessionId: 'session-parent' } }, res)
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.jsonBody, {
+    error: 'embedded launch is only available for embedded child sessions',
   })
 })
 

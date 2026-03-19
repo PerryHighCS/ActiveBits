@@ -309,7 +309,10 @@ function normalizeSelectedOptionsRecord(value: unknown): Record<string, string> 
   const normalized: Record<string, string> = {}
   for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
     if (typeof entryValue === 'string') {
-      normalized[key] = entryValue
+      const trimmed = entryValue.trim()
+      if (trimmed) {
+        normalized[key] = trimmed
+      }
     }
   }
   return normalized
@@ -341,17 +344,20 @@ export async function updatePersistentSessionUrlState(
   const normalizedEntryPolicy = state.entryPolicy === undefined
     ? undefined
     : resolvePersistentSessionEntryPolicy(state.entryPolicy)
-  const normalizedSelectedOptions = normalizeSelectedOptionsRecord(state.selectedOptions)
-  const existingSelectedOptions = normalizeSelectedOptionsRecord(session.selectedOptions)
 
   if (normalizedEntryPolicy !== undefined && session.entryPolicy !== normalizedEntryPolicy) {
     session.entryPolicy = normalizedEntryPolicy
     shouldPersist = true
   }
 
-  if (!stringRecordEquals(existingSelectedOptions, normalizedSelectedOptions)) {
-    session.selectedOptions = normalizedSelectedOptions
-    shouldPersist = true
+  if (state.selectedOptions !== undefined) {
+    const normalizedSelectedOptions = normalizeSelectedOptionsRecord(state.selectedOptions)
+    const existingSelectedOptions = normalizeSelectedOptionsRecord(session.selectedOptions)
+
+    if (!stringRecordEquals(existingSelectedOptions, normalizedSelectedOptions)) {
+      session.selectedOptions = normalizedSelectedOptions
+      shouldPersist = true
+    }
   }
 
   if (shouldPersist) {

@@ -322,6 +322,11 @@ export function setupSessionRoutes(app: {
   app.get('/api/session/:sessionId/embedded-launch', async (req, res) => {
     setNoStore(res)
     const { sessionId } = req.params
+    if (!sessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
+      res.status(403).json({ error: 'embedded launch is only available for embedded child sessions' })
+      return
+    }
+
     const session = await sessions.get(sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })

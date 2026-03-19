@@ -5,6 +5,7 @@ import type { SessionRecord } from './core/sessions.js'
 import {
   cleanupPersistentSession,
   generatePersistentHash,
+  getPersistentSession,
   getOrCreateActivePersistentSession,
   initializePersistentStorage,
   updatePersistentSessionUrlState,
@@ -122,4 +123,52 @@ void test('persistent session websocket bootstraps started sessions with canonic
     .map((payload) => JSON.parse(payload) as { type?: string })
     .some((payload) => payload.type === 'teacher-authenticated')
   assert.equal(teacherAuthenticated, true)
+})
+
+void test('updatePersistentSessionUrlState keeps existing selectedOptions when selectedOptions is omitted', async (t) => {
+  initializePersistentStorage(null)
+
+  const activityName = 'algorithm-demo'
+  const teacherCode = 'preserve-selected-options'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'instructor-required')
+  await updatePersistentSessionUrlState(hash, {
+    selectedOptions: {
+      algorithm: 'merge-sort',
+    },
+  })
+
+  await updatePersistentSessionUrlState(hash, {
+    entryPolicy: 'solo-allowed',
+  })
+
+  const stored = await getPersistentSession(hash)
+  assert.equal(stored?.entryPolicy, 'solo-allowed')
+  assert.deepEqual(stored?.selectedOptions, {
+    algorithm: 'merge-sort',
+  })
+})
+
+void test('updatePersistentSessionUrlState trims selectedOptions and drops blank values', async (t) => {
+  initializePersistentStorage(null)
+
+  const activityName = 'algorithm-demo'
+  const teacherCode = 'trim-selected-options'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'instructor-required')
+  await updatePersistentSessionUrlState(hash, {
+    selectedOptions: {
+      algorithm: '  binary-search  ',
+      utm_source: '   ',
+    },
+  })
+
+  const stored = await getPersistentSession(hash)
+  assert.deepEqual(stored?.selectedOptions, {
+    algorithm: 'binary-search',
+  })
 })
