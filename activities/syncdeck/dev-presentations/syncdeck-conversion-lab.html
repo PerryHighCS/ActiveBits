@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SyncDeck Conversion Lab</title>
+    <title>SyncDeck Conversion Lab (Dev Only)</title>
+    <!--
+      Dev-only SyncDeck sample deck.
+      Source lives under activities/syncdeck/dev-presentations and is served only by the local Vite dev server.
+      It is intentionally not emitted in production builds.
+    -->
     <link
       rel="stylesheet"
       href="https://perryhighcs.github.io/SyncDeck-Reveal/dist/syncdeck-reveal.css"
@@ -513,6 +518,7 @@
           window.initSyncDeckReveal({
             deckId,
             iframeSyncOverrides: {
+              // Dev-only sample content: local preview can be embedded from varying localhost/Codespaces origins.
               hostOrigin: '*',
               allowedOrigins: ['*'],
             },

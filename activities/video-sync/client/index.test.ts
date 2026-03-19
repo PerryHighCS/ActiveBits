@@ -32,6 +32,8 @@ void test('launchVideoSyncPersistentSoloEntry creates and configures a standalon
 
   try {
     const result = await launchVideoSyncPersistentSoloEntry({
+      hash: 'solo-hash',
+      search: '',
       selectedOptions: {
         sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
       },
@@ -60,6 +62,8 @@ void test('launchVideoSyncPersistentSoloEntry rejects when sourceUrl is missing'
   await assert.rejects(
     async () => {
       await launchVideoSyncPersistentSoloEntry({
+        hash: 'solo-hash',
+        search: '',
         selectedOptions: {},
       })
     },

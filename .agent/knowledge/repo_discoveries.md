@@ -34,7 +34,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: client | syncdeck | conversion-lab-stack-requests
 - Discovery: The SyncDeck conversion-lab deck now emits sibling vertical activity anchors as `stackRequests` alongside the primary `activityRequest`, so entering `2:0` launches the whole `h:2` embedded stack (`2:0`, `2:1`, `2:2`) instead of only the currently visible anchor.
 - Why it matters: Student overlay arrows derive vertical reach from known embedded instance keys. Without stack bootstrapping, moving to `2:1`/`2:2` before the instructor visited each anchor left the overlay thinking the stack had ended and showed incorrect “not started” or disabled-arrow behavior.
-- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
 - Follow-up action: Keep deck-side stack metadata emission close to slide-activity metadata; if future decks need partial-stack launch behavior, make that an explicit per-deck policy instead of relying on missing sibling requests.
 - Owner: Codex
 
@@ -90,7 +90,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: client | syncdeck | conversion-lab-command-bridge
 - Discovery: Conversion-lab now also triggers slide-enter activity emission when receiving inbound reveal `command` messages for `setState`/`syncToInstructor`, using command target indices as the source of truth.
 - Why it matters: In host-driven navigation flows, status/slidechanged events can lag or miss transient transitions; command-level bridging ensures anchored activity requests still emit when the instructor jumps back to an activity slide.
-- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`
 - Follow-up action: Keep the command bridge as a fallback path while hosted runtime event timing is validated under instructor-driven setState control.
 - Owner: Codex
 
@@ -98,7 +98,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: client | syncdeck | conversion-lab-activity-emit
 - Discovery: Conversion-lab now resolves activity metadata from authoritative sync indices (`h:v`) via DOM traversal instead of relying on `Reveal.getCurrentSlide()`, and slide-enter dedupe advances only after slide resolution succeeds.
 - Why it matters: Host-driven `setState` can report updated indices before `getCurrentSlide()` points at the expected nested vertical section; advancing dedupe on that transient mismatch can suppress the later valid activityRequest when returning to anchors like `2:0`.
-- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`
 - Follow-up action: Keep slide-enter request emission keyed to resolved indexed slide elements rather than runtime-current slide references in host-driven navigation scenarios.
 - Owner: Codex
 
@@ -106,7 +106,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: client | syncdeck | conversion-lab-events
 - Discovery: Conversion-lab slide-enter activity emission is now tied to status index transitions (`reveal-iframesync-status`/`getStatus().navigation.current`) with per-position dedupe, so host-driven `setState` navigation emits activity requests even when Reveal `slidechanged` does not fire.
 - Why it matters: Instructor overlay navigation uses `setState`; without status-based detection, returning to anchors like `2:0` can miss relaunch requests and leave students synchronized but without an active overlay.
-- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`
 - Follow-up action: Keep deck-side emission keyed to authoritative sync status and avoid relying solely on local Reveal UI events for host-driven transitions.
 - Owner: Codex
 
@@ -114,7 +114,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: client | syncdeck | conversion-lab
 - Discovery: The conversion-lab deck now emits `activityRequest` on every slide-enter (no permanent per-slide dedupe), relying on manager-side instanceKey idempotency to ignore duplicate starts while an anchored activity is already running.
 - Why it matters: Revisiting anchors like `2:0` or vertical branches can relaunch overlays after an earlier lifecycle end instead of silently doing nothing due to stale deck-side dedupe state.
-- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`
 - Follow-up action: Keep deck emit behavior stateless; if duplicate suppression is needed, move it to manager/server where live instance state is authoritative.
 - Owner: Codex
 
@@ -144,9 +144,9 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-18
 - Area: client | syncdeck | presentations
-- Discovery: `client/public/presentations/syncdeck-conversion-lab.html` now boots via hosted SyncDeck Reveal assets (`syncdeck-reveal.js` + `syncdeck-reveal.css`) and `initSyncDeckReveal({ deckId, ... })` instead of a hand-rolled postMessage simulator. Activity anchors are now encoded in slide `data-activity-*` attributes and bridged to host launches by calling `window.RevealIframeSyncAPI.sendCustom('activityRequest', ...)` on slide-enter/manual trigger.
+- Discovery: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html` now boots via hosted SyncDeck Reveal assets (`syncdeck-reveal.js` + `syncdeck-reveal.css`) and `initSyncDeckReveal({ deckId, ... })` instead of a hand-rolled postMessage simulator. Activity anchors are now encoded in slide `data-activity-*` attributes and bridged to host launches by calling `window.RevealIframeSyncAPI.sendCustom('activityRequest', ...)` on slide-enter/manual trigger.
 - Why it matters: The conversion lab now exercises the real iframe sync runtime (navigation/status semantics and role handling) while preserving embedded activity launch testing without relying on the old synthetic state emitter.
-- Evidence: `client/public/presentations/syncdeck-conversion-lab.html`
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`
 - Follow-up action: If hosted runtime adds native slide metadata -> `activityRequest` emission, remove the deck-side bridge helper and keep only declarative `data-activity-*` metadata.
 - Owner: Codex
 

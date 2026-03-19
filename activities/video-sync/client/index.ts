@@ -1,11 +1,15 @@
 import type { ComponentType } from 'react'
-import type { ActivityClientModule } from '../../../types/activity.js'
+import type {
+  ActivityClientModule,
+  ActivityPersistentSoloLaunchParams,
+  ActivityPersistentSoloLaunchResult,
+} from '../../../types/activity.js'
 import VideoSyncManager from './manager/VideoSyncManager.js'
 import VideoSyncStudent from './student/VideoSyncStudent.js'
 
-export async function launchVideoSyncPersistentSoloEntry(params: {
-  selectedOptions?: Record<string, string>
-}): Promise<{ sessionId: string }> {
+export async function launchVideoSyncPersistentSoloEntry(
+  params: ActivityPersistentSoloLaunchParams,
+): Promise<ActivityPersistentSoloLaunchResult> {
   const sourceUrl = params.selectedOptions?.sourceUrl?.trim()
   if (!sourceUrl) {
     throw new Error('Video Sync solo entry requires a configured YouTube URL.')

@@ -139,6 +139,14 @@ ActiveBits intentionally ships source maps in production for debugging and teach
    - Confirm `.map` files are present in deployment artifacts.
    - Verify stack traces map to original TypeScript source during incident debugging.
 
+## Dev-Only Presentation Assets
+
+SyncDeck sample decks that exist only for local development live under `activities/syncdeck/dev-presentations/`.
+
+- They may use permissive local-development settings that are not suitable for production embedding.
+- Vite serves them during local development from the same `/presentations/...` URLs used by the app.
+- Production builds must not emit these dev-only presentation files.
+
 ## Scaling Considerations
 
 ### Single Instance (Default)

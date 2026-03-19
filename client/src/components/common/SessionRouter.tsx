@@ -364,7 +364,14 @@ const SessionRouter = () => {
         setSessionData(fullData)
       })
       .catch(() => setError('Invalid or missing session'))
-  }, [completedJoinPreflightSessionId, hasStoredSessionParticipantContext, sessionData, sessionEntryStatus, sessionId])
+  }, [
+    completedJoinPreflightSessionId,
+    hasStoredSessionEntryParticipantHandoff,
+    hasStoredSessionParticipantContext,
+    sessionData,
+    sessionEntryStatus,
+    sessionId,
+  ])
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSessionIdInput(event.target.value.toLowerCase())

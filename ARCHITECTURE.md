@@ -13,6 +13,10 @@ ActiveBits/
 │   │   ├── activity.config.ts       # Metadata + client/server entry pointers
 │   │   ├── client/                  # Manager/Student components and assets
 │   │   └── server/                  # API/WebSocket routes and data
+│   ├── syncdeck/
+│   │   ├── dev-presentations/       # Optional dev-only sample decks, served locally only
+│   │   ├── client/
+│   │   └── server/
 │   ├── www-sim/
 │   │   ├── activity.config.ts
 │   │   ├── client/
