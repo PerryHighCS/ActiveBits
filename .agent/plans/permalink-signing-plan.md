@@ -64,13 +64,19 @@ Notes:
 
 These do not currently advertise activity-owned URL generation, but they use deep-link options and should be checked during the refactor:
 
-- [ ] `java-string-practice`
-- [ ] `video-sync`
-- [ ] `algorithm-demo`
-- [ ] `syncdeck`
+- [x] `java-string-practice`
+- [x] `video-sync`
+- [x] `algorithm-demo`
+- [x] `syncdeck`
+
+Audit result:
+- `java-string-practice` does not consume standalone permalink query params directly in activity runtime code.
+- `video-sync` manager still reads raw `sourceUrl` during generic bootstrap, but persistent-manager recovery now prefers server-recovered canonical `persistentSourceUrl`, so raw query params are not authoritative for persistent links.
+- `algorithm-demo` manager bootstrap now reads canonical embedded-launch `selectedOptions.algorithm` from started session data instead of raw manage-route query params.
+- `syncdeck` still reads `urlHash` and `entryPolicy` on manager routes as part of the shared canonical permalink verification flow; it does not use unsigned query params for activity bootstrap.
 
 Question to answer during implementation:
-- Do any other activities consume permalink query params directly outside shared selected-option parsing?
+- No remaining activity bootstrap path relies on raw unsigned permalink query params outside the shared canonical selected-option flow. Remaining raw query reads are either non-permalink URL parsing or part of canonical control-state verification (`entryPolicy` / `urlHash`).
 
 ## Validation Checklist
 

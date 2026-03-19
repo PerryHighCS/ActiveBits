@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import AlgorithmPicker from '../components/AlgorithmPicker.js'
@@ -21,6 +21,11 @@ import './DemoManager.css'
 interface SessionResponseData {
   algorithmId?: string | null
   algorithmState?: unknown
+  embeddedLaunch?: {
+    selectedOptions?: {
+      algorithm?: unknown
+    }
+  } | null
 }
 
 interface SessionResponse {
@@ -61,10 +66,14 @@ export function parseBroadcastMessage(rawData: unknown): BroadcastMessage | null
   }
 }
 
+export function readEmbeddedLaunchAlgorithmId(data: SessionResponseData | null | undefined): string | null {
+  const algorithm = data?.embeddedLaunch?.selectedOptions?.algorithm
+  return typeof algorithm === 'string' && algorithm.length > 0 ? algorithm : null
+}
+
 export default function DemoManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
 
   const algorithms = getAllAlgorithms()
   const [session, setSession] = useState<SessionResponse | null>(null)
@@ -166,23 +175,23 @@ export default function DemoManager() {
   )
 
   useEffect(() => {
-    const algorithmParam = searchParams.get('algorithm')
+    const algorithmParam = readEmbeddedLaunchAlgorithmId(session?.data)
     if (!algorithmParam || hasAutoSelected || !sessionId || !session) return
 
     const algo = getAlgorithm(algorithmParam)
     if (!algo) {
-      console.warn(`[algorithm-demo] Algorithm "${algorithmParam}" not found in available algorithms`)
+      console.warn(`[algorithm-demo] Embedded launch algorithm "${algorithmParam}" not found in available algorithms`)
       setInvalidAlgorithm(algorithmParam)
       setHasAutoSelected(true)
       return
     }
 
     if (!session.data.algorithmId) {
-      console.log(`[algorithm-demo] Auto-selecting algorithm from URL: ${algorithmParam}`)
+      console.log(`[algorithm-demo] Auto-selecting algorithm from embedded launch: ${algorithmParam}`)
       void handleSelectAlgorithm(algorithmParam)
     }
     setHasAutoSelected(true)
-  }, [searchParams, hasAutoSelected, sessionId, session, handleSelectAlgorithm])
+  }, [hasAutoSelected, sessionId, session, handleSelectAlgorithm])
 
   const handleStateChange = async (newState: AlgorithmState) => {
     if (!sessionId) return
@@ -224,7 +233,7 @@ export default function DemoManager() {
     return <div className="error">Algorithm manager view unavailable</div>
   }
 
-  const isDeepLink = Boolean(searchParams.get('algorithm'))
+  const isDeepLink = Boolean(readEmbeddedLaunchAlgorithmId(session?.data))
 
   return (
     <div className="demo-manager">

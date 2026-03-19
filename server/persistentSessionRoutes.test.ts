@@ -1021,6 +1021,11 @@ void test('authenticate persists selectedOptions from request body when cookie e
   assert.deepEqual(entry?.selectedOptions, {
     algorithm: 'merge-sort',
   })
+
+  const stored = await getPersistentSession(hash)
+  assert.deepEqual(stored?.selectedOptions, {
+    algorithm: 'merge-sort',
+  })
 })
 
 void test('authenticate preserves existing selectedOptions from cookie over request body', async (t) => {
@@ -1290,6 +1295,11 @@ void test('update preserves canonical algorithm-demo option across edit and list
   const sessionsList = Array.isArray(listRes.jsonBody?.sessions) ? listRes.jsonBody.sessions : []
   assert.equal(sessionsList.length, 1)
   assert.deepEqual((sessionsList[0] as Record<string, unknown>).selectedOptions, {
+    algorithm: 'binary-search',
+  })
+
+  const stored = await getPersistentSession(hash)
+  assert.deepEqual(stored?.selectedOptions, {
     algorithm: 'binary-search',
   })
 })

@@ -14,6 +14,7 @@ import {
   storePersistentSessionEntryParticipant,
   verifyTeacherCodeWithHash,
   resolvePersistentSessionEntryPolicy,
+  updatePersistentSessionUrlState,
 } from '../core/persistentSessions.js'
 import {
   buildPersistentLinkUrlQuery,
@@ -414,6 +415,10 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     }
 
     await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, entryPolicy)
+    await updatePersistentSessionUrlState(hash, {
+      entryPolicy,
+      selectedOptions,
+    })
 
     writePersistentSessionsCookie(res, sessionEntries)
 
@@ -477,6 +482,10 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       null,
       entryPolicy,
     )
+    await updatePersistentSessionUrlState(hash, {
+      entryPolicy,
+      selectedOptions,
+    })
 
     writePersistentSessionsCookie(res, sessionEntries)
     res.json({
@@ -610,6 +619,10 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     }
 
     writePersistentSessionsCookie(res, sessionEntries)
+    await updatePersistentSessionUrlState(hash, {
+      entryPolicy: finalEntryPolicy,
+      selectedOptions: finalSelectedOptions,
+    })
 
     res.json({
       success: true,

@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-19
+- Area: server | activities | persistent-bootstrap
+- Discovery: Persistent-session startup now copies canonical permalink `selectedOptions` into the started live session's `data.embeddedLaunch.selectedOptions`, and Algorithm Demo manager bootstrap reads its initial algorithm from that embedded-launch state instead of the manage-route query string.
+- Why it matters: This removes the last manager bootstrap path that could be influenced by unsigned query edits after a persistent-link redirect while preserving canonical deep-link recovery for started sessions.
+- Evidence: `server/core/persistentSessions.ts`; `server/core/persistentSessionWs.ts`; `server/routes/persistentSessionRoutes.ts`; `activities/algorithm-demo/client/manager/DemoManager.tsx`; `server/persistentSessionRoutes.test.ts`; `activities/algorithm-demo/client/manager/DemoManager.test.tsx`
+- Follow-up action: For future persistent manager bootstrap needs, prefer `embeddedLaunch.selectedOptions` or explicit server recovery endpoints over re-reading manage-route query params.
+- Owner: Codex
+
+- Date: 2026-03-19
 - Area: activities | video-sync | permalink-recovery
 - Discovery: Video Sync manager bootstrap now prefers a server-recovered canonical `persistentSourceUrl` from `/api/video-sync/:sessionId/instructor-passcode` over raw manage-route query params when recovering persistent launches.
 - Why it matters: This keeps manager bootstrap aligned with canonical permalink-selected options and prevents unsigned or drifted query params on the manage route from becoming authoritative during persistent-session recovery.
