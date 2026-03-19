@@ -643,9 +643,26 @@ export function resolvePersistentUrlHashForConfigure(
 }
 
 export function resolvePersistentEntryPolicyForConfigure(
+  queryUrlHash: string | null | undefined,
   queryEntryPolicy: string | null | undefined,
+  persistentUrlHashFallback: string | null | undefined,
   persistentEntryPolicyFallback: PersistentSessionEntryPolicy | null | undefined,
 ): PersistentSessionEntryPolicy {
+  const normalizedQueryUrlHash = typeof queryUrlHash === 'string' && queryUrlHash.trim().length > 0
+    ? queryUrlHash.trim()
+    : null
+  const normalizedPersistentUrlHashFallback = typeof persistentUrlHashFallback === 'string' && persistentUrlHashFallback.trim().length > 0
+    ? persistentUrlHashFallback.trim()
+    : null
+
+  if (normalizedPersistentUrlHashFallback) {
+    return resolvePersistentSessionEntryPolicy(persistentEntryPolicyFallback)
+  }
+
+  if (normalizedQueryUrlHash) {
+    return resolvePersistentSessionEntryPolicy(queryEntryPolicy)
+  }
+
   const hasExplicitQueryEntryPolicy = typeof queryEntryPolicy === 'string' && queryEntryPolicy.trim().length > 0
   if (hasExplicitQueryEntryPolicy) {
     return resolvePersistentSessionEntryPolicy(queryEntryPolicy)
@@ -1686,7 +1703,12 @@ const SyncDeckManager: FC = () => {
   const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
   const queryEntryPolicy = new URLSearchParams(location.search).get('entryPolicy')
   const urlHash = resolvePersistentUrlHashForConfigure(queryUrlHash, persistentUrlHashFallback)
-  const entryPolicy = resolvePersistentEntryPolicyForConfigure(queryEntryPolicy, persistentEntryPolicyFallback)
+  const entryPolicy = resolvePersistentEntryPolicyForConfigure(
+    queryUrlHash,
+    queryEntryPolicy,
+    persistentUrlHashFallback,
+    persistentEntryPolicyFallback,
+  )
   const hostProtocol = typeof window !== 'undefined' ? window.location.protocol : null
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : null
   const presentationUrlError = useMemo(() => {

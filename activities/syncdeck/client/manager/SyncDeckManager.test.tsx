@@ -173,9 +173,23 @@ void test('normalizeStoredInstructorPasscode trims and rejects empty cached valu
 })
 
 void test('resolvePersistentEntryPolicyForConfigure prefers recovered policy when query is absent', () => {
-  assert.equal(resolvePersistentEntryPolicyForConfigure(null, 'solo-allowed'), 'solo-allowed')
-  assert.equal(resolvePersistentEntryPolicyForConfigure('', 'solo-only'), 'solo-only')
-  assert.equal(resolvePersistentEntryPolicyForConfigure('instructor-required', 'solo-allowed'), 'instructor-required')
+  assert.equal(resolvePersistentEntryPolicyForConfigure(null, null, null, 'solo-allowed'), 'solo-allowed')
+  assert.equal(resolvePersistentEntryPolicyForConfigure('', '', null, 'solo-only'), 'solo-only')
+  assert.equal(
+    resolvePersistentEntryPolicyForConfigure(null, 'instructor-required', null, 'solo-allowed'),
+    'instructor-required',
+  )
+})
+
+void test('resolvePersistentEntryPolicyForConfigure keeps policy aligned with the chosen hash source', () => {
+  assert.equal(
+    resolvePersistentEntryPolicyForConfigure('stale-query-hash', 'instructor-required', 'verified-cookie-hash', 'solo-allowed'),
+    'solo-allowed',
+  )
+  assert.equal(
+    resolvePersistentEntryPolicyForConfigure('query-hash', 'solo-only', null, 'instructor-required'),
+    'solo-only',
+  )
 })
 
 void test('resolvePersistentUrlHashForConfigure prefers verified fallback hash over query hash', () => {
