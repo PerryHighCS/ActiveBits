@@ -1,7 +1,16 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
-import { findHashBySessionId, verifyTeacherCodeWithHash } from 'activebits-server/core/persistentSessions.js'
+import {
+  findHashBySessionId,
+  resolvePersistentSessionEntryPolicy,
+  verifyTeacherCodeWithHash,
+} from 'activebits-server/core/persistentSessions.js'
+import {
+  normalizePersistentLinkSelectedOptions,
+  verifyPersistentLinkUrlHash,
+  type PersistentLinkUrlState,
+} from 'activebits-server/core/persistentLinkUrlState.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -159,6 +168,8 @@ interface CookieSessionEntry {
   key: string
   teacherCode: unknown
   selectedOptions?: unknown
+  entryPolicy?: unknown
+  urlHash?: unknown
 }
 
 interface EmbeddedParentSessionContext {
@@ -423,6 +434,8 @@ function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry
         key: String(entry.key),
         teacherCode: entry.teacherCode,
         selectedOptions: entry.selectedOptions,
+        entryPolicy: entry.entryPolicy,
+        urlHash: entry.urlHash,
       }))
   }
 
@@ -455,7 +468,10 @@ function readEmbeddedParentSessionContext(data: unknown): EmbeddedParentSessionC
   }
 }
 
-function readPersistentSourceUrlFromCookieEntry(entry: CookieSessionEntry | undefined): string | null {
+function readPersistentSourceUrlFromCookieEntry(
+  persistentHash: string,
+  entry: CookieSessionEntry | undefined,
+): string | null {
   if (!isPlainObject(entry?.selectedOptions)) {
     return null
   }
@@ -466,7 +482,27 @@ function readPersistentSourceUrlFromCookieEntry(entry: CookieSessionEntry | unde
   }
 
   const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  const urlHash = typeof entry.urlHash === 'string' && entry.urlHash.trim().length > 0
+    ? entry.urlHash.trim()
+    : null
+  if (!urlHash) {
+    return null
+  }
+
+  const state = {
+    entryPolicy: resolvePersistentSessionEntryPolicy(entry.entryPolicy),
+    selectedOptions: normalizePersistentLinkSelectedOptions(entry.selectedOptions),
+  } satisfies PersistentLinkUrlState
+
+  if (!verifyPersistentLinkUrlHash(persistentHash, state, urlHash)) {
+    return null
+  }
+
+  return trimmed
 }
 
 function normalizeStudentId(value: unknown): string | null {
@@ -1292,7 +1328,7 @@ export default function setupVideoSyncRoutes(
     if (didNormalizeSessionData) {
       await sessions.set(session.id, session)
     }
-    const persistentSourceUrl = readPersistentSourceUrlFromCookieEntry(matchingEntry)
+    const persistentSourceUrl = readPersistentSourceUrlFromCookieEntry(persistentHash, matchingEntry)
     res.json({
       instructorPasscode: data.instructorPasscode,
       ...(persistentSourceUrl ? { persistentSourceUrl } : {}),

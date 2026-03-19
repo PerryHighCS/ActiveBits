@@ -23,6 +23,7 @@ import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
 import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
 import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
 import { normalizeStoredInstructorPasscode } from './SyncDeckManager.js'
+import { resolvePersistentEntryPolicyForConfigure } from './SyncDeckManager.js'
 import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
 import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
@@ -169,6 +170,12 @@ void test('normalizeStoredInstructorPasscode trims and rejects empty cached valu
   assert.equal(normalizeStoredInstructorPasscode(' teacher-pass '), 'teacher-pass')
   assert.equal(normalizeStoredInstructorPasscode('   '), null)
   assert.equal(normalizeStoredInstructorPasscode(null), null)
+})
+
+void test('resolvePersistentEntryPolicyForConfigure prefers recovered policy when query is absent', () => {
+  assert.equal(resolvePersistentEntryPolicyForConfigure(null, 'solo-allowed'), 'solo-allowed')
+  assert.equal(resolvePersistentEntryPolicyForConfigure('', 'solo-only'), 'solo-only')
+  assert.equal(resolvePersistentEntryPolicyForConfigure('instructor-required', 'solo-allowed'), 'instructor-required')
 })
 
 void test('resolvePersistentUrlHashForConfigure prefers verified fallback hash over query hash', () => {

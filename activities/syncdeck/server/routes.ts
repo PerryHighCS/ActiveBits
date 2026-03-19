@@ -1226,6 +1226,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const selectedOptions = isPlainObject(matchingEntry.selectedOptions) ? matchingEntry.selectedOptions : {}
     const persistentPresentationUrl = normalizePersistentPresentationUrl(selectedOptions.presentationUrl)
+    const persistentEntryPolicy = resolvePersistentSessionEntryPolicy(matchingEntry.entryPolicy)
     const candidateUrlHash =
       typeof matchingEntry.urlHash === 'string' && matchingEntry.urlHash.trim().length > 0
         ? matchingEntry.urlHash.trim()
@@ -1235,7 +1236,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         && persistentPresentationUrl
         && verifyPersistentLinkUrlHash(
           persistentHash,
-          buildSyncDeckPersistentLinkUrlState(matchingEntry.entryPolicy, persistentPresentationUrl),
+          buildSyncDeckPersistentLinkUrlState(persistentEntryPolicy, persistentPresentationUrl),
           candidateUrlHash,
         )
         ? candidateUrlHash
@@ -1243,6 +1244,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     res.json({
       instructorPasscode: session.data.instructorPasscode,
+      persistentEntryPolicy,
       ...(persistentPresentationUrl ? { persistentPresentationUrl } : {}),
       ...(persistentUrlHash ? { persistentUrlHash } : {}),
     })

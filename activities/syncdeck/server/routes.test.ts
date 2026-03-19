@@ -250,9 +250,13 @@ function emitInstructorAuth(socket: MockSocket, instructorPasscode: string): voi
   )
 }
 
-function computeUrlHash(persistentHash: string, presentationUrl: string): string {
+function computeUrlHash(
+  persistentHash: string,
+  presentationUrl: string,
+  entryPolicy: PersistentLinkUrlState['entryPolicy'] = DEFAULT_SYNCDECK_ENTRY_POLICY,
+): string {
   const state: PersistentLinkUrlState = {
-    entryPolicy: DEFAULT_SYNCDECK_ENTRY_POLICY,
+    entryPolicy,
     selectedOptions: {
       presentationUrl,
     },
@@ -1431,6 +1435,62 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'instructor-required',
+    persistentPresentationUrl: presentationUrl,
+    persistentUrlHash: urlHash,
+  })
+})
+
+void test('instructor-passcode route returns recovered persistent entryPolicy for syncdeck links', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const teacherCode = 'persistent-teacher-code'
+  const presentationUrl = 'https://slides.example/deck'
+  const entryPolicy: PersistentLinkUrlState['entryPolicy'] = 'solo-allowed'
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', teacherCode)
+  const urlHash = computeUrlHash(hash, presentationUrl, entryPolicy)
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `syncdeck:${hash}`,
+            teacherCode,
+            entryPolicy,
+            selectedOptions: {
+              presentationUrl,
+            },
+            urlHash,
+          },
+        ]),
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'solo-allowed',
     persistentPresentationUrl: presentationUrl,
     persistentUrlHash: urlHash,
   })
@@ -1481,6 +1541,7 @@ void test('instructor-passcode route decodes encoded cookie presentationUrl with
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'instructor-required',
     persistentPresentationUrl: presentationUrl,
   })
 })
@@ -1530,6 +1591,7 @@ void test('instructor-passcode route decodes double-encoded cookie presentationU
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'instructor-required',
     persistentPresentationUrl: presentationUrl,
   })
 })
@@ -1582,6 +1644,7 @@ void test('instructor-passcode route drops stale cookie urlHash that does not ma
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'instructor-required',
     persistentPresentationUrl: presentationUrl,
   })
 })
@@ -1630,6 +1693,7 @@ void test('instructor-passcode route ignores invalid cookie presentationUrl edge
     assert.equal(res.statusCode, 200)
     assert.deepEqual(res.body, {
       instructorPasscode: 'teacher-passcode-1',
+      persistentEntryPolicy: 'instructor-required',
     })
   }
 })
@@ -1681,6 +1745,7 @@ void test('instructor-passcode route preserves already-valid cookie presentation
     assert.equal(res.statusCode, 200)
     assert.deepEqual(res.body, {
       instructorPasscode: 'teacher-passcode-1',
+      persistentEntryPolicy: 'instructor-required',
       persistentPresentationUrl: presentationUrl,
     })
   }

@@ -1,5 +1,6 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
 import {
   getStudentPresentationCompatibilityError,
@@ -39,6 +40,7 @@ interface InstructorPasscodeResponsePayload {
   instructorPasscode?: unknown
   persistentPresentationUrl?: unknown
   persistentUrlHash?: unknown
+  persistentEntryPolicy?: unknown
 }
 
 interface SyncDeckStudentPresenceMessage {
@@ -638,6 +640,18 @@ export function resolvePersistentUrlHashForConfigure(
 
   // Prefer the server-verified/cookie-recovered hash to avoid stale query params forcing configure failures.
   return normalizedPersistentUrlHashFallback ?? normalizedQueryUrlHash
+}
+
+export function resolvePersistentEntryPolicyForConfigure(
+  queryEntryPolicy: string | null | undefined,
+  persistentEntryPolicyFallback: PersistentSessionEntryPolicy | null | undefined,
+): PersistentSessionEntryPolicy {
+  const hasExplicitQueryEntryPolicy = typeof queryEntryPolicy === 'string' && queryEntryPolicy.trim().length > 0
+  if (hasExplicitQueryEntryPolicy) {
+    return resolvePersistentSessionEntryPolicy(queryEntryPolicy)
+  }
+
+  return resolvePersistentSessionEntryPolicy(persistentEntryPolicyFallback)
 }
 
 function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmbeddedInstancePosition | null {
@@ -1510,6 +1524,7 @@ const SyncDeckManager: FC = () => {
   const [isConfigurePanelOpen, setIsConfigurePanelOpen] = useState(true)
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
   const [persistentUrlHashFallback, setPersistentUrlHashFallback] = useState<string | null>(null)
+  const [persistentEntryPolicyFallback, setPersistentEntryPolicyFallback] = useState<PersistentSessionEntryPolicy | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
   const [instructorConnectionState, setInstructorConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
@@ -1671,7 +1686,7 @@ const SyncDeckManager: FC = () => {
   const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
   const queryEntryPolicy = new URLSearchParams(location.search).get('entryPolicy')
   const urlHash = resolvePersistentUrlHashForConfigure(queryUrlHash, persistentUrlHashFallback)
-  const entryPolicy = (queryEntryPolicy ?? 'instructor-required').trim() || 'instructor-required'
+  const entryPolicy = resolvePersistentEntryPolicyForConfigure(queryEntryPolicy, persistentEntryPolicyFallback)
   const hostProtocol = typeof window !== 'undefined' ? window.location.protocol : null
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : null
   const presentationUrlError = useMemo(() => {
@@ -1968,6 +1983,7 @@ const SyncDeckManager: FC = () => {
     if (!sessionId || typeof window === 'undefined') {
       setInstructorPasscode(null)
       setPersistentUrlHashFallback(null)
+      setPersistentEntryPolicyFallback(null)
       setIsPasscodeReady(true)
       return
     }
@@ -1982,6 +1998,7 @@ const SyncDeckManager: FC = () => {
       if (!isCancelled) {
         setInstructorPasscode(cachedPasscode)
         setPersistentUrlHashFallback(null)
+        setPersistentEntryPolicyFallback(null)
       }
 
       try {
@@ -1994,6 +2011,7 @@ const SyncDeckManager: FC = () => {
               setInstructorPasscode(null)
             }
             setPersistentUrlHashFallback(null)
+            setPersistentEntryPolicyFallback(null)
           }
           return
         }
@@ -2018,6 +2036,7 @@ const SyncDeckManager: FC = () => {
             typeof payload.persistentUrlHash === 'string' && payload.persistentUrlHash.trim().length > 0
               ? payload.persistentUrlHash
               : null
+          const persistentEntryPolicy = resolvePersistentSessionEntryPolicy(payload.persistentEntryPolicy)
 
           if (persistentPresentationUrl) {
             setPresentationUrl((current) => {
@@ -2025,6 +2044,7 @@ const SyncDeckManager: FC = () => {
             })
           }
           setPersistentUrlHashFallback(persistentUrlHash)
+          setPersistentEntryPolicyFallback(persistentEntryPolicy)
         }
       } catch {
         if (!isCancelled) {
@@ -2032,6 +2052,7 @@ const SyncDeckManager: FC = () => {
             setInstructorPasscode(null)
           }
           setPersistentUrlHashFallback(null)
+          setPersistentEntryPolicyFallback(null)
         }
       } finally {
         if (!isCancelled) {
@@ -2046,7 +2067,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId, queryUrlHash, userAgent])
+  }, [hostProtocol, sessionId, userAgent])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
