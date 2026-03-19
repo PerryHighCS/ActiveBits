@@ -22,6 +22,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Reuse this outer envelope for future embedded-activity protocol plans unless a shared cross-activity transport spec supersedes it.
 - Owner: Codex
 
+- Date: 2026-03-19
+- Area: activities
+- Discovery: The Resonance plan was updated to align with the current `ActivityConfig` schema and dashboard conventions: use `manageDashboard.customPersistentLinkBuilder`, `createSessionBootstrap.sessionStorage`, and activity-owned report/download flows instead of proposing a new shared `reporting` config or repo-wide report contract up front.
+- Why it matters: Future Resonance work should build on the existing activity extension points already implemented in shared code, which keeps dashboard and registry layers activity-agnostic and avoids speculative schema churn.
+- Evidence: `.agent/plans/resonance.md`; `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/java-string-practice/client/manager/JavaStringPracticeManager.tsx`
+- Follow-up action: Only extract a shared reporting schema or report registration contract after a second activity demonstrates the same need.
+- Owner: Codex
+
 - Date: 2026-03-01
 - Area: activities
 - Discovery: SyncDeck presentation URLs must be scheme-compatible with the ActiveBits host page. When ActiveBits is loaded over HTTPS, configuring or joining a SyncDeck session with an `http://...` presentation URL causes mixed-content blocking, the iframe stays on an `about:blank` parent-origin window, and subsequent `postMessage(..., "http://...")` calls fail in the student view.
