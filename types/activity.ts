@@ -34,7 +34,7 @@ export interface ActivityDeepLinkPreflightResult {
 export interface ActivityPersistentSoloLaunchParams {
   hash: string
   search: string
-  selectedOptions: Record<string, string>
+  selectedOptions: Partial<Record<string, string>>
 }
 
 export interface ActivityPersistentSoloLaunchResult {

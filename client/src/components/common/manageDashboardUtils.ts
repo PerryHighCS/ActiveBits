@@ -84,21 +84,30 @@ function persistCreateSessionBootstrapPayloadToSessionStorage(
   sessionId: string,
   payload: Record<string, unknown>,
   createdAtMs: number,
+  nowMs = createdAtMs,
 ): void {
   if (typeof window === 'undefined' || window.sessionStorage == null) {
     return
   }
 
+  pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs)
+
+  const storageKey = buildCreateSessionBootstrapStorageKey(activityId, sessionId)
+  const serializedEntry = JSON.stringify({
+    createdAtMs,
+    payload,
+  } satisfies CreateSessionBootstrapPayloadEntry)
+
   try {
-    window.sessionStorage.setItem(
-      buildCreateSessionBootstrapStorageKey(activityId, sessionId),
-      JSON.stringify({
-        createdAtMs,
-        payload,
-      } satisfies CreateSessionBootstrapPayloadEntry),
-    )
-  } catch (error) {
-    console.warn('[ManageDashboard] Failed to persist same-tab bootstrap payload to sessionStorage:', error)
+    window.sessionStorage.setItem(storageKey, serializedEntry)
+  } catch {
+    pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs)
+
+    try {
+      window.sessionStorage.setItem(storageKey, serializedEntry)
+    } catch (retryError) {
+      console.warn('[ManageDashboard] Failed to persist same-tab bootstrap payload to sessionStorage:', retryError)
+    }
   }
 }
 
@@ -343,11 +352,12 @@ export function storeCreateSessionBootstrapPayload(
   payload: Record<string, unknown>,
   nowMs = Date.now(),
 ): void {
+  pruneCreateSessionBootstrapPayloads(nowMs)
   createSessionBootstrapPayloads.set(`${activityId}:${sessionId}`, {
     payload,
     createdAtMs: nowMs,
   })
-  persistCreateSessionBootstrapPayloadToSessionStorage(activityId, sessionId, payload, nowMs)
+  persistCreateSessionBootstrapPayloadToSessionStorage(activityId, sessionId, payload, nowMs, nowMs)
   pruneCreateSessionBootstrapPayloads(nowMs)
 }
 

@@ -647,6 +647,74 @@ void test('storeCreateSessionBootstrapPayload evicts oldest sessionStorage boots
   }
 })
 
+void test('storeCreateSessionBootstrapPayload prunes stale sessionStorage entries before writing a new payload', () => {
+  const originalWindow = globalThis.window
+  const staleCreatedAtMs = 1_000
+  const freshNowMs = staleCreatedAtMs + 5 * 60 * 1000 + 1
+  const staleKey = 'create-session-bootstrap:video-sync:stale-session'
+  const freshKey = 'create-session-bootstrap:video-sync:fresh-session'
+  const staleValue = JSON.stringify({
+    createdAtMs: staleCreatedAtMs,
+    payload: {
+      instructorPasscode: 'stale-passcode',
+    },
+  })
+  const writes = new Map<string, string>([[staleKey, staleValue]])
+  let setAttempts = 0
+
+  const fakeSessionStorage = {
+    get length() {
+      return writes.size
+    },
+    key(index: number) {
+      return Array.from(writes.keys())[index] ?? null
+    },
+    getItem(key: string) {
+      return writes.get(key) ?? null
+    },
+    setItem(key: string, value: string) {
+      setAttempts += 1
+      if (key === freshKey && writes.has(staleKey)) {
+        throw new Error('quota exceeded')
+      }
+      writes.set(key, value)
+    },
+    removeItem(key: string) {
+      writes.delete(key)
+    },
+  }
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: fakeSessionStorage,
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    storeCreateSessionBootstrapPayload(
+      'video-sync',
+      'fresh-session',
+      {
+        id: 'fresh-session',
+        instructorPasscode: 'fresh-passcode',
+      },
+      freshNowMs,
+    )
+
+    assert.equal(setAttempts, 1)
+    assert.equal(writes.has(staleKey), false)
+    assert.equal(writes.has(freshKey), true)
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
 void test('buildCreateSessionBootstrapHistoryState keeps only declared history-state fields', () => {
   assert.deepEqual(
     buildCreateSessionBootstrapHistoryState(

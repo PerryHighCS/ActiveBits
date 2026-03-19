@@ -574,30 +574,51 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   }, [isStandaloneSession, state])
 
   useEffect(() => {
+    setIsSessionModeResolved(false)
+  }, [sessionId])
+
+  useEffect(() => {
     if (!sessionId) return undefined
 
-    setIsSessionModeResolved(false)
+    let cancelled = false
 
     const loadSession = async () => {
       try {
         const response = await fetch(`/api/video-sync/${sessionId}/session`)
         if (!response.ok) {
-          setIsSessionModeResolved(true)
+          if (!cancelled) {
+            setIsSessionModeResolved(true)
+          }
           return
         }
         const data = (await response.json()) as SessionResponse
+        if (cancelled) {
+          return
+        }
         setIsStandaloneSession(data.data?.standaloneMode === true)
         if (data.data?.state) {
           setState(data.data.state)
         }
       } catch {
-        setErrorMessage('Unable to load synchronized video state')
+        if (!cancelled) {
+          setErrorMessage('Unable to load synchronized video state')
+        }
       } finally {
-        setIsSessionModeResolved(true)
+        if (!cancelled) {
+          setIsSessionModeResolved(true)
+        }
       }
     }
 
     void loadSession()
+
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!sessionId) return undefined
     if (shouldConnectVideoSyncStudentRealtime({
       sessionId,
       isStandaloneSession,

@@ -190,7 +190,7 @@ export function createManagerWsAuthMessage(instructorPasscode: string | null | u
   })
 }
 
-export function shouldRenderEmbeddedManagerHeader(sessionId: string | null | undefined): boolean {
+export function shouldRenderManagerHeaderForSession(sessionId: string | null | undefined): boolean {
   return !isEmbeddedChildSessionId(sessionId ?? undefined)
 }
 
@@ -980,7 +980,7 @@ export default function VideoSyncManager() {
 
   if (setupMode) {
     const shouldShowAutoStartSplash = bootstrapSourceUrl != null && autoStartStatus !== 'failed'
-    const shouldRenderHeader = shouldRenderEmbeddedManagerHeader(sessionId)
+    const shouldRenderHeader = shouldRenderManagerHeaderForSession(sessionId)
 
     return (
       <div className="w-full p-4 space-y-4">
@@ -1061,7 +1061,7 @@ export default function VideoSyncManager() {
     )
   }
 
-  const shouldRenderHeader = shouldRenderEmbeddedManagerHeader(sessionId)
+  const shouldRenderHeader = shouldRenderManagerHeaderForSession(sessionId)
 
   return (
     <div className="fixed inset-0 z-30 bg-black text-white">

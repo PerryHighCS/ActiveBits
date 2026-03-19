@@ -16,7 +16,7 @@ import {
   readEmbeddedBootstrapSourceUrl,
   resolveBootstrapInstructorPasscode,
   sanitizeManagerApiErrorMessage,
-  shouldRenderEmbeddedManagerHeader,
+  shouldRenderManagerHeaderForSession,
   shouldFetchEmbeddedBootstrapSourceUrl,
   shouldCorrectManagerPlaybackDrift,
   shouldApplyManagerStateUpdate,
@@ -153,10 +153,10 @@ void test('readEmbeddedBootstrapSourceUrl ignores missing or invalid embedded la
   assert.equal(readEmbeddedBootstrapSourceUrl({ sourceUrl: 42 }), null)
 })
 
-void test('shouldRenderEmbeddedManagerHeader hides the manager header for embedded child sessions', () => {
-  assert.equal(shouldRenderEmbeddedManagerHeader('session-123'), true)
-  assert.equal(shouldRenderEmbeddedManagerHeader('CHILD:parent:abcde:video-sync'), false)
-  assert.equal(shouldRenderEmbeddedManagerHeader(null), true)
+void test('shouldRenderManagerHeaderForSession hides the manager header for embedded child sessions', () => {
+  assert.equal(shouldRenderManagerHeaderForSession('session-123'), true)
+  assert.equal(shouldRenderManagerHeaderForSession('CHILD:parent:abcde:video-sync'), false)
+  assert.equal(shouldRenderManagerHeaderForSession(null), true)
 })
 
 void test('shouldFetchEmbeddedBootstrapSourceUrl only fetches for embedded child sessions without query bootstrap', () => {

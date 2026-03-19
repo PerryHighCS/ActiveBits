@@ -173,8 +173,8 @@ export function getActivityWaitingRoomFieldCount(activityName: string): number {
   return Array.isArray(fields) ? fields.length : 0
 }
 
-export function getActivityConfig(activityName: string): ActivityConfigLike | null {
-  const matchingConfig = filteredConfigs.find((config) => config.id === activityName)
+export function getActivityConfig(activityId: string): ActivityConfigLike | null {
+  const matchingConfig = filteredConfigs.find((config) => config.id === activityId)
   return matchingConfig?.loadedConfig ?? null
 }
 
