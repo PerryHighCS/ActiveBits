@@ -831,6 +831,23 @@ export function resolveManagerOverlayNavigationBaseIndices(params: {
   }
 }
 
+export function resolveManagerCurrentSlideNavigationCapability(params: {
+  iframeCapability: boolean | null
+  capabilityIndices: { h: number; v: number; f: number } | null
+  currentIndices: { h: number; v: number; f: number } | null
+}): boolean | null {
+  if (!params.currentIndices || !params.capabilityIndices) {
+    return null
+  }
+
+  // Overlay arrows follow slide-stack position, so fragment-only changes should not invalidate
+  // a vertical capability payload for the current h/v slide anchor.
+  return params.capabilityIndices.h === params.currentIndices.h
+    && params.capabilityIndices.v === params.currentIndices.v
+    ? params.iframeCapability
+    : null
+}
+
 export function extractManagerNavigationCapabilitiesFromRevealMessage(
   rawPayload: unknown,
 ): SyncDeckManagerNavigationCapabilities | null {
@@ -1558,6 +1575,8 @@ const SyncDeckManager: FC = () => {
   const [downloadingEmbeddedReportInstanceKey, setDownloadingEmbeddedReportInstanceKey] = useState<string | null>(null)
   const [isDownloadingSessionReport, setIsDownloadingSessionReport] = useState(false)
   const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
+  const [overlayNavigationCapabilityIndices, setOverlayNavigationCapabilityIndices] =
+    useState<{ h: number; v: number; f: number } | null>(null)
   const [instructorIndicesState, setInstructorIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [isPresentationPaused, setIsPresentationPaused] = useState(false)
@@ -2664,6 +2683,7 @@ const SyncDeckManager: FC = () => {
       const nextOverlayNavigationCapabilities = extractManagerNavigationCapabilitiesFromRevealMessage(event.data)
       if (nextOverlayNavigationCapabilities) {
         setOverlayNavigationCapabilities(nextOverlayNavigationCapabilities)
+        setOverlayNavigationCapabilityIndices(extractIndicesFromRevealPayload(event.data))
       }
 
       const storyboardDisplayed = extractStoryboardDisplayed(event.data)
@@ -2945,14 +2965,22 @@ const SyncDeckManager: FC = () => {
   const canMoveUp =
     resolveEmbeddedOverlayVerticalMoveAllowed({
       direction: 'up',
-      iframeCapability: overlayNavigationCapabilities?.canGoUp ?? null,
+      iframeCapability: resolveManagerCurrentSlideNavigationCapability({
+        iframeCapability: overlayNavigationCapabilities?.canGoUp ?? null,
+        capabilityIndices: overlayNavigationCapabilityIndices,
+        currentIndices: overlayNavigationBaseIndices,
+      }),
       derivedCapabilities: overlayVerticalNavigationCapabilities,
       fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v > 0 : false,
     })
   const canMoveDown =
     resolveEmbeddedOverlayVerticalMoveAllowed({
       direction: 'down',
-      iframeCapability: overlayNavigationCapabilities?.canGoDown ?? null,
+      iframeCapability: resolveManagerCurrentSlideNavigationCapability({
+        iframeCapability: overlayNavigationCapabilities?.canGoDown ?? null,
+        capabilityIndices: overlayNavigationCapabilityIndices,
+        currentIndices: overlayNavigationBaseIndices,
+      }),
       derivedCapabilities: overlayVerticalNavigationCapabilities,
       fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false,
     })

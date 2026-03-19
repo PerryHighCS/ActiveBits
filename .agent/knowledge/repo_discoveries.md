@@ -1259,3 +1259,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `types/activity.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`
 - Follow-up action: When adding custom permalink builders for other activities, make sure both create and edit paths are covered before leaving the generic-form fallback in place.
 - Owner: Codex
+
+- Date: 2026-03-19
+- Area: activities | syncdeck | manager overlay navigation
+- Discovery: SyncDeck manager overlay arrows need to scope iframe-reported `canGoUp` and `canGoDown` to the slide indices that produced them. Reusing the last capability payload without matching `h`/`v` lets stale vertical bounds from the previous slide override the current stack position.
+- Why it matters: In vertical stacks like `2:0 -> 2:1 -> 2:2`, the instructor can move correctly while the overlay controls stay visually wrong, for example leaving `up` disabled at `2:1` or leaving `down` enabled at `2:2`.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: When consuming iframe navigation metadata for overlay controls, always track the indices that emitted the capability payload and ignore it after the deck moves to a different slide.
+- Owner: Codex
