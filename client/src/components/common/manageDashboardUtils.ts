@@ -126,6 +126,17 @@ function clearCreateSessionBootstrapPayloadFromSessionStorage(
   }
 }
 
+function removeCreateSessionBootstrapStorageEntry(
+  storage: Pick<Storage, 'removeItem'>,
+  storageKey: string,
+): void {
+  try {
+    storage.removeItem(storageKey)
+  } catch {
+    // Best-effort cleanup only; callers should still be able to consume in-memory data.
+  }
+}
+
 function pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs: number): void {
   if (typeof window === 'undefined' || window.sessionStorage == null) {
     return
@@ -223,18 +234,18 @@ function consumeCreateSessionBootstrapPayloadFromSessionStorage(
       || !Number.isFinite(parsed.createdAtMs)
       || !isObjectRecord(parsed.payload)
     ) {
-      window.sessionStorage.removeItem(storageKey)
+      removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
       return null
     }
 
-    window.sessionStorage.removeItem(storageKey)
+    removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
     if (nowMs - parsed.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
       return null
     }
 
     return parsed.payload
   } catch (error) {
-    window.sessionStorage.removeItem(storageKey)
+    removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
     console.warn('[ManageDashboard] Failed to parse same-tab bootstrap payload from sessionStorage:', error)
     return null
   }

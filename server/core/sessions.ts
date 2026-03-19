@@ -1,5 +1,9 @@
 import { randomBytes } from 'crypto'
-import type { Session as SharedSession, SessionStore as SharedSessionStore } from '../../types/session.js'
+import {
+  EMBEDDED_CHILD_SESSION_PREFIX,
+  type Session as SharedSession,
+  type SessionStore as SharedSessionStore,
+} from '../../types/session.js'
 import type { SessionEntryStatus } from '../../types/waitingRoom.js'
 import { findHashBySessionId, resetPersistentSession } from './persistentSessions.js'
 import { ValkeySessionStore } from './valkeyStore.js'
@@ -62,7 +66,7 @@ interface WsServerLike {
   clients: Iterable<WsClient>
 }
 
-export const EMBEDDED_CHILD_SESSION_PREFIX = 'CHILD:'
+export { EMBEDDED_CHILD_SESSION_PREFIX }
 
 class InMemorySessionStore implements SessionStore {
   public readonly ttlMs: number

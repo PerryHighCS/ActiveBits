@@ -179,6 +179,18 @@ export function getVideoSyncStudentIdentityLookup(sessionId: string | null | und
   }
 }
 
+export function getVideoSyncStudentSessionModeResetState(): {
+  isStandaloneSession: false
+  isSessionModeResolved: false
+  errorMessage: null
+} {
+  return {
+    isStandaloneSession: false,
+    isSessionModeResolved: false,
+    errorMessage: null,
+  }
+}
+
 export function resetUnsyncedPlaybackTelemetry(params: {
   isLocallyUnsyncedRef: { current: boolean }
   lastUnsyncReportAtRef: { current: number }
@@ -587,7 +599,10 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   }, [isStandaloneSession, state])
 
   useEffect(() => {
-    setIsSessionModeResolved(false)
+    const resetState = getVideoSyncStudentSessionModeResetState()
+    setIsStandaloneSession(resetState.isStandaloneSession)
+    setIsSessionModeResolved(resetState.isSessionModeResolved)
+    setErrorMessage(resetState.errorMessage)
   }, [sessionId])
 
   useEffect(() => {

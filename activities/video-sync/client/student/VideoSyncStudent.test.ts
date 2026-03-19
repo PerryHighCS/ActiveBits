@@ -15,6 +15,7 @@ import { shouldInitializeYoutubePlayer } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
 import { shouldConnectVideoSyncStudentRealtime } from './VideoSyncStudent.js'
 import { getVideoSyncStudentIdentityLookup } from './VideoSyncStudent.js'
+import { getVideoSyncStudentSessionModeResetState } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
 import type { YoutubePlayerLike } from '../youtubeIframeApi.js'
 
@@ -285,6 +286,14 @@ void test('getVideoSyncStudentIdentityLookup keeps standalone session handoff on
   })
   assert.deepEqual(getVideoSyncStudentIdentityLookup(null), {
     isSoloSession: false,
+  })
+})
+
+void test('getVideoSyncStudentSessionModeResetState clears stale standalone mode and load errors on session changes', () => {
+  assert.deepEqual(getVideoSyncStudentSessionModeResetState(), {
+    isStandaloneSession: false,
+    isSessionModeResolved: false,
+    errorMessage: null,
   })
 })
 

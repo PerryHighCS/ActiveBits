@@ -471,6 +471,65 @@ void test('consumeCreateSessionBootstrapPayload falls back to sessionStorage for
   }
 })
 
+void test('consumeCreateSessionBootstrapPayload tolerates sessionStorage removeItem failures', () => {
+  const originalWindow = globalThis.window
+  const storageEntries = new Map<string, string>([
+    [
+      'create-session-bootstrap:video-sync:session-iframe',
+      JSON.stringify({
+        createdAtMs: 10,
+        payload: {
+          instructorPasscode: 'teacher-passcode',
+        },
+      }),
+    ],
+    [
+      'create-session-bootstrap:video-sync:session-invalid',
+      '{"createdAtMs":"bad"}',
+    ],
+  ])
+
+  const fakeSessionStorage = {
+    getItem(key: string) {
+      return storageEntries.get(key) ?? null
+    },
+    setItem(_key: string, _value: string) {
+      throw new Error('[TEST] unexpected setItem')
+    },
+    removeItem(_key: string) {
+      throw new Error('[TEST] removeItem unavailable')
+    },
+  }
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: fakeSessionStorage,
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    assert.deepEqual(
+      consumeCreateSessionBootstrapPayload('video-sync', 'session-iframe', 10),
+      {
+        instructorPasscode: 'teacher-passcode',
+      },
+    )
+
+    assert.equal(
+      consumeCreateSessionBootstrapPayload('video-sync', 'session-invalid', 10),
+      null,
+    )
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
 void test('storeCreateSessionBootstrapPayload expires abandoned same-tab payloads after a short TTL', () => {
   const createdAtMs = 1_000
 
