@@ -12,6 +12,10 @@ interface PersistentLinkCreateResponse {
 
 const MIN_TEACHER_CODE_LENGTH = 6
 
+function formatPersistentLinkPreflightWarning(warning: string): string {
+  return warning.replace(/\s*You can continue anyway\.?\s*$/i, ' Please fix the URL and verify again.')
+}
+
 function getWindowOrigin(): string {
   return typeof window !== 'undefined' ? window.location.origin : ''
 }
@@ -58,7 +62,16 @@ export function resolveSyncDeckPersistentLinkBuilderRequest(params: {
   }
 }
 
-export default function SyncDeckPersistentLinkBuilder({ activityId, editState, onCreated }: ActivityPersistentLinkBuilderProps) {
+interface SyncDeckPersistentLinkBuilderComponentProps extends ActivityPersistentLinkBuilderProps {
+  preflightRunner?: typeof runSyncDeckPresentationPreflight
+}
+
+export default function SyncDeckPersistentLinkBuilder({
+  activityId,
+  editState,
+  onCreated,
+  preflightRunner = runSyncDeckPresentationPreflight,
+}: SyncDeckPersistentLinkBuilderComponentProps) {
   const isEditing = Boolean(editState?.hash)
   const [teacherCode, setTeacherCode] = useState(editState?.teacherCode ?? '')
   const [presentationUrl, setPresentationUrl] = useState(() => readSelectedPresentationUrl(editState?.selectedOptions))
@@ -95,7 +108,7 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, editState, o
     setError(null)
     setIsPreflightChecking(true)
     try {
-      const preflightResult = await runSyncDeckPresentationPreflight(normalizedPresentationUrl)
+      const preflightResult = await preflightRunner(normalizedPresentationUrl)
       if (preflightResult.valid) {
         setPreflightValidatedUrl(normalizedPresentationUrl)
         setPreflightWarning(null)
@@ -105,7 +118,11 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, editState, o
 
       setPreflightValidatedUrl(null)
       setPreflightPreviewUrl(null)
-      setPreflightWarning(preflightResult.warning)
+      setPreflightWarning(
+        preflightResult.warning
+          ? formatPersistentLinkPreflightWarning(preflightResult.warning)
+          : 'Unable to verify this presentation URL right now. Please try again.',
+      )
     } catch {
       setPreflightValidatedUrl(null)
       setPreflightPreviewUrl(null)
