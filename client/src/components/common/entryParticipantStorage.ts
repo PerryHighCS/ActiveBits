@@ -191,6 +191,22 @@ export function hasEntryParticipantHandoffStorageValue(
   return storage.getItem(storageKey) != null
 }
 
+export function hasValidEntryParticipantHandoffStorageValue(
+  storage: Pick<EntryParticipantStorageLike, 'getItem'>,
+  storageKey: string,
+): boolean {
+  const raw = storage.getItem(storageKey)
+  if (!raw) {
+    return false
+  }
+
+  try {
+    return isEntryParticipantHandoff(JSON.parse(raw) as unknown)
+  } catch {
+    return false
+  }
+}
+
 export function buildSessionEntryParticipantSubmitApiUrl(sessionId: string): string {
   return `/api/session/${encodeURIComponent(sessionId)}/entry-participant`
 }

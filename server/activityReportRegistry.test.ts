@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   getActivityReportBuilder,
   registerActivityReportBuilder,
+  resetActivityReportBuildersForTests,
   type ActivityReportBuilder,
 } from './activities/activityReportRegistry.js'
 
@@ -27,10 +28,13 @@ function nextTestActivityType(label: string): string {
 }
 
 test.beforeEach(() => {
+  resetActivityReportBuildersForTests()
+  activityTypeCounter = 0
   originalWarn = console.warn
 })
 
 test.afterEach(() => {
+  resetActivityReportBuildersForTests()
   console.warn = originalWarn
 })
 

@@ -15,6 +15,7 @@ import {
   getEntryParticipantDisplayName,
   getEntryParticipantParticipantId,
   hasEntryParticipantHandoffStorageValue,
+  hasValidEntryParticipantHandoffStorageValue,
   persistEntryParticipantToken,
   persistEntryParticipantValues,
   type EntryParticipantStorageLike,
@@ -115,6 +116,38 @@ void test('hasEntryParticipantHandoffStorageValue is a pure presence check and d
 
   assert.equal(hasEntryParticipantHandoffStorageValue(storage, storageKey), true)
   assert.equal(storage.getItem(storageKey), '{not-json')
+})
+
+void test('hasValidEntryParticipantHandoffStorageValue returns false for malformed or invalid payloads without cleaning storage', () => {
+  const storage = createStorage()
+  const malformedKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-invalid-json')
+  const wrongShapeKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-wrong-shape')
+
+  storage.setItem(malformedKey, '{not-json')
+  storage.setItem(wrongShapeKey, JSON.stringify({ nope: true }))
+
+  assert.equal(hasValidEntryParticipantHandoffStorageValue(storage, malformedKey), false)
+  assert.equal(hasValidEntryParticipantHandoffStorageValue(storage, wrongShapeKey), false)
+  assert.equal(storage.getItem(malformedKey), '{not-json')
+  assert.equal(storage.getItem(wrongShapeKey), JSON.stringify({ nope: true }))
+})
+
+void test('hasValidEntryParticipantHandoffStorageValue returns true for valid handoff payloads', () => {
+  const storage = createStorage()
+  const valuesKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-values')
+  const tokenKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-token')
+
+  storage.setItem(valuesKey, JSON.stringify({
+    kind: 'values',
+    values: { displayName: 'Ada' },
+  }))
+  storage.setItem(tokenKey, JSON.stringify({
+    kind: 'token',
+    token: 'token-123',
+  }))
+
+  assert.equal(hasValidEntryParticipantHandoffStorageValue(storage, valuesKey), true)
+  assert.equal(hasValidEntryParticipantHandoffStorageValue(storage, tokenKey), true)
 })
 
 void test('getEntryParticipantDisplayName returns trimmed display names only', () => {
