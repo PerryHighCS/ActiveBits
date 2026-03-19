@@ -52,6 +52,7 @@ interface CommandResponse {
 
 interface InstructorPasscodeResponse {
   instructorPasscode?: unknown
+  persistentSourceUrl?: unknown
 }
 
 interface ManagerLocationState {
@@ -106,6 +107,16 @@ export function readBootstrapInstructorPasscode(locationState: unknown): string 
 
 export function readBootstrapSourceUrl(search: string): string | null {
   const value = new URLSearchParams(search).get('sourceUrl')
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export function readRecoveredPersistentSourceUrl(payload: InstructorPasscodeResponse | null | undefined): string | null {
+  const value = payload?.persistentSourceUrl
   if (typeof value !== 'string') {
     return null
   }
@@ -332,6 +343,7 @@ export default function VideoSyncManager() {
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
   const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
+  const [persistentRecoverySourceUrl, setPersistentRecoverySourceUrl] = useState<string | null>(null)
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -346,7 +358,7 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
-  const bootstrapSourceUrl = queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
+  const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
 
   useEffect(() => {
     if (!shouldFetchEmbeddedBootstrapSourceUrl({ sessionId, queryBootstrapSourceUrl })) {
@@ -600,6 +612,7 @@ export default function VideoSyncManager() {
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
       setInstructorPasscode(null)
+      setPersistentRecoverySourceUrl(null)
       setIsPasscodeReady(true)
       return
     }
@@ -620,6 +633,7 @@ export default function VideoSyncManager() {
         }
         if (!isCancelled) {
           setInstructorPasscode(bootstrap.instructorPasscode)
+          setPersistentRecoverySourceUrl(null)
           setIsPasscodeReady(true)
         }
         return
@@ -632,24 +646,29 @@ export default function VideoSyncManager() {
         if (!response.ok) {
           if (!isCancelled) {
             setInstructorPasscode(null)
+            setPersistentRecoverySourceUrl(null)
           }
           return
         }
 
         const payload = (await response.json()) as InstructorPasscodeResponse
+        const recoveredPersistentSourceUrl = readRecoveredPersistentSourceUrl(payload)
         if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
+            setPersistentRecoverySourceUrl(recoveredPersistentSourceUrl)
           }
           return
         }
 
         if (!isCancelled) {
           setInstructorPasscode(null)
+          setPersistentRecoverySourceUrl(null)
         }
       } catch {
         if (!isCancelled) {
           setInstructorPasscode(null)
+          setPersistentRecoverySourceUrl(null)
         }
       } finally {
         if (!isCancelled) {
@@ -801,19 +820,6 @@ export default function VideoSyncManager() {
     if (!playerReady) return
     applyStateToPlayer(state)
   }, [playerReady, state, applyStateToPlayer])
-
-  useEffect(() => {
-    if (!setupMode) {
-      return
-    }
-
-    const bootstrappedSourceUrl = readBootstrapSourceUrl(location.search)
-    if (!bootstrappedSourceUrl) {
-      return
-    }
-
-    setSourceUrlInput((current) => (current.trim().length > 0 ? current : bootstrappedSourceUrl))
-  }, [location.search, setupMode])
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,

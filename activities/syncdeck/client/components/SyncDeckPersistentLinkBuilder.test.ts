@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { resolveSyncDeckPersistentLinkBuilderRequest } from './SyncDeckPersistentLinkBuilder.js'
 
-void test('resolveSyncDeckPersistentLinkBuilderRequest uses syncdeck generate-url for new links', () => {
+void test('resolveSyncDeckPersistentLinkBuilderRequest uses shared persistent-session create for new links', () => {
   assert.deepEqual(
     resolveSyncDeckPersistentLinkBuilderRequest({
       activityId: 'syncdeck',
@@ -11,10 +11,11 @@ void test('resolveSyncDeckPersistentLinkBuilderRequest uses syncdeck generate-ur
       editState: null,
     }),
     {
-      endpoint: '/api/syncdeck/generate-url',
+      endpoint: '/api/persistent-session/create',
       body: {
         activityName: 'syncdeck',
         teacherCode: 'teacher-code',
+        entryPolicy: 'instructor-required',
         selectedOptions: {
           presentationUrl: 'http://localhost:3000/presentations/syncdeck-conversion-lab.html',
         },

@@ -1556,6 +1556,53 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
   await cleanupPersistentSession(hash)
 })
 
+void test('instructor-passcode route returns canonical persistent sourceUrl for persistent teacher cookie', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      cookies: {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `video-sync:${hash}`,
+            teacherCode,
+            selectedOptions: {
+              sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+            },
+          },
+        ]),
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE,
+    persistentSourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+  })
+  await cleanupPersistentSession(hash)
+})
+
 void test('instructor-passcode route persists normalized session data when recovery reads repair malformed fields', async () => {
   initializePersistentStorage(null)
 

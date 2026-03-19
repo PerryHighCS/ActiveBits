@@ -32,33 +32,33 @@ Notes:
 
 ## Shared Work Checklist
 
-- [ ] Add a shared activity contract for canonical permalink state normalization/serialization.
-- [ ] Update shared create flow to sign the final canonical permalink state instead of ad hoc query params.
-- [ ] Update shared edit flow to regenerate the same canonical signed state for an existing permalink hash.
-- [ ] Update waiting-room/auth verification to trust only canonical signed state.
-- [ ] Make unknown query params explicitly ignored for behavior unless copied into canonical state.
-- [ ] Add regression tests for extra unsigned params like `utm_source`.
+- [x] Add a shared activity contract for canonical permalink state normalization/serialization.
+- [x] Update shared create flow to sign the final canonical permalink state instead of ad hoc query params.
+- [x] Update shared edit flow to regenerate the same canonical signed state for an existing permalink hash.
+- [x] Update waiting-room/auth verification to trust only canonical signed state.
+- [x] Make unknown query params explicitly ignored for behavior unless copied into canonical state.
+- [x] Add regression tests for extra unsigned params like `utm_source`.
 - [ ] Update docs for the new permalink contract after implementation lands.
 
 ## Activity Follow-up
 
 ### SyncDeck
 
-- [ ] Move SyncDeck permalink generation to return canonical state instead of relying on a second activity-specific signer.
-- [ ] Decide whether `presentationUrl` is fully represented inside canonical signed state or still needs activity-owned derivation before signing.
-- [ ] Keep SyncDeck preflight/verification UX in the activity-owned builder.
-- [ ] Ensure manager launch/recovery trusts canonical permalink state consistently for both create and edit.
+- [x] Move SyncDeck permalink generation to return canonical state instead of relying on a second activity-specific signer.
+- [x] Decide whether `presentationUrl` is fully represented inside canonical signed state or still needs activity-owned derivation before signing.
+- [x] Keep SyncDeck preflight/verification UX in the activity-owned builder.
+- [x] Ensure manager launch/recovery trusts canonical permalink state consistently for both create and edit.
 
 ### Video Sync
 
-- [ ] Define canonical permalink-selected options for standalone/video launch behavior.
-- [ ] Verify persistent solo and embedded launch paths rebuild the same canonical state on reload.
-- [ ] Confirm manager/student bootstrap does not depend on unsigned query params.
+- [x] Define canonical permalink-selected options for standalone/video launch behavior.
+- [x] Verify persistent solo and embedded launch paths rebuild the same canonical state on reload.
+- [x] Confirm manager/student bootstrap does not depend on unsigned query params.
 
 ### Algorithm Demo
 
-- [ ] Define canonical permalink-selected options for algorithm choice and any manager bootstrap options.
-- [ ] Verify create/edit/launch all normalize the same selected options before signing.
+- [x] Define canonical permalink-selected options for algorithm choice and any manager bootstrap options.
+- [x] Verify create/edit/launch all normalize the same selected options before signing.
 
 ## Likely Additional Audit Targets
 
@@ -74,8 +74,8 @@ Question to answer during implementation:
 
 ## Validation Checklist
 
-- [ ] Shared permalink route tests cover create, edit, authenticate, and entry verification with canonical state.
-- [ ] SyncDeck tests cover create/edit parity and first-launch manager bootstrap.
-- [ ] Video Sync tests cover standalone permalink launch after edit.
-- [ ] Algorithm Demo tests cover signed option preservation across edit.
+- [x] Shared permalink route tests cover create, edit, authenticate, and entry verification with canonical state.
+- [x] SyncDeck tests cover create/edit parity and first-launch manager bootstrap.
+- [x] Video Sync tests cover standalone permalink launch after edit.
+- [x] Algorithm Demo tests cover signed option preservation across edit.
 - [ ] `npm test` or `npm run test:codex` passes in this environment.

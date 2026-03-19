@@ -1654,7 +1654,9 @@ const SyncDeckManager: FC = () => {
   )
 
   const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
+  const queryEntryPolicy = new URLSearchParams(location.search).get('entryPolicy')
   const urlHash = queryUrlHash ?? persistentUrlHashFallback
+  const entryPolicy = (queryEntryPolicy ?? 'instructor-required').trim() || 'instructor-required'
   const hostProtocol = typeof window !== 'undefined' ? window.location.protocol : null
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : null
   const presentationUrlError = useMemo(() => {
@@ -2435,6 +2437,7 @@ const SyncDeckManager: FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           presentationUrl: normalizedUrl,
+          entryPolicy,
           instructorPasscode,
           ...(urlHash ? { urlHash } : {}),
         }),
@@ -2469,6 +2472,7 @@ const SyncDeckManager: FC = () => {
     userAgent,
     isPasscodeReady,
     instructorPasscode,
+    entryPolicy,
     urlHash,
     preflightValidatedUrl,
     allowUnverifiedStartForUrl,

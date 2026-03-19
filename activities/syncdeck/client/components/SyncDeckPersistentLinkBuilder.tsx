@@ -45,10 +45,11 @@ export function resolveSyncDeckPersistentLinkBuilderRequest(params: {
   }
 
   return {
-    endpoint: '/api/syncdeck/generate-url',
+    endpoint: '/api/persistent-session/create',
     body: {
       activityName: params.activityId,
       teacherCode: params.normalizedTeacherCode,
+      entryPolicy: 'instructor-required',
       selectedOptions: {
         presentationUrl: params.normalizedPresentationUrl,
       },

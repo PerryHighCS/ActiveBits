@@ -13,6 +13,7 @@ import {
   parseManagerStopTimeInput,
   readBootstrapInstructorPasscode,
   readBootstrapSourceUrl,
+  readRecoveredPersistentSourceUrl,
   readEmbeddedBootstrapSourceUrl,
   resolveBootstrapInstructorPasscode,
   sanitizeManagerApiErrorMessage,
@@ -135,6 +136,20 @@ void test('readBootstrapSourceUrl ignores missing or empty query params', () => 
   assert.equal(readBootstrapSourceUrl(''), null)
   assert.equal(readBootstrapSourceUrl('?sourceUrl='), null)
   assert.equal(readBootstrapSourceUrl('?other=value'), null)
+})
+
+void test('readRecoveredPersistentSourceUrl returns canonical sourceUrl from recovery payload', () => {
+  assert.equal(
+    readRecoveredPersistentSourceUrl({ persistentSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43' }),
+    'https://youtu.be/dQw4w9WgXcQ?t=43',
+  )
+})
+
+void test('readRecoveredPersistentSourceUrl ignores missing or invalid recovery payload values', () => {
+  assert.equal(readRecoveredPersistentSourceUrl(null), null)
+  assert.equal(readRecoveredPersistentSourceUrl({}), null)
+  assert.equal(readRecoveredPersistentSourceUrl({ persistentSourceUrl: '' }), null)
+  assert.equal(readRecoveredPersistentSourceUrl({ persistentSourceUrl: 42 as unknown as string }), null)
 })
 
 void test('readEmbeddedBootstrapSourceUrl returns sourceUrl from embedded launch selected options', () => {

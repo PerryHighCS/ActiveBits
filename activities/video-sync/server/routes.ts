@@ -158,6 +158,7 @@ const unsyncedStudentPruneTimersBySession = new Map<string, ReturnType<typeof se
 interface CookieSessionEntry {
   key: string
   teacherCode: unknown
+  selectedOptions?: unknown
 }
 
 interface EmbeddedParentSessionContext {
@@ -421,6 +422,7 @@ function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry
       .map((entry) => ({
         key: String(entry.key),
         teacherCode: entry.teacherCode,
+        selectedOptions: entry.selectedOptions,
       }))
   }
 
@@ -451,6 +453,20 @@ function readEmbeddedParentSessionContext(data: unknown): EmbeddedParentSessionC
     parentSessionId,
     activityName: 'syncdeck',
   }
+}
+
+function readPersistentSourceUrlFromCookieEntry(entry: CookieSessionEntry | undefined): string | null {
+  if (!isPlainObject(entry?.selectedOptions)) {
+    return null
+  }
+
+  const value = entry.selectedOptions.sourceUrl
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function normalizeStudentId(value: unknown): string | null {
@@ -1276,7 +1292,11 @@ export default function setupVideoSyncRoutes(
     if (didNormalizeSessionData) {
       await sessions.set(session.id, session)
     }
-    res.json({ instructorPasscode: data.instructorPasscode })
+    const persistentSourceUrl = readPersistentSourceUrlFromCookieEntry(matchingEntry)
+    res.json({
+      instructorPasscode: data.instructorPasscode,
+      ...(persistentSourceUrl ? { persistentSourceUrl } : {}),
+    })
   })
 
   app.get('/api/video-sync/:sessionId/session', async (req, res) => {
