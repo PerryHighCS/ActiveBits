@@ -448,8 +448,6 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       return
     }
 
-    const selectedOptions = getCanonicalPersistentLinkSelectedOptions(activityName, body.selectedOptions)
-
     const cookieName = 'persistent_sessions'
     let { sessions: sessionEntries } = parsePersistentSessionsCookie(
       req.cookies?.[cookieName],
@@ -460,6 +458,10 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       res.status(404).json({ error: 'Persistent link not found' })
       return
     }
+    const existingUrlState = getVerifiedPersistentLinkUrlStateFromCookieEntry(activityName, hash, existingEntry)
+    const selectedOptions = Object.prototype.hasOwnProperty.call(body, 'selectedOptions')
+      ? getCanonicalPersistentLinkSelectedOptions(activityName, body.selectedOptions)
+      : (existingUrlState?.selectedOptions ?? getCanonicalPersistentLinkSelectedOptions(activityName, existingEntry.selectedOptions))
 
     const query = buildPersistentLinkUrlQuery({
       hash,

@@ -1544,6 +1544,61 @@ void test('update rewrites permalink settings for the same hash and preserves te
   assert.equal((sessionsList[0] as Record<string, unknown>).teacherCode, 'update-link-code')
 })
 
+void test('update preserves existing selectedOptions when request omits selectedOptions', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'algorithm-demo',
+      teacherCode: 'preserve-options-code',
+      entryPolicy: 'instructor-required',
+      selectedOptions: {
+        algorithm: 'merge-sort',
+      },
+    },
+  })
+  const createRes = createMockRes()
+
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+  const cookie = createRes.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+
+  const updateHandler = getRoute(app, 'POST', '/api/persistent-session/update')
+  const updateReq = createMockReq({
+    cookies: { persistent_sessions: cookie.value },
+    body: {
+      activityName: 'algorithm-demo',
+      hash,
+      entryPolicy: 'solo-allowed',
+    },
+  })
+  const updateRes = createMockRes()
+
+  await updateHandler(updateReq, updateRes)
+
+  assert.equal(updateRes.statusCode, 200, JSON.stringify(updateRes.jsonBody))
+  assert.match(String(updateRes.jsonBody?.url ?? ''), /algorithm=merge-sort/)
+  assert.match(String(updateRes.jsonBody?.url ?? ''), /entryPolicy=solo-allowed/)
+
+  const updatedCookie = updateRes.cookies.get('persistent_sessions')
+  assert.ok(updatedCookie)
+  const parsedCookie = JSON.parse(updatedCookie.value) as Array<{ key?: string; selectedOptions?: Record<string, unknown> }>
+  const entry = parsedCookie.find((candidate) => candidate.key === `algorithm-demo:${hash}`)
+  assert.deepEqual(entry?.selectedOptions, {
+    algorithm: 'merge-sort',
+  })
+})
+
 void test('remove drops a saved permalink from the teacher cookie list', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()
