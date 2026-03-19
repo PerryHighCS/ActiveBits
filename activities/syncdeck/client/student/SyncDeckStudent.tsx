@@ -4,12 +4,17 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
   buildEntryParticipantStorageKey,
+  buildSessionEntryParticipantStorageKey,
   persistEntryParticipantToken,
 } from '@src/components/common/entryParticipantStorage'
 import {
   persistSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
+import {
+  buildSessionEntryParticipantSubmitApiUrl,
+} from '@src/components/common/entryParticipantStorage'
+import { persistWaitingRoomServerBackedHandoff } from '@src/components/common/waitingRoomHandoffUtils'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
@@ -78,6 +83,7 @@ interface RevealActivityRequestPayload {
   indices?: unknown
   stackRequests?: unknown
   standaloneEntry?: unknown
+  activityOptions?: unknown
 }
 
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
@@ -117,6 +123,7 @@ interface SyncDeckSoloOverlayRecord {
   activityId: string
   src?: string
   notice?: string
+  selectedOptions?: Record<string, string>
 }
 
 type SyncDeckSoloOverlaysMap = Record<string, SyncDeckSoloOverlayRecord>
@@ -131,7 +138,9 @@ interface SyncDeckSoloActivityRequest {
   standaloneEntry?: {
     enabled: boolean
     supportsDirectPath: boolean
+    supportsPermalink: boolean
   }
+  selectedOptions?: Record<string, string>
 }
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
@@ -237,6 +246,7 @@ function resolveSoloOverlaySlideKey(indices: { h: number; v: number }): string {
 function normalizeStandaloneEntryContract(value: unknown): {
   enabled: boolean
   supportsDirectPath: boolean
+  supportsPermalink: boolean
 } | null {
   if (!isPlainObject(value)) {
     return null
@@ -245,7 +255,25 @@ function normalizeStandaloneEntryContract(value: unknown): {
   return {
     enabled: value.enabled === true,
     supportsDirectPath: value.supportsDirectPath === true,
+    supportsPermalink: value.supportsPermalink === true,
   }
+}
+
+function normalizeSelectedOptions(value: unknown): Record<string, string> | undefined {
+  if (!isPlainObject(value)) {
+    return undefined
+  }
+
+  const entries = Object.entries(value)
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    .map(([key, optionValue]) => [key, optionValue.trim()] as const)
+    .filter(([, optionValue]) => optionValue.length > 0)
+
+  if (entries.length === 0) {
+    return undefined
+  }
+
+  return Object.fromEntries(entries)
 }
 
 export function resolveStudentSoloActivityRequestInputs(
@@ -275,11 +303,13 @@ export function resolveStudentSoloActivityRequestInputs(
     }
 
     const standaloneEntry = normalizeStandaloneEntryContract(request.standaloneEntry)
+    const selectedOptions = normalizeSelectedOptions(request.activityOptions)
 
     return {
       activityId,
       indices,
       ...(standaloneEntry ? { standaloneEntry } : {}),
+      ...(selectedOptions ? { selectedOptions } : {}),
     }
   }
 
@@ -327,20 +357,81 @@ export function resolveStudentSoloActivityRequest(
   return requests[0] ?? null
 }
 
+export function applyResolvedStandaloneEntryToSoloRequest(
+  request: SyncDeckSoloActivityRequest,
+  resolvedStandaloneEntry: SyncDeckSoloActivityRequest['standaloneEntry'] | null | undefined,
+): SyncDeckSoloActivityRequest {
+  if (request.standaloneEntry || !resolvedStandaloneEntry) {
+    return request
+  }
+
+  return {
+    ...request,
+    standaloneEntry: resolvedStandaloneEntry,
+  }
+}
+
+export function shouldRenderStudentOverlayNavigation(params: {
+  activeEmbeddedActivity: SyncDeckEmbeddedActivityRecord | null
+  activeSoloOverlay: SyncDeckSoloOverlayRecord | null
+}): boolean {
+  return params.activeEmbeddedActivity != null || params.activeSoloOverlay != null
+}
+
+export function getStudentOverlayBackdropClass(): string {
+  return 'bg-white'
+}
+
+export function buildStudentOverlayNavigationKeys(params: {
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap
+  soloOverlays: SyncDeckSoloOverlaysMap
+}): string[] {
+  const embeddedKeys = Object.keys(params.embeddedActivities)
+  const soloKeys = Object.entries(params.soloOverlays).flatMap(([slideKey, overlay]) => {
+    const activityId = overlay.activityId.trim()
+    return activityId.length > 0 ? [`${activityId}:${slideKey}`] : []
+  })
+
+  return [...new Set([...embeddedKeys, ...soloKeys])]
+}
+
+export function resolveCurrentSlideNavigationCapability(params: {
+  iframeCapability: boolean | null
+  capabilityIndices: { h: number; v: number; f: number } | null
+  currentIndices: { h: number; v: number; f: number } | null
+}): boolean | null {
+  if (!params.currentIndices || !params.capabilityIndices) {
+    return null
+  }
+
+  return params.capabilityIndices.h === params.currentIndices.h
+    && params.capabilityIndices.v === params.currentIndices.v
+    ? params.iframeCapability
+    : null
+}
+
 export function applyStudentSoloActivityRequest(
   current: SyncDeckSoloOverlaysMap,
   request: SyncDeckSoloActivityRequest,
 ): SyncDeckSoloOverlaysMap {
   const slideKey = resolveSoloOverlaySlideKey(request.indices)
-  const directStandaloneSupported = request.standaloneEntry
-    ? request.standaloneEntry.enabled && request.standaloneEntry.supportsDirectPath
+  const standaloneEntry = request.standaloneEntry
+  const supportsDirectStandalone = standaloneEntry
+    ? standaloneEntry.enabled && standaloneEntry.supportsDirectPath
     : true
+  const supportsActivityOwnedStandaloneLaunch = standaloneEntry?.enabled === true && standaloneEntry.supportsPermalink === true
 
-  const nextOverlay: SyncDeckSoloOverlayRecord = directStandaloneSupported
+  const nextOverlay: SyncDeckSoloOverlayRecord = supportsDirectStandalone
     ? {
       activityId: request.activityId,
       src: `/solo/${encodeURIComponent(request.activityId)}`,
     }
+    : supportsActivityOwnedStandaloneLaunch
+      ? {
+        activityId: request.activityId,
+        notice: 'Launching solo activity…',
+        ...(request.selectedOptions ? { selectedOptions: request.selectedOptions } : {}),
+      }
     : {
       activityId: request.activityId,
       notice: 'This activity requires a live session.',
@@ -350,6 +441,7 @@ export function applyStudentSoloActivityRequest(
     current[slideKey]?.activityId === nextOverlay.activityId
     && current[slideKey]?.src === nextOverlay.src
     && current[slideKey]?.notice === nextOverlay.notice
+    && JSON.stringify(current[slideKey]?.selectedOptions ?? null) === JSON.stringify(nextOverlay.selectedOptions ?? null)
   ) {
     return current
   }
@@ -1548,6 +1640,7 @@ const SyncDeckStudent: FC = () => {
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const [studentIndicesState, setStudentIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
   const [navigationCapabilities, setNavigationCapabilities] = useState<NavigationCapabilities | null>(null)
+  const [navigationCapabilityIndices, setNavigationCapabilityIndices] = useState<{ h: number; v: number; f: number } | null>(null)
   const [soloOverlays, setSoloOverlays] = useState<SyncDeckSoloOverlaysMap>({})
   const embeddedActivityIframeRef = useRef<HTMLIFrameElement | null>(null)
 
@@ -2033,9 +2126,29 @@ const SyncDeckStudent: FC = () => {
             lastInstructorIndicesRef.current,
           )
           if (currentSyncState === 'solo') {
-            const soloRequest = resolveStudentSoloActivityRequest(event.data.payload, localStudentIndicesRef.current)
-            if (soloRequest) {
-              setSoloOverlays((current) => applyStudentSoloActivityRequest(current, soloRequest))
+            const soloRequests = resolveStudentSoloActivityRequestInputs(event.data.payload, localStudentIndicesRef.current)
+            if (soloRequests.length > 0) {
+              void (async () => {
+                const { getActivity } = await import('@src/activities')
+                const resolvedRequests = soloRequests.map((soloRequest) => {
+                  const activity = getActivity(soloRequest.activityId)
+                  return applyResolvedStandaloneEntryToSoloRequest(
+                    soloRequest,
+                    activity?.standaloneEntry
+                      ? {
+                        enabled: activity.standaloneEntry.enabled === true,
+                        supportsDirectPath: activity.standaloneEntry.supportsDirectPath === true,
+                        supportsPermalink: activity.standaloneEntry.supportsPermalink === true,
+                      }
+                      : null,
+                  )
+                })
+
+                setSoloOverlays((current) => resolvedRequests.reduce(
+                  (nextOverlays, resolvedRequest) => applyStudentSoloActivityRequest(nextOverlays, resolvedRequest),
+                  current,
+                ))
+              })()
             }
           }
         }
@@ -2107,6 +2220,7 @@ const SyncDeckStudent: FC = () => {
       const capabilities = extractNavigationCapabilitiesFromStateMessage(event.data)
       if (capabilities) {
         setNavigationCapabilities(capabilities)
+        setNavigationCapabilityIndices(localIndices ?? localStudentIndicesRef.current)
       }
 
       if (!hasSeenIframeReadySignalRef.current && isRevealSyncMessage(event.data)) {
@@ -2373,6 +2487,10 @@ const SyncDeckStudent: FC = () => {
     suppressFallbackToInstructor: suppressFallbackToInstructorRef.current,
   })
   const embeddedActivityKeys = Object.keys(embeddedActivities)
+  const overlayNavigationKeys = buildStudentOverlayNavigationKeys({
+    embeddedActivities,
+    soloOverlays,
+  })
   const studentAnchoredInstanceKey = resolveStudentActiveEmbeddedInstanceKey(
     embeddedActivities,
     studentIndicesState,
@@ -2411,7 +2529,7 @@ const SyncDeckStudent: FC = () => {
     activeEmbeddedInstanceKey,
   })
   const overlayVerticalNavigationCapabilities = deriveEmbeddedOverlayVerticalNavigationCapabilities(
-    embeddedActivityKeys,
+    overlayNavigationKeys,
     overlayNavigationBaseIndices,
   )
   const canMoveBack =
@@ -2422,14 +2540,22 @@ const SyncDeckStudent: FC = () => {
   const canMoveUp =
     resolveEmbeddedOverlayVerticalMoveAllowed({
       direction: 'up',
-      iframeCapability: navigationCapabilities?.canGoUp ?? null,
+      iframeCapability: resolveCurrentSlideNavigationCapability({
+        iframeCapability: navigationCapabilities?.canGoUp ?? null,
+        capabilityIndices: navigationCapabilityIndices,
+        currentIndices: overlayNavigationBaseIndices,
+      }),
       derivedCapabilities: overlayVerticalNavigationCapabilities,
       fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v > 0 : false,
     })
   const canMoveDown =
     resolveEmbeddedOverlayVerticalMoveAllowed({
       direction: 'down',
-      iframeCapability: navigationCapabilities?.canGoDown ?? null,
+      iframeCapability: resolveCurrentSlideNavigationCapability({
+        iframeCapability: navigationCapabilities?.canGoDown ?? null,
+        capabilityIndices: navigationCapabilityIndices,
+        currentIndices: overlayNavigationBaseIndices,
+      }),
       derivedCapabilities: overlayVerticalNavigationCapabilities,
       fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false,
     })
@@ -2493,12 +2619,135 @@ const SyncDeckStudent: FC = () => {
   }, [soloOverlays, syncState])
 
   useEffect(() => {
+    if (syncState !== 'solo') {
+      return
+    }
+
+    const launchableEntries = Object.entries(soloOverlays).filter(([, overlay]) => {
+      return overlay.src == null && overlay.selectedOptions != null
+    })
+    if (launchableEntries.length === 0) {
+      return
+    }
+
+    let isCancelled = false
+
+    void (async () => {
+      const { launchActivityPersistentSoloEntry } = await import('@src/activities')
+
+      for (const [slideKey, overlay] of launchableEntries) {
+        if (isCancelled) {
+          return
+        }
+
+        const selectedOptions = overlay.selectedOptions
+        if (!selectedOptions) {
+          continue
+        }
+
+        try {
+          const launchResult = await launchActivityPersistentSoloEntry(overlay.activityId, {
+            hash: '',
+            search: '',
+            selectedOptions,
+          })
+
+          if (isCancelled || !launchResult) {
+            return
+          }
+
+          const nextSrc = typeof launchResult.navigateTo === 'string' && launchResult.navigateTo.length > 0
+            ? launchResult.navigateTo
+            : typeof launchResult.sessionId === 'string' && launchResult.sessionId.length > 0
+              ? `/${encodeURIComponent(launchResult.sessionId)}`
+              : null
+
+          if (
+            typeof window !== 'undefined'
+            && typeof launchResult.sessionId === 'string'
+            && launchResult.sessionId.length > 0
+            && registeredStudentName.trim().length > 0
+            && registeredStudentId.trim().length > 0
+          ) {
+            const launchedSessionId = launchResult.sessionId
+            persistSessionParticipantIdentity(
+              window.localStorage,
+              launchedSessionId,
+              registeredStudentName,
+              registeredStudentId,
+            )
+            void persistWaitingRoomServerBackedHandoff({
+              storage: window.sessionStorage,
+              storageKey: buildSessionEntryParticipantStorageKey(overlay.activityId, launchedSessionId),
+              values: {
+                displayName: registeredStudentName,
+                participantId: registeredStudentId,
+              },
+              submitApiUrl: buildSessionEntryParticipantSubmitApiUrl(launchedSessionId),
+              participantContextStorage: window.localStorage,
+              sessionParticipantContextSessionId: launchedSessionId,
+            })
+          }
+
+          setSoloOverlays((current) => {
+            const existing = current[slideKey]
+            if (!existing || existing.activityId !== overlay.activityId || existing.selectedOptions !== overlay.selectedOptions) {
+              return current
+            }
+
+            if (!nextSrc) {
+              return {
+                ...current,
+                [slideKey]: {
+                  activityId: overlay.activityId,
+                  notice: 'This activity requires a live session.',
+                },
+              }
+            }
+
+            return {
+              ...current,
+              [slideKey]: {
+                activityId: overlay.activityId,
+                src: nextSrc,
+              },
+            }
+          })
+        } catch {
+          if (isCancelled) {
+            return
+          }
+
+          setSoloOverlays((current) => {
+            const existing = current[slideKey]
+            if (!existing || existing.activityId !== overlay.activityId || existing.selectedOptions !== overlay.selectedOptions) {
+              return current
+            }
+
+            return {
+              ...current,
+              [slideKey]: {
+                activityId: overlay.activityId,
+                notice: 'Unable to launch this solo activity.',
+              },
+            }
+          })
+        }
+      }
+    })()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [soloOverlays, syncState])
+
+  useEffect(() => {
     sendSyncContextToEmbeddedIframe()
   }, [activeEmbeddedInstanceKey, sendSyncContextToEmbeddedIframe, studentIndicesState, syncState])
 
   const sendStudentOverlayNavigation = useCallback((direction: 'left' | 'right' | 'up' | 'down') => {
     const optimisticIndices = resolveOptimisticEmbeddedOverlayIndices(
-      Object.keys(embeddedActivities),
+      overlayNavigationKeys,
       overlayNavigationBaseIndices,
       direction,
     )
@@ -2528,7 +2777,7 @@ const SyncDeckStudent: FC = () => {
     }
   }, [
     activeEmbeddedInstanceKey,
-    embeddedActivities,
+    overlayNavigationKeys,
     overlayNavigationBaseIndices,
     sendPayloadToIframe,
     studentAnchoredInstanceKey,
@@ -2700,7 +2949,7 @@ const SyncDeckStudent: FC = () => {
               </div>
             </div>
           ) : (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/95 p-6">
+            <div className={`absolute inset-0 z-10 flex items-center justify-center ${getStudentOverlayBackdropClass()} p-6`}>
               <div className="max-w-lg rounded-lg border border-gray-300 bg-white p-4 shadow-sm space-y-3 text-center">
                 <h2 className="text-lg font-semibold text-gray-900">Solo Embedded Activity</h2>
                 <p className="text-sm text-gray-700">
@@ -2712,7 +2961,7 @@ const SyncDeckStudent: FC = () => {
         ) : null}
 
         {!activeEmbeddedActivity && showInstructorPendingActivityNotice ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/92 p-6">
+          <div className={`absolute inset-0 z-10 flex items-center justify-center ${getStudentOverlayBackdropClass()} p-6`}>
             <div className="max-w-lg rounded-lg border border-amber-300 bg-amber-50 p-4 shadow-sm space-y-3 text-center">
               <h2 className="text-lg font-semibold text-amber-900">Activity Is Starting</h2>
               <p className="text-sm text-amber-900">
@@ -2726,7 +2975,10 @@ const SyncDeckStudent: FC = () => {
           </div>
         ) : null}
 
-        {activeEmbeddedActivity || activeSoloOverlay?.src ? (
+        {shouldRenderStudentOverlayNavigation({
+          activeEmbeddedActivity,
+          activeSoloOverlay,
+        }) ? (
           <>
             <button
               type="button"

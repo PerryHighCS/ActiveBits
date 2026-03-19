@@ -7,9 +7,14 @@ import { toRevealCommandMessage } from './SyncDeckStudent.js'
 import { toRevealBoundaryCommandMessage } from './SyncDeckStudent.js'
 import { buildStudentRoleCommandMessage } from './SyncDeckStudent.js'
 import { buildStandaloneBootstrapCommandMessages } from './SyncDeckStudent.js'
+import { applyResolvedStandaloneEntryToSoloRequest } from './SyncDeckStudent.js'
+import { buildStudentOverlayNavigationKeys } from './SyncDeckStudent.js'
 import { buildStudentWebSocketUrl } from './SyncDeckStudent.js'
+import { getStudentOverlayBackdropClass } from './SyncDeckStudent.js'
+import { resolveCurrentSlideNavigationCapability } from './SyncDeckStudent.js'
 import { resolveConfiguredPresentationOrigin } from './SyncDeckStudent.js'
 import { resolveIframePostMessageTargetOrigin } from './SyncDeckStudent.js'
+import { shouldRenderStudentOverlayNavigation } from './SyncDeckStudent.js'
 import { shouldSuppressForwardInstructorSync } from './SyncDeckStudent.js'
 import { shouldResetBacktrackOptOutByMaxPosition } from './SyncDeckStudent.js'
 import { shouldEnableBacktrackOptOutOnLocalMove } from './SyncDeckStudent.js'
@@ -1511,17 +1516,17 @@ void test('resolveStudentSoloActivityRequestInputs parses primary and stack slid
     {
       activityId: 'raffle',
       indices: { h: 2, v: 0, f: 0 },
-      standaloneEntry: { enabled: true, supportsDirectPath: true },
+      standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false },
       stackRequests: [
         {
           activityId: 'video-sync',
           indices: { h: 2, v: 1, f: 0 },
-          standaloneEntry: { enabled: false, supportsDirectPath: false },
+          standaloneEntry: { enabled: false, supportsDirectPath: false, supportsPermalink: false },
         },
         {
           activityId: 'embedded-test',
           indices: { h: 2, v: 1, f: 0 },
-          standaloneEntry: { enabled: true, supportsDirectPath: true },
+          standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false },
         },
       ],
     },
@@ -1532,12 +1537,12 @@ void test('resolveStudentSoloActivityRequestInputs parses primary and stack slid
     {
       activityId: 'raffle',
       indices: { h: 2, v: 0, f: 0 },
-      standaloneEntry: { enabled: true, supportsDirectPath: true },
+      standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false },
     },
     {
       activityId: 'embedded-test',
       indices: { h: 2, v: 1, f: 0 },
-      standaloneEntry: { enabled: true, supportsDirectPath: true },
+      standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false },
     },
   ])
 })
@@ -1551,7 +1556,7 @@ void test('resolveStudentSoloActivityRequest prefers request matching current st
         {
           activityId: 'embedded-test',
           indices: { h: 2, v: 1, f: 0 },
-          standaloneEntry: { enabled: true, supportsDirectPath: true },
+          standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false },
         },
       ],
     },
@@ -1561,7 +1566,7 @@ void test('resolveStudentSoloActivityRequest prefers request matching current st
   assert.deepEqual(request, {
     activityId: 'embedded-test',
     indices: { h: 2, v: 1, f: 0 },
-    standaloneEntry: { enabled: true, supportsDirectPath: true },
+    standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false },
   })
 })
 
@@ -1569,7 +1574,7 @@ void test('resolveStudentSoloActivityRequestInputs falls back to provided studen
   const requests = resolveStudentSoloActivityRequestInputs(
     {
       activityId: 'embedded-test',
-      standaloneEntry: { enabled: true, supportsDirectPath: true },
+      standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false },
     },
     { h: 6, v: 0, f: 0 },
   )
@@ -1578,7 +1583,7 @@ void test('resolveStudentSoloActivityRequestInputs falls back to provided studen
     {
       activityId: 'embedded-test',
       indices: { h: 6, v: 0, f: 0 },
-      standaloneEntry: { enabled: true, supportsDirectPath: true },
+      standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false },
     },
   ])
 })
@@ -1589,7 +1594,7 @@ void test('applyStudentSoloActivityRequest creates direct standalone overlay whe
     {
       activityId: 'embedded-test',
       indices: { h: 4, v: 0, f: 0 },
-      standaloneEntry: { enabled: true, supportsDirectPath: true },
+      standaloneEntry: { enabled: true, supportsDirectPath: true, supportsPermalink: false },
     },
   )
 
@@ -1601,18 +1606,72 @@ void test('applyStudentSoloActivityRequest creates direct standalone overlay whe
   })
 })
 
-void test('applyStudentSoloActivityRequest falls back to live-session notice when request metadata does not support direct solo path', () => {
+void test('applyStudentSoloActivityRequest keeps selectedOptions for permalink-capable standalone launch', () => {
   const overlays = applyStudentSoloActivityRequest(
     {},
     {
       activityId: 'video-sync',
       indices: { h: 5, v: 0, f: 0 },
-      standaloneEntry: { enabled: false, supportsDirectPath: false },
+      standaloneEntry: { enabled: true, supportsDirectPath: false, supportsPermalink: true },
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
     },
   )
 
   assert.deepEqual(overlays, {
     '5:0': {
+      activityId: 'video-sync',
+      notice: 'Launching solo activity…',
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
+    },
+  })
+})
+
+void test('applyResolvedStandaloneEntryToSoloRequest fills missing slide metadata from activity registry config', () => {
+  const resolved = applyResolvedStandaloneEntryToSoloRequest(
+    {
+      activityId: 'video-sync',
+      indices: { h: 5, v: 0, f: 0 },
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
+    },
+    {
+      enabled: true,
+      supportsDirectPath: false,
+      supportsPermalink: true,
+    },
+  )
+
+  assert.deepEqual(resolved, {
+    activityId: 'video-sync',
+    indices: { h: 5, v: 0, f: 0 },
+    selectedOptions: {
+      sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+    },
+    standaloneEntry: {
+      enabled: true,
+      supportsDirectPath: false,
+      supportsPermalink: true,
+    },
+  })
+})
+
+void test('applyStudentSoloActivityRequest falls back to live-session notice when request metadata does not support standalone launch', () => {
+  const overlays = applyStudentSoloActivityRequest(
+    {},
+    {
+      activityId: 'video-sync',
+      indices: { h: 5, v: 1, f: 0 },
+      standaloneEntry: { enabled: false, supportsDirectPath: false, supportsPermalink: false },
+    },
+  )
+
+  assert.deepEqual(overlays, {
+    '5:1': {
       activityId: 'video-sync',
       notice: 'This activity requires a live session.',
     },
@@ -1623,7 +1682,10 @@ void test('applyStudentSoloActivityRequest returns same map reference when overl
   const current = {
     '5:0': {
       activityId: 'video-sync',
-      notice: 'This activity requires a live session.',
+      notice: 'Launching solo activity…',
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
     },
   }
 
@@ -1632,9 +1694,75 @@ void test('applyStudentSoloActivityRequest returns same map reference when overl
     {
       activityId: 'video-sync',
       indices: { h: 5, v: 0, f: 0 },
-      standaloneEntry: { enabled: false, supportsDirectPath: false },
+      standaloneEntry: { enabled: true, supportsDirectPath: false, supportsPermalink: true },
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
     },
   )
 
   assert.equal(next, current)
+})
+
+void test('shouldRenderStudentOverlayNavigation keeps controls available for notice-only solo overlays', () => {
+  assert.equal(
+    shouldRenderStudentOverlayNavigation({
+      activeEmbeddedActivity: null,
+      activeSoloOverlay: {
+        activityId: 'video-sync',
+        notice: 'This activity requires a live session.',
+      },
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldRenderStudentOverlayNavigation({
+      activeEmbeddedActivity: null,
+      activeSoloOverlay: null,
+    }),
+    false,
+  )
+})
+
+void test('getStudentOverlayBackdropClass keeps fullscreen overlays opaque', () => {
+  assert.equal(getStudentOverlayBackdropClass(), 'bg-white')
+})
+
+void test('buildStudentOverlayNavigationKeys includes solo-overlay slide anchors for vertical stacks', () => {
+  assert.deepEqual(
+    buildStudentOverlayNavigationKeys({
+      embeddedActivities: {},
+      soloOverlays: {
+        '2:0': { activityId: 'embedded-test', src: '/solo/embedded-test' },
+        '2:1': { activityId: 'raffle', notice: 'Launching solo activity…' },
+        '2:2': { activityId: 'algorithm-demo', notice: 'This activity requires a live session.' },
+      },
+    }),
+    [
+      'embedded-test:2:0',
+      'raffle:2:1',
+      'algorithm-demo:2:2',
+    ],
+  )
+})
+
+void test('resolveCurrentSlideNavigationCapability ignores stale iframe navigation from a different slide', () => {
+  assert.equal(
+    resolveCurrentSlideNavigationCapability({
+      iframeCapability: false,
+      capabilityIndices: { h: 2, v: 0, f: 0 },
+      currentIndices: { h: 2, v: 1, f: 0 },
+    }),
+    null,
+  )
+
+  assert.equal(
+    resolveCurrentSlideNavigationCapability({
+      iframeCapability: true,
+      capabilityIndices: { h: 2, v: 1, f: 0 },
+      currentIndices: { h: 2, v: 1, f: 0 },
+    }),
+    true,
+  )
 })

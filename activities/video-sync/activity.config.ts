@@ -6,9 +6,9 @@ const videoSyncConfig: ActivityConfig = {
   description: 'Synchronized YouTube playback for whole-class instruction',
   color: 'rose',
   standaloneEntry: {
-    enabled: false,
+    enabled: true,
     supportsDirectPath: false,
-    supportsPermalink: false,
+    supportsPermalink: true,
     showOnHome: false,
   },
   waitingRoom: {

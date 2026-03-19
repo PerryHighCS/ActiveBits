@@ -17,13 +17,17 @@ export function resolveEmbeddedOverlayVerticalMoveAllowed(params: {
   derivedCapabilities: EmbeddedOverlayVerticalNavigationCapabilities | null
   fallbackAllowed: boolean
 }): boolean {
+  if (params.iframeCapability != null) {
+    return params.iframeCapability
+  }
+
   if (params.derivedCapabilities) {
     return params.direction === 'up'
       ? params.derivedCapabilities.canGoUp
       : params.derivedCapabilities.canGoDown
   }
 
-  return params.iframeCapability === true || params.fallbackAllowed
+  return params.fallbackAllowed
 }
 
 interface EmbeddedOverlayAnchor {

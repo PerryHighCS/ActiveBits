@@ -42,11 +42,13 @@ interface VideoSyncTelemetry {
 
 interface VideoSyncSessionData extends Record<string, unknown> {
   instructorPasscode: string
+  standaloneMode: boolean
   state: VideoSyncState
   telemetry: VideoSyncTelemetry
 }
 
 interface PublicVideoSyncSessionData {
+  standaloneMode: boolean
   state: VideoSyncState
   telemetry: VideoSyncTelemetry
 }
@@ -112,6 +114,7 @@ interface ConfigBody {
   instructorPasscode?: unknown
   sourceUrl?: unknown
   stopSec?: unknown
+  standaloneMode?: unknown
 }
 
 interface EventBody {
@@ -872,6 +875,7 @@ function normalizeVideoSyncSessionData(session: SessionRecord): {
   const normalized: VideoSyncSessionData = {
     ...rawData,
     instructorPasscode: normalizeInstructorPasscode(rawData.instructorPasscode) ?? createInstructorPasscode(),
+    standaloneMode: rawData.standaloneMode === true,
     state,
     telemetry,
   }
@@ -890,6 +894,7 @@ function ensureVideoSyncSessionData(session: SessionRecord): VideoSyncSessionDat
 
 function toPublicSessionData(data: VideoSyncSessionData): PublicVideoSyncSessionData {
   return {
+    standaloneMode: data.standaloneMode,
     state: data.state,
     telemetry: data.telemetry,
   }
@@ -1188,6 +1193,15 @@ function readInstructorPasscode(body: unknown): string | null {
   return normalizeInstructorPasscode(body.instructorPasscode)
 }
 
+function readBooleanField(body: unknown, key: string): boolean | null {
+  if (!isPlainObject(body)) {
+    return null
+  }
+
+  const value = body[key]
+  return typeof value === 'boolean' ? value : null
+}
+
 export default function setupVideoSyncRoutes(
   app: VideoSyncRouteApp,
   sessions: VideoSyncSessionStore,
@@ -1307,10 +1321,11 @@ export default function setupVideoSyncRoutes(
     res.json({
       id: session.id,
       type: session.type,
-      data: {
+      data: toPublicSessionData({
+        ...data,
         state: projectedState,
         telemetry: projectedTelemetry,
-      },
+      }),
     })
   })
 
@@ -1345,6 +1360,7 @@ export default function setupVideoSyncRoutes(
     }
 
     const body = isPlainObject(req.body) ? (req.body as ConfigBody) : {}
+    const standaloneMode = readBooleanField(req.body, 'standaloneMode') === true
 
     if (typeof body.sourceUrl !== 'string' || body.sourceUrl.trim().length === 0) {
       data.telemetry.error = {
@@ -1417,6 +1433,7 @@ export default function setupVideoSyncRoutes(
       updatedBy: 'instructor',
       serverTimestampMs: now,
     }
+    data.standaloneMode = standaloneMode
     data.telemetry.error = { code: null, message: null }
     await updateConnectionTelemetry(sessions, data, sessionId)
 

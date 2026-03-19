@@ -1195,3 +1195,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/manageDashboardUtils.test.ts`
 - Follow-up action: If another browser-storage-backed bootstrap cache is added, give it the same prefix-scoped TTL/max-entry pruning path rather than relying on consume-time cleanup alone.
 - Owner: Codex
+
+- Date: 2026-03-19
+- Area: activities | standalone permalink launch
+- Discovery: Activities that support permalink solo entry but still need activity-owned setup should persist a `standaloneMode` flag on the created session and let the student client branch off that normalized public session data, instead of teaching shared routing about each activity’s solo runtime behavior.
+- Why it matters: This keeps waiting-room/shared entry code generic while still letting activities like SyncDeck and Video Sync disable live-sync plumbing and unlock their own standalone controls after the handoff.
+- Evidence: `activities/syncdeck/client/index.tsx`; `activities/syncdeck/server/routes.ts`; `activities/video-sync/client/index.ts`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/student/VideoSyncStudent.tsx`
+- Follow-up action: Reuse the same session-backed `standaloneMode` pattern for future permalink-only solo activities that need custom student runtime behavior after launch.
+- Owner: Codex

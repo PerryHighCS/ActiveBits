@@ -75,7 +75,7 @@ void test('deriveEmbeddedOverlayVerticalNavigationCapabilities disables down whe
   )
 })
 
-void test('resolveEmbeddedOverlayVerticalMoveAllowed prefers embedded anchor bounds over iframe vertical capability', () => {
+void test('resolveEmbeddedOverlayVerticalMoveAllowed prefers iframe slide-stack capability over activity-derived bounds', () => {
   assert.equal(
     resolveEmbeddedOverlayVerticalMoveAllowed({
       direction: 'down',
@@ -83,7 +83,7 @@ void test('resolveEmbeddedOverlayVerticalMoveAllowed prefers embedded anchor bou
       derivedCapabilities: { canGoUp: true, canGoDown: false },
       fallbackAllowed: true,
     }),
-    false,
+    true,
   )
 
   assert.equal(
@@ -93,16 +93,16 @@ void test('resolveEmbeddedOverlayVerticalMoveAllowed prefers embedded anchor bou
       derivedCapabilities: { canGoUp: true, canGoDown: false },
       fallbackAllowed: false,
     }),
-    true,
+    false,
   )
 })
 
-void test('resolveEmbeddedOverlayVerticalMoveAllowed falls back to iframe capability and local default when anchors are unavailable', () => {
+void test('resolveEmbeddedOverlayVerticalMoveAllowed falls back to derived bounds and local default when iframe capability is unavailable', () => {
   assert.equal(
     resolveEmbeddedOverlayVerticalMoveAllowed({
       direction: 'down',
-      iframeCapability: true,
-      derivedCapabilities: null,
+      iframeCapability: null,
+      derivedCapabilities: { canGoUp: false, canGoDown: true },
       fallbackAllowed: false,
     }),
     true,

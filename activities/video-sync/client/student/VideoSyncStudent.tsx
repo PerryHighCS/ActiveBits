@@ -35,6 +35,7 @@ interface VideoSyncStudentProps {
 
 interface SessionResponse {
   data?: {
+    standaloneMode?: boolean
     state?: VideoSyncState
   }
 }
@@ -140,6 +141,22 @@ const BLOCKED_STUDENT_OVERLAY_KEYS = new Set<string>([
 
 export function shouldBlockStudentOverlayKey(key: string): boolean {
   return BLOCKED_STUDENT_OVERLAY_KEYS.has(key)
+}
+
+export function buildStudentPlayerVars(isStandaloneSession: boolean): {
+  controls: 0 | 1
+  rel: 0
+  modestbranding: 1
+} {
+  return {
+    controls: isStandaloneSession ? 1 : 0,
+    rel: 0,
+    modestbranding: 1,
+  }
+}
+
+export function shouldRenderStudentInteractionOverlay(isStandaloneSession: boolean): boolean {
+  return !isStandaloneSession
 }
 
 export function resetUnsyncedPlaybackTelemetry(params: {
@@ -265,6 +282,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [playerReady, setPlayerReady] = useState(false)
   const [hasStartedInstructorPlayback, setHasStartedInstructorPlayback] = useState(false)
+  const [isStandaloneSession, setIsStandaloneSession] = useState(false)
   const [studentIdentity, setStudentIdentity] = useState<VideoSyncStudentIdentity>(() => ({
     studentName: 'Student',
     studentId: createStudentClientId(),
@@ -296,7 +314,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         const resolvedIdentity = await resolveInitialEntryParticipantIdentity({
           activityName: 'video-sync',
           sessionId,
-          isSoloSession: false,
+          isSoloSession: isStandaloneSession,
           localStorage: window.localStorage,
           sessionStorage: window.sessionStorage,
         })
@@ -320,7 +338,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     return () => {
       isCancelled = true
     }
-  }, [sessionId])
+  }, [isStandaloneSession, sessionId])
 
   const reportEvent = useCallback(async (
     eventType: 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'load-failure',
@@ -346,9 +364,21 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     const player = playerRef.current
     if (!player || !nextState.videoId) return
 
-    player.mute()
-
     const desiredPositionSec = computeDesiredPositionSec(nextState)
+    if (isStandaloneSession) {
+      if (loadedVideoIdRef.current !== nextState.videoId) {
+        syncLoadedVideoSource(player, {
+          ...nextState,
+          isPlaying: false,
+        }, desiredPositionSec)
+        loadedVideoIdRef.current = nextState.videoId
+      }
+      clearAutoplayCheckTimer(autoplayCheckTimerRef)
+      setAutoplayBlocked(false)
+      return
+    }
+
+    player.mute()
     const now = Date.now()
 
     if (loadedVideoIdRef.current !== nextState.videoId) {
@@ -415,7 +445,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       player.pauseVideo()
       setAutoplayBlocked(false)
     }
-  }, [reportEvent])
+  }, [isStandaloneSession, reportEvent])
 
   const buildWsUrl = useCallback(() => {
     if (!sessionId || typeof window === 'undefined') return null
@@ -425,7 +455,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: Boolean(sessionId),
+    shouldReconnect: Boolean(sessionId && !isStandaloneSession),
     attachSessionEndedHandler,
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
@@ -464,16 +494,14 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           width: '100%',
           height: '100%',
           host: 'https://www.youtube-nocookie.com',
-          playerVars: {
-            controls: 0,
-            rel: 0,
-            modestbranding: 1,
-          },
+          playerVars: buildStudentPlayerVars(isStandaloneSession),
           events: {
             onReady: () => {
               if (cancelled) return
               setPlayerReady(true)
-              player.mute()
+              if (!isStandaloneSession) {
+                player.mute()
+              }
             },
             onError: () => {
               if (cancelled) return
@@ -509,7 +537,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       playerRef.current?.destroy()
       playerRef.current = null
     }
-  }, [reportEvent, state.videoId])
+  }, [isStandaloneSession, reportEvent, state.videoId])
 
   useEffect(() => {
     if (!playerReady) return
@@ -522,10 +550,15 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       return
     }
 
+    if (isStandaloneSession) {
+      setHasStartedInstructorPlayback(true)
+      return
+    }
+
     if (hasInstructorPlaybackStarted(state)) {
       setHasStartedInstructorPlayback(true)
     }
-  }, [state])
+  }, [isStandaloneSession, state])
 
   useEffect(() => {
     if (!sessionId) return undefined
@@ -535,6 +568,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         const response = await fetch(`/api/video-sync/${sessionId}/session`)
         if (!response.ok) return
         const data = (await response.json()) as SessionResponse
+        setIsStandaloneSession(data.data?.standaloneMode === true)
         if (data.data?.state) {
           setState(data.data.state)
         }
@@ -544,10 +578,12 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     }
 
     void loadSession()
-    connect()
+    if (!isStandaloneSession) {
+      connect()
+    }
 
     return () => disconnect()
-  }, [sessionId, connect, disconnect])
+  }, [sessionId, isStandaloneSession, connect, disconnect])
 
   const retryAutoplay = (): void => {
     const player = playerRef.current
@@ -585,16 +621,18 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         </div>
       )}
 
-      <div
-        className="absolute inset-0 z-10 bg-transparent"
-        tabIndex={0}
-        aria-label="Synchronized playback is managed by the instructor"
-        onMouseDown={handleStudentOverlayPointer}
-        onClick={handleStudentOverlayPointer}
-        onKeyDown={handleStudentOverlayKeyDown}
-      />
+      {shouldRenderStudentInteractionOverlay(isStandaloneSession) ? (
+        <div
+          className="absolute inset-0 z-10 bg-transparent"
+          tabIndex={0}
+          aria-label="Synchronized playback is managed by the instructor"
+          onMouseDown={handleStudentOverlayPointer}
+          onClick={handleStudentOverlayPointer}
+          onKeyDown={handleStudentOverlayKeyDown}
+        />
+      ) : null}
 
-      {state.videoId && !hasStartedInstructorPlayback && (
+      {state.videoId && !isStandaloneSession && !hasStartedInstructorPlayback && (
         <div
           className="absolute inset-0 z-20 flex items-center justify-center bg-black"
           role="status"

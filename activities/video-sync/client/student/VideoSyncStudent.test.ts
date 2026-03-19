@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { buildStudentPlayerVars } from './VideoSyncStudent.js'
 import { clearAutoplayCheckTimer } from './VideoSyncStudent.js'
 import { finalizeVideoSyncStudentIdentity } from './VideoSyncStudent.js'
 import { getStudentPlaybackSyncAction } from './VideoSyncStudent.js'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
 import { resetUnsyncedPlaybackTelemetry } from './VideoSyncStudent.js'
+import { shouldRenderStudentInteractionOverlay } from './VideoSyncStudent.js'
 import { shouldCorrectStudentPlaybackDrift } from './VideoSyncStudent.js'
 import { shouldRunAutoplayCheck } from './VideoSyncStudent.js'
 import { syncLoadedVideoSource } from './VideoSyncStudent.js'
@@ -260,6 +262,24 @@ void test('shouldBlockStudentOverlayKey blocks other playback-related keys', () 
   assert.equal(shouldBlockStudentOverlayKey(' '), true)
   assert.equal(shouldBlockStudentOverlayKey('ArrowRight'), true)
   assert.equal(shouldBlockStudentOverlayKey('k'), true)
+})
+
+void test('buildStudentPlayerVars enables native controls for standalone sessions only', () => {
+  assert.deepEqual(buildStudentPlayerVars(false), {
+    controls: 0,
+    rel: 0,
+    modestbranding: 1,
+  })
+  assert.deepEqual(buildStudentPlayerVars(true), {
+    controls: 1,
+    rel: 0,
+    modestbranding: 1,
+  })
+})
+
+void test('shouldRenderStudentInteractionOverlay disables the blocking overlay in standalone mode', () => {
+  assert.equal(shouldRenderStudentInteractionOverlay(false), true)
+  assert.equal(shouldRenderStudentInteractionOverlay(true), false)
 })
 
 void test('shouldBlockStudentOverlayKey allows non-media keys to preserve keyboard navigation', () => {

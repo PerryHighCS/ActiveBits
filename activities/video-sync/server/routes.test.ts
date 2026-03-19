@@ -331,6 +331,7 @@ function createVideoSyncSession(id: string, instructorPasscode = TEST_INSTRUCTOR
     lastActivity: Date.now(),
     data: {
       instructorPasscode,
+      standaloneMode: false,
       state: {
         provider: 'youtube',
         videoId: '',
@@ -409,9 +410,37 @@ void test('session get route redacts instructor-only fields from public payload'
   assert.equal(payload.id, 's1')
   assert.equal(payload.type, 'video-sync')
   assert.ok(payload.data)
+  assert.equal(payload.data?.standaloneMode, false)
   assert.equal(typeof payload.data?.state, 'object')
   assert.equal(typeof payload.data?.telemetry, 'object')
   assert.equal('instructorPasscode' in (payload.data ?? {}), false)
+})
+
+void test('session get route includes standaloneMode for standalone sessions', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('s1')
+  ;(session.data as { standaloneMode: boolean }).standaloneMode = true
+  const storeState = createSessionStore({ s1: session })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const payload = res.body as {
+    data?: Record<string, unknown>
+  }
+  assert.equal(payload.data?.standaloneMode, true)
 })
 
 void test('session get route regenerates malformed persisted instructor passcodes', async () => {
@@ -1038,6 +1067,7 @@ void test('session patch normalizes youtube source and publishes extensible enve
   assert.equal('instructorPasscode' in (patchResponse.data ?? {}), false)
 
   const updated = storeState.store.s1?.data as Record<string, unknown>
+  assert.equal(updated.standaloneMode, false)
   const state = updated.state as Record<string, unknown>
   assert.equal(state.videoId, 'dQw4w9WgXcQ')
   assert.equal(state.startSec, 43)
@@ -1053,6 +1083,54 @@ void test('session patch normalizes youtube source and publishes extensible enve
   assert.equal(typeof message.timestamp, 'number')
   assert.equal(message.version, '1')
   assert.equal(typeof message.payload, 'object')
+})
+
+void test('session patch can mark a configured session as standalone', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
+        standaloneMode: true,
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  assert.equal(updated.standaloneMode, true)
+  assert.deepEqual(res.body, {
+    success: true,
+    data: {
+      standaloneMode: true,
+      state: {
+        provider: 'youtube',
+        videoId: 'dQw4w9WgXcQ',
+        startSec: 43,
+        stopSec: null,
+        positionSec: 43,
+        isPlaying: false,
+        playbackRate: 1,
+        updatedBy: 'instructor',
+        serverTimestampMs: updated.state != null && typeof updated.state === 'object'
+          ? (updated.state as { serverTimestampMs?: unknown }).serverTimestampMs
+          : undefined,
+      },
+      telemetry: updated.telemetry,
+    },
+  })
 })
 
 void test('session patch ignores partially numeric timestamp query values', async () => {
