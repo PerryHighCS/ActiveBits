@@ -4,6 +4,7 @@ import * as React from 'react'
 import { JSDOM } from 'jsdom'
 import type { SyncDeckPreflightResult } from '../shared/presentationPreflight.js'
 import { resolveSyncDeckPersistentLinkBuilderRequest } from './SyncDeckPersistentLinkBuilder.js'
+import { shouldCreateNewSyncDeckPersistentLinkFromTeacherCodeChange } from './SyncDeckPersistentLinkBuilder.js'
 
 ;(globalThis as { React?: typeof React }).React = React
 
@@ -85,6 +86,73 @@ void test('resolveSyncDeckPersistentLinkBuilderRequest creates a new link when e
         },
       },
     },
+  )
+})
+
+void test('resolveSyncDeckPersistentLinkBuilderRequest preserves entryPolicy when creating a new link from edit', () => {
+  assert.deepEqual(
+    resolveSyncDeckPersistentLinkBuilderRequest({
+      activityId: 'syncdeck',
+      normalizedTeacherCode: 'new-teacher-code',
+      normalizedPresentationUrl: 'http://localhost:3000/presentations/syncdeck-conversion-lab.html',
+      editState: {
+        hash: 'hash-123',
+        teacherCode: 'teacher-code',
+        entryPolicy: 'solo-allowed',
+        selectedOptions: {
+          presentationUrl: 'http://localhost:5173/presentations/syncdeck-conversion-lab.html',
+        },
+      },
+    }),
+    {
+      endpoint: '/api/persistent-session/create',
+      body: {
+        activityName: 'syncdeck',
+        teacherCode: 'new-teacher-code',
+        entryPolicy: 'solo-allowed',
+        selectedOptions: {
+          presentationUrl: 'http://localhost:3000/presentations/syncdeck-conversion-lab.html',
+        },
+      },
+    },
+  )
+})
+
+void test('shouldCreateNewSyncDeckPersistentLinkFromTeacherCodeChange only creates when prior code is known and changed', () => {
+  assert.equal(
+    shouldCreateNewSyncDeckPersistentLinkFromTeacherCodeChange({
+      normalizedTeacherCode: 'new-teacher-code',
+      editState: {
+        hash: 'hash-123',
+        teacherCode: 'teacher-code',
+        entryPolicy: 'instructor-required',
+      },
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldCreateNewSyncDeckPersistentLinkFromTeacherCodeChange({
+      normalizedTeacherCode: 'teacher-code',
+      editState: {
+        hash: 'hash-123',
+        teacherCode: 'teacher-code',
+        entryPolicy: 'instructor-required',
+      },
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldCreateNewSyncDeckPersistentLinkFromTeacherCodeChange({
+      normalizedTeacherCode: 'teacher-code',
+      editState: {
+        hash: 'hash-123',
+        teacherCode: '',
+        entryPolicy: 'instructor-required',
+      },
+    }),
+    false,
   )
 })
 

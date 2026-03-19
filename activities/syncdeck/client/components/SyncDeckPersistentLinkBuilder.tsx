@@ -25,6 +25,20 @@ function readSelectedPresentationUrl(value: Record<string, unknown> | null | und
   return presentationUrl
 }
 
+export function shouldCreateNewSyncDeckPersistentLinkFromTeacherCodeChange(params: {
+  normalizedTeacherCode: string
+  editState: ActivityPersistentLinkBuilderProps['editState']
+}): boolean {
+  const normalizedExistingTeacherCode = typeof params.editState?.teacherCode === 'string'
+    ? params.editState.teacherCode.trim()
+    : ''
+  const hasKnownExistingTeacherCode = normalizedExistingTeacherCode.length > 0
+
+  return Boolean(params.editState?.hash)
+    && hasKnownExistingTeacherCode
+    && params.normalizedTeacherCode !== normalizedExistingTeacherCode
+}
+
 export function resolveSyncDeckPersistentLinkBuilderRequest(params: {
   activityId: string
   normalizedTeacherCode: string
@@ -34,13 +48,10 @@ export function resolveSyncDeckPersistentLinkBuilderRequest(params: {
   endpoint: string
   body: Record<string, unknown>
 } {
-  const normalizedExistingTeacherCode = typeof params.editState?.teacherCode === 'string'
-    ? params.editState.teacherCode.trim()
-    : ''
-  const hasKnownExistingTeacherCode = normalizedExistingTeacherCode.length > 0
-  const shouldCreateNewLink = Boolean(params.editState?.hash)
-    && hasKnownExistingTeacherCode
-    && params.normalizedTeacherCode !== normalizedExistingTeacherCode
+  const shouldCreateNewLink = shouldCreateNewSyncDeckPersistentLinkFromTeacherCodeChange({
+    normalizedTeacherCode: params.normalizedTeacherCode,
+    editState: params.editState,
+  })
 
   if (params.editState?.hash && !shouldCreateNewLink) {
     return {
@@ -62,7 +73,7 @@ export function resolveSyncDeckPersistentLinkBuilderRequest(params: {
     body: {
       activityName: params.activityId,
       teacherCode: params.normalizedTeacherCode,
-      entryPolicy: 'instructor-required',
+      entryPolicy: params.editState?.entryPolicy ?? 'instructor-required',
       selectedOptions: {
         presentationUrl: params.normalizedPresentationUrl,
       },
@@ -108,9 +119,10 @@ export default function SyncDeckPersistentLinkBuilder({
 
   const normalizedPresentationUrl = presentationUrl.trim()
   const normalizedTeacherCode = teacherCode.trim()
-  const normalizedExistingTeacherCode = typeof editState?.teacherCode === 'string' ? editState.teacherCode.trim() : ''
-  const createsNewLinkFromTeacherCodeChange = isEditing
-    && normalizedTeacherCode !== normalizedExistingTeacherCode
+  const createsNewLinkFromTeacherCodeChange = shouldCreateNewSyncDeckPersistentLinkFromTeacherCodeChange({
+    normalizedTeacherCode,
+    editState,
+  })
   const presentationUrlError =
     normalizedPresentationUrl.length === 0
       ? 'Presentation URL is required'
