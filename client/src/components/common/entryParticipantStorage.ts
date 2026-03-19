@@ -30,6 +30,8 @@ export interface EntryParticipantFetchLike {
   }>
 }
 
+const pendingTokenConsumeRequests = new Map<string, Promise<EntryParticipantValueMap | null>>()
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -174,6 +176,37 @@ export function consumeEntryParticipantValues(
   return handoff.values
 }
 
+export function hasStoredEntryParticipantHandoff(
+  storage: EntryParticipantStorageLike,
+  storageKey: string,
+  onWarn: (message: string, error: unknown) => void = console.warn,
+): boolean {
+  return readEntryParticipantHandoff(storage, storageKey, onWarn) != null
+}
+
+export function hasEntryParticipantHandoffStorageValue(
+  storage: Pick<EntryParticipantStorageLike, 'getItem'>,
+  storageKey: string,
+): boolean {
+  return storage.getItem(storageKey) != null
+}
+
+export function hasValidEntryParticipantHandoffStorageValue(
+  storage: Pick<EntryParticipantStorageLike, 'getItem'>,
+  storageKey: string,
+): boolean {
+  const raw = storage.getItem(storageKey)
+  if (!raw) {
+    return false
+  }
+
+  try {
+    return isEntryParticipantHandoff(JSON.parse(raw) as unknown)
+  } catch {
+    return false
+  }
+}
+
 export function buildSessionEntryParticipantSubmitApiUrl(sessionId: string): string {
   return `/api/session/${encodeURIComponent(sessionId)}/entry-participant`
 }
@@ -219,7 +252,13 @@ export async function consumeResolvedEntryParticipantValues(
     return null
   }
 
-  try {
+  const pendingRequestKey = `${storageKey}:${handoff.token}`
+  const pendingRequest = pendingTokenConsumeRequests.get(pendingRequestKey)
+  if (pendingRequest) {
+    return pendingRequest
+  }
+
+  const requestPromise = (async () => {
     const apiUrl = isSoloSession
       ? (typeof handoff.persistentHash === 'string' && handoff.persistentHash.length > 0
         ? buildPersistentEntryParticipantConsumeApiUrl(handoff.persistentHash, activityName)
@@ -250,9 +289,14 @@ export async function consumeResolvedEntryParticipantValues(
     return normalizeEntryParticipantValues(
       isRecord(payload.values) ? payload.values : {},
     )
-  } catch {
+  })().catch(() => {
     return null
-  }
+  }).finally(() => {
+    pendingTokenConsumeRequests.delete(pendingRequestKey)
+  })
+
+  pendingTokenConsumeRequests.set(pendingRequestKey, requestPromise)
+  return requestPromise
 }
 
 export function getEntryParticipantDisplayName(values: EntryParticipantValueMap | null): string | null {

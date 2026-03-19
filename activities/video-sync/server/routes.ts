@@ -42,11 +42,13 @@ interface VideoSyncTelemetry {
 
 interface VideoSyncSessionData extends Record<string, unknown> {
   instructorPasscode: string
+  standaloneMode: boolean
   state: VideoSyncState
   telemetry: VideoSyncTelemetry
 }
 
 interface PublicVideoSyncSessionData {
+  standaloneMode: boolean
   state: VideoSyncState
   telemetry: VideoSyncTelemetry
 }
@@ -112,6 +114,7 @@ interface ConfigBody {
   instructorPasscode?: unknown
   sourceUrl?: unknown
   stopSec?: unknown
+  standaloneMode?: unknown
 }
 
 interface EventBody {
@@ -155,6 +158,11 @@ const unsyncedStudentPruneTimersBySession = new Map<string, ReturnType<typeof se
 interface CookieSessionEntry {
   key: string
   teacherCode: unknown
+}
+
+interface EmbeddedParentSessionContext {
+  parentSessionId: string
+  activityName: 'syncdeck'
 }
 
 function isInstructorRoleParam(role: string | null): boolean {
@@ -424,6 +432,25 @@ function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry
   }
 
   return []
+}
+
+function readEmbeddedParentSessionContext(data: unknown): EmbeddedParentSessionContext | null {
+  if (!isPlainObject(data)) {
+    return null
+  }
+
+  const parentSessionId = typeof data.embeddedParentSessionId === 'string'
+    ? data.embeddedParentSessionId.trim()
+    : ''
+
+  if (parentSessionId.length === 0) {
+    return null
+  }
+
+  return {
+    parentSessionId,
+    activityName: 'syncdeck',
+  }
 }
 
 function normalizeStudentId(value: unknown): string | null {
@@ -848,6 +875,7 @@ function normalizeVideoSyncSessionData(session: SessionRecord): {
   const normalized: VideoSyncSessionData = {
     ...rawData,
     instructorPasscode: normalizeInstructorPasscode(rawData.instructorPasscode) ?? createInstructorPasscode(),
+    standaloneMode: rawData.standaloneMode === true,
     state,
     telemetry,
   }
@@ -866,6 +894,7 @@ function ensureVideoSyncSessionData(session: SessionRecord): VideoSyncSessionDat
 
 function toPublicSessionData(data: VideoSyncSessionData): PublicVideoSyncSessionData {
   return {
+    standaloneMode: data.standaloneMode,
     state: data.state,
     telemetry: data.telemetry,
   }
@@ -1164,6 +1193,15 @@ function readInstructorPasscode(body: unknown): string | null {
   return normalizeInstructorPasscode(body.instructorPasscode)
 }
 
+function readBooleanField(body: unknown, key: string): boolean | null {
+  if (!isPlainObject(body)) {
+    return null
+  }
+
+  const value = body[key]
+  return typeof value === 'boolean' ? value : null
+}
+
 export default function setupVideoSyncRoutes(
   app: VideoSyncRouteApp,
   sessions: VideoSyncSessionStore,
@@ -1205,20 +1243,31 @@ export default function setupVideoSyncRoutes(
       return
     }
 
-    const persistentHash = await findHashBySessionId(sessionId)
-    if (!persistentHash) {
+    const directPersistentHash = await findHashBySessionId(sessionId)
+    const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
+    const recoveryActivityName = directPersistentHash
+      ? 'video-sync'
+      : embeddedParentContext?.activityName ?? null
+    const recoverySessionId = directPersistentHash
+      ? sessionId
+      : embeddedParentContext?.parentSessionId ?? null
+    const persistentHash = recoverySessionId
+      ? await findHashBySessionId(recoverySessionId)
+      : null
+
+    if (!persistentHash || !recoveryActivityName) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
       return
     }
 
     const sessionEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
-    const matchingEntry = sessionEntries.find((entry) => entry.key === `video-sync:${persistentHash}`)
+    const matchingEntry = sessionEntries.find((entry) => entry.key === `${recoveryActivityName}:${persistentHash}`)
     if (!matchingEntry) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
       return
     }
 
-    const verifiedTeacherCode = verifyTeacherCodeWithHash('video-sync', persistentHash, String(matchingEntry.teacherCode ?? ''))
+    const verifiedTeacherCode = verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, String(matchingEntry.teacherCode ?? ''))
     if (!verifiedTeacherCode.valid) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Instructor credential recovery is not available for this session' })
       return
@@ -1272,10 +1321,11 @@ export default function setupVideoSyncRoutes(
     res.json({
       id: session.id,
       type: session.type,
-      data: {
+      data: toPublicSessionData({
+        ...data,
         state: projectedState,
         telemetry: projectedTelemetry,
-      },
+      }),
     })
   })
 
@@ -1310,6 +1360,7 @@ export default function setupVideoSyncRoutes(
     }
 
     const body = isPlainObject(req.body) ? (req.body as ConfigBody) : {}
+    const requestedStandaloneMode = readBooleanField(req.body, 'standaloneMode')
 
     if (typeof body.sourceUrl !== 'string' || body.sourceUrl.trim().length === 0) {
       data.telemetry.error = {
@@ -1381,6 +1432,9 @@ export default function setupVideoSyncRoutes(
       playbackRate: 1,
       updatedBy: 'instructor',
       serverTimestampMs: now,
+    }
+    if (requestedStandaloneMode != null) {
+      data.standaloneMode = requestedStandaloneMode
     }
     data.telemetry.error = { code: null, message: null }
     await updateConnectionTelemetry(sessions, data, sessionId)

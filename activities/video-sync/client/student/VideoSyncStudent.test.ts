@@ -1,16 +1,21 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { buildStudentPlayerVars } from './VideoSyncStudent.js'
 import { clearAutoplayCheckTimer } from './VideoSyncStudent.js'
 import { finalizeVideoSyncStudentIdentity } from './VideoSyncStudent.js'
 import { getStudentPlaybackSyncAction } from './VideoSyncStudent.js'
 import { hasInstructorPlaybackStarted } from './VideoSyncStudent.js'
 import { reportVideoSyncStudentEvent } from './VideoSyncStudent.js'
 import { resetUnsyncedPlaybackTelemetry } from './VideoSyncStudent.js'
+import { shouldRenderStudentInteractionOverlay } from './VideoSyncStudent.js'
 import { shouldCorrectStudentPlaybackDrift } from './VideoSyncStudent.js'
 import { shouldRunAutoplayCheck } from './VideoSyncStudent.js'
 import { syncLoadedVideoSource } from './VideoSyncStudent.js'
 import { shouldInitializeYoutubePlayer } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
+import { shouldConnectVideoSyncStudentRealtime } from './VideoSyncStudent.js'
+import { getVideoSyncStudentIdentityLookup } from './VideoSyncStudent.js'
+import { getVideoSyncStudentSessionModeResetState } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
 import type { YoutubePlayerLike } from '../youtubeIframeApi.js'
 
@@ -256,10 +261,64 @@ void test('shouldBlockStudentOverlayKey allows Tab and Escape so focus is not tr
   assert.equal(shouldBlockStudentOverlayKey('Escape'), false)
 })
 
+void test('shouldConnectVideoSyncStudentRealtime waits for session mode resolution and skips standalone sessions', () => {
+  assert.equal(shouldConnectVideoSyncStudentRealtime({
+    sessionId: 'session-1',
+    isStandaloneSession: false,
+    isSessionModeResolved: false,
+  }), false)
+  assert.equal(shouldConnectVideoSyncStudentRealtime({
+    sessionId: 'session-1',
+    isStandaloneSession: true,
+    isSessionModeResolved: true,
+  }), false)
+  assert.equal(shouldConnectVideoSyncStudentRealtime({
+    sessionId: 'session-1',
+    isStandaloneSession: false,
+    isSessionModeResolved: true,
+  }), true)
+})
+
+void test('getVideoSyncStudentIdentityLookup keeps standalone session handoff on the session-backed path', () => {
+  assert.deepEqual(getVideoSyncStudentIdentityLookup('session-1'), {
+    sessionId: 'session-1',
+    isSoloSession: false,
+  })
+  assert.deepEqual(getVideoSyncStudentIdentityLookup(null), {
+    isSoloSession: false,
+  })
+})
+
+void test('getVideoSyncStudentSessionModeResetState clears stale standalone mode and load errors on session changes', () => {
+  assert.deepEqual(getVideoSyncStudentSessionModeResetState(), {
+    isStandaloneSession: false,
+    isSessionModeResolved: false,
+    errorMessage: null,
+  })
+})
+
 void test('shouldBlockStudentOverlayKey blocks other playback-related keys', () => {
   assert.equal(shouldBlockStudentOverlayKey(' '), true)
   assert.equal(shouldBlockStudentOverlayKey('ArrowRight'), true)
   assert.equal(shouldBlockStudentOverlayKey('k'), true)
+})
+
+void test('buildStudentPlayerVars enables native controls for standalone sessions only', () => {
+  assert.deepEqual(buildStudentPlayerVars(false), {
+    controls: 0,
+    rel: 0,
+    modestbranding: 1,
+  })
+  assert.deepEqual(buildStudentPlayerVars(true), {
+    controls: 1,
+    rel: 0,
+    modestbranding: 1,
+  })
+})
+
+void test('shouldRenderStudentInteractionOverlay disables the blocking overlay in standalone mode', () => {
+  assert.equal(shouldRenderStudentInteractionOverlay(false), true)
+  assert.equal(shouldRenderStudentInteractionOverlay(true), false)
 })
 
 void test('shouldBlockStudentOverlayKey allows non-media keys to preserve keyboard navigation', () => {

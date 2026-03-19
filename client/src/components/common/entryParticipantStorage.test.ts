@@ -14,6 +14,8 @@ import {
   consumeEntryParticipantValues,
   getEntryParticipantDisplayName,
   getEntryParticipantParticipantId,
+  hasEntryParticipantHandoffStorageValue,
+  hasValidEntryParticipantHandoffStorageValue,
   persistEntryParticipantToken,
   persistEntryParticipantValues,
   type EntryParticipantStorageLike,
@@ -104,6 +106,48 @@ void test('consumeEntryParticipantValues drops malformed payloads after removing
   )
   assert.equal(storage.getItem(storageKey), null)
   assert.equal(warnings.length, 1)
+})
+
+void test('hasEntryParticipantHandoffStorageValue is a pure presence check and does not clean malformed storage', () => {
+  const storage = createStorage()
+  const storageKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-presence')
+
+  storage.setItem(storageKey, '{not-json')
+
+  assert.equal(hasEntryParticipantHandoffStorageValue(storage, storageKey), true)
+  assert.equal(storage.getItem(storageKey), '{not-json')
+})
+
+void test('hasValidEntryParticipantHandoffStorageValue returns false for malformed or invalid payloads without cleaning storage', () => {
+  const storage = createStorage()
+  const malformedKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-invalid-json')
+  const wrongShapeKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-wrong-shape')
+
+  storage.setItem(malformedKey, '{not-json')
+  storage.setItem(wrongShapeKey, JSON.stringify({ nope: true }))
+
+  assert.equal(hasValidEntryParticipantHandoffStorageValue(storage, malformedKey), false)
+  assert.equal(hasValidEntryParticipantHandoffStorageValue(storage, wrongShapeKey), false)
+  assert.equal(storage.getItem(malformedKey), '{not-json')
+  assert.equal(storage.getItem(wrongShapeKey), JSON.stringify({ nope: true }))
+})
+
+void test('hasValidEntryParticipantHandoffStorageValue returns true for valid handoff payloads', () => {
+  const storage = createStorage()
+  const valuesKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-values')
+  const tokenKey = buildEntryParticipantStorageKey('java-string-practice', 'session', 'session-token')
+
+  storage.setItem(valuesKey, JSON.stringify({
+    kind: 'values',
+    values: { displayName: 'Ada' },
+  }))
+  storage.setItem(tokenKey, JSON.stringify({
+    kind: 'token',
+    token: 'token-123',
+  }))
+
+  assert.equal(hasValidEntryParticipantHandoffStorageValue(storage, valuesKey), true)
+  assert.equal(hasValidEntryParticipantHandoffStorageValue(storage, tokenKey), true)
 })
 
 void test('getEntryParticipantDisplayName returns trimmed display names only', () => {
@@ -288,6 +332,79 @@ void test('consumeResolvedEntryParticipantValues only calls the server consume e
 
   assert.equal(requestCount, 1)
   assert.deepEqual(values, {
+    displayName: 'Ada',
+    participantId: 'participant-1',
+  })
+  assert.equal(storage.getItem(storageKey), null)
+})
+
+void test('consumeResolvedEntryParticipantValues deduplicates concurrent token consume requests', async () => {
+  const storage = createStorage()
+  const storageKey = buildSessionEntryParticipantStorageKey('java-string-practice', 'session-5b')
+  persistEntryParticipantToken(storage, storageKey, 'token-concurrent')
+
+  let requestCount = 0
+  let releaseFetchGate: () => void = () => {}
+  const fetchGate = new Promise<void>((resolve) => {
+    releaseFetchGate = () => {
+      resolve()
+    }
+  })
+
+  const consumeA = consumeResolvedEntryParticipantValues(
+    storage,
+    {
+      activityName: 'java-string-practice',
+      sessionId: 'session-5b',
+      isSoloSession: false,
+    },
+    async () => {
+      requestCount += 1
+      await fetchGate
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            values: {
+              displayName: 'Ada',
+              participantId: 'participant-1',
+            },
+          }
+        },
+      }
+    },
+  )
+
+  const consumeB = consumeResolvedEntryParticipantValues(
+    storage,
+    {
+      activityName: 'java-string-practice',
+      sessionId: 'session-5b',
+      isSoloSession: false,
+    },
+    async () => {
+      requestCount += 1
+      return {
+        ok: false,
+        status: 404,
+        async json() {
+          return {}
+        },
+      }
+    },
+  )
+
+  releaseFetchGate()
+
+  const [valuesA, valuesB] = await Promise.all([consumeA, consumeB])
+
+  assert.equal(requestCount, 1)
+  assert.deepEqual(valuesA, {
+    displayName: 'Ada',
+    participantId: 'participant-1',
+  })
+  assert.deepEqual(valuesB, {
     displayName: 'Ada',
     participantId: 'participant-1',
   })

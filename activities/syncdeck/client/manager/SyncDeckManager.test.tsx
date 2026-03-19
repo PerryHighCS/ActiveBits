@@ -22,6 +22,21 @@ import { validatePresentationUrl } from './SyncDeckManager.js'
 import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
 import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
 import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
+import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
+import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
+import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
+import { resolveManagerEmbeddedInstanceStatus } from './SyncDeckManager.js'
+import { buildManagerOverlayNavigationCommand } from './SyncDeckManager.js'
+import { buildManagerOverlaySetStateCommand } from './SyncDeckManager.js'
+import { buildManagerResyncCommandForInstanceKey } from './SyncDeckManager.js'
+import { resolveManagerOverlayNavigationBaseIndices } from './SyncDeckManager.js'
+import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
+import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
+import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
+import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
+import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
+import { activitySupportsEmbeddedReport } from './SyncDeckManager.js'
+import { parseDownloadFilenameFromContentDisposition } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -45,8 +60,10 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   )
 
   assert.match(html, /Join Code:/i)
+  assert.match(html, /Running activities:/i)
   assert.match(html, /session-123/i)
   assert.match(html, /Copy Join URL/i)
+  assert.match(html, /Download Session Report/i)
   assert.match(html, /End Session/i)
   assert.match(html, /Force sync students to current position/i)
   assert.match(html, /Disable instructor sync/i)
@@ -55,6 +72,8 @@ void test('SyncDeckManager shows the active session id when provided', () => {
   assert.match(html, /Toggle chalkboard screen/i)
   assert.match(html, /Toggle pen overlay/i)
   assert.match(html, /Configure Presentation/i)
+  assert.match(html, /Activities/i)
+  assert.match(html, /aria-controls="syncdeck-activity-picker-panel"/i)
   assert.match(html, /Presentation URL/i)
   assert.match(html, /Presentation URL is required/i)
   assert.match(html, /aria-invalid="true"/i)
@@ -73,6 +92,29 @@ void test('SyncDeckManager pre-fills presentation URL from query params', () => 
   )
 
   assert.match(html, /value="https:\/\/slides\.example\/deck"/i)
+})
+
+void test('activitySupportsEmbeddedReport reflects shared activity config metadata', () => {
+  const entries = resolveSyncDeckActivityPickerEntries([
+    { id: 'gallery-walk', name: 'Gallery Walk', description: 'Peer feedback', reportEndpoint: '/api/gallery-walk/:sessionId/report' },
+    { id: 'video-sync', name: 'Video Sync', description: 'Shared video' },
+  ])
+
+  assert.equal(activitySupportsEmbeddedReport('gallery-walk', entries), true)
+  assert.equal(activitySupportsEmbeddedReport('video-sync', entries), false)
+  assert.equal(activitySupportsEmbeddedReport('missing-activity', entries), false)
+})
+
+void test('parseDownloadFilenameFromContentDisposition handles standard and utf-8 filenames', () => {
+  assert.equal(
+    parseDownloadFilenameFromContentDisposition('attachment; filename="critique-day.html"'),
+    'critique-day.html',
+  )
+  assert.equal(
+    parseDownloadFilenameFromContentDisposition("attachment; filename*=UTF-8''critique%20day.html"),
+    'critique day.html',
+  )
+  assert.equal(parseDownloadFilenameFromContentDisposition(null), null)
 })
 
 void test('validatePresentationUrl rejects empty and whitespace-only values', () => {
@@ -182,6 +224,16 @@ void test('evaluateRestoreSuppressionForOutboundState drops and releases when re
   })
 
   assert.deepEqual(result, { shouldDrop: true, shouldRelease: true })
+})
+
+void test('evaluateRestoreSuppressionForOutboundState keeps suppression armed when outbound state is ahead of target', () => {
+  const result = evaluateRestoreSuppressionForOutboundState({
+    suppressOutboundUntilRestore: true,
+    restoreTargetIndices: { h: 2, v: 0, f: 0 },
+    instructorIndices: { h: 3, v: 0, f: 0 },
+  })
+
+  assert.deepEqual(result, { shouldDrop: true, shouldRelease: false })
 })
 
 void test('buildClearBoundaryCommandMessage emits clearBoundary command', () => {
@@ -308,6 +360,208 @@ void test('extractSyncDeckStatePayload ignores non-syncdeck-state message', () =
   })
 
   assert.equal(extracted, null)
+})
+
+void test('normalizeSyncDeckEmbeddedActivities filters invalid records', () => {
+  const normalized = normalizeSyncDeckEmbeddedActivities({
+    'video-sync:3:0': {
+      childSessionId: 'CHILD:s1:abc12:video-sync',
+      activityId: 'video-sync',
+      startedAt: 123,
+      owner: 'syncdeck-instructor',
+    },
+    bad: {
+      childSessionId: '',
+      activityId: 'video-sync',
+    },
+  })
+
+  assert.deepEqual(Object.keys(normalized), ['video-sync:3:0'])
+  assert.equal(normalized['video-sync:3:0']?.activityId, 'video-sync')
+})
+
+void test('applySyncDeckEmbeddedLifecyclePayload applies start and end lifecycle updates', () => {
+  const started = applySyncDeckEmbeddedLifecyclePayload(
+    {},
+    {
+      type: 'embedded-activity-start',
+      instanceKey: 'video-sync:3:0',
+      activityId: 'video-sync',
+      childSessionId: 'CHILD:s1:abc12:video-sync',
+    },
+  )
+
+  assert.equal(started['video-sync:3:0']?.childSessionId, 'CHILD:s1:abc12:video-sync')
+
+  const ended = applySyncDeckEmbeddedLifecyclePayload(
+    started,
+    {
+      type: 'embedded-activity-end',
+      instanceKey: 'video-sync:3:0',
+      childSessionId: 'CHILD:s1:abc12:video-sync',
+    },
+  )
+
+  assert.deepEqual(ended, {})
+})
+
+void test('resolveManagerActiveEmbeddedInstanceKey picks instance anchored to current slide position', () => {
+  const selected = resolveManagerActiveEmbeddedInstanceKey(
+    {
+      'video-sync:2:0': {
+        childSessionId: 'CHILD:s1:abc12:video-sync',
+        activityId: 'video-sync',
+        startedAt: 100,
+        owner: 'syncdeck-instructor',
+      },
+      'embedded-test:3:1': {
+        childSessionId: 'CHILD:s1:abc13:embedded-test',
+        activityId: 'embedded-test',
+        startedAt: 200,
+        owner: 'syncdeck-instructor',
+      },
+    },
+    { h: 3, v: 1, f: 0 },
+  )
+
+  assert.equal(selected, 'embedded-test:3:1')
+})
+
+void test('resolveManagerEmbeddedInstanceStatus marks only selected instance as active', () => {
+  assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'video-sync:3:0'), 'active')
+  assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'embedded-test:3:0'), 'idle')
+  assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', null), 'idle')
+})
+
+void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for four directions and slide', () => {
+  const left = buildManagerOverlayNavigationCommand('left') as { payload?: { name?: unknown } }
+  const right = buildManagerOverlayNavigationCommand('right') as { payload?: { name?: unknown } }
+  const up = buildManagerOverlayNavigationCommand('up') as { payload?: { name?: unknown } }
+  const down = buildManagerOverlayNavigationCommand('down') as { payload?: { name?: unknown } }
+  const slide = buildManagerOverlayNavigationCommand('slide') as { payload?: { name?: unknown } }
+
+  assert.equal(left.payload?.name, 'left')
+  assert.equal(right.payload?.name, 'right')
+  assert.equal(up.payload?.name, 'up')
+  assert.equal(down.payload?.name, 'down')
+  assert.equal(slide.payload?.name, 'slide')
+})
+
+void test('buildManagerOverlaySetStateCommand builds a setState envelope with explicit indices', () => {
+  const command = buildManagerOverlaySetStateCommand({ h: 3, v: 1, f: 0 }) as {
+    payload?: { name?: unknown; payload?: { state?: { indexh?: unknown; indexv?: unknown; indexf?: unknown } } }
+  }
+
+  assert.equal(command.payload?.name, 'setState')
+  assert.deepEqual(command.payload?.payload?.state, {
+    indexh: 3,
+    indexv: 1,
+    indexf: 0,
+  })
+})
+
+void test('buildManagerResyncCommandForInstanceKey builds setState for anchored instance key', () => {
+  const command = buildManagerResyncCommandForInstanceKey('embedded-test:2:0') as {
+    payload?: { name?: unknown; payload?: { state?: { indexh?: unknown; indexv?: unknown; indexf?: unknown } } }
+  }
+
+  assert.equal(command.payload?.name, 'setState')
+  assert.deepEqual(command.payload?.payload?.state, {
+    indexh: 2,
+    indexv: 0,
+    indexf: 0,
+  })
+})
+
+void test('buildManagerResyncCommandForInstanceKey ignores non-anchored instance key', () => {
+  const command = buildManagerResyncCommandForInstanceKey('embedded-test:global')
+  assert.equal(command, null)
+})
+
+void test('resolveManagerOverlayNavigationBaseIndices falls back to active embedded anchor when current indices are unavailable', () => {
+  assert.deepEqual(
+    resolveManagerOverlayNavigationBaseIndices({
+      currentIndices: null,
+      activeEmbeddedInstanceKey: 'embedded-test:2:1',
+    }),
+    { h: 2, v: 1, f: 0 },
+  )
+})
+
+void test('resolveManagerActivityRequestBatchInputs keeps current slide primary and adds sibling stack requests', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestBatchInputs(
+      {
+        activityId: 'embedded-test',
+        indices: { h: 2, v: 0, f: 0 },
+        activityOptions: { prompt: 'hello' },
+        stackRequests: [
+          {
+            activityId: 'raffle',
+            indices: { h: 2, v: 1, f: -1 },
+            activityOptions: { title: 'raffle title' },
+          },
+          {
+            activityId: 'algorithm-demo',
+            indices: { h: 2, v: 2, f: -1 },
+          },
+        ],
+      },
+      { h: 9, v: 0, f: 0 },
+    ),
+    [
+      { activityId: 'embedded-test', instanceKey: 'embedded-test:2:0', activityOptions: { prompt: 'hello' } },
+      { activityId: 'raffle', instanceKey: 'raffle:2:1', activityOptions: { title: 'raffle title' } },
+      { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:2' },
+    ],
+  )
+})
+
+void test('resolveSyncDeckActivityPickerEntries excludes SyncDeck and sorts entries by label', () => {
+  assert.deepEqual(
+    resolveSyncDeckActivityPickerEntries([
+      { id: 'video-sync', name: 'Video Sync', description: 'Watch together' },
+      { id: 'syncdeck', name: 'SyncDeck', description: 'Host slides' },
+      { id: 'algorithm-demo', name: 'Algorithm Demo', description: 'Visualize algorithms' },
+    ]),
+    [
+      { activityId: 'algorithm-demo', name: 'Algorithm Demo', description: 'Visualize algorithms', supportsReport: false },
+      { activityId: 'video-sync', name: 'Video Sync', description: 'Watch together', supportsReport: false },
+    ],
+  )
+})
+
+void test('extractManagerNavigationCapabilitiesFromRevealMessage reads four-direction navigation capabilities', () => {
+  const capabilities = extractManagerNavigationCapabilitiesFromRevealMessage({
+    type: 'reveal-sync',
+    action: 'state',
+    payload: {
+      navigation: {
+        canGoLeft: false,
+        canGoRight: true,
+        canGoUp: false,
+        canGoDown: true,
+      },
+    },
+  })
+
+  assert.deepEqual(capabilities, {
+    canGoBack: false,
+    canGoForward: true,
+    canGoUp: false,
+    canGoDown: true,
+  })
+})
+
+void test('resolveNextPendingEmbeddedEndConfirmation requires two clicks before ending', () => {
+  const first = resolveNextPendingEmbeddedEndConfirmation(null, 'video-sync:3:0')
+  assert.deepEqual(first, { nextPending: 'video-sync:3:0', shouldEnd: false })
+
+  const second = resolveNextPendingEmbeddedEndConfirmation(first.nextPending, 'video-sync:3:0')
+  assert.deepEqual(second, { nextPending: null, shouldEnd: true })
+
+  const switchTarget = resolveNextPendingEmbeddedEndConfirmation('video-sync:3:0', 'embedded-test:5:0')
+  assert.deepEqual(switchTarget, { nextPending: 'embedded-test:5:0', shouldEnd: false })
 })
 
 void test('extractIndicesFromRevealPayload reads indices from state payload top-level index fields', () => {
@@ -595,4 +849,82 @@ void test('applyChalkboardSnapshotFallback does not replace non-empty chalkboard
 
   assert.equal(result.restoredSnapshotStorage, null)
   assert.equal(result.relayPayload.payload?.payload?.storage, '[{"width":960,"height":700,"data":[]}]')
+})
+
+void test('resolveManagerActivityRequestStartInput resolves anchored and global instance keys', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'embedded-test',
+        indices: { h: 2, v: 1, f: 0 },
+      },
+      null,
+    ),
+    {
+      activityId: 'embedded-test',
+      instanceKey: 'embedded-test:2:1',
+    },
+  )
+
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'raffle',
+      },
+      null,
+    ),
+    {
+      activityId: 'raffle',
+      instanceKey: 'raffle:global',
+    },
+  )
+})
+
+void test('resolveManagerActivityRequestStartInput prefers explicit instanceKey and falls back to instructor indices', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'video-sync',
+        instanceKey: 'video-sync:global',
+      },
+      { h: 6, v: 2, f: 0 },
+    ),
+    {
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:global',
+    },
+  )
+
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'algorithm-demo',
+      },
+      { h: 6, v: 2, f: 0 },
+    ),
+    {
+      activityId: 'algorithm-demo',
+      instanceKey: 'algorithm-demo:6:2',
+    },
+  )
+
+  assert.equal(resolveManagerActivityRequestStartInput({ activityId: '' }, { h: 1, v: 0, f: 0 }), null)
+})
+
+void test('resolveManagerActivityRequestStartInput preserves activity options when present', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'video-sync',
+        indices: { h: 3, v: 0, f: 0 },
+        activityOptions: { sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA' },
+      },
+      null,
+    ),
+    {
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:3:0',
+      activityOptions: { sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA' },
+    },
+  )
 })

@@ -139,6 +139,14 @@ ActiveBits intentionally ships source maps in production for debugging and teach
    - Confirm `.map` files are present in deployment artifacts.
    - Verify stack traces map to original TypeScript source during incident debugging.
 
+## Dev-Only Presentation Assets
+
+SyncDeck sample decks that exist only for local development live under `activities/syncdeck/dev-presentations/`.
+
+- They may use permissive local-development settings that are not suitable for production embedding.
+- Vite serves them during local development from the same `/presentations/...` URLs used by the app.
+- Production builds must not emit these dev-only presentation files.
+
 ## Scaling Considerations
 
 ### Single Instance (Default)
@@ -157,6 +165,7 @@ When scaling to multiple instances:
 4. **Persistent Sessions**: Shared via Valkey; waiters are instance-local
 5. **Teacher/manager cookies**: Keep the `persistent_sessions` httpOnly cookie path and same-site behavior intact, since activities such as SyncDeck and Video Sync recover manager credentials from a teacher-validated persistent-session cookie after redirects into `/manage/...`
 6. **Video Sync unsynced-student telemetry**: In Valkey mode, `video-sync` stores per-session unsynced-student timestamps in a Valkey-backed key (with short TTL pruning) so `telemetry.sync.unsyncedStudents` stays coherent when `/api/video-sync/:sessionId/event` requests land on different instances. In in-memory mode this telemetry remains single-instance only, which is acceptable for local/dev deployments.
+7. **Embedded child bootstrap payloads**: SyncDeck embedded launches now persist child-session bootstrap data under `session.data.embeddedLaunch.selectedOptions`. That session record must survive reloads and hot redeploys because embedded managers such as Video Sync rehydrate launch intent from the sanitized `GET /api/session/:childSessionId/embedded-launch` endpoint. In production, validate that this route remains available after deploys and returns only `{ embeddedLaunch: { selectedOptions } }`, not the raw session record.
 
 **To scale horizontally**:
 1. Go to **Settings** → **Scaling**

@@ -31,6 +31,17 @@ export interface ActivityDeepLinkPreflightResult {
   warning: string | null
 }
 
+export interface ActivityPersistentSoloLaunchParams {
+  hash: string
+  search: string
+  selectedOptions: Partial<Record<string, string>>
+}
+
+export interface ActivityPersistentSoloLaunchResult {
+  sessionId?: string
+  navigateTo?: string
+}
+
 export interface ActivityPersistentLinkBuildResult {
   fullUrl: string
   hash: string
@@ -72,6 +83,93 @@ export interface ActivityStandaloneEntryConfig {
   description?: string
 }
 
+export interface ActivityEmbeddedRuntimeConfig {
+  instructorGated?: 'runtime' | 'waiting-room'
+}
+
+export type ActivityReportScope = 'activity-session' | 'student-cross-activity' | 'session-summary'
+
+export interface ActivityReportStudentRef {
+  studentId: string
+  displayName?: string | null
+}
+
+export interface ActivityReportSummaryMetric {
+  id: string
+  label: string
+  value: string | number
+  description?: string
+}
+
+export interface ActivityReportSummaryCard {
+  id: string
+  title: string
+  description?: string
+  metrics?: ActivityReportSummaryMetric[]
+}
+
+export interface ActivityReportRichTextBlock {
+  id: string
+  type: 'rich-text'
+  title?: string
+  paragraphs: string[]
+}
+
+export interface ActivityReportTableRow {
+  id: string
+  cells: string[]
+}
+
+export interface ActivityReportTableBlock {
+  id: string
+  type: 'table'
+  title?: string
+  columns: string[]
+  rows: ActivityReportTableRow[]
+  emptyMessage?: string
+}
+
+export type ActivityReportBlock =
+  | ActivityReportRichTextBlock
+  | ActivityReportTableBlock
+
+export interface ActivityStructuredReportSection {
+  activityId: string
+  childSessionId: string
+  instanceKey: string
+  title: string
+  generatedAt: number
+  supportsScopes: ActivityReportScope[]
+  students?: ActivityReportStudentRef[]
+  summaryCards?: ActivityReportSummaryCard[]
+  scopeBlocks?: Partial<Record<ActivityReportScope, ActivityReportBlock[]>>
+  studentScopeBlocks?: Record<string, ActivityReportBlock[]>
+  payload: Record<string, unknown>
+}
+
+export interface SyncDeckSessionReportManifestActivity {
+  activityId: string
+  activityName: string
+  childSessionId: string
+  instanceKey: string
+  startedAt: number
+  report: ActivityStructuredReportSection
+}
+
+export interface SyncDeckSessionReportManifest {
+  parentSessionId: string
+  generatedAt: number
+  activities: SyncDeckSessionReportManifestActivity[]
+  students: ActivityReportStudentRef[]
+}
+
+export interface ActivityReportSectionProps {
+  scope: ActivityReportScope
+  manifest: SyncDeckSessionReportManifest
+  activity: SyncDeckSessionReportManifestActivity
+  student?: ActivityReportStudentRef | null
+}
+
 export interface ActivityConfig {
   id: string
   name: string
@@ -94,6 +192,8 @@ export interface ActivityConfig {
   manageLayout?: {
     expandShell?: boolean
   }
+  embeddedRuntime?: ActivityEmbeddedRuntimeConfig
+  reportEndpoint?: string
   waitingRoom?: ActivityWaitingRoomConfig
   isDev?: boolean
   clientEntry?: string
@@ -106,10 +206,14 @@ export interface ActivityClientModule {
   StudentComponent?: ComponentType<unknown>
   footerContent?: ReactNode | (() => ReactNode)
   PersistentLinkBuilderComponent?: ComponentType<ActivityPersistentLinkBuilderProps>
+  ReportSectionComponent?: ComponentType<ActivityReportSectionProps>
   runDeepLinkPreflight?: (
     preflight: ActivityDeepLinkPreflightConfig,
     rawValue: string,
   ) => Promise<ActivityDeepLinkPreflightResult>
+  launchPersistentSoloEntry?: (
+    params: ActivityPersistentSoloLaunchParams,
+  ) => Promise<ActivityPersistentSoloLaunchResult>
   waitingRoomFields?: Record<string, ComponentType<WaitingRoomFieldComponentProps>>
 }
 

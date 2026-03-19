@@ -61,6 +61,10 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
           },
         ],
       },
+      embeddedRuntime: {
+        instructorGated: 'runtime',
+      },
+      reportEndpoint: '/api/syncdeck/s1/report',
       waitingRoom: {
         fields: [
           {
@@ -100,6 +104,8 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
     responseField: 'instructorPasscode',
   })
   assert.deepEqual(parsed.createSessionBootstrap?.historyState, ['instructorPasscode'])
+  assert.equal(parsed.embeddedRuntime?.instructorGated, 'runtime')
+  assert.equal(parsed.reportEndpoint, '/api/syncdeck/s1/report')
   assert.deepEqual(parsed.utilities, [
     {
       id: 'gallery-walk-review-copy',
@@ -281,6 +287,50 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
       ),
     /historyState/,
   )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad7',
+          name: 'Bad7',
+          description: 'desc',
+          color: 'navy',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          embeddedRuntime: {
+            instructorGated: true,
+          },
+        },
+        'bad-config-7',
+      ),
+    /embeddedRuntime.*instructorGated.*runtime.*waiting-room/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad8',
+          name: 'Bad8',
+          description: 'desc',
+          color: 'gray',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          reportEndpoint: 42,
+        },
+        'bad-config-8',
+      ),
+    /reportEndpoint.*non-empty string/,
+  )
 })
 
 void test('parseActivityConfig removes optional keys when input provides null', () => {
@@ -298,12 +348,15 @@ void test('parseActivityConfig removes optional keys when input provides null', 
       },
       title: null,
       deepLinkOptions: null,
+      reportEndpoint: null,
     },
     'null-config',
   )
 
   assert.equal(parsed.title, undefined)
   assert.equal(parsed.deepLinkOptions, undefined)
+  assert.equal(parsed.reportEndpoint, undefined)
   assert.equal('title' in parsed, false)
   assert.equal('deepLinkOptions' in parsed, false)
+  assert.equal('reportEndpoint' in parsed, false)
 })

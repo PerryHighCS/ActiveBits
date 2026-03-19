@@ -1,5 +1,7 @@
 import SessionHeader from '@src/components/common/SessionHeader'
+import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -112,6 +114,24 @@ export function readBootstrapSourceUrl(search: string): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
+export function readEmbeddedBootstrapSourceUrl(selectedOptions: unknown): string | null {
+  if (
+    selectedOptions == null ||
+    typeof selectedOptions !== 'object' ||
+    Array.isArray(selectedOptions)
+  ) {
+    return null
+  }
+
+  const value = (selectedOptions as { sourceUrl?: unknown }).sourceUrl
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 export function resolveBootstrapInstructorPasscode(params: {
   locationState: unknown
   sessionId: string | null | undefined
@@ -168,6 +188,21 @@ export function createManagerWsAuthMessage(instructorPasscode: string | null | u
     type: 'authenticate',
     instructorPasscode,
   })
+}
+
+export function shouldRenderManagerHeaderForSession(sessionId: string | null | undefined): boolean {
+  return !isEmbeddedChildSessionId(sessionId ?? undefined)
+}
+
+export function shouldFetchEmbeddedBootstrapSourceUrl(params: {
+  sessionId: string | null | undefined
+  queryBootstrapSourceUrl: string | null
+}): boolean {
+  if (params.queryBootstrapSourceUrl != null) {
+    return false
+  }
+
+  return isEmbeddedChildSessionId(params.sessionId ?? undefined)
 }
 
 export function shouldAutoStartBootstrapSource(params: {
@@ -296,6 +331,7 @@ export default function VideoSyncManager() {
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
+  const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -309,7 +345,39 @@ export default function VideoSyncManager() {
   const suppressPlayerEventsRef = useRef(false)
   const suppressPlayerEventsTimeoutRef = useRef<number | null>(null)
   const autoStartAttemptKeyRef = useRef<string | null>(null)
-  const bootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
+  const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
+  const bootstrapSourceUrl = queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
+
+  useEffect(() => {
+    if (!shouldFetchEmbeddedBootstrapSourceUrl({ sessionId, queryBootstrapSourceUrl })) {
+      setEmbeddedBootstrapSourceUrl(null)
+      return
+    }
+
+    const embeddedSessionId = sessionId
+    if (!embeddedSessionId) {
+      setEmbeddedBootstrapSourceUrl(null)
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const selectedOptions = await fetchEmbeddedLaunchSelectedOptions(embeddedSessionId)
+        if (!cancelled) {
+          setEmbeddedBootstrapSourceUrl(readEmbeddedBootstrapSourceUrl(selectedOptions))
+        }
+      } catch {
+        if (!cancelled) {
+          setEmbeddedBootstrapSourceUrl(null)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [queryBootstrapSourceUrl, sessionId])
 
   useEffect(() => {
     latestStateRef.current = state
@@ -912,14 +980,17 @@ export default function VideoSyncManager() {
 
   if (setupMode) {
     const shouldShowAutoStartSplash = bootstrapSourceUrl != null && autoStartStatus !== 'failed'
+    const shouldRenderHeader = shouldRenderManagerHeaderForSession(sessionId)
 
     return (
       <div className="w-full p-4 space-y-4">
-        <SessionHeader
-          activityName="Video Sync"
-          sessionId={sessionId}
-          onEndSession={handleEndSession}
-        />
+        {shouldRenderHeader ? (
+          <SessionHeader
+            activityName="Video Sync"
+            sessionId={sessionId}
+            onEndSession={handleEndSession}
+          />
+        ) : null}
 
         {errorMessage && (
           <div className="border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
@@ -931,7 +1002,7 @@ export default function VideoSyncManager() {
           <section className="max-w-2xl border rounded p-4 space-y-3" aria-labelledby="video-sync-autostart-heading">
             <h2 id="video-sync-autostart-heading" className="text-xl font-semibold">Preparing instructor view…</h2>
             <p className="text-gray-700">
-              Loading the configured YouTube video from your permanent link and moving directly into the instructor view.
+              Loading the configured YouTube video from launch bootstrap and moving directly into the instructor view.
             </p>
             <p className="text-sm text-gray-600 break-all">{bootstrapSourceUrl}</p>
           </section>
@@ -990,22 +1061,26 @@ export default function VideoSyncManager() {
     )
   }
 
+  const shouldRenderHeader = shouldRenderManagerHeaderForSession(sessionId)
+
   return (
     <div className="fixed inset-0 z-30 bg-black text-white">
-      <div className="absolute top-0 left-0 right-0 z-20 px-3 py-2 bg-black/80 border-b border-white/10">
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <div className="min-w-0 flex items-center gap-3">
-            <span className="font-semibold whitespace-nowrap">Video Sync Instructor</span>
-            <span className="text-gray-300 truncate">Session: {sessionId ?? '—'}</span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Button onClick={() => void handleEndSession()}>End session</Button>
+      {shouldRenderHeader ? (
+        <div className="absolute top-0 left-0 right-0 z-20 px-3 py-2 bg-black/80 border-b border-white/10">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <div className="min-w-0 flex items-center gap-3">
+              <span className="font-semibold whitespace-nowrap">Video Sync Instructor</span>
+              <span className="text-gray-300 truncate">Session: {sessionId ?? '—'}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button onClick={() => void handleEndSession()}>End session</Button>
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       {errorMessage && (
-        <div className="absolute top-20 right-4 z-20 w-[min(28rem,calc(100vw-2rem))] border border-red-300 bg-red-50 text-red-800 rounded p-3" role="alert">
+        <div className={`absolute right-4 z-20 w-[min(28rem,calc(100vw-2rem))] border border-red-300 bg-red-50 text-red-800 rounded p-3 ${shouldRenderHeader ? 'top-20' : 'top-4'}`} role="alert">
           {errorMessage}
         </div>
       )}

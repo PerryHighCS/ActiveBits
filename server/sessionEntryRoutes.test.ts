@@ -59,13 +59,41 @@ function createMockResponse(): MockResponse {
   }
 }
 
-function getRoute(app: ReturnType<typeof createMockApp>, method: 'get' | 'post', path: string): RouteHandler {
+function getRoute(app: ReturnType<typeof createMockApp>, method: 'get' | 'post' | 'delete', path: string): RouteHandler {
   const handler = app.routes[method].get(path)
   if (!handler) {
     throw new Error(`Route ${method.toUpperCase()} ${path} not registered`)
   }
   return handler
 }
+
+void test('session delete route rejects embedded child sessions', async () => {
+  await initializeActivityRegistry()
+
+  let deleted = false
+  const sessions = {
+    get: async (id: string) => id === 'CHILD:parent:abc12:embedded-test' ? createSessionRecord(id, 'embedded-test') : null,
+    set: async () => {},
+    delete: async () => {
+      deleted = true
+      return true
+    },
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'delete', '/api/session/:sessionId')({ params: { sessionId: 'CHILD:parent:abc12:embedded-test' } }, res)
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.jsonBody, { error: 'embedded child sessions must be ended by the parent session' })
+  assert.equal(deleted, false)
+})
 
 function createSessionRecord(id: string, type: string): SessionRecord {
   return {
@@ -155,6 +183,80 @@ void test('session entry route returns 404 for missing sessions', async () => {
 
   assert.equal(res.statusCode, 404)
   assert.deepEqual(res.jsonBody, { error: 'invalid session' })
+})
+
+void test('embedded launch route returns only selectedOptions and not raw session data', async () => {
+  await initializeActivityRegistry()
+  const session: SessionRecord = {
+    ...createSessionRecord('session-embedded', 'video-sync'),
+    data: {
+      instructorPasscode: 'secret-passcode',
+      embeddedLaunch: {
+        parentSessionId: 'parent-1',
+        instanceKey: 'video-sync:3:0',
+        selectedOptions: {
+          sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+        },
+      },
+    },
+  }
+  const sessions = {
+    get: async (id: string) => id === 'session-embedded' ? session : null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/embedded-launch')({ params: { sessionId: 'session-embedded' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.headers['cache-control'], 'no-store')
+  assert.deepEqual(res.jsonBody, {
+    embeddedLaunch: {
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
+    },
+  })
+  assert.equal('session' in (res.jsonBody ?? {}), false)
+  assert.equal(JSON.stringify(res.jsonBody).includes('secret-passcode'), false)
+})
+
+void test('embedded launch route treats array session.data as absent object data', async () => {
+  await initializeActivityRegistry()
+  const session: SessionRecord = {
+    ...createSessionRecord('session-array', 'video-sync'),
+    data: [] as unknown as Record<string, unknown>,
+  }
+  const sessions = {
+    get: async (id: string) => id === 'session-array' ? session : null,
+    set: async () => {},
+    delete: async () => true,
+    touch: async () => true,
+    getAll: async () => [],
+    getAllIds: async () => [],
+    cleanup: () => {},
+    close: async () => {},
+  }
+  const app = createMockApp()
+  setupSessionRoutes(app as unknown as Parameters<typeof setupSessionRoutes>[0], sessions)
+
+  const res = createMockResponse()
+  await getRoute(app, 'get', '/api/session/:sessionId/embedded-launch')({ params: { sessionId: 'session-array' } }, res)
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.jsonBody, {
+    embeddedLaunch: {
+      selectedOptions: null,
+    },
+  })
 })
 
 void test('session entry participant store route returns 404 for missing sessions', async () => {

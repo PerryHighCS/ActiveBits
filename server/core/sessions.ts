@@ -1,5 +1,9 @@
 import { randomBytes } from 'crypto'
-import type { Session as SharedSession, SessionStore as SharedSessionStore } from '../../types/session.js'
+import {
+  EMBEDDED_CHILD_SESSION_PREFIX,
+  type Session as SharedSession,
+  type SessionStore as SharedSessionStore,
+} from '../../types/session.js'
 import type { SessionEntryStatus } from '../../types/waitingRoom.js'
 import { findHashBySessionId, resetPersistentSession } from './persistentSessions.js'
 import { ValkeySessionStore } from './valkeyStore.js'
@@ -61,6 +65,8 @@ interface WsClient {
 interface WsServerLike {
   clients: Iterable<WsClient>
 }
+
+export { EMBEDDED_CHILD_SESSION_PREFIX }
 
 class InMemorySessionStore implements SessionStore {
   public readonly ttlMs: number
@@ -313,6 +319,32 @@ export function setupSessionRoutes(app: {
     res.json({ session })
   })
 
+  app.get('/api/session/:sessionId/embedded-launch', async (req, res) => {
+    setNoStore(res)
+    const { sessionId } = req.params
+    const session = await sessions.get(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const sessionData = ensurePlainObject(session.data)
+    const embeddedLaunch = sessionData?.embeddedLaunch
+    const embeddedLaunchRecord = embeddedLaunch != null && typeof embeddedLaunch === 'object' && !Array.isArray(embeddedLaunch)
+      ? embeddedLaunch as Record<string, unknown>
+      : null
+    const selectedOptions = embeddedLaunchRecord?.selectedOptions
+    const selectedOptionsRecord = selectedOptions != null && typeof selectedOptions === 'object' && !Array.isArray(selectedOptions)
+      ? selectedOptions as Record<string, unknown>
+      : null
+
+    res.json({
+      embeddedLaunch: {
+        selectedOptions: selectedOptionsRecord,
+      },
+    })
+  })
+
   app.post('/api/session/:sessionId/entry-participant', async (req, res) => {
     setNoStore(res)
     const { sessionId } = req.params
@@ -369,6 +401,11 @@ export function setupSessionRoutes(app: {
     const session = await sessions.get(sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    if (sessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
+      res.status(403).json({ error: 'embedded child sessions must be ended by the parent session' })
       return
     }
 

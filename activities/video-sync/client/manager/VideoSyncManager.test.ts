@@ -13,8 +13,11 @@ import {
   parseManagerStopTimeInput,
   readBootstrapInstructorPasscode,
   readBootstrapSourceUrl,
+  readEmbeddedBootstrapSourceUrl,
   resolveBootstrapInstructorPasscode,
   sanitizeManagerApiErrorMessage,
+  shouldRenderManagerHeaderForSession,
+  shouldFetchEmbeddedBootstrapSourceUrl,
   shouldCorrectManagerPlaybackDrift,
   shouldApplyManagerStateUpdate,
   shouldAutoStartBootstrapSource,
@@ -132,6 +135,59 @@ void test('readBootstrapSourceUrl ignores missing or empty query params', () => 
   assert.equal(readBootstrapSourceUrl(''), null)
   assert.equal(readBootstrapSourceUrl('?sourceUrl='), null)
   assert.equal(readBootstrapSourceUrl('?other=value'), null)
+})
+
+void test('readEmbeddedBootstrapSourceUrl returns sourceUrl from embedded launch selected options', () => {
+  assert.equal(
+    readEmbeddedBootstrapSourceUrl({
+      sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+    }),
+    'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+  )
+})
+
+void test('readEmbeddedBootstrapSourceUrl ignores missing or invalid embedded launch payloads', () => {
+  assert.equal(readEmbeddedBootstrapSourceUrl(null), null)
+  assert.equal(readEmbeddedBootstrapSourceUrl({}), null)
+  assert.equal(readEmbeddedBootstrapSourceUrl({ sourceUrl: '' }), null)
+  assert.equal(readEmbeddedBootstrapSourceUrl({ sourceUrl: 42 }), null)
+})
+
+void test('shouldRenderManagerHeaderForSession hides the manager header for embedded child sessions', () => {
+  assert.equal(shouldRenderManagerHeaderForSession('session-123'), true)
+  assert.equal(shouldRenderManagerHeaderForSession('CHILD:parent:abcde:video-sync'), false)
+  assert.equal(shouldRenderManagerHeaderForSession(null), true)
+})
+
+void test('shouldFetchEmbeddedBootstrapSourceUrl only fetches for embedded child sessions without query bootstrap', () => {
+  assert.equal(
+    shouldFetchEmbeddedBootstrapSourceUrl({
+      sessionId: 'CHILD:parent:abcde:video-sync',
+      queryBootstrapSourceUrl: null,
+    }),
+    true,
+  )
+  assert.equal(
+    shouldFetchEmbeddedBootstrapSourceUrl({
+      sessionId: 'session-123',
+      queryBootstrapSourceUrl: null,
+    }),
+    false,
+  )
+  assert.equal(
+    shouldFetchEmbeddedBootstrapSourceUrl({
+      sessionId: 'CHILD:parent:abcde:video-sync',
+      queryBootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+    }),
+    false,
+  )
+  assert.equal(
+    shouldFetchEmbeddedBootstrapSourceUrl({
+      sessionId: null,
+      queryBootstrapSourceUrl: null,
+    }),
+    false,
+  )
 })
 
 void test('buildManagerWsUrl omits instructor credentials from the websocket URL', () => {

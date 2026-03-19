@@ -1,3 +1,5 @@
+export const EMBEDDED_CHILD_SESSION_PREFIX = 'CHILD:'
+
 export interface Session<TData = Record<string, unknown>> {
   id: string
   type?: string

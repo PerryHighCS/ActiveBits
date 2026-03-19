@@ -149,3 +149,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: Seemingly unrelated tests start timing out or taking alternate auth paths only when a specific env-mutating test is present.
 - Follow-up action: Replace env overrides with local simulation (`emit('close')`, explicit timeout args where exposed), or mark the suite/test non-concurrent only when unavoidable.
 - Owner: Codex
+
+- Date: 2026-03-18
+- Scope: unit | integration
+- Pattern: For `activities` workspace scoped lint/test scripts, pass the target via npm config (`npm_config_target=... npm --workspace activities run lint:scope|test:scope`) instead of forwarding `-- --target=...`.
+- Why it helps: The scripts read `npm_config_target` internally. Forwarded CLI args can leak through to `eslint` as an invalid `--target` flag, and `test:scope` may fall back to `.` and run the full activities suite instead of the intended folder.
+- Example (file/path): `activities/package.json`
+- Failure signal: `eslint` exits with `Invalid option '--target'`, or a supposedly scoped activities test run starts executing unrelated activity suites.
+- Follow-up action: Prefer the env-style invocation in agent notes, docs, and future validation commands until the script interface is changed.
+- Owner: Codex

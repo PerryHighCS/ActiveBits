@@ -14,6 +14,198 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-18
+- Area: client | waiting-room | standalone-permalinks
+- Discovery: Persistent-link solo launches that cannot use a direct `/solo/:activityId` route should be handled through an optional activity client-module hook (`launchPersistentSoloEntry`) instead of adding activity-specific conditionals in the shared waiting-room component.
+- Why it matters: Some activities, such as SyncDeck, support solo entry from permalinks but still require activity-owned session/bootstrap work before a student can enter. Keeping that logic in the activity client module preserves the activity-containment rule while letting shared waiting-room code stay generic.
+- Evidence: `client/src/components/common/WaitingRoom.tsx`; `client/src/activities/index.ts`; `activities/syncdeck/client/index.tsx`
+- Follow-up action: If another permalink-only standalone activity needs nontrivial bootstrap, implement the same hook in that activity's client module and return either a `sessionId` or explicit `navigateTo` target.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | activity-picker-metadata
+- Discovery: SyncDeck's manager-side manual activity picker should source its launch list from activity config metadata via a local guarded `import.meta.glob(...)` read, not from the client activity registry module.
+- Why it matters: The client registry eagerly uses Vite-only `import.meta.glob`, which breaks the Node-based activities test runner when imported directly into `SyncDeckManager`. A local guarded metadata read keeps the picker metadata-only, satisfies the activity-containment rule, and preserves server-render/unit test compatibility.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: If other activity-owned manager views need config-only metadata, prefer the same guarded local pattern or extract a test-safe config loader instead of importing the full client registry.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab-stack-requests
+- Discovery: The SyncDeck conversion-lab deck now emits sibling vertical activity anchors as `stackRequests` alongside the primary `activityRequest`, so entering `2:0` launches the whole `h:2` embedded stack (`2:0`, `2:1`, `2:2`) instead of only the currently visible anchor.
+- Why it matters: Student overlay arrows derive vertical reach from known embedded instance keys. Without stack bootstrapping, moving to `2:1`/`2:2` before the instructor visited each anchor left the overlay thinking the stack had ended and showed incorrect “not started” or disabled-arrow behavior.
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Keep deck-side stack metadata emission close to slide-activity metadata; if future decks need partial-stack launch behavior, make that an explicit per-deck policy instead of relying on missing sibling requests.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | overlay-arrow-setstate
+- Discovery: SyncDeck manager and student embedded-overlay arrows now rely only on resolved `setState` targets from local/base slide indices and no longer fall back to raw directional Reveal commands when indices are unresolved.
+- Why it matters: Raw fallback commands behave like Reveal document-order navigation, which can turn the overlay left arrow into a vertical move and leave up/down ineffective in embedded-stack flows. Explicit index targets keep host arrows aligned with the intended slide coordinates.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Preserve explicit index-driven overlay navigation unless the iframe-sync protocol later adds guaranteed strict-direction commands for horizontal and vertical movement.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | student-replay-suppression
+- Discovery: Student replay of the latest instructor payload on iframe-ready now uses the same forward-suppression policy as live inbound handling (backtrack opt-out and vertical-independence guards), so suppressed instructor commands/states are not re-applied during iframe reconnect/ready replay.
+- Why it matters: Without parity between live-forward and replay-forward paths, vertical `up/down` or stale `setState` payloads can still drag students or snap deck position unexpectedly even after live suppression logic is correct.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep replay and live-forwarding suppression paths centralized through shared helper logic to prevent policy drift.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | waiting-room | entry-participant-token-consume
+- Discovery: Entry participant token consume now deduplicates concurrent consume calls per storage key/token on the client by sharing an in-flight promise.
+- Why it matters: React StrictMode and parallel bootstrap effects can issue duplicate consume POSTs for the same token; deduping removes expected-but-noisy second-call 404s and prevents racey identity fallback behavior.
+- Evidence: `client/src/components/common/entryParticipantStorage.ts`; `client/src/components/common/entryParticipantStorage.test.ts`
+- Follow-up action: Reuse this dedupe path for any future token-backed one-time handoff consumers instead of adding local effect guards in each activity.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | student-vertical-independence
+- Discovery: Student now suppresses instructor `setState` sync when the move is vertical-only within the same horizontal stack (`h` unchanged, `v` differs), so instructor vertical navigation no longer drags student position.
+- Why it matters: Embedded stack workflows require student-controlled vertical exploration while still allowing instructor horizontal progression and explicit force-sync commands.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep vertical-independence scoped to `setState`; preserve `syncToInstructor` for explicit instructor force-sync behavior.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | manager-activity-request-resync
+- Discovery: When manager receives an `activityRequest` for an already-running anchored instance key (for example `embedded-test:2:0`), it now emits and relays an explicit `setState` resync command for that anchor instead of only logging/returning.
+- Why it matters: Re-entering an active anchored activity can otherwise skip launch and leave students stuck on an older slide if they missed a prior navigation update; resync-on-skip forces students back to the anchor so overlays reopen.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Preserve this fallback until server-side acked per-student sync state can guarantee all participants reached the anchored slide before skip-existing short-circuits.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | student-embedded-reconcile
+- Discovery: Student now reconciles `embeddedActivities` from `/api/session/:sessionId` when synchronized on a slide but no active anchored overlay is resolvable, and initial session hydration always applies the normalized embedded map (including empty snapshots).
+- Why it matters: If a websocket lifecycle start/end event is missed, stale embedded maps can persist and block overlay re-entry even when instructor/student slide indices are synchronized.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Keep realtime WS as primary, but preserve snapshot reconciliation as drift correction for reconnect/race windows.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab-command-bridge
+- Discovery: Conversion-lab now also triggers slide-enter activity emission when receiving inbound reveal `command` messages for `setState`/`syncToInstructor`, using command target indices as the source of truth.
+- Why it matters: In host-driven navigation flows, status/slidechanged events can lag or miss transient transitions; command-level bridging ensures anchored activity requests still emit when the instructor jumps back to an activity slide.
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`
+- Follow-up action: Keep the command bridge as a fallback path while hosted runtime event timing is validated under instructor-driven setState control.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab-activity-emit
+- Discovery: Conversion-lab now resolves activity metadata from authoritative sync indices (`h:v`) via DOM traversal instead of relying on `Reveal.getCurrentSlide()`, and slide-enter dedupe advances only after slide resolution succeeds.
+- Why it matters: Host-driven `setState` can report updated indices before `getCurrentSlide()` points at the expected nested vertical section; advancing dedupe on that transient mismatch can suppress the later valid activityRequest when returning to anchors like `2:0`.
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`
+- Follow-up action: Keep slide-enter request emission keyed to resolved indexed slide elements rather than runtime-current slide references in host-driven navigation scenarios.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab-events
+- Discovery: Conversion-lab slide-enter activity emission is now tied to status index transitions (`reveal-iframesync-status`/`getStatus().navigation.current`) with per-position dedupe, so host-driven `setState` navigation emits activity requests even when Reveal `slidechanged` does not fire.
+- Why it matters: Instructor overlay navigation uses `setState`; without status-based detection, returning to anchors like `2:0` can miss relaunch requests and leave students synchronized but without an active overlay.
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`
+- Follow-up action: Keep deck-side emission keyed to authoritative sync status and avoid relying solely on local Reveal UI events for host-driven transitions.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | conversion-lab
+- Discovery: The conversion-lab deck now emits `activityRequest` on every slide-enter (no permanent per-slide dedupe), relying on manager-side instanceKey idempotency to ignore duplicate starts while an anchored activity is already running.
+- Why it matters: Revisiting anchors like `2:0` or vertical branches can relaunch overlays after an earlier lifecycle end instead of silently doing nothing due to stale deck-side dedupe state.
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`
+- Follow-up action: Keep deck emit behavior stateless; if duplicate suppression is needed, move it to manager/server where live instance state is authoritative.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | student-follow-mode
+- Discovery: Student follow-mode now treats authoritative instructor `setState` as a forced rejoin when it targets an anchored embedded activity (or a non-forward correction), clearing backtrack opt-out and applying instructor indices locally.
+- Why it matters: Backtrack opt-out can otherwise block overlay re-entry after instructor navigation changes from `syncToInstructor` to `setState`, which prevents returning to anchored slides and vertical embedded activity anchors from reopening for following students.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: If Reveal runtime emits explicit command provenance for instructor-initiated state transitions, replace heuristic follow/force rules with provenance-based policy.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | manager-relay
+- Discovery: Manager overlay `setState` navigation now arms outbound state restore-suppression and only releases suppression when the iframe reports the exact target indices, preventing stale state echoes from overwriting just-issued backward/vertical moves (for example returning to `2:0` then moving down).
+- Why it matters: Without this guard, older iframe `state` packets can race behind a `setState` command, get relayed to the server, and make students reopen the previous anchored overlay even though instructor navigation already changed.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: If the hosted Reveal runtime later exposes a monotonic command ack id, switch suppression from index-matching heuristics to ack-driven release.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | embedded-overlays
+- Discovery: SyncDeck manager and student overlay navigation now updates local slide indices optimistically before waiting for the presentation iframe to echo a new reveal state, and the student fallback overlay resolver only falls back to instructor indices when local student indices are absent rather than merely unmatched.
+- Why it matters: This makes embedded overlays close or swap immediately when users navigate away from the anchored slide instead of lingering until an async state echo arrives, and it avoids the student fallback path re-opening overlays after local navigation has already moved off the embedded slide.
+- Evidence: `activities/syncdeck/client/shared/embeddedOverlayNavigation.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: If the hosted reveal runtime later exposes authoritative next-slide coordinates in navigation callbacks, replace the heuristic optimistic resolver with that runtime-provided destination.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client | syncdeck | presentations
+- Discovery: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html` now boots via hosted SyncDeck Reveal assets (`syncdeck-reveal.js` + `syncdeck-reveal.css`) and `initSyncDeckReveal({ deckId, ... })` instead of a hand-rolled postMessage simulator. Activity anchors are now encoded in slide `data-activity-*` attributes and bridged to host launches by calling `window.RevealIframeSyncAPI.sendCustom('activityRequest', ...)` on slide-enter/manual trigger.
+- Why it matters: The conversion lab now exercises the real iframe sync runtime (navigation/status semantics and role handling) while preserving embedded activity launch testing without relying on the old synthetic state emitter.
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`
+- Follow-up action: If hosted runtime adds native slide metadata -> `activityRequest` emission, remove the deck-side bridge helper and keep only declarative `data-activity-*` metadata.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: client+server | embedded-session-ownership
+- Discovery: Embedded child sessions (`CHILD:...`) are now explicitly parent-owned at both UI and API layers: shared `SessionHeader` auto-detects child session ids and hides join-code/end-session controls, and shared `DELETE /api/session/:sessionId` rejects child session ids with a 403 so only parent-session flows (for example SyncDeck embedded end route) can terminate them.
+- Why it matters: This prevents embedded activity manager UIs from accidentally exposing destructive controls that break parent orchestration guarantees, while preserving a single authoritative end path in the parent session.
+- Evidence: `client/src/components/common/SessionHeader.tsx`; `client/src/components/common/SessionHeader.test.tsx`; `server/core/sessions.ts`; `server/sessionEntryRoutes.test.ts`
+- Follow-up action: Add explicit instructor lock/hold capabilities as a separate feature instead of overloading session-end controls inside embedded managers.
+- Owner: Codex
+
+- Date: 2026-03-17
+- Area: activities | syncdeck | slide-activation
+- Discovery: SyncDeck manager now consumes `reveal-sync` `activityRequest` messages from the presentation iframe, resolves `activityId` plus instance key (explicit `instanceKey`, payload `indices`, fallback instructor indices, otherwise `:global`), prompts instructor confirmation, and then calls `POST /api/syncdeck/:sessionId/embedded-activity/start`.
+- Why it matters: This wires the first end-to-end launch seam for Phase 4 from deck events to server-backed embedded child session creation while preserving instructor confirmation and existing dedup semantics on the server.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `.agent/plans/syncdeck-checklist.md`; `.agent/plans/syncdeck-embedded-activities.md`
+- Follow-up action: Complete remaining Phase 4 work by finalizing deck metadata/plugin emission conventions and adding integration coverage for request→prompt→launch→overlay flow.
+- Owner: Codex
+
+- Date: 2026-03-17
+- Area: activities | syncdeck | student-overlay
+- Discovery: SyncDeck student now hydrates `embeddedActivities` from `session.data.embeddedActivities`, applies `embedded-activity-start`/`embedded-activity-end` websocket lifecycle payloads, and selects the active embedded overlay by matching `instanceKey` slide anchors against local student indices. The student host also extracts `canGoBack`/`canGoForward` from reveal state messages, renders host-layer navigation controls over the embedded iframe, and emits `activebits-embedded/syncContext` postMessages with `solo|synchronized|behind|ahead|vertical` state.
+- Why it matters: This establishes the student-side Phase 3 host-overlay seam with late-join hydration and capability-driven navigation while keeping reveal transport and embedded activity transport separated.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `.agent/plans/syncdeck-checklist.md`; `.agent/plans/syncdeck-embedded-activities.md`
+- Follow-up action: Complete the remaining solo activation path by reading `standaloneEntry` capability metadata and mounting direct `/solo/:activityId` routes when supported, then expand tests for stack transitions and solo launch behavior.
+- Owner: Codex
+
+- Date: 2026-03-17
+- Area: activities | syncdeck | manager-overlay
+- Discovery: SyncDeck manager now keeps a local `embeddedActivities` keyed map hydrated from both session bootstrap data and `embedded-activity-start`/`embedded-activity-end` websocket lifecycle payloads. The active manager overlay is selected by parsing `instanceKey` anchors (`activityId:h:v`) against the current instructor slide indices, and when active it renders an iframe to `/manage/:activityId/:childSessionId` with host-side prev/next overlay navigation controls.
+- Why it matters: This establishes the manager-side embedded orchestration seam for Phase 2 without coupling generic host logic to activity-specific protocols. It also ensures late-reconnect managers can recover running embedded instances from persisted session state before new websocket lifecycle events arrive.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `.agent/plans/syncdeck-checklist.md`; `.agent/plans/syncdeck-embedded-activities.md`
+- Follow-up action: Finish the remaining Phase 2 items by adding richer running-panel status semantics and interaction-focused tests that exercise panel controls and overlay navigation behavior end-to-end.
+- Owner: Codex
+
+- Date: 2026-03-17
+- Area: activities | embedded | testing
+- Discovery: The new `embedded-test` activity is the repo's thin dev-only harness for embedded activity contract validation. It is intentionally static, uses accepted-entry student identity on the websocket path, and exposes only a minimal manager/student roster-plus-chat surface to verify inherited identity, connection state, and child websocket isolation without coupling SyncDeck to a real rollout activity.
+- Why it matters: Future embedded-activity work can validate generic lifecycle and identity behavior against a controlled target before debugging Video Sync or other real activity logic. Keeping the harness `isDev: true` also prevents it from leaking into production activity discovery.
+- Evidence: `activities/embedded-test/activity.config.ts`; `activities/embedded-test/client/manager/EmbeddedTestManager.tsx`; `activities/embedded-test/client/student/EmbeddedTestStudent.tsx`; `activities/embedded-test/server/routes.ts`; `activities/embedded-test/server/routes.test.ts`
+- Follow-up action: Use `embedded-test` first when exercising generic embedded launch/entry/reconnect flows, then confirm the same seams against the first real rollout activity rather than adding feature logic to the harness.
+- Owner: Codex
+
+- Date: 2026-03-17
+- Area: activities | syncdeck | contracts
+- Discovery: SyncDeck embedded-activity Phase 0 contracts now explicitly separate transport responsibilities: parent SyncDeck websocket carries only lifecycle envelopes keyed by `instanceKey`, while each running child activity keeps an independent activity websocket (no multiplexed parent relay). The shared activity config contract also gained `embeddedRuntime.instructorGated?: 'runtime' | 'waiting-room'` so shared code can distinguish runtime gating from waiting-room hold behavior.
+- Why it matters: This locks down Activity Containment boundaries before implementation and prevents accidental protocol coupling where SyncDeck starts relaying activity-specific realtime payloads. The enum contract gives activity teams a shared, metadata-driven way to preserve instructor control while still distinguishing pass-through runtime hold from waiting-room hold semantics.
+- Evidence: `.agent/knowledge/data-contracts.md`; `types/activity.ts`; `types/activityConfigSchema.ts`; `server/activityConfigSchema.test.ts`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
+- Follow-up action: During Phase 1/3.5, keep websocket payloads activity-agnostic on the parent channel and read `embeddedRuntime.instructorGated` from config metadata rather than adding activity-specific conditionals in shared SyncDeck modules.
+- Owner: Codex
+
+- Date: 2026-03-17
+- Area: activities | waiting-room | syncdeck
+- Discovery: SyncDeck embedded-activity planning should build on the waiting-room expansion that is already in the repo: `POST /api/syncdeck/:sessionId/embedded-context` proves inherited parent teacher/student identity, while child session entry should continue through the shared session entry gateway and entry-participant handoff contracts instead of inventing a separate child claim/join API.
+- Why it matters: Reusing the shipped waiting-room seams keeps embedded child launch compatible with accepted-entry identity, extra waiting-room fields, and late-join flows. It also avoids creating a second incompatible entry model just for SyncDeck overlays.
+- Evidence: `activities/syncdeck/client/shared/embeddedContextUtils.ts`; `activities/syncdeck/server/routes.ts`; `.agent/plans/waiting-room-expansion.md`; `.agent/knowledge/data-contracts.md`
+- Follow-up action: When implementing embedded child launch, treat parent-context proof plus shared `GET /api/session/:sessionId/entry` and entry-participant consume routes as the default integration path; only add SyncDeck-specific embedded endpoints where they issue or transport inherited context, not where they replace the child activity's normal entry gateway.
+- Owner: Codex
+
 - Date: 2026-03-17
 - Area: activities | interoperability
 - Discovery: `video-sync` now uses `instructor` as its canonical elevated websocket role and state-author identity so embedded SyncDeck presentations can pass a shared instructor role into Video Sync, but the server/client still accept legacy `manager` protocol values and normalize them to `instructor` during the rollout.
@@ -970,4 +1162,52 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: This removes the last meaningful client-side compatibility layer from SyncDeck student entry and brings its new-entry path much closer to the other session-backed activities.
 - Evidence: `server/core/acceptedSessionParticipants.ts`; `server/acceptedSessionParticipants.test.ts`; `activities/syncdeck/server/studentParticipants.ts`; `activities/syncdeck/server/studentParticipants.test.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/entryIdentityUtils.ts`
 - Follow-up action: Reuse this preserved-participant-id rule for other activities whenever accepted entry should be the first authoritative source of participant identity, not just a source of fallback names.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: activities | embedded activity manager controls
+- Discovery: `CHILD:*` session ids are hard-blocked from `DELETE /api/session/:sessionId` by the shared server session route. Embedded child managers must either hide/disable local "End Session" controls with `isEmbeddedChildSessionId()` or route termination through the parent SyncDeck embedded-session endpoint instead of calling the generic delete route directly.
+- Why it matters: Activity-owned manager UIs can bypass the shared `SessionHeader` guard and end up surfacing a button that now fails with a server-side `403` in embedded mode.
+- Evidence: `server/core/sessions.ts`; `client/src/components/common/sessionHeaderUtils.ts`; `client/src/components/common/SessionHeader.tsx`; `activities/embedded-test/client/manager/EmbeddedTestManager.tsx`
+- Follow-up action: When adding new embedded child manager UIs, check for any activity-owned end-session buttons that bypass `SessionHeader` and guard them explicitly.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: activities | embedded-test | websocket participant identity
+- Discovery: Student websocket `studentName` query params for `embedded-test` should be normalized with participant/display-name rules, not chat-message rules. Missing names must stay `null` so accepted-entry fallback still resolves the authoritative display name, while explicit names should still be trimmed to the tighter participant cap.
+- Why it matters: Reusing a chat sanitizer (`normalizeMessageText`) allows unexpectedly long names into persisted session state and blurs the boundary between message content and participant identity constraints.
+- Evidence: `activities/embedded-test/server/routes.ts`; `activities/embedded-test/server/routes.test.ts`; `server/core/acceptedSessionParticipants.ts`
+- Follow-up action: When adding websocket or REST student join paths in other activities, prefer a dedicated optional participant-name normalizer instead of reusing message-body sanitizers.
+- Owner: Codex
+
+- Date: 2026-03-18
+- Area: server | syncdeck | embedded child session ids
+- Discovery: The embedded child session prefix should include its trailing colon in the shared constant (`CHILD:`), and child-session builders should concatenate the rest of the id directly instead of appending another separator. That keeps creation and `startsWith('CHILD:')` detection aligned across server and client layers.
+- Why it matters: A bare-prefix constructor (`CHILD`) can drift from delete guards and client helpers that check for `CHILD:`; once the shared constant is corrected, any leftover `:${...}` concatenation produces malformed ids like `CHILD::parent:...`.
+- Evidence: `server/core/sessions.ts`; `activities/syncdeck/server/routes.ts`; `client/src/components/common/sessionHeaderUtils.ts`; `server/sessionEntryRoutes.test.ts`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: Prefer importing the shared prefix constant anywhere child session ids are constructed on the server, and keep client-only detection helpers keyed to the same literal.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: client | manage-dashboard | create-session bootstrap storage
+- Discovery: Same-tab create-session bootstrap payload persistence now needs pruning in both the in-memory map and the `create-session-bootstrap:*` `sessionStorage` namespace. Keeping only the map trimmed is not enough once payloads are written to browser storage for reload resilience.
+- Why it matters: Long-lived dashboard tabs can accumulate abandoned bootstrap records in `sessionStorage`, eventually hitting quota and causing later bootstrap writes to fail even though the in-memory cache still looks bounded.
+- Evidence: `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/manageDashboardUtils.test.ts`
+- Follow-up action: If another browser-storage-backed bootstrap cache is added, give it the same prefix-scoped TTL/max-entry pruning path rather than relying on consume-time cleanup alone.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: activities | standalone permalink launch
+- Discovery: Activities that support permalink solo entry but still need activity-owned setup should persist a `standaloneMode` flag on the created session and let the student client branch off that normalized public session data, instead of teaching shared routing about each activity’s solo runtime behavior.
+- Why it matters: This keeps waiting-room/shared entry code generic while still letting activities like SyncDeck and Video Sync disable live-sync plumbing and unlock their own standalone controls after the handoff.
+- Evidence: `activities/syncdeck/client/index.tsx`; `activities/syncdeck/server/routes.ts`; `activities/video-sync/client/index.ts`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/student/VideoSyncStudent.tsx`
+- Follow-up action: Reuse the same session-backed `standaloneMode` pattern for future permalink-only solo activities that need custom student runtime behavior after launch.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: activities | syncdeck | synchronized embedded slide handoff
+- Discovery: A synchronized student can miss a newly launched embedded child session if SyncDeck does only a one-shot parent-session reconcile when the slide reports `activityRequest`. If that fetch lands before the manager finishes creating the child, the student stays on stale `embeddedActivities` until reload.
+- Why it matters: The symptom looks activity-specific because reload suddenly works, but the real bug is the race between the deck’s `activityRequest` and the parent session reflecting the new embedded child.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: When adding new embedded-slide handoffs, treat the deck’s current-slide `activityRequest` as the pending signal and keep reconciling until the expected child session appears or the request ages out.
 - Owner: Codex

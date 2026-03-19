@@ -13,6 +13,10 @@ ActiveBits/
 │   │   ├── activity.config.ts       # Metadata + client/server entry pointers
 │   │   ├── client/                  # Manager/Student components and assets
 │   │   └── server/                  # API/WebSocket routes and data
+│   ├── syncdeck/
+│   │   ├── dev-presentations/       # Optional dev-only sample decks, served locally only
+│   │   ├── client/
+│   │   └── server/
 │   ├── www-sim/
 │   │   ├── activity.config.ts
 │   │   ├── client/
@@ -146,6 +150,7 @@ export default {
   manageDashboard: { // optional shared dashboard hints/capabilities
     customPersistentLinkBuilder: true, // activity-owned persistent-link UI in dashboard modal
   },
+  reportEndpoint: '/api/my-activity/:sessionId/report', // optional: activity-owned embedded report download route
   clientEntry: './client/index.ts',  // Component entry (TS/TSX)
   serverEntry: './server/routes.ts', // Server routes
 };
@@ -157,6 +162,52 @@ export default {
 - `historyState`: Array of response field names. Matching fields are attached to React Router navigation state when transitioning from `/manage/:activityId` to `/manage/:activityId/:sessionId`.
 
 Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` when the value should still be recoverable after reloads or later manager re-entry in the same tab.
+
+`reportEndpoint` is optional activity metadata for embedded-session reporting. When present, SyncDeck can treat it as the child activity's authoritative download surface during embedded end/report flows instead of hard-coding per-activity routes in shared code.
+
+Embedded activity reports should be delivered as a single self-contained HTML document:
+
+- inline the report data payload in the document itself
+- inline any required CSS and JavaScript
+- avoid external fonts, CDN assets, or follow-up API calls after download
+- support multiple views inside the same file (for example class summary and per-student drill-down)
+  rather than emitting separate report files for each perspective
+
+These activity-level reports are building blocks for the higher-level SyncDeck session report.
+The parent report should eventually aggregate all embedded activities launched during a session
+into one self-contained export with:
+
+- whole-session summary across activities
+- activity-by-activity drill-down
+- per-student drill-down that can span multiple embedded activities
+
+For the aggregate path, SyncDeck should own the outer report container while activities own
+their internal report rendering. The shared type contract should follow this split:
+
+- SyncDeck chooses a report `scope` such as `activity-session`, `student-cross-activity`, or
+  `session-summary`
+- each child activity contributes structured report data for its child session
+- each child activity may contribute generic structured report blocks (`scopeBlocks`,
+  `studentScopeBlocks`) that the SyncDeck shell can render offline without understanding the
+  child activity's raw session schema
+- each activity may optionally provide a `ReportSectionComponent` later if richer client-side
+  rendering is needed inside the SyncDeck session-report shell for the requested scope
+- SyncDeck aggregates those sections through a parent-session manifest rather than trying to
+  understand every activity's raw session schema directly
+
+### Embedded Child Bootstrap
+
+Some parent activities launch other activities as embedded child sessions instead of routing
+through the normal dashboard create-session flow. In that case, launch options should be
+persisted on the child session itself in a generic bootstrap envelope rather than passed
+through activity-specific props.
+
+- Parent launchers store embedded bootstrap metadata on `session.data.embeddedLaunch`.
+- The bootstrap payload is activity-agnostic and should include the parent session identity,
+  the embedded `instanceKey`, and `selectedOptions` for the child activity.
+- Child managers should read that payload through shared bootstrap helpers in the same spirit
+  as `createSessionBootstrap` or permalink `selectedOptions`, so reloads and redeploys keep
+  the launch intent intact.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript

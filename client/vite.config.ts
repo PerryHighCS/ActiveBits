@@ -4,17 +4,44 @@ import tailwindcss from '@tailwindcss/vite'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import path, { dirname } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { getDevPresentationAsset } from './src/devPresentationAssets'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 const isCodespaces = Boolean(process.env.CODESPACES) || Boolean(process.env.CODESPACE_NAME) || Boolean(process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN)
 
+function serveDevPresentationAssets() {
+  return {
+    name: 'serve-dev-presentation-assets',
+    configureServer(server: { middlewares: { use: (handler: (req: { url?: string }, res: { setHeader: (name: string, value: string) => void, end: (body: string) => void }, next: (error?: Error) => void) => void) => void } }) {
+      server.middlewares.use((req, res, next) => {
+        const pathname = req.url?.split('?')[0] ?? ''
+        const asset = getDevPresentationAsset(pathname)
+        if (!asset?.devOnly) {
+          next()
+          return
+        }
+
+        try {
+          const sourcePath = path.resolve(__dirname, asset.sourceRelativePath)
+          res.setHeader('Content-Type', 'text/html; charset=utf-8')
+          res.end(readFileSync(sourcePath, 'utf8'))
+        } catch (error) {
+          next(error instanceof Error ? error : new Error(String(error)))
+        }
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    serveDevPresentationAssets(),
   ],
   resolve: {
     alias: {
