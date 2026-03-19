@@ -626,6 +626,15 @@ void test('resolveManagerCurrentSlideNavigationCapability only trusts iframe cap
     }),
     true,
   )
+
+  assert.equal(
+    resolveManagerCurrentSlideNavigationCapability({
+      iframeCapability: true,
+      capabilityIndices: null,
+      currentIndices: { h: 2, v: 2, f: 0 },
+    }),
+    null,
+  )
 })
 
 void test('resolveNextPendingEmbeddedEndConfirmation requires two clicks before ending', () => {

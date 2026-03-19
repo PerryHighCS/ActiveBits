@@ -2681,7 +2681,7 @@ const SyncDeckManager: FC = () => {
       const nextOverlayNavigationCapabilities = extractManagerNavigationCapabilitiesFromRevealMessage(event.data)
       if (nextOverlayNavigationCapabilities) {
         setOverlayNavigationCapabilities(nextOverlayNavigationCapabilities)
-        setOverlayNavigationCapabilityIndices(extractIndicesFromRevealPayload(event.data) ?? lastInstructorIndicesRef.current)
+        setOverlayNavigationCapabilityIndices(extractIndicesFromRevealPayload(event.data))
       }
 
       const storyboardDisplayed = extractStoryboardDisplayed(event.data)
