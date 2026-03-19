@@ -28,6 +28,7 @@ interface SessionResponsePayload {
   session?: {
     data?: {
       presentationUrl?: unknown
+      standaloneMode?: unknown
       embeddedActivities?: unknown
     }
   }
@@ -767,10 +768,19 @@ function buildRevealCommandMessage(name: string, payload: RevealCommandPayload):
   }
 }
 
-export function buildStudentRoleCommandMessage(): Record<string, unknown> {
+export function buildStudentRoleCommandMessage(
+  role: 'student' | 'standalone' = 'student',
+): Record<string, unknown> {
   return buildRevealCommandMessage('setRole', {
-    role: 'student',
+    role,
   })
+}
+
+export function buildStandaloneBootstrapCommandMessages(): Record<string, unknown>[] {
+  return [
+    buildStudentRoleCommandMessage('standalone'),
+    buildRevealCommandMessage('clearBoundary', {}),
+  ]
 }
 
 function extractStoryboardDisplayed(data: unknown): boolean | null {
@@ -1510,6 +1520,7 @@ const SyncDeckStudent: FC = () => {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [presentationUrl, setPresentationUrl] = useState<string | null>(null)
+  const [isStandaloneSession, setIsStandaloneSession] = useState(false)
   const [isWaitingForConfiguration, setIsWaitingForConfiguration] = useState(false)
   const [statusMessage, setStatusMessage] = useState('Waiting for instructor sync…')
   const [connectionState, setConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
@@ -2147,7 +2158,7 @@ const SyncDeckStudent: FC = () => {
   const { connect: connectStudentWs, disconnect: disconnectStudentWs, socketRef: studentSocketRef } =
     useResilientWebSocket({
       buildUrl: buildStudentWsUrl,
-      shouldReconnect: Boolean(sessionId && presentationUrl && !presentationUrlError),
+      shouldReconnect: Boolean(sessionId && presentationUrl && !presentationUrlError && !isStandaloneSession),
       onOpen: () => {
         setConnectionState('connected')
         setStatusMessage('Connected. Waiting for instructor sync…')
@@ -2196,8 +2207,10 @@ const SyncDeckStudent: FC = () => {
 
         const payload = (await response.json()) as SessionResponsePayload
         const configuredPresentationUrl = payload.session?.data?.presentationUrl
+        const standaloneMode = payload.session?.data?.standaloneMode === true
         if (typeof configuredPresentationUrl !== 'string' || !validatePresentationUrl(configuredPresentationUrl)) {
           if (!isCancelled) {
+            setIsStandaloneSession(standaloneMode)
             setIsWaitingForConfiguration(true)
             setError(null)
             setIsLoading(false)
@@ -2211,6 +2224,7 @@ const SyncDeckStudent: FC = () => {
           )
           setEmbeddedActivities(existingEmbeddedActivities)
           setPresentationUrl(configuredPresentationUrl)
+          setIsStandaloneSession(standaloneMode)
           setIsWaitingForConfiguration(false)
           setError(null)
           setIsLoading(false)
@@ -2246,15 +2260,17 @@ const SyncDeckStudent: FC = () => {
 
         const payload = (await response.json()) as SessionResponsePayload
         const configuredPresentationUrl = payload.session?.data?.presentationUrl
+        const standaloneMode = payload.session?.data?.standaloneMode === true
         if (typeof configuredPresentationUrl !== 'string' || !validatePresentationUrl(configuredPresentationUrl)) {
           return
         }
 
         if (!isCancelled) {
           setPresentationUrl(configuredPresentationUrl)
+          setIsStandaloneSession(standaloneMode)
           setIsWaitingForConfiguration(false)
-          setConnectionState('disconnected')
-          setStatusMessage('Waiting for instructor sync…')
+          setConnectionState(standaloneMode ? 'connected' : 'disconnected')
+          setStatusMessage(standaloneMode ? 'Standalone navigation enabled' : 'Waiting for instructor sync…')
         }
       } catch {
         return
@@ -2276,6 +2292,7 @@ const SyncDeckStudent: FC = () => {
     if (
       !sessionId
       || !presentationUrl
+      || isStandaloneSession
       || presentationUrlError
       || registeredStudentName.trim().length === 0
       || registeredStudentId.trim().length === 0
@@ -2288,16 +2305,37 @@ const SyncDeckStudent: FC = () => {
     return () => {
       disconnectStudentWs()
     }
-  }, [sessionId, presentationUrl, presentationUrlError, registeredStudentName, registeredStudentId, connectStudentWs, disconnectStudentWs])
+  }, [
+    sessionId,
+    presentationUrl,
+    isStandaloneSession,
+    presentationUrlError,
+    registeredStudentName,
+    registeredStudentId,
+    connectStudentWs,
+    disconnectStudentWs,
+  ])
 
   const handleIframeLoad = useCallback(() => {
     hasSeenIframeReadySignalRef.current = false
-    sendPayloadToIframe(buildStudentRoleCommandMessage())
+    const bootstrapPayloads = isStandaloneSession
+      ? buildStandaloneBootstrapCommandMessages()
+      : [buildStudentRoleCommandMessage()]
+
+    for (const payload of bootstrapPayloads) {
+      sendPayloadToIframe(payload)
+    }
+
+    if (isStandaloneSession) {
+      setConnectionState('connected')
+      setStatusMessage('Standalone navigation enabled')
+      return
+    }
 
     if (studentSocketRef.current?.readyState === WS_OPEN_READY_STATE) {
       setStatusMessage('Connected to instructor sync')
     }
-  }, [sendPayloadToIframe, studentSocketRef])
+  }, [isStandaloneSession, sendPayloadToIframe, studentSocketRef])
 
   const toggleStoryboard = useCallback(() => {
     sendPayloadToIframe(
@@ -2736,6 +2774,7 @@ const SyncDeckStudent: FC = () => {
             </button>
           </>
         ) : null}
+
       </div>
     </div>
   )

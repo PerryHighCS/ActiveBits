@@ -6,6 +6,7 @@ import SyncDeckStudent from './SyncDeckStudent.js'
 import { toRevealCommandMessage } from './SyncDeckStudent.js'
 import { toRevealBoundaryCommandMessage } from './SyncDeckStudent.js'
 import { buildStudentRoleCommandMessage } from './SyncDeckStudent.js'
+import { buildStandaloneBootstrapCommandMessages } from './SyncDeckStudent.js'
 import { buildStudentWebSocketUrl } from './SyncDeckStudent.js'
 import { resolveConfiguredPresentationOrigin } from './SyncDeckStudent.js'
 import { resolveIframePostMessageTargetOrigin } from './SyncDeckStudent.js'
@@ -610,7 +611,7 @@ void test('extractIndicesFromRevealStateMessage reads indices from ready navigat
   assert.deepEqual(indices, { h: 5, v: 3, f: 0 })
 })
 
-void test('buildStudentRoleCommandMessage emits setRole student command', () => {
+void test('buildStudentRoleCommandMessage emits setRole student command by default', () => {
   const message = buildStudentRoleCommandMessage()
 
   assert.equal(message.type, 'reveal-sync')
@@ -622,6 +623,40 @@ void test('buildStudentRoleCommandMessage emits setRole student command', () => 
     payload: {
       role: 'student',
     },
+  })
+})
+
+void test('buildStudentRoleCommandMessage can emit standalone role command', () => {
+  const message = buildStudentRoleCommandMessage('standalone')
+
+  assert.deepEqual(message.payload, {
+    name: 'setRole',
+    payload: {
+      role: 'standalone',
+    },
+  })
+})
+
+void test('buildStandaloneBootstrapCommandMessages sets standalone role and clears boundary', () => {
+  const messages = buildStandaloneBootstrapCommandMessages() as Array<{
+    payload?: {
+      name?: unknown
+      payload?: {
+        role?: unknown
+      }
+    }
+  }>
+
+  assert.equal(messages.length, 2)
+  assert.deepEqual(messages[0]?.payload, {
+    name: 'setRole',
+    payload: {
+      role: 'standalone',
+    },
+  })
+  assert.deepEqual(messages[1]?.payload, {
+    name: 'clearBoundary',
+    payload: {},
   })
 })
 

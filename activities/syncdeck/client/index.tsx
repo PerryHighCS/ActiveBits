@@ -61,6 +61,7 @@ export async function launchSyncDeckPersistentSoloEntry(
     body: JSON.stringify({
       presentationUrl,
       instructorPasscode,
+      standaloneMode: true,
     }),
   })
   if (!configureResponse.ok) {

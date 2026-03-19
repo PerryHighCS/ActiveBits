@@ -108,6 +108,7 @@ type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
 interface SyncDeckSessionData extends Record<string, unknown> {
   presentationUrl: string | null
+  standaloneMode: boolean
   instructorPasscode: string
   instructorState: SyncDeckInstructorState | null
   lastInstructorPayload: unknown
@@ -485,6 +486,7 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
     ...(preservedAcceptedEntryParticipants ? { acceptedEntryParticipants: preservedAcceptedEntryParticipants } : {}),
     ...(preservedEntryParticipants ? { entryParticipants: preservedEntryParticipants } : {}),
     presentationUrl: typeof source.presentationUrl === 'string' ? source.presentationUrl : null,
+    standaloneMode: source.standaloneMode === true,
     instructorPasscode:
       typeof source.instructorPasscode === 'string' && source.instructorPasscode.length > 0
         ? source.instructorPasscode
@@ -750,6 +752,12 @@ function readStringField(payload: unknown, key: string): string | null {
   if (!isPlainObject(payload)) return null
   const value = payload[key]
   return typeof value === 'string' ? value : null
+}
+
+function readBooleanField(payload: unknown, key: string): boolean | null {
+  if (!isPlainObject(payload)) return null
+  const value = payload[key]
+  return typeof value === 'boolean' ? value : null
 }
 
 function readObjectField(payload: unknown, key: string): Record<string, unknown> | null {
@@ -1692,6 +1700,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const instructorPasscode = readStringField(req.body, 'instructorPasscode')
     const urlHash = readStringField(req.body, 'urlHash')
     const persistentHashFromClient = readStringField(req.body, 'persistentHash')
+    const standaloneMode = readBooleanField(req.body, 'standaloneMode') === true
     if (
       !presentationUrl ||
       !validatePresentationUrl(presentationUrl) ||
@@ -1725,6 +1734,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     session.data.presentationUrl = presentationUrl
+    session.data.standaloneMode = standaloneMode
     await sessions.set(session.id, session)
 
     const response = res as unknown as JsonResponse

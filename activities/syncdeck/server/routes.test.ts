@@ -2826,6 +2826,38 @@ void test('configure route sets presentation url for valid passcode', async () =
   assert.deepEqual(res.body, { ok: true })
   const updated = storeState.store.s1?.data as Record<string, unknown>
   assert.equal(updated.presentationUrl, 'https://example.com/deck')
+  assert.equal(updated.standaloneMode, false)
+})
+
+void test('configure route can enable standalone mode for solo-launched sessions', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/configure']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        presentationUrl: 'https://example.com/deck',
+        instructorPasscode: 'teacher-pass',
+        standaloneMode: true,
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { ok: true })
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  assert.equal(updated.presentationUrl, 'https://example.com/deck')
+  assert.equal(updated.standaloneMode, true)
 })
 
 void test('configure route accepts urlHash when session has persistent mapping', async () => {

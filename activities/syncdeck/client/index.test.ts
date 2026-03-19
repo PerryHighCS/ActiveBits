@@ -68,6 +68,7 @@ void test('launchSyncDeckPersistentSoloEntry creates and configures a solo sessi
       {
         presentationUrl: 'https://slides.example/deck',
         instructorPasscode: 'pass-123',
+        standaloneMode: true,
       },
     )
   } finally {
