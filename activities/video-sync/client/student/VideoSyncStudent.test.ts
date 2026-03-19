@@ -13,6 +13,7 @@ import { shouldRunAutoplayCheck } from './VideoSyncStudent.js'
 import { syncLoadedVideoSource } from './VideoSyncStudent.js'
 import { shouldInitializeYoutubePlayer } from './VideoSyncStudent.js'
 import { shouldBlockStudentOverlayKey } from './VideoSyncStudent.js'
+import { shouldConnectVideoSyncStudentRealtime } from './VideoSyncStudent.js'
 import type { VideoSyncState } from '../protocol.js'
 import type { YoutubePlayerLike } from '../youtubeIframeApi.js'
 
@@ -256,6 +257,24 @@ void test('shouldRunAutoplayCheck only reads autoplay state for the current play
 void test('shouldBlockStudentOverlayKey allows Tab and Escape so focus is not trapped', () => {
   assert.equal(shouldBlockStudentOverlayKey('Tab'), false)
   assert.equal(shouldBlockStudentOverlayKey('Escape'), false)
+})
+
+void test('shouldConnectVideoSyncStudentRealtime waits for session mode resolution and skips standalone sessions', () => {
+  assert.equal(shouldConnectVideoSyncStudentRealtime({
+    sessionId: 'session-1',
+    isStandaloneSession: false,
+    isSessionModeResolved: false,
+  }), false)
+  assert.equal(shouldConnectVideoSyncStudentRealtime({
+    sessionId: 'session-1',
+    isStandaloneSession: true,
+    isSessionModeResolved: true,
+  }), false)
+  assert.equal(shouldConnectVideoSyncStudentRealtime({
+    sessionId: 'session-1',
+    isStandaloneSession: false,
+    isSessionModeResolved: true,
+  }), true)
 })
 
 void test('shouldBlockStudentOverlayKey blocks other playback-related keys', () => {

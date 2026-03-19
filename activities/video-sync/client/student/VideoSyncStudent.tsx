@@ -159,6 +159,14 @@ export function shouldRenderStudentInteractionOverlay(isStandaloneSession: boole
   return !isStandaloneSession
 }
 
+export function shouldConnectVideoSyncStudentRealtime(params: {
+  sessionId: string | null
+  isStandaloneSession: boolean
+  isSessionModeResolved: boolean
+}): boolean {
+  return Boolean(params.sessionId && params.isSessionModeResolved && !params.isStandaloneSession)
+}
+
 export function resetUnsyncedPlaybackTelemetry(params: {
   isLocallyUnsyncedRef: { current: boolean }
   lastUnsyncReportAtRef: { current: number }
@@ -283,6 +291,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const [playerReady, setPlayerReady] = useState(false)
   const [hasStartedInstructorPlayback, setHasStartedInstructorPlayback] = useState(false)
   const [isStandaloneSession, setIsStandaloneSession] = useState(false)
+  const [isSessionModeResolved, setIsSessionModeResolved] = useState(false)
   const [studentIdentity, setStudentIdentity] = useState<VideoSyncStudentIdentity>(() => ({
     studentName: 'Student',
     studentId: createStudentClientId(),
@@ -455,7 +464,11 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
   const { connect, disconnect } = useResilientWebSocket({
     buildUrl: buildWsUrl,
-    shouldReconnect: Boolean(sessionId && !isStandaloneSession),
+    shouldReconnect: shouldConnectVideoSyncStudentRealtime({
+      sessionId,
+      isStandaloneSession,
+      isSessionModeResolved,
+    }),
     attachSessionEndedHandler,
     onMessage: (event) => {
       const envelope = parseVideoSyncEnvelope(event.data)
@@ -563,10 +576,15 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   useEffect(() => {
     if (!sessionId) return undefined
 
+    setIsSessionModeResolved(false)
+
     const loadSession = async () => {
       try {
         const response = await fetch(`/api/video-sync/${sessionId}/session`)
-        if (!response.ok) return
+        if (!response.ok) {
+          setIsSessionModeResolved(true)
+          return
+        }
         const data = (await response.json()) as SessionResponse
         setIsStandaloneSession(data.data?.standaloneMode === true)
         if (data.data?.state) {
@@ -574,16 +592,22 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         }
       } catch {
         setErrorMessage('Unable to load synchronized video state')
+      } finally {
+        setIsSessionModeResolved(true)
       }
     }
 
     void loadSession()
-    if (!isStandaloneSession) {
+    if (shouldConnectVideoSyncStudentRealtime({
+      sessionId,
+      isStandaloneSession,
+      isSessionModeResolved,
+    })) {
       connect()
     }
 
     return () => disconnect()
-  }, [sessionId, isStandaloneSession, connect, disconnect])
+  }, [sessionId, isStandaloneSession, isSessionModeResolved, connect, disconnect])
 
   const retryAutoplay = (): void => {
     const player = playerRef.current
