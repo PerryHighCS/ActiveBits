@@ -1133,6 +1133,36 @@ void test('session patch can mark a configured session as standalone', async () 
   })
 })
 
+void test('session patch preserves existing standaloneMode when request omits the field', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  ;(storeState.store.s1?.data as { standaloneMode: boolean }).standaloneMode = true
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        sourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  assert.equal(updated.standaloneMode, true)
+  assert.deepEqual((res.body as { data?: Record<string, unknown> }).data?.standaloneMode, true)
+})
+
 void test('session patch ignores partially numeric timestamp query values', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter

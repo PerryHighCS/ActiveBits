@@ -1360,7 +1360,7 @@ export default function setupVideoSyncRoutes(
     }
 
     const body = isPlainObject(req.body) ? (req.body as ConfigBody) : {}
-    const standaloneMode = readBooleanField(req.body, 'standaloneMode') === true
+    const requestedStandaloneMode = readBooleanField(req.body, 'standaloneMode')
 
     if (typeof body.sourceUrl !== 'string' || body.sourceUrl.trim().length === 0) {
       data.telemetry.error = {
@@ -1433,7 +1433,9 @@ export default function setupVideoSyncRoutes(
       updatedBy: 'instructor',
       serverTimestampMs: now,
     }
-    data.standaloneMode = standaloneMode
+    if (requestedStandaloneMode != null) {
+      data.standaloneMode = requestedStandaloneMode
+    }
     data.telemetry.error = { code: null, message: null }
     await updateConnectionTelemetry(sessions, data, sessionId)
 
