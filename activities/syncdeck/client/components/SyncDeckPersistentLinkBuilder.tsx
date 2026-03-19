@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import Button from '@src/components/ui/Button'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
@@ -68,8 +68,6 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, editState, o
   const [preflightWarning, setPreflightWarning] = useState<string | null>(null)
   const [preflightPreviewUrl, setPreflightPreviewUrl] = useState<string | null>(null)
   const [preflightValidatedUrl, setPreflightValidatedUrl] = useState<string | null>(null)
-  const [allowUnverifiedGenerateForUrl, setAllowUnverifiedGenerateForUrl] = useState<string | null>(null)
-  const [confirmGenerateForUrl, setConfirmGenerateForUrl] = useState<string | null>(null)
 
   const normalizedPresentationUrl = presentationUrl.trim()
   const normalizedTeacherCode = teacherCode.trim()
@@ -81,29 +79,52 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, editState, o
         hostProtocol: typeof window !== 'undefined' ? window.location.protocol : null,
         userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
       })
-  const canSubmit = normalizedTeacherCode.length >= MIN_TEACHER_CODE_LENGTH && !presentationUrlError
+  const isUrlVerified = preflightValidatedUrl === normalizedPresentationUrl && !presentationUrlError
+  const canVerify = Boolean(normalizedPresentationUrl) && !presentationUrlError && !isPreflightChecking
+  const canSubmit = normalizedTeacherCode.length >= MIN_TEACHER_CODE_LENGTH && !presentationUrlError && isUrlVerified
 
-  const showGenerateAnyway =
-    Boolean(preflightWarning) &&
-    Boolean(normalizedPresentationUrl) &&
-    allowUnverifiedGenerateForUrl === normalizedPresentationUrl
-  const showGenerateVerified =
-    preflightValidatedUrl === normalizedPresentationUrl &&
-    confirmGenerateForUrl === normalizedPresentationUrl
+  const buttonLabel = isCreating
+    ? (isEditing ? 'Saving...' : 'Creating...')
+    : (isEditing ? 'Save Changes' : 'Generate Link')
 
-  const buttonLabel = useMemo(() => {
-    if (isPreflightChecking) return 'Validating...'
-    if (isCreating) return 'Creating...'
-    if (showGenerateAnyway) return 'Generate Anyway'
-    if (showGenerateVerified) return 'Generate Verified Link'
-    return isEditing ? 'Save Changes' : 'Generate Link'
-  }, [isCreating, isEditing, isPreflightChecking, showGenerateAnyway, showGenerateVerified])
+  const handleVerifyUrl = async (): Promise<void> => {
+    if (!canVerify) {
+      return
+    }
+
+    setError(null)
+    setIsPreflightChecking(true)
+    try {
+      const preflightResult = await runSyncDeckPresentationPreflight(normalizedPresentationUrl)
+      if (preflightResult.valid) {
+        setPreflightValidatedUrl(normalizedPresentationUrl)
+        setPreflightWarning(null)
+        setPreflightPreviewUrl(normalizedPresentationUrl)
+        return
+      }
+
+      setPreflightValidatedUrl(null)
+      setPreflightPreviewUrl(null)
+      setPreflightWarning(preflightResult.warning)
+    } catch {
+      setPreflightValidatedUrl(null)
+      setPreflightPreviewUrl(null)
+      setPreflightWarning('Unable to verify this presentation URL right now. Please try again.')
+    } finally {
+      setIsPreflightChecking(false)
+    }
+  }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
 
     if (!canSubmit) {
-      setError(presentationUrlError ?? `Teacher code must be at least ${MIN_TEACHER_CODE_LENGTH} characters`)
+      setError(
+        presentationUrlError
+          ?? (normalizedTeacherCode.length < MIN_TEACHER_CODE_LENGTH
+            ? `Teacher code must be at least ${MIN_TEACHER_CODE_LENGTH} characters`
+            : 'Verify the presentation URL before creating the link.'),
+      )
       return
     }
 
@@ -111,34 +132,6 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, editState, o
     setIsCreating(true)
 
     try {
-      const canBypassPreflight = allowUnverifiedGenerateForUrl === normalizedPresentationUrl
-      if (preflightValidatedUrl !== normalizedPresentationUrl && !canBypassPreflight) {
-        setIsPreflightChecking(true)
-        const preflightResult = await runSyncDeckPresentationPreflight(normalizedPresentationUrl)
-        setIsPreflightChecking(false)
-
-        if (preflightResult.valid) {
-          setPreflightValidatedUrl(normalizedPresentationUrl)
-          setAllowUnverifiedGenerateForUrl(null)
-          setConfirmGenerateForUrl(normalizedPresentationUrl)
-          setPreflightWarning(null)
-          setPreflightPreviewUrl(normalizedPresentationUrl)
-          return
-        }
-
-        setPreflightValidatedUrl(null)
-        setPreflightPreviewUrl(null)
-        setPreflightWarning(preflightResult.warning)
-        setAllowUnverifiedGenerateForUrl(normalizedPresentationUrl)
-        setConfirmGenerateForUrl(null)
-        setError('Link validation failed. Click Generate Anyway to continue.')
-        return
-      }
-
-      if (preflightValidatedUrl === normalizedPresentationUrl && confirmGenerateForUrl === normalizedPresentationUrl) {
-        setConfirmGenerateForUrl(null)
-      }
-
       const request = resolveSyncDeckPersistentLinkBuilderRequest({
         activityId,
         normalizedTeacherCode,
@@ -219,27 +212,43 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, editState, o
 
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-2">Presentation URL</label>
-        <input
-          type="text"
-          value={presentationUrl}
-          onChange={(event) => {
-            const nextValue = event.target.value
-            setPresentationUrl(nextValue)
-            const normalizedNextValue = nextValue.trim()
-            if (!normalizedNextValue || normalizedNextValue === preflightValidatedUrl) {
-              return
-            }
-            setPreflightValidatedUrl(null)
-            setPreflightPreviewUrl(null)
-            setPreflightWarning(null)
-            setAllowUnverifiedGenerateForUrl(null)
-            setConfirmGenerateForUrl(null)
-          }}
-          className={`w-full border-2 rounded px-3 py-2 ${presentationUrlError ? 'border-red-400' : 'border-gray-300'}`}
-          placeholder="https://..."
-          autoComplete="off"
-          required
-        />
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={presentationUrl}
+            onChange={(event) => {
+              const nextValue = event.target.value
+              setPresentationUrl(nextValue)
+              const normalizedNextValue = nextValue.trim()
+              if (normalizedNextValue !== preflightValidatedUrl) {
+                setPreflightValidatedUrl(null)
+                setPreflightPreviewUrl(null)
+                setPreflightWarning(null)
+              }
+              setError(null)
+            }}
+            className={`flex-1 border-2 rounded px-3 py-2 ${presentationUrlError ? 'border-red-400' : 'border-gray-300'}`}
+            placeholder="https://..."
+            autoComplete="off"
+            required
+          />
+          <Button
+            type="button"
+            onClick={() => {
+              void handleVerifyUrl()
+            }}
+            disabled={!canVerify || isCreating}
+            variant="outline"
+            className="whitespace-nowrap"
+          >
+            {isPreflightChecking ? 'Verifying...' : 'Verify URL'}
+          </Button>
+        </div>
+        {!presentationUrlError && normalizedPresentationUrl && (
+          <p className={`text-xs mt-1 ${isUrlVerified ? 'text-green-700' : 'text-gray-600'}`}>
+            {isUrlVerified ? 'URL verified. You can now create the link.' : 'Verify this URL before creating the link.'}
+          </p>
+        )}
         {presentationUrlError && <p className="text-xs text-red-600 mt-1">{presentationUrlError}</p>}
       </div>
 
