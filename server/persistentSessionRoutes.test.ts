@@ -1165,6 +1165,48 @@ void test('persistent session metadata route ignores unsigned query params that 
   })
 })
 
+void test('persistent session metadata route does not expose queryParams when urlHash is missing', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'algorithm-demo',
+      teacherCode: 'unsigned-query-test',
+      selectedOptions: {
+        algorithm: 'merge-sort',
+      },
+    },
+  })
+  const createRes = createMockRes()
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  const handler = getRoute(app, 'GET', '/api/persistent-session/:hash')
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { hash },
+    query: {
+      activityName: 'algorithm-demo',
+      algorithm: 'merge-sort',
+      entryPolicy: 'instructor-required',
+      // Intentionally missing urlHash: query params must not be trusted.
+      utm_source: 'email',
+    },
+  }), res)
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.jsonBody))
+  assert.deepEqual(res.jsonBody?.queryParams, {})
+})
+
 void test('update preserves canonical video-sync sourceUrl across edit and list output', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

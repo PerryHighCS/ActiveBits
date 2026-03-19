@@ -625,6 +625,21 @@ export function normalizeSyncDeckEmbeddedActivities(value: unknown): SyncDeckEmb
   return normalized
 }
 
+export function resolvePersistentUrlHashForConfigure(
+  queryUrlHash: string | null | undefined,
+  persistentUrlHashFallback: string | null | undefined,
+): string | null {
+  const normalizedQueryUrlHash = typeof queryUrlHash === 'string' && queryUrlHash.trim().length > 0
+    ? queryUrlHash.trim()
+    : null
+  const normalizedPersistentUrlHashFallback = typeof persistentUrlHashFallback === 'string' && persistentUrlHashFallback.trim().length > 0
+    ? persistentUrlHashFallback.trim()
+    : null
+
+  // Prefer the server-verified/cookie-recovered hash to avoid stale query params forcing configure failures.
+  return normalizedPersistentUrlHashFallback ?? normalizedQueryUrlHash
+}
+
 function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmbeddedInstancePosition | null {
   const segments = instanceKey.split(':')
   if (segments.length < 3) {
@@ -1655,7 +1670,7 @@ const SyncDeckManager: FC = () => {
 
   const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
   const queryEntryPolicy = new URLSearchParams(location.search).get('entryPolicy')
-  const urlHash = queryUrlHash ?? persistentUrlHashFallback
+  const urlHash = resolvePersistentUrlHashForConfigure(queryUrlHash, persistentUrlHashFallback)
   const entryPolicy = (queryEntryPolicy ?? 'instructor-required').trim() || 'instructor-required'
   const hostProtocol = typeof window !== 'undefined' ? window.location.protocol : null
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : null

@@ -659,8 +659,7 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       sessions,
     })
 
-    const queryParams = verifiedUrlState?.selectedOptions
-      ?? getPersistentLinkSelectedOptionsFromQuery(activityName, req.query)
+    const queryParams = verifiedUrlState?.selectedOptions ?? {}
 
     res.json({
       activityName: entryContext.activityName,

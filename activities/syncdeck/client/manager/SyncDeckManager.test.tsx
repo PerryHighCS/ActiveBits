@@ -23,6 +23,7 @@ import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
 import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
 import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
 import { normalizeStoredInstructorPasscode } from './SyncDeckManager.js'
+import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
 import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
 import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
@@ -168,6 +169,22 @@ void test('normalizeStoredInstructorPasscode trims and rejects empty cached valu
   assert.equal(normalizeStoredInstructorPasscode(' teacher-pass '), 'teacher-pass')
   assert.equal(normalizeStoredInstructorPasscode('   '), null)
   assert.equal(normalizeStoredInstructorPasscode(null), null)
+})
+
+void test('resolvePersistentUrlHashForConfigure prefers verified fallback hash over query hash', () => {
+  assert.equal(
+    resolvePersistentUrlHashForConfigure('stale-query-hash', 'verified-cookie-hash'),
+    'verified-cookie-hash',
+  )
+  assert.equal(
+    resolvePersistentUrlHashForConfigure(' query-hash ', '  '),
+    'query-hash',
+  )
+  assert.equal(
+    resolvePersistentUrlHashForConfigure('   ', ' verified-cookie-hash '),
+    'verified-cookie-hash',
+  )
+  assert.equal(resolvePersistentUrlHashForConfigure(null, null), null)
 })
 
 void test('buildInstructorRoleCommandMessage emits setRole instructor command', () => {
