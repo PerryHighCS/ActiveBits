@@ -303,14 +303,14 @@ Sessions are stored in-memory with a TTL (time-to-live). Each session has:
 ### Persistent Sessions
 Permanent sessions use HMAC-SHA256 authentication:
 - **Hash Format**: 20 characters of `salt(8 hex) + hmac(12 hex)` derived from `activityName|hashedTeacherCode|salt`
-- **Generic permalink URL state**: generic persistent links now also carry signed query state for permalink meaning (`entryPolicy`, plus selected deep-link options) via a short `urlHash`; the URL is the source of truth for those settings, and missing/invalid signed state falls back to `instructor-required` / "Live Only"
+- **Generic permalink URL state**: persistent links carry one canonical signed permalink state via a short `urlHash`. That canonical state is `entryPolicy` plus the activity's declared deep-link options (`deepLinkOptions`) after normalization. Missing or invalid signed state falls back to `instructor-required` / "Live Only".
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
 - **Activity Manager Credentials**: Activities that expose manager-only controls should derive any session-scoped manager credential from create-session bootstrap data and/or teacher-cookie-validated recovery routes instead of trusting a client-selected websocket/API role
 - **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
-- **Query Parameters**: Activities can use URL query params for deep linking (e.g., `/activity/algorithm-demo/abc123?algorithm=merge-sort`)
-  - Server passes all query params to activities via `queryParams` object
-  - Each activity decides which parameters to handle
-  - Examples: `algorithm` (algorithm-demo), `preset` (gallery-walk), `challenge` (java-practice)
+- **Query Parameters**: For persistent links, only canonical selected options represented in activity `deepLinkOptions` are authoritative and signed (for example `/activity/algorithm-demo/abc123?algorithm=merge-sort&entryPolicy=solo-allowed&urlHash=...`).
+  - Unknown query params remain unsigned and must not influence persistent-link runtime behavior.
+  - Persistent-session metadata routes expose only the canonical signed option subset via `queryParams`.
+  - Activities that need recovered bootstrap values after redirects should use server-recovered/session-backed data instead of re-reading raw manage-route query params.
 - **Auto-reset**: Session data resets each time teacher visits
 - **Security**: 
   - httpOnly cookies prevent XSS attacks

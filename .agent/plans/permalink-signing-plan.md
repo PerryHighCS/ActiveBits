@@ -38,7 +38,7 @@ Notes:
 - [x] Update waiting-room/auth verification to trust only canonical signed state.
 - [x] Make unknown query params explicitly ignored for behavior unless copied into canonical state.
 - [x] Add regression tests for extra unsigned params like `utm_source`.
-- [ ] Update docs for the new permalink contract after implementation lands.
+- [x] Update docs for the new permalink contract after implementation lands.
 
 ## Activity Follow-up
 
@@ -78,4 +78,4 @@ Question to answer during implementation:
 - [x] SyncDeck tests cover create/edit parity and first-launch manager bootstrap.
 - [x] Video Sync tests cover standalone permalink launch after edit.
 - [x] Algorithm Demo tests cover signed option preservation across edit.
-- [ ] `npm test` or `npm run test:codex` passes in this environment.
+- [x] `npm test` or `npm run test:codex` passes in this environment.
