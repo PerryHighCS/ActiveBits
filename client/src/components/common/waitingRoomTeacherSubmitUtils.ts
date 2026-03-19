@@ -1,3 +1,5 @@
+import { buildPersistentTeacherManagePath } from './sessionRouterUtils'
+
 export interface WaitingRoomTeacherSubmitPayload {
   isStarted?: boolean
   sessionId?: string | null
@@ -29,7 +31,7 @@ export function resolveWaitingRoomTeacherSubmitResult({
 }: ResolveWaitingRoomTeacherSubmitParams): WaitingRoomTeacherSubmitResolution {
   if (payload.isStarted && typeof payload.sessionId === 'string' && payload.sessionId.length > 0) {
     return {
-      navigateTo: `/manage/${activityName}/${payload.sessionId}${queryString}`,
+      navigateTo: buildPersistentTeacherManagePath(activityName, payload.sessionId, queryString),
       closeSocket: true,
     }
   }

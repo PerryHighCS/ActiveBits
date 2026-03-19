@@ -495,6 +495,15 @@ function buildSyncDeckChalkboardOpenKey(sessionId: string): string {
   return `${SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX}${sessionId}`
 }
 
+export function normalizeStoredInstructorPasscode(value: string | null): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
   return value.trim().length > 0 && getStudentPresentationCompatibilityError({
     value,
@@ -1941,6 +1950,7 @@ const SyncDeckManager: FC = () => {
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
       setInstructorPasscode(null)
+      setPersistentUrlHashFallback(null)
       setIsPasscodeReady(true)
       return
     }
@@ -1948,13 +1958,13 @@ const SyncDeckManager: FC = () => {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      const fromStorage = window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId))
-      if (fromStorage) {
-        if (!isCancelled) {
-          setInstructorPasscode(fromStorage)
-          setIsPasscodeReady(true)
-        }
-        return
+      const cachedPasscode = normalizeStoredInstructorPasscode(
+        window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId)),
+      )
+
+      if (!isCancelled) {
+        setInstructorPasscode(cachedPasscode)
+        setPersistentUrlHashFallback(null)
       }
 
       try {
@@ -1963,9 +1973,10 @@ const SyncDeckManager: FC = () => {
         })
         if (!response.ok) {
           if (!isCancelled) {
-            setInstructorPasscode(null)
+            if (!cachedPasscode) {
+              setInstructorPasscode(null)
+            }
             setPersistentUrlHashFallback(null)
-            setIsPasscodeReady(true)
           }
           return
         }
@@ -1976,6 +1987,8 @@ const SyncDeckManager: FC = () => {
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
+        } else if (!isCancelled && !cachedPasscode) {
+          setInstructorPasscode(null)
         }
 
         if (!isCancelled) {
@@ -1994,13 +2007,13 @@ const SyncDeckManager: FC = () => {
               return resolveRecoveredPresentationUrl(current, persistentPresentationUrl, hostProtocol, userAgent)
             })
           }
-          if (!queryUrlHash) {
-            setPersistentUrlHashFallback(persistentUrlHash)
-          }
+          setPersistentUrlHashFallback(persistentUrlHash)
         }
       } catch {
         if (!isCancelled) {
-          setInstructorPasscode(null)
+          if (!cachedPasscode) {
+            setInstructorPasscode(null)
+          }
           setPersistentUrlHashFallback(null)
         }
       } finally {

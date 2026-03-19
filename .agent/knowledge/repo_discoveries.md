@@ -1211,3 +1211,19 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
 - Follow-up action: When adding new embedded-slide handoffs, treat the deck’s current-slide `activityRequest` as the pending signal and keep reconciling until the expected child session appears or the request ages out.
 - Owner: Codex
+
+- Date: 2026-03-19
+- Area: client | waiting room | syncdeck teacher redirect
+- Discovery: Teacher redirects that leave the waiting room should use the shared `buildPersistentTeacherManagePath(...)` helper, not inline `/manage/...${queryString}` concatenation. SyncDeck manager query params can carry the permalink layer’s generic `urlHash`, which is invalid for SyncDeck’s activity-specific configure hash and forces the manager back into the configure screen.
+- Why it matters: The dashboard resume path already strips SyncDeck permalink query params before redirecting to the manager; waiting-room teacher auth needs to match that behavior or freshly edited SyncDeck permalinks behave differently depending on how they are opened.
+- Evidence: `client/src/components/common/waitingRoomTeacherSubmitUtils.ts`; `client/src/components/common/sessionRouterUtils.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.test.ts`
+- Follow-up action: Reuse shared route builders for activity-specific teacher redirects instead of duplicating redirect strings inside waiting-room helpers.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: client | manage dashboard | activity-owned permalink builders
+- Discovery: Activity-owned permalink builders need edit-state props as well as create-mode props. Otherwise edit falls back to the generic dashboard form and can silently bypass activity-specific validation or generation flows such as SyncDeck’s Reveal preflight and `generate-url` handling.
+- Why it matters: The UI can look similar while behaving differently; for SyncDeck this caused edited links to skip verification and diverge from the create flow.
+- Evidence: `types/activity.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`
+- Follow-up action: When adding custom permalink builders for other activities, make sure both create and edit paths are covered before leaving the generic-form fallback in place.
+- Owner: Codex

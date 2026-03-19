@@ -49,8 +49,16 @@ export interface ActivityPersistentLinkBuildResult {
   selectedOptions?: Record<string, unknown>
 }
 
+export interface ActivityPersistentLinkBuilderEditState {
+  hash: string
+  teacherCode: string
+  selectedOptions?: Record<string, unknown>
+  entryPolicy?: string
+}
+
 export interface ActivityPersistentLinkBuilderProps {
   activityId: string
+  editState?: ActivityPersistentLinkBuilderEditState | null
   onCreated(result: ActivityPersistentLinkBuildResult): void | Promise<void>
 }
 

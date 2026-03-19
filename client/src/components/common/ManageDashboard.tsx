@@ -601,12 +601,18 @@ export default function ManageDashboard() {
         title={`${editingPersistentSession ? 'Edit' : 'Create'} Permanent Link - ${selectedActivity?.name}`}
       >
         {!persistentUrl ? (
-          // Temporary workaround (owner: Codex, cleanup: once activity-owned builders support edit props):
-          // use the shared form for edits so existing create-only custom builders remain compatible.
-          CustomPersistentLinkBuilder && selectedActivity && !editingPersistentSession ? (
+          CustomPersistentLinkBuilder && selectedActivity ? (
             <Suspense fallback={<p className="text-sm text-gray-600">Loading link builder...</p>}>
               <CustomPersistentLinkBuilder
                 activityId={selectedActivity.id}
+                editState={editingPersistentSession
+                  ? {
+                    hash: editingPersistentSession.hash,
+                    teacherCode: savedSessions[buildPersistentSessionKey(selectedActivity.id, editingPersistentSession.hash)] || '',
+                    selectedOptions: editingPersistentSession.selectedOptions || {},
+                    entryPolicy: editingPersistentSession.entryPolicy,
+                  }
+                  : null}
                 onCreated={async (result: ActivityPersistentLinkBuildResult) => {
                   await handlePersistentLinkCreated(selectedActivity.id, result)
                 }}

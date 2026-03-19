@@ -16,9 +16,50 @@ function getWindowOrigin(): string {
   return typeof window !== 'undefined' ? window.location.origin : ''
 }
 
-export default function SyncDeckPersistentLinkBuilder({ activityId, onCreated }: ActivityPersistentLinkBuilderProps) {
-  const [teacherCode, setTeacherCode] = useState('')
-  const [presentationUrl, setPresentationUrl] = useState('')
+function readSelectedPresentationUrl(value: Record<string, unknown> | null | undefined): string {
+  const presentationUrl = typeof value?.presentationUrl === 'string' ? value.presentationUrl.trim() : ''
+  return presentationUrl
+}
+
+export function resolveSyncDeckPersistentLinkBuilderRequest(params: {
+  activityId: string
+  normalizedTeacherCode: string
+  normalizedPresentationUrl: string
+  editState: ActivityPersistentLinkBuilderProps['editState']
+}): {
+  endpoint: string
+  body: Record<string, unknown>
+} {
+  if (params.editState?.hash) {
+    return {
+      endpoint: '/api/persistent-session/update',
+      body: {
+        activityName: params.activityId,
+        hash: params.editState.hash,
+        entryPolicy: params.editState.entryPolicy ?? 'instructor-required',
+        selectedOptions: {
+          presentationUrl: params.normalizedPresentationUrl,
+        },
+      },
+    }
+  }
+
+  return {
+    endpoint: '/api/syncdeck/generate-url',
+    body: {
+      activityName: params.activityId,
+      teacherCode: params.normalizedTeacherCode,
+      selectedOptions: {
+        presentationUrl: params.normalizedPresentationUrl,
+      },
+    },
+  }
+}
+
+export default function SyncDeckPersistentLinkBuilder({ activityId, editState, onCreated }: ActivityPersistentLinkBuilderProps) {
+  const isEditing = Boolean(editState?.hash)
+  const [teacherCode, setTeacherCode] = useState(editState?.teacherCode ?? '')
+  const [presentationUrl, setPresentationUrl] = useState(() => readSelectedPresentationUrl(editState?.selectedOptions))
   const [error, setError] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [isPreflightChecking, setIsPreflightChecking] = useState(false)
@@ -53,8 +94,8 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, onCreated }:
     if (isCreating) return 'Creating...'
     if (showGenerateAnyway) return 'Generate Anyway'
     if (showGenerateVerified) return 'Generate Verified Link'
-    return 'Generate Link'
-  }, [isCreating, isPreflightChecking, showGenerateAnyway, showGenerateVerified])
+    return isEditing ? 'Save Changes' : 'Generate Link'
+  }, [isCreating, isEditing, isPreflightChecking, showGenerateAnyway, showGenerateVerified])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -96,16 +137,17 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, onCreated }:
         setConfirmGenerateForUrl(null)
       }
 
-      const response = await fetch('/api/syncdeck/generate-url', {
+      const request = resolveSyncDeckPersistentLinkBuilderRequest({
+        activityId,
+        normalizedTeacherCode,
+        normalizedPresentationUrl,
+        editState,
+      })
+
+      const response = await fetch(request.endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          activityName: activityId,
-          teacherCode: normalizedTeacherCode,
-          selectedOptions: {
-            presentationUrl: normalizedPresentationUrl,
-          },
-        }),
+        body: JSON.stringify(request.body),
       })
 
       if (!response.ok) {
@@ -130,7 +172,7 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, onCreated }:
       await onCreated({
         fullUrl,
         hash: payload.hash,
-        teacherCode: normalizedTeacherCode,
+        teacherCode: isEditing ? (editState?.teacherCode ?? normalizedTeacherCode) : normalizedTeacherCode,
         selectedOptions: {
           presentationUrl: normalizedPresentationUrl,
         },
@@ -146,8 +188,9 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, onCreated }:
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <p className="text-gray-700">
-        Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL,
-        they&apos;ll wait until you start the session with your teacher code.
+        {isEditing
+          ? 'Update this permanent SyncDeck link. The same presentation verification flow runs before the new URL is saved.'
+          : 'Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL, they\'ll wait until you start the session with your teacher code.'}
       </p>
 
       <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-2">
@@ -157,20 +200,22 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, onCreated }:
         </p>
       </div>
 
-      <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
-        <input
-          type="text"
-          value={teacherCode}
-          onChange={(event) => setTeacherCode(event.target.value)}
-          className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
-          placeholder="Create a Teacher Code for this link"
-          minLength={MIN_TEACHER_CODE_LENGTH}
-          required
-          autoComplete="off"
-        />
-        <p className="text-xs text-gray-500 mt-1">Remember this code! You&apos;ll need it to start sessions from this link.</p>
-      </div>
+      {!isEditing && (
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+          <input
+            type="text"
+            value={teacherCode}
+            onChange={(event) => setTeacherCode(event.target.value)}
+            className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
+            placeholder="Create a Teacher Code for this link"
+            minLength={MIN_TEACHER_CODE_LENGTH}
+            required
+            autoComplete="off"
+          />
+          <p className="text-xs text-gray-500 mt-1">Remember this code! You&apos;ll need it to start sessions from this link.</p>
+        </div>
+      )}
 
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-2">Presentation URL</label>
