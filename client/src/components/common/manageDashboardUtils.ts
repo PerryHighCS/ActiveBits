@@ -365,7 +365,6 @@ export function storeCreateSessionBootstrapPayload(
   payload: Record<string, unknown>,
   nowMs = Date.now(),
 ): void {
-  pruneCreateSessionBootstrapPayloads(nowMs)
   createSessionBootstrapPayloads.set(`${activityId}:${sessionId}`, {
     payload,
     createdAtMs: nowMs,

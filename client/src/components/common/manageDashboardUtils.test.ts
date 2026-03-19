@@ -744,7 +744,7 @@ void test('storeCreateSessionBootstrapPayload evicts oldest sessionStorage boots
   }
 })
 
-void test('storeCreateSessionBootstrapPayload prunes stale sessionStorage entries before writing a new payload', () => {
+void test('storeCreateSessionBootstrapPayload prunes stale sessionStorage entries when a write hits storage pressure', () => {
   const originalWindow = globalThis.window
   const staleCreatedAtMs = 1_000
   const freshNowMs = staleCreatedAtMs + 5 * 60 * 1000 + 1
@@ -800,7 +800,7 @@ void test('storeCreateSessionBootstrapPayload prunes stale sessionStorage entrie
       freshNowMs,
     )
 
-    assert.equal(setAttempts, 1)
+    assert.equal(setAttempts, 2)
     assert.equal(writes.has(staleKey), false)
     assert.equal(writes.has(freshKey), true)
   } finally {
