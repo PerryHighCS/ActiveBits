@@ -90,8 +90,6 @@ function persistCreateSessionBootstrapPayloadToSessionStorage(
     return
   }
 
-  pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs)
-
   const storageKey = buildCreateSessionBootstrapStorageKey(activityId, sessionId)
   const serializedEntry = JSON.stringify({
     createdAtMs,
