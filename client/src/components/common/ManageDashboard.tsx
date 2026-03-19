@@ -139,6 +139,7 @@ export default function ManageDashboard() {
   const [persistentUrl, setPersistentUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  const [lastPersistentSubmitMode, setLastPersistentSubmitMode] = useState<'created' | 'updated'>('created')
   const [persistentSessions, setPersistentSessions] = useState<PersistentSession[]>([])
   const [savedSessions, setSavedSessions] = useState<Record<string, string>>({})
   const [visibleCodes, setVisibleCodes] = useState<Record<string, boolean>>({})
@@ -246,6 +247,7 @@ export default function ManageDashboard() {
     setPersistentUrl(null)
     setError(null)
     setIsCreating(false)
+    setLastPersistentSubmitMode('created')
     setPersistentOptions({})
     setPersistentEntryPolicy(DEFAULT_PERSISTENT_ENTRY_POLICY)
   }
@@ -286,12 +288,20 @@ export default function ManageDashboard() {
       const selectedOptions = normalizeSelectedOptions(selectedActivity.deepLinkOptions, persistentOptions)
       const deepLinkGenerator = parseDeepLinkGenerator(selectedActivity.deepLinkGenerator)
       const isEditing = editingPersistentSession != null
-      const endpoint = isEditing
-        ? '/api/persistent-session/update'
-        : (deepLinkGenerator?.endpoint ?? '/api/persistent-session/create')
+      const normalizedTeacherCode = teacherCode.trim()
+      const existingTeacherCode = isEditing
+        ? (savedSessions[buildPersistentSessionKey(editingPersistentSession.activityName, editingPersistentSession.hash)] ?? '').trim()
+        : ''
+      const createsNewLinkFromTeacherCodeChange = isEditing
+        && normalizedTeacherCode.length > 0
+        && normalizedTeacherCode !== existingTeacherCode
+      const isCreateRequest = !isEditing || createsNewLinkFromTeacherCodeChange
+      const endpoint = isCreateRequest
+        ? (deepLinkGenerator?.endpoint ?? '/api/persistent-session/create')
+        : '/api/persistent-session/update'
       const requestBody = buildPersistentLinkRequestBody({
         activityId: selectedActivity.id,
-        hash: isEditing ? editingPersistentSession.hash : undefined,
+        hash: isCreateRequest ? undefined : editingPersistentSession?.hash,
         teacherCode,
         selectedOptions,
         entryPolicy: persistentEntryPolicy,
@@ -301,7 +311,7 @@ export default function ManageDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          !isEditing && deepLinkGenerator?.expectsSelectedOptions === false
+          isCreateRequest && deepLinkGenerator?.expectsSelectedOptions === false
             ? {
                 activityName: requestBody.activityName,
                 teacherCode: 'teacherCode' in requestBody ? requestBody.teacherCode : undefined,
@@ -338,6 +348,7 @@ export default function ManageDashboard() {
         teacherCode: persistedTeacherCode,
         selectedOptions,
       })
+      setLastPersistentSubmitMode(isCreateRequest ? 'created' : 'updated')
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : String(createError))
     } finally {
@@ -411,6 +422,12 @@ export default function ManageDashboard() {
     ? validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)
     : {}
   const hasPersistentOptionErrors = Object.keys(persistentOptionErrors).length > 0
+  const existingTeacherCodeForEdit = editingPersistentSession
+    ? (savedSessions[buildPersistentSessionKey(editingPersistentSession.activityName, editingPersistentSession.hash)] ?? '').trim()
+    : ''
+  const createsNewLinkFromTeacherCodeChange = editingPersistentSession != null
+    && teacherCode.trim().length > 0
+    && teacherCode.trim() !== existingTeacherCodeForEdit
   const CustomPersistentLinkBuilder = resolveCustomPersistentLinkBuilder(selectedActivity) as
     | ComponentType<ActivityPersistentLinkBuilderProps>
     | null
@@ -632,13 +649,17 @@ export default function ManageDashboard() {
                   value={teacherCode}
                   onChange={(event) => setTeacherCode(event.target.value)}
                   className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
-                  placeholder={editingPersistentSession ? 'Update Teacher Code for this link' : 'Create a Teacher Code for this link'}
+                  placeholder={editingPersistentSession
+                    ? 'Keep code to update this link, or enter a new code to create a new link'
+                    : 'Create a Teacher Code for this link'}
                   minLength={6}
                   required
                   autoComplete="off"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Remember this code! You'll need it to start sessions from this link.
+                  {editingPersistentSession
+                    ? 'Changing the teacher code creates a new permanent link hash. Existing links are not replaced.'
+                    : 'Remember this code! You\'ll need it to start sessions from this link.'}
                 </p>
               </div>
 
@@ -715,14 +736,16 @@ export default function ManageDashboard() {
                 type="submit"
                 disabled={isCreating || teacherCode.trim().length < 6 || hasPersistentOptionErrors}
               >
-                {isCreating ? (editingPersistentSession ? 'Saving...' : 'Creating...') : (editingPersistentSession ? 'Save Changes' : 'Generate Link')}
+                {isCreating
+                  ? ((editingPersistentSession == null || createsNewLinkFromTeacherCodeChange) ? 'Creating...' : 'Saving...')
+                  : (createsNewLinkFromTeacherCodeChange ? 'Create New Link' : (editingPersistentSession ? 'Save Changes' : 'Generate Link'))}
               </Button>
             </form>
           )
         ) : (
           <div className="flex flex-col gap-4">
             <p className="text-green-600 font-semibold">
-              ✓ Permanent link {editingPersistentSession ? 'updated' : 'created'} successfully!
+              ✓ Permanent link {lastPersistentSubmitMode} successfully!
             </p>
 
             <div className="bg-gray-50 p-4 rounded border-2 border-gray-200">

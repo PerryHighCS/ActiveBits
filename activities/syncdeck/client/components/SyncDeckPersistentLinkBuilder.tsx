@@ -34,7 +34,13 @@ export function resolveSyncDeckPersistentLinkBuilderRequest(params: {
   endpoint: string
   body: Record<string, unknown>
 } {
-  if (params.editState?.hash) {
+  const normalizedExistingTeacherCode = typeof params.editState?.teacherCode === 'string'
+    ? params.editState.teacherCode.trim()
+    : ''
+  const shouldCreateNewLink = Boolean(params.editState?.hash)
+    && params.normalizedTeacherCode !== normalizedExistingTeacherCode
+
+  if (params.editState?.hash && !shouldCreateNewLink) {
     return {
       endpoint: '/api/persistent-session/update',
       body: {
@@ -84,6 +90,9 @@ export default function SyncDeckPersistentLinkBuilder({
 
   const normalizedPresentationUrl = presentationUrl.trim()
   const normalizedTeacherCode = teacherCode.trim()
+  const normalizedExistingTeacherCode = typeof editState?.teacherCode === 'string' ? editState.teacherCode.trim() : ''
+  const createsNewLinkFromTeacherCodeChange = isEditing
+    && normalizedTeacherCode !== normalizedExistingTeacherCode
   const presentationUrlError =
     normalizedPresentationUrl.length === 0
       ? 'Presentation URL is required'
@@ -97,8 +106,8 @@ export default function SyncDeckPersistentLinkBuilder({
   const canSubmit = normalizedTeacherCode.length >= MIN_TEACHER_CODE_LENGTH && !presentationUrlError && isUrlVerified
 
   const buttonLabel = isCreating
-    ? (isEditing ? 'Saving...' : 'Creating...')
-    : (isEditing ? 'Save Changes' : 'Generate Link')
+    ? (createsNewLinkFromTeacherCodeChange || !isEditing ? 'Creating...' : 'Saving...')
+    : (createsNewLinkFromTeacherCodeChange ? 'Create New Link' : (isEditing ? 'Save Changes' : 'Generate Link'))
 
   const handleVerifyUrl = async (): Promise<void> => {
     if (!canVerify) {
@@ -201,7 +210,7 @@ export default function SyncDeckPersistentLinkBuilder({
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <p className="text-gray-700">
         {isEditing
-          ? 'Update this permanent SyncDeck link. The same presentation verification flow runs before the new URL is saved.'
+          ? 'Update this permanent SyncDeck link. If you change the teacher code, a new permanent link is created and the existing link remains unchanged.'
           : 'Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL, they\'ll wait until you start the session with your teacher code.'}
       </p>
 
@@ -219,12 +228,16 @@ export default function SyncDeckPersistentLinkBuilder({
           value={teacherCode}
           onChange={(event) => setTeacherCode(event.target.value)}
           className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
-          placeholder={isEditing ? 'Update Teacher Code for this link' : 'Create a Teacher Code for this link'}
+          placeholder={isEditing ? 'Keep code to update this link, or enter a new code to create a new link' : 'Create a Teacher Code for this link'}
           minLength={MIN_TEACHER_CODE_LENGTH}
           required
           autoComplete="off"
         />
-        <p className="text-xs text-gray-500 mt-1">Remember this code! You&apos;ll need it to start sessions from this link.</p>
+        <p className="text-xs text-gray-500 mt-1">
+          {isEditing
+            ? 'Changing the teacher code creates a new permanent link hash. Existing links are not replaced.'
+            : 'Remember this code! You&apos;ll need it to start sessions from this link.'}
+        </p>
       </div>
 
       <div>

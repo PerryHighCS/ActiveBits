@@ -59,6 +59,35 @@ void test('resolveSyncDeckPersistentLinkBuilderRequest uses persistent-session u
   )
 })
 
+void test('resolveSyncDeckPersistentLinkBuilderRequest creates a new link when edit teacher code changes', () => {
+  assert.deepEqual(
+    resolveSyncDeckPersistentLinkBuilderRequest({
+      activityId: 'syncdeck',
+      normalizedTeacherCode: 'new-teacher-code',
+      normalizedPresentationUrl: 'http://localhost:3000/presentations/syncdeck-conversion-lab.html',
+      editState: {
+        hash: 'hash-123',
+        teacherCode: 'teacher-code',
+        entryPolicy: 'instructor-required',
+        selectedOptions: {
+          presentationUrl: 'http://localhost:5173/presentations/syncdeck-conversion-lab.html',
+        },
+      },
+    }),
+    {
+      endpoint: '/api/persistent-session/create',
+      body: {
+        activityName: 'syncdeck',
+        teacherCode: 'new-teacher-code',
+        entryPolicy: 'instructor-required',
+        selectedOptions: {
+          presentationUrl: 'http://localhost:3000/presentations/syncdeck-conversion-lab.html',
+        },
+      },
+    },
+  )
+})
+
 function installDomEnvironment() {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: 'https://activebits.local/',
