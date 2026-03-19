@@ -35,7 +35,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: SyncDeck permalink hashing now uses the shared canonical signer (`entryPolicy` + `selectedOptions.presentationUrl`) for generate, manager configure verification, and cookie-backed manager recovery; activity-specific `presentationUrl` hash logic was removed.
 - Why it matters: SyncDeck create/edit/launch now verify the same canonical permalink state as shared persistent routes, reducing signer drift and making unsigned query params non-authoritative by design.
 - Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/server/routes.test.ts`
-- Follow-up action: Apply the same canonical-state verification pass to Video Sync and Algorithm Demo permalink launch paths.
+- Follow-up action: Treat canonical permalink signing as the default model for any future permalink-capable activity or recovery path; new activity-owned launch/recovery logic should consume only canonical signed state.
 - Owner: Codex
 
 - Date: 2026-03-19
@@ -43,7 +43,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: Shared persistent permalink signing and verification now canonicalize `selectedOptions` from activity config `deepLinkOptions` keys, and ignore unsigned query params (for example `utm_source`) even when `urlHash` is present.
 - Why it matters: This removes ambiguity where arbitrary query params could influence signed-state verification or runtime behavior, and aligns create/edit/auth/launch on one canonical signed permalink state.
 - Evidence: `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `.agent/plans/permalink-signing-plan.md`
-- Follow-up action: Migrate SyncDeck off its activity-specific `computeUrlHash` signer onto the shared canonical signer and keep backward-compatible verification during rollout.
+- Follow-up action: Canonical permalink signing is now the shared model. Future follow-up should focus only on keeping new activity-owned recovery/bootstrap paths aligned with canonical signed state instead of introducing parallel signers.
 - Owner: Codex
 
 - Date: 2026-03-18
