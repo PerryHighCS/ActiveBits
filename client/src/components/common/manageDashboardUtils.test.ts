@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildPersistentLinkRequestBody,
   buildCreateSessionBootstrapHistoryState,
   buildPersistentLinkUrl,
   buildManageDashboardUtilityUrl,
@@ -136,6 +137,50 @@ void test('validateDeepLinkSelection enforces URL validator options', () => {
 
 void test('buildPersistentSessionKey creates stable map keys', () => {
   assert.equal(buildPersistentSessionKey('raffle', 'abc123'), 'raffle:abc123')
+})
+
+void test('buildPersistentLinkRequestBody includes normalized teacher code for creates', () => {
+  assert.deepEqual(
+    buildPersistentLinkRequestBody({
+      activityId: 'video-sync',
+      teacherCode: ' teacher-code ',
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
+      entryPolicy: 'instructor-required',
+    }),
+    {
+      activityName: 'video-sync',
+      teacherCode: 'teacher-code',
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
+      entryPolicy: 'instructor-required',
+    },
+  )
+})
+
+void test('buildPersistentLinkRequestBody includes hash and teacher code for edits', () => {
+  assert.deepEqual(
+    buildPersistentLinkRequestBody({
+      activityId: 'algorithm-demo',
+      hash: 'abc123',
+      teacherCode: ' updated-code ',
+      selectedOptions: {
+        algorithm: 'merge-sort',
+      },
+      entryPolicy: 'solo-allowed',
+    }),
+    {
+      activityName: 'algorithm-demo',
+      hash: 'abc123',
+      teacherCode: 'updated-code',
+      selectedOptions: {
+        algorithm: 'merge-sort',
+      },
+      entryPolicy: 'solo-allowed',
+    },
+  )
 })
 
 void test('buildManageDashboardUtilityUrl normalizes relative utility paths and preserves absolute URLs', () => {

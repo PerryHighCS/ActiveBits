@@ -36,6 +36,7 @@ export function resolveSyncDeckPersistentLinkBuilderRequest(params: {
       body: {
         activityName: params.activityId,
         hash: params.editState.hash,
+        teacherCode: params.normalizedTeacherCode,
         entryPolicy: params.editState.entryPolicy ?? 'instructor-required',
         selectedOptions: {
           presentationUrl: params.normalizedPresentationUrl,
@@ -173,7 +174,7 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, editState, o
       await onCreated({
         fullUrl,
         hash: payload.hash,
-        teacherCode: isEditing ? (editState?.teacherCode ?? normalizedTeacherCode) : normalizedTeacherCode,
+        teacherCode: normalizedTeacherCode,
         selectedOptions: {
           presentationUrl: normalizedPresentationUrl,
         },
@@ -201,22 +202,20 @@ export default function SyncDeckPersistentLinkBuilder({ activityId, editState, o
         </p>
       </div>
 
-      {!isEditing && (
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
-          <input
-            type="text"
-            value={teacherCode}
-            onChange={(event) => setTeacherCode(event.target.value)}
-            className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
-            placeholder="Create a Teacher Code for this link"
-            minLength={MIN_TEACHER_CODE_LENGTH}
-            required
-            autoComplete="off"
-          />
-          <p className="text-xs text-gray-500 mt-1">Remember this code! You&apos;ll need it to start sessions from this link.</p>
-        </div>
-      )}
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+        <input
+          type="text"
+          value={teacherCode}
+          onChange={(event) => setTeacherCode(event.target.value)}
+          className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
+          placeholder={isEditing ? 'Update Teacher Code for this link' : 'Create a Teacher Code for this link'}
+          minLength={MIN_TEACHER_CODE_LENGTH}
+          required
+          autoComplete="off"
+        />
+        <p className="text-xs text-gray-500 mt-1">Remember this code! You&apos;ll need it to start sessions from this link.</p>
+      </div>
 
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-2">Presentation URL</label>

@@ -6,6 +6,7 @@ import { useClipboard } from '@src/hooks/useClipboard'
 import type { ActivityPersistentLinkBuildResult, ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import {
+  buildPersistentLinkRequestBody,
   buildPersistentLinkUrl,
   buildManageDashboardUtilityUrl,
   buildPersistentSessionKey,
@@ -288,19 +289,13 @@ export default function ManageDashboard() {
       const endpoint = isEditing
         ? '/api/persistent-session/update'
         : (deepLinkGenerator?.endpoint ?? '/api/persistent-session/create')
-      const requestBody = isEditing
-        ? {
-            activityName: selectedActivity.id,
-            hash: editingPersistentSession.hash,
-            selectedOptions,
-            entryPolicy: persistentEntryPolicy,
-          }
-        : {
-            activityName: selectedActivity.id,
-            teacherCode: teacherCode.trim(),
-            selectedOptions,
-            entryPolicy: persistentEntryPolicy,
-          }
+      const requestBody = buildPersistentLinkRequestBody({
+        activityId: selectedActivity.id,
+        hash: isEditing ? editingPersistentSession.hash : undefined,
+        teacherCode,
+        selectedOptions,
+        entryPolicy: persistentEntryPolicy,
+      })
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -336,9 +331,7 @@ export default function ManageDashboard() {
       }
 
       const fullUrl = buildPersistentLinkUrl(getWindowOrigin(), payload.url, selectedOptions, deepLinkGenerator)
-      const persistedTeacherCode = isEditing
-        ? (savedSessions[buildPersistentSessionKey(selectedActivity.id, editingPersistentSession.hash)] || '')
-        : teacherCode.trim()
+      const persistedTeacherCode = teacherCode.trim()
       await handlePersistentLinkCreated(selectedActivity.id, {
         fullUrl,
         hash: payload.hash as string,
@@ -632,24 +625,22 @@ export default function ManageDashboard() {
                 </p>
               </div>
 
-              {!editingPersistentSession && (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
-                  <input
-                    type="text"
-                    value={teacherCode}
-                    onChange={(event) => setTeacherCode(event.target.value)}
-                    className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
-                    placeholder="Create a Teacher Code for this link"
-                    minLength={6}
-                    required
-                    autoComplete="off"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Remember this code! You'll need it to start sessions from this link.
-                  </p>
-                </div>
-              )}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+                <input
+                  type="text"
+                  value={teacherCode}
+                  onChange={(event) => setTeacherCode(event.target.value)}
+                  className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
+                  placeholder={editingPersistentSession ? 'Update Teacher Code for this link' : 'Create a Teacher Code for this link'}
+                  minLength={6}
+                  required
+                  autoComplete="off"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Remember this code! You'll need it to start sessions from this link.
+                </p>
+              </div>
 
               <div>
                 <label htmlFor="persistent-entry-policy" className="block text-sm font-semibold text-gray-700 mb-2">
@@ -722,7 +713,7 @@ export default function ManageDashboard() {
 
               <Button
                 type="submit"
-                disabled={isCreating || (!editingPersistentSession && teacherCode.length < 6) || hasPersistentOptionErrors}
+                disabled={isCreating || teacherCode.trim().length < 6 || hasPersistentOptionErrors}
               >
                 {isCreating ? (editingPersistentSession ? 'Saving...' : 'Creating...') : (editingPersistentSession ? 'Save Changes' : 'Generate Link')}
               </Button>

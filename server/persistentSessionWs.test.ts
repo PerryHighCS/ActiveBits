@@ -52,17 +52,6 @@ function waitForAsyncWork(): Promise<void> {
 }
 
 void test('persistent session websocket bootstraps started sessions with canonical selected options', async (t) => {
-  const originalSetTimeout = global.setTimeout
-  global.setTimeout = (((handler: Parameters<typeof setTimeout>[0]) => {
-    if (typeof handler === 'function') {
-      handler()
-    }
-    return 0 as unknown as NodeJS.Timeout
-  }) as typeof setTimeout)
-  t.after(() => {
-    global.setTimeout = originalSetTimeout
-  })
-
   initializePersistentStorage(null)
 
   const sessionStore = new Map<string, SessionRecord>()

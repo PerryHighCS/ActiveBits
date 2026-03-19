@@ -44,6 +44,7 @@ void test('resolveSyncDeckPersistentLinkBuilderRequest uses persistent-session u
       body: {
         activityName: 'syncdeck',
         hash: 'hash-123',
+        teacherCode: 'teacher-code',
         entryPolicy: 'instructor-required',
         selectedOptions: {
           presentationUrl: 'http://localhost:3000/presentations/syncdeck-conversion-lab.html',

@@ -81,9 +81,10 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
       const current = (memoryStore.get(bucket) as number) ?? 0
       const next = current + 1
       memoryStore.set(bucket, next)
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         memoryStore.delete(bucket)
       }, 60_000)
+      timeout.unref?.()
       return next
     },
     async getAttempts(key: string): Promise<number> {
