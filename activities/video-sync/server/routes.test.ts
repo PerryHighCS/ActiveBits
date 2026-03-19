@@ -7,6 +7,7 @@ import {
   initializePersistentStorage,
   startPersistentSession,
 } from 'activebits-server/core/persistentSessions.js'
+import { computePersistentLinkUrlHash } from 'activebits-server/core/persistentLinkUrlState.js'
 import type { SessionRecord } from 'activebits-server/core/sessions.js'
 import type { WsRouter } from '../../../types/websocket.js'
 import setupVideoSyncRoutes, { waitForInstructorAuthMessage } from './routes.js'
@@ -1553,6 +1554,104 @@ void test('instructor-passcode route returns passcode for persistent teacher coo
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
   assert.equal(setCalls, 0)
+  await cleanupPersistentSession(hash)
+})
+
+void test('instructor-passcode route returns canonical persistent sourceUrl for persistent teacher cookie', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  const selectedOptions = {
+    sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+  }
+  const urlHash = computePersistentLinkUrlHash(hash, {
+    entryPolicy: 'instructor-required',
+    selectedOptions,
+  })
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      cookies: {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `video-sync:${hash}`,
+            teacherCode,
+            selectedOptions,
+            entryPolicy: 'instructor-required',
+            urlHash,
+          },
+        ]),
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE,
+    persistentSourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+  })
+  await cleanupPersistentSession(hash)
+})
+
+void test('instructor-passcode route ignores unsigned persistent sourceUrl from cookie selectedOptions', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1', ALT_TEST_INSTRUCTOR_PASSCODE) })
+  const teacherCode = 'persistent-teacher-code'
+  const { hash, hashedTeacherCode } = generatePersistentHash('video-sync', teacherCode)
+  await getOrCreateActivePersistentSession('video-sync', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.get['/api/video-sync/:sessionId/instructor-passcode']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      cookies: {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `video-sync:${hash}`,
+            teacherCode,
+            selectedOptions: {
+              sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            },
+          },
+        ]),
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, { instructorPasscode: ALT_TEST_INSTRUCTOR_PASSCODE })
   await cleanupPersistentSession(hash)
 })
 

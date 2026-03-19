@@ -12,6 +12,7 @@ interface PersistentSession {
   activityName: string
   hashedTeacherCode: string | null
   entryPolicy?: PersistentSessionEntryPolicy
+  selectedOptions?: Record<string, string>
   createdAt: number
   sessionId: string | null
   teacherSocketId: string | null
@@ -80,9 +81,10 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
       const current = (memoryStore.get(bucket) as number) ?? 0
       const next = current + 1
       memoryStore.set(bucket, next)
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         memoryStore.delete(bucket)
       }, 60_000)
+      timeout.unref?.()
       return next
     },
     async getAttempts(key: string): Promise<number> {
@@ -298,6 +300,70 @@ export async function getOrCreateActivePersistentSession(
 
 export async function getPersistentSession(hash: string): Promise<PersistentSession | null> {
   return await persistentStore.get(hash)
+}
+
+function normalizeSelectedOptionsRecord(value: unknown): Record<string, string> {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  const normalized: Record<string, string> = {}
+  for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entryValue === 'string') {
+      const trimmed = entryValue.trim()
+      if (trimmed) {
+        normalized[key] = trimmed
+      }
+    }
+  }
+  return normalized
+}
+
+function stringRecordEquals(left: Record<string, string>, right: Record<string, string>): boolean {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  if (leftKeys.length !== rightKeys.length) {
+    return false
+  }
+
+  return leftKeys.every((key) => left[key] === right[key])
+}
+
+export async function updatePersistentSessionUrlState(
+  hash: string,
+  state: {
+    entryPolicy?: PersistentSessionEntryPolicy
+    selectedOptions?: Record<string, unknown>
+  },
+): Promise<void> {
+  const session = await persistentStore.get(hash)
+  if (!session) {
+    return
+  }
+
+  let shouldPersist = false
+  const normalizedEntryPolicy = state.entryPolicy === undefined
+    ? undefined
+    : resolvePersistentSessionEntryPolicy(state.entryPolicy)
+
+  if (normalizedEntryPolicy !== undefined && session.entryPolicy !== normalizedEntryPolicy) {
+    session.entryPolicy = normalizedEntryPolicy
+    shouldPersist = true
+  }
+
+  if (state.selectedOptions !== undefined) {
+    const normalizedSelectedOptions = normalizeSelectedOptionsRecord(state.selectedOptions)
+    const existingSelectedOptions = normalizeSelectedOptionsRecord(session.selectedOptions)
+
+    if (!stringRecordEquals(existingSelectedOptions, normalizedSelectedOptions)) {
+      session.selectedOptions = normalizedSelectedOptions
+      shouldPersist = true
+    }
+  }
+
+  if (shouldPersist) {
+    await persistentStore.set(hash, session)
+  }
 }
 
 export function addWaiter(hash: string, ws: PersistentSessionSocket): number {

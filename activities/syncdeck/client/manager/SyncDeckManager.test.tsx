@@ -22,6 +22,9 @@ import { validatePresentationUrl } from './SyncDeckManager.js'
 import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
 import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
 import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
+import { normalizeStoredInstructorPasscode } from './SyncDeckManager.js'
+import { resolvePersistentEntryPolicyForConfigure } from './SyncDeckManager.js'
+import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
 import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckManager.js'
 import { resolveManagerActiveEmbeddedInstanceKey } from './SyncDeckManager.js'
@@ -161,6 +164,48 @@ void test('resolveRecoveredPresentationUrl preserves incompatible recovered URLs
     resolveRecoveredPresentationUrl('https://slides.example/current', 'http://slides.example/deck', 'https:'),
     'https://slides.example/current',
   )
+})
+
+void test('normalizeStoredInstructorPasscode trims and rejects empty cached values', () => {
+  assert.equal(normalizeStoredInstructorPasscode(' teacher-pass '), 'teacher-pass')
+  assert.equal(normalizeStoredInstructorPasscode('   '), null)
+  assert.equal(normalizeStoredInstructorPasscode(null), null)
+})
+
+void test('resolvePersistentEntryPolicyForConfigure prefers recovered policy when query is absent', () => {
+  assert.equal(resolvePersistentEntryPolicyForConfigure(null, null, null, 'solo-allowed'), 'solo-allowed')
+  assert.equal(resolvePersistentEntryPolicyForConfigure('', '', null, 'solo-only'), 'solo-only')
+  assert.equal(
+    resolvePersistentEntryPolicyForConfigure(null, 'instructor-required', null, 'solo-allowed'),
+    'instructor-required',
+  )
+})
+
+void test('resolvePersistentEntryPolicyForConfigure keeps policy aligned with the chosen hash source', () => {
+  assert.equal(
+    resolvePersistentEntryPolicyForConfigure('stale-query-hash', 'instructor-required', 'verified-cookie-hash', 'solo-allowed'),
+    'solo-allowed',
+  )
+  assert.equal(
+    resolvePersistentEntryPolicyForConfigure('query-hash', 'solo-only', null, 'instructor-required'),
+    'solo-only',
+  )
+})
+
+void test('resolvePersistentUrlHashForConfigure prefers verified fallback hash over query hash', () => {
+  assert.equal(
+    resolvePersistentUrlHashForConfigure('stale-query-hash', 'verified-cookie-hash'),
+    'verified-cookie-hash',
+  )
+  assert.equal(
+    resolvePersistentUrlHashForConfigure(' query-hash ', '  '),
+    'query-hash',
+  )
+  assert.equal(
+    resolvePersistentUrlHashForConfigure('   ', ' verified-cookie-hash '),
+    'verified-cookie-hash',
+  )
+  assert.equal(resolvePersistentUrlHashForConfigure(null, null), null)
 })
 
 void test('buildInstructorRoleCommandMessage emits setRole instructor command', () => {

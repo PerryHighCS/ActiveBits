@@ -990,7 +990,7 @@ void test('authenticate persists selectedOptions from request body when cookie e
   const app = createMockApp()
   registerPersistentSessionRoutes({ app, sessions })
 
-  const activityName = 'gallery-walk'
+  const activityName = 'algorithm-demo'
   const teacherCode = 'persistent-teacher'
   const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
   t.after(async () => cleanupPersistentSession(hash))
@@ -1005,8 +1005,7 @@ void test('authenticate persists selectedOptions from request body when cookie e
       hash,
       teacherCode,
       selectedOptions: {
-        mode: 'review',
-        prompt: 'exit ticket',
+        algorithm: 'merge-sort',
       },
     },
   })
@@ -1020,8 +1019,12 @@ void test('authenticate persists selectedOptions from request body when cookie e
   const parsed = JSON.parse(cookie.value) as Array<{ key?: string; selectedOptions?: Record<string, unknown> }>
   const entry = parsed.find((candidate) => candidate.key === `${activityName}:${hash}`)
   assert.deepEqual(entry?.selectedOptions, {
-    mode: 'review',
-    prompt: 'exit ticket',
+    algorithm: 'merge-sort',
+  })
+
+  const stored = await getPersistentSession(hash)
+  assert.deepEqual(stored?.selectedOptions, {
+    algorithm: 'merge-sort',
   })
 })
 
@@ -1033,7 +1036,7 @@ void test('authenticate preserves existing selectedOptions from cookie over requ
   const app = createMockApp()
   registerPersistentSessionRoutes({ app, sessions })
 
-  const activityName = 'gallery-walk'
+  const activityName = 'algorithm-demo'
   const teacherCode = 'persistent-teacher-preserve'
   const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
   t.after(async () => cleanupPersistentSession(hash))
@@ -1045,8 +1048,7 @@ void test('authenticate preserves existing selectedOptions from cookie over requ
   const req = createMockReq({
     cookies: {
       persistent_sessions: buildCookieValue(activityName, hash, teacherCode, {
-        mode: 'presentation',
-        prompt: 'warmup',
+        algorithm: 'binary-search',
       }),
     },
     body: {
@@ -1054,8 +1056,7 @@ void test('authenticate preserves existing selectedOptions from cookie over requ
       hash,
       teacherCode,
       selectedOptions: {
-        mode: 'review',
-        prompt: 'exit ticket',
+        algorithm: 'merge-sort',
       },
     },
   })
@@ -1069,8 +1070,7 @@ void test('authenticate preserves existing selectedOptions from cookie over requ
   const parsed = JSON.parse(cookie.value) as Array<{ key?: string; selectedOptions?: Record<string, unknown> }>
   const entry = parsed.find((candidate) => candidate.key === `${activityName}:${hash}`)
   assert.deepEqual(entry?.selectedOptions, {
-    mode: 'presentation',
-    prompt: 'warmup',
+    algorithm: 'binary-search',
   })
 })
 
@@ -1082,7 +1082,7 @@ void test('authenticate ignores selectedOptions from invalid remembered teacher 
   const app = createMockApp()
   registerPersistentSessionRoutes({ app, sessions })
 
-  const activityName = 'gallery-walk'
+  const activityName = 'algorithm-demo'
   const teacherCode = 'persistent-teacher-invalid-cookie'
   const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
   t.after(async () => cleanupPersistentSession(hash))
@@ -1094,8 +1094,7 @@ void test('authenticate ignores selectedOptions from invalid remembered teacher 
   const req = createMockReq({
     cookies: {
       persistent_sessions: buildCookieValue(activityName, hash, 'wrong-teacher-code', {
-        mode: 'stale-cookie-value',
-        prompt: 'stale-cookie-prompt',
+        algorithm: 'selection-sort',
       }),
     },
     body: {
@@ -1103,8 +1102,7 @@ void test('authenticate ignores selectedOptions from invalid remembered teacher 
       hash,
       teacherCode,
       selectedOptions: {
-        mode: 'review',
-        prompt: 'exit ticket',
+        algorithm: 'merge-sort',
       },
     },
   })
@@ -1118,8 +1116,262 @@ void test('authenticate ignores selectedOptions from invalid remembered teacher 
   const parsed = JSON.parse(cookie.value) as Array<{ key?: string; selectedOptions?: Record<string, unknown> }>
   const entry = parsed.find((candidate) => candidate.key === `${activityName}:${hash}`)
   assert.deepEqual(entry?.selectedOptions, {
-    mode: 'review',
-    prompt: 'exit ticket',
+    algorithm: 'merge-sort',
+  })
+})
+
+void test('authenticate validates activity before canonicalizing selectedOptions', async () => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const handler = getRoute(app, 'POST', '/api/persistent-session/authenticate')
+  const body: Record<string, unknown> = {
+    activityName: 'not-a-real-activity',
+    hash: 'deadbeefdeadbeefdead',
+    teacherCode: 'teacher-code',
+  }
+
+  Object.defineProperty(body, 'selectedOptions', {
+    enumerable: true,
+    get() {
+      throw new Error('[TEST] selectedOptions should not be canonicalized for invalid activity requests')
+    },
+  })
+
+  const res = createMockRes()
+  await handler(createMockReq({ body }), res)
+
+  assert.equal(res.statusCode, 400)
+  assert.equal(res.jsonBody?.error, 'Invalid activity name')
+})
+
+void test('persistent session metadata route ignores unsigned query params that are not in canonical selectedOptions', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'algorithm-demo',
+      teacherCode: 'canonical-query-test',
+      selectedOptions: {
+        algorithm: 'merge-sort',
+      },
+    },
+  })
+  const createRes = createMockRes()
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  const url = new URL(`https://bits.example${String(createRes.jsonBody?.url ?? '')}`)
+  const handler = getRoute(app, 'GET', '/api/persistent-session/:hash')
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { hash },
+    query: {
+      activityName: 'algorithm-demo',
+      algorithm: 'merge-sort',
+      entryPolicy: url.searchParams.get('entryPolicy') ?? '',
+      urlHash: url.searchParams.get('urlHash') ?? '',
+      utm_source: 'email',
+    },
+  }), res)
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.jsonBody))
+  assert.deepEqual(res.jsonBody?.queryParams, {
+    algorithm: 'merge-sort',
+  })
+})
+
+void test('persistent session metadata route does not expose queryParams when urlHash is missing', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'algorithm-demo',
+      teacherCode: 'unsigned-query-test',
+      selectedOptions: {
+        algorithm: 'merge-sort',
+      },
+    },
+  })
+  const createRes = createMockRes()
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+
+  const handler = getRoute(app, 'GET', '/api/persistent-session/:hash')
+  const res = createMockRes()
+  await handler(createMockReq({
+    params: { hash },
+    query: {
+      activityName: 'algorithm-demo',
+      algorithm: 'merge-sort',
+      entryPolicy: 'instructor-required',
+      // Intentionally missing urlHash: query params must not be trusted.
+      utm_source: 'email',
+    },
+  }), res)
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.jsonBody))
+  assert.deepEqual(res.jsonBody?.queryParams, {})
+})
+
+void test('update preserves canonical video-sync sourceUrl across edit and list output', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'video-sync',
+      teacherCode: 'video-sync-edit-code',
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
+      },
+    },
+  })
+  const createRes = createMockRes()
+
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+  const cookie = createRes.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+
+  const updateHandler = getRoute(app, 'POST', '/api/persistent-session/update')
+  const updateReq = createMockReq({
+    cookies: { persistent_sessions: cookie.value },
+    body: {
+      activityName: 'video-sync',
+      hash,
+      selectedOptions: {
+        sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      },
+    },
+  })
+  const updateRes = createMockRes()
+
+  await updateHandler(updateReq, updateRes)
+
+  assert.equal(updateRes.statusCode, 200, JSON.stringify(updateRes.jsonBody))
+  assert.match(String(updateRes.jsonBody?.url ?? ''), /sourceUrl=https%3A%2F%2Fwww\.youtube\.com%2Fwatch%3Fv%3DdQw4w9WgXcQ/)
+
+  const updatedCookie = updateRes.cookies.get('persistent_sessions')
+  assert.ok(updatedCookie)
+
+  const listHandler = getRoute(app, 'GET', '/api/persistent-session/list')
+  const listReq = createMockReq({
+    cookies: { persistent_sessions: updatedCookie.value },
+    headers: { host: 'bits.example' },
+    protocol: 'https',
+  })
+  const listRes = createMockRes()
+
+  await listHandler(listReq, listRes)
+
+  assert.equal(listRes.statusCode, 200)
+  const sessionsList = Array.isArray(listRes.jsonBody?.sessions) ? listRes.jsonBody.sessions : []
+  assert.equal(sessionsList.length, 1)
+  assert.deepEqual((sessionsList[0] as Record<string, unknown>).selectedOptions, {
+    sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  })
+})
+
+void test('update preserves canonical algorithm-demo option across edit and list output', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'algorithm-demo',
+      teacherCode: 'algorithm-edit-code',
+      selectedOptions: {
+        algorithm: 'merge-sort',
+      },
+    },
+  })
+  const createRes = createMockRes()
+
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+  const cookie = createRes.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+
+  const updateHandler = getRoute(app, 'POST', '/api/persistent-session/update')
+  const updateReq = createMockReq({
+    cookies: { persistent_sessions: cookie.value },
+    body: {
+      activityName: 'algorithm-demo',
+      hash,
+      selectedOptions: {
+        algorithm: 'binary-search',
+      },
+    },
+  })
+  const updateRes = createMockRes()
+
+  await updateHandler(updateReq, updateRes)
+
+  assert.equal(updateRes.statusCode, 200, JSON.stringify(updateRes.jsonBody))
+  assert.match(String(updateRes.jsonBody?.url ?? ''), /algorithm=binary-search/)
+
+  const updatedCookie = updateRes.cookies.get('persistent_sessions')
+  assert.ok(updatedCookie)
+
+  const listHandler = getRoute(app, 'GET', '/api/persistent-session/list')
+  const listReq = createMockReq({
+    cookies: { persistent_sessions: updatedCookie.value },
+    headers: { host: 'bits.example' },
+    protocol: 'https',
+  })
+  const listRes = createMockRes()
+
+  await listHandler(listReq, listRes)
+
+  assert.equal(listRes.statusCode, 200)
+  const sessionsList = Array.isArray(listRes.jsonBody?.sessions) ? listRes.jsonBody.sessions : []
+  assert.equal(sessionsList.length, 1)
+  assert.deepEqual((sessionsList[0] as Record<string, unknown>).selectedOptions, {
+    algorithm: 'binary-search',
+  })
+
+  const stored = await getPersistentSession(hash)
+  assert.deepEqual(stored?.selectedOptions, {
+    algorithm: 'binary-search',
   })
 })
 
@@ -1290,6 +1542,61 @@ void test('update rewrites permalink settings for the same hash and preserves te
   assert.equal(sessionsList.length, 1)
   assert.equal((sessionsList[0] as Record<string, unknown>).entryPolicy, 'solo-allowed')
   assert.equal((sessionsList[0] as Record<string, unknown>).teacherCode, 'update-link-code')
+})
+
+void test('update preserves existing selectedOptions when request omits selectedOptions', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+
+  const createHandler = getRoute(app, 'POST', '/api/persistent-session/create')
+  const createReq = createMockReq({
+    body: {
+      activityName: 'algorithm-demo',
+      teacherCode: 'preserve-options-code',
+      entryPolicy: 'instructor-required',
+      selectedOptions: {
+        algorithm: 'merge-sort',
+      },
+    },
+  })
+  const createRes = createMockRes()
+
+  await createHandler(createReq, createRes)
+
+  assert.equal(createRes.statusCode, 200, JSON.stringify(createRes.jsonBody))
+  const hash = String(createRes.jsonBody?.hash ?? '')
+  t.after(async () => cleanupPersistentSession(hash))
+  const cookie = createRes.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+
+  const updateHandler = getRoute(app, 'POST', '/api/persistent-session/update')
+  const updateReq = createMockReq({
+    cookies: { persistent_sessions: cookie.value },
+    body: {
+      activityName: 'algorithm-demo',
+      hash,
+      entryPolicy: 'solo-allowed',
+    },
+  })
+  const updateRes = createMockRes()
+
+  await updateHandler(updateReq, updateRes)
+
+  assert.equal(updateRes.statusCode, 200, JSON.stringify(updateRes.jsonBody))
+  assert.match(String(updateRes.jsonBody?.url ?? ''), /algorithm=merge-sort/)
+  assert.match(String(updateRes.jsonBody?.url ?? ''), /entryPolicy=solo-allowed/)
+
+  const updatedCookie = updateRes.cookies.get('persistent_sessions')
+  assert.ok(updatedCookie)
+  const parsedCookie = JSON.parse(updatedCookie.value) as Array<{ key?: string; selectedOptions?: Record<string, unknown> }>
+  const entry = parsedCookie.find((candidate) => candidate.key === `algorithm-demo:${hash}`)
+  assert.deepEqual(entry?.selectedOptions, {
+    algorithm: 'merge-sort',
+  })
 })
 
 void test('remove drops a saved permalink from the teacher cookie list', async (t) => {

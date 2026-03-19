@@ -50,6 +50,14 @@ export interface PersistentEntryPolicyOptionLike {
   description: string
 }
 
+export interface BuildPersistentLinkRequestBodyParams {
+  activityId: string
+  teacherCode: string
+  selectedOptions: Record<string, string>
+  entryPolicy: PersistentEntryPolicyOptionLike['value']
+  hash?: string
+}
+
 export interface ManageDashboardUtilityLike {
   label: string
   path: string
@@ -574,6 +582,33 @@ export function normalizePersistentEntryPolicyForActivity<
 
 export function buildPersistentSessionKey(activityName: string, hash: string): string {
   return `${activityName}:${hash}`
+}
+
+export function buildPersistentLinkRequestBody({
+  activityId,
+  teacherCode,
+  selectedOptions,
+  entryPolicy,
+  hash,
+}: BuildPersistentLinkRequestBodyParams): Record<string, unknown> {
+  const normalizedTeacherCode = teacherCode.trim()
+
+  if (hash) {
+    return {
+      activityName: activityId,
+      hash,
+      teacherCode: normalizedTeacherCode,
+      selectedOptions,
+      entryPolicy,
+    }
+  }
+
+  return {
+    activityName: activityId,
+    teacherCode: normalizedTeacherCode,
+    selectedOptions,
+    entryPolicy,
+  }
 }
 
 export function buildPersistentLinkUrl(

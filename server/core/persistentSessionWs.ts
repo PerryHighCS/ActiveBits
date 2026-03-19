@@ -191,7 +191,18 @@ async function handleTeacherCodeVerification(
     return
   }
 
-  const newSession = await createSession(sessions, { data: {} })
+  const selectedOptions = persistentSession.selectedOptions != null
+    ? { ...persistentSession.selectedOptions }
+    : {}
+  const newSession = await createSession(sessions, {
+    data: Object.keys(selectedOptions).length > 0
+      ? {
+        embeddedLaunch: {
+          selectedOptions,
+        },
+      }
+      : {},
+  })
   newSession.type = persistentSession.activityName
   await sessions.set(newSession.id, newSession)
 

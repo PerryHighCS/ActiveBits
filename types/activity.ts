@@ -1,6 +1,7 @@
 import type { ComponentType, LazyExoticComponent, ReactNode } from 'react'
 import type {
   ActivityWaitingRoomConfig,
+  PersistentSessionEntryPolicy,
   WaitingRoomFieldComponentProps,
 } from './waitingRoom.js'
 
@@ -49,8 +50,16 @@ export interface ActivityPersistentLinkBuildResult {
   selectedOptions?: Record<string, unknown>
 }
 
+export interface ActivityPersistentLinkBuilderEditState {
+  hash: string
+  teacherCode: string
+  selectedOptions?: Record<string, unknown>
+  entryPolicy?: PersistentSessionEntryPolicy
+}
+
 export interface ActivityPersistentLinkBuilderProps {
   activityId: string
+  editState?: ActivityPersistentLinkBuilderEditState | null
   onCreated(result: ActivityPersistentLinkBuildResult): void | Promise<void>
 }
 

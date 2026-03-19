@@ -2,9 +2,14 @@ import { normalizeSessionData as normalizeSessionRecord, registerSessionNormaliz
 import {
   findHashBySessionId,
   generatePersistentHash,
-  resolvePersistentSessionSecret,
+  resolvePersistentSessionEntryPolicy,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
+import {
+  computePersistentLinkUrlHash,
+  verifyPersistentLinkUrlHash,
+  type PersistentLinkUrlState,
+} from 'activebits-server/core/persistentLinkUrlState.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import {
   createSession,
@@ -14,7 +19,7 @@ import {
   type SessionStore,
 } from 'activebits-server/core/sessions.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
@@ -29,12 +34,14 @@ import { buildSyncDeckReportFilename, buildSyncDeckSessionReportHtml } from './r
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
 const MAX_TEACHER_CODE_LENGTH = 100
-const HMAC_SECRET = resolvePersistentSessionSecret()
+const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
 
 interface CookieSessionEntry {
   key: string
   teacherCode: string
   selectedOptions?: Record<string, unknown>
+  entryPolicy?: unknown
+  urlHash?: unknown
 }
 
 interface JsonResponse {
@@ -899,6 +906,15 @@ function toSelectedOptions(value: unknown): Record<string, unknown> {
   return isPlainObject(value) ? value : {}
 }
 
+function buildSyncDeckPersistentLinkUrlState(entryPolicy: unknown, presentationUrl: string): PersistentLinkUrlState {
+  return {
+    entryPolicy: resolvePersistentSessionEntryPolicy(entryPolicy),
+    selectedOptions: {
+      presentationUrl,
+    },
+  }
+}
+
 function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry[] {
   if (cookieValue == null) {
     return []
@@ -924,6 +940,8 @@ function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry
       key: String(entry.key),
       teacherCode: entry.teacherCode as string,
       selectedOptions: toSelectedOptions(entry.selectedOptions),
+      entryPolicy: entry.entryPolicy,
+      urlHash: entry.urlHash,
     }))
 }
 
@@ -1059,23 +1077,6 @@ function buildEmbeddedActivityEndPayload(instanceKey: string, childSessionId: st
     type: 'embedded-activity-end',
     instanceKey,
     childSessionId,
-  }
-}
-
-function computeUrlHash(persistentHash: string, presentationUrl: string): string {
-  return createHmac('sha256', HMAC_SECRET).update(`${persistentHash}|${presentationUrl}`).digest('hex').substring(0, 16)
-}
-
-function verifyUrlHash(persistentHash: string, presentationUrl: string, candidate: string): boolean {
-  if (candidate.length !== 16) {
-    return false
-  }
-
-  const expected = computeUrlHash(persistentHash, presentationUrl)
-  try {
-    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(candidate, 'hex'))
-  } catch {
-    return false
   }
 }
 
@@ -1225,17 +1226,25 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const selectedOptions = isPlainObject(matchingEntry.selectedOptions) ? matchingEntry.selectedOptions : {}
     const persistentPresentationUrl = normalizePersistentPresentationUrl(selectedOptions.presentationUrl)
+    const persistentEntryPolicy = resolvePersistentSessionEntryPolicy(matchingEntry.entryPolicy)
     const candidateUrlHash =
-      typeof selectedOptions.urlHash === 'string' && selectedOptions.urlHash.trim().length > 0
-        ? selectedOptions.urlHash.trim()
+      typeof matchingEntry.urlHash === 'string' && matchingEntry.urlHash.trim().length > 0
+        ? matchingEntry.urlHash.trim()
         : null
     const persistentUrlHash =
-      candidateUrlHash && persistentPresentationUrl && verifyUrlHash(persistentHash, persistentPresentationUrl, candidateUrlHash)
+      candidateUrlHash
+        && persistentPresentationUrl
+        && verifyPersistentLinkUrlHash(
+          persistentHash,
+          buildSyncDeckPersistentLinkUrlState(persistentEntryPolicy, persistentPresentationUrl),
+          candidateUrlHash,
+        )
         ? candidateUrlHash
-        : (persistentPresentationUrl ? computeUrlHash(persistentHash, persistentPresentationUrl) : null)
+        : null
 
     res.json({
       instructorPasscode: session.data.instructorPasscode,
+      persistentEntryPolicy,
       ...(persistentPresentationUrl ? { persistentPresentationUrl } : {}),
       ...(persistentUrlHash ? { persistentUrlHash } : {}),
     })
@@ -1269,7 +1278,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const { hash } = generatePersistentHash('syncdeck', teacherCode)
-    const urlHash = computeUrlHash(hash, presentationUrl)
+    const urlState = buildSyncDeckPersistentLinkUrlState(DEFAULT_SYNCDECK_ENTRY_POLICY, presentationUrl)
+    const urlHash = computePersistentLinkUrlHash(hash, urlState)
 
     const cookieName = 'persistent_sessions'
     let sessionEntries = parsePersistentSessionsCookie(req.cookies?.[cookieName])
@@ -1284,8 +1294,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       teacherCode,
       selectedOptions: {
         presentationUrl,
-        urlHash,
       },
+      entryPolicy: DEFAULT_SYNCDECK_ENTRY_POLICY,
+      urlHash,
     })
 
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
@@ -1301,6 +1312,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const params = new URLSearchParams({
       presentationUrl,
+      entryPolicy: DEFAULT_SYNCDECK_ENTRY_POLICY,
       urlHash,
     })
 
@@ -1697,6 +1709,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const presentationUrl = readStringField(req.body, 'presentationUrl')
+    const entryPolicy = resolvePersistentSessionEntryPolicy(readStringField(req.body, 'entryPolicy'))
     const instructorPasscode = readStringField(req.body, 'instructorPasscode')
     const urlHash = readStringField(req.body, 'urlHash')
     const persistentHashFromClient = readStringField(req.body, 'persistentHash')
@@ -1726,7 +1739,11 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         return
       }
 
-      if (!verifyUrlHash(persistentHash, presentationUrl, urlHash)) {
+      if (!verifyPersistentLinkUrlHash(
+        persistentHash,
+        buildSyncDeckPersistentLinkUrlState(entryPolicy, presentationUrl),
+        urlHash,
+      )) {
         const response = res as unknown as JsonResponse
         response.status(400).json({ error: 'invalid payload' })
         return

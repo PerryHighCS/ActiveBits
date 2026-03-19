@@ -1,14 +1,16 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
 import { acceptEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
+  computePersistentLinkUrlHash,
+  type PersistentLinkUrlState,
+} from 'activebits-server/core/persistentLinkUrlState.js'
+import {
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   initializePersistentStorage,
-  resolvePersistentSessionSecret,
   startPersistentSession,
 } from 'activebits-server/core/persistentSessions.js'
 import assert from 'node:assert/strict'
-import { createHmac } from 'node:crypto'
 import test from 'node:test'
 import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../../types/websocket.js'
 import { initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
@@ -16,7 +18,7 @@ import setupSyncDeckRoutes, { waitForInstructorAuthMessage } from './routes.js'
 import '../../gallery-walk/server/routes.js'
 import '../../video-sync/server/routes.js'
 
-const HMAC_SECRET = resolvePersistentSessionSecret()
+const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -248,8 +250,18 @@ function emitInstructorAuth(socket: MockSocket, instructorPasscode: string): voi
   )
 }
 
-function computeUrlHash(persistentHash: string, presentationUrl: string): string {
-  return createHmac('sha256', HMAC_SECRET).update(`${persistentHash}|${presentationUrl}`).digest('hex').substring(0, 16)
+function computeUrlHash(
+  persistentHash: string,
+  presentationUrl: string,
+  entryPolicy: PersistentLinkUrlState['entryPolicy'] = DEFAULT_SYNCDECK_ENTRY_POLICY,
+): string {
+  const state: PersistentLinkUrlState = {
+    entryPolicy,
+    selectedOptions: {
+      presentationUrl,
+    },
+  }
+  return computePersistentLinkUrlHash(persistentHash, state)
 }
 
 async function waitForCondition(
@@ -1330,7 +1342,10 @@ void test('generate-url returns signed syncdeck persistent link and sets cookie'
   const payload = res.body as { hash?: string; url?: string }
   assert.equal(typeof payload.hash, 'string')
   assert.equal(typeof payload.url, 'string')
-  assert.match(payload.url ?? '', /^\/activity\/syncdeck\/[a-f0-9]{20}\?presentationUrl=.*&urlHash=[a-f0-9]{16}$/)
+  assert.match(
+    payload.url ?? '',
+    /^\/activity\/syncdeck\/[a-f0-9]{20}\?presentationUrl=.*&entryPolicy=instructor-required&urlHash=[a-f0-9]{16}$/,
+  )
   const generatedUrl = new URL(payload.url ?? '', 'https://bits.example')
   const urlHash = generatedUrl.searchParams.get('urlHash')
   assert.equal(typeof urlHash, 'string')
@@ -1343,8 +1358,9 @@ void test('generate-url returns signed syncdeck persistent link and sets cookie'
   assert.match(String(cookiePayload[0]?.key ?? ''), /^syncdeck:[a-f0-9]{20}$/)
   assert.deepEqual(cookiePayload[0]?.selectedOptions, {
     presentationUrl: 'https://slides.example.com/deck',
-    urlHash,
   })
+  assert.equal(cookiePayload[0]?.entryPolicy, 'instructor-required')
+  assert.equal(cookiePayload[0]?.urlHash, urlHash)
 })
 
 void test('generate-url rejects invalid presentationUrl', async () => {
@@ -1406,8 +1422,9 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
             teacherCode,
             selectedOptions: {
               presentationUrl,
-              urlHash,
             },
+            entryPolicy: 'instructor-required',
+            urlHash,
           },
         ]),
       },
@@ -1418,12 +1435,68 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'instructor-required',
     persistentPresentationUrl: presentationUrl,
     persistentUrlHash: urlHash,
   })
 })
 
-void test('instructor-passcode route decodes encoded cookie presentationUrl and backfills missing urlHash', async () => {
+void test('instructor-passcode route returns recovered persistent entryPolicy for syncdeck links', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const teacherCode = 'persistent-teacher-code'
+  const presentationUrl = 'https://slides.example/deck'
+  const entryPolicy: PersistentLinkUrlState['entryPolicy'] = 'solo-allowed'
+  const { hash, hashedTeacherCode } = generatePersistentHash('syncdeck', teacherCode)
+  const urlHash = computeUrlHash(hash, presentationUrl, entryPolicy)
+  await getOrCreateActivePersistentSession('syncdeck', hash, hashedTeacherCode)
+  await startPersistentSession(hash, 's1', {
+    id: 'teacher-ws',
+    readyState: 1,
+    send() {},
+  })
+
+  const handler = app.handlers.get['/api/syncdeck/:sessionId/instructor-passcode']
+  const res = createResponse()
+
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {},
+      {
+        persistent_sessions: JSON.stringify([
+          {
+            key: `syncdeck:${hash}`,
+            teacherCode,
+            entryPolicy,
+            selectedOptions: {
+              presentationUrl,
+            },
+            urlHash,
+          },
+        ]),
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'solo-allowed',
+    persistentPresentationUrl: presentationUrl,
+    persistentUrlHash: urlHash,
+  })
+})
+
+void test('instructor-passcode route decodes encoded cookie presentationUrl without backfilling missing urlHash', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
@@ -1468,12 +1541,12 @@ void test('instructor-passcode route decodes encoded cookie presentationUrl and 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'instructor-required',
     persistentPresentationUrl: presentationUrl,
-    persistentUrlHash: computeUrlHash(hash, presentationUrl),
   })
 })
 
-void test('instructor-passcode route decodes double-encoded cookie presentationUrl and backfills missing urlHash', async () => {
+void test('instructor-passcode route decodes double-encoded cookie presentationUrl without backfilling missing urlHash', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
@@ -1518,12 +1591,12 @@ void test('instructor-passcode route decodes double-encoded cookie presentationU
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'instructor-required',
     persistentPresentationUrl: presentationUrl,
-    persistentUrlHash: computeUrlHash(hash, presentationUrl),
   })
 })
 
-void test('instructor-passcode route repairs stale cookie urlHash that does not match normalized presentationUrl', async () => {
+void test('instructor-passcode route drops stale cookie urlHash that does not match normalized presentationUrl', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
@@ -1558,9 +1631,9 @@ void test('instructor-passcode route repairs stale cookie urlHash that does not 
             teacherCode,
             selectedOptions: {
               presentationUrl: encodedPresentationUrl,
-              // Stale hash computed against the encoded URL should not be trusted.
-              urlHash: computeUrlHash(hash, encodedPresentationUrl),
             },
+            // Stale hash computed against the encoded URL should not be trusted.
+            urlHash: computeUrlHash(hash, encodedPresentationUrl),
           },
         ]),
       },
@@ -1571,8 +1644,8 @@ void test('instructor-passcode route repairs stale cookie urlHash that does not 
   assert.equal(res.statusCode, 200)
   assert.deepEqual(res.body, {
     instructorPasscode: 'teacher-passcode-1',
+    persistentEntryPolicy: 'instructor-required',
     persistentPresentationUrl: presentationUrl,
-    persistentUrlHash: computeUrlHash(hash, presentationUrl),
   })
 })
 
@@ -1620,11 +1693,12 @@ void test('instructor-passcode route ignores invalid cookie presentationUrl edge
     assert.equal(res.statusCode, 200)
     assert.deepEqual(res.body, {
       instructorPasscode: 'teacher-passcode-1',
+      persistentEntryPolicy: 'instructor-required',
     })
   }
 })
 
-void test('instructor-passcode route preserves already-valid cookie presentationUrl values and backfills urlHash', async () => {
+void test('instructor-passcode route preserves already-valid cookie presentationUrl values without backfilling urlHash', async () => {
   initializePersistentStorage(null)
 
   const app = createMockApp()
@@ -1671,8 +1745,8 @@ void test('instructor-passcode route preserves already-valid cookie presentation
     assert.equal(res.statusCode, 200)
     assert.deepEqual(res.body, {
       instructorPasscode: 'teacher-passcode-1',
+      persistentEntryPolicy: 'instructor-required',
       persistentPresentationUrl: presentationUrl,
-      persistentUrlHash: computeUrlHash(hash, presentationUrl),
     })
   }
 })

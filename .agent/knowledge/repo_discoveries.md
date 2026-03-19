@@ -14,6 +14,38 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-19
+- Area: server | activities | persistent-bootstrap
+- Discovery: Persistent-session startup now copies canonical permalink `selectedOptions` into the started live session's `data.embeddedLaunch.selectedOptions`, and Algorithm Demo manager bootstrap reads its initial algorithm from that embedded-launch state instead of the manage-route query string.
+- Why it matters: This removes the last manager bootstrap path that could be influenced by unsigned query edits after a persistent-link redirect while preserving canonical deep-link recovery for started sessions.
+- Evidence: `server/core/persistentSessions.ts`; `server/core/persistentSessionWs.ts`; `server/routes/persistentSessionRoutes.ts`; `activities/algorithm-demo/client/manager/DemoManager.tsx`; `server/persistentSessionRoutes.test.ts`; `activities/algorithm-demo/client/manager/DemoManager.test.tsx`
+- Follow-up action: For future persistent manager bootstrap needs, prefer `embeddedLaunch.selectedOptions` or explicit server recovery endpoints over re-reading manage-route query params.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: activities | video-sync | permalink-recovery
+- Discovery: Video Sync manager bootstrap now prefers a server-recovered canonical `persistentSourceUrl` from `/api/video-sync/:sessionId/instructor-passcode` over raw manage-route query params when recovering persistent launches.
+- Why it matters: This keeps manager bootstrap aligned with canonical permalink-selected options and prevents unsigned or drifted query params on the manage route from becoming authoritative during persistent-session recovery.
+- Evidence: `activities/video-sync/server/routes.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/server/routes.test.ts`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`
+- Follow-up action: Keep any future persistent manager bootstrap data on server-recovered or embedded-launch-selected-options paths rather than re-reading raw query params after redirect.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: activities | syncdeck | permalink-signing
+- Discovery: SyncDeck permalink hashing now uses the shared canonical signer (`entryPolicy` + `selectedOptions.presentationUrl`) for generate, manager configure verification, and cookie-backed manager recovery; activity-specific `presentationUrl` hash logic was removed.
+- Why it matters: SyncDeck create/edit/launch now verify the same canonical permalink state as shared persistent routes, reducing signer drift and making unsigned query params non-authoritative by design.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: Treat canonical permalink signing as the default model for any future permalink-capable activity or recovery path; new activity-owned launch/recovery logic should consume only canonical signed state.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: server | permalink | canonical-state
+- Discovery: Shared persistent permalink signing and verification now canonicalize `selectedOptions` from activity config `deepLinkOptions` keys, and ignore unsigned query params (for example `utm_source`) even when `urlHash` is present.
+- Why it matters: This removes ambiguity where arbitrary query params could influence signed-state verification or runtime behavior, and aligns create/edit/auth/launch on one canonical signed permalink state.
+- Evidence: `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `.agent/plans/permalink-signing-plan.md`
+- Follow-up action: Canonical permalink signing is now the shared model. Future follow-up should focus only on keeping new activity-owned recovery/bootstrap paths aligned with canonical signed state instead of introducing parallel signers.
+- Owner: Codex
+
 - Date: 2026-03-18
 - Area: client | waiting-room | standalone-permalinks
 - Discovery: Persistent-link solo launches that cannot use a direct `/solo/:activityId` route should be handled through an optional activity client-module hook (`launchPersistentSoloEntry`) instead of adding activity-specific conditionals in the shared waiting-room component.
@@ -1210,4 +1242,20 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: The symptom looks activity-specific because reload suddenly works, but the real bug is the race between the deck’s `activityRequest` and the parent session reflecting the new embedded child.
 - Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
 - Follow-up action: When adding new embedded-slide handoffs, treat the deck’s current-slide `activityRequest` as the pending signal and keep reconciling until the expected child session appears or the request ages out.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: client | waiting room | syncdeck teacher redirect
+- Discovery: Teacher redirects that leave the waiting room should use the shared `buildPersistentTeacherManagePath(...)` helper, not inline `/manage/...${queryString}` concatenation. SyncDeck manager query params can carry the permalink layer’s generic `urlHash`, which is invalid for SyncDeck’s activity-specific configure hash and forces the manager back into the configure screen.
+- Why it matters: The dashboard resume path already strips SyncDeck permalink query params before redirecting to the manager; waiting-room teacher auth needs to match that behavior or freshly edited SyncDeck permalinks behave differently depending on how they are opened.
+- Evidence: `client/src/components/common/waitingRoomTeacherSubmitUtils.ts`; `client/src/components/common/sessionRouterUtils.ts`; `client/src/components/common/waitingRoomTeacherSubmitUtils.test.ts`
+- Follow-up action: Reuse shared route builders for activity-specific teacher redirects instead of duplicating redirect strings inside waiting-room helpers.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: client | manage dashboard | activity-owned permalink builders
+- Discovery: Activity-owned permalink builders need edit-state props as well as create-mode props. Otherwise edit falls back to the generic dashboard form and can silently bypass activity-specific validation or generation flows such as SyncDeck’s Reveal preflight and `generate-url` handling.
+- Why it matters: The UI can look similar while behaving differently; for SyncDeck this caused edited links to skip verification and diverge from the create flow.
+- Evidence: `types/activity.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`
+- Follow-up action: When adding custom permalink builders for other activities, make sure both create and edit paths are covered before leaving the generic-form fallback in place.
 - Owner: Codex
