@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 import {
   getActivityReportBuilder,
   registerActivityReportBuilder,
+  restoreActivityReportBuildersForTests,
+  snapshotActivityReportBuildersForTests,
   type ActivityReportBuilder,
+  type ActivityReportBuilderRegistrySnapshot,
 } from './activities/activityReportRegistry.js'
 
 function createBuilder(label: string): ActivityReportBuilder {
@@ -19,11 +22,26 @@ function createBuilder(label: string): ActivityReportBuilder {
 }
 
 let activityTypeCounter = 0
+let registrySnapshot: ActivityReportBuilderRegistrySnapshot | null = null
+let originalWarn: typeof console.warn = console.warn
 
 function nextTestActivityType(label: string): string {
   activityTypeCounter += 1
   return `__activity-report-registry-test__:${label}:${activityTypeCounter}`
 }
+
+test.beforeEach(() => {
+  registrySnapshot = snapshotActivityReportBuildersForTests()
+  originalWarn = console.warn
+})
+
+test.afterEach(() => {
+  if (registrySnapshot != null) {
+    restoreActivityReportBuildersForTests(registrySnapshot)
+    registrySnapshot = null
+  }
+  console.warn = originalWarn
+})
 
 void test('registerActivityReportBuilder validates inputs', () => {
   assert.throws(
@@ -37,24 +55,19 @@ void test('registerActivityReportBuilder validates inputs', () => {
 })
 
 void test('registerActivityReportBuilder warns and overrides duplicates outside development mode', () => {
-  const originalWarn = console.warn
   const warnings: string[] = []
   console.warn = (...args: unknown[]) => {
     warnings.push(args.map((arg) => String(arg)).join(' '))
   }
 
-  try {
-    const first = createBuilder('first')
-    const second = createBuilder('second')
-    const activityType = nextTestActivityType('duplicate')
+  const first = createBuilder('first')
+  const second = createBuilder('second')
+  const activityType = nextTestActivityType('duplicate')
 
-    registerActivityReportBuilder(activityType, first)
-    registerActivityReportBuilder(activityType, second)
+  registerActivityReportBuilder(activityType, first)
+  registerActivityReportBuilder(activityType, second)
 
-    assert.equal(getActivityReportBuilder(activityType), second)
-    assert.equal(warnings.length, 1)
-    assert.match(warnings[0] ?? '', new RegExp(`Overriding activity report builder for "${activityType}"`))
-  } finally {
-    console.warn = originalWarn
-  }
+  assert.equal(getActivityReportBuilder(activityType), second)
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0] ?? '', new RegExp(`Overriding activity report builder for "${activityType}"`))
 })

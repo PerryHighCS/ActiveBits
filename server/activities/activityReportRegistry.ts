@@ -8,6 +8,8 @@ export type ActivityReportBuilder = (
 
 const activityReportBuilders = new Map<string, ActivityReportBuilder>()
 
+export type ActivityReportBuilderRegistrySnapshot = Map<string, ActivityReportBuilder>
+
 export function registerActivityReportBuilder(activityType: string, builder: ActivityReportBuilder): void {
   if (typeof activityType !== 'string' || activityType.length === 0) {
     throw new Error('registerActivityReportBuilder requires a non-empty activity type string')
@@ -34,4 +36,17 @@ export function getActivityReportBuilder(activityType: string): ActivityReportBu
 
 export function resetActivityReportBuildersForTests(): void {
   activityReportBuilders.clear()
+}
+
+export function snapshotActivityReportBuildersForTests(): ActivityReportBuilderRegistrySnapshot {
+  return new Map(activityReportBuilders)
+}
+
+export function restoreActivityReportBuildersForTests(
+  snapshot: ActivityReportBuilderRegistrySnapshot,
+): void {
+  activityReportBuilders.clear()
+  for (const [activityType, builder] of snapshot.entries()) {
+    activityReportBuilders.set(activityType, builder)
+  }
 }
