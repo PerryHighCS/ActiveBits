@@ -179,3 +179,67 @@ void test('SyncDeckPersistentLinkBuilder submit stays disabled until verify succ
     restoreDomEnvironment()
   }
 })
+
+void test('SyncDeckPersistentLinkBuilder syncs local form state when edit hash changes', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { default: SyncDeckPersistentLinkBuilder } = await import('./SyncDeckPersistentLinkBuilder.js')
+
+  try {
+    const rendered = render(
+      React.createElement(SyncDeckPersistentLinkBuilder, {
+        activityId: 'syncdeck',
+        editState: {
+          hash: 'hash-1',
+          teacherCode: 'teacher-one',
+          entryPolicy: 'instructor-required',
+          selectedOptions: {
+            presentationUrl: 'https://slides.example/deck-one',
+          },
+        },
+        preflightRunner: async (): Promise<SyncDeckPreflightResult> => ({ valid: true, warning: null }),
+        onCreated: async () => undefined,
+      }),
+    )
+
+    const teacherCodeInput = rendered.getByLabelText(/teacher code/i)
+    const presentationUrlInput = rendered.getByLabelText(/presentation url/i)
+    const submitButton = rendered.getByRole('button', { name: /save changes/i })
+
+    await waitFor(() => {
+      assert.equal((teacherCodeInput as HTMLInputElement).value, 'teacher-one')
+      assert.equal((presentationUrlInput as HTMLInputElement).value, 'https://slides.example/deck-one')
+    })
+
+    fireEvent.click(rendered.getByRole('button', { name: /verify url/i }))
+
+    await waitFor(() => {
+      assert.equal((submitButton as HTMLButtonElement).disabled, false)
+    })
+
+    rendered.rerender(
+      React.createElement(SyncDeckPersistentLinkBuilder, {
+        activityId: 'syncdeck',
+        editState: {
+          hash: 'hash-2',
+          teacherCode: 'teacher-two',
+          entryPolicy: 'instructor-required',
+          selectedOptions: {
+            presentationUrl: 'https://slides.example/deck-two',
+          },
+        },
+        preflightRunner: async (): Promise<SyncDeckPreflightResult> => ({ valid: true, warning: null }),
+        onCreated: async () => undefined,
+      }),
+    )
+
+    await waitFor(() => {
+      assert.equal((teacherCodeInput as HTMLInputElement).value, 'teacher-two')
+      assert.equal((presentationUrlInput as HTMLInputElement).value, 'https://slides.example/deck-two')
+      assert.equal((submitButton as HTMLButtonElement).disabled, true)
+      assert.notEqual(rendered.queryByText('Verify this URL before creating the link.'), null)
+    })
+  } finally {
+    restoreDomEnvironment()
+  }
+})

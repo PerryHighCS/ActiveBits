@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useId, useState, type FormEvent } from 'react'
 import Button from '@src/components/ui/Button'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
@@ -78,6 +78,8 @@ export default function SyncDeckPersistentLinkBuilder({
   onCreated,
   preflightRunner = runSyncDeckPresentationPreflight,
 }: SyncDeckPersistentLinkBuilderComponentProps) {
+  const teacherCodeInputId = useId()
+  const presentationUrlInputId = useId()
   const isEditing = Boolean(editState?.hash)
   const [teacherCode, setTeacherCode] = useState(editState?.teacherCode ?? '')
   const [presentationUrl, setPresentationUrl] = useState(() => readSelectedPresentationUrl(editState?.selectedOptions))
@@ -87,6 +89,17 @@ export default function SyncDeckPersistentLinkBuilder({
   const [preflightWarning, setPreflightWarning] = useState<string | null>(null)
   const [preflightPreviewUrl, setPreflightPreviewUrl] = useState<string | null>(null)
   const [preflightValidatedUrl, setPreflightValidatedUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    setTeacherCode(editState?.teacherCode ?? '')
+    setPresentationUrl(readSelectedPresentationUrl(editState?.selectedOptions))
+    setError(null)
+    setIsCreating(false)
+    setIsPreflightChecking(false)
+    setPreflightWarning(null)
+    setPreflightPreviewUrl(null)
+    setPreflightValidatedUrl(null)
+  }, [editState?.hash])
 
   const normalizedPresentationUrl = presentationUrl.trim()
   const normalizedTeacherCode = teacherCode.trim()
@@ -222,8 +235,9 @@ export default function SyncDeckPersistentLinkBuilder({
       </div>
 
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+        <label htmlFor={teacherCodeInputId} className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
         <input
+          id={teacherCodeInputId}
           type="text"
           value={teacherCode}
           onChange={(event) => setTeacherCode(event.target.value)}
@@ -241,9 +255,10 @@ export default function SyncDeckPersistentLinkBuilder({
       </div>
 
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Presentation URL</label>
+        <label htmlFor={presentationUrlInputId} className="block text-sm font-semibold text-gray-700 mb-2">Presentation URL</label>
         <div className="flex items-center gap-2">
           <input
+            id={presentationUrlInputId}
             type="text"
             value={presentationUrl}
             onChange={(event) => {
