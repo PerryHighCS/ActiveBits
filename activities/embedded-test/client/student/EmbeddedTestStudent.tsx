@@ -56,6 +56,10 @@ function createFallbackStudentId(): string {
   return `embedded-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+export function getEmbeddedTestStudentMessagePlaceholder(socketReady: boolean): string {
+  return socketReady ? 'Reply to manager' : 'Connecting...'
+}
+
 export default function EmbeddedTestStudent({ sessionData }: EmbeddedTestStudentProps) {
   const sessionId = sessionData?.sessionId ?? null
   const attachSessionEndedHandler = useSessionEndedHandler()
@@ -66,7 +70,7 @@ export default function EmbeddedTestStudent({ sessionData }: EmbeddedTestStudent
   const [messages, setMessages] = useState<EmbeddedTestMessage[]>([])
   const [draft, setDraft] = useState('')
   const studentIdRef = useRef<string | null>(null)
-  const socketReadyRef = useRef(false)
+  const [socketReady, setSocketReady] = useState(false)
 
   useEffect(() => {
     studentIdRef.current = studentId
@@ -130,10 +134,10 @@ export default function EmbeddedTestStudent({ sessionData }: EmbeddedTestStudent
     shouldReconnect: Boolean(identityResolved && sessionId),
     attachSessionEndedHandler,
     onOpen: () => {
-      socketReadyRef.current = true
+      setSocketReady(true)
     },
     onClose: () => {
-      socketReadyRef.current = false
+      setSocketReady(false)
     },
     onMessage: (event) => {
       const payload = parseStatePayload(event.data)
@@ -223,7 +227,7 @@ export default function EmbeddedTestStudent({ sessionData }: EmbeddedTestStudent
                 sendMessage()
               }
             }}
-            placeholder={socketReadyRef.current ? 'Reply to manager' : 'Connecting...'}
+            placeholder={getEmbeddedTestStudentMessagePlaceholder(socketReady)}
             style={{ flex: 1, padding: '10px 12px' }}
           />
           <button type="button" onClick={sendMessage}>Send</button>

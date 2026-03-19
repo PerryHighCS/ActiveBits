@@ -1,6 +1,6 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 interface EmbeddedTestParticipant {
@@ -44,13 +44,17 @@ export function shouldRenderEmbeddedTestEndSessionButton(sessionId?: string): bo
   return !isEmbeddedChildSessionId(sessionId)
 }
 
+export function getEmbeddedTestManagerMessagePlaceholder(socketReady: boolean): string {
+  return socketReady ? 'Send a message to students' : 'Connecting...'
+}
+
 export default function EmbeddedTestManager() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
   const [participants, setParticipants] = useState<EmbeddedTestParticipant[]>([])
   const [messages, setMessages] = useState<EmbeddedTestMessage[]>([])
   const [draft, setDraft] = useState('')
-  const socketReadyRef = useRef(false)
+  const [socketReady, setSocketReady] = useState(false)
 
   const buildWsUrl = useCallback(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -64,10 +68,10 @@ export default function EmbeddedTestManager() {
     buildUrl: buildWsUrl,
     shouldReconnect: true,
     onOpen: () => {
-      socketReadyRef.current = true
+      setSocketReady(true)
     },
     onClose: () => {
-      socketReadyRef.current = false
+      setSocketReady(false)
     },
     onMessage: (event) => {
       const payload = parseStatePayload(event.data)
@@ -188,7 +192,7 @@ export default function EmbeddedTestManager() {
                 sendMessage()
               }
             }}
-            placeholder={socketReadyRef.current ? 'Send a message to students' : 'Connecting...'}
+            placeholder={getEmbeddedTestManagerMessagePlaceholder(socketReady)}
             style={{ flex: 1, padding: '10px 12px' }}
           />
           <button type="button" onClick={sendMessage}>Send</button>
