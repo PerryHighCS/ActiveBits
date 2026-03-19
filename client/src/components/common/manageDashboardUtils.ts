@@ -117,6 +117,80 @@ function clearCreateSessionBootstrapPayloadFromSessionStorage(
   }
 }
 
+function pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs: number): void {
+  if (typeof window === 'undefined' || window.sessionStorage == null) {
+    return
+  }
+
+  const storage = window.sessionStorage
+  if (typeof storage.key !== 'function' || typeof storage.length !== 'number') {
+    return
+  }
+
+  const matchingKeys: string[] = []
+
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index)
+    if (typeof key === 'string' && key.startsWith(CREATE_SESSION_BOOTSTRAP_SESSION_STORAGE_PREFIX)) {
+      matchingKeys.push(key)
+    }
+  }
+
+  const retainedEntries: Array<{ key: string, createdAtMs: number }> = []
+
+  for (const key of matchingKeys) {
+    try {
+      const rawValue = storage.getItem(key)
+      if (typeof rawValue !== 'string' || rawValue.length === 0) {
+        storage.removeItem(key)
+        continue
+      }
+
+      const parsed = JSON.parse(rawValue) as unknown
+      if (
+        !isObjectRecord(parsed)
+        || typeof parsed.createdAtMs !== 'number'
+        || !Number.isFinite(parsed.createdAtMs)
+        || !isObjectRecord(parsed.payload)
+      ) {
+        storage.removeItem(key)
+        continue
+      }
+
+      if (nowMs - parsed.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+        storage.removeItem(key)
+        continue
+      }
+
+      retainedEntries.push({
+        key,
+        createdAtMs: parsed.createdAtMs,
+      })
+    } catch {
+      try {
+        storage.removeItem(key)
+      } catch {
+        // Best-effort cleanup only; keep pruning the remaining keys.
+      }
+    }
+  }
+
+  if (retainedEntries.length <= MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS) {
+    return
+  }
+
+  retainedEntries
+    .sort((left, right) => left.createdAtMs - right.createdAtMs)
+    .slice(0, retainedEntries.length - MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS)
+    .forEach(({ key }) => {
+      try {
+        storage.removeItem(key)
+      } catch {
+        // Best-effort cleanup only; a later consume path can still fall back to in-memory data.
+      }
+    })
+}
+
 function consumeCreateSessionBootstrapPayloadFromSessionStorage(
   activityId: string,
   sessionId: string,
@@ -329,6 +403,8 @@ function pruneCreateSessionBootstrapPayloads(nowMs: number): void {
 
     createSessionBootstrapPayloads.delete(oldestKey)
   }
+
+  pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs)
 }
 
 export function parseDeepLinkOptions(rawDeepLinkOptions: unknown): DeepLinkOptions {

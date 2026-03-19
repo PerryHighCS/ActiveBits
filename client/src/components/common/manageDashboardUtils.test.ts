@@ -21,6 +21,31 @@ import {
   validateDeepLinkSelection,
 } from './manageDashboardUtils'
 
+function createFakeSessionStorage(initialEntries?: Iterable<readonly [string, string]>) {
+  const writes = new Map<string, string>(initialEntries)
+
+  return {
+    backing: writes,
+    storage: {
+      get length() {
+        return writes.size
+      },
+      key(index: number) {
+        return Array.from(writes.keys())[index] ?? null
+      },
+      getItem(key: string) {
+        return writes.get(key) ?? null
+      },
+      setItem(key: string, value: string) {
+        writes.set(key, value)
+      },
+      removeItem(key: string) {
+        writes.delete(key)
+      },
+    },
+  }
+}
+
 const rawOptions = {
   algorithm: {
     label: 'Algorithm',
@@ -261,12 +286,7 @@ void test('parseCreateSessionBootstrap validates sessionStorage bootstrap metada
 
 void test('persistCreateSessionBootstrapToSessionStorage stores declared create response fields', () => {
   const originalWindow = globalThis.window
-  const writes = new Map<string, string>()
-  const fakeSessionStorage = {
-    setItem(key: string, value: string) {
-      writes.set(key, value)
-    },
-  }
+  const { backing: writes, storage: fakeSessionStorage } = createFakeSessionStorage()
 
   Object.defineProperty(globalThis, 'window', {
     value: { sessionStorage: fakeSessionStorage },
@@ -365,22 +385,12 @@ void test('storeCreateSessionBootstrapPayload keeps a same-tab bootstrap payload
 })
 
 void test('consumeCreateSessionBootstrapPayload clears sessionStorage even when the same-tab cache entry exists', () => {
-  const sessionStorage = new Map<string, string>()
   const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage()
 
   Object.defineProperty(globalThis, 'window', {
     value: {
-      sessionStorage: {
-        getItem(key: string) {
-          return sessionStorage.get(key) ?? null
-        },
-        setItem(key: string, value: string) {
-          sessionStorage.set(key, value)
-        },
-        removeItem(key: string) {
-          sessionStorage.delete(key)
-        },
-      },
+      sessionStorage: fakeSessionStorage,
     },
     configurable: true,
     writable: true,
@@ -419,22 +429,12 @@ void test('consumeCreateSessionBootstrapPayload clears sessionStorage even when 
 })
 
 void test('consumeCreateSessionBootstrapPayload falls back to sessionStorage for iframe/bootstrap reload contexts', () => {
-  const sessionStorage = new Map<string, string>()
   const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage()
 
   Object.defineProperty(globalThis, 'window', {
     value: {
-      sessionStorage: {
-        getItem(key: string) {
-          return sessionStorage.get(key) ?? null
-        },
-        setItem(key: string, value: string) {
-          sessionStorage.set(key, value)
-        },
-        removeItem(key: string) {
-          sessionStorage.delete(key)
-        },
-      },
+      sessionStorage: fakeSessionStorage,
     },
     configurable: true,
     writable: true,
@@ -488,6 +488,52 @@ void test('storeCreateSessionBootstrapPayload expires abandoned same-tab payload
     consumeCreateSessionBootstrapPayload('video-sync', 'session-expiring', createdAtMs + 5 * 60 * 1000 + 1),
     null,
   )
+})
+
+void test('consumeCreateSessionBootstrapPayload prunes expired sessionStorage bootstrap payloads', () => {
+  const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage([
+    [
+      'create-session-bootstrap:video-sync:session-expired',
+      JSON.stringify({
+        createdAtMs: 1_000,
+        payload: {
+          instructorPasscode: 'expired-passcode',
+        },
+      }),
+    ],
+    [
+      'unrelated-key',
+      'preserve-me',
+    ],
+  ])
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: fakeSessionStorage,
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    assert.equal(
+      consumeCreateSessionBootstrapPayload('video-sync', 'session-missing', 1_000 + 5 * 60 * 1000 + 1),
+      null,
+    )
+
+    assert.equal(
+      sessionStorage.has('create-session-bootstrap:video-sync:session-expired'),
+      false,
+    )
+    assert.equal(sessionStorage.get('unrelated-key'), 'preserve-me')
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
 })
 
 void test('consumeCreateSessionBootstrapPayload prunes unrelated expired entries without requiring a new write', () => {
@@ -552,6 +598,52 @@ void test('storeCreateSessionBootstrapPayload evicts oldest abandoned entries wh
 
   for (let index = 1; index < 100; index += 1) {
     consumeCreateSessionBootstrapPayload('video-sync', `session-${index}`, 101)
+  }
+})
+
+void test('storeCreateSessionBootstrapPayload evicts oldest sessionStorage bootstrap entries when the same-tab cache is full', () => {
+  const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage()
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: fakeSessionStorage,
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    for (let index = 0; index <= 100; index += 1) {
+      storeCreateSessionBootstrapPayload(
+        'video-sync',
+        `stored-session-${index}`,
+        {
+          id: `stored-session-${index}`,
+          instructorPasscode: `teacher-passcode-${index}`,
+        },
+        index,
+      )
+    }
+
+    assert.equal(
+      sessionStorage.has('create-session-bootstrap:video-sync:stored-session-0'),
+      false,
+    )
+    assert.equal(
+      sessionStorage.has('create-session-bootstrap:video-sync:stored-session-100'),
+      true,
+    )
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+
+    for (let index = 0; index <= 100; index += 1) {
+      consumeCreateSessionBootstrapPayload('video-sync', `stored-session-${index}`, 101)
+    }
   }
 })
 

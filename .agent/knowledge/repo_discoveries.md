@@ -1187,3 +1187,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `server/core/sessions.ts`; `activities/syncdeck/server/routes.ts`; `client/src/components/common/sessionHeaderUtils.ts`; `server/sessionEntryRoutes.test.ts`; `activities/syncdeck/server/routes.test.ts`
 - Follow-up action: Prefer importing the shared prefix constant anywhere child session ids are constructed on the server, and keep client-only detection helpers keyed to the same literal.
 - Owner: Codex
+
+- Date: 2026-03-19
+- Area: client | manage-dashboard | create-session bootstrap storage
+- Discovery: Same-tab create-session bootstrap payload persistence now needs pruning in both the in-memory map and the `create-session-bootstrap:*` `sessionStorage` namespace. Keeping only the map trimmed is not enough once payloads are written to browser storage for reload resilience.
+- Why it matters: Long-lived dashboard tabs can accumulate abandoned bootstrap records in `sessionStorage`, eventually hitting quota and causing later bootstrap writes to fail even though the in-memory cache still looks bounded.
+- Evidence: `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/manageDashboardUtils.test.ts`
+- Follow-up action: If another browser-storage-backed bootstrap cache is added, give it the same prefix-scoped TTL/max-entry pruning path rather than relying on consume-time cleanup alone.
+- Owner: Codex
