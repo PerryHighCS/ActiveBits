@@ -3,6 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
+import {
+  persistSessionParticipantIdentity,
+  readStoredSessionParticipantIdentity,
+  resolveInitialEntryParticipantIdentity,
+} from '@src/components/common/entryParticipantIdentityUtils'
+import { persistSessionParticipantContext } from '@src/components/common/sessionParticipantContext'
 import type {
   FeedbackState,
   JavaStringAnswer,
@@ -56,14 +62,20 @@ const defaultStats: JavaStringStats = {
 export default function JavaStringPractice({ sessionData }: JavaStringPracticeProps) {
   const sessionId = sessionData?.sessionId
   const isSoloSession = sessionId ? sessionId.startsWith('solo-') : false
+  const initialIdentity = (
+    typeof window !== 'undefined'
+    && sessionId
+    && !isSoloSession
+  ) ? readStoredSessionParticipantIdentity(window.localStorage, sessionId) : null
   const initializedRef = useRef(false)
   const studentIdRef = useRef<string | null>(null)
   const navigate = useNavigate()
   const attachSessionEndedHandler = useSessionEndedHandler()
 
-  const [studentName, setStudentName] = useState('')
-  const [studentId, setStudentId] = useState<string | null>(null)
-  const [nameSubmitted, setNameSubmitted] = useState(false)
+  const [studentName, setStudentName] = useState(initialIdentity?.studentName ?? '')
+  const [studentId, setStudentId] = useState<string | null>(initialIdentity?.studentId ?? null)
+  const [nameSubmitted, setNameSubmitted] = useState(initialIdentity?.nameSubmitted ?? false)
+  const [identityResolved, setIdentityResolved] = useState(Boolean(initialIdentity))
   const [currentChallenge, setCurrentChallenge] = useState<JavaStringChallenge | null>(null)
   const [selectedTypes, setSelectedTypes] = useState<Set<JavaStringMethodId>>(new Set(['all']))
   const [userAnswer, setUserAnswer] = useState('')
@@ -86,19 +98,39 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
   }, [])
 
   useEffect(() => {
-    if (isSoloSession) {
-      setStudentName('Solo Student')
-      setNameSubmitted(true)
+    if (typeof window === 'undefined') {
       return
     }
 
-    if (sessionId == null) return
-    const savedName = localStorage.getItem(`student-name-${sessionId}`)
-    const savedId = localStorage.getItem(`student-id-${sessionId}`)
-    if (savedName) {
-      setStudentName(savedName)
-      setStudentId(savedId)
-      setNameSubmitted(true)
+    let isCancelled = false
+
+    void (async () => {
+      try {
+        const identity = await resolveInitialEntryParticipantIdentity({
+          activityName: 'java-string-practice',
+          sessionId,
+          isSoloSession,
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+        })
+        if (isCancelled) {
+          return
+        }
+
+        setStudentName(identity.studentName)
+        setStudentId(identity.studentId)
+        setNameSubmitted(identity.nameSubmitted)
+      } catch (error) {
+        console.error('Failed to resolve initial participant identity:', error)
+      } finally {
+        if (!isCancelled) {
+          setIdentityResolved(true)
+        }
+      }
+    })()
+
+    return () => {
+      isCancelled = true
     }
   }, [isSoloSession, sessionId])
 
@@ -131,7 +163,10 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
           const nextStudentId = typeof payload.studentId === 'string' ? payload.studentId : null
           setStudentId(nextStudentId)
           if (nextStudentId && sessionId) {
-            localStorage.setItem(`student-id-${sessionId}`, nextStudentId)
+            persistSessionParticipantContext(window.localStorage, sessionId, {
+              studentName: studentName.trim() || null,
+              studentId: nextStudentId,
+            })
           }
           return
         }
@@ -145,7 +180,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
         console.error('Failed to parse WebSocket message:', error)
       }
     },
-    [navigate, resetChallengeState, sessionId],
+    [navigate, resetChallengeState, sessionId, studentName],
   )
 
   const handleWsOpen = useCallback(() => {
@@ -157,7 +192,10 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const currentStudentId = studentIdRef.current
     const studentIdParam = currentStudentId ? `&studentId=${encodeURIComponent(currentStudentId)}` : ''
-    return `${protocol}//${window.location.host}/ws/java-string-practice?sessionId=${sessionId}&studentName=${encodeURIComponent(studentName)}${studentIdParam}`
+    const studentNameParam = studentName.trim().length > 0
+      ? `&studentName=${encodeURIComponent(studentName)}`
+      : ''
+    return `${protocol}//${window.location.host}/ws/java-string-practice?sessionId=${sessionId}${studentNameParam}${studentIdParam}`
   }, [isSoloSession, nameSubmitted, sessionId, studentName])
 
   const { connect: connectStudentWs, disconnect: disconnectStudentWs } = useResilientWebSocket({
@@ -270,6 +308,21 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
     })
   }
 
+  if (isSoloSession !== true && identityResolved !== true) {
+    return (
+      <div className="java-string-container">
+        <div className="java-string-header">
+          <div className="game-title">Java String Methods Practice</div>
+        </div>
+        <div className="java-string-content">
+          <div className="challenge-card" style={{ textAlign: 'center', padding: '40px' }}>
+            <p>Rejoining session...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (isSoloSession !== true && nameSubmitted !== true) {
     return (
       <div className="java-string-container">
@@ -283,7 +336,7 @@ export default function JavaStringPractice({ sessionData }: JavaStringPracticePr
               onSubmit={(event) => {
                 event.preventDefault()
                 if (studentName.trim() && sessionId) {
-                  localStorage.setItem(`student-name-${sessionId}`, studentName.trim())
+                  persistSessionParticipantIdentity(window.localStorage, sessionId, studentName.trim(), studentId)
                   setNameSubmitted(true)
                 }
               }}

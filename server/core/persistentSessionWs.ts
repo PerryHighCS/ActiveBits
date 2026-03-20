@@ -14,6 +14,7 @@ import {
 } from './persistentSessions.js'
 import { createSession } from './sessions.js'
 import type { SessionStore as CoreSessionStore } from './sessions.js'
+import { buildSoloOnlyPolicyRejection } from './persistentSessionPolicyUtils.js'
 
 const OPEN_SOCKET_STATE = 1
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -162,6 +163,16 @@ async function handleTeacherCodeVerification(
     return
   }
 
+  if (persistentSession.entryPolicy === 'solo-only') {
+    socket.send(
+      JSON.stringify({
+        type: 'teacher-code-error',
+        ...buildSoloOnlyPolicyRejection(),
+      }),
+    )
+    return
+  }
+
   const validation = verifyTeacherCodeWithHash(persistentSession.activityName, hash, teacherCode)
 
   if (!validation.valid) {
@@ -180,7 +191,18 @@ async function handleTeacherCodeVerification(
     return
   }
 
-  const newSession = await createSession(sessions, { data: {} })
+  const selectedOptions = persistentSession.selectedOptions != null
+    ? { ...persistentSession.selectedOptions }
+    : {}
+  const newSession = await createSession(sessions, {
+    data: Object.keys(selectedOptions).length > 0
+      ? {
+        embeddedLaunch: {
+          selectedOptions,
+        },
+      }
+      : {},
+  })
   newSession.type = persistentSession.activityName
   await sessions.set(newSession.id, newSession)
 

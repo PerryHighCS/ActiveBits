@@ -1,4 +1,9 @@
 import type { ComponentType, LazyExoticComponent, ReactNode } from 'react'
+import type {
+  ActivityWaitingRoomConfig,
+  PersistentSessionEntryPolicy,
+  WaitingRoomFieldComponentProps,
+} from './waitingRoom.js'
 
 export type ActivityRenderableComponent =
   | ComponentType<unknown>
@@ -27,6 +32,17 @@ export interface ActivityDeepLinkPreflightResult {
   warning: string | null
 }
 
+export interface ActivityPersistentSoloLaunchParams {
+  hash: string
+  search: string
+  selectedOptions: Partial<Record<string, string>>
+}
+
+export interface ActivityPersistentSoloLaunchResult {
+  sessionId?: string
+  navigateTo?: string
+}
+
 export interface ActivityPersistentLinkBuildResult {
   fullUrl: string
   hash: string
@@ -34,8 +50,16 @@ export interface ActivityPersistentLinkBuildResult {
   selectedOptions?: Record<string, unknown>
 }
 
+export interface ActivityPersistentLinkBuilderEditState {
+  hash: string
+  teacherCode: string
+  selectedOptions?: Record<string, unknown>
+  entryPolicy?: PersistentSessionEntryPolicy
+}
+
 export interface ActivityPersistentLinkBuilderProps {
   activityId: string
+  editState?: ActivityPersistentLinkBuilderEditState | null
   onCreated(result: ActivityPersistentLinkBuildResult): void | Promise<void>
 }
 
@@ -46,6 +70,113 @@ export interface ActivityCreateSessionBootstrapSessionStorageEntry {
 
 export interface ActivityCreateSessionBootstrapConfig {
   sessionStorage?: ActivityCreateSessionBootstrapSessionStorageEntry[]
+  historyState?: string[]
+}
+
+export interface ActivityUtility {
+  id: string
+  label: string
+  action: 'copy-url' | 'go-to-url'
+  path: string
+  description?: string
+  surfaces?: Array<'manage' | 'home'>
+  standaloneSessionId?: string
+}
+
+export interface ActivityStandaloneEntryConfig {
+  enabled: boolean
+  supportsDirectPath?: boolean
+  supportsPermalink?: boolean
+  showOnHome?: boolean
+  title?: string
+  description?: string
+}
+
+export interface ActivityEmbeddedRuntimeConfig {
+  instructorGated?: 'runtime' | 'waiting-room'
+}
+
+export type ActivityReportScope = 'activity-session' | 'student-cross-activity' | 'session-summary'
+
+export interface ActivityReportStudentRef {
+  studentId: string
+  displayName?: string | null
+}
+
+export interface ActivityReportSummaryMetric {
+  id: string
+  label: string
+  value: string | number
+  description?: string
+}
+
+export interface ActivityReportSummaryCard {
+  id: string
+  title: string
+  description?: string
+  metrics?: ActivityReportSummaryMetric[]
+}
+
+export interface ActivityReportRichTextBlock {
+  id: string
+  type: 'rich-text'
+  title?: string
+  paragraphs: string[]
+}
+
+export interface ActivityReportTableRow {
+  id: string
+  cells: string[]
+}
+
+export interface ActivityReportTableBlock {
+  id: string
+  type: 'table'
+  title?: string
+  columns: string[]
+  rows: ActivityReportTableRow[]
+  emptyMessage?: string
+}
+
+export type ActivityReportBlock =
+  | ActivityReportRichTextBlock
+  | ActivityReportTableBlock
+
+export interface ActivityStructuredReportSection {
+  activityId: string
+  childSessionId: string
+  instanceKey: string
+  title: string
+  generatedAt: number
+  supportsScopes: ActivityReportScope[]
+  students?: ActivityReportStudentRef[]
+  summaryCards?: ActivityReportSummaryCard[]
+  scopeBlocks?: Partial<Record<ActivityReportScope, ActivityReportBlock[]>>
+  studentScopeBlocks?: Record<string, ActivityReportBlock[]>
+  payload: Record<string, unknown>
+}
+
+export interface SyncDeckSessionReportManifestActivity {
+  activityId: string
+  activityName: string
+  childSessionId: string
+  instanceKey: string
+  startedAt: number
+  report: ActivityStructuredReportSection
+}
+
+export interface SyncDeckSessionReportManifest {
+  parentSessionId: string
+  generatedAt: number
+  activities: SyncDeckSessionReportManifestActivity[]
+  students: ActivityReportStudentRef[]
+}
+
+export interface ActivityReportSectionProps {
+  scope: ActivityReportScope
+  manifest: SyncDeckSessionReportManifest
+  activity: SyncDeckSessionReportManifestActivity
+  student?: ActivityReportStudentRef | null
 }
 
 export interface ActivityConfig {
@@ -54,12 +185,8 @@ export interface ActivityConfig {
   title?: string
   description: string
   color: string
-  soloMode: boolean
-  soloModeMeta?: {
-    title?: string
-    description?: string
-    buttonText?: string
-  }
+  standaloneEntry: ActivityStandaloneEntryConfig
+  utilities?: ActivityUtility[]
   deepLinkOptions?: Record<string, ActivityDeepLinkOption>
   deepLinkGenerator?: {
     endpoint: string
@@ -74,6 +201,9 @@ export interface ActivityConfig {
   manageLayout?: {
     expandShell?: boolean
   }
+  embeddedRuntime?: ActivityEmbeddedRuntimeConfig
+  reportEndpoint?: string
+  waitingRoom?: ActivityWaitingRoomConfig
   isDev?: boolean
   /** When true, the activity exposes a utility/tools page at /util/:id. */
   utilMode?: boolean
@@ -89,10 +219,15 @@ export interface ActivityClientModule {
   UtilComponent?: ComponentType<unknown>
   footerContent?: ReactNode | (() => ReactNode)
   PersistentLinkBuilderComponent?: ComponentType<ActivityPersistentLinkBuilderProps>
+  ReportSectionComponent?: ComponentType<ActivityReportSectionProps>
   runDeepLinkPreflight?: (
     preflight: ActivityDeepLinkPreflightConfig,
     rawValue: string,
   ) => Promise<ActivityDeepLinkPreflightResult>
+  launchPersistentSoloEntry?: (
+    params: ActivityPersistentSoloLaunchParams,
+  ) => Promise<ActivityPersistentSoloLaunchResult>
+  waitingRoomFields?: Record<string, ComponentType<WaitingRoomFieldComponentProps>>
 }
 
 export interface ActivityRegistryEntry extends ActivityConfig {

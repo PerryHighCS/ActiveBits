@@ -10,7 +10,12 @@ export type WaitingRoomMessage =
   | { type: 'session-started'; sessionId: string }
   | { type: 'session-ended' }
   | { type: 'teacher-authenticated'; sessionId: string }
-  | { type: 'teacher-code-error'; error: string }
+  | {
+      type: 'teacher-code-error'
+      error: string
+      code?: 'entry-policy-rejected'
+      entryPolicy?: 'solo-only'
+    }
 
 export interface WaitingRoomRawMessage {
   type: string
@@ -70,7 +75,10 @@ export function isWaitingRoomMessage(message: WaitingRoomRawMessage): message is
     return typeof message.sessionId === 'string'
   }
   if (message.type === 'teacher-code-error') {
-    return typeof message.error === 'string'
+    const hasValidError = typeof message.error === 'string'
+    const hasValidCode = message.code === undefined || message.code === 'entry-policy-rejected'
+    const hasValidEntryPolicy = message.entryPolicy === undefined || message.entryPolicy === 'solo-only'
+    return hasValidError && hasValidCode && hasValidEntryPolicy
   }
   return false
 }

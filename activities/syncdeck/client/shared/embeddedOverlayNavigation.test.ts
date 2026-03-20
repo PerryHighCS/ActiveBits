@@ -1,0 +1,120 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { resolveOptimisticEmbeddedOverlayIndices } from './embeddedOverlayNavigation.js'
+import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from './embeddedOverlayNavigation.js'
+import { resolveEmbeddedOverlayVerticalMoveAllowed } from './embeddedOverlayNavigation.js'
+
+void test('resolveOptimisticEmbeddedOverlayIndices uses directional horizontal navigation across slide columns', () => {
+  const instanceKeys = [
+    'embedded-test:2:0',
+    'raffle:2:1',
+    'algorithm-demo:2:2',
+    'video-sync:3:0',
+  ]
+
+  assert.deepEqual(
+    resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 0, f: 0 }, 'right'),
+    { h: 3, v: 0, f: 0 },
+  )
+
+  assert.deepEqual(
+    resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 2, f: 0 }, 'left'),
+    { h: 1, v: 0, f: 0 },
+  )
+
+  assert.deepEqual(
+    resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 3, v: 0, f: 0 }, 'left'),
+    { h: 2, v: 0, f: 0 },
+  )
+})
+
+void test('resolveOptimisticEmbeddedOverlayIndices preserves vertical movement within the same slide column', () => {
+  const instanceKeys = [
+    'embedded-test:2:0',
+    'raffle:2:1',
+  ]
+
+  assert.deepEqual(
+    resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 0, f: 0 }, 'down'),
+    { h: 2, v: 1, f: 0 },
+  )
+
+  assert.deepEqual(
+    resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 1, f: 0 }, 'up'),
+    { h: 2, v: 0, f: 0 },
+  )
+})
+
+void test('deriveEmbeddedOverlayVerticalNavigationCapabilities enables up/down from anchored stack bounds', () => {
+  const instanceKeys = [
+    'embedded-test:2:0',
+    'raffle:2:1',
+    'algorithm-demo:2:2',
+  ]
+
+  assert.deepEqual(
+    deriveEmbeddedOverlayVerticalNavigationCapabilities(instanceKeys, { h: 2, v: 0, f: 0 }),
+    { canGoUp: false, canGoDown: true },
+  )
+
+  assert.deepEqual(
+    deriveEmbeddedOverlayVerticalNavigationCapabilities(instanceKeys, { h: 2, v: 1, f: 0 }),
+    { canGoUp: true, canGoDown: true },
+  )
+
+  assert.deepEqual(
+    deriveEmbeddedOverlayVerticalNavigationCapabilities(instanceKeys, { h: 2, v: 2, f: 0 }),
+    { canGoUp: true, canGoDown: false },
+  )
+})
+
+void test('deriveEmbeddedOverlayVerticalNavigationCapabilities disables down when no lower anchored stack exists', () => {
+  assert.deepEqual(
+    deriveEmbeddedOverlayVerticalNavigationCapabilities(['embedded-test:2:0'], { h: 2, v: 0, f: 0 }),
+    { canGoUp: false, canGoDown: false },
+  )
+})
+
+void test('resolveEmbeddedOverlayVerticalMoveAllowed prefers iframe slide-stack capability over activity-derived bounds', () => {
+  assert.equal(
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'down',
+      iframeCapability: true,
+      derivedCapabilities: { canGoUp: true, canGoDown: false },
+      fallbackAllowed: true,
+    }),
+    true,
+  )
+
+  assert.equal(
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'up',
+      iframeCapability: false,
+      derivedCapabilities: { canGoUp: true, canGoDown: false },
+      fallbackAllowed: false,
+    }),
+    false,
+  )
+})
+
+void test('resolveEmbeddedOverlayVerticalMoveAllowed falls back to derived bounds and local default when iframe capability is unavailable', () => {
+  assert.equal(
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'down',
+      iframeCapability: null,
+      derivedCapabilities: { canGoUp: false, canGoDown: true },
+      fallbackAllowed: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'up',
+      iframeCapability: null,
+      derivedCapabilities: null,
+      fallbackAllowed: true,
+    }),
+    true,
+  )
+})

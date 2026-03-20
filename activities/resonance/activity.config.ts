@@ -5,7 +5,12 @@ const resonanceConfig: ActivityConfig = {
   name: 'Resonance',
   description: 'Collect, review, and share class responses in real time',
   color: 'rose',
-  soloMode: false,
+  standaloneEntry: {
+    enabled: false,
+    supportsDirectPath: false,
+    supportsPermalink: false,
+    showOnHome: false,
+  },
   deepLinkGenerator: {
     endpoint: '/api/resonance/generate-link',
     mode: 'replace-url',

@@ -13,6 +13,10 @@ ActiveBits/
 │   │   ├── activity.config.ts       # Metadata + client/server entry pointers
 │   │   ├── client/                  # Manager/Student components and assets
 │   │   └── server/                  # API/WebSocket routes and data
+│   ├── syncdeck/
+│   │   ├── dev-presentations/       # Optional dev-only sample decks, served locally only
+│   │   ├── client/
+│   │   └── server/
 │   ├── www-sim/
 │   │   ├── activity.config.ts
 │   │   ├── client/
@@ -51,6 +55,7 @@ ActiveBits/
 6. Teacher can access the session at any time via their link ( `/activity/{activityName}/{hash}` )
 7. Auto-authentication using teacher code cookie
 8. Download CSV backup of all permanent links
+9. For `solo-allowed` links with no active live session, the waiting room remains visible so students can choose solo mode and instructors without a remembered cookie can still enter the teacher code to start a new live session
 
 ### Student Flow
 1. Receive session ID or permanent link from teacher
@@ -85,12 +90,34 @@ export default {
   name: 'Display Name',         // Human-readable name
   description: 'Brief description', // Shown in dashboard
   color: 'blue',                // Accent color for activity card
-  soloMode: false,              // Allow solo practice without teacher
-  soloModeMeta: {               // Optional: customize Solo Bits/manager labels
-    title: 'Solo Card Title',
-    description: 'Solo mode description',
-    buttonText: 'Copy Solo Link',
+  standaloneEntry: {            // Explicit standalone-entry capabilities
+    enabled: false,
+    supportsDirectPath: false,  // Supports /solo/:activityId
+    supportsPermalink: false,   // Supports standalone-capable permalinks
+    showOnHome: false,          // Show in the home-page standalone section
+    title: 'Standalone Card Title',
+    description: 'Standalone entry description',
   },
+  utilities: [                  // Optional: extra utility routes/actions
+    {
+      id: 'gallery-walk-review-copy',
+      label: 'Copy Gallery Walk Review Link',
+      action: 'copy-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload and review feedback that was left for you.',
+      surfaces: ['manage'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+    {
+      id: 'gallery-walk-review-home',
+      label: 'Gallery Walk Review',
+      action: 'go-to-url',
+      path: '/util/gallery-walk/viewer',
+      description: 'Upload and review feedback that was left for you.',
+      surfaces: ['home'],
+      standaloneSessionId: 'solo-gallery-walk',
+    },
+  ],
   // Optional: shared permanent-link modal options and server-side link generation
   deepLinkOptions: {
     presentationUrl: {
@@ -109,13 +136,78 @@ export default {
       timeoutMs: 4000,
     },
   },
+  createSessionBootstrap: { // optional: persist create-session response fields for manager entry
+    sessionStorage: [
+      {
+        keyPrefix: 'my_activity_instructor_',
+        responseField: 'instructorPasscode',
+      },
+    ],
+    historyState: [
+      'instructorPasscode',
+    ],
+  },
   manageDashboard: { // optional shared dashboard hints/capabilities
     customPersistentLinkBuilder: true, // activity-owned persistent-link UI in dashboard modal
   },
+  reportEndpoint: '/api/my-activity/:sessionId/report', // optional: activity-owned embedded report download route
   clientEntry: './client/index.ts',  // Component entry (TS/TSX)
   serverEntry: './server/routes.ts', // Server routes
 };
 ```
+
+`createSessionBootstrap` supports two persistence channels:
+
+- `sessionStorage`: Array of `{ keyPrefix, responseField }` entries. Each matching string field from the create-session API response is written to browser sessionStorage using `${keyPrefix}${sessionId}` as the key.
+- `historyState`: Array of response field names. Matching fields are attached to React Router navigation state when transitioning from `/manage/:activityId` to `/manage/:activityId/:sessionId`.
+
+Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` when the value should still be recoverable after reloads or later manager re-entry in the same tab.
+
+`reportEndpoint` is optional activity metadata for embedded-session reporting. When present, SyncDeck can treat it as the child activity's authoritative download surface during embedded end/report flows instead of hard-coding per-activity routes in shared code.
+
+Embedded activity reports should be delivered as a single self-contained HTML document:
+
+- inline the report data payload in the document itself
+- inline any required CSS and JavaScript
+- avoid external fonts, CDN assets, or follow-up API calls after download
+- support multiple views inside the same file (for example class summary and per-student drill-down)
+  rather than emitting separate report files for each perspective
+
+These activity-level reports are building blocks for the higher-level SyncDeck session report.
+The parent report should eventually aggregate all embedded activities launched during a session
+into one self-contained export with:
+
+- whole-session summary across activities
+- activity-by-activity drill-down
+- per-student drill-down that can span multiple embedded activities
+
+For the aggregate path, SyncDeck should own the outer report container while activities own
+their internal report rendering. The shared type contract should follow this split:
+
+- SyncDeck chooses a report `scope` such as `activity-session`, `student-cross-activity`, or
+  `session-summary`
+- each child activity contributes structured report data for its child session
+- each child activity may contribute generic structured report blocks (`scopeBlocks`,
+  `studentScopeBlocks`) that the SyncDeck shell can render offline without understanding the
+  child activity's raw session schema
+- each activity may optionally provide a `ReportSectionComponent` later if richer client-side
+  rendering is needed inside the SyncDeck session-report shell for the requested scope
+- SyncDeck aggregates those sections through a parent-session manifest rather than trying to
+  understand every activity's raw session schema directly
+
+### Embedded Child Bootstrap
+
+Some parent activities launch other activities as embedded child sessions instead of routing
+through the normal dashboard create-session flow. In that case, launch options should be
+persisted on the child session itself in a generic bootstrap envelope rather than passed
+through activity-specific props.
+
+- Parent launchers store embedded bootstrap metadata on `session.data.embeddedLaunch`.
+- The bootstrap payload is activity-agnostic and should include the parent session identity,
+  the embedded `instanceKey`, and `selectedOptions` for the child activity.
+- Child managers should read that payload through shared bootstrap helpers in the same spirit
+  as `createSessionBootstrap` or permalink `selectedOptions`, so reloads and redeploys keep
+  the launch intent intact.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript
@@ -144,33 +236,43 @@ Routes are automatically generated in `App.tsx` based on registered activities:
 
 See **[ADDING_ACTIVITIES.md](ADDING_ACTIVITIES.md)** for a complete step-by-step tutorial with working code examples.
 
-## Solo Mode
+## Standalone Entry
 
-Solo mode enables students to practice activities independently without requiring a teacher to manage a session. This feature provides self-paced learning opportunities directly from the join page.
+Standalone entry enables students to use certain activities without requiring a teacher-managed live session. Shared config now distinguishes between:
+- direct standalone routes at `/solo/:activityId`
+- standalone-capable permalinks
+- utility routes that are not normal student-entry flows
 
 ### Configuration
 
-Enable solo mode by setting `soloMode: true` in the activity configuration:
+Declare standalone capabilities in the activity configuration:
 
 ```typescript
 export const myActivity = {
   id: 'my-activity',
   name: 'My Activity',
-  soloMode: true,  // Appears in "Solo Bits" section
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
+  },
   // ... other config
 };
 ```
 
 ### How It Works
 
-1. **Display**: Activities with `soloMode: true` appear as clickable cards in the "Solo Bits" section on the join page (`/`)
+1. **Display**: Activities with `standaloneEntry.showOnHome: true` and `supportsDirectPath: true` appear as clickable cards in the standalone section on the join page (`/`)
    - Cards display in a responsive 3-column grid on medium screens and larger (1 column on mobile)
    - Each card shows the activity name, description, and clickable area to launch the activity
 2. **Session ID Format**: Solo sessions use the format `solo-{activity-id}` (e.g., `solo-java-string-practice`)
 3. **No Teacher Required**: Students can start practicing immediately without a teacher-managed session
 4. **Client-Side State**: Solo activities typically use `localStorage` for progress persistence
-5. **Custom Labels**: Optional `soloModeMeta` lets each activity override the Solo Bits card title/description and the dashboard "Copy Solo…" button text
-6. **Deep Linking Support**: Solo mode supports query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort` auto-selects the merge sort algorithm
+5. **Utilities**: Optional top-level `utilities` lets an activity expose dashboard and home-page tools without overloading permalink or standalone-entry semantics
+6. **Deep Linking Support**: Direct standalone routes can still support query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort`
+
+Activities can also support standalone via permalink without supporting `/solo/:activityId`. SyncDeck is the motivating example for that split.
 
 ### Solo Mode vs. Teacher Mode
 
@@ -201,12 +303,14 @@ Sessions are stored in-memory with a TTL (time-to-live). Each session has:
 ### Persistent Sessions
 Permanent sessions use HMAC-SHA256 authentication:
 - **Hash Format**: 20 characters of `salt(8 hex) + hmac(12 hex)` derived from `activityName|hashedTeacherCode|salt`
+- **Generic permalink URL state**: persistent links carry one canonical signed permalink state via a short `urlHash`. That canonical state is `entryPolicy` plus the activity's declared deep-link options (`deepLinkOptions`) after normalization. Missing or invalid signed state falls back to `instructor-required` / "Live Only".
 - **Teacher Authentication**: Unique teacher codes stored in httpOnly cookies
+- **Activity Manager Credentials**: Activities that expose manager-only controls should derive any session-scoped manager credential from create-session bootstrap data and/or teacher-cookie-validated recovery routes instead of trusting a client-selected websocket/API role
 - **URL Format**: `/activity/{activityName}/{hash}` for permanent activity access
-- **Query Parameters**: Activities can use URL query params for deep linking (e.g., `/activity/algorithm-demo/abc123?algorithm=merge-sort`)
-  - Server passes all query params to activities via `queryParams` object
-  - Each activity decides which parameters to handle
-  - Examples: `algorithm` (algorithm-demo), `preset` (gallery-walk), `challenge` (java-practice)
+- **Query Parameters**: For persistent links, only canonical selected options represented in activity `deepLinkOptions` are authoritative and signed (for example `/activity/algorithm-demo/abc123?algorithm=merge-sort&entryPolicy=solo-allowed&urlHash=...`).
+  - Unknown query params remain unsigned and must not influence persistent-link runtime behavior.
+  - Persistent-session metadata routes expose only the canonical signed option subset via `queryParams`.
+  - Activities that need recovered bootstrap values after redirects should use server-recovered/session-backed data instead of re-reading raw manage-route query params.
 - **Auto-reset**: Session data resets each time teacher visits
 - **Security**: 
   - httpOnly cookies prevent XSS attacks

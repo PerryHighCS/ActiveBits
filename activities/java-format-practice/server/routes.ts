@@ -1,5 +1,9 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
+import { connectAcceptedSessionParticipant } from 'activebits-server/core/acceptedSessionParticipants.js'
+import { generateParticipantId } from 'activebits-server/core/participantIds.js'
+import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
+import { disconnectSessionParticipant, updateSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
@@ -91,12 +95,6 @@ function asJavaFormatSession(session: SessionRecord | null): JavaFormatSession |
   return session as JavaFormatSession
 }
 
-function generateStudentId(name: string): string {
-  const timestamp = Date.now().toString(36)
-  const random = Math.random().toString(36).substring(2, 6)
-  return `${name}-${timestamp}-${random}`
-}
-
 registerSessionNormalizer('java-format-practice', (session) => {
   session.data = normalizeSessionData(session.data)
 })
@@ -107,26 +105,6 @@ export default function setupJavaFormatPracticeRoutes(
   ws: WsRouter,
 ): void {
   const ensureBroadcastSubscription = createBroadcastSubscriptionHelper(sessions, ws)
-
-  function closeDuplicateStudentSockets(currentSocket: JavaFormatSocket): void {
-    if (!currentSocket.sessionId || !currentSocket.studentId) return
-
-    for (const client of ws.wss.clients as Set<JavaFormatSocket>) {
-      if (
-        client !== currentSocket &&
-        client.readyState === 1 &&
-        client.sessionId === currentSocket.sessionId &&
-        client.studentId === currentSocket.studentId
-      ) {
-        client.ignoreDisconnect = true
-        try {
-          client.close(4000, 'Replaced by new connection')
-        } catch (error) {
-          console.error('Failed to close duplicate student socket', error)
-        }
-      }
-    }
-  }
 
   async function broadcast(type: string, payload: unknown, sessionId: string): Promise<void> {
     const message = JSON.stringify({ type, payload })
@@ -162,39 +140,59 @@ export default function setupJavaFormatPracticeRoutes(
       `WebSocket connection: sessionId=${client.sessionId}, studentName=${client.studentName}, studentId=${studentId}`,
     )
 
-    if (client.sessionId && client.studentName) {
+    if (client.sessionId) {
       const activeSessionId = client.sessionId
-      const activeStudentName = client.studentName
 
       ;(async () => {
         const session = asJavaFormatSession(await sessions.get(activeSessionId))
         console.log('Found session:', session ? 'yes' : 'no')
         if (!session) return
 
-        const existing = studentId
-          ? session.data.students.find((student) => student.id === studentId)
-          : session.data.students.find((student) => student.name === activeStudentName && !student.id)
-
-        if (existing) {
-          console.log(`Reconnecting student: ${activeStudentName} (${existing.id})`)
-          existing.connected = true
-          existing.lastSeen = Date.now()
-          client.studentId = existing.id || null
-          closeDuplicateStudentSockets(client)
-        } else {
-          console.log(`New student joining: ${activeStudentName}`)
-          const newId = generateStudentId(activeStudentName)
-          client.studentId = newId
-          session.data.students.push({
-            id: newId,
-            name: activeStudentName,
+        const result = connectAcceptedSessionParticipant({
+          session,
+          participants: session.data.students,
+          participantId: studentId,
+          participantName: client.studentName ?? null,
+          allowLegacyUnnamedMatch: true,
+          createParticipant: (participantId, participantName, now) => ({
+            id: participantId,
+            name: participantName,
             connected: true,
-            joined: Date.now(),
-            lastSeen: Date.now(),
+            joined: now,
+            lastSeen: now,
             stats: { ...defaultStats },
-          })
-          closeDuplicateStudentSockets(client)
+          }),
+          generateParticipantId,
+        })
+        if (!result) {
+          try {
+            if (client.readyState === 1) {
+              client.send(
+                JSON.stringify({
+                  type: 'error',
+                  payload: {
+                    code: 'waiting-room-required',
+                    message: 'Student identity not accepted. Rejoin from the waiting room.',
+                  },
+                }),
+              )
+            }
+          } catch (error) {
+            console.error('Failed to send waiting-room-required error:', error)
+          }
+          client.close(1008, 'waiting-room-required')
+          return
         }
+        client.studentName = result.participantName
+        const { participantId, isNew } = result
+        client.studentId = participantId
+
+        if (!isNew) {
+          console.log(`Reconnecting student: ${result.participantName} (${participantId})`)
+        } else {
+          console.log(`New student joining: ${result.participantName}`)
+        }
+        closeDuplicateParticipantSockets(ws.wss.clients as Set<JavaFormatSocket>, client)
 
         await sessions.set(session.id, session)
         console.log('Total students in session:', session.data.students.length)
@@ -215,10 +213,12 @@ export default function setupJavaFormatPracticeRoutes(
         const session = asJavaFormatSession(await sessions.get(activeSessionId))
         if (!session) return
 
-        const student = session.data.students.find((entry) => entry.id === activeStudentId)
+        const student = disconnectSessionParticipant({
+          participants: session.data.students,
+          participantId: activeStudentId,
+        })
         if (!student) return
 
-        student.connected = false
         await sessions.set(session.id, session)
         await broadcast('studentsUpdate', { students: session.data.students }, session.id)
       })().catch((error) => console.error('Error in student disconnect:', error))
@@ -325,10 +325,17 @@ export default function setupJavaFormatPracticeRoutes(
     }
 
     const studentId = typeof body.studentId === 'string' ? body.studentId : null
-    const student = session.data.students.find((entry) => entry.id === studentId)
+    const studentName = validateStudentName(body.studentName)
+    const student = updateSessionParticipant({
+      participants: session.data.students,
+      participantId: studentId,
+      participantName: studentName,
+      allowLegacyUnnamedMatch: true,
+      update: (participant) => {
+        participant.stats = stats
+      },
+    })
     if (student) {
-      student.stats = stats
-      student.lastSeen = Date.now()
       await sessions.set(session.id, session)
       await broadcast('studentsUpdate', { students: session.data.students }, session.id)
     }

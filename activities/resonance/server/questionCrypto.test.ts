@@ -30,7 +30,7 @@ const SAMPLE_QUESTIONS: Question[] = [
   },
 ]
 
-test('encryptQuestions + decryptQuestions round-trip preserves question data', () => {
+void test('encryptQuestions + decryptQuestions round-trip preserves question data', () => {
   const hash = 'abc123def456'
   const { encoded } = encryptQuestions(SAMPLE_QUESTIONS, hash)
   assert.ok(typeof encoded === 'string' && encoded.length > 0, 'encoded must be a non-empty string')
@@ -39,50 +39,54 @@ test('encryptQuestions + decryptQuestions round-trip preserves question data', (
   assert.deepEqual(decrypted, SAMPLE_QUESTIONS, 'decrypted questions must match original')
 })
 
-test('encryptQuestions produces different output on each call (random IV)', () => {
+void test('encryptQuestions produces different output on each call (random IV)', () => {
   const hash = 'abc123def456'
   const { encoded: enc1 } = encryptQuestions(SAMPLE_QUESTIONS, hash)
   const { encoded: enc2 } = encryptQuestions(SAMPLE_QUESTIONS, hash)
   assert.notEqual(enc1, enc2, 'each encryption call must produce a unique ciphertext')
 })
 
-test('decryptQuestions returns null when hash (AAD) is wrong (tamper detection)', () => {
+void test('decryptQuestions returns null when hash (AAD) is wrong (tamper detection)', () => {
   const hash = 'abc123def456'
   const { encoded } = encryptQuestions(SAMPLE_QUESTIONS, hash)
   const result = decryptQuestions(encoded, 'wronghashvalue1')
   assert.equal(result, null, 'decryption must fail when hash does not match')
 })
 
-test('decryptQuestions returns null for malformed input', () => {
+void test('decryptQuestions returns null for malformed input', () => {
   assert.equal(decryptQuestions('not-base64url!!', 'hash'), null)
   assert.equal(decryptQuestions('', 'hash'), null)
   assert.equal(decryptQuestions('YWJj', 'hash'), null, 'too short to be valid')
 })
 
-test('decryptQuestions returns null when ciphertext is bit-flipped (tamper detection)', () => {
+void test('decryptQuestions returns null when ciphertext is bit-flipped (tamper detection)', () => {
   const hash = 'abc123def456'
   const { encoded } = encryptQuestions(SAMPLE_QUESTIONS, hash)
   const buf = Buffer.from(encoded, 'base64url')
+  const originalByte = buf.at(28)
+  if (originalByte === undefined) {
+    throw new Error('encoded payload must be long enough to flip ciphertext bytes')
+  }
   // Flip a bit in the ciphertext region (after IV + authTag)
-  buf[28] ^= 0x01
+  buf[28] = originalByte ^ 0x01
   const tampered = buf.toString('base64url')
   const result = decryptQuestions(tampered, hash)
   assert.equal(result, null, 'decryption must fail after ciphertext tamper')
 })
 
-test('encoded payload fits within MAX_ENCODED_PAYLOAD_CHARS for a typical question set', () => {
+void test('encoded payload fits within MAX_ENCODED_PAYLOAD_CHARS for a typical question set', () => {
   const hash = 'abc123def456'
   const { sizeChars } = encryptQuestions(SAMPLE_QUESTIONS, hash)
   assert.ok(sizeChars <= MAX_ENCODED_PAYLOAD_CHARS, `payload size ${sizeChars} chars exceeds limit ${MAX_ENCODED_PAYLOAD_CHARS}`)
 })
 
-test('encoded payload contains only URL-safe characters (base64url)', () => {
+void test('encoded payload contains only URL-safe characters (base64url)', () => {
   const hash = 'abc123def456'
   const { encoded } = encryptQuestions(SAMPLE_QUESTIONS, hash)
   assert.ok(/^[A-Za-z0-9_-]+$/.test(encoded), 'encoded string must be URL-safe base64url')
 })
 
-test('[TEST] large question set that exceeds size limit produces an oversized payload', () => {
+void test('[TEST] large question set that exceeds size limit produces an oversized payload', () => {
   // Build a question set large enough to blow the limit (expected noisy output)
   const bigQuestions: Question[] = Array.from({ length: 100 }, (_, i) => ({
     id: `q${i + 1}`,

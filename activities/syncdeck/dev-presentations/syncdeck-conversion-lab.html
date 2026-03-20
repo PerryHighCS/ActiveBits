@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SyncDeck Conversion Lab (Dev Only)</title>
+    <!--
+      Dev-only SyncDeck sample deck.
+      Source lives under activities/syncdeck/dev-presentations and is served only by the local Vite dev server.
+      It is intentionally not emitted in production builds.
+    -->
+    <link
+      rel="stylesheet"
+      href="https://perryhighcs.github.io/SyncDeck-Reveal/dist/syncdeck-reveal.css"
+    />
+    <style>
+      :root {
+        --bg: #f4f1ea;
+        --ink: #19243a;
+        --muted: #5e6b7f;
+        --card: #fffdfa;
+        --line: #d5ccb7;
+        --accent: #1f8f7a;
+        --accent-2: #e06c2d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        background:
+          radial-gradient(circle at 15% 10%, #ffffffaa 0 12%, transparent 13%),
+          radial-gradient(circle at 88% 74%, #e9dbc2 0 18%, transparent 19%),
+          linear-gradient(130deg, #ede6d8 0%, #f7f4ee 52%, #ece6d9 100%);
+        color: var(--ink);
+      }
+
+      .wrap {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+      }
+
+      .topbar {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        border-bottom: 2px solid var(--line);
+        background: #fff8ea;
+      }
+
+      .btn {
+        border: 1px solid #32435f;
+        background: #fff;
+        color: #243449;
+        border-radius: 999px;
+        padding: 0.45rem 0.9rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+      }
+
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .btn.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #f8fffd;
+      }
+
+      .btn.alt {
+        background: #fff4eb;
+        border-color: #b15a2d;
+        color: #7a371b;
+      }
+
+      .status {
+        margin-left: auto;
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+
+      .stage {
+        display: grid;
+        place-items: center;
+        padding: 1.25rem;
+      }
+
+      .deck-frame {
+        width: min(980px, 100%);
+        aspect-ratio: 16 / 9;
+        min-height: min(620px, calc(100vh - 220px));
+        border: 2px solid var(--line);
+        border-radius: 20px;
+        background: var(--card);
+        box-shadow: 0 18px 40px #7b6d5233;
+        padding: 0.35rem;
+      }
+
+      .reveal {
+        width: 100%;
+        height: 100%;
+        border-radius: 16px;
+        overflow: hidden;
+      }
+
+      .reveal .slides section {
+        text-align: left;
+        color: var(--ink);
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+      }
+
+      .reveal .slides section h2 {
+        margin: 0 0 0.8rem;
+        font-size: clamp(1.5rem, 3.2vw, 2.4rem);
+        line-height: 1.15;
+        color: #12364e;
+      }
+
+      .reveal .slides section p {
+        margin: 0 0 0.9rem;
+      }
+
+      .slide {
+        width: min(980px, 100%);
+        min-height: min(620px, calc(100vh - 210px));
+        border: 2px solid var(--line);
+        border-radius: 20px;
+        background: var(--card);
+        padding: clamp(1rem, 2vw, 2rem);
+        box-shadow: 0 18px 40px #7b6d5233;
+        display: grid;
+        gap: 1rem;
+        align-content: start;
+      }
+
+      .meta {
+        display: flex;
+        gap: 0.7rem;
+        flex-wrap: wrap;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+
+      .chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.2rem 0.65rem;
+        background: #fff;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.5rem, 3.4vw, 2.6rem);
+        line-height: 1.1;
+      }
+
+      p {
+        margin: 0;
+        line-height: 1.45;
+      }
+
+      .grid {
+        display: grid;
+        gap: 0.65rem;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      }
+
+      .panel {
+        border: 1px dashed #9aa4b3;
+        border-radius: 12px;
+        padding: 0.8rem;
+        background: #fcfbf8;
+      }
+
+      .panel strong {
+        color: #12364e;
+      }
+
+      .foot {
+        padding: 0.65rem 1rem 1rem;
+        color: #647388;
+        font-size: 0.9rem;
+      }
+
+      .log {
+        width: min(980px, 100%);
+        margin: 0 auto;
+        border: 1px solid #d3d6dc;
+        border-radius: 12px;
+        padding: 0.7rem;
+        background: #f8fafc;
+        color: #334155;
+        font-size: 0.86rem;
+        max-height: 120px;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="topbar">
+        <button class="btn" id="prevBtn">Previous</button>
+        <button class="btn" id="nextBtn">Next</button>
+        <button class="btn" id="upBtn">Up</button>
+        <button class="btn" id="downBtn">Down</button>
+        <button class="btn alt" id="toggleOverviewBtn">Toggle Storyboard Flag</button>
+        <button class="btn primary" id="requestActivityBtn">Request Activity</button>
+        <div class="status" id="status">Initializing…</div>
+      </div>
+
+      <main class="stage">
+        <div class="deck-frame">
+          <div class="reveal">
+            <div class="slides">
+              <section>
+                <div class="meta">
+                  <span class="chip">h:0</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>SyncDeck Conversion Lab</h2>
+                <p>
+                  Use this deck to validate manager and student host overlays while activities migrate to
+                  embedded mode.
+                </p>
+                <div class="grid two">
+                  <div class="panel">Manager and student navigation sync</div>
+                  <div class="panel">Overlay visibility by h:v anchor</div>
+                  <div class="panel">Late-join hydration behavior</div>
+                </div>
+              </section>
+
+              <section>
+                <div class="meta">
+                  <span class="chip">h:1</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>Global Smoke Slide</h2>
+                <p>No activity request here. Verify pure navigation and status updates.</p>
+                <div class="grid two">
+                  <div class="panel">canGoBack and canGoForward flip at boundaries</div>
+                  <div class="panel">State envelopes continue after local navigation</div>
+                </div>
+              </section>
+
+              <section>
+                <section
+                  data-activity-id="embedded-test"
+                  data-activity-trigger="slide-enter"
+                  data-activity-options='{"prompt":"embedded contract smoke check"}'
+                >
+                  <div class="meta">
+                    <span class="chip">h:2</span>
+                    <span class="chip">v:0</span>
+                  </div>
+                  <h2>Embedded Test Harness</h2>
+                  <p>Anchored request for embedded-test activity at 2:0.</p>
+                  <div class="panel">
+                    <strong>Activity Anchor:</strong> embedded-test<br />
+                    <strong>Trigger:</strong> slide-enter
+                  </div>
+                  <div class="grid two">
+                    <div class="panel">Start once, verify dedup by instanceKey</div>
+                    <div class="panel">Manager panel shows running instance</div>
+                    <div class="panel">Student overlay appears on 2:0</div>
+                  </div>
+                </section>
+
+                <section
+                  data-activity-id="raffle"
+                  data-activity-trigger="slide-enter"
+                  data-activity-options='{"title":"Vertical stack raffle branch"}'
+                >
+                  <div class="meta">
+                    <span class="chip">h:2</span>
+                    <span class="chip">v:1</span>
+                  </div>
+                  <h2>Vertical Choice A</h2>
+                  <p>Vertical stack sibling for position-based overlay switching.</p>
+                  <div class="panel">
+                    <strong>Activity Anchor:</strong> raffle<br />
+                    <strong>Trigger:</strong> slide-enter
+                  </div>
+                  <div class="grid two">
+                    <div class="panel">Different overlay than 2:0</div>
+                    <div class="panel">Move between 2:0 and 2:1 to swap overlays</div>
+                  </div>
+                </section>
+
+                <section
+                  data-activity-id="algorithm-demo"
+                  data-activity-trigger="slide-enter"
+                  data-activity-options='{"seed":"syncdeck-ui-check"}'
+                >
+                  <div class="meta">
+                    <span class="chip">h:2</span>
+                    <span class="chip">v:2</span>
+                  </div>
+                  <h2>Vertical Choice B</h2>
+                  <p>Second vertical branch using algorithm-demo for conversion checks.</p>
+                  <div class="panel">
+                    <strong>Activity Anchor:</strong> algorithm-demo<br />
+                    <strong>Trigger:</strong> slide-enter
+                  </div>
+                  <div class="grid two">
+                    <div class="panel">Host chevrons up and down state transitions</div>
+                    <div class="panel">Overlay switches on vertical changes</div>
+                  </div>
+                </section>
+              </section>
+
+              <section
+                data-activity-id="video-sync"
+                data-activity-trigger="slide-enter"
+                data-activity-options='{"mode":"conversion-smoke","sourceUrl":"https://www.youtube.com/watch?v=mCq8-xTH7jA"}'
+              >
+                <div class="meta">
+                  <span class="chip">h:3</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>Synchronous Candidate</h2>
+                <p>Use this for future instructor-gated runtime behavior checks.</p>
+                <div class="panel">
+                  <strong>Activity Anchor:</strong> video-sync<br />
+                  <strong>Trigger:</strong> slide-enter
+                </div>
+                <div class="grid two">
+                  <div class="panel">syncContext updates while navigating</div>
+                  <div class="panel">End control dismisses one instance only</div>
+                </div>
+              </section>
+
+              <section
+                data-activity-id="gallery-walk"
+                data-activity-trigger="slide-enter"
+                data-activity-options='{"title":"Embedded critique board"}'
+              >
+                <div class="meta">
+                  <span class="chip">h:4</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>Gallery Walk Candidate</h2>
+                <p>Use this to validate structured embedded reporting and cross-student aggregation paths.</p>
+                <div class="panel">
+                  <strong>Activity Anchor:</strong> gallery-walk<br />
+                  <strong>Trigger:</strong> slide-enter
+                </div>
+                <div class="grid two">
+                  <div class="panel">Structured child report data route</div>
+                  <div class="panel">Session report manifest includes gallery-walk entries</div>
+                </div>
+              </section>
+
+              <section>
+                <div class="meta">
+                  <span class="chip">h:5</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>Manual Trigger Lab</h2>
+                <p>
+                  Slide-enter activity requests now come from the SyncDeck Reveal library. Use the Request Activity
+                  button only for manual retry checks.
+                </p>
+                <div class="grid two">
+                  <div class="panel">Manual request payload path</div>
+                  <div class="panel">Repeated manual requests for idempotency checks</div>
+                </div>
+              </section>
+
+              <section>
+                <div class="meta">
+                  <span class="chip">h:6</span>
+                  <span class="chip">v:0</span>
+                </div>
+                <h2>Wrap Up / Rejoin Test</h2>
+                <p>Use this endpoint slide for reconnect, refresh, and late-join validation.</p>
+                <div class="grid two">
+                  <div class="panel">Reconnect while activity active</div>
+                  <div class="panel">Hydrate embeddedActivities from session snapshot</div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <div class="log" id="log"></div>
+      <div class="foot">
+        SyncDeck Conversion Lab deck. Powered by hosted SyncDeck Reveal runtime with library-provided activityRequest support.
+      </div>
+    </div>
+
+    <script src="https://perryhighcs.github.io/SyncDeck-Reveal/dist/syncdeck-reveal.js"></script>
+    <script>
+      ;(() => {
+        const deckId = 'syncdeck-conversion-lab'
+
+        const statusEl = document.getElementById('status')
+        const logEl = document.getElementById('log')
+
+        const prevBtn = document.getElementById('prevBtn')
+        const nextBtn = document.getElementById('nextBtn')
+        const upBtn = document.getElementById('upBtn')
+        const downBtn = document.getElementById('downBtn')
+        const toggleOverviewBtn = document.getElementById('toggleOverviewBtn')
+        const requestActivityBtn = document.getElementById('requestActivityBtn')
+
+        function log(message, details) {
+          const ts = new Date().toLocaleTimeString()
+          const line = details ? `${ts} ${message} ${JSON.stringify(details)}` : `${ts} ${message}`
+          const div = document.createElement('div')
+          div.textContent = line
+          logEl.prepend(div)
+        }
+
+        function getSyncApi() {
+          if (!window.RevealIframeSyncAPI) {
+            return null
+          }
+          return window.RevealIframeSyncAPI
+        }
+
+        function currentIndices() {
+          const reveal = window.Reveal
+          const indices = reveal && typeof reveal.getIndices === 'function' ? reveal.getIndices() : {}
+          return {
+            h: Number.isFinite(indices?.h) ? Number(indices.h) : 0,
+            v: Number.isFinite(indices?.v) ? Number(indices.v) : 0,
+            f: Number.isFinite(indices?.f) ? Number(indices.f) : -1,
+          }
+        }
+
+        function parseJsonAttribute(raw, fallback = {}) {
+          if (typeof raw !== 'string' || raw.trim().length === 0) {
+            return fallback
+          }
+
+          try {
+            const parsed = JSON.parse(raw)
+            return parsed && typeof parsed === 'object' ? parsed : fallback
+          } catch {
+            return fallback
+          }
+        }
+
+        function getActivityRequestFromSlide(slide) {
+          if (!slide) {
+            return null
+          }
+
+          const activityId = slide.getAttribute('data-activity-id')
+          if (!activityId) {
+            return null
+          }
+
+          return {
+            activityId,
+            trigger: slide.getAttribute('data-activity-trigger') || 'slide-enter',
+            activityOptions: parseJsonAttribute(slide.getAttribute('data-activity-options'), {}),
+          }
+        }
+
+        function getCurrentSlideActivityRequest() {
+          const reveal = window.Reveal
+          const slide = reveal && typeof reveal.getCurrentSlide === 'function' ? reveal.getCurrentSlide() : null
+          return getActivityRequestFromSlide(slide)
+        }
+
+        function sendCustom(action, payload) {
+          const syncApi = getSyncApi()
+          if (!syncApi || typeof syncApi.sendCustom !== 'function') {
+            log('sync api unavailable', { action })
+            return
+          }
+
+          syncApi.sendCustom(action, payload)
+          log('sent', { action, payload })
+        }
+
+        function updateUiFromStatus() {
+          const syncApi = getSyncApi()
+          const status = syncApi && typeof syncApi.getStatus === 'function' ? syncApi.getStatus() : null
+          const nav = status?.navigation || null
+          const indices = nav?.current || currentIndices()
+          const role = status?.role || (syncApi && typeof syncApi.getRole === 'function' ? syncApi.getRole() : 'standalone')
+
+          if (nav) {
+            prevBtn.disabled = nav.canGoBack === false
+            nextBtn.disabled = nav.canGoForward === false
+            upBtn.disabled = nav.canGoUp === false
+            downBtn.disabled = nav.canGoDown === false
+          }
+
+          statusEl.textContent = `Slide ${indices.h}:${indices.v} | role ${role} | canGoBack ${nav ? String(nav.canGoBack) : '?'} | canGoForward ${nav ? String(nav.canGoForward) : '?'}`
+        }
+
+        function toggleStoryboard() {
+          window.dispatchEvent(new CustomEvent('reveal-storyboard-toggle'))
+        }
+
+        function initDeck() {
+          if (typeof window.initSyncDeckReveal !== 'function') {
+            statusEl.textContent = 'initSyncDeckReveal unavailable'
+            return
+          }
+
+          window.initSyncDeckReveal({
+            deckId,
+            iframeSyncOverrides: {
+              // Dev-only sample content: local preview can be embedded from varying localhost/Codespaces origins.
+              hostOrigin: '*',
+              allowedOrigins: ['*'],
+            },
+            revealOverrides: {
+              embedded: true,
+              controls: true,
+              progress: true,
+              hash: false,
+            },
+            afterInit: (reveal) => {
+              log('deck initialized', { version: window.RevealIframeSyncAPI?.version ?? null })
+
+              reveal.on('ready', () => {
+                updateUiFromStatus()
+              })
+
+              reveal.on('slidechanged', (event) => {
+                updateUiFromStatus()
+              })
+
+              reveal.on('fragmentshown', updateUiFromStatus)
+              reveal.on('fragmenthidden', updateUiFromStatus)
+
+              window.addEventListener('reveal-iframesync-status', updateUiFromStatus)
+              updateUiFromStatus()
+            },
+          })
+        }
+
+        prevBtn.addEventListener('click', () => {
+          if (window.Reveal && typeof window.Reveal.prev === 'function') {
+            window.Reveal.prev()
+          }
+        })
+        nextBtn.addEventListener('click', () => {
+          if (window.Reveal && typeof window.Reveal.next === 'function') {
+            window.Reveal.next()
+          }
+        })
+        upBtn.addEventListener('click', () => {
+          if (window.Reveal && typeof window.Reveal.up === 'function') {
+            window.Reveal.up()
+          }
+        })
+        downBtn.addEventListener('click', () => {
+          if (window.Reveal && typeof window.Reveal.down === 'function') {
+            window.Reveal.down()
+          }
+        })
+        toggleOverviewBtn.addEventListener('click', () => {
+          toggleStoryboard()
+          updateUiFromStatus()
+        })
+        requestActivityBtn.addEventListener('click', () => {
+          const current = getCurrentSlideActivityRequest()
+          const indices = currentIndices()
+          const fallback = {
+            activityId: 'embedded-test',
+            trigger: 'manual-button',
+            activityOptions: {
+              fromDeck: true,
+              h: indices.h,
+              v: indices.v,
+            },
+          }
+          const activity = current || fallback
+          sendCustom('activityRequest', {
+            activityId: activity.activityId,
+            indices,
+            trigger: 'manual-button',
+            activityOptions: {
+              ...(activity.activityOptions || {}),
+              manual: true,
+            },
+          })
+        })
+
+        initDeck()
+      })()
+    </script>
+  </body>
+</html>

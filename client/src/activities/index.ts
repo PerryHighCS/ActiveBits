@@ -4,6 +4,8 @@ import type {
   ActivityConfig,
   ActivityDeepLinkPreflightConfig,
   ActivityDeepLinkPreflightResult,
+  ActivityPersistentSoloLaunchParams,
+  ActivityPersistentSoloLaunchResult,
   ActivityRegistryEntry,
 } from '../../../types/activity.js'
 import activityConfigSchema from '../../../types/activityConfigSchema.js'
@@ -239,6 +241,35 @@ export async function runActivityDeepLinkPreflight(
   }
 
   return await resolved.runDeepLinkPreflight(preflight, rawValue)
+}
+
+export async function launchActivityPersistentSoloEntry(
+  activityId: string,
+  params: ActivityPersistentSoloLaunchParams,
+): Promise<ActivityPersistentSoloLaunchResult | null> {
+  const clientLoader = findClientLoader(activityId)
+  if (!clientLoader) {
+    return null
+  }
+
+  const resolved = await resolveClientModule(clientLoader)
+  if (typeof resolved.launchPersistentSoloEntry !== 'function') {
+    return null
+  }
+
+  return await resolved.launchPersistentSoloEntry(params)
+}
+
+export async function loadActivityWaitingRoomFields(
+  activityId: string,
+): Promise<NonNullable<ActivityClientModule['waitingRoomFields']>> {
+  const clientLoader = findClientLoader(activityId)
+  if (!clientLoader) {
+    return {}
+  }
+
+  const resolved = await resolveClientModule(clientLoader)
+  return resolved.waitingRoomFields ?? {}
 }
 
 export default activities

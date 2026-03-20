@@ -7,6 +7,15 @@ import { isMissingDiscoveredConfigError } from './activityRegistryMissingConfigE
 interface ActivityConfigLike extends Record<string, unknown> {
   serverEntry?: string
   isDev?: boolean
+  waitingRoom?: {
+    fields?: unknown[]
+  }
+  standaloneEntry?: {
+    enabled?: boolean
+    supportsDirectPath?: boolean
+    supportsPermalink?: boolean
+    showOnHome?: boolean
+  }
 }
 
 interface DiscoveredConfig {
@@ -156,6 +165,23 @@ export function getAllowedActivities(): string[] {
 
 export function isValidActivity(activityName: string): boolean {
   return ALLOWED_ACTIVITIES.includes(activityName)
+}
+
+export function getActivityWaitingRoomFieldCount(activityName: string): number {
+  const matchingConfig = filteredConfigs.find((config) => config.id === activityName)
+  const fields = matchingConfig?.loadedConfig.waitingRoom?.fields
+  return Array.isArray(fields) ? fields.length : 0
+}
+
+export function getActivityConfig(activityId: string): ActivityConfigLike | null {
+  const matchingConfig = filteredConfigs.find((config) => config.id === activityId)
+  return matchingConfig?.loadedConfig ?? null
+}
+
+export function activitySupportsStandalonePermalink(activityName: string): boolean {
+  const matchingConfig = filteredConfigs.find((config) => config.id === activityName)
+  const standaloneEntry = matchingConfig?.loadedConfig.standaloneEntry
+  return standaloneEntry?.enabled === true && standaloneEntry?.supportsPermalink === true
 }
 
 /**

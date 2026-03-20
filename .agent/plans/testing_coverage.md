@@ -96,7 +96,56 @@ Deliverable:
 Deliverable:
 - Integration test list with environment requirements.
 
-### Workstream E: Coverage Tooling and CI Policy
+### Workstream E: Browser-Level Interaction Coverage
+
+Goal:
+- Add a small, high-value browser test layer only for flows that still cross too many boundaries for the current Node test runner to cover comfortably.
+
+Guiding rule:
+- Browser tests should confirm shared container behavior across routing, fetch, storage, and websocket/runtime boundaries.
+- They should not replace the existing helper, contract, and activity-level tests that already give the fast inner loop.
+
+Recommended rollout:
+
+1. Add a minimal browser harness in reporting-only mode.
+2. Start with 1-3 P0/P1 flows that have already produced regressions during manual testing.
+3. Keep fixtures deterministic and local to the test environment.
+4. Avoid broad screenshot/snapshot suites in the first pass.
+
+First-wave candidate scenarios:
+
+1. `live/solo` permalink waiting-room transition
+   - Student opens permalink and sees solo continuation available.
+   - Instructor authenticates and starts a live session.
+   - Student waiting-room button flips from solo to live join.
+   - Instructor ends the live session before student joins.
+   - Student regains solo continuation.
+   - A second instructor can still reach the teacher-code path from the same permalink.
+2. Waiting-room name collection and rejoin persistence
+   - Student enters name once in the waiting room.
+   - Activity opens without a second prompt.
+   - Reload reuses stored participant identity and skips both waiting-room and activity-local duplicate prompts.
+3. Permalink role-auth split
+   - Student path remains available without teacher cookie.
+   - Teacher-code submission can still start the live session from a no-cookie browser.
+   - Teacher-authenticated follow-up navigation lands on the correct manage/session path.
+
+Entry criteria for adding browser tests:
+
+- A regression spans multiple shared boundaries such as router + fetch + websocket + storage.
+- The current seam-first helper tests can describe the logic but do not make the full mounted flow easy to trust.
+- The scenario is shared enough to justify harness cost rather than belonging only in one activity’s local test surface.
+
+Out of scope for the first browser wave:
+
+- Broad visual regression coverage.
+- Activity-specific runtime protocols that are already well covered in activity-local tests.
+- Embedded-activity flows before a real runtime consumer exists.
+
+Deliverable:
+- A short browser suite covering the first 1-3 shared waiting-room/permalink scenarios, with clear notes about what remains intentionally covered by seam/unit tests instead.
+
+### Workstream F: Coverage Tooling and CI Policy
 
 1. Introduce coverage reporter(s) only after baseline matrix exists.
 2. Start with reporting-only thresholds; enforce per-risk-area gates later.
@@ -110,7 +159,8 @@ Deliverable:
 1. Phase A: Inventory + baseline review file.
 2. Phase B: P0 server contract/lifecycle gaps.
 3. Phase C: P1 activity and client contract gaps.
-4. Phase D: Coverage reporting + policy ratchet.
+4. Phase D: Selected browser-level interaction coverage for shared flows.
+5. Phase E: Coverage reporting + policy ratchet.
 
 Each phase should be shipped in small PR slices with explicit validation commands and outcomes.
 
@@ -126,8 +176,11 @@ Each phase should be shipped in small PR slices with explicit validation command
 1. All P0 flows have explicit automated tests.
 2. Each active activity has manager + student contract coverage.
 3. Server lifecycle and websocket contracts are tested for both happy and failure paths.
-4. CI exposes coverage deltas and blocks regressions on critical-path coverage.
-5. Coverage review file is current and auditable.
+4. The highest-risk shared waiting-room/permalink interaction flows have either:
+   - browser-level tests, or
+   - an explicit documented decision that seam/contract coverage is sufficient.
+5. CI exposes coverage deltas and blocks regressions on critical-path coverage.
+6. Coverage review file is current and auditable.
 
 ## Immediate Next Step
 

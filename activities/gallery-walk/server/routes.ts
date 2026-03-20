@@ -1,7 +1,14 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import { registerActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
+import {
+  buildGalleryWalkReportFilename,
+  buildGalleryWalkReportHtml,
+  buildGalleryWalkStructuredReportSection,
+  type GalleryWalkReportBundle,
+} from './reportHtml.js'
 import { normalizeNoteStyleId } from '../shared/noteStyles.js'
 import { generateShortId } from '../shared/id.js'
 
@@ -51,6 +58,8 @@ interface GalleryWalkSession extends SessionRecord {
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): JsonResponse | void
+  send?(payload: string): JsonResponse | void
+  setHeader?(name: string, value: string): void
 }
 
 interface RouteRequest {
@@ -171,6 +180,31 @@ function asGalleryWalkSession(session: SessionRecord | null): GalleryWalkSession
   return session as GalleryWalkSession
 }
 
+function readEmbeddedInstanceKey(session: GalleryWalkSession): string {
+  if (!isPlainObject(session.data.embeddedLaunch)) {
+    return `gallery-walk:${session.id}`
+  }
+
+  const candidate = session.data.embeddedLaunch.instanceKey
+  return typeof candidate === 'string' && candidate.trim().length > 0
+    ? candidate.trim()
+    : `gallery-walk:${session.id}`
+}
+
+function buildGalleryWalkReportBundle(session: GalleryWalkSession): GalleryWalkReportBundle {
+  return {
+    version: 1,
+    exportedAt: Date.now(),
+    sessionId: session.id,
+    reviewees: session.data.reviewees,
+    reviewers: session.data.reviewers,
+    feedback: session.data.feedback,
+    stats: session.data.stats,
+    stage: session.data.stage,
+    config: session.data.config,
+  }
+}
+
 export function sanitizeName(value: unknown, fallback: string | null = '', maxLength = 200): string | null {
   if (value == null || typeof value !== 'string') return fallback
   const trimmed = value.trim()
@@ -180,6 +214,18 @@ export function sanitizeName(value: unknown, fallback: string | null = '', maxLe
 
 registerSessionNormalizer('gallery-walk', (session) => {
   session.data = normalizeSessionData(session.data)
+})
+
+registerActivityReportBuilder('gallery-walk', (session, params) => {
+  const normalizedSession = asGalleryWalkSession(session)
+  if (!normalizedSession) {
+    return null
+  }
+
+  return buildGalleryWalkStructuredReportSection(
+    buildGalleryWalkReportBundle(normalizedSession),
+    { instanceKey: params.instanceKey },
+  )
 })
 
 export default function setupGalleryWalkRoutes(app: GalleryWalkRouteApp, sessions: SessionStore, ws: WsRouter): void {
@@ -437,19 +483,55 @@ export default function setupGalleryWalkRoutes(app: GalleryWalkRouteApp, session
       return
     }
 
-    const bundle = {
-      version: 1,
-      exportedAt: Date.now(),
-      sessionId: session.id,
-      reviewees: session.data.reviewees,
-      reviewers: session.data.reviewers,
-      feedback: session.data.feedback,
-      stats: session.data.stats,
-      stage: session.data.stage,
-      config: session.data.config,
-    }
+    const bundle = buildGalleryWalkReportBundle(session)
 
     res.json(bundle)
+  })
+
+  app.get('/api/gallery-walk/:sessionId/report-data', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const session = asGalleryWalkSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const bundle = buildGalleryWalkReportBundle(session)
+    const section = buildGalleryWalkStructuredReportSection(bundle, {
+      instanceKey: readEmbeddedInstanceKey(session),
+    })
+    res.json(section)
+  })
+
+  app.get('/api/gallery-walk/:sessionId/report', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const session = asGalleryWalkSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const bundle = buildGalleryWalkReportBundle(session)
+
+    const html = buildGalleryWalkReportHtml(bundle)
+    const filename = buildGalleryWalkReportFilename(bundle)
+    res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
+    res.setHeader?.('Content-Disposition', `attachment; filename="${filename}"`)
+    if (typeof res.send === 'function') {
+      res.send(html)
+      return
+    }
+    res.json({ html, filename })
   })
 
   app.post('/api/gallery-walk/:sessionId/title', async (req, res) => {

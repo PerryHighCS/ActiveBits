@@ -8,7 +8,7 @@ Current activity areas include:
 - Network and web-systems simulations
 - Algorithm demonstrations
 - Java and Python practice activities
-- Solo practice modes for independent student work
+- Standalone practice and utility flows for independent student work
 
 ## Documentation
 
@@ -25,6 +25,15 @@ Activity-specific documentation:
 
 Additional operational docs:
 - [Valkey Development Notes](docs/VALKEY_DEVELOPMENT.md)
+
+## Dev Container Profiles
+
+- Default devcontainer: `.devcontainer/devcontainer.json`
+  - Least-privilege setup for normal ActiveBits development.
+- Opt-in privileged devcontainer: `.devcontainer/privileged/devcontainer.json`
+  - Adds `SYS_ADMIN` and disables AppArmor/seccomp confinement for the app container.
+  - Use only for nested sandbox tooling inside the devcontainer, such as agent/debug environments that launch their own sandbox layer.
+  - Do not use this profile for routine development unless you specifically need those tools.
 
 ## Access
 

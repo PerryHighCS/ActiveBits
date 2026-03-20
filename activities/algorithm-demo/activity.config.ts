@@ -5,11 +5,13 @@ const algorithmDemoConfig: ActivityConfig = {
   name: 'Algorithm Demonstrations',
   description: 'Instructor-driven algorithm demonstrations with synchronized visualization',
   color: 'indigo',
-  soloMode: true,
-  soloModeMeta: {
+  standaloneEntry: {
+    enabled: true,
+    supportsDirectPath: true,
+    supportsPermalink: true,
+    showOnHome: true,
     title: 'Algorithm Practice',
     description: 'Explore sorting, searching, and recursion algorithms independently',
-    buttonText: 'Copy Algorithm Practice Link',
   },
   deepLinkOptions: {
     algorithm: {

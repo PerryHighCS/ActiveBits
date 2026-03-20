@@ -1,0 +1,49 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { getWaitingRoomViewModel } from './waitingRoomViewUtils'
+
+void test('getWaitingRoomViewModel returns wait-state copy and teacher controls by default', () => {
+  const viewModel = getWaitingRoomViewModel('wait')
+
+  assert.equal(viewModel.showWaiterCount, true)
+  assert.equal(viewModel.showTeacherSection, true)
+  assert.equal(viewModel.primaryActionLabel, null)
+  assert.match(viewModel.statusTitle, /Waiting for teacher/i)
+  assert.match(viewModel.fieldHeading, /Before you join/i)
+})
+
+void test('getWaitingRoomViewModel returns solo-preflight copy for continue-solo outcome', () => {
+  const viewModel = getWaitingRoomViewModel('continue-solo')
+
+  assert.equal(viewModel.showWaiterCount, false)
+  assert.equal(viewModel.showTeacherSection, true)
+  assert.equal(viewModel.primaryActionLabel, 'Continue in Solo Mode')
+  assert.equal(viewModel.statusTitle, '')
+  assert.equal(viewModel.statusDetail, '')
+  assert.equal(viewModel.fieldHeading, '')
+  assert.equal(viewModel.fieldDescription, '')
+})
+
+void test('getWaitingRoomViewModel returns live-join preflight copy for join-live outcome', () => {
+  const viewModel = getWaitingRoomViewModel('join-live')
+
+  assert.equal(viewModel.showWaiterCount, false)
+  assert.equal(viewModel.showTeacherSection, true)
+  assert.equal(viewModel.primaryActionLabel, 'Join Session')
+  assert.equal(viewModel.statusTitle, '')
+  assert.equal(viewModel.statusDetail, '')
+  assert.equal(viewModel.fieldHeading, '')
+  assert.equal(viewModel.fieldDescription, '')
+})
+
+void test('getWaitingRoomViewModel returns solo-unavailable error copy with no primary action', () => {
+  const viewModel = getWaitingRoomViewModel('solo-unavailable')
+
+  assert.equal(viewModel.showWaiterCount, false)
+  assert.equal(viewModel.showTeacherSection, false)
+  assert.equal(viewModel.primaryActionLabel, null)
+  assert.match(viewModel.statusTitle, /solo mode is not available/i)
+  assert.match(viewModel.statusDetail, /does not support solo mode/i)
+  assert.equal(viewModel.fieldHeading, '')
+  assert.equal(viewModel.fieldDescription, '')
+})

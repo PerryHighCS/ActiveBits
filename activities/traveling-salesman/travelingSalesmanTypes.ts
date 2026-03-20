@@ -79,6 +79,7 @@ export interface TravelingSalesmanSession extends SessionRecord {
 
 export interface TravelingSalesmanSocket extends ActiveBitsWebSocket {
   studentId?: string | null
+  studentName?: string | null
   ignoreDisconnect?: boolean
 }
 

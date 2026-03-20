@@ -1,10 +1,23 @@
 import { randomBytes } from 'crypto'
-import type { Session as SharedSession, SessionStore as SharedSessionStore } from '../../types/session.js'
+import {
+  EMBEDDED_CHILD_SESSION_PREFIX,
+  type Session as SharedSession,
+  type SessionStore as SharedSessionStore,
+} from '../../types/session.js'
+import type { SessionEntryStatus } from '../../types/waitingRoom.js'
 import { findHashBySessionId, resetPersistentSession } from './persistentSessions.js'
 import { ValkeySessionStore } from './valkeyStore.js'
 import type { SessionLike } from './valkeyStore.js'
 import { SessionCache } from './sessionCache.js'
 import { normalizeSessionData } from './sessionNormalization.js'
+import { getActivityWaitingRoomFieldCount } from '../activities/activityRegistry.js'
+import {
+  consumeSessionEntryParticipant,
+  SessionEntryParticipantStoreError,
+  storeSessionEntryParticipant,
+} from './sessionEntryParticipants.js'
+import { buildSessionEntryStatus } from './entryStatus.js'
+import { acceptEntryParticipant } from './acceptedEntryParticipants.js'
 
 export interface SessionRecord extends SharedSession<Record<string, unknown>> {
   [key: string]: unknown
@@ -52,6 +65,8 @@ interface WsClient {
 interface WsServerLike {
   clients: Iterable<WsClient>
 }
+
+export { EMBEDDED_CHILD_SESSION_PREFIX }
 
 class InMemorySessionStore implements SessionStore {
   public readonly ttlMs: number
@@ -263,10 +278,37 @@ export async function createSession(
   return session
 }
 
+function setNoStore(response: ResponseLike): void {
+  response.set?.('Cache-Control', 'no-store')
+}
+
 export function setupSessionRoutes(app: {
   get(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
+  post(path: string, handler: (req: { params: { sessionId: string }; body?: unknown }, res: ResponseLike) => void | Promise<void>): void
   delete(path: string, handler: (req: { params: { sessionId: string } }, res: ResponseLike) => void | Promise<void>): void
 }, sessions: SessionStore, wss: WsServerLike | null = null): void {
+  app.get('/api/session/:sessionId/entry', async (req, res) => {
+    const { sessionId } = req.params
+    const session = await sessions.get(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const activityName = typeof session.type === 'string' ? session.type : ''
+    const waitingRoomFieldCount = activityName ? getActivityWaitingRoomFieldCount(activityName) : 0
+    const payload = {
+      ...buildSessionEntryStatus({
+        sessionId,
+        activityName,
+        waitingRoomFieldCount,
+        resolvedRole: 'student',
+        entryOutcome: 'join-live',
+      }),
+    } satisfies SessionEntryStatus & Record<string, unknown>
+    res.json(payload)
+  })
+
   app.get('/api/session/:sessionId', async (req, res) => {
     const { sessionId } = req.params
     const session = await sessions.get(sessionId)
@@ -277,11 +319,98 @@ export function setupSessionRoutes(app: {
     res.json({ session })
   })
 
+  app.get('/api/session/:sessionId/embedded-launch', async (req, res) => {
+    setNoStore(res)
+    const { sessionId } = req.params
+    if (!sessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
+      res.status(403).json({ error: 'embedded launch is only available for embedded child sessions' })
+      return
+    }
+
+    const session = await sessions.get(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const sessionData = ensurePlainObject(session.data)
+    const embeddedLaunch = sessionData?.embeddedLaunch
+    const embeddedLaunchRecord = embeddedLaunch != null && typeof embeddedLaunch === 'object' && !Array.isArray(embeddedLaunch)
+      ? embeddedLaunch as Record<string, unknown>
+      : null
+    const selectedOptions = embeddedLaunchRecord?.selectedOptions
+    const selectedOptionsRecord = selectedOptions != null && typeof selectedOptions === 'object' && !Array.isArray(selectedOptions)
+      ? selectedOptions as Record<string, unknown>
+      : null
+
+    res.json({
+      embeddedLaunch: {
+        selectedOptions: selectedOptionsRecord,
+      },
+    })
+  })
+
+  app.post('/api/session/:sessionId/entry-participant', async (req, res) => {
+    setNoStore(res)
+    const { sessionId } = req.params
+    const session = await sessions.get(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    try {
+      const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
+      const { token, values } = storeSessionEntryParticipant(session, body.values)
+      await sessions.set(sessionId, session)
+      res.json({ entryParticipantToken: token, values })
+    } catch (error) {
+      if (error instanceof SessionEntryParticipantStoreError) {
+        res.status(error.statusCode).json({ error: error.message })
+        return
+      }
+      console.error('Error storing session entry participant:', { sessionId, error })
+      res.status(500).json({ error: 'internal server error' })
+    }
+  })
+
+  app.post('/api/session/:sessionId/entry-participant/consume', async (req, res) => {
+    setNoStore(res)
+    const { sessionId } = req.params as { sessionId: string }
+    const session = await sessions.get(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    try {
+      const body = req.body != null && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {}
+      const token = typeof body.token === 'string' ? body.token : ''
+      const values = consumeSessionEntryParticipant(session, token)
+      if (!values) {
+        res.status(404).json({ error: 'entry participant not found' })
+        return
+      }
+
+      acceptEntryParticipant(session, values)
+      await sessions.set(sessionId, session)
+      res.json({ values })
+    } catch (error) {
+      console.error('Error consuming session entry participant:', { sessionId, error })
+      res.status(500).json({ error: 'internal server error' })
+    }
+  })
+
   app.delete('/api/session/:sessionId', async (req, res) => {
     const { sessionId } = req.params
     const session = await sessions.get(sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    if (sessionId.startsWith(EMBEDDED_CHILD_SESSION_PREFIX)) {
+      res.status(403).json({ error: 'embedded child sessions must be ended by the parent session' })
       return
     }
 
@@ -307,5 +436,6 @@ export function setupSessionRoutes(app: {
 
 interface ResponseLike {
   status(code: number): ResponseLike
+  set?(field: string, value: string): ResponseLike
   json(payload: Record<string, unknown>): void
 }

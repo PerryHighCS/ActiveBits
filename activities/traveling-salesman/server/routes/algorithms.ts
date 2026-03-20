@@ -3,6 +3,7 @@ import type { TravelingSalesmanRouteApp, TravelingSalesmanSessionStore } from '.
 import { asTravelingSalesmanSession } from '../../travelingSalesmanTypes.js'
 import { isFiniteNumber, isRouteArray } from '../validation.js'
 import { createBroadcastHelpers } from './shared.js'
+import { findSessionParticipant } from 'activebits-server/core/sessionParticipants.js'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -275,7 +276,10 @@ export default function registerAlgorithmRoutes(
         timeToComplete: session.data.algorithms.heuristic.computeTime,
       }
     } else {
-      const student = session.data.students.find((entry) => entry.id === solutionId)
+      const student = findSessionParticipant({
+        participants: session.data.students,
+        participantId: solutionId,
+      })
       if (student) {
         solution = {
           id: student.id,

@@ -1,22 +1,32 @@
 import { Suspense, useCallback, useEffect, useState, type ChangeEvent, type ComponentType, type FormEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import type { PersistentSessionEntryStatus, SessionEntryStatus } from '../../../../types/waitingRoom.js'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
 import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
 import { getActivity, activities } from '@src/activities'
 import {
+  activitySupportsDirectStandalonePath,
   buildTeacherManagePathFromSession,
-  buildPersistentSessionApiUrl,
+  buildPersistentSessionEntryApiUrl,
+  buildSessionEntryApiUrl,
   buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
+  findUtilityRouteMatch,
+  getHomeUtilityActivities,
   getSessionPresentationUrlForTeacherRedirect,
-  getPersistentSelectedOptionsFromSearchForActivity,
-  getSoloActivities,
+  getStandaloneHomeActivities,
   isJoinSessionId,
   readCachedSession,
   type SessionCacheRecord,
 } from './sessionRouterUtils'
+import {
+  buildSessionEntryParticipantStorageKey,
+  hasValidEntryParticipantHandoffStorageValue,
+} from './entryParticipantStorage'
+import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
+import { readSessionParticipantContext } from './sessionParticipantContext'
 
 interface RouteParams {
   [key: string]: string | undefined
@@ -24,21 +34,12 @@ interface RouteParams {
   activityName?: string
   hash?: string
   soloActivityId?: string
+  utilityActivityId?: string
+  utilityId?: string
 }
 
 interface SessionPayload {
   session?: Record<string, unknown>
-}
-
-interface PersistentSessionInfo {
-  isStarted?: boolean
-  sessionId?: string
-  hasTeacherCookie?: boolean
-}
-
-interface TeacherAuthResponse {
-  sessionId?: string
-  error?: string
 }
 
 interface SessionData extends SessionCacheRecord {
@@ -88,20 +89,61 @@ function getWindowSearch(): string {
 
 const SessionRouter = () => {
   const [sessionIdInput, setSessionIdInput] = useState('')
-  const [soloActivity, setSoloActivity] = useState<(typeof activities)[number] | null>(null)
-
-  const { sessionId, activityName, hash, soloActivityId } = useParams<RouteParams>()
+  const { sessionId, activityName, hash, soloActivityId, utilityActivityId, utilityId } = useParams<RouteParams>()
+  const location = useLocation()
 
   const [sessionData, setSessionData] = useState<SessionData | null>(null)
-  const [persistentSessionInfo, setPersistentSessionInfo] = useState<PersistentSessionInfo | null>(null)
+  const [sessionEntryStatus, setSessionEntryStatus] = useState<SessionEntryStatus | null>(null)
+  const [completedJoinPreflightSessionId, setCompletedJoinPreflightSessionId] = useState<string | null>(null)
+  const [persistentSessionEntryStatus, setPersistentSessionEntryStatus] = useState<PersistentSessionEntryStatus | null>(null)
   const [isLoadingPersistent, setIsLoadingPersistent] = useState(false)
-  const [teacherCode, setTeacherCode] = useState('')
-  const [teacherAuthError, setTeacherAuthError] = useState('')
-  const [isAuthenticatingTeacher, setIsAuthenticatingTeacher] = useState(false)
-  const [showTeacherAuth, setShowTeacherAuth] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const hasStoredSessionParticipantContext = (
+    typeof window !== 'undefined'
+    && sessionId != null
+  ) ? Boolean(readSessionParticipantContext(window.localStorage, sessionId)) : false
+  const hasStoredPersistentSessionParticipantContext = (
+    typeof window !== 'undefined'
+    && persistentSessionEntryStatus?.sessionId != null
+  ) ? Boolean(readSessionParticipantContext(window.localStorage, persistentSessionEntryStatus.sessionId)) : false
+  const hasStoredSessionEntryParticipantHandoff = (
+    typeof window !== 'undefined'
+    && sessionEntryStatus?.sessionId != null
+    && sessionEntryStatus?.activityName != null
+    && window.sessionStorage != null
+  ) ? hasValidEntryParticipantHandoffStorageValue(
+    window.sessionStorage,
+    buildSessionEntryParticipantStorageKey(sessionEntryStatus.activityName, sessionEntryStatus.sessionId),
+  ) : false
+  const hasStoredPersistentEntryParticipantHandoff = (
+    typeof window !== 'undefined'
+    && persistentSessionEntryStatus?.sessionId != null
+    && activityName != null
+    && window.sessionStorage != null
+  ) ? hasValidEntryParticipantHandoffStorageValue(
+    window.sessionStorage,
+    buildSessionEntryParticipantStorageKey(activityName, persistentSessionEntryStatus.sessionId),
+  ) : false
+  const soloActivity = soloActivityId
+    ? activities.find((entry) => entry.id === soloActivityId && activitySupportsDirectStandalonePath(entry)) ?? null
+    : null
+  const soloRouteError = soloActivityId == null
+    ? null
+    : soloActivity != null
+      ? null
+      : activities.some((entry) => entry.id === soloActivityId)
+        ? 'This activity does not support solo mode'
+        : 'Unknown solo activity'
+  const utilityRouteMatch = (utilityActivityId != null && utilityId != null)
+    ? findUtilityRouteMatch(activities, location.pathname)
+    : null
+  const utilityRouteError = utilityActivityId == null
+    ? null
+    : utilityRouteMatch != null
+      ? null
+      : 'Unknown utility route'
 
   const resolveTeacherManagePath = useCallback(
     async (
@@ -130,59 +172,35 @@ const SessionRouter = () => {
   )
 
   useEffect(() => {
-    if (hash && activityName) {
-      setTeacherCode('')
-      setTeacherAuthError('')
-      setIsAuthenticatingTeacher(false)
-      setShowTeacherAuth(false)
-    }
-  }, [hash, activityName])
-
-  useEffect(() => {
-    if (!soloActivityId) {
-      setSoloActivity(null)
-      setError(null)
-      return
-    }
-
-    const activity = activities.find((entry) => entry.id === soloActivityId)
-    if (!activity) {
-      setSoloActivity(null)
-      setError('Unknown solo activity')
-      return
-    }
-
-    if (!activity.soloMode) {
-      setSoloActivity(null)
-      setError('This activity does not support solo mode')
-      return
-    }
-
-    setError(null)
-    setSoloActivity(activity)
-  }, [soloActivityId])
-
-  useEffect(() => {
     if (typeof window === 'undefined') return
     cleanExpiredSessions(localStorage, Date.now(), CACHE_TTL)
   }, [])
 
-  useEffect(() => setError(null), [sessionIdInput])
+  useEffect(() => {
+    queueMicrotask(() => {
+      setCompletedJoinPreflightSessionId(null)
+      setSessionData(null)
+      setSessionEntryStatus(null)
+      setError(null)
+    })
+  }, [sessionId])
 
   useEffect(() => {
     if (!hash || !activityName) return
 
-    setIsLoadingPersistent(true)
-    setPersistentSessionInfo(null)
-
-    const url = buildPersistentSessionApiUrl(hash, activityName, getWindowSearch())
+    queueMicrotask(() => {
+      setIsLoadingPersistent(true)
+      setPersistentSessionEntryStatus(null)
+      setError(null)
+    })
+    const url = buildPersistentSessionEntryApiUrl(hash, activityName, getWindowSearch())
     fetch(url, { credentials: 'include' })
       .then((response) => {
         if (!response.ok) throw new Error('Persistent session not found')
-        return response.json() as Promise<PersistentSessionInfo>
+        return response.json() as Promise<PersistentSessionEntryStatus>
       })
       .then((data) => {
-        setPersistentSessionInfo(data)
+        setPersistentSessionEntryStatus(data)
         setIsLoadingPersistent(false)
       })
       .catch(() => {
@@ -193,11 +211,13 @@ const SessionRouter = () => {
 
   useEffect(() => {
     if (!activityName) return
-    if (!persistentSessionInfo?.isStarted || !persistentSessionInfo.sessionId) return
-    if (!persistentSessionInfo.hasTeacherCookie) return
+    if (!persistentSessionEntryStatus?.isStarted || !persistentSessionEntryStatus.sessionId) return
+    if (persistentSessionEntryStatus.resolvedRole !== 'teacher' || persistentSessionEntryStatus.entryOutcome !== 'join-live') {
+      return
+    }
 
     let isCancelled = false
-    const startedSessionId = persistentSessionInfo.sessionId
+    const startedSessionId = persistentSessionEntryStatus.sessionId
     const queryString = getWindowSearch()
 
     void (async () => {
@@ -212,32 +232,33 @@ const SessionRouter = () => {
     }
   }, [
     activityName,
-    persistentSessionInfo?.hasTeacherCookie,
-    persistentSessionInfo?.isStarted,
-    persistentSessionInfo?.sessionId,
+    persistentSessionEntryStatus?.entryOutcome,
+    persistentSessionEntryStatus?.isStarted,
+    persistentSessionEntryStatus?.resolvedRole,
+    persistentSessionEntryStatus?.sessionId,
     navigate,
     resolveTeacherManagePath,
   ])
 
   useEffect(() => {
     if (!hash || !activityName) return undefined
-    if (!persistentSessionInfo?.isStarted) return undefined
+    if (!persistentSessionEntryStatus?.isStarted) return undefined
 
     let isCancelled = false
 
     const pollStatus = async () => {
       try {
-        const url = buildPersistentSessionApiUrl(hash, activityName, getWindowSearch())
+        const url = buildPersistentSessionEntryApiUrl(hash, activityName, getWindowSearch())
         const response = await fetch(url, {
           credentials: 'include',
         })
 
         if (!response.ok) return
 
-        const data = (await response.json()) as PersistentSessionInfo
+        const data = (await response.json()) as PersistentSessionEntryStatus
         if (isCancelled) return
 
-        setPersistentSessionInfo(data)
+        setPersistentSessionEntryStatus(data)
         if (!data.isStarted) {
           void navigate('/session-ended')
         }
@@ -255,15 +276,75 @@ const SessionRouter = () => {
       isCancelled = true
       clearInterval(intervalId)
     }
-  }, [hash, activityName, persistentSessionInfo?.isStarted, navigate])
+  }, [activityName, hash, navigate, persistentSessionEntryStatus?.isStarted])
+
+  useEffect(() => {
+    if (!hash || !activityName || !persistentSessionEntryStatus?.isStarted || !persistentSessionEntryStatus.sessionId) {
+      return
+    }
+
+    if (
+      persistentSessionEntryStatus.resolvedRole !== 'student'
+      || persistentSessionEntryStatus.entryOutcome !== 'join-live'
+      || persistentSessionEntryStatus.presentationMode !== 'pass-through'
+    ) {
+      return
+    }
+
+    void navigate(`/${persistentSessionEntryStatus.sessionId}`, { replace: true })
+  }, [activityName, hash, navigate, persistentSessionEntryStatus])
+
+  useEffect(() => {
+    if (!hash || !activityName || !persistentSessionEntryStatus?.isStarted || !persistentSessionEntryStatus.sessionId) {
+      return
+    }
+
+    if (
+      persistentSessionEntryStatus.resolvedRole !== 'student'
+      || persistentSessionEntryStatus.entryOutcome !== 'join-live'
+      || persistentSessionEntryStatus.presentationMode !== 'render-ui'
+      || persistentSessionEntryStatus.entryPolicy === 'solo-allowed'
+      || !hasStoredPersistentSessionParticipantContext
+    ) {
+      return
+    }
+
+    void navigate(`/${persistentSessionEntryStatus.sessionId}`, { replace: true })
+  }, [activityName, hash, hasStoredPersistentSessionParticipantContext, navigate, persistentSessionEntryStatus])
+
+  useEffect(() => {
+    if (!sessionId || sessionEntryStatus) return
+
+    fetch(buildSessionEntryApiUrl(sessionId))
+      .then((response) => {
+        if (!response.ok) throw new Error('Session not found')
+        return response.json() as Promise<SessionEntryStatus>
+      })
+      .then((payload) => {
+        setSessionEntryStatus(payload)
+      })
+      .catch(() => setError('Invalid or missing session'))
+  }, [sessionEntryStatus, sessionId])
 
   useEffect(() => {
     if (!sessionId || sessionData || typeof window === 'undefined') return
+    if (!sessionEntryStatus) return
+    if (shouldRenderSessionJoinPreflight({
+      sessionId: sessionEntryStatus.sessionId,
+      presentationMode: sessionEntryStatus.presentationMode,
+      completedJoinPreflightSessionId,
+      hasStoredParticipantContext: hasStoredSessionParticipantContext,
+      hasStoredEntryParticipantHandoff: hasStoredSessionEntryParticipantHandoff,
+    })) {
+      return
+    }
 
     const storageKey = `session-${sessionId}`
     const cached = readCachedSession(localStorage, storageKey, Date.now(), CACHE_TTL)
     if (cached) {
-      setSessionData(cached as SessionData)
+      queueMicrotask(() => {
+        setSessionData(cached as SessionData)
+      })
       return
     }
 
@@ -283,10 +364,18 @@ const SessionRouter = () => {
         setSessionData(fullData)
       })
       .catch(() => setError('Invalid or missing session'))
-  }, [sessionId, sessionData])
+  }, [
+    completedJoinPreflightSessionId,
+    hasStoredSessionEntryParticipantHandoff,
+    hasStoredSessionParticipantContext,
+    sessionData,
+    sessionEntryStatus,
+    sessionId,
+  ])
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSessionIdInput(event.target.value.toLowerCase())
+    setError(null)
   }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -296,121 +385,62 @@ const SessionRouter = () => {
     }
   }
 
-  if (error) return <div className="text-red-500 text-center">{error}</div>
+  if (error || soloRouteError || utilityRouteError) {
+    return <div className="text-red-500 text-center">{error || soloRouteError || utilityRouteError}</div>
+  }
 
   if (hash && activityName) {
-    if (isLoadingPersistent || persistentSessionInfo === null) {
+    if (isLoadingPersistent || persistentSessionEntryStatus === null) {
       return <div className="text-center">Loading...</div>
     }
 
-    if (persistentSessionInfo?.isStarted && persistentSessionInfo.sessionId) {
-      const startedSessionId = persistentSessionInfo.sessionId
+    const persistentActivity = getActivity(activityName)
+    const persistentEntryOutcome = persistentSessionEntryStatus.entryOutcome
 
-      if (persistentSessionInfo.hasTeacherCookie) {
-        return <div className="text-center">Redirecting to session...</div>
-      }
-
-      const handleTeacherLogin = async (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault()
-        setTeacherAuthError('')
-        setIsAuthenticatingTeacher(true)
-
-        try {
-          const response = await fetch('/api/persistent-session/authenticate', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({
-              activityName,
-              hash,
-              teacherCode: teacherCode.trim(),
-              selectedOptions: getPersistentSelectedOptionsFromSearchForActivity(
-                getWindowSearch(),
-                getActivity(activityName)?.deepLinkOptions,
-                activityName,
-              ),
-            }),
-          })
-
-          if (!response.ok) {
-            const payload = (await response.json().catch(() => ({}))) as TeacherAuthResponse
-            throw new Error(payload.error || 'Invalid teacher code')
-          }
-
-          const payload = (await response.json()) as TeacherAuthResponse
-          const queryString = getWindowSearch()
-          const targetSessionId = payload.sessionId || startedSessionId
-          const path = await resolveTeacherManagePath(activityName, targetSessionId, queryString)
-          void navigate(path, { replace: true })
-        } catch (authError) {
-          setTeacherAuthError(authError instanceof Error ? authError.message : String(authError))
-          setIsAuthenticatingTeacher(false)
-        }
-      }
-
-      const handleStudentJoin = () => {
-        void navigate(`/${persistentSessionInfo.sessionId}`, { replace: true })
-      }
-
+    if (persistentEntryOutcome === 'solo-unavailable') {
       return (
         <div className="max-w-lg mx-auto bg-white rounded-lg shadow-lg lg:p-6 border border-gray-200">
-          <h1 className="text-2xl font-bold text-gray-800 mb-3 text-center">Session is already running</h1>
-          <p className="text-gray-700 text-center mb-6">
-            Join the session now or log in as a teacher to open the manage dashboard.
+          <h1 className="text-2xl font-bold text-gray-800 mb-3 text-center">Live session required</h1>
+          <p className="text-gray-700 text-center mb-4">
+            This permanent link is configured for solo entry, but {persistentActivity?.name || activityName} does not support solo mode.
           </p>
-
-          <div className="flex flex-col sm:flex-row gap-3 justify-between">
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => {
-                if (!showTeacherAuth) {
-                  setShowTeacherAuth(true)
-                }
-                setTeacherAuthError('')
-              }}
-            >
-              Join as Teacher
-            </Button>
-            <Button type="button" onClick={handleStudentJoin}>
-              Join Session
-            </Button>
-          </div>
-
-          {showTeacherAuth && (
-            <form onSubmit={handleTeacherLogin} className="space-y-4 mt-6 border-t border-gray-200 pt-6">
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-semibold text-gray-700">Teacher Code</label>
-                <input
-                  type="password"
-                  value={teacherCode}
-                  onChange={(event) => setTeacherCode(event.target.value)}
-                  className="border-2 border-gray-300 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
-                  placeholder="Enter teacher code"
-                  autoComplete="off"
-                  required
-                  disabled={isAuthenticatingTeacher}
-                />
-                {teacherAuthError && <p className="text-sm text-red-600">{teacherAuthError}</p>}
-              </div>
-              <div className="flex justify-end">
-                <Button type="submit" disabled={!teacherCode.trim() || isAuthenticatingTeacher}>
-                  {isAuthenticatingTeacher ? 'Verifying...' : 'Manage Session'}
-                </Button>
-              </div>
-            </form>
-          )}
+          <p className="text-sm text-gray-600 text-center">
+            Ask your teacher for a live session link or return when they have started a classroom session for this activity.
+          </p>
         </div>
       )
+    }
+
+    if (persistentSessionEntryStatus.isStarted && persistentSessionEntryStatus.sessionId) {
+      const startedSessionId = persistentSessionEntryStatus.sessionId
+      if (shouldRenderSessionJoinPreflight({
+        sessionId: startedSessionId,
+        presentationMode: persistentSessionEntryStatus.presentationMode,
+        hasStoredParticipantContext: hasStoredPersistentSessionParticipantContext,
+        hasStoredEntryParticipantHandoff: hasStoredPersistentEntryParticipantHandoff,
+        allowStoredParticipantContext: persistentSessionEntryStatus.entryPolicy === 'solo-allowed',
+      })) {
+        return (
+          <WaitingRoom
+            activityName={activityName}
+            hash={hash}
+            hasTeacherCookie={persistentSessionEntryStatus.hasTeacherCookie}
+            entryOutcome={persistentEntryOutcome}
+            entryPolicy={persistentSessionEntryStatus.entryPolicy}
+            startedSessionId={startedSessionId}
+          />
+        )
+      }
+      return <div className="text-center">Redirecting to session...</div>
     }
 
     return (
       <WaitingRoom
         activityName={activityName}
         hash={hash}
-        hasTeacherCookie={Boolean(persistentSessionInfo?.hasTeacherCookie)}
+        hasTeacherCookie={persistentSessionEntryStatus.hasTeacherCookie}
+        entryOutcome={persistentEntryOutcome}
+        entryPolicy={persistentSessionEntryStatus.entryPolicy}
       />
     )
   }
@@ -431,8 +461,26 @@ const SessionRouter = () => {
     )
   }
 
+  if (utilityRouteMatch) {
+    const StudentComponent = utilityRouteMatch.activity.StudentComponent
+
+    if (!StudentComponent) {
+      return <div className="text-center">Utility view is unavailable for this activity.</div>
+    }
+
+    const UtilityStudentComponent = StudentComponent as ActivityStudentComponent
+    const utilitySessionId = utilityRouteMatch.utility.standaloneSessionId || `solo-${utilityRouteMatch.activity.id}`
+
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <UtilityStudentComponent sessionData={{ sessionId: utilitySessionId, studentName: 'Utility User' }} />
+      </Suspense>
+    )
+  }
+
   if (!sessionId) {
-    const soloActivities = getSoloActivities(activities)
+    const standaloneActivities = getStandaloneHomeActivities(activities)
+    const utilityActivities = getHomeUtilityActivities(activities)
 
     return (
       <div className="flex flex-col items-center gap-8 max-w-6xl mx-auto p-6">
@@ -451,14 +499,14 @@ const SessionRouter = () => {
           <Button type="submit">Join Session</Button>
         </form>
 
-        {soloActivities.length > 0 && (
+        {standaloneActivities.length > 0 && (
           <div className="w-full border-t-2 border-gray-300 pt-8">
-            <h2 className="text-2xl font-bold text-center mb-4 text-gray-800">Solo Bits</h2>
+            <h2 className="text-2xl font-bold text-center mb-4 text-gray-800">Standalone Activities</h2>
             <p className="text-center text-gray-600 mb-6">Practice on your own</p>
             <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
-              {soloActivities.map((activity) => {
-                const soloTitle = activity.soloModeMeta?.title || activity.name
-                const soloDescription = activity.soloModeMeta?.description || activity.description
+              {standaloneActivities.map((activity) => {
+                const standaloneTitle = activity.standaloneEntry.title || activity.name
+                const standaloneDescription = activity.standaloneEntry.description || activity.description
 
                 return (
                   <div
@@ -467,10 +515,10 @@ const SessionRouter = () => {
                     className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer h-full flex flex-col"
                   >
                     <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>
-                      <h3 className="text-xl font-semibold">{soloTitle}</h3>
+                      <h3 className="text-xl font-semibold">{standaloneTitle}</h3>
                     </div>
                     <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4 flex-1`}>
-                      <p className="text-gray-600">{soloDescription}</p>
+                      <p className="text-gray-600">{standaloneDescription}</p>
                     </div>
                   </div>
                 )
@@ -478,9 +526,59 @@ const SessionRouter = () => {
             </div>
           </div>
         )}
+
+        {utilityActivities.length > 0 && (
+          <div className="w-full border-t-2 border-gray-300 pt-8">
+            <h2 className="text-2xl font-bold text-center mb-4 text-gray-800">Utility Tools</h2>
+            <p className="text-center text-gray-600 mb-6">Activity-specific tools and viewers</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
+              {utilityActivities.flatMap((activity) =>
+                (activity.utilities ?? [])
+                  .filter((utility) => utility.surfaces?.includes('home'))
+                  .map((utility) => (
+                    <div
+                      key={`${activity.id}:${utility.id}`}
+                      onClick={() => navigate(utility.path)}
+                      className="rounded-lg shadow-md overflow-hidden border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer h-full flex flex-col"
+                    >
+                      <div className={`${colorClasses[activity.color] || 'bg-gray-600'} text-white px-6 py-3`}>
+                        <h3 className="text-xl font-semibold">{utility.label}</h3>
+                      </div>
+                      <div className={`${bgColorClasses[activity.color] || 'bg-gray-50'} px-6 py-4 flex-1`}>
+                        <p className="text-gray-600">{utility.description || activity.description}</p>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
+
+  if (sessionEntryStatus && shouldRenderSessionJoinPreflight({
+    sessionId: sessionEntryStatus.sessionId,
+    presentationMode: sessionEntryStatus.presentationMode,
+    completedJoinPreflightSessionId,
+    hasStoredParticipantContext: hasStoredSessionParticipantContext,
+    hasStoredEntryParticipantHandoff: hasStoredSessionEntryParticipantHandoff,
+  })) {
+    return (
+      <WaitingRoom
+        activityName={sessionEntryStatus.activityName}
+        hash={sessionEntryStatus.sessionId}
+        hasTeacherCookie={false}
+        entryOutcome={sessionEntryStatus.entryOutcome}
+        startedSessionId={sessionEntryStatus.sessionId}
+        allowTeacherSection={false}
+        showShareUrl={false}
+        onJoinLive={() => setCompletedJoinPreflightSessionId(sessionEntryStatus.sessionId)}
+      />
+    )
+  }
+
+  if (sessionId && !sessionEntryStatus) return <div className="text-center">Loading session...</div>
 
   if (!sessionData) return <div className="text-center">Loading session...</div>
 
@@ -499,7 +597,7 @@ const SessionRouter = () => {
 
   return (
     <Suspense fallback={<LoadingFallback />}>
-      <SessionStudentComponent sessionData={sessionData} persistentSessionInfo={persistentSessionInfo} />
+      <SessionStudentComponent sessionData={sessionData} persistentSessionInfo={persistentSessionEntryStatus} />
     </Suspense>
   )
 }

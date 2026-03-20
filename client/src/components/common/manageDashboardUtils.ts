@@ -37,18 +37,228 @@ export interface CreateSessionBootstrapSessionStorageEntry {
 
 export interface CreateSessionBootstrapConfig {
   sessionStorage: CreateSessionBootstrapSessionStorageEntry[]
+  historyState?: string[]
 }
 
 export type DeepLinkOptions = Record<string, DeepLinkOption>
 export type DeepLinkSelection = Record<string, string>
 export type DeepLinkValidationErrors = Record<string, string>
 
+export interface PersistentEntryPolicyOptionLike {
+  value: 'instructor-required' | 'solo-allowed' | 'solo-only'
+  label: string
+  description: string
+}
+
+export interface BuildPersistentLinkRequestBodyParams {
+  activityId: string
+  teacherCode: string
+  selectedOptions: Record<string, string>
+  entryPolicy: PersistentEntryPolicyOptionLike['value']
+  hash?: string
+}
+
+export interface ManageDashboardUtilityLike {
+  label: string
+  path: string
+  description?: string
+}
+
+const CREATE_SESSION_BOOTSTRAP_TTL_MS = 5 * 60 * 1000
+const MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS = 100
+const CREATE_SESSION_BOOTSTRAP_SESSION_STORAGE_PREFIX = 'create-session-bootstrap:'
+
+interface CreateSessionBootstrapPayloadEntry {
+  payload: Record<string, unknown>
+  createdAtMs: number
+}
+
+const createSessionBootstrapPayloads = new Map<string, CreateSessionBootstrapPayloadEntry>()
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return isObjectRecord(value) && !Array.isArray(value)
+}
+
 function toStringValue(value: unknown): string {
   return typeof value === 'string' ? value : String(value ?? '')
+}
+
+function buildCreateSessionBootstrapStorageKey(activityId: string, sessionId: string): string {
+  return `${CREATE_SESSION_BOOTSTRAP_SESSION_STORAGE_PREFIX}${activityId}:${sessionId}`
+}
+
+function persistCreateSessionBootstrapPayloadToSessionStorage(
+  activityId: string,
+  sessionId: string,
+  payload: Record<string, unknown>,
+  createdAtMs: number,
+  nowMs = createdAtMs,
+): void {
+  if (typeof window === 'undefined' || window.sessionStorage == null) {
+    return
+  }
+
+  const storageKey = buildCreateSessionBootstrapStorageKey(activityId, sessionId)
+  const serializedEntry = JSON.stringify({
+    createdAtMs,
+    payload,
+  } satisfies CreateSessionBootstrapPayloadEntry)
+
+  try {
+    window.sessionStorage.setItem(storageKey, serializedEntry)
+  } catch {
+    pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs)
+
+    try {
+      window.sessionStorage.setItem(storageKey, serializedEntry)
+    } catch (retryError) {
+      console.warn('[ManageDashboard] Failed to persist same-tab bootstrap payload to sessionStorage:', retryError)
+    }
+  }
+}
+
+function clearCreateSessionBootstrapPayloadFromSessionStorage(
+  activityId: string,
+  sessionId: string,
+): void {
+  if (typeof window === 'undefined' || window.sessionStorage == null) {
+    return
+  }
+
+  try {
+    window.sessionStorage.removeItem(buildCreateSessionBootstrapStorageKey(activityId, sessionId))
+  } catch {
+    // Best-effort cleanup only; consume should still succeed from the in-memory cache.
+  }
+}
+
+function removeCreateSessionBootstrapStorageEntry(
+  storage: Pick<Storage, 'removeItem'>,
+  storageKey: string,
+): void {
+  try {
+    storage.removeItem(storageKey)
+  } catch {
+    // Best-effort cleanup only; callers should still be able to consume in-memory data.
+  }
+}
+
+function pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs: number): void {
+  if (typeof window === 'undefined' || window.sessionStorage == null) {
+    return
+  }
+
+  const storage = window.sessionStorage
+  if (typeof storage.key !== 'function' || typeof storage.length !== 'number') {
+    return
+  }
+
+  const matchingKeys: string[] = []
+
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index)
+    if (typeof key === 'string' && key.startsWith(CREATE_SESSION_BOOTSTRAP_SESSION_STORAGE_PREFIX)) {
+      matchingKeys.push(key)
+    }
+  }
+
+  const retainedEntries: Array<{ key: string, createdAtMs: number }> = []
+
+  for (const key of matchingKeys) {
+    try {
+      const rawValue = storage.getItem(key)
+      if (typeof rawValue !== 'string' || rawValue.length === 0) {
+        storage.removeItem(key)
+        continue
+      }
+
+      const parsed = JSON.parse(rawValue) as unknown
+      if (
+        !isPlainObjectRecord(parsed)
+        || typeof parsed.createdAtMs !== 'number'
+        || !Number.isFinite(parsed.createdAtMs)
+        || !isPlainObjectRecord(parsed.payload)
+      ) {
+        storage.removeItem(key)
+        continue
+      }
+
+      if (nowMs - parsed.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+        storage.removeItem(key)
+        continue
+      }
+
+      retainedEntries.push({
+        key,
+        createdAtMs: parsed.createdAtMs,
+      })
+    } catch {
+      try {
+        storage.removeItem(key)
+      } catch {
+        // Best-effort cleanup only; keep pruning the remaining keys.
+      }
+    }
+  }
+
+  if (retainedEntries.length <= MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS) {
+    return
+  }
+
+  retainedEntries
+    .sort((left, right) => left.createdAtMs - right.createdAtMs)
+    .slice(0, retainedEntries.length - MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS)
+    .forEach(({ key }) => {
+      try {
+        storage.removeItem(key)
+      } catch {
+        // Best-effort cleanup only; a later consume path can still fall back to in-memory data.
+      }
+    })
+}
+
+function consumeCreateSessionBootstrapPayloadFromSessionStorage(
+  activityId: string,
+  sessionId: string,
+  nowMs: number,
+): Record<string, unknown> | null {
+  if (typeof window === 'undefined' || window.sessionStorage == null) {
+    return null
+  }
+
+  const storageKey = buildCreateSessionBootstrapStorageKey(activityId, sessionId)
+  const rawValue = window.sessionStorage.getItem(storageKey)
+  if (typeof rawValue !== 'string' || rawValue.length === 0) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown
+    if (
+      !isPlainObjectRecord(parsed)
+      || typeof parsed.createdAtMs !== 'number'
+      || !Number.isFinite(parsed.createdAtMs)
+      || !isPlainObjectRecord(parsed.payload)
+    ) {
+      removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
+      return null
+    }
+
+    removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
+    if (nowMs - parsed.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+      return null
+    }
+
+    return parsed.payload
+  } catch (error) {
+    removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
+    console.warn('[ManageDashboard] Failed to parse same-tab bootstrap payload from sessionStorage:', error)
+    return null
+  }
 }
 
 export function parseDeepLinkGenerator(rawDeepLinkGenerator: unknown): DeepLinkGeneratorConfig | null {
@@ -112,11 +322,21 @@ export function parseCreateSessionBootstrap(rawCreateSessionBootstrap: unknown):
     }))
     .filter((entry) => entry.keyPrefix.length > 0 && entry.responseField.length > 0)
 
-  if (sessionStorage.length === 0) {
+  const historyState = Array.isArray(rawCreateSessionBootstrap.historyState)
+    ? rawCreateSessionBootstrap.historyState
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+    : []
+
+  if (sessionStorage.length === 0 && historyState.length === 0) {
     return null
   }
 
-  return { sessionStorage }
+  return {
+    sessionStorage,
+    ...(historyState.length > 0 ? { historyState } : {}),
+  }
 }
 
 export function persistCreateSessionBootstrapToSessionStorage(
@@ -145,6 +365,76 @@ export function persistCreateSessionBootstrapToSessionStorage(
       console.warn('[ManageDashboard] Failed to persist create-session bootstrap data to sessionStorage:', error)
     }
   }
+}
+
+export function storeCreateSessionBootstrapPayload(
+  activityId: string,
+  sessionId: string,
+  payload: Record<string, unknown>,
+  nowMs = Date.now(),
+): void {
+  createSessionBootstrapPayloads.set(`${activityId}:${sessionId}`, {
+    payload,
+    createdAtMs: nowMs,
+  })
+  persistCreateSessionBootstrapPayloadToSessionStorage(activityId, sessionId, payload, nowMs, nowMs)
+  pruneCreateSessionBootstrapPayloads(nowMs)
+}
+
+export function consumeCreateSessionBootstrapPayload(
+  activityId: string,
+  sessionId: string,
+  nowMs = Date.now(),
+): Record<string, unknown> | null {
+  pruneCreateSessionBootstrapPayloads(nowMs)
+  const key = `${activityId}:${sessionId}`
+  const entry = createSessionBootstrapPayloads.get(key) ?? null
+
+  const payload = entry?.payload ?? consumeCreateSessionBootstrapPayloadFromSessionStorage(activityId, sessionId, nowMs)
+  createSessionBootstrapPayloads.delete(key)
+  clearCreateSessionBootstrapPayloadFromSessionStorage(activityId, sessionId)
+  return payload
+}
+
+export function buildCreateSessionBootstrapHistoryState(
+  rawCreateSessionBootstrap: unknown,
+  payload: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const createSessionBootstrap = parseCreateSessionBootstrap(rawCreateSessionBootstrap)
+  if (!createSessionBootstrap?.historyState || createSessionBootstrap.historyState.length === 0) {
+    return null
+  }
+
+  const historyStatePayload = createSessionBootstrap.historyState.reduce<Record<string, unknown>>((accumulator, field) => {
+    if (Object.hasOwn(payload, field)) {
+      const value = payload[field]
+      if (value !== undefined) {
+        accumulator[field] = value
+      }
+    }
+    return accumulator
+  }, {})
+
+  return Object.keys(historyStatePayload).length > 0 ? historyStatePayload : null
+}
+
+function pruneCreateSessionBootstrapPayloads(nowMs: number): void {
+  for (const [key, entry] of createSessionBootstrapPayloads.entries()) {
+    if (nowMs - entry.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+      createSessionBootstrapPayloads.delete(key)
+    }
+  }
+
+  while (createSessionBootstrapPayloads.size > MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS) {
+    const oldestKey = createSessionBootstrapPayloads.keys().next().value
+    if (typeof oldestKey !== 'string') {
+      break
+    }
+
+    createSessionBootstrapPayloads.delete(oldestKey)
+  }
+
+  pruneCreateSessionBootstrapPayloadsFromSessionStorage(nowMs)
 }
 
 export function parseDeepLinkOptions(rawDeepLinkOptions: unknown): DeepLinkOptions {
@@ -257,8 +547,68 @@ export function buildSoloLink(
   return `${origin}/solo/${activityId}${buildQueryString(selectedOptions)}`
 }
 
+export function buildManageDashboardUtilityUrl(origin: string, path: string): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path
+  }
+
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${origin}${normalizedPath}`
+}
+
+export function filterPersistentEntryPolicyOptionsForActivity<T extends PersistentEntryPolicyOptionLike>(
+  options: readonly T[],
+  activitySupportsSolo: boolean,
+): T[] {
+  if (activitySupportsSolo) {
+    return [...options]
+  }
+
+  return options.filter((option) => option.value === 'instructor-required')
+}
+
+export function normalizePersistentEntryPolicyForActivity<
+  T extends PersistentEntryPolicyOptionLike['value'],
+>(
+  entryPolicy: T,
+  activitySupportsSolo: boolean,
+): T | 'instructor-required' {
+  if (activitySupportsSolo) {
+    return entryPolicy
+  }
+
+  return entryPolicy === 'instructor-required' ? entryPolicy : 'instructor-required'
+}
+
 export function buildPersistentSessionKey(activityName: string, hash: string): string {
   return `${activityName}:${hash}`
+}
+
+export function buildPersistentLinkRequestBody({
+  activityId,
+  teacherCode,
+  selectedOptions,
+  entryPolicy,
+  hash,
+}: BuildPersistentLinkRequestBodyParams): Record<string, unknown> {
+  const normalizedTeacherCode = teacherCode.trim()
+
+  if (hash) {
+    return {
+      activityName: activityId,
+      hash,
+      teacherCode: normalizedTeacherCode,
+      selectedOptions,
+      entryPolicy,
+    }
+  }
+
+  return {
+    activityName: activityId,
+    teacherCode: normalizedTeacherCode,
+    selectedOptions,
+    entryPolicy,
+  }
 }
 
 export function buildPersistentLinkUrl(
@@ -270,7 +620,17 @@ export function buildPersistentLinkUrl(
   const absoluteUrl = /^https?:\/\//i.test(urlFromServer) ? urlFromServer : `${origin}${urlFromServer}`
 
   if (deepLinkGenerator == null || deepLinkGenerator.mode === 'append-query') {
-    return `${absoluteUrl}${buildQueryString(selectedOptions)}`
+    const mergedUrl = new URL(absoluteUrl, origin || 'http://localhost')
+    for (const [key, value] of Object.entries(selectedOptions || {})) {
+      if (value != null && value !== '') {
+        mergedUrl.searchParams.set(key, toStringValue(value))
+      }
+    }
+    return /^https?:\/\//i.test(urlFromServer)
+      ? mergedUrl.toString()
+      : `${mergedUrl.pathname}${mergedUrl.search}${mergedUrl.hash}`.startsWith('/')
+        ? `${origin}${mergedUrl.pathname}${mergedUrl.search}${mergedUrl.hash}`
+        : mergedUrl.toString()
   }
 
   return absoluteUrl

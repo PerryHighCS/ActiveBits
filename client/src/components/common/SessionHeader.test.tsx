@@ -28,3 +28,15 @@ void test('SessionHeader full mode renders join controls and action buttons', ()
   assert.match(html, /Copy Join URL/)
   assert.match(html, /End Session/)
 })
+
+void test('SessionHeader hides join and end controls for embedded child sessions', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SessionHeader activityName="Embedded Test" sessionId="CHILD:parent:abc12:embedded-test" />
+    </MemoryRouter>,
+  )
+
+  assert.match(html, /Embedded session managed by parent SyncDeck session/i)
+  assert.doesNotMatch(html, /Join Code:/)
+  assert.doesNotMatch(html, /End Session/)
+})

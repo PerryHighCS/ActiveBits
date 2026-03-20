@@ -1,10 +1,21 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
 import {
   getStudentPresentationCompatibilityError,
 } from '../shared/presentationUrlCompatibility.js'
+import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
-import { REVEAL_SYNC_PROTOCOL_VERSION } from '../../shared/revealSyncProtocol.js'
+import {
+  deriveEmbeddedOverlayVerticalNavigationCapabilities,
+  resolveEmbeddedOverlayVerticalMoveAllowed,
+  resolveOptimisticEmbeddedOverlayIndices,
+} from '../shared/embeddedOverlayNavigation.js'
+import {
+  REVEAL_SYNC_PROTOCOL_VERSION,
+  assessRevealSyncProtocolCompatibility,
+} from '../../shared/revealSyncProtocol.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
@@ -20,6 +31,7 @@ interface SessionResponsePayload {
   session?: {
     data?: {
       presentationUrl?: unknown
+      embeddedActivities?: unknown
     }
   }
 }
@@ -28,6 +40,7 @@ interface InstructorPasscodeResponsePayload {
   instructorPasscode?: unknown
   persistentPresentationUrl?: unknown
   persistentUrlHash?: unknown
+  persistentEntryPolicy?: unknown
 }
 
 interface SyncDeckStudentPresenceMessage {
@@ -41,6 +54,20 @@ interface SyncDeckStudentPresenceMessage {
 interface SyncDeckStateSnapshotMessage {
   type?: unknown
   payload?: unknown
+}
+
+interface SyncDeckEmbeddedActivityRecord {
+  childSessionId: string
+  activityId: string
+  startedAt: number
+  owner: string
+}
+
+type SyncDeckEmbeddedActivitiesMap = Record<string, SyncDeckEmbeddedActivityRecord>
+
+interface SyncDeckInstructorAuthMessage {
+  type: 'authenticate'
+  instructorPasscode: string
 }
 
 interface RevealCommandPayload {
@@ -65,6 +92,20 @@ interface RevealSyncEnvelope {
   payload?: unknown
 }
 
+interface RevealActivityRequestPayload {
+  activityId?: unknown
+  instanceKey?: unknown
+  indices?: unknown
+  stackRequests?: unknown
+  activityOptions?: unknown
+}
+
+interface SyncDeckEmbeddedActivityStartResponse {
+  childSessionId?: unknown
+  instanceKey?: unknown
+  managerBootstrap?: unknown
+}
+
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
 interface RelayCommandPayloadEnvelope {
   name?: unknown
@@ -87,6 +128,37 @@ interface RevealSyncStatePayload {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function buildSyncDeckInstructorWsUrl(params: {
+  sessionId: string | null | undefined
+  location: Pick<Location, 'protocol' | 'host'> | null | undefined
+  isConfigurePanelOpen: boolean
+}): string | null {
+  if (!params.sessionId || params.location == null || params.isConfigurePanelOpen) {
+    return null
+  }
+
+  const protocol = params.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const query = new URLSearchParams({
+    sessionId: params.sessionId,
+    role: 'instructor',
+  })
+  return `${protocol}//${params.location.host}/ws/syncdeck?${query.toString()}`
+}
+
+export function createSyncDeckInstructorWsAuthMessage(
+  instructorPasscode: string | null | undefined,
+): string | null {
+  if (typeof instructorPasscode !== 'string' || instructorPasscode.length === 0) {
+    return null
+  }
+
+  const message: SyncDeckInstructorAuthMessage = {
+    type: 'authenticate',
+    instructorPasscode,
+  }
+  return JSON.stringify(message)
 }
 
 function stripOverviewFromStateEnvelope(data: unknown): unknown {
@@ -368,12 +440,70 @@ interface SyncDeckStudentPresence {
   connected: boolean
 }
 
+interface SyncDeckEmbeddedInstancePosition {
+  h: number
+  v: number
+}
+
+interface SyncDeckEmbeddedLifecyclePayload {
+  type: 'embedded-activity-start' | 'embedded-activity-end'
+  instanceKey: string
+  activityId?: string
+  childSessionId: string
+}
+
+type SyncDeckManagerOverlayNavigationDirection = 'left' | 'right' | 'up' | 'down' | 'slide'
+
+interface SyncDeckActivityPickerEntry {
+  activityId: string
+  name: string
+  description: string
+  supportsReport: boolean
+}
+
+interface SyncDeckActivityLaunchRequest {
+  activityId: string
+  instanceKey: string
+  activityOptions?: Record<string, unknown>
+}
+
+interface SyncDeckActivityConfigModule {
+  default?: {
+    id?: string
+    name?: string
+    title?: string
+    description?: string
+    reportEndpoint?: string
+  }
+}
+
+const activityPickerConfigModules =
+  typeof import.meta.glob === 'function'
+    ? import.meta.glob<SyncDeckActivityConfigModule>('@activities/*/activity.config.{js,ts}', { eager: true })
+    : {}
+
+interface SyncDeckManagerNavigationCapabilities {
+  canGoBack: boolean
+  canGoForward: boolean
+  canGoUp: boolean
+  canGoDown: boolean
+}
+
 function buildSyncDeckPasscodeKey(sessionId: string): string {
   return `${SYNCDECK_PASSCODE_KEY_PREFIX}${sessionId}`
 }
 
 function buildSyncDeckChalkboardOpenKey(sessionId: string): string {
   return `${SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX}${sessionId}`
+}
+
+export function normalizeStoredInstructorPasscode(value: string | null): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
@@ -456,6 +586,341 @@ function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; 
   return a.f - b.f
 }
 
+function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivityRecord | null {
+  if (!isPlainObject(value)) {
+    return null
+  }
+
+  const childSessionId = typeof value.childSessionId === 'string' ? value.childSessionId.trim() : ''
+  const activityId = typeof value.activityId === 'string' ? value.activityId.trim() : ''
+  if (!childSessionId || !activityId) {
+    return null
+  }
+
+  return {
+    childSessionId,
+    activityId,
+    startedAt: typeof value.startedAt === 'number' && Number.isFinite(value.startedAt) ? value.startedAt : Date.now(),
+    owner: typeof value.owner === 'string' ? value.owner : 'syncdeck-instructor',
+  }
+}
+
+export function normalizeSyncDeckEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivitiesMap {
+  if (!isPlainObject(value)) {
+    return {}
+  }
+
+  const normalized: SyncDeckEmbeddedActivitiesMap = {}
+  for (const [instanceKey, record] of Object.entries(value)) {
+    if (typeof instanceKey !== 'string' || instanceKey.trim().length === 0) {
+      continue
+    }
+
+    const normalizedRecord = normalizeEmbeddedActivityRecord(record)
+    if (!normalizedRecord) {
+      continue
+    }
+
+    normalized[instanceKey] = normalizedRecord
+  }
+
+  return normalized
+}
+
+export function resolvePersistentUrlHashForConfigure(
+  queryUrlHash: string | null | undefined,
+  persistentUrlHashFallback: string | null | undefined,
+): string | null {
+  const normalizedQueryUrlHash = typeof queryUrlHash === 'string' && queryUrlHash.trim().length > 0
+    ? queryUrlHash.trim()
+    : null
+  const normalizedPersistentUrlHashFallback = typeof persistentUrlHashFallback === 'string' && persistentUrlHashFallback.trim().length > 0
+    ? persistentUrlHashFallback.trim()
+    : null
+
+  // Prefer the server-verified/cookie-recovered hash to avoid stale query params forcing configure failures.
+  return normalizedPersistentUrlHashFallback ?? normalizedQueryUrlHash
+}
+
+export function resolvePersistentEntryPolicyForConfigure(
+  queryUrlHash: string | null | undefined,
+  queryEntryPolicy: string | null | undefined,
+  persistentUrlHashFallback: string | null | undefined,
+  persistentEntryPolicyFallback: PersistentSessionEntryPolicy | null | undefined,
+): PersistentSessionEntryPolicy {
+  const normalizedQueryUrlHash = typeof queryUrlHash === 'string' && queryUrlHash.trim().length > 0
+    ? queryUrlHash.trim()
+    : null
+  const normalizedPersistentUrlHashFallback = typeof persistentUrlHashFallback === 'string' && persistentUrlHashFallback.trim().length > 0
+    ? persistentUrlHashFallback.trim()
+    : null
+
+  if (normalizedPersistentUrlHashFallback) {
+    return resolvePersistentSessionEntryPolicy(persistentEntryPolicyFallback)
+  }
+
+  if (normalizedQueryUrlHash) {
+    return resolvePersistentSessionEntryPolicy(queryEntryPolicy)
+  }
+
+  const hasExplicitQueryEntryPolicy = typeof queryEntryPolicy === 'string' && queryEntryPolicy.trim().length > 0
+  if (hasExplicitQueryEntryPolicy) {
+    return resolvePersistentSessionEntryPolicy(queryEntryPolicy)
+  }
+
+  return resolvePersistentSessionEntryPolicy(persistentEntryPolicyFallback)
+}
+
+function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmbeddedInstancePosition | null {
+  const segments = instanceKey.split(':')
+  if (segments.length < 3) {
+    return null
+  }
+
+  const hSegment = segments.at(-2)
+  const vSegment = segments.at(-1)
+  if (typeof hSegment !== 'string' || typeof vSegment !== 'string') {
+    return null
+  }
+
+  const h = Number.parseInt(hSegment, 10)
+  const v = Number.parseInt(vSegment, 10)
+  if (!Number.isFinite(h) || !Number.isFinite(v)) {
+    return null
+  }
+
+  return { h, v }
+}
+
+function parseEmbeddedLifecyclePayload(payload: unknown): SyncDeckEmbeddedLifecyclePayload | null {
+  if (!isPlainObject(payload)) {
+    return null
+  }
+
+  const payloadType = payload.type
+  if (payloadType !== 'embedded-activity-start' && payloadType !== 'embedded-activity-end') {
+    return null
+  }
+
+  const instanceKey = typeof payload.instanceKey === 'string' ? payload.instanceKey.trim() : ''
+  const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
+  if (!instanceKey || !childSessionId) {
+    return null
+  }
+
+  const activityId = typeof payload.activityId === 'string' ? payload.activityId.trim() : undefined
+  return {
+    type: payloadType,
+    instanceKey,
+    activityId,
+    childSessionId,
+  }
+}
+
+export function applySyncDeckEmbeddedLifecyclePayload(
+  current: SyncDeckEmbeddedActivitiesMap,
+  payload: SyncDeckEmbeddedLifecyclePayload,
+): SyncDeckEmbeddedActivitiesMap {
+  if (payload.type === 'embedded-activity-end') {
+    const next = { ...current }
+    delete next[payload.instanceKey]
+    return next
+  }
+
+  if (!payload.activityId) {
+    return current
+  }
+
+  return {
+    ...current,
+    [payload.instanceKey]: {
+      childSessionId: payload.childSessionId,
+      activityId: payload.activityId,
+      startedAt: Date.now(),
+      owner: 'syncdeck-instructor',
+    },
+  }
+}
+
+export function resolveManagerActiveEmbeddedInstanceKey(
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap,
+  instructorIndices: { h: number; v: number; f: number } | null,
+): string | null {
+  if (!instructorIndices) {
+    return null
+  }
+
+  let selected: string | null = null
+  for (const [instanceKey, record] of Object.entries(embeddedActivities)) {
+    const position = parseSyncDeckEmbeddedInstancePosition(instanceKey)
+    if (!position) {
+      continue
+    }
+    if (position.h !== instructorIndices.h || position.v !== instructorIndices.v) {
+      continue
+    }
+
+    const selectedRecord = selected ? embeddedActivities[selected] : null
+    if (!selectedRecord || record.startedAt > selectedRecord.startedAt) {
+      selected = instanceKey
+    }
+  }
+
+  return selected
+}
+
+export function resolveManagerEmbeddedInstanceStatus(
+  instanceKey: string,
+  activeInstanceKey: string | null,
+): 'active' | 'idle' {
+  return activeInstanceKey != null && instanceKey === activeInstanceKey ? 'active' : 'idle'
+}
+
+export function buildManagerOverlayNavigationCommand(
+  direction: SyncDeckManagerOverlayNavigationDirection,
+): Record<string, unknown> {
+  return buildRevealCommandMessage(direction, {})
+}
+
+export function buildManagerOverlaySetStateCommand(
+  indices: { h: number; v: number; f: number },
+): Record<string, unknown> {
+  return buildRevealCommandMessage('setState', {
+    state: {
+      indexh: indices.h,
+      indexv: indices.v,
+      indexf: indices.f,
+    },
+  })
+}
+
+export function buildManagerResyncCommandForInstanceKey(instanceKey: string): Record<string, unknown> | null {
+  const position = parseSyncDeckEmbeddedInstancePosition(instanceKey)
+  if (!position) {
+    return null
+  }
+
+  return buildManagerOverlaySetStateCommand({
+    h: position.h,
+    v: position.v,
+    f: 0,
+  })
+}
+
+export function resolveManagerOverlayNavigationBaseIndices(params: {
+  currentIndices: { h: number; v: number; f: number } | null
+  activeEmbeddedInstanceKey: string | null
+}): { h: number; v: number; f: number } | null {
+  if (params.currentIndices) {
+    return params.currentIndices
+  }
+
+  if (!params.activeEmbeddedInstanceKey) {
+    return null
+  }
+
+  const position = parseSyncDeckEmbeddedInstancePosition(params.activeEmbeddedInstanceKey)
+  if (!position) {
+    return null
+  }
+
+  return {
+    h: position.h,
+    v: position.v,
+    f: 0,
+  }
+}
+
+export function resolveManagerCurrentSlideNavigationCapability(params: {
+  iframeCapability: boolean | null
+  capabilityIndices: { h: number; v: number; f: number } | null
+  currentIndices: { h: number; v: number; f: number } | null
+}): boolean | null {
+  if (!params.currentIndices || !params.capabilityIndices) {
+    return null
+  }
+
+  // Overlay arrows follow slide-stack position, so fragment-only changes should not invalidate
+  // a vertical capability payload for the current h/v slide anchor.
+  return params.capabilityIndices.h === params.currentIndices.h
+    && params.capabilityIndices.v === params.currentIndices.v
+    ? params.iframeCapability
+    : null
+}
+
+export function extractManagerNavigationCapabilitiesFromRevealMessage(
+  rawPayload: unknown,
+): SyncDeckManagerNavigationCapabilities | null {
+  const envelope = parseRevealSyncEnvelope(rawPayload)
+  if (!envelope || (envelope.action !== 'state' && envelope.action !== 'ready') || !isPlainObject(envelope.payload)) {
+    return null
+  }
+
+  const payload = envelope.payload as Record<string, unknown>
+  const navigation = isPlainObject(payload.navigation) ? (payload.navigation as Record<string, unknown>) : null
+  const capabilities = isPlainObject(payload.capabilities) ? (payload.capabilities as Record<string, unknown>) : null
+  const source = navigation ?? capabilities
+
+  if (!source) {
+    return null
+  }
+
+  const canGoBack = typeof source.canGoLeft === 'boolean' ? source.canGoLeft
+    : typeof source.canGoBack === 'boolean' ? source.canGoBack : null
+  const canGoForward = typeof source.canGoRight === 'boolean' ? source.canGoRight
+    : typeof source.canGoForward === 'boolean' ? source.canGoForward : null
+  const canGoUp = typeof source.canGoUp === 'boolean' ? source.canGoUp : null
+  const canGoDown = typeof source.canGoDown === 'boolean' ? source.canGoDown : null
+
+  if (canGoBack === null && canGoForward === null && canGoUp === null && canGoDown === null) {
+    return null
+  }
+
+  return {
+    canGoBack: canGoBack ?? true,
+    canGoForward: canGoForward ?? true,
+    canGoUp: canGoUp ?? true,
+    canGoDown: canGoDown ?? true,
+  }
+}
+
+export function resolveNextPendingEmbeddedEndConfirmation(
+  currentPending: string | null,
+  targetInstanceKey: string,
+): { nextPending: string | null; shouldEnd: boolean } {
+  if (currentPending === targetInstanceKey) {
+    return { nextPending: null, shouldEnd: true }
+  }
+
+  return { nextPending: targetInstanceKey, shouldEnd: false }
+}
+
+export function activitySupportsEmbeddedReport(
+  activityId: string,
+  activityEntries: SyncDeckActivityPickerEntry[],
+): boolean {
+  return activityEntries.some((entry) => entry.activityId === activityId && entry.supportsReport)
+}
+
+export function parseDownloadFilenameFromContentDisposition(headerValue: string | null): string | null {
+  if (typeof headerValue !== 'string' || headerValue.trim().length === 0) {
+    return null
+  }
+
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+
+  const plainMatch = headerValue.match(/filename="([^"]+)"|filename=([^;]+)/i)
+  const candidate = plainMatch?.[1] ?? plainMatch?.[2] ?? null
+  return typeof candidate === 'string' && candidate.trim().length > 0 ? candidate.trim() : null
+}
+
 export function evaluateRestoreSuppressionForOutboundState(params: {
   suppressOutboundUntilRestore: boolean
   restoreTargetIndices: { h: number; v: number; f: number } | null
@@ -468,7 +933,7 @@ export function evaluateRestoreSuppressionForOutboundState(params: {
   const hasReachedRestoreTarget =
     params.restoreTargetIndices != null &&
     params.instructorIndices != null &&
-    compareIndices(params.instructorIndices, params.restoreTargetIndices) >= 0
+    compareIndices(params.instructorIndices, params.restoreTargetIndices) === 0
 
   if (!hasReachedRestoreTarget) {
     return { shouldDrop: true, shouldRelease: false }
@@ -623,6 +1088,111 @@ function parseRevealSyncEnvelope(data: unknown): RevealSyncEnvelope | null {
   }
 
   return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
+}
+
+function normalizeActivityId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function buildAnchoredInstanceKey(activityId: string, indices: { h: number; v: number; f: number }): string {
+  return `${activityId}:${indices.h}:${indices.v}`
+}
+
+function normalizeActivityOptions(value: unknown): Record<string, unknown> | undefined {
+  return isPlainObject(value) ? value : undefined
+}
+
+export function resolveManagerActivityRequestStartInput(
+  rawPayload: unknown,
+  fallbackInstructorIndices: { h: number; v: number; f: number } | null,
+): SyncDeckActivityLaunchRequest | null {
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const payload = rawPayload as RevealActivityRequestPayload
+  const activityId = normalizeActivityId(payload.activityId)
+  if (!activityId) {
+    return null
+  }
+  const activityOptions = normalizeActivityOptions(payload.activityOptions)
+
+  const requestedInstanceKey = typeof payload.instanceKey === 'string' ? payload.instanceKey.trim() : ''
+  if (requestedInstanceKey.length > 0) {
+    return {
+      activityId,
+      instanceKey: requestedInstanceKey,
+      ...(activityOptions ? { activityOptions } : {}),
+    }
+  }
+
+  const requestedIndices = normalizeIndices(payload.indices)
+  const resolvedIndices = requestedIndices ?? fallbackInstructorIndices
+  if (!resolvedIndices) {
+    return {
+      activityId,
+      instanceKey: `${activityId}:global`,
+      ...(activityOptions ? { activityOptions } : {}),
+    }
+  }
+
+  return {
+    activityId,
+    instanceKey: buildAnchoredInstanceKey(activityId, resolvedIndices),
+    ...(activityOptions ? { activityOptions } : {}),
+  }
+}
+
+export function resolveManagerActivityRequestBatchInputs(
+  rawPayload: unknown,
+  fallbackInstructorIndices: { h: number; v: number; f: number } | null,
+): SyncDeckActivityLaunchRequest[] {
+  if (!isPlainObject(rawPayload)) {
+    return []
+  }
+
+  const payload = rawPayload as RevealActivityRequestPayload
+  const primary = resolveManagerActivityRequestStartInput(payload, fallbackInstructorIndices)
+
+  const parsedStackRequests = Array.isArray(payload.stackRequests)
+    ? payload.stackRequests
+      .map((entry) => resolveManagerActivityRequestStartInput(entry, fallbackInstructorIndices))
+      .filter((entry): entry is SyncDeckActivityLaunchRequest => entry != null)
+    : []
+
+  const byInstanceKey = new Map<string, SyncDeckActivityLaunchRequest>()
+  if (primary) {
+    byInstanceKey.set(primary.instanceKey, primary)
+  }
+  for (const request of parsedStackRequests) {
+    byInstanceKey.set(request.instanceKey, request)
+  }
+
+  return [...byInstanceKey.values()]
+}
+
+export function resolveSyncDeckActivityPickerEntries(
+  entries: Array<{ id: string; name: string; description: string; reportEndpoint?: string }>,
+): SyncDeckActivityPickerEntry[] {
+  return entries
+    .filter((entry) => entry.id !== 'syncdeck')
+    .map((entry) => ({
+      activityId: entry.id,
+      name: entry.name,
+      description: entry.description,
+      supportsReport: typeof entry.reportEndpoint === 'string' && entry.reportEndpoint.trim().length > 0,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+}
+
+function isRevealSyncEnvelopeData(data: unknown): data is RevealSyncEnvelope {
+  const envelope = parseRevealSyncEnvelope(data)
+  return envelope?.type === 'reveal-sync'
 }
 
 function extractRevealCommandName(data: unknown): string | null {
@@ -988,6 +1558,7 @@ const SyncDeckManager: FC = () => {
   const [isConfigurePanelOpen, setIsConfigurePanelOpen] = useState(true)
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
   const [persistentUrlHashFallback, setPersistentUrlHashFallback] = useState<string | null>(null)
+  const [persistentEntryPolicyFallback, setPersistentEntryPolicyFallback] = useState<PersistentSessionEntryPolicy | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
   const [instructorConnectionState, setInstructorConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
@@ -996,6 +1567,17 @@ const SyncDeckManager: FC = () => {
   const [connectedStudentCount, setConnectedStudentCount] = useState(0)
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
   const [isStudentsPanelOpen, setIsStudentsPanelOpen] = useState(false)
+  const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
+  const [isEmbeddedPanelOpen, setIsEmbeddedPanelOpen] = useState(false)
+  const [isActivityPickerOpen, setIsActivityPickerOpen] = useState(false)
+  const [endingEmbeddedInstanceKey, setEndingEmbeddedInstanceKey] = useState<string | null>(null)
+  const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
+  const [downloadingEmbeddedReportInstanceKey, setDownloadingEmbeddedReportInstanceKey] = useState<string | null>(null)
+  const [isDownloadingSessionReport, setIsDownloadingSessionReport] = useState(false)
+  const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
+  const [overlayNavigationCapabilityIndices, setOverlayNavigationCapabilityIndices] =
+    useState<{ h: number; v: number; f: number } | null>(null)
+  const [instructorIndicesState, setInstructorIndicesState] = useState<{ h: number; v: number; f: number } | null>(null)
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
   const [isPresentationPaused, setIsPresentationPaused] = useState(false)
   const [isChalkboardOpen, setIsChalkboardOpen] = useState(false)
@@ -1025,6 +1607,22 @@ const SyncDeckManager: FC = () => {
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
+
+  useEffect(() => {
+    syncDebugEnabledRef.current = isSyncDeckDebugEnabled()
+  }, [location.search])
+
+  const traceSync = useCallback((event: string, details: Record<string, unknown>): void => {
+    if (!syncDebugEnabledRef.current) {
+      return
+    }
+
+    console.info('[SyncDeck][Manager]', {
+      event,
+      ...details,
+    })
+  }, [])
 
   const clearRestoreSuppressionTimeout = useCallback((): void => {
     if (restoreSuppressionTimeoutRef.current != null) {
@@ -1122,7 +1720,14 @@ const SyncDeckManager: FC = () => {
   )
 
   const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
-  const urlHash = queryUrlHash ?? persistentUrlHashFallback
+  const queryEntryPolicy = new URLSearchParams(location.search).get('entryPolicy')
+  const urlHash = resolvePersistentUrlHashForConfigure(queryUrlHash, persistentUrlHashFallback)
+  const entryPolicy = resolvePersistentEntryPolicyForConfigure(
+    queryUrlHash,
+    queryEntryPolicy,
+    persistentUrlHashFallback,
+    persistentEntryPolicyFallback,
+  )
   const hostProtocol = typeof window !== 'undefined' ? window.location.protocol : null
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : null
   const presentationUrlError = useMemo(() => {
@@ -1145,24 +1750,27 @@ const SyncDeckManager: FC = () => {
   }, [presentationUrlError, isConfigurePanelOpen])
 
   const buildInstructorWsUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined' || !sessionId || !instructorPasscode || isConfigurePanelOpen) {
+    if (typeof window === 'undefined') {
       return null
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams({
+    return buildSyncDeckInstructorWsUrl({
       sessionId,
-      role: 'instructor',
-      instructorPasscode,
+      location: window.location,
+      isConfigurePanelOpen,
     })
-    return `${protocol}//${window.location.host}/ws/syncdeck?${params.toString()}`
-  }, [sessionId, instructorPasscode, isConfigurePanelOpen])
+  }, [sessionId, isConfigurePanelOpen])
 
   const { connect: connectInstructorWs, disconnect: disconnectInstructorWs, socketRef: instructorSocketRef } =
     useResilientWebSocket({
       buildUrl: buildInstructorWsUrl,
       shouldReconnect: Boolean(sessionId && instructorPasscode && !isConfigurePanelOpen),
-      onOpen: () => {
+      onOpen: (_event, ws) => {
+        const authMessage = createSyncDeckInstructorWsAuthMessage(instructorPasscode)
+        if (authMessage != null) {
+          ws.send(authMessage)
+        }
+
         if (disconnectStatusTimeoutRef.current != null) {
           clearTimeout(disconnectStatusTimeoutRef.current)
           disconnectStatusTimeoutRef.current = null
@@ -1185,7 +1793,36 @@ const SyncDeckManager: FC = () => {
           const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage
           const statePayload = extractSyncDeckStatePayload(message)
           if (statePayload != null) {
+            const embeddedLifecyclePayload = parseEmbeddedLifecyclePayload(statePayload)
+            if (embeddedLifecyclePayload) {
+              if (embeddedLifecyclePayload.type === 'embedded-activity-end') {
+                setPendingEmbeddedEndConfirmInstanceKey((current) =>
+                  current === embeddedLifecyclePayload.instanceKey ? null : current,
+                )
+              }
+              setEmbeddedActivities((current) =>
+                applySyncDeckEmbeddedLifecyclePayload(current, embeddedLifecyclePayload),
+              )
+              return
+            }
+
+            const revealSyncStatePayload = isRevealSyncEnvelopeData(statePayload) ? statePayload : null
+            if (revealSyncStatePayload) {
+              const compatibility = assessRevealSyncProtocolCompatibility(revealSyncStatePayload.version)
+              if (!compatibility.compatible) {
+                traceSync('warn_inbound_server_payload_incompatible_protocol', {
+                  reason: compatibility.reason,
+                  expectedVersion: compatibility.expectedVersion,
+                  receivedVersion: compatibility.receivedVersion,
+                  action: revealSyncStatePayload.action,
+                })
+              }
+            }
+
             if (!isInstructorSyncEnabledRef.current) {
+              traceSync('drop_inbound_server_payload_sync_disabled', {
+                type: revealSyncStatePayload ? revealSyncStatePayload.type : typeof statePayload,
+              })
               return
             }
 
@@ -1203,6 +1840,10 @@ const SyncDeckManager: FC = () => {
 
             lastInstructorPayloadRef.current = statePayload
             const commandName = extractRevealCommandName(statePayload)
+            traceSync('apply_inbound_server_payload', {
+              commandName,
+              action: revealSyncStatePayload ? revealSyncStatePayload.action : null,
+            })
             if (isInboundChalkboardReplayCommand(commandName)) {
               const replayStorage = readChalkboardSnapshotStorage(statePayload)
               if (replayStorage != null && replayStorage.trim().length > 0) {
@@ -1220,8 +1861,14 @@ const SyncDeckManager: FC = () => {
             const currentIndices = extractIndicesFromRevealPayload(statePayload)
             if (currentIndices) {
               lastInstructorIndicesRef.current = currentIndices
+              setInstructorIndicesState(currentIndices)
               lastInstructorStatePayloadRef.current = statePayload
             }
+            console.info('[SyncDeck][ManagerInboundServerPayload]', {
+              action: revealSyncStatePayload ? revealSyncStatePayload.action : null,
+              commandName,
+              currentIndices,
+            })
             const paused = extractPausedState(statePayload)
             if (typeof paused === 'boolean') {
               setIsPresentationPaused(paused)
@@ -1245,6 +1892,9 @@ const SyncDeckManager: FC = () => {
           }
 
           if (message.type !== 'syncdeck-students') {
+            traceSync('ignore_non_student_presence_payload', {
+              messageType: message.type as string | undefined,
+            })
             return
           }
 
@@ -1317,7 +1967,13 @@ const SyncDeckManager: FC = () => {
         }
 
         const payload = (await response.json()) as SessionResponsePayload
+        const existingEmbeddedActivities = normalizeSyncDeckEmbeddedActivities(payload.session?.data?.embeddedActivities)
         const existingPresentationUrl = payload.session?.data?.presentationUrl
+
+        if (!isCancelled) {
+          setEmbeddedActivities(existingEmbeddedActivities)
+        }
+
         if (typeof existingPresentationUrl !== 'string') {
           return
         }
@@ -1367,6 +2023,8 @@ const SyncDeckManager: FC = () => {
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
       setInstructorPasscode(null)
+      setPersistentUrlHashFallback(null)
+      setPersistentEntryPolicyFallback(null)
       setIsPasscodeReady(true)
       return
     }
@@ -1374,13 +2032,14 @@ const SyncDeckManager: FC = () => {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      const fromStorage = window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId))
-      if (fromStorage) {
-        if (!isCancelled) {
-          setInstructorPasscode(fromStorage)
-          setIsPasscodeReady(true)
-        }
-        return
+      const cachedPasscode = normalizeStoredInstructorPasscode(
+        window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId)),
+      )
+
+      if (!isCancelled) {
+        setInstructorPasscode(cachedPasscode)
+        setPersistentUrlHashFallback(null)
+        setPersistentEntryPolicyFallback(null)
       }
 
       try {
@@ -1389,9 +2048,11 @@ const SyncDeckManager: FC = () => {
         })
         if (!response.ok) {
           if (!isCancelled) {
-            setInstructorPasscode(null)
+            if (!cachedPasscode) {
+              setInstructorPasscode(null)
+            }
             setPersistentUrlHashFallback(null)
-            setIsPasscodeReady(true)
+            setPersistentEntryPolicyFallback(null)
           }
           return
         }
@@ -1402,6 +2063,8 @@ const SyncDeckManager: FC = () => {
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
+        } else if (!isCancelled && !cachedPasscode) {
+          setInstructorPasscode(null)
         }
 
         if (!isCancelled) {
@@ -1414,20 +2077,23 @@ const SyncDeckManager: FC = () => {
             typeof payload.persistentUrlHash === 'string' && payload.persistentUrlHash.trim().length > 0
               ? payload.persistentUrlHash
               : null
+          const persistentEntryPolicy = resolvePersistentSessionEntryPolicy(payload.persistentEntryPolicy)
 
           if (persistentPresentationUrl) {
             setPresentationUrl((current) => {
               return resolveRecoveredPresentationUrl(current, persistentPresentationUrl, hostProtocol, userAgent)
             })
           }
-          if (!queryUrlHash) {
-            setPersistentUrlHashFallback(persistentUrlHash)
-          }
+          setPersistentUrlHashFallback(persistentUrlHash)
+          setPersistentEntryPolicyFallback(persistentEntryPolicy)
         }
       } catch {
         if (!isCancelled) {
-          setInstructorPasscode(null)
+          if (!cachedPasscode) {
+            setInstructorPasscode(null)
+          }
           setPersistentUrlHashFallback(null)
+          setPersistentEntryPolicyFallback(null)
         }
       } finally {
         if (!isCancelled) {
@@ -1442,7 +2108,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId, queryUrlHash, userAgent])
+  }, [hostProtocol, sessionId, userAgent])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
@@ -1661,6 +2327,110 @@ const SyncDeckManager: FC = () => {
     )
   }, [presentationOrigin, armRestoreSuppression])
 
+  const launchEmbeddedActivityFromRequest = useCallback(
+    async (request: SyncDeckActivityLaunchRequest): Promise<void> => {
+      if (!sessionId) {
+        setStartError('Cannot launch embedded activity without a SyncDeck session id.')
+        setStartSuccess(null)
+        return
+      }
+
+      if (!instructorPasscode) {
+        setStartError('Instructor passcode missing. Refresh SyncDeck manager and try again.')
+        setStartSuccess(null)
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instructorPasscode,
+            activityId: request.activityId,
+            instanceKey: request.instanceKey,
+            ...(request.activityOptions ? { activityOptions: request.activityOptions } : {}),
+          }),
+        })
+
+        if (!response.ok) {
+          let message = 'Unable to launch embedded activity.'
+          try {
+            const payload = (await response.json()) as { error?: string }
+            if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
+              message = payload.error
+            }
+          } catch {
+            // keep default message
+          }
+          setStartError(message)
+          setStartSuccess(null)
+          return
+        }
+
+        const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+        const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
+        if (childSessionId && isPlainObject(payload.managerBootstrap)) {
+          storeCreateSessionBootstrapPayload(request.activityId, childSessionId, payload.managerBootstrap)
+        }
+
+        setStartError(null)
+        setStartSuccess(`Launched ${request.activityId} (${request.instanceKey}).`)
+      } catch {
+        setStartError('Unable to launch embedded activity.')
+        setStartSuccess(null)
+      }
+    },
+    [sessionId, instructorPasscode],
+  )
+
+  const handleResolvedActivityRequests = useCallback((startRequests: SyncDeckActivityLaunchRequest[]): void => {
+    const primaryStartRequest = startRequests[0] ?? null
+    if (!primaryStartRequest) {
+      setStartError('Ignored activity request with missing activity id.')
+      setStartSuccess(null)
+      return
+    }
+
+    if (startRequests.length === 1 && embeddedActivities[primaryStartRequest.instanceKey]) {
+      const resyncCommand = buildManagerResyncCommandForInstanceKey(primaryStartRequest.instanceKey)
+      if (resyncCommand && presentationOrigin) {
+        presentationIframeRef.current?.contentWindow?.postMessage(resyncCommand, presentationOrigin)
+        relayInstructorPayload(resyncCommand)
+        setInstructorIndicesState(extractIndicesFromRevealPayload(resyncCommand))
+      }
+      console.info('[SyncDeck][ManagerActivityRequestSkippedExisting]', {
+        startRequest: primaryStartRequest,
+        embeddedActivityKeys: Object.keys(embeddedActivities),
+        resyncCommandName: extractRevealCommandName(resyncCommand),
+      })
+      setStartError(null)
+      setStartSuccess(null)
+      return
+    }
+
+    console.info('[SyncDeck][ManagerActivityRequestLaunch]', {
+      startRequests,
+    })
+    void (async () => {
+      for (const startRequest of startRequests) {
+        if (embeddedActivities[startRequest.instanceKey]) {
+          continue
+        }
+        await launchEmbeddedActivityFromRequest(startRequest)
+      }
+    })()
+  }, [embeddedActivities, launchEmbeddedActivityFromRequest, presentationOrigin, relayInstructorPayload])
+
+  const handleActivityPickerLaunch = useCallback((activityId: string): void => {
+    const startRequests = resolveManagerActivityRequestBatchInputs(
+      { activityId, indices: lastInstructorIndicesRef.current },
+      lastInstructorIndicesRef.current,
+    )
+    setIsActivityPickerOpen(false)
+    handleResolvedActivityRequests(startRequests)
+  }, [handleResolvedActivityRequests])
+
   const startSession = useCallback(async (options?: { automatic?: boolean }): Promise<void> => {
     const automaticStart = options?.automatic === true
 
@@ -1744,6 +2514,7 @@ const SyncDeckManager: FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           presentationUrl: normalizedUrl,
+          entryPolicy,
           instructorPasscode,
           ...(urlHash ? { urlHash } : {}),
         }),
@@ -1778,6 +2549,7 @@ const SyncDeckManager: FC = () => {
     userAgent,
     isPasscodeReady,
     instructorPasscode,
+    entryPolicy,
     urlHash,
     preflightValidatedUrl,
     allowUnverifiedStartForUrl,
@@ -1836,6 +2608,26 @@ const SyncDeckManager: FC = () => {
     }
   }, [isConfigurePanelOpen, sessionId, instructorPasscode, connectInstructorWs, disconnectInstructorWs])
 
+  const activityPickerEntries = useMemo(
+    () => resolveSyncDeckActivityPickerEntries(
+      Object.values(activityPickerConfigModules)
+        .map((moduleExports) => moduleExports.default)
+        .filter((entry): entry is NonNullable<SyncDeckActivityConfigModule['default']> => entry != null)
+        .map((entry) => ({
+          id: typeof entry.id === 'string' ? entry.id : '',
+          name: typeof entry.title === 'string' && entry.title.trim().length > 0
+            ? entry.title
+            : typeof entry.name === 'string'
+              ? entry.name
+              : '',
+          description: typeof entry.description === 'string' ? entry.description : '',
+          reportEndpoint: typeof entry.reportEndpoint === 'string' ? entry.reportEndpoint : undefined,
+        }))
+        .filter((entry) => entry.id.length > 0 && entry.name.length > 0 && entry.description.length > 0),
+    ),
+    [],
+  )
+
   useEffect(
     () => () => {
       if (disconnectStatusTimeoutRef.current != null) {
@@ -1860,6 +2652,40 @@ const SyncDeckManager: FC = () => {
         return
       }
 
+      const envelope = parseRevealSyncEnvelope(event.data)
+      if (envelope?.type === 'reveal-sync') {
+        const compatibility = assessRevealSyncProtocolCompatibility(envelope.version)
+        if (!compatibility.compatible) {
+          traceSync('warn_inbound_iframe_payload_incompatible_protocol', {
+            reason: compatibility.reason,
+            expectedVersion: compatibility.expectedVersion,
+            receivedVersion: compatibility.receivedVersion,
+            action: envelope.action,
+          })
+        }
+
+        if (envelope.action === 'activityRequest') {
+          const startRequests = resolveManagerActivityRequestBatchInputs(
+            envelope.payload,
+            lastInstructorIndicesRef.current,
+          )
+          console.info('[SyncDeck][ManagerActivityRequestInbound]', {
+            rawPayload: envelope.payload,
+            resolvedStartRequests: startRequests,
+            instructorIndices: lastInstructorIndicesRef.current,
+            embeddedActivityKeys: Object.keys(embeddedActivities),
+          })
+          handleResolvedActivityRequests(startRequests)
+          return
+        }
+      }
+
+      const nextOverlayNavigationCapabilities = extractManagerNavigationCapabilitiesFromRevealMessage(event.data)
+      if (nextOverlayNavigationCapabilities) {
+        setOverlayNavigationCapabilities(nextOverlayNavigationCapabilities)
+        setOverlayNavigationCapabilityIndices(extractIndicesFromRevealPayload(event.data))
+      }
+
       const storyboardDisplayed = extractStoryboardDisplayed(event.data)
       if (typeof storyboardDisplayed === 'boolean') {
         setIsStoryboardOpen(storyboardDisplayed)
@@ -1874,8 +2700,7 @@ const SyncDeckManager: FC = () => {
         setIsPresentationPaused(pausedStateFromCommand)
       }
 
-      const initialEnvelope = parseRevealSyncEnvelope(event.data)
-      if (!hasSeenInstructorIframeReadySignalRef.current && initialEnvelope?.type === 'reveal-sync') {
+      if (!hasSeenInstructorIframeReadySignalRef.current && envelope?.type === 'reveal-sync') {
         hasSeenInstructorIframeReadySignalRef.current = true
         const targetWindow = presentationIframeRef.current?.contentWindow
         if (targetWindow && presentationOrigin) {
@@ -1919,8 +2744,10 @@ const SyncDeckManager: FC = () => {
       }
 
       try {
-        const envelope = parseRevealSyncEnvelope(event.data)
         if (!isInstructorSyncEnabledRef.current) {
+          traceSync('drop_outbound_iframe_payload_sync_disabled', {
+            action: envelope?.action,
+          })
           return
         }
 
@@ -1950,12 +2777,16 @@ const SyncDeckManager: FC = () => {
               payload: outboundChalkboardRelayCommand,
             }),
           )
+          traceSync('relay_outbound_chalkboard_payload', {
+            action: extractRevealCommandName(outboundChalkboardRelayCommand),
+          })
           return
         }
 
         const instructorIndices = extractIndicesFromRevealPayload(event.data)
         if (instructorIndices) {
           lastInstructorIndicesRef.current = instructorIndices
+          setInstructorIndicesState(instructorIndices)
         }
 
         if (envelope?.type === 'reveal-sync' && envelope.action === 'state') {
@@ -1969,6 +2800,9 @@ const SyncDeckManager: FC = () => {
             releaseRestoreSuppression()
           }
           if (restoreSuppression.shouldDrop) {
+            traceSync('drop_outbound_iframe_state_restore_suppression', {
+              action: envelope.action,
+            })
             return
           }
         }
@@ -1988,6 +2822,9 @@ const SyncDeckManager: FC = () => {
           envelope.action === 'state' &&
           shouldSuppressInstructorStateBroadcast(lastInstructorIndicesRef.current, explicitBoundaryRef.current)
         ) {
+          traceSync('drop_outbound_iframe_state_explicit_boundary', {
+            action: envelope.action,
+          })
           return
         }
 
@@ -2026,9 +2863,9 @@ const SyncDeckManager: FC = () => {
         )
         const payloadWithPauseState = includePausedInStateEnvelope(payloadWithInstructorIndices, pausedState)
         const sanitizedPayload = stripOverviewFromStateEnvelope(payloadWithPauseState)
+        const sanitizedIndices = extractIndicesFromRevealPayload(sanitizedPayload)
         lastInstructorPayloadRef.current = sanitizedPayload
         if (envelope?.type === 'reveal-sync' && envelope.action === 'state') {
-          const sanitizedIndices = extractIndicesFromRevealPayload(sanitizedPayload)
           if (sanitizedIndices) {
             lastInstructorStatePayloadRef.current = sanitizedPayload
           }
@@ -2047,6 +2884,9 @@ const SyncDeckManager: FC = () => {
         }
 
         if (!shouldRelayRevealSyncPayloadToSession(sanitizedPayload)) {
+          traceSync('drop_outbound_iframe_payload_relay_policy', {
+            action: envelope?.action,
+          })
           return
         }
 
@@ -2056,6 +2896,17 @@ const SyncDeckManager: FC = () => {
             payload: sanitizedPayload,
           }),
         )
+        console.info('[SyncDeck][ManagerRelayOutbound]', {
+          action: envelope?.action,
+          commandName: extractRevealCommandName(event.data),
+          instructorIndices,
+          sanitizedIndices,
+          explicitBoundary: explicitBoundaryRef.current,
+          pausedState,
+        })
+        traceSync('relay_outbound_iframe_payload', {
+          action: envelope?.action,
+        })
       } catch {
         return
       }
@@ -2066,12 +2917,15 @@ const SyncDeckManager: FC = () => {
       window.removeEventListener('message', handleMessage)
     }
   }, [
+    embeddedActivities,
+    handleResolvedActivityRequests,
     isConfigurePanelOpen,
     presentationOrigin,
     requestChalkboardStateFromInstructor,
     applyDrawingToolModeToInstructorIframe,
     armRestoreSuppression,
     releaseRestoreSuppression,
+    traceSync,
   ])
 
   useEffect(
@@ -2091,6 +2945,197 @@ const SyncDeckManager: FC = () => {
   }
 
   const normalizedPresentationUrl = presentationUrl.trim()
+  const runningEmbeddedActivityCount = Object.keys(embeddedActivities).length
+  const activeEmbeddedInstanceKey = resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState)
+  const activeEmbeddedActivity = activeEmbeddedInstanceKey ? embeddedActivities[activeEmbeddedInstanceKey] ?? null : null
+  const currentOverlayIndices = instructorIndicesState ?? lastInstructorIndicesRef.current
+  const overlayNavigationBaseIndices = resolveManagerOverlayNavigationBaseIndices({
+    currentIndices: currentOverlayIndices,
+    activeEmbeddedInstanceKey,
+  })
+  const overlayVerticalNavigationCapabilities = deriveEmbeddedOverlayVerticalNavigationCapabilities(
+    Object.keys(embeddedActivities),
+    overlayNavigationBaseIndices,
+  )
+  const canMoveBack =
+    overlayNavigationCapabilities?.canGoBack === true
+    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.h > 0 : false)
+  const canMoveForward =
+    overlayNavigationCapabilities?.canGoForward !== false
+  const canMoveUp =
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'up',
+      iframeCapability: resolveManagerCurrentSlideNavigationCapability({
+        iframeCapability: overlayNavigationCapabilities?.canGoUp ?? null,
+        capabilityIndices: overlayNavigationCapabilityIndices,
+        currentIndices: overlayNavigationBaseIndices,
+      }),
+      derivedCapabilities: overlayVerticalNavigationCapabilities,
+      fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v > 0 : false,
+    })
+  const canMoveDown =
+    resolveEmbeddedOverlayVerticalMoveAllowed({
+      direction: 'down',
+      iframeCapability: resolveManagerCurrentSlideNavigationCapability({
+        iframeCapability: overlayNavigationCapabilities?.canGoDown ?? null,
+        capabilityIndices: overlayNavigationCapabilityIndices,
+        currentIndices: overlayNavigationBaseIndices,
+      }),
+      derivedCapabilities: overlayVerticalNavigationCapabilities,
+      fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false,
+    })
+
+  const sendEmbeddedOverlayNavigation = (direction: 'left' | 'right' | 'up' | 'down'): void => {
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (!targetWindow || !presentationOrigin) {
+      return
+    }
+
+    const optimisticIndices = resolveOptimisticEmbeddedOverlayIndices(
+      Object.keys(embeddedActivities),
+      overlayNavigationBaseIndices,
+      direction,
+    )
+
+    console.info('[SyncDeck][ManagerOverlayNav]', {
+      direction,
+      currentOverlayIndices,
+      overlayNavigationBaseIndices,
+      optimisticIndices,
+      commandName: optimisticIndices ? 'setState' : null,
+    })
+
+    if (!optimisticIndices) {
+      return
+    }
+
+    armRestoreSuppression(optimisticIndices)
+    setInstructorIndicesState(optimisticIndices)
+    const setStateCommand = buildManagerOverlaySetStateCommand(optimisticIndices)
+    targetWindow.postMessage(
+      setStateCommand,
+      presentationOrigin,
+    )
+    relayInstructorPayload(setStateCommand)
+  }
+
+  const endEmbeddedActivity = async (instanceKey: string): Promise<void> => {
+    if (!sessionId || !instructorPasscode) {
+      return
+    }
+
+    setEndingEmbeddedInstanceKey(instanceKey)
+    try {
+      const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/end`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instructorPasscode,
+          instanceKey,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to end embedded activity')
+      }
+
+      setEmbeddedActivities((current) => {
+        const next = { ...current }
+        delete next[instanceKey]
+        return next
+      })
+      setPendingEmbeddedEndConfirmInstanceKey((current) => (current === instanceKey ? null : current))
+    } catch {
+      // Keep UI stable if end fails; WS lifecycle update will eventually reconcile.
+    } finally {
+      setEndingEmbeddedInstanceKey(null)
+    }
+  }
+
+  const downloadEmbeddedActivityReport = async (instanceKey: string): Promise<void> => {
+    if (!sessionId || !instructorPasscode) {
+      return
+    }
+
+    setDownloadingEmbeddedReportInstanceKey(instanceKey)
+    try {
+      const response = await fetch(
+        `/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/report/${encodeURIComponent(instanceKey)}`,
+        {
+          headers: {
+            'x-syncdeck-instructor-passcode': instructorPasscode,
+          },
+        },
+      )
+      if (!response.ok) {
+        throw new Error('Failed to download embedded activity report')
+      }
+
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const downloadLink = document.createElement('a')
+      downloadLink.href = objectUrl
+      downloadLink.download =
+        parseDownloadFilenameFromContentDisposition(response.headers.get('Content-Disposition'))
+        ?? `${instanceKey}.html`
+      document.body.appendChild(downloadLink)
+      downloadLink.click()
+      document.body.removeChild(downloadLink)
+      URL.revokeObjectURL(objectUrl)
+    } catch {
+      // Keep the confirmation state visible so the instructor can retry the download.
+    } finally {
+      setDownloadingEmbeddedReportInstanceKey(null)
+    }
+  }
+
+  const downloadSessionReport = async (): Promise<void> => {
+    if (!sessionId || !instructorPasscode) {
+      return
+    }
+
+    setIsDownloadingSessionReport(true)
+    try {
+      const response = await fetch(
+        `/api/syncdeck/${encodeURIComponent(sessionId)}/report`,
+        {
+          headers: {
+            'x-syncdeck-instructor-passcode': instructorPasscode,
+          },
+        },
+      )
+      if (!response.ok) {
+        throw new Error('Failed to download SyncDeck session report')
+      }
+
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const downloadLink = document.createElement('a')
+      downloadLink.href = objectUrl
+      downloadLink.download =
+        parseDownloadFilenameFromContentDisposition(response.headers.get('Content-Disposition'))
+        ?? `syncdeck-${sessionId}.html`
+      document.body.appendChild(downloadLink)
+      downloadLink.click()
+      document.body.removeChild(downloadLink)
+      URL.revokeObjectURL(objectUrl)
+    } catch {
+      // Keep the session toolbar stable if the download fails so the instructor can retry.
+    } finally {
+      setIsDownloadingSessionReport(false)
+    }
+  }
+
+  const handleEmbeddedEndControlClick = (instanceKey: string): void => {
+    const next = resolveNextPendingEmbeddedEndConfirmation(pendingEmbeddedEndConfirmInstanceKey, instanceKey)
+    setPendingEmbeddedEndConfirmInstanceKey(next.nextPending)
+    if (!next.shouldEnd) {
+      return
+    }
+
+    void endEmbeddedActivity(instanceKey)
+  }
+
   const showStartAnyway =
     Boolean(preflightWarning) &&
     allowUnverifiedStartForUrl === normalizedPresentationUrl &&
@@ -2191,6 +3236,25 @@ const SyncDeckManager: FC = () => {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={() => setIsEmbeddedPanelOpen((current) => !current)}
+                className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                aria-expanded={isEmbeddedPanelOpen}
+                aria-controls="syncdeck-running-activities-panel"
+              >
+                Running activities: {runningEmbeddedActivityCount}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsActivityPickerOpen((current) => !current)}
+                className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-expanded={isActivityPickerOpen}
+                aria-controls="syncdeck-activity-picker-panel"
+                disabled={isConfigurePanelOpen}
+              >
+                Activities
+              </button>
+              <button
+                type="button"
                 onClick={() => setIsStudentsPanelOpen((current) => !current)}
                 className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
               >
@@ -2216,6 +3280,16 @@ const SyncDeckManager: FC = () => {
             >
               {copiedValue === studentJoinUrl ? '✓ Copied!' : 'Copy Join URL'}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                void downloadSessionReport()
+              }}
+              disabled={isDownloadingSessionReport || !instructorPasscode}
+              className="px-3 py-2 rounded border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isDownloadingSessionReport ? 'Downloading report…' : 'Download Session Report'}
+            </button>
 
             <button
               onClick={() => {
@@ -2227,6 +3301,107 @@ const SyncDeckManager: FC = () => {
             </button>
           </div>
         </div>
+
+        {isEmbeddedPanelOpen && (
+          <div
+            id="syncdeck-running-activities-panel"
+            className="absolute right-6 top-full mt-2 w-80 rounded border border-gray-200 bg-white shadow-lg p-3 z-30"
+          >
+            <h2 className="text-sm font-semibold text-gray-800 mb-2">Running Activities</h2>
+            {runningEmbeddedActivityCount === 0 ? (
+              <p className="text-sm text-gray-600">No embedded activities running.</p>
+            ) : (
+              <div className="space-y-2">
+                {Object.entries(embeddedActivities).map(([instanceKey, record]) => (
+                  <div key={instanceKey} className="rounded border border-gray-200 p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-gray-800">{record.activityId}</p>
+                      {resolveManagerEmbeddedInstanceStatus(instanceKey, activeEmbeddedInstanceKey) === 'active' ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-emerald-700" aria-label="Active overlay">
+                          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                          Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs text-gray-500" aria-label="Idle overlay">
+                          <span className="inline-block h-2 w-2 rounded-full bg-gray-400" />
+                          Idle
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-600">{instanceKey}</p>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <span className="text-xs text-gray-600 truncate">{record.childSessionId}</span>
+                      <div className="flex items-center gap-2">
+                        {pendingEmbeddedEndConfirmInstanceKey === instanceKey && activitySupportsEmbeddedReport(record.activityId, activityPickerEntries) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void downloadEmbeddedActivityReport(instanceKey)
+                            }}
+                            disabled={downloadingEmbeddedReportInstanceKey === instanceKey}
+                            className="px-2 py-1 rounded border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                          >
+                            {downloadingEmbeddedReportInstanceKey === instanceKey ? 'Downloading…' : 'Download report'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleEmbeddedEndControlClick(instanceKey)
+                          }}
+                          disabled={endingEmbeddedInstanceKey === instanceKey}
+                          className="px-2 py-1 rounded border border-red-600 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                        >
+                          {endingEmbeddedInstanceKey === instanceKey
+                            ? 'Ending…'
+                            : pendingEmbeddedEndConfirmInstanceKey === instanceKey
+                              ? 'Confirm end'
+                              : 'End'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {isActivityPickerOpen && (
+          <div
+            id="syncdeck-activity-picker-panel"
+            className="absolute right-32 top-full mt-2 w-96 rounded border border-gray-200 bg-white shadow-lg p-3 z-30"
+          >
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-gray-800">Launch Activity</h2>
+              <button
+                type="button"
+                onClick={() => setIsActivityPickerOpen(false)}
+                className="text-xs text-gray-500 hover:text-gray-800"
+              >
+                Close
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-gray-600">
+              Launches the selected activity on your current slide anchor using the same embedded start flow as deck activity requests.
+            </p>
+            <div className="max-h-80 space-y-2 overflow-y-auto">
+              {activityPickerEntries.map((entry) => (
+                <button
+                  key={entry.activityId}
+                  type="button"
+                  onClick={() => {
+                    handleActivityPickerLaunch(entry.activityId)
+                  }}
+                  className="w-full rounded border border-gray-200 px-3 py-2 text-left hover:bg-gray-50"
+                >
+                  <span className="block text-sm font-medium text-gray-800">{entry.name}</span>
+                  <span className="mt-1 block text-xs text-gray-600">{entry.description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 flex">
@@ -2300,7 +3475,7 @@ const SyncDeckManager: FC = () => {
             )}
 
             {!isConfigurePanelOpen && !presentationUrlError && validatePresentationUrl(presentationUrl, hostProtocol, userAgent) && (
-              <div className="w-full h-full min-h-0 bg-white overflow-hidden">
+              <div className="w-full h-full min-h-0 bg-white overflow-hidden relative">
                 <iframe
                   ref={presentationIframeRef}
                   title="SyncDeck Presentation"
@@ -2310,6 +3485,66 @@ const SyncDeckManager: FC = () => {
                   sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
                   onLoad={handlePresentationIframeLoad}
                 />
+
+                {activeEmbeddedActivity && (
+                  <div className="absolute inset-0 z-20 bg-white overflow-hidden">
+                    <div className="absolute left-4 top-4 z-30 max-w-[calc(100%-8rem)] rounded-md bg-white/92 px-3 py-2 shadow-sm ring-1 ring-black/5 backdrop-blur-sm">
+                      <p className="text-sm font-semibold text-gray-800 truncate">
+                        Embedded Manager: {activeEmbeddedActivity.activityId}
+                      </p>
+                      <p className="text-xs text-gray-600 truncate">{activeEmbeddedInstanceKey}</p>
+                    </div>
+                    <div className="absolute inset-0 p-14">
+                      <div className="w-full h-full rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+                        <iframe
+                          title={`Embedded ${activeEmbeddedActivity.activityId} manager`}
+                          src={`/manage/${encodeURIComponent(activeEmbeddedActivity.activityId)}/${encodeURIComponent(activeEmbeddedActivity.childSessionId)}`}
+                          className="w-full h-full"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                          onClick={() => sendEmbeddedOverlayNavigation('left')}
+                      aria-label="Move left"
+                      title="Move left"
+                      disabled={!canMoveBack}
+                    >
+                      ◀
+                    </button>
+                    <button
+                      type="button"
+                      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                      onClick={() => sendEmbeddedOverlayNavigation('up')}
+                      aria-label="Move up"
+                      title="Move up"
+                      disabled={!canMoveUp}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                          onClick={() => sendEmbeddedOverlayNavigation('right')}
+                      aria-label="Move right"
+                      title="Move right"
+                      disabled={!canMoveForward}
+                    >
+                      ▶
+                    </button>
+                    <button
+                      type="button"
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                      onClick={() => sendEmbeddedOverlayNavigation('down')}
+                      aria-label="Move down"
+                      title="Move down"
+                      disabled={!canMoveDown}
+                    >
+                      ▼
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
