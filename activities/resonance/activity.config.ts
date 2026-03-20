@@ -11,6 +11,12 @@ const resonanceConfig: ActivityConfig = {
     supportsPermalink: false,
     showOnHome: false,
   },
+  deepLinkOptions: {
+    // q: encrypted question set; h: persistent hash used for decryption
+    // Both are internal and managed by the custom link builder — not shown in generic UI.
+    q: {},
+    h: {},
+  },
   deepLinkGenerator: {
     endpoint: '/api/resonance/generate-link',
     mode: 'replace-url',

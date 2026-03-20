@@ -529,3 +529,22 @@ activities/resonance/
 
 - Should the utility tool load JSON reports only from exports/files, or also support direct
   session-linked loading flows? Current implementation: file-only.
+
+## Resolved Issues
+
+### Permalink URL Format (fixed)
+
+`POST /api/resonance/generate-link` previously returned a malformed URL
+(`/manage/resonance?h=HASH&q=ENCODED`) instead of the platform-standard
+`/activity/resonance/HASH?q=ENCODED&h=HASH&entryPolicy=instructor-required&urlHash=...`.
+
+Fix applied:
+- Added `deepLinkOptions: { q: {}, h: {} }` to `activity.config.ts` so the platform's
+  `getCanonicalPersistentLinkSelectedOptions` preserves both fields from URL query params.
+- `generate-link` now calls `getOrCreateActivePersistentSession` and
+  `updatePersistentSessionUrlState` to pre-load `selectedOptions: { q, h }` in the persistent store.
+- URL built with `buildPersistentLinkUrlQuery` and formatted as `/activity/resonance/HASH?...`.
+- Cookie updated to include `selectedOptions`, `entryPolicy`, and `urlHash` for platform compatibility.
+- `normalizeSessionData` extended to decrypt `embeddedLaunch.selectedOptions.{ q, h }` when the
+  platform WS creates the session (questions empty, embeddedLaunch present), populating
+  `session.data.questions` and `session.data.persistentHash`.

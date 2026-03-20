@@ -3,8 +3,11 @@ import { createSession, type SessionRecord, type SessionStore } from 'activebits
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import {
   generatePersistentHash,
+  getOrCreateActivePersistentSession,
+  updatePersistentSessionUrlState,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
+import { buildPersistentLinkUrlQuery } from 'activebits-server/core/persistentLinkUrlState.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   InstructorAnnotation,
@@ -80,6 +83,9 @@ interface ResonanceSession extends SessionRecord {
 interface PersistentSessionsCookieEntry {
   key: string
   teacherCode: string
+  selectedOptions?: Record<string, string>
+  entryPolicy?: string
+  urlHash?: string
 }
 
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -102,6 +108,9 @@ function parsePersistentSessionsCookie(cookieValue: unknown): PersistentSessions
     .map((entry) => ({
       key: String(entry.key),
       teacherCode: String(entry.teacherCode),
+      ...(isPlainObject(entry.selectedOptions) ? { selectedOptions: entry.selectedOptions as Record<string, string> } : {}),
+      ...(typeof entry.entryPolicy === 'string' ? { entryPolicy: entry.entryPolicy } : {}),
+      ...(typeof entry.urlHash === 'string' ? { urlHash: entry.urlHash } : {}),
     }))
 }
 
@@ -119,9 +128,28 @@ function ensurePlainObject(value: unknown): Record<string, unknown> {
 
 function normalizeSessionData(data: unknown): ResonanceSessionData {
   const source = ensurePlainObject(data)
+
+  let questions: Question[] = Array.isArray(source.questions) ? (source.questions as Question[]) : []
+  let persistentHash: string | null = typeof source.persistentHash === 'string' ? source.persistentHash : null
+
+  // When the platform WS creates a session from a persistent link, it stores
+  // the encrypted question set and hash in embeddedLaunch.selectedOptions.
+  if (questions.length === 0 && isPlainObject(source.embeddedLaunch)) {
+    const embedded = ensurePlainObject((source.embeddedLaunch as Record<string, unknown>).selectedOptions)
+    const encodedQ = typeof embedded.q === 'string' ? embedded.q : null
+    const embeddedHash = typeof embedded.h === 'string' ? embedded.h : null
+    if (encodedQ !== null && embeddedHash !== null) {
+      const decrypted = decryptQuestions(encodedQ, embeddedHash)
+      if (decrypted !== null && decrypted.length > 0) {
+        questions = decrypted
+        persistentHash = embeddedHash
+      }
+    }
+  }
+
   return {
     instructorPasscode: typeof source.instructorPasscode === 'string' ? source.instructorPasscode : '',
-    questions: Array.isArray(source.questions) ? (source.questions as Question[]) : [],
+    questions,
     activeQuestionId: typeof source.activeQuestionId === 'string' ? source.activeQuestionId : null,
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
     responses: Array.isArray(source.responses) ? (source.responses as Response[]) : [],
@@ -132,7 +160,7 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     responseOrderOverrides: isPlainObject(source.responseOrderOverrides)
       ? (source.responseOrderOverrides as Record<string, string[]>)
       : {},
-    persistentHash: typeof source.persistentHash === 'string' ? source.persistentHash : null,
+    persistentHash,
   }
 }
 
@@ -342,7 +370,7 @@ export default function setupResonanceRoutes(
     }
 
     // Generate hash and encrypt the question payload
-    const { hash } = generatePersistentHash('resonance', teacherCode)
+    const { hash, hashedTeacherCode } = generatePersistentHash('resonance', teacherCode)
     const { encoded, sizeChars } = encryptQuestions(questions, hash)
 
     if (sizeChars > MAX_ENCODED_PAYLOAD_CHARS) {
@@ -351,6 +379,21 @@ export default function setupResonanceRoutes(
         .json({ error: `Question set is too large for a persistent link (${sizeChars} chars, limit ${MAX_ENCODED_PAYLOAD_CHARS})` })
       return
     }
+
+    // Register the persistent session in the store and pre-load the encoded
+    // question set so the platform WS session creator can bootstrap it.
+    // selectedOptions.h carries the hash for in-session decryption (see normalizeSessionData).
+    const selectedOptions = { q: encoded, h: hash }
+    await getOrCreateActivePersistentSession('resonance', hash, hashedTeacherCode, 'instructor-required')
+    await updatePersistentSessionUrlState(hash, { selectedOptions, entryPolicy: 'instructor-required' })
+
+    // Build the canonical persistent link URL with HMAC-verified query params.
+    const query = buildPersistentLinkUrlQuery({
+      hash,
+      entryPolicy: 'instructor-required',
+      selectedOptions,
+    })
+    const urlHash = query.get('urlHash') ?? ''
 
     // Store teacher code in the persistent_sessions cookie so it can be
     // recovered later via GET /api/resonance/:sessionId/instructor-passcode.
@@ -361,7 +404,7 @@ export default function setupResonanceRoutes(
     if (existingIndex !== -1) {
       sessionEntries.splice(existingIndex, 1)
     }
-    sessionEntries.push({ key: cookieKey, teacherCode })
+    sessionEntries.push({ key: cookieKey, teacherCode, selectedOptions, entryPolicy: 'instructor-required', urlHash })
     if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
       sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
     }
@@ -373,7 +416,7 @@ export default function setupResonanceRoutes(
       httpOnly: true,
     })
 
-    const url = `/manage/resonance?h=${hash}&q=${encoded}`
+    const url = `/activity/resonance/${hash}?${query.toString()}`
     console.info('[resonance] Persistent link generated', { hash, questionCount: questions.length, sizeChars })
     res.json({ hash, url })
   })
