@@ -95,8 +95,8 @@ Notes:
 - `deepLinkGenerator` is still needed so the activity-owned builder can submit validated question
   data to an authoritative server endpoint that returns the final persistent URL.
 - Resonance should not use `soloMode: true` for its builder/report tool.
-- The current config schema can carry metadata for a non-solo utility surface, but the app needs an
-  explicit non-solo utility route/entry convention for Resonance rather than reusing `/solo/...`.
+- The current config schema can carry metadata for a non-solo utility surface, and Resonance
+  should target an explicit `/util/...` route/entry convention rather than reusing `/solo/...`.
 - The dashboard should stay activity-agnostic. Question-set authoring, validation, and upload flow
   belong in Resonance-owned components.
 - If Resonance later needs extra dashboard integration, prefer evolving
@@ -190,13 +190,16 @@ The manager route should focus on live session facilitation only.
 Plan direction:
 
 - `/manage/resonance/:sessionId` should show the live instructor view only.
-- Question-set building/import/export should live in a separate Resonance utility tool.
+- Question-set building/import/export should live in a separate Resonance utility tool under
+  `/util/resonance`.
 - Report viewing/export should also live in that separate utility tool, similar in spirit to the
   Gallery Walk review-tool product pattern.
-- The separate Resonance utility tool should use an explicit non-solo route/entry pattern rather
-  than the current `/solo/:activityId` route.
+- The separate Resonance utility tool should use the `/util/...` route/entry pattern rather than
+  the current `/solo/:activityId` route.
 - The live manager should still include a header/action area with the controls needed to launch or
   navigate to the separate builder/report tool.
+- The `/` selector/join surface should continue to rely on the normal activity config discovery
+  pattern; the extra work is making the same utility entry discoverable from `/manage`.
 - The session-creation flow should also expose Resonance permalink building so instructors can
   upload a JSON or Gimkit CSV file and create a permanent link without first entering the separate
   utility tool.
@@ -396,9 +399,11 @@ activities/resonance/
 - [ ] Add Resonance-local report types in `shared/reportTypes.ts`.
 - [ ] Add request/response validation helpers for question sets, student registration, and answer payloads.
 - [ ] Record any finalized REST or WS contract details in `.agent/knowledge/data-contracts.md`.
-- [ ] Define the route/entry pattern for the separate Resonance utility tool.
-- [ ] Introduce or document the explicit non-solo utility route/entry pattern needed for Resonance.
+- [ ] Define the `/util/resonance` route/entry pattern for the separate Resonance utility tool.
+- [ ] Introduce or document the `/util/...` non-solo utility route convention needed for Resonance.
 - [ ] Treat Gallery Walk as a product-pattern reference only, not as a routing precedent.
+- [ ] Add utility cards/entry points for Resonance to the `/manage` dashboard, mirroring the
+      existing activity-config-driven discovery already available from `/`.
 
 ### Phase 3: Permanent Links and Session Bootstrap
 
