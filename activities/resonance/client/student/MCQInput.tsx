@@ -1,17 +1,29 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { StudentMCQOption } from '../../shared/types.js'
 
 interface Props {
   options: StudentMCQOption[]
+  value?: string | null
   onSubmit(selectedOptionId: string): void | Promise<void>
   onDraftChange?(selectedOptionId: string | null): void
   submitting?: boolean
   submitted?: boolean
 }
 
-export default function MCQInput({ options, onSubmit, onDraftChange, submitting = false, submitted = false }: Props) {
-  const [selected, setSelected] = useState<string | null>(null)
+export default function MCQInput({
+  options,
+  value = null,
+  onSubmit,
+  onDraftChange,
+  submitting = false,
+  submitted = false,
+}: Props) {
+  const [selected, setSelected] = useState<string | null>(value)
   const canSubmit = !submitting && !submitted && selected !== null
+
+  useEffect(() => {
+    setSelected(value)
+  }, [value])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -43,7 +55,7 @@ export default function MCQInput({ options, onSubmit, onDraftChange, submitting 
               <label
                 key={option.id}
                 className={`flex items-start gap-3 rounded-lg border-2 px-4 py-3 cursor-pointer transition-colors ${
-                  isSelected ? 'border-rose-500 bg-rose-50' : 'border-gray-200 hover:border-gray-300'
+                  isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
                 } ${submitting || submitted ? 'pointer-events-none opacity-60' : ''}`}
               >
                 <input
@@ -56,7 +68,7 @@ export default function MCQInput({ options, onSubmit, onDraftChange, submitting 
                     onDraftChange?.(option.id)
                   }}
                   disabled={submitting || submitted}
-                  className="mt-0.5 accent-rose-600"
+                  className="mt-0.5 accent-blue-600"
                   aria-label={option.text}
                 />
                 <span className="text-sm text-gray-800">{option.text}</span>
@@ -71,7 +83,7 @@ export default function MCQInput({ options, onSubmit, onDraftChange, submitting 
         disabled={!canSubmit}
         aria-busy={submitting}
         aria-disabled={!canSubmit}
-        className="w-full rounded bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {submitting ? 'Submitting…' : 'Submit answer'}
       </button>

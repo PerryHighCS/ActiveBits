@@ -175,7 +175,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
             onClick={() => setType(t)}
             className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
               draft.type === t
-                ? 'border-rose-500 bg-rose-50 text-rose-700'
+                ? 'border-blue-500 bg-blue-50 text-blue-700'
                 : 'border-gray-200 text-gray-500 hover:border-gray-300'
             }`}
           >
@@ -195,7 +195,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
           onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
           placeholder="Type your question…"
           rows={2}
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm resize-none focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
+          className="w-full rounded border border-gray-300 px-3 py-2 text-sm resize-none focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </div>
 
@@ -229,7 +229,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
                   value={opt.text}
                   onChange={(e) => setOption(opt.id, { text: e.target.value })}
                   placeholder={`Option ${idx + 1}`}
-                  className="flex-1 rounded border border-gray-200 px-2 py-1 text-sm focus:border-rose-400 focus:outline-none"
+                  className="flex-1 rounded border border-gray-200 px-2 py-1 text-sm focus:border-blue-400 focus:outline-none"
                   aria-label={`Option ${idx + 1} text`}
                 />
                 {draft.options.length > 2 && (
@@ -249,7 +249,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
             <button
               type="button"
               onClick={addOption}
-              className="mt-2 text-xs text-rose-600 hover:text-rose-700"
+              className="mt-2 text-xs text-blue-600 hover:text-blue-700"
             >
               + Add option
             </button>
@@ -274,7 +274,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
             setDraft((d) => ({ ...d, timeLimitMs: val !== null && !isNaN(val) ? val : null }))
           }}
           placeholder="No limit"
-          className="w-32 rounded border border-gray-200 px-2 py-1 text-sm focus:border-rose-400 focus:outline-none"
+          className="w-32 rounded border border-gray-200 px-2 py-1 text-sm focus:border-blue-400 focus:outline-none"
         />
       </div>
 
@@ -284,7 +284,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
           type="button"
           disabled={!canSave}
           onClick={handleSave}
-          className="rounded bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+          className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {isEdit ? 'Save changes' : 'Add question'}
         </button>

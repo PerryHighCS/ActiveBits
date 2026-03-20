@@ -8,6 +8,7 @@ import { useResonanceSession } from '../hooks/useResonanceSession.js'
 import NameEntryForm from './NameEntryForm.js'
 import QuestionView from './QuestionView.js'
 import SharedResponseFeed from './SharedResponseFeed.js'
+import type { AnswerPayload } from '../../shared/types.js'
 
 interface RegisterResponse {
   studentId?: string
@@ -47,6 +48,7 @@ export default function ResonanceStudent() {
   const [registerError, setRegisterError] = useState<string | null>(null)
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
   const [submittedQuestionIds, setSubmittedQuestionIds] = useState<Set<string>>(new Set())
+  const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, AnswerPayload>>({})
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
 
   const mountedRef = useRef(true)
@@ -219,6 +221,12 @@ export default function ResonanceStudent() {
         {/* Header */}
         <header className="flex items-center justify-between">
           <h1 className="text-lg font-semibold text-gray-900">Resonance</h1>
+          {liveCountdown !== null && activeQuestions.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-right">
+              <p className="text-[11px] uppercase tracking-wide text-amber-700">Time left</p>
+              <p className="text-lg font-semibold text-amber-900">{liveCountdown}</p>
+            </div>
+          )}
         </header>
 
         {/* Session loading / error */}
@@ -234,27 +242,6 @@ export default function ResonanceStudent() {
         {/* Active question(s) */}
         {snapshot !== null && activeQuestion !== null && studentId !== null && (
           <section aria-label="Current question" className="space-y-4">
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                    {activeQuestions.length > 1 ? 'All questions are live' : 'Question is live'}
-                  </p>
-                  <p className="text-sm text-amber-900">
-                    {activeQuestions.length > 1
-                      ? 'Move between questions and submit each one before time runs out.'
-                      : 'Submit your response before time runs out.'}
-                  </p>
-                </div>
-                {liveCountdown !== null && (
-                  <div className="rounded-lg bg-white px-3 py-2 text-right shadow-sm">
-                    <p className="text-[11px] uppercase tracking-wide text-amber-600">Time left</p>
-                    <p className="text-lg font-semibold text-amber-900">{liveCountdown}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
             {activeQuestions.length > 1 && (
               <nav className="flex flex-wrap gap-2" aria-label="Active questions">
                 {activeQuestions.map((question, index) => {
@@ -267,7 +254,7 @@ export default function ResonanceStudent() {
                       onClick={() => setSelectedQuestionId(question.id)}
                       className={`rounded-full border px-3 py-1.5 text-sm ${
                         isSelected
-                          ? 'border-rose-400 bg-rose-50 text-rose-700'
+                          ? 'border-blue-400 bg-blue-50 text-blue-700'
                           : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
                       }`}
                       aria-pressed={isSelected}
@@ -283,14 +270,19 @@ export default function ResonanceStudent() {
               question={activeQuestion}
               sessionId={sessionId}
               studentId={studentId}
+              initialAnswer={submittedAnswers[activeQuestion.id] ?? null}
               disabled={hasExpired}
               isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
-              onSubmitted={(questionId) => {
+              onSubmitted={(questionId, answer) => {
                 setSubmittedQuestionIds((current) => {
                   const next = new Set(current)
                   next.add(questionId)
                   return next
                 })
+                setSubmittedAnswers((current) => ({
+                  ...current,
+                  [questionId]: answer,
+                }))
               }}
               sendMessage={sendMessage}
             />

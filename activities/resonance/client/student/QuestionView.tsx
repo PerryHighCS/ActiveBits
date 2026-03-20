@@ -7,9 +7,10 @@ interface Props {
   question: StudentQuestion
   sessionId: string
   studentId: string
+  initialAnswer?: AnswerPayload | null
   disabled?: boolean
   isSubmitted?: boolean
-  onSubmitted?(questionId: string): void
+  onSubmitted?(questionId: string, answer: AnswerPayload): void
   sendMessage?(type: string, payload: unknown): boolean
 }
 
@@ -33,6 +34,7 @@ export default function QuestionView({
   question,
   sessionId,
   studentId,
+  initialAnswer = null,
   disabled = false,
   isSubmitted = false,
   onSubmitted,
@@ -40,8 +42,13 @@ export default function QuestionView({
 }: Props) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(null)
+  const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
+
+  useEffect(() => {
+    setDraftAnswer(initialAnswer)
+    lastSentDraftRef.current = initialAnswer
+  }, [question.id, initialAnswer, isSubmitted])
 
   useEffect(() => {
     if (isSubmitted || !sendMessage || isSameAnswer(draftAnswer, lastSentDraftRef.current)) {
@@ -95,7 +102,8 @@ export default function QuestionView({
         return
       }
 
-      onSubmitted?.(question.id)
+      onSubmitted?.(question.id, answer)
+      setDraftAnswer(answer)
       lastSentDraftRef.current = answer
     } catch {
       setError('Network error — please try again')
@@ -110,6 +118,7 @@ export default function QuestionView({
 
       {question.type === 'free-response' ? (
         <FreeResponseInput
+          value={draftAnswer?.type === 'free-response' ? draftAnswer.text : ''}
           onDraftChange={(text) => {
             const trimmed = text.trim()
             setDraftAnswer(trimmed.length > 0 ? { type: 'free-response', text: trimmed } : null)
@@ -121,6 +130,7 @@ export default function QuestionView({
       ) : (
         <MCQInput
           options={question.options}
+          value={draftAnswer?.type === 'multiple-choice' ? draftAnswer.selectedOptionId : null}
           onDraftChange={(selectedOptionId) => {
             setDraftAnswer(selectedOptionId ? { type: 'multiple-choice', selectedOptionId } : null)
           }}

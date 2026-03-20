@@ -165,7 +165,7 @@ function QuestionSetPanel() {
         <button
           type="button"
           onClick={() => setBuildingNew(true)}
-          className="w-full rounded-lg border-2 border-dashed border-gray-200 py-3 text-sm text-gray-400 hover:border-rose-300 hover:text-rose-500 transition-colors"
+          className="w-full rounded-lg border-2 border-dashed border-gray-200 py-3 text-sm text-gray-400 hover:border-blue-300 hover:text-blue-500 transition-colors"
         >
           + Add question
         </button>
@@ -215,7 +215,7 @@ export default function ResonanceToolShell() {
               onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.id
-                  ? 'border-rose-500 text-rose-600'
+                  ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >

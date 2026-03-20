@@ -123,6 +123,7 @@ function createInstructorResonanceSession(): SessionRecord {
       students: {
         student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 2000 },
         student2: { studentId: 'student2', name: 'Grace Hopper', joinedAt: now - 1500 },
+        student3: { studentId: 'student3', name: 'Katherine Johnson', joinedAt: now - 1000 },
       },
       responses: [
         {
@@ -276,7 +277,7 @@ void test('instructor-passcode route returns passcode for embedded child session
   await sessions.close()
 })
 
-void test('responses route includes submitted and still-working progress entries for the instructor', async () => {
+void test('responses route includes submitted, working, and idle progress entries for the instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const sessions = createSessionStore(null)
@@ -314,6 +315,7 @@ void test('responses route includes submitted and still-working progress entries
     [
       { studentId: 'student1', status: 'submitted', responseId: 'r1' },
       { studentId: 'student2', status: 'working', responseId: null },
+      { studentId: 'student3', status: 'idle', responseId: null },
     ],
   )
 

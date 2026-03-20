@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type {
   InstructorAnnotation,
   MCQQuestion,
@@ -6,6 +7,38 @@ import type {
   ResponseWithName,
 } from '../../shared/types.js'
 import ResponseCard from './ResponseCard.js'
+
+export function reorderResponseIds(currentIds: string[], draggedId: string, targetId: string): string[] {
+  if (draggedId === targetId) {
+    return currentIds
+  }
+
+  const fromIndex = currentIds.indexOf(draggedId)
+  const targetIndex = currentIds.indexOf(targetId)
+  if (fromIndex === -1 || targetIndex === -1) {
+    return currentIds
+  }
+
+  const reordered = [...currentIds]
+  const [moved] = reordered.splice(fromIndex, 1)
+  if (moved === undefined) {
+    return currentIds
+  }
+  reordered.splice(targetIndex, 0, moved)
+  return reordered
+}
+
+export function mergeDisplayOrder(currentIds: string[], availableIds: string[]): string[] {
+  const availableIdSet = new Set(availableIds)
+  const preserved = currentIds.filter((id) => availableIdSet.has(id))
+  const preservedSet = new Set(preserved)
+  const appended = availableIds.filter((id) => !preservedSet.has(id))
+  return [...preserved, ...appended]
+}
+
+function areIdsEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
+}
 
 interface Props {
   question: Question
@@ -27,12 +60,10 @@ function MCQTable({
   question,
   progress,
   annotations,
-  onAnnotate,
 }: {
   question: MCQQuestion
   progress: ResponseProgress[]
   annotations: Record<string, InstructorAnnotation>
-  onAnnotate(responseId: string, patch: Partial<InstructorAnnotation>): void
 }) {
   const options = question.options
   const isPoll = !options.some((option) => option.isCorrect)
@@ -52,7 +83,6 @@ function MCQTable({
                 {opt.isCorrect && <span className="ml-1 text-green-600">✓</span>}
               </th>
             ))}
-            <th className="pl-2 py-1 font-medium w-16">Emoji</th>
           </tr>
         </thead>
         <tbody>
@@ -77,9 +107,11 @@ function MCQTable({
                   <span className={`ml-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
                     entry.status === 'submitted'
                       ? 'bg-green-100 text-green-700'
-                      : 'bg-amber-100 text-amber-700'
+                      : entry.status === 'working'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-gray-100 text-gray-600'
                   }`}>
-                    {entry.status === 'submitted' ? 'Submitted' : 'Still working'}
+                    {entry.status === 'submitted' ? 'Submitted' : entry.status === 'working' ? 'Still working' : 'Not started'}
                   </span>
                   {annotation.starred && <span className="ml-1 text-yellow-400">★</span>}
                   {annotation.flagged && <span className="ml-1 text-red-500">🚩</span>}
@@ -97,7 +129,7 @@ function MCQTable({
                             ? 'bg-green-50'
                             : isIncorrect
                               ? 'bg-red-50'
-                              : 'bg-rose-50'
+                              : 'bg-blue-50'
                           : ''
                       }`}
                     >
@@ -111,7 +143,7 @@ function MCQTable({
                                 ? 'bg-green-600'
                                 : isIncorrect
                                   ? 'bg-red-500'
-                                  : 'bg-rose-500'
+                                  : 'bg-blue-500'
                             }`}
                             aria-label={`Selected${isCorrect ? ', correct' : isIncorrect ? ', incorrect' : ''}`}
                           />
@@ -120,31 +152,13 @@ function MCQTable({
                     </td>
                   )
                 })}
-                <td className="pl-2 py-1.5">
-                  <div className="relative group inline-block">
-                    <button
-                      type="button"
-                      aria-label="Emoji annotation"
-                      aria-haspopup="listbox"
-                      onClick={() => {
-                        if (responseId) {
-                          onAnnotate(responseId, {})
-                        }
-                      }}
-                      disabled={!responseId}
-                      className="text-base hover:bg-gray-100 rounded px-0.5"
-                    >
-                      {annotation.emoji ?? '—'}
-                    </button>
-                  </div>
-                </td>
               </tr>
             )
           })}
           {progress.length === 0 && (
             <tr>
               <td
-                colSpan={options.length + 2}
+                colSpan={options.length + 1}
                 className="py-4 text-center text-sm text-gray-400"
               >
                 No responses yet.
@@ -180,64 +194,126 @@ function FreeResponseList({
   onShareResponse?(responseId: string): void
   onReorder(newOrder: string[]): void
 }) {
+  const [draggedResponseId, setDraggedResponseId] = useState<string | null>(null)
+  const [dragOverResponseId, setDragOverResponseId] = useState<string | null>(null)
   // Apply order overrides: put overridden IDs first in the given order, then any remaining.
   const overrideSet = new Set(orderOverrides)
   const progressByResponseId = new Map(progress.filter((entry) => entry.responseId).map((entry) => [entry.responseId as string, entry]))
-  const ordered = [
+  const submittedResponses = [
     ...orderOverrides.map((id) => responses.find((r) => r.id === id)).filter(Boolean),
     ...responses.filter((r) => !overrideSet.has(r.id)),
   ] as ResponseWithName[]
-  const workingOnly = progress
-    .filter((entry) => entry.status === 'working' && !entry.responseId)
+  const pendingWithoutSubmission = progress
+    .filter((entry) => entry.status !== 'submitted' && !entry.responseId)
     .sort((left, right) => right.updatedAt - left.updatedAt)
 
+  const displayItems = [
+    ...submittedResponses.map((response) => {
+      const status = progressByResponseId.get(response.id)?.status ?? 'submitted'
+      return {
+        id: response.id,
+        response,
+        annotation: annotations[response.id] ?? { starred: false, flagged: false, emoji: null },
+        answerText: response.answer.type === 'free-response' ? response.answer.text : '',
+        status,
+        submittedResponseId: response.id,
+      }
+    }),
+    ...pendingWithoutSubmission.map((entry) => ({
+      id: `draft:${entry.studentId}:${entry.questionId}`,
+      response: {
+        id: `draft:${entry.studentId}:${entry.questionId}`,
+        questionId: entry.questionId,
+        studentId: entry.studentId,
+        submittedAt: entry.updatedAt,
+        answer: entry.answer ?? { type: 'free-response', text: '' },
+        studentName: entry.studentName,
+      } satisfies ResponseWithName,
+      annotation: { starred: false, flagged: false, emoji: null },
+      answerText:
+        entry.answer?.type === 'free-response'
+          ? entry.answer.text
+          : entry.status === 'working'
+            ? 'Working on a response…'
+            : 'Has not started yet.',
+      status: entry.status,
+      submittedResponseId: null,
+    })),
+  ]
+  const displayItemIds = displayItems.map((item) => item.id)
+  const [displayOrderIds, setDisplayOrderIds] = useState<string[]>(displayItemIds)
+
+  useEffect(() => {
+    setDisplayOrderIds((current) => {
+      const merged = mergeDisplayOrder(current, displayItemIds)
+      return areIdsEqual(current, merged) ? current : merged
+    })
+  }, [displayItemIds])
+
   function moveItem(fromIndex: number, toIndex: number) {
-    const ids = ordered.map((r) => r.id)
+    const ids = [...displayOrderIds]
     const moved = ids.splice(fromIndex, 1)[0]
     if (moved !== undefined) ids.splice(toIndex, 0, moved)
-    onReorder(ids)
+    setDisplayOrderIds(ids)
+    onReorder(ids.filter((id) => !id.startsWith('draft:')))
+  }
+
+  function clearDragState() {
+    setDraggedResponseId(null)
+    setDragOverResponseId(null)
   }
 
   return (
     <div className="space-y-2">
-      {ordered.map((resp, idx) => {
-        const annotation = annotations[resp.id] ?? { starred: false, flagged: false, emoji: null }
-        const answerText = resp.answer.type === 'free-response' ? resp.answer.text : ''
-        const status = progressByResponseId.get(resp.id)?.status ?? 'submitted'
+      {displayOrderIds.map((itemId, idx) => {
+        const item = displayItems.find((entry) => entry.id === itemId)
+        if (!item) {
+          return null
+        }
+
         return (
           <ResponseCard
-            key={resp.id}
-            response={resp}
-            annotation={annotation}
-            answerText={answerText}
-            status={status}
-            onAnnotate={(patch) => onAnnotate(resp.id, patch)}
-            onShare={onShareResponse ? () => onShareResponse(resp.id) : undefined}
-            shareLabel={activeSharedResponseId === resp.id ? 'Stop sharing' : 'Share'}
-            shareActive={activeSharedResponseId === resp.id}
+            key={item.id}
+            response={item.response}
+            annotation={item.annotation}
+            answerText={item.answerText}
+            status={item.status}
+            onAnnotate={(patch) => {
+              if (item.submittedResponseId !== null) {
+                onAnnotate(item.submittedResponseId, patch)
+              }
+            }}
+            onShare={item.submittedResponseId !== null && onShareResponse ? () => onShareResponse(item.submittedResponseId) : undefined}
+            shareLabel={item.submittedResponseId !== null && activeSharedResponseId === item.submittedResponseId ? 'Stop sharing' : 'Share'}
+            shareActive={item.submittedResponseId !== null && activeSharedResponseId === item.submittedResponseId}
+            draggable
+            isDragging={draggedResponseId === item.id}
+            isDragTarget={draggedResponseId !== null && dragOverResponseId === item.id && draggedResponseId !== item.id}
+            onDragStart={() => {
+              setDraggedResponseId(item.id)
+              setDragOverResponseId(item.id)
+            }}
+            onDragEnd={clearDragState}
+            onDragOver={() => {
+              if (draggedResponseId !== null && draggedResponseId !== item.id) {
+                setDragOverResponseId(item.id)
+              }
+            }}
+            onDrop={() => {
+              if (draggedResponseId === null) {
+                return
+              }
+              const reorderedIds = reorderResponseIds(displayOrderIds, draggedResponseId, item.id)
+              setDisplayOrderIds(reorderedIds)
+              onReorder(reorderedIds.filter((id) => !id.startsWith('draft:')))
+              clearDragState()
+            }}
             onMoveUp={idx > 0 ? () => moveItem(idx, idx - 1) : undefined}
-            onMoveDown={idx < ordered.length - 1 ? () => moveItem(idx, idx + 1) : undefined}
+            onMoveDown={idx < displayOrderIds.length - 1 ? () => moveItem(idx, idx + 1) : undefined}
           />
         )
       })}
-      {workingOnly.map((entry) => (
-        <ResponseCard
-          key={`${entry.studentId}:${entry.questionId}`}
-          response={{
-            id: `draft:${entry.studentId}:${entry.questionId}`,
-            questionId: entry.questionId,
-            studentId: entry.studentId,
-            submittedAt: entry.updatedAt,
-            answer: entry.answer ?? { type: 'free-response', text: '' },
-            studentName: entry.studentName,
-          }}
-          annotation={{ starred: false, flagged: false, emoji: null }}
-          answerText={entry.answer?.type === 'free-response' ? entry.answer.text : 'Working on a response…'}
-          status="working"
-          onAnnotate={() => {}}
-        />
-      ))}
-      {ordered.length === 0 && workingOnly.length === 0 && (
+      {displayItems.length === 0 && (
         <p className="text-sm text-gray-400 italic">No responses yet.</p>
       )}
     </div>
@@ -270,7 +346,6 @@ export default function ResponseViewer({
         question={question}
         progress={progress}
         annotations={annotations}
-        onAnnotate={onAnnotate}
       />
     )
   }

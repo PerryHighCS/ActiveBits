@@ -74,7 +74,7 @@ export default function NameEntryForm({ sessionId, onRegistered }: Props) {
               maxLength={80}
               autoComplete="name"
               autoFocus
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               aria-describedby={error !== null ? 'resonance-name-error' : undefined}
               disabled={submitting}
             />
@@ -91,7 +91,7 @@ export default function NameEntryForm({ sessionId, onRegistered }: Props) {
             disabled={!canSubmit}
             aria-busy={submitting}
             aria-disabled={!canSubmit}
-            className="w-full rounded bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? 'Joining…' : 'Join session'}
           </button>

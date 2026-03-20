@@ -49,7 +49,7 @@ export interface ResponseWithName extends Response {
   studentName: string
 }
 
-export type ResponseProgressStatus = 'working' | 'submitted'
+export type ResponseProgressStatus = 'idle' | 'working' | 'submitted'
 
 export interface ResponseProgress {
   questionId: string

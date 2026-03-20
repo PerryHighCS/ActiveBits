@@ -21,9 +21,9 @@ function ResponseCard({ response, question }: { response: SharedResponse; questi
   const reactionEntries = Object.entries(reactions).filter(([, count]) => count > 0)
 
   return (
-    <div className={`rounded-lg border bg-white px-4 py-3 space-y-1 ${response.isOwnResponse ? 'border-rose-300 bg-rose-50/40' : 'border-gray-200'}`}>
+    <div className={`rounded-lg border bg-white px-4 py-3 space-y-1 ${response.isOwnResponse ? 'border-blue-300 bg-blue-50/40' : 'border-gray-200'}`}>
       {response.isOwnResponse && (
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">
           Your response was shared
         </p>
       )}
@@ -108,7 +108,7 @@ function RevealSection({ reveal, question }: { reveal: QuestionReveal; question:
                 <span className="text-gray-700 break-words">{opt.text}</span>
                 <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                   <div
-                    className="h-2 bg-rose-500 rounded-full"
+                    className="h-2 bg-blue-500 rounded-full"
                     style={{ width: `${pct}%` }}
                     role="presentation"
                   />

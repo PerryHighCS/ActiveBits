@@ -1,15 +1,26 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 interface Props {
+  value?: string
   onSubmit(text: string): void | Promise<void>
   onDraftChange?(text: string): void
   submitting?: boolean
   submitted?: boolean
 }
 
-export default function FreeResponseInput({ onSubmit, onDraftChange, submitting = false, submitted = false }: Props) {
-  const [text, setText] = useState('')
+export default function FreeResponseInput({
+  value = '',
+  onSubmit,
+  onDraftChange,
+  submitting = false,
+  submitted = false,
+}: Props) {
+  const [text, setText] = useState(value)
   const canSubmit = !submitting && !submitted && text.trim().length > 0
+
+  useEffect(() => {
+    setText(value)
+  }, [value])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -47,14 +58,14 @@ export default function FreeResponseInput({ onSubmit, onDraftChange, submitting 
         rows={4}
         maxLength={2000}
         disabled={submitting}
-        className="w-full rounded border border-gray-300 px-3 py-2 text-sm resize-none focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
+        className="w-full rounded border border-gray-300 px-3 py-2 text-sm resize-none focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
       <button
         type="submit"
         disabled={!canSubmit}
         aria-busy={submitting}
         aria-disabled={!canSubmit}
-        className="w-full rounded bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {submitting ? 'Submitting…' : 'Submit answer'}
       </button>

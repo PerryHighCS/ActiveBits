@@ -1307,3 +1307,27 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/resonance/server/routes.ts`; `activities/resonance/shared/types.ts`; `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/resonance/client/student/ResonanceStudent.tsx`; `activities/resonance/server/routes.test.ts`
 - Follow-up action: Future Resonance features that depend on “what is live right now” should build on the session run fields first and treat `activeQuestionId` as compatibility state, not the authoritative source.
 - Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | manager question panel
+- Discovery: The selected-question panel in Resonance manager should stay focused on review and sharing, not on starting or stopping live runs. Live activation controls still belong in the question list/sidebar where multi-question runs are managed.
+- Why it matters: Duplicating activation actions inside the selected-question panel makes the manager UI harder to scan and creates overlapping control surfaces for the same live-run state.
+- Evidence: `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/resonance/client/manager/ResonanceManager.test.ts`
+- Follow-up action: If Resonance adds more question-panel actions later, keep them scoped to review/share workflows unless the product explicitly wants a second live-run control surface there.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | manager question list truncation
+- Discovery: The Resonance manager question list should show `Show more` based on actual rendered text overflow, not a fixed character-count guess. The narrow sidebar can truncate stems well before they pass an arbitrary length threshold.
+- Why it matters: Character-count heuristics miss real truncation cases like medium-length prompts in narrow layouts, leaving users with cut-off stems and no way to expand them.
+- Evidence: `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/resonance/client/manager/ResonanceManager.test.ts`
+- Follow-up action: If the question list layout changes again, keep the expansion affordance tied to measured overflow rather than copy length so it stays accurate across widths and font changes.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | manager response cards
+- Discovery: Free-response `ResponseCard` actions read better when the student-specific tools stay grouped in one left control stack. Star, flag, emoji, and share belong together, while reorder arrows can stay separated as layout controls.
+- Why it matters: Splitting share and emoji away from the star/flag stack makes the per-response actions harder to scan and increases pointer travel during instructor review.
+- Evidence: `activities/resonance/client/manager/ResponseCard.tsx`; `activities/resonance/client/manager/ResponseCard.test.tsx`
+- Follow-up action: If more response-level tools are added later, prefer keeping content actions in the left stack and reserve the opposite edge for ordering or layout controls.
+- Owner: Codex

@@ -104,7 +104,7 @@ export default function ResonancePersistentLinkBuilder({
           placeholder="Minimum 6 characters"
           autoComplete="off"
           spellCheck={false}
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
+          className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           aria-describedby="resonance-plb-teacher-code-hint"
           disabled={submitting}
         />
@@ -137,7 +137,7 @@ export default function ResonancePersistentLinkBuilder({
         disabled={!canSubmit}
         aria-busy={submitting}
         aria-disabled={!canSubmit}
-        className="w-full rounded bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {submitting
           ? isEdit

@@ -522,6 +522,25 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     })
   }
 
+  for (const question of questions) {
+    for (const student of Object.values(students)) {
+      const key = buildDraftKey(question.id, student.studentId)
+      if (submittedByQuestionStudent.has(key) || responseDrafts[key] !== undefined) {
+        continue
+      }
+
+      progress.push({
+        questionId: question.id,
+        studentId: student.studentId,
+        studentName: student.name,
+        updatedAt: student.joinedAt,
+        status: 'idle',
+        answer: null,
+        responseId: null,
+      })
+    }
+  }
+
   return {
     sessionId: session.id,
     questions,

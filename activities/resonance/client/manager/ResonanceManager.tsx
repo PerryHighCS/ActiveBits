@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import type { InstructorAnnotation, Question } from '../../shared/types.js'
 import { useInstructorState } from '../hooks/useInstructorState.js'
 import ResponseViewer from './ResponseViewer.js'
+import QuestionBuilder from '../tools/QuestionBuilder.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -42,23 +43,6 @@ function resolvePasscode(sessionId: string): string | null {
   return null
 }
 
-function buildNewQuestion(text: string, type: Question['type']): Question {
-  const id = `q_${Date.now().toString(36)}`
-  if (type === 'free-response') {
-    return { id, type: 'free-response', text, order: 0 }
-  }
-  return {
-    id,
-    type: 'multiple-choice',
-    text,
-    order: 0,
-    options: [
-      { id: `${id}_a`, text: 'Option A' },
-      { id: `${id}_b`, text: 'Option B' },
-    ],
-  }
-}
-
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
   if (deadlineAt === null) {
     return null
@@ -71,7 +55,27 @@ function formatRemainingTime(deadlineAt: number | null, now: number): string | n
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
+export function shouldShowQuestionPanelActions(question: Question): boolean {
+  return question.type === 'multiple-choice'
+}
+
+export function isQuestionStemVisuallyTruncated(
+  element: Pick<HTMLElement, 'clientWidth' | 'scrollWidth' | 'clientHeight' | 'scrollHeight'> | null,
+): boolean {
+  if (element === null) {
+    return false
+  }
+
+  return element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight
+}
+
 export function toggleQuestionActivationSelection(current: string[], questionId: string): string[] {
+  return current.includes(questionId)
+    ? current.filter((id) => id !== questionId)
+    : [...current, questionId]
+}
+
+export function toggleExpandedQuestionStem(current: string[], questionId: string): string[] {
   return current.includes(questionId)
     ? current.filter((id) => id !== questionId)
     : [...current, questionId]
@@ -97,52 +101,6 @@ export function normalizeActivationSelection(
 }
 
 // ---------------------------------------------------------------------------
-// AddQuestionForm: quick inline question creation
-// ---------------------------------------------------------------------------
-
-function AddQuestionForm({ onAdd }: { onAdd(q: Question): void }) {
-  const [text, setText] = useState('')
-  const [type, setType] = useState<Question['type']>('free-response')
-  const canAdd = text.trim().length > 0
-
-  return (
-    <div className="border-t border-gray-200 pt-3 mt-3 space-y-2">
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Add question</p>
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Question text…"
-        rows={2}
-        className="w-full rounded border border-gray-200 px-2 py-1.5 text-sm resize-none focus:border-rose-400 focus:outline-none"
-        aria-label="New question text"
-      />
-      <div className="flex items-center gap-2">
-        <select
-          value={type}
-          onChange={(e) => setType(e.target.value as Question['type'])}
-          className="rounded border border-gray-200 px-2 py-1 text-sm"
-          aria-label="Question type"
-        >
-          <option value="free-response">Free response</option>
-          <option value="multiple-choice">Multiple choice</option>
-        </select>
-        <button
-          type="button"
-          disabled={!canAdd}
-          onClick={() => {
-            onAdd(buildNewQuestion(text.trim(), type))
-            setText('')
-          }}
-          className="rounded bg-gray-700 px-3 py-1 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
-        >
-          Add
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // ResonanceManager
 // ---------------------------------------------------------------------------
 
@@ -151,7 +109,7 @@ function AddQuestionForm({ onAdd }: { onAdd(q: Question): void }) {
  *
  * Reads the instructor passcode from sessionStorage (stored by
  * createSessionBootstrap), polls the session state, and provides:
- * - Question list with activation controls
+ * - Question list with live-state controls
  * - Response review (MCQ table or free-response list) with annotation
  * - Share-results flow with correct-answer reveal toggle
  * - Quick inline question creation
@@ -163,7 +121,11 @@ export default function ResonanceManager() {
   const [isResolvingPasscode, setIsResolvingPasscode] = useState(true)
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [activationSelectionIds, setActivationSelectionIds] = useState<string[]>([])
+  const [expandedQuestionStemIds, setExpandedQuestionStemIds] = useState<string[]>([])
+  const [overflowingQuestionStemIds, setOverflowingQuestionStemIds] = useState<string[]>([])
+  const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
+  const questionStemRefs = useRef<Record<string, HTMLParagraphElement | null>>({})
 
   // Resolve passcode from same-tab bootstrap state first, then recover it from
   // the server when this manager is running as an embedded child session.
@@ -252,7 +214,43 @@ export default function ResonanceManager() {
     setActivationSelectionIds((current) => {
       return normalizeActivationSelection(current, availableIds, snapshot.activeQuestionIds)
     })
+    setExpandedQuestionStemIds((current) => current.filter((questionId) => availableIds.includes(questionId)))
+    setOverflowingQuestionStemIds((current) => current.filter((questionId) => availableIds.includes(questionId)))
+    questionStemRefs.current = Object.fromEntries(
+      Object.entries(questionStemRefs.current).filter(([questionId]) => availableIds.includes(questionId)),
+    )
   }, [snapshot])
+
+  useEffect(() => {
+    if (snapshot === null) {
+      return
+    }
+
+    const measureOverflow = () => {
+      const overflowingQuestionIds = snapshot.questions
+        .filter((question) => isQuestionStemVisuallyTruncated(questionStemRefs.current[question.id] ?? null))
+        .map((question) => question.id)
+
+      setOverflowingQuestionStemIds((current) => {
+        if (
+          current.length === overflowingQuestionIds.length
+          && current.every((questionId, index) => questionId === overflowingQuestionIds[index])
+        ) {
+          return current
+        }
+
+        return overflowingQuestionIds
+      })
+    }
+
+    const frameId = window.requestAnimationFrame(measureOverflow)
+    window.addEventListener('resize', measureOverflow)
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      window.removeEventListener('resize', measureOverflow)
+    }
+  }, [snapshot, expandedQuestionStemIds])
 
   // ---------------------------------------------------------------------------
   // Instructor actions
@@ -286,6 +284,10 @@ export default function ResonanceManager() {
 
   const toggleActivationSelection = useCallback((questionId: string) => {
     setActivationSelectionIds((current) => toggleQuestionActivationSelection(current, questionId))
+  }, [])
+
+  const toggleQuestionStemExpansion = useCallback((questionId: string) => {
+    setExpandedQuestionStemIds((current) => toggleExpandedQuestionStem(current, questionId))
   }, [])
 
   const annotateResponse = useCallback(
@@ -364,6 +366,8 @@ export default function ResonanceManager() {
   const hasLiveRun = activeQuestionDeadlineAt === null || activeQuestionDeadlineAt > countdownNow
   const activeQuestionIdSet = new Set(hasLiveRun ? activeQuestionIds : [])
   const activationSelectionSet = new Set(activationSelectionIds)
+  const expandedQuestionStemSet = new Set(expandedQuestionStemIds)
+  const overflowingQuestionStemSet = new Set(overflowingQuestionStemIds)
   const liveCountdown = formatRemainingTime(activeQuestionDeadlineAt, countdownNow)
   const activeReveal = reveals[0] ?? null
 
@@ -406,15 +410,15 @@ export default function ResonanceManager() {
           <span className="text-xs text-gray-500">{students.length} student{students.length !== 1 ? 's' : ''}</span>
         </div>
         <div className="flex items-center gap-2">
+          {liveCountdown !== null && activeQuestionIds.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-right">
+              <p className="text-[10px] uppercase tracking-wide text-amber-700">Time left</p>
+              <p className="text-sm font-semibold text-amber-900">{liveCountdown}</p>
+            </div>
+          )}
           {error !== null && (
             <span className="text-xs text-amber-600">{error}</span>
           )}
-          <a
-            href="/util/resonance"
-            className="text-sm text-rose-600 hover:text-rose-700 font-medium"
-          >
-            Resonance Tools ↗
-          </a>
         </div>
       </header>
 
@@ -423,6 +427,34 @@ export default function ResonanceManager() {
         <aside className="w-64 shrink-0 bg-white border-r border-gray-200 flex flex-col overflow-y-auto">
           <div className="p-3 space-y-1">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+              Build
+            </p>
+            <div className="pb-3">
+              <button
+                type="button"
+                aria-expanded={isAddQuestionOpen}
+                aria-controls="resonance-add-question-builder"
+                onClick={() => setIsAddQuestionOpen((current) => !current)}
+                className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2.5 py-2 text-left text-xs font-medium text-gray-700 hover:border-gray-300 hover:bg-white"
+              >
+                <span>{isAddQuestionOpen ? 'Hide question builder' : 'Add question'}</span>
+                <span className="text-sm text-gray-400">{isAddQuestionOpen ? '▴' : '▾'}</span>
+              </button>
+              {isAddQuestionOpen && (
+                <div id="resonance-add-question-builder" className="mt-2">
+                  <QuestionBuilder
+                    nextOrder={questions.length}
+                    onSave={(question) => {
+                      addQuestion(question)
+                      setIsAddQuestionOpen(false)
+                    }}
+                    onCancel={() => setIsAddQuestionOpen(false)}
+                  />
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 border-t border-gray-200 pt-3">
               Questions
             </p>
 
@@ -431,46 +463,28 @@ export default function ResonanceManager() {
             )}
 
             {questions.length > 1 && (
-              <div className="space-y-2 pb-2">
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => activateQuestions(activationSelectionIds)}
-                    disabled={activationSelectionIds.length === 0}
-                    className="rounded bg-rose-600 px-2 py-1 text-xs font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Activate selected ({activationSelectionIds.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActivationSelectionIds(questions.map((question) => question.id))}
-                    className="rounded border border-rose-300 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
-                  >
-                    Select all
-                  </button>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => activateQuestions(questions.map((question) => question.id))}
-                    className="rounded bg-rose-600 px-2 py-1 text-xs font-medium text-white hover:bg-rose-700"
-                  >
-                    Activate all
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => activateQuestion(null)}
-                    className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
-                  >
-                    Stop all
-                  </button>
-                </div>
+              <div className="flex flex-wrap gap-1.5 pb-2">
                 <button
                   type="button"
-                  onClick={() => setActivationSelectionIds(activeQuestionIds)}
-                  className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                  onClick={() => setActivationSelectionIds(questions.map((question) => question.id))}
+                  className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
                 >
-                  Match live set
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => activateQuestions(activationSelectionIds)}
+                  disabled={activationSelectionIds.length === 0}
+                    className="rounded bg-blue-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Activate
+                </button>
+                <button
+                  type="button"
+                  onClick={() => activateQuestion(null)}
+                  className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
+                >
+                  Stop
                 </button>
               </div>
             )}
@@ -478,15 +492,17 @@ export default function ResonanceManager() {
             {questions.map((q) => {
               const isActive = activeQuestionIdSet.has(q.id)
               const isSelectedForActivation = activationSelectionSet.has(q.id)
+              const isStemExpanded = expandedQuestionStemSet.has(q.id)
               const isViewing = q.id === activeTab
               const responseCount = progress.filter((entry) => entry.questionId === q.id).length
               const hasReveal = reveals.some((rv) => rv.questionId === q.id)
+              const canExpandStem = isStemExpanded || overflowingQuestionStemSet.has(q.id)
 
               return (
                 <div
                   key={q.id}
                   className={`rounded-md border px-2 py-2 cursor-pointer text-sm transition-colors ${
-                    isViewing ? 'border-rose-300 bg-rose-50' : 'border-gray-100 hover:border-gray-300'
+                    isViewing ? 'border-blue-300 bg-blue-50' : 'border-gray-100 hover:border-gray-300'
                   }`}
                   onClick={() => setActiveTab(q.id)}
                   role="button"
@@ -505,12 +521,75 @@ export default function ResonanceManager() {
                         }}
                         onClick={(e) => e.stopPropagation()}
                         aria-label={`Select ${q.text} for activation`}
-                        className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-rose-600 focus:ring-rose-500"
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
-                      <p className="text-xs text-gray-700 truncate flex-1">{q.text}</p>
+                      <div className="min-w-0 flex-1">
+                        {isStemExpanded ? (
+                          <div className="space-y-1">
+                            <p
+                              ref={(element) => {
+                                questionStemRefs.current[q.id] = element
+                              }}
+                              className="text-xs text-gray-700 whitespace-normal break-words"
+                            >
+                              {q.text}
+                            </p>
+                            {canExpandStem && (
+                              <button
+                                type="button"
+                                aria-expanded={isStemExpanded}
+                                aria-label="Collapse question stem"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  toggleQuestionStemExpansion(q.id)
+                                }}
+                                className="inline-flex items-center text-[10px] font-medium text-blue-700 hover:text-blue-800"
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  viewBox="0 0 12 12"
+                                  className="h-3 w-3"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M2.5 7.5 6 4.5l3.5 3" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-baseline gap-1 min-w-0">
+                            <p
+                              ref={(element) => {
+                                questionStemRefs.current[q.id] = element
+                              }}
+                              className="flex-1 overflow-hidden whitespace-nowrap text-clip text-xs text-gray-700"
+                            >
+                              {q.text}
+                            </p>
+                            {canExpandStem && (
+                              <button
+                                type="button"
+                                aria-expanded={isStemExpanded}
+                                aria-label="Expand question stem"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  toggleQuestionStemExpansion(q.id)
+                                }}
+                                className="shrink-0 text-[10px] font-medium leading-none text-blue-700 hover:text-blue-800"
+                              >
+                                ...
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                     {isActive && (
-                      <span className="text-[10px] bg-rose-500 text-white rounded px-1 shrink-0">Live</span>
+                      <span className="text-[10px] bg-blue-500 text-white rounded px-1 shrink-0">Live</span>
                     )}
                     {hasReveal && !isActive && (
                       <span className="text-[10px] text-gray-400 shrink-0">Shared</span>
@@ -529,7 +608,7 @@ export default function ResonanceManager() {
                         }}
                         className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                           isSelectedForActivation
-                            ? 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+                            ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                         }`}
                       >
@@ -541,7 +620,6 @@ export default function ResonanceManager() {
               )
             })}
 
-            <AddQuestionForm onAdd={addQuestion} />
           </div>
         </aside>
 
@@ -558,7 +636,7 @@ export default function ResonanceManager() {
                 <p className="text-xs text-gray-500 uppercase tracking-wide">
                   {viewingQuestion.type === 'free-response' ? 'Free response' : 'Multiple choice'}
                   {activeQuestionIdSet.has(viewingQuestion.id) && (
-                    <span className="ml-2 text-rose-600 font-medium">● Live</span>
+                    <span className="ml-2 text-blue-600 font-medium">● Live</span>
                   )}
                 </p>
                 <p className="text-base font-medium text-gray-900">{viewingQuestion.text}</p>
@@ -567,15 +645,12 @@ export default function ResonanceManager() {
                   {isViewingQuestionShared && (
                     <span className="ml-2 text-green-600">● Results shared</span>
                   )}
-                  {liveCountdown !== null && activeQuestionIds.length > 0 && (
-                    <span className="ml-2 text-amber-600">⏱ {liveCountdown} remaining</span>
-                  )}
                 </p>
               </div>
 
               {/* Action bar */}
-              <div className="flex items-center gap-2">
-                {viewingQuestion.type === 'multiple-choice' && (
+              {shouldShowQuestionPanelActions(viewingQuestion) && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -589,39 +664,12 @@ export default function ResonanceManager() {
                         mcqCorrectOptionIds !== undefined && mcqCorrectOptionIds.length > 0 ? mcqCorrectOptionIds : null,
                       )
                     }}
-                    className="rounded border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50"
+                    className="rounded border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50"
                   >
                     {isViewingQuestionShared ? 'Stop sharing' : 'Share'}
                   </button>
-                )}
-                {activeQuestionIdSet.has(viewingQuestion.id) ? (
-                  <button
-                    type="button"
-                    onClick={() => activateQuestion(null)}
-                    className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
-                  >
-                    Stop all live questions
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => activateQuestion(viewingQuestion.id)}
-                    className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
-                  >
-                    Activate question
-                  </button>
-                )}
-                {questions.length > 1 && !activeQuestionIdSet.has(viewingQuestion.id) && (
-                  <button
-                    type="button"
-                    onClick={() => activateQuestions(activationSelectionIds)}
-                    disabled={activationSelectionIds.length === 0}
-                    className="rounded border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50"
-                  >
-                    Activate selected set
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Response viewer */}
               <ResponseViewer

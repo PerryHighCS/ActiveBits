@@ -9,7 +9,7 @@ function PercentBar({ pct }: { pct: number }) {
   return (
     <div className="flex items-center gap-2 text-xs">
       <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div className="h-2 bg-rose-500 rounded-full" style={{ width: `${pct}%` }} role="presentation" />
+        <div className="h-2 bg-blue-500 rounded-full" style={{ width: `${pct}%` }} role="presentation" />
       </div>
       <span className="w-8 text-right text-gray-500">{pct}%</span>
     </div>
