@@ -18,7 +18,7 @@
 - Support lightweight badges and achievements, including simple emoji-style badges.
 - Show student progress visually over time with milestone markers tied to slide views and activity achievements.
 - Include points, badges, and achievements in exported reports both per activity and in the whole-session summary.
-- Preserve activity containment by keeping SyncDeck generic and making child activity reporting additive across deck.
+- Preserve activity containment by keeping SyncDeck generic and making child activity reporting additive.
 
 ## Current State
 
