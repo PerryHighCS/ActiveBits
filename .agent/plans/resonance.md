@@ -26,7 +26,7 @@ Resonance should follow the same containment and dashboard patterns used by newe
   - second row column titles: "Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"
   - third row on - one question per row
 - Permanent links that preserve a question set using an activity-owned deep-link flow.
-  - Incorporate a link builder into instructor utility editor
+  - Incorporate a link builder plus JSON/CSV upload into both the session-creation flow and the instructor utility editor
 - Instructor bootstrap via session-created passcode stored in `sessionStorage`.
 - Student name registration.
 - Student answer submission.
@@ -90,6 +90,8 @@ const resonanceConfig: ActivityConfig = {
 Notes:
 
 - `deepLinkOptions` is not required if Resonance owns the permanent-link modal UI.
+- `deepLinkGenerator` is still needed so the activity-owned builder can submit validated question
+  data to an authoritative server endpoint that returns the final persistent URL.
 - The dashboard should stay activity-agnostic. Question-set authoring, validation, and upload flow
   belong in Resonance-owned components.
 - If Resonance later needs extra dashboard integration, prefer evolving
@@ -101,18 +103,31 @@ Notes:
 
 Resonance should use an activity-owned builder, similar to SyncDeck's modern pattern:
 
-1. Instructor opens the dashboard permanent-link modal.
+1. Instructor can open Resonance permalink building from the session-creation UI or from the
+   separate Resonance utility tool.
 2. `PersistentLinkBuilderComponent` handles question-set import or authoring.
-3. The builder posts plaintext `Question[]` plus `teacherCode` to
+3. The builder accepts uploaded JSON and Gimkit-compatible CSV instead of trying to build complex
+   questions inside the shared dashboard UI.
+4. The builder performs client-side parsing and validation, shows question summary/errors, and only
+   enables submission when the imported data is valid.
+5. The builder posts plaintext `Question[]` plus `teacherCode` to
    `POST /api/resonance/generate-link`.
-4. The server returns the authoritative `{ hash, url }`.
-5. Dashboard success state uses the returned URL directly.
+6. The server performs final validation, encrypts the payload, and returns the authoritative
+   `{ hash, url }`.
+7. Dashboard/session-creation success state uses the returned URL directly.
 
 This keeps question-set-specific UX and validation inside the activity instead of adding special
 branches to shared dashboard code.
 
 Because the repo does not have any other persistent store for this workflow, the encrypted
 question payload should live in URL query data for persistent links.
+
+Resonance should not rely on the current shared `deepLinkGenerator.preflight` hook for uploaded
+question-set validation. That hook fits lightweight field checks, while Resonance needs richer
+file parsing/import validation. Validation should happen in two places:
+
+- client-side inside the custom persistent-link builder
+- server-side inside `POST /api/resonance/generate-link`
 
 ### Instructor Bootstrap
 
@@ -170,6 +185,11 @@ Plan direction:
   gallery-walk review tooling pattern.
 - The live manager should still include a header/action area with the controls needed to launch or
   navigate to the separate builder/report tool.
+- The session-creation flow should also expose Resonance permalink building so instructors can
+  upload a JSON or Gimkit CSV file and create a permanent link without first entering the separate
+  utility tool.
+- The session-creation flow should also support JSON/CSV upload for ordinary Resonance session
+  creation, not just permanent-link generation.
 
 ### WebSocket Envelope
 
@@ -369,7 +389,14 @@ activities/resonance/
 
 - [ ] Implement `POST /api/resonance/create` returning `{ id, instructorPasscode }`.
 - [ ] Implement `ResonancePersistentLinkBuilder` using `ActivityPersistentLinkBuilderProps`.
+- [ ] Expose the permalink builder in the Resonance session-creation UI.
+- [ ] Support JSON and Gimkit-compatible CSV upload in the session-creation UI.
+- [ ] Allow the session-creation UI to create either an ad-hoc live session or a permanent link
+      from the uploaded question set.
+- [ ] Support JSON and Gimkit-compatible CSV upload in the builder.
+- [ ] Parse and validate imported files client-side before enabling link generation.
 - [ ] Implement `POST /api/resonance/generate-link`.
+- [ ] Validate imported question payloads server-side in `POST /api/resonance/generate-link`.
 - [ ] Encrypt question sets in the persistent-link flow for obscuration.
 - [ ] Store the encrypted question payload in URL query data because there is no other persistent
       store available for this workflow.
