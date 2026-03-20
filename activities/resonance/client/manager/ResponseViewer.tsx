@@ -62,6 +62,45 @@ function normalizeOrderOverrides(orderOverrides: string[] | unknown): string[] {
     : []
 }
 
+export function getMcqSelectionTone({
+  isPoll,
+  isCorrect,
+  isIncorrect,
+}: {
+  isPoll: boolean
+  isCorrect: boolean
+  isIncorrect: boolean
+}): {
+  cellClassName: string
+  dotClassName: string
+} {
+  if (isPoll) {
+    return {
+      cellClassName: 'bg-sky-50',
+      dotClassName: 'bg-sky-500',
+    }
+  }
+
+  if (isCorrect) {
+    return {
+      cellClassName: 'bg-green-50',
+      dotClassName: 'bg-green-600',
+    }
+  }
+
+  if (isIncorrect) {
+    return {
+      cellClassName: 'bg-red-50',
+      dotClassName: 'bg-red-500',
+    }
+  }
+
+  return {
+    cellClassName: '',
+    dotClassName: 'bg-red-500',
+  }
+}
+
 interface Props {
   question: Question
   responses: ResponseWithName[]
@@ -141,33 +180,24 @@ function MCQTable({
                 </td>
                 {options.map((opt) => {
                   const chosen = opt.id === selectedOptionId
+                  const selectionTone = getMcqSelectionTone({
+                    isPoll,
+                    isCorrect,
+                    isIncorrect,
+                  })
                   return (
                     <td
                       key={opt.id}
                       className={`px-3 py-2 text-center align-middle ${
                         chosen
-                          ? isPoll
-                            ? 'bg-sky-50'
-                            : isCorrect
-                            ? 'bg-green-50'
-                            : isIncorrect
-                              ? 'bg-red-50'
-                              : 'bg-blue-50'
+                          ? selectionTone.cellClassName
                           : ''
                       }`}
                     >
                       {chosen && (
                         <div className="flex justify-center">
                           <span
-                            className={`inline-block h-5 w-5 rounded-full ${
-                              isPoll
-                                ? 'bg-sky-500'
-                                : isCorrect
-                                ? 'bg-green-600'
-                                : isIncorrect
-                                  ? 'bg-red-500'
-                                  : 'bg-blue-500'
-                            }`}
+                            className={`inline-block h-5 w-5 rounded-full ${selectionTone.dotClassName}`}
                             aria-label={`Selected${isCorrect ? ', correct' : isIncorrect ? ', incorrect' : ''}`}
                           />
                         </div>

@@ -221,13 +221,14 @@ function RevealSection({
               viewerResponse?.answer.type === 'multiple-choice' &&
               viewerResponse.answer.selectedOptionId === opt.id
             const isCorrectOption = correctOptionIds?.includes(opt.id) ?? false
-            const rowClass = isPoll
+            const baseRowClass = isPoll
               ? isViewerSelection
                 ? 'border-blue-300 bg-blue-50'
                 : 'border-transparent'
               : isCorrectOption
                 ? 'border-green-300 bg-green-50'
                 : 'border-red-200 bg-red-50/70'
+            const rowClass = `${baseRowClass} ${isViewerSelection ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-white' : ''}`.trim()
             const meterClass = isPoll ? 'bg-blue-500' : isCorrectOption ? 'bg-green-500' : 'bg-red-400'
             return (
               <div

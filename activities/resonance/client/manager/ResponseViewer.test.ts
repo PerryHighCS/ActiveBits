@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mergeDisplayOrder, moveResponseIdToEnd, reorderResponseIds } from './ResponseViewer.js'
+import {
+  getMcqSelectionTone,
+  mergeDisplayOrder,
+  moveResponseIdToEnd,
+  reorderResponseIds,
+} from './ResponseViewer.js'
 
 void test('reorderResponseIds moves the dragged response to the target position', () => {
   assert.deepEqual(
@@ -54,5 +59,31 @@ void test('reorder helpers tolerate unexpected runtime shapes upstream', () => {
   assert.deepEqual(
     mergeDisplayOrder([], ['r1']),
     ['r1'],
+  )
+})
+
+void test('getMcqSelectionTone uses green for correct answers and red for incorrect answers', () => {
+  assert.deepEqual(
+    getMcqSelectionTone({ isPoll: false, isCorrect: true, isIncorrect: false }),
+    {
+      cellClassName: 'bg-green-50',
+      dotClassName: 'bg-green-600',
+    },
+  )
+
+  assert.deepEqual(
+    getMcqSelectionTone({ isPoll: false, isCorrect: false, isIncorrect: true }),
+    {
+      cellClassName: 'bg-red-50',
+      dotClassName: 'bg-red-500',
+    },
+  )
+
+  assert.deepEqual(
+    getMcqSelectionTone({ isPoll: true, isCorrect: false, isIncorrect: false }),
+    {
+      cellClassName: 'bg-sky-50',
+      dotClassName: 'bg-sky-500',
+    },
   )
 })

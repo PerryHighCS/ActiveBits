@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   isQuestionStemVisuallyTruncated,
   normalizeActivationSelection,
+  shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
   toggleExpandedQuestionStem,
   toggleQuestionActivationSelection,
@@ -35,6 +36,12 @@ void test('normalizeActivationSelection keeps valid selection and falls back to 
     normalizeActivationSelection([], [], []),
     [],
   )
+})
+
+void test('shouldShowQuestionListActivationControls keeps activate and stop available for single-question sessions', () => {
+  assert.equal(shouldShowQuestionListActivationControls(0), false)
+  assert.equal(shouldShowQuestionListActivationControls(1), true)
+  assert.equal(shouldShowQuestionListActivationControls(3), true)
 })
 
 void test('shouldShowQuestionPanelActions only keeps share controls on multiple-choice questions', () => {

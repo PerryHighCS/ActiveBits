@@ -100,6 +100,10 @@ export function normalizeActivationSelection(
   return availableQuestionIds[0] ? [availableQuestionIds[0]] : []
 }
 
+export function shouldShowQuestionListActivationControls(questionCount: number): boolean {
+  return questionCount > 0
+}
+
 // ---------------------------------------------------------------------------
 // ResonanceManager
 // ---------------------------------------------------------------------------
@@ -462,20 +466,22 @@ export default function ResonanceManager() {
               <p className="text-xs text-gray-400 italic">No questions yet.</p>
             )}
 
-            {questions.length > 1 && (
+            {shouldShowQuestionListActivationControls(questions.length) && (
               <div className="flex flex-wrap gap-1.5 pb-2">
-                <button
-                  type="button"
-                  onClick={() => setActivationSelectionIds(questions.map((question) => question.id))}
-                  className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
-                >
-                  Select all
-                </button>
+                {questions.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setActivationSelectionIds(questions.map((question) => question.id))}
+                    className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    Select all
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => activateQuestions(activationSelectionIds)}
                   disabled={activationSelectionIds.length === 0}
-                    className="rounded bg-blue-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded bg-blue-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Activate
                 </button>
