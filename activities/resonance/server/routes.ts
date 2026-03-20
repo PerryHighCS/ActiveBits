@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import {
@@ -12,7 +13,7 @@ import type {
   Response,
   Student,
 } from '../shared/types.js'
-import { validateAnswerPayload, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
+import { validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 
 // ---------------------------------------------------------------------------
@@ -136,6 +137,23 @@ function asResonanceSession(session: SessionRecord | null): ResonanceSession | n
 
 function generatePasscode(): string {
   return Math.random().toString(36).slice(2, 10).toUpperCase()
+}
+
+function verifyInstructorPasscode(expected: string, candidate: string): boolean {
+  if (!expected || !candidate) return false
+  const exp = Buffer.from(expected, 'utf8')
+  const cand = Buffer.from(candidate, 'utf8')
+  if (exp.length !== cand.length) return false
+  try {
+    return timingSafeEqual(exp, cand)
+  } catch {
+    return false
+  }
+}
+
+function checkInstructorAuth(req: RouteRequest, session: ResonanceSession): boolean {
+  const header = req.headers?.['x-instructor-passcode']
+  return typeof header === 'string' && verifyInstructorPasscode(session.data.instructorPasscode, header)
 }
 
 // ---------------------------------------------------------------------------
@@ -468,19 +486,351 @@ export default function setupResonanceRoutes(
     })
   })
 
-  // GET /api/resonance/:sessionId/responses — stub; full implementation in Phase 5
+  // GET /api/resonance/:sessionId/responses
+  // Returns the full instructor session snapshot with student names and annotations.
   app.get('/api/resonance/:sessionId/responses', async (req, res) => {
     const { sessionId } = req.params
     if (!sessionId) {
       res.status(400).json({ error: 'missing sessionId' })
       return
     }
+
     const session = asResonanceSession(await sessions.get(sessionId))
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
     }
-    res.status(501).json({ error: 'responses endpoint not yet implemented' })
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const { questions, activeQuestionId, students, responses, annotations, reveals, responseOrderOverrides } =
+      session.data
+
+    // Enrich responses with student names.
+    const responsesWithNames = responses.map((r) => ({
+      ...r,
+      studentName: students[r.studentId]?.name ?? 'Unknown',
+    }))
+
+    res.json({
+      sessionId,
+      questions,
+      activeQuestionId,
+      students: Object.values(students),
+      responses: responsesWithNames,
+      annotations,
+      reveals,
+      responseOrderOverrides,
+    })
+  })
+
+  // POST /api/resonance/:sessionId/activate-question
+  // Sets the active question. Pass null to deactivate.
+  app.post('/api/resonance/:sessionId/activate-question', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asResonanceSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const body = isPlainObject(req.body) ? req.body : {}
+    const questionId = body.questionId === null ? null
+      : typeof body.questionId === 'string' ? body.questionId
+      : undefined
+
+    if (questionId === undefined) {
+      res.status(400).json({ error: 'questionId must be a string or null' })
+      return
+    }
+
+    if (questionId !== null && !session.data.questions.some((q) => q.id === questionId)) {
+      res.status(404).json({ error: 'question not found' })
+      return
+    }
+
+    session.data.activeQuestionId = questionId
+    await sessions.set(sessionId, session)
+
+    console.info('[resonance] Question activated', { sessionId, questionId })
+    void broadcast('resonance:question-activated', { questionId }, sessionId)
+    res.json({ ok: true, activeQuestionId: questionId })
+  })
+
+  // POST /api/resonance/:sessionId/add-question
+  // Adds a new question to the session's question set.
+  app.post('/api/resonance/:sessionId/add-question', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asResonanceSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const errors: string[] = []
+    const question = validateQuestion(req.body, errors)
+    if (!question || errors.length > 0) {
+      res.status(400).json({ error: errors[0] ?? 'invalid question', details: errors })
+      return
+    }
+
+    // Enforce unique IDs within the set.
+    if (session.data.questions.some((q) => q.id === question.id)) {
+      res.status(409).json({ error: 'a question with that id already exists' })
+      return
+    }
+
+    session.data.questions.push(question)
+    await sessions.set(sessionId, session)
+
+    console.info('[resonance] Question added', { sessionId, questionId: question.id })
+    void broadcast('resonance:question-added', { question }, sessionId)
+    res.json({ ok: true, question })
+  })
+
+  // POST /api/resonance/:sessionId/annotate-response
+  // Updates the private instructor annotation on a single response.
+  app.post('/api/resonance/:sessionId/annotate-response', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asResonanceSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const body = isPlainObject(req.body) ? req.body : {}
+    const responseId = typeof body.responseId === 'string' ? body.responseId : null
+    if (!responseId || !session.data.responses.some((r) => r.id === responseId)) {
+      res.status(400).json({ error: 'invalid responseId' })
+      return
+    }
+
+    const patch = isPlainObject(body.annotation) ? body.annotation : {}
+    const existing = session.data.annotations[responseId] ?? {
+      starred: false,
+      flagged: false,
+      emoji: null,
+    }
+
+    const updated: InstructorAnnotation = {
+      starred: typeof patch.starred === 'boolean' ? patch.starred : existing.starred,
+      flagged: typeof patch.flagged === 'boolean' ? patch.flagged : existing.flagged,
+      emoji:
+        'emoji' in patch
+          ? (typeof patch.emoji === 'string' ? patch.emoji : null)
+          : existing.emoji,
+    }
+
+    session.data.annotations[responseId] = updated
+    await sessions.set(sessionId, session)
+
+    res.json({ ok: true, responseId, annotation: updated })
+  })
+
+  // POST /api/resonance/:sessionId/share-results
+  // Creates a QuestionReveal broadcasting selected responses to all students.
+  app.post('/api/resonance/:sessionId/share-results', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asResonanceSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const body = isPlainObject(req.body) ? req.body : {}
+    const questionId = typeof body.questionId === 'string' ? body.questionId : null
+    if (!questionId || !session.data.questions.some((q) => q.id === questionId)) {
+      res.status(400).json({ error: 'invalid questionId' })
+      return
+    }
+
+    const selectedIds = Array.isArray(body.selectedResponseIds)
+      ? body.selectedResponseIds.filter((id): id is string => typeof id === 'string')
+      : []
+
+    const correctOptionIds =
+      body.correctOptionIds === null
+        ? null
+        : Array.isArray(body.correctOptionIds)
+          ? body.correctOptionIds.filter((id): id is string => typeof id === 'string')
+          : null
+
+    const now = Date.now()
+
+    // Build shared responses — include instructor emoji only (no stars/flags).
+    const sharedResponses = selectedIds
+      .map((id) => session.data.responses.find((r) => r.id === id))
+      .filter((r): r is Response => r !== undefined)
+      .map((r) => ({
+        id: r.id,
+        questionId: r.questionId,
+        answer: r.answer,
+        sharedAt: now,
+        instructorEmoji: session.data.annotations[r.id]?.emoji ?? null,
+        reactions: {} as Record<string, number>,
+      }))
+
+    // Replace any existing reveal for this question.
+    const existingIndex = session.data.reveals.findIndex((rv) => rv.questionId === questionId)
+    const reveal: QuestionReveal = {
+      questionId,
+      sharedAt: now,
+      correctOptionIds,
+      sharedResponses,
+    }
+
+    if (existingIndex !== -1) {
+      session.data.reveals[existingIndex] = reveal
+    } else {
+      session.data.reveals.push(reveal)
+    }
+
+    await sessions.set(sessionId, session)
+
+    console.info('[resonance] Results shared', {
+      sessionId,
+      questionId,
+      sharedCount: sharedResponses.length,
+      correctOptionIds,
+    })
+
+    // Strip isCorrect from question options before broadcasting to students.
+    const question = session.data.questions.find((q) => q.id === questionId)
+    const studentSafeQuestion =
+      question?.type === 'multiple-choice'
+        ? { ...question, options: question.options.map(({ id, text }) => ({ id, text })) }
+        : question
+
+    void broadcast('resonance:results-shared', { reveal, question: studentSafeQuestion }, sessionId)
+    res.json({ ok: true, reveal })
+  })
+
+  // POST /api/resonance/:sessionId/reorder-responses
+  // Sets the display order of responses for a given question (instructor private view).
+  app.post('/api/resonance/:sessionId/reorder-responses', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asResonanceSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const body = isPlainObject(req.body) ? req.body : {}
+    const questionId = typeof body.questionId === 'string' ? body.questionId : null
+    if (!questionId) {
+      res.status(400).json({ error: 'missing questionId' })
+      return
+    }
+
+    const orderedIds = Array.isArray(body.orderedResponseIds)
+      ? body.orderedResponseIds.filter((id): id is string => typeof id === 'string')
+      : []
+
+    session.data.responseOrderOverrides[questionId] = orderedIds
+    await sessions.set(sessionId, session)
+
+    res.json({ ok: true })
+  })
+
+  // POST /api/resonance/:sessionId/update-question-timer
+  // Sets or clears the response time limit on a question.
+  app.post('/api/resonance/:sessionId/update-question-timer', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asResonanceSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const body = isPlainObject(req.body) ? req.body : {}
+    const questionId = typeof body.questionId === 'string' ? body.questionId : null
+    const timeLimitMs =
+      body.timeLimitMs === null
+        ? null
+        : typeof body.timeLimitMs === 'number' && body.timeLimitMs > 0
+          ? Math.round(body.timeLimitMs)
+          : undefined
+
+    if (!questionId || timeLimitMs === undefined) {
+      res.status(400).json({ error: 'questionId and timeLimitMs (number or null) are required' })
+      return
+    }
+
+    const question = session.data.questions.find((q) => q.id === questionId)
+    if (!question) {
+      res.status(404).json({ error: 'question not found' })
+      return
+    }
+
+    question.responseTimeLimitMs = timeLimitMs
+    await sessions.set(sessionId, session)
+
+    console.info('[resonance] Question timer updated', { sessionId, questionId, timeLimitMs })
+    void broadcast('resonance:question-timer-updated', { questionId, timeLimitMs }, sessionId)
+    res.json({ ok: true, questionId, timeLimitMs })
   })
 
   // GET /api/resonance/:sessionId/report — stub; full implementation in Phase 8
