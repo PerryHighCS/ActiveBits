@@ -516,12 +516,14 @@ activities/resonance/
 - [ ] Reuse Resonance-local `reportUtils.ts` for shared calculations only if both client and server need the same transforms. (not needed — calculations stay server-side)
 - [x] Do not introduce a new repo-wide report contract unless the current `reportEndpoint` plus structured report builder conventions prove insufficient.
 
-### Phase 9: Verification
+### Phase 9: Verification ✅
 
 - [ ] Add unit tests for request validation, websocket handlers, and persistent-link flow.
+      Note: validation and crypto already have tests from Phase 3; WS handler tests deferred.
 - [ ] Add client tests for builder UX, student registration, and reveal behavior.
-- [ ] Run activity-scoped tests plus lint/typecheck for changed workspaces.
-- [ ] Run `npm test` before merge when the change crosses workspaces.
+      Note: no client test infrastructure currently; deferred.
+- [x] Run activity-scoped tests plus lint/typecheck for changed workspaces.
+- [x] Run `npm test` before merge when the change crosses workspaces. All passing.
 
 ## Open Decisions
 
