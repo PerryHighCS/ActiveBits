@@ -15,7 +15,7 @@
       "username": "vscode"
     }
   },
-  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postCreateCommand": "bash .devcontainer/post-create.sh ${containerWorkspaceFolder}",
   "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Setup script failed'",
   "forwardPorts": [
     6379,
