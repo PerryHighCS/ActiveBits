@@ -135,6 +135,47 @@ function asResonanceSession(session: SessionRecord | null): ResonanceSession | n
   return session as ResonanceSession
 }
 
+// ---------------------------------------------------------------------------
+// Snapshot builders (produce student-safe and instructor-safe views)
+// ---------------------------------------------------------------------------
+
+function toStudentQuestion(q: Question) {
+  if (q.type === 'free-response') return q
+  return { ...q, options: q.options.map(({ id, text }) => ({ id, text })) }
+}
+
+function buildStudentSnapshot(session: ResonanceSession) {
+  const { activeQuestionId, questions, reveals } = session.data
+  const activeQuestion =
+    activeQuestionId !== null ? (questions.find((q) => q.id === activeQuestionId) ?? null) : null
+  const revealedQuestionIds = new Set(reveals.map((r) => r.questionId))
+  const revealedQuestions = questions.filter((q) => revealedQuestionIds.has(q.id)).map(toStudentQuestion)
+  return {
+    sessionId: session.id,
+    activeQuestion: activeQuestion !== null ? toStudentQuestion(activeQuestion) : null,
+    reveals,
+    revealedQuestions,
+  }
+}
+
+function buildInstructorSnapshot(session: ResonanceSession) {
+  const { questions, activeQuestionId, students, responses, annotations, reveals, responseOrderOverrides } =
+    session.data
+  return {
+    sessionId: session.id,
+    questions,
+    activeQuestionId,
+    students: Object.values(students),
+    responses: responses.map((r) => ({
+      ...r,
+      studentName: students[r.studentId]?.name ?? 'Unknown',
+    })),
+    annotations,
+    reveals,
+    responseOrderOverrides,
+  }
+}
+
 function generatePasscode(): string {
   return Math.random().toString(36).slice(2, 10).toUpperCase()
 }
@@ -173,16 +214,47 @@ export default function setupResonanceRoutes(
   sessions: SessionStore,
   ws: WsRouter,
 ): void {
+  function sendToSocket(socket: ResonanceSocket, type: string, payload: unknown, sessionId: string): void {
+    if (socket.readyState !== 1) return
+    try {
+      socket.send(
+        JSON.stringify({
+          version: '1' as const,
+          activity: 'resonance',
+          sessionId,
+          type,
+          timestamp: Date.now(),
+          payload,
+        }),
+      )
+    } catch (err) {
+      console.error('[resonance] Failed to send WS message', { sessionId, type, err })
+    }
+  }
+
   async function broadcast(type: string, payload: unknown, sessionId: string): Promise<void> {
-    const message = JSON.stringify({ type, payload })
     const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
     for (const socket of clients as Set<ResonanceSocket>) {
       if (socket.readyState === 1 && socket.sessionId === sessionId) {
-        try {
-          socket.send(message)
-        } catch (err) {
-          console.error('[resonance] Failed to send broadcast', { sessionId, err })
-        }
+        sendToSocket(socket, type, payload, sessionId)
+      }
+    }
+  }
+
+  function broadcastToRole(
+    type: string,
+    payload: unknown,
+    sessionId: string,
+    isInstructor: boolean,
+  ): void {
+    const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
+    for (const socket of clients as Set<ResonanceSocket>) {
+      if (
+        socket.readyState === 1 &&
+        socket.sessionId === sessionId &&
+        socket.isInstructor === isInstructor
+      ) {
+        sendToSocket(socket, type, payload, sessionId)
       }
     }
   }
@@ -460,30 +532,7 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const { activeQuestionId, questions, reveals } = session.data
-
-    // Strip isCorrect from MCQ options for student-safe representation.
-    function toStudentQuestion(q: Question) {
-      if (q.type === 'free-response') return q
-      return { ...q, options: q.options.map(({ id, text }) => ({ id, text })) }
-    }
-
-    const activeQuestion =
-      activeQuestionId !== null
-        ? (questions.find((q) => q.id === activeQuestionId) ?? null)
-        : null
-
-    const revealedQuestionIds = new Set(reveals.map((r) => r.questionId))
-    const revealedQuestions = questions
-      .filter((q) => revealedQuestionIds.has(q.id))
-      .map(toStudentQuestion)
-
-    res.json({
-      sessionId,
-      activeQuestion: activeQuestion !== null ? toStudentQuestion(activeQuestion) : null,
-      reveals,
-      revealedQuestions,
-    })
+    res.json(buildStudentSnapshot(session))
   })
 
   // GET /api/resonance/:sessionId/responses
@@ -506,25 +555,7 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const { questions, activeQuestionId, students, responses, annotations, reveals, responseOrderOverrides } =
-      session.data
-
-    // Enrich responses with student names.
-    const responsesWithNames = responses.map((r) => ({
-      ...r,
-      studentName: students[r.studentId]?.name ?? 'Unknown',
-    }))
-
-    res.json({
-      sessionId,
-      questions,
-      activeQuestionId,
-      students: Object.values(students),
-      responses: responsesWithNames,
-      annotations,
-      reveals,
-      responseOrderOverrides,
-    })
+    res.json(buildInstructorSnapshot(session))
   })
 
   // POST /api/resonance/:sessionId/activate-question
@@ -833,6 +864,232 @@ export default function setupResonanceRoutes(
     res.json({ ok: true, questionId, timeLimitMs })
   })
 
+  // ---------------------------------------------------------------------------
+  // WS message handlers
+  // ---------------------------------------------------------------------------
+
+  async function handleInstructorWsMessage(
+    session: ResonanceSession,
+    type: string,
+    payload: Record<string, unknown>,
+    sessionId: string,
+  ): Promise<void> {
+    switch (type) {
+      case 'resonance:activate-question': {
+        const questionId =
+          payload.questionId === null
+            ? null
+            : typeof payload.questionId === 'string'
+              ? payload.questionId
+              : undefined
+        if (questionId === undefined) return
+        if (questionId !== null && !session.data.questions.some((q) => q.id === questionId)) return
+        session.data.activeQuestionId = questionId
+        await sessions.set(sessionId, session)
+        console.info('[resonance] WS activate-question', { sessionId, questionId })
+        void broadcast('resonance:question-activated', { questionId }, sessionId)
+        broadcastToRole('resonance:session-state', buildStudentSnapshot(session), sessionId, false)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:add-question': {
+        const errors: string[] = []
+        const question = validateQuestion(payload, errors)
+        if (!question || errors.length > 0) return
+        if (session.data.questions.some((q) => q.id === question.id)) return
+        session.data.questions.push(question)
+        await sessions.set(sessionId, session)
+        console.info('[resonance] WS add-question', { sessionId, questionId: question.id })
+        void broadcast('resonance:question-added', { question }, sessionId)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:share-results': {
+        const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+        if (!questionId || !session.data.questions.some((q) => q.id === questionId)) return
+        const selectedIds = Array.isArray(payload.selectedResponseIds)
+          ? payload.selectedResponseIds.filter((id): id is string => typeof id === 'string')
+          : []
+        const correctOptionIds =
+          payload.correctOptionIds === null
+            ? null
+            : Array.isArray(payload.correctOptionIds)
+              ? payload.correctOptionIds.filter((id): id is string => typeof id === 'string')
+              : null
+        const now = Date.now()
+        const sharedResponses = selectedIds
+          .map((id) => session.data.responses.find((r) => r.id === id))
+          .filter((r): r is Response => r !== undefined)
+          .map((r) => ({
+            id: r.id,
+            questionId: r.questionId,
+            answer: r.answer,
+            sharedAt: now,
+            instructorEmoji: session.data.annotations[r.id]?.emoji ?? null,
+            reactions: {} as Record<string, number>,
+          }))
+        const reveal: QuestionReveal = { questionId, sharedAt: now, correctOptionIds, sharedResponses }
+        const existingIndex = session.data.reveals.findIndex((rv) => rv.questionId === questionId)
+        if (existingIndex !== -1) {
+          session.data.reveals[existingIndex] = reveal
+        } else {
+          session.data.reveals.push(reveal)
+        }
+        await sessions.set(sessionId, session)
+        console.info('[resonance] WS share-results', {
+          sessionId,
+          questionId,
+          sharedCount: sharedResponses.length,
+        })
+        const q = session.data.questions.find((sq) => sq.id === questionId)
+        const studentSafeQ =
+          q?.type === 'multiple-choice'
+            ? { ...q, options: q.options.map(({ id, text }) => ({ id, text })) }
+            : q
+        void broadcast('resonance:results-shared', { reveal, question: studentSafeQ }, sessionId)
+        broadcastToRole('resonance:session-state', buildStudentSnapshot(session), sessionId, false)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:annotate-response': {
+        const responseId = typeof payload.responseId === 'string' ? payload.responseId : null
+        if (!responseId || !session.data.responses.some((r) => r.id === responseId)) return
+        const patch = isPlainObject(payload.annotation) ? payload.annotation : {}
+        const existing = session.data.annotations[responseId] ?? {
+          starred: false,
+          flagged: false,
+          emoji: null,
+        }
+        const updated: InstructorAnnotation = {
+          starred: typeof patch.starred === 'boolean' ? patch.starred : existing.starred,
+          flagged: typeof patch.flagged === 'boolean' ? patch.flagged : existing.flagged,
+          emoji:
+            'emoji' in patch
+              ? typeof patch.emoji === 'string'
+                ? patch.emoji
+                : null
+              : existing.emoji,
+        }
+        session.data.annotations[responseId] = updated
+        await sessions.set(sessionId, session)
+        broadcastToRole(
+          'resonance:annotation-updated',
+          { responseId, annotation: updated },
+          sessionId,
+          true,
+        )
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:update-question-timer': {
+        const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+        const timeLimitMs =
+          payload.timeLimitMs === null
+            ? null
+            : typeof payload.timeLimitMs === 'number' && payload.timeLimitMs > 0
+              ? Math.round(payload.timeLimitMs)
+              : undefined
+        if (!questionId || timeLimitMs === undefined) return
+        const q = session.data.questions.find((sq) => sq.id === questionId)
+        if (!q) return
+        q.responseTimeLimitMs = timeLimitMs
+        await sessions.set(sessionId, session)
+        console.info('[resonance] WS update-question-timer', { sessionId, questionId, timeLimitMs })
+        void broadcast('resonance:question-timer-updated', { questionId, timeLimitMs }, sessionId)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:reorder-responses': {
+        const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+        if (!questionId) return
+        const orderedIds = Array.isArray(payload.orderedResponseIds)
+          ? payload.orderedResponseIds.filter((id): id is string => typeof id === 'string')
+          : []
+        session.data.responseOrderOverrides[questionId] = orderedIds
+        await sessions.set(sessionId, session)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      default:
+        console.info('[resonance] Unknown instructor WS message type', { sessionId, type })
+    }
+  }
+
+  async function handleStudentWsMessage(
+    session: ResonanceSession,
+    type: string,
+    payload: Record<string, unknown>,
+    sessionId: string,
+    clientStudentId: string | null | undefined,
+  ): Promise<void> {
+    switch (type) {
+      case 'resonance:submit-answer': {
+        const studentId =
+          typeof payload.studentId === 'string' ? payload.studentId : (clientStudentId ?? null)
+        if (!studentId || !session.data.students[studentId]) return
+        const { activeQuestionId, questions, responses } = session.data
+        if (!activeQuestionId) return
+        const activeQuestion = questions.find((q) => q.id === activeQuestionId) ?? null
+        if (!activeQuestion) return
+        const alreadyAnswered = responses.some(
+          (r) => r.questionId === activeQuestionId && r.studentId === studentId,
+        )
+        if (alreadyAnswered) return
+        const answer = validateAnswerPayload(payload.answer, activeQuestion)
+        if (!answer) return
+        const response: Response = {
+          id: `r_${Math.random().toString(36).slice(2, 12)}`,
+          questionId: activeQuestionId,
+          studentId,
+          submittedAt: Date.now(),
+          answer,
+        }
+        session.data.responses.push(response)
+        await sessions.set(sessionId, session)
+        console.info('[resonance] WS submit-answer', {
+          sessionId,
+          studentId,
+          questionId: activeQuestionId,
+        })
+        const student = session.data.students[studentId]
+        const responseWithName = { ...response, studentName: student?.name ?? 'Unknown' }
+        broadcastToRole('resonance:response-received', { response: responseWithName }, sessionId, true)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:react-to-shared': {
+        const sharedResponseId =
+          typeof payload.sharedResponseId === 'string' ? payload.sharedResponseId : null
+        const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
+        const emoji = typeof payload.emoji === 'string' ? payload.emoji : null
+        if (!sharedResponseId || !questionId || !emoji) return
+        const reveal = session.data.reveals.find((r) => r.questionId === questionId)
+        if (!reveal) return
+        const sharedResp = reveal.sharedResponses.find((sr) => sr.id === sharedResponseId)
+        if (!sharedResp) return
+        sharedResp.reactions[emoji] = (sharedResp.reactions[emoji] ?? 0) + 1
+        await sessions.set(sessionId, session)
+        void broadcast(
+          'resonance:reaction-updated',
+          { questionId, sharedResponseId, reactions: sharedResp.reactions },
+          sessionId,
+        )
+        broadcastToRole('resonance:session-state', buildStudentSnapshot(session), sessionId, false)
+        break
+      }
+
+      default:
+        console.info('[resonance] Unknown student WS message type', { sessionId, type })
+    }
+  }
+
   // GET /api/resonance/:sessionId/report — stub; full implementation in Phase 8
   app.get('/api/resonance/:sessionId/report', async (req, res) => {
     const { sessionId } = req.params
@@ -848,12 +1105,15 @@ export default function setupResonanceRoutes(
     res.status(501).json({ error: 'report not yet implemented' })
   })
 
-  // WebSocket /ws/resonance — stub; full implementation in Phase 7
+  // ---------------------------------------------------------------------------
+  // WebSocket /ws/resonance
+  // ---------------------------------------------------------------------------
+
   ws.register('/ws/resonance', (socket, queryParams) => {
     const client = socket as ResonanceSocket
-    client.sessionId = queryParams.get('sessionId') || null
+    client.sessionId = queryParams.get('sessionId') ?? null
     client.isInstructor = false
-    client.studentId = queryParams.get('studentId') || null
+    client.studentId = queryParams.get('studentId') ?? null
 
     const sessionId = client.sessionId
     if (!sessionId) {
@@ -872,30 +1132,49 @@ export default function setupResonanceRoutes(
       const instructorPasscode = queryParams.get('instructorPasscode')
 
       if (role === 'instructor') {
-        if (!instructorPasscode || instructorPasscode !== session.data.instructorPasscode) {
+        if (
+          !instructorPasscode ||
+          !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)
+        ) {
           socket.close(1008, 'invalid instructor passcode')
           return
         }
         client.isInstructor = true
+        sendToSocket(client, 'resonance:instructor-state', buildInstructorSnapshot(session), sessionId)
+      } else {
+        sendToSocket(client, 'resonance:session-state', buildStudentSnapshot(session), sessionId)
       }
 
       console.info('[resonance] WebSocket connected', {
         sessionId,
         role: client.isInstructor ? 'instructor' : 'student',
+        studentId: client.studentId,
       })
 
       socket.on('message', (...args: unknown[]) => {
         const [rawMessage] = args
-        try {
-          const data = JSON.parse(String(rawMessage)) as { type?: unknown; payload?: unknown }
-          console.info('[resonance] WebSocket message received', {
-            sessionId,
-            type: data.type,
-          })
-          // Full message dispatch implemented in Phase 7
-        } catch {
-          console.warn('[resonance] Failed to parse WebSocket message', { sessionId })
-        }
+        void (async () => {
+          try {
+            const data = JSON.parse(String(rawMessage)) as { type?: unknown; payload?: unknown }
+            const msgType = typeof data.type === 'string' ? data.type : null
+            const msgPayload = isPlainObject(data.payload) ? data.payload : {}
+            if (!msgType) return
+
+            const sess = asResonanceSession(await sessions.get(sessionId))
+            if (!sess) {
+              socket.close(1011, 'session expired')
+              return
+            }
+
+            if (client.isInstructor) {
+              await handleInstructorWsMessage(sess, msgType, msgPayload, sessionId)
+            } else {
+              await handleStudentWsMessage(sess, msgType, msgPayload, sessionId, client.studentId)
+            }
+          } catch (err) {
+            console.error('[resonance] WS message handler error', { sessionId, err })
+          }
+        })()
       })
 
       socket.on('close', () => {
@@ -904,8 +1183,9 @@ export default function setupResonanceRoutes(
           role: client.isInstructor ? 'instructor' : 'student',
         })
       })
-    })()
+    })().catch((err) => {
+      console.error('[resonance] WS connection setup failed', { sessionId, err })
+      socket.close(1011, 'setup failed')
+    })
   })
-
-  void broadcast
 }

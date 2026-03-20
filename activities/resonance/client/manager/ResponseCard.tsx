@@ -97,16 +97,16 @@ export default function ResponseCard({
               </button>
             </li>
             {INSTRUCTOR_ANNOTATION_EMOJIS.map((em) => (
-              <li key={em}>
+              <li key={em.emoji}>
                 <button
                   type="button"
                   role="option"
-                  aria-selected={annotation.emoji === em}
-                  onClick={() => onAnnotate({ emoji: em })}
+                  aria-selected={annotation.emoji === em.emoji}
+                  onClick={() => onAnnotate({ emoji: em.emoji })}
                   className="text-base hover:bg-gray-100 rounded px-0.5"
-                  aria-label={em}
+                  aria-label={em.label}
                 >
-                  {em}
+                  {em.emoji}
                 </button>
               </li>
             ))}

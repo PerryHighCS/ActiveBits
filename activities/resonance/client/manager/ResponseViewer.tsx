@@ -175,8 +175,8 @@ function FreeResponseList({
 
   function moveItem(fromIndex: number, toIndex: number) {
     const ids = ordered.map((r) => r.id)
-    const [moved] = ids.splice(fromIndex, 1)
-    ids.splice(toIndex, 0, moved)
+    const moved = ids.splice(fromIndex, 1)[0]
+    if (moved !== undefined) ids.splice(toIndex, 0, moved)
     onReorder(ids)
   }
 

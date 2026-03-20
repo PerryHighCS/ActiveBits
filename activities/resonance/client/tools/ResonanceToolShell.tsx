@@ -68,8 +68,8 @@ function QuestionSetPanel() {
   function moveQuestion(from: number, to: number) {
     setQuestions((qs) => {
       const next = [...qs]
-      const [moved] = next.splice(from, 1)
-      next.splice(to, 0, moved)
+      const moved = next.splice(from, 1)[0]
+      if (moved !== undefined) next.splice(to, 0, moved)
       return next.map((q, i) => ({ ...q, order: i }))
     })
   }

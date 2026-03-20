@@ -90,9 +90,10 @@ export default function ResonanceStudent() {
         // Use the server-assigned studentId (may differ if there was a conflict).
         setStudentId(data.studentId)
         persistSessionParticipantIdentity(
-          { activityName: 'resonance', sessionId },
-          { studentId: data.studentId, studentName: studentName },
           window.localStorage,
+          sessionId,
+          studentName,
+          data.studentId,
         )
         setRegistered(true)
       } catch {
@@ -103,6 +104,7 @@ export default function ResonanceStudent() {
 
   const { snapshot, loading: sessionLoading, error: sessionError } = useResonanceSession(
     registered && sessionId ? sessionId : null,
+    studentId,
   )
 
   // Guard: no session
