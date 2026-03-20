@@ -407,89 +407,93 @@ activities/resonance/
 
 ## Implementation Checklist
 
-### Phase 1: Activity Skeleton
+### Phase 1: Activity Skeleton ✅
 
-- [ ] Create `activities/resonance/` directory skeleton.
-- [ ] Add `activity.config.ts` using current `ActivityConfig` fields only.
-- [ ] Set `manageDashboard.customPersistentLinkBuilder: true`.
-- [ ] Set `createSessionBootstrap.sessionStorage` for `instructorPasscode`.
-- [ ] Add stub `client/index.tsx` exporting manager, student, and persistent-link builder entry points.
-- [ ] Add stub `server/routes.ts`.
-- [ ] Keep Resonance behind `isDev: true` until the activity is ready for broader discovery.
+- [x] Create `activities/resonance/` directory skeleton.
+- [x] Add `activity.config.ts` using current `ActivityConfig` fields only.
+- [x] Set `manageDashboard.customPersistentLinkBuilder: true`.
+- [x] Set `createSessionBootstrap.sessionStorage` for `instructorPasscode`.
+- [x] Add stub `client/index.tsx` exporting manager, student, and persistent-link builder entry points.
+- [x] Add stub `server/routes.ts`.
+- [x] Keep Resonance behind `isDev: true` until the activity is ready for broader discovery.
 
-### Phase 2: Shared Types and Validation
+### Phase 2: Shared Types and Validation ✅
 
-- [ ] Add `shared/types.ts` with question, response, reveal, and snapshot types.
-- [ ] Add `shared/emojiSet.ts`.
-- [ ] Add Resonance-local report types in `shared/reportTypes.ts`.
-- [ ] Add request/response validation helpers for question sets, student registration, and answer payloads.
-- [ ] Record any finalized REST or WS contract details in `.agent/knowledge/data-contracts.md`.
-- [ ] Wire Resonance into the existing `/util/...` route/entry pattern with `utilMode` and a `UtilComponent`.
-- [ ] Treat Gallery Walk as a product-pattern reference only, not as a routing precedent.
-- [ ] Add utility cards/entry points for Resonance to the `/manage` dashboard, mirroring the
+- [x] Add `shared/types.ts` with question, response, reveal, and snapshot types.
+- [x] Add `shared/emojiSet.ts`.
+- [x] Add Resonance-local report types in `shared/reportTypes.ts`.
+- [x] Add request/response validation helpers for question sets, student registration, and answer payloads.
+- [x] Record any finalized REST or WS contract details in `.agent/knowledge/data-contracts.md`.
+- [x] Wire Resonance into the existing `/util/...` route/entry pattern with `utilMode` and a `UtilComponent`.
+- [x] Treat Gallery Walk as a product-pattern reference only, not as a routing precedent.
+- [x] Add utility cards/entry points for Resonance to the `/manage` dashboard, mirroring the
       existing activity-config-driven discovery already available from `/`.
 
-### Phase 3: Permanent Links and Session Bootstrap
+### Phase 3: Permanent Links and Session Bootstrap ✅
 
-- [ ] Implement `POST /api/resonance/create` returning `{ id, instructorPasscode }`.
-- [ ] Implement `ResonancePersistentLinkBuilder` using `ActivityPersistentLinkBuilderProps`.
-- [ ] Support both create-mode and edit-mode builder flows via `editState`, preserving activity-owned validation on updates as well as creates.
-- [ ] Expose the permalink builder in the Resonance session-creation UI.
-- [ ] Support JSON and Gimkit-compatible CSV upload in the session-creation UI.
-- [ ] Build one shared upload/import component for session creation and permalink creation.
-- [ ] Allow the session-creation UI to create either an ad-hoc live session or a permanent link
+- [x] Implement `POST /api/resonance/create` returning `{ id, instructorPasscode }`.
+- [x] Implement `ResonancePersistentLinkBuilder` using `ActivityPersistentLinkBuilderProps`.
+- [x] Support both create-mode and edit-mode builder flows via `editState`, preserving activity-owned validation on updates as well as creates.
+- [x] Expose the permalink builder in the Resonance session-creation UI.
+- [x] Support JSON and Gimkit-compatible CSV upload in the session-creation UI.
+- [x] Build one shared upload/import component for session creation and permalink creation.
+- [x] Allow the session-creation UI to create either an ad-hoc live session or a permanent link
       from the uploaded question set.
-- [ ] Support JSON and Gimkit-compatible CSV upload in the builder.
-- [ ] Parse and validate imported files client-side before enabling link generation.
-- [ ] Implement `POST /api/resonance/generate-link`.
-- [ ] Validate imported question payloads server-side in `POST /api/resonance/generate-link`.
-- [ ] Return an authoritative persistent-link result that maps cleanly onto `onCreated(...)` (`fullUrl`, `hash`, `teacherCode`, and any persisted `selectedOptions` as needed).
-- [ ] Compress serialized question payloads before encryption to keep query payloads smaller.
-- [ ] Encrypt question sets in the persistent-link flow for obscuration.
-- [ ] Store the encrypted question payload in URL query data because there is no other persistent
+- [x] Support JSON and Gimkit-compatible CSV upload in the builder.
+- [x] Parse and validate imported files client-side before enabling link generation.
+- [x] Implement `POST /api/resonance/generate-link`.
+- [x] Validate imported question payloads server-side in `POST /api/resonance/generate-link`.
+- [x] Return an authoritative persistent-link result that maps cleanly onto `onCreated(...)` (`fullUrl`, `hash`, `teacherCode`, and any persisted `selectedOptions` as needed).
+- [x] Compress serialized question payloads before encryption to keep query payloads smaller.
+- [x] Encrypt question sets in the persistent-link flow for obscuration.
+- [x] Store the encrypted question payload in URL query data because there is no other persistent
       store available for this workflow.
-- [ ] Use URL-safe encoding for encrypted query payload transport.
-- [ ] Add payload-size validation/failure handling for oversized question sets.
-- [ ] Add `server/questionCrypto.ts` with tests for round-trip, tamper detection, and compressed payload handling.
-- [ ] Implement `GET /api/resonance/:sessionId/instructor-passcode` for persistent-link instructor recovery.
+- [x] Use URL-safe encoding for encrypted query payload transport.
+- [x] Add payload-size validation/failure handling for oversized question sets.
+- [x] Add `server/questionCrypto.ts` with tests for round-trip, tamper detection, and compressed payload handling.
+- [x] Implement `GET /api/resonance/:sessionId/instructor-passcode` for persistent-link instructor recovery.
 
-### Phase 4: Student Lifecycle
+### Phase 4: Student Lifecycle ✅
 
-- [ ] Implement `POST /api/resonance/:sessionId/register-student`.
-- [ ] Build `NameEntryForm.tsx` and student-side `sessionStorage` bootstrap.
-- [ ] Implement `ResonanceStudent.tsx` and question rendering flow.
-- [ ] Support answer submission for free-response and multiple-choice questions.
-- [ ] Ensure student-visible snapshots never expose `isCorrect` before reveal.
+- [x] Implement `POST /api/resonance/:sessionId/register-student`.
+- [x] Build `NameEntryForm.tsx` and student-side `sessionStorage` bootstrap.
+      Note: waiting room (`waitingRoom.fields`) is the primary name-collection path;
+      `NameEntryForm` is a fallback for direct-URL access.
+- [x] Implement `ResonanceStudent.tsx` and question rendering flow.
+- [x] Support answer submission for free-response and multiple-choice questions.
+      Note: uses REST (`POST /api/resonance/:sessionId/submit-answer`) until Phase 7 adds WS.
+- [x] Ensure student-visible snapshots never expose `isCorrect` before reveal.
 
-### Phase 5: Live Instructor Workflow
+### Phase 5: Live Instructor Workflow ✅
 
-- [ ] Build `ResonanceManager.tsx`.
-- [ ] Keep the manager focused on live view only.
-- [ ] Include a manager header/action area with buttons/links needed to open the separate
+- [x] Build `ResonanceManager.tsx`.
+- [x] Keep the manager focused on live view only.
+- [x] Include a manager header/action area with buttons/links needed to open the separate
       Resonance tool for question-set editing and report access.
-- [ ] Build response review UI with student names visible only to instructors.
-- [ ] For MCQ private review, support a table-style view such as `name | a | b | c | d`, with the
+- [x] Build response review UI with student names visible only to instructors.
+- [x] For MCQ private review, support a table-style view such as `name | a | b | c | d`, with the
       student's selected answer shown in correct/incorrect styling when the question has a correct answer.
-- [ ] For free-response private review, support a reorderable table that includes student name,
+- [x] For free-response private review, support a reorderable table that includes student name,
       response content, and instructor annotations.
-- [ ] Allow instructor-side response reordering in private review.
-- [ ] Add private star / flag / emoji annotations.
-- [ ] When an instructor intentionally shares a response, allow the instructor emoji annotation to
+- [x] Allow instructor-side response reordering in private review.
+- [x] Add private star / flag / emoji annotations.
+- [x] When an instructor intentionally shares a response, allow the instructor emoji annotation to
       appear with that shared response for students.
-- [ ] Keep instructor star/flag state private in both live student views and exported shared results.
-- [ ] Support MCQ poll mode without a required correct answer.
-- [ ] Add question activation and ad-hoc question creation.
-- [ ] Allow instructors to set or change question response time limits during live session management.
-- [ ] Add share-results flow that broadcasts anonymous shared responses plus correct-answer reveal.
+- [x] Keep instructor star/flag state private in both live student views and exported shared results.
+- [x] Support MCQ poll mode without a required correct answer.
+- [x] Add question activation and ad-hoc question creation.
+- [x] Allow instructors to set or change question response time limits during live session management.
+- [x] Add share-results flow that broadcasts anonymous shared responses plus correct-answer reveal.
 - [ ] For poll-style MCQs, include shared choice percentages and a pie chart in the first implementation.
+      Note: percentage bars are implemented on the student side; pie chart deferred to a follow-up.
 
-### Phase 6: Builder and Report Tooling
+### Phase 6: Builder and Report Tooling ✅
 
-- [ ] Build the separate Resonance tool shell for question-set editing/import/export and report access.
-- [ ] Build `QuestionBuilder.tsx` and `QuestionCard.tsx` in the tool flow.
-- [ ] Allow instructors to set a response time limit while authoring each question.
-- [ ] Add JSON and Gimkit-compatible CSV import/export for question sets.
-- [ ] Build the Resonance report view in the tool flow rather than the live manager route.
+- [x] Build the separate Resonance tool shell for question-set editing/import/export and report access.
+- [x] Build `QuestionBuilder.tsx` and `QuestionCard.tsx` in the tool flow.
+- [x] Allow instructors to set a response time limit while authoring each question.
+- [x] Add JSON and Gimkit-compatible CSV import/export for question sets.
+- [x] Build the Resonance report view in the tool flow rather than the live manager route.
 
 ### Phase 7: WebSocket Protocol
 
@@ -519,6 +523,5 @@ activities/resonance/
 
 ## Open Decisions
 
-- What should the route and navigation shape of the separate Resonance utility tool be?
 - Should the utility tool load JSON reports only from exports/files, or also support direct
-  session-linked loading flows?
+  session-linked loading flows? Current implementation: file-only.
