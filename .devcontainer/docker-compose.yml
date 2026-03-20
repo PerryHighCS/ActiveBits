@@ -3,7 +3,7 @@ version: "3.8"
 services:
   app:
     image: mcr.microsoft.com/devcontainers/javascript-node:22
-    user: node
+    user: vscode
     volumes:
       - ..:/workspaces/ActiveBits:cached
     command: sleep infinity

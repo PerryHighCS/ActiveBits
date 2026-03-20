@@ -12,7 +12,7 @@
     },
     "ghcr.io/devcontainers-extra/features/ripgrep:1": {},
     "ghcr.io/devcontainers/features/common-utils:2": {
-      "username": "node"
+      "username": "vscode"
     }
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh ${containerWorkspaceFolder}",
@@ -57,5 +57,6 @@
       ]
     }
   },
-  "remoteUser": "node"
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true
 }
