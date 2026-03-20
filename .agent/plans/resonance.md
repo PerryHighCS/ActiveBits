@@ -495,24 +495,26 @@ activities/resonance/
 - [x] Add JSON and Gimkit-compatible CSV import/export for question sets.
 - [x] Build the Resonance report view in the tool flow rather than the live manager route.
 
-### Phase 7: WebSocket Protocol
+### Phase 7: WebSocket Protocol ✅
 
-- [ ] Implement `/ws/resonance` with instructor and student auth flows.
-- [ ] Use the versioned outer envelope with `activity: 'resonance'`.
-- [ ] Namespace semantic message types with `resonance:`.
-- [ ] Send instructor-safe and student-safe snapshots on connect.
-- [ ] Broadcast reaction updates for shared responses.
-- [ ] Add focused server tests for REST and websocket behavior.
+- [x] Implement `/ws/resonance` with instructor and student auth flows.
+- [x] Use the versioned outer envelope with `activity: 'resonance'`.
+- [x] Namespace semantic message types with `resonance:`.
+- [x] Send instructor-safe and student-safe snapshots on connect.
+- [x] Broadcast reaction updates for shared responses.
+- [ ] Add focused server tests for REST and websocket behavior. (deferred to Phase 9)
+      Note: WS push upgrades useResonanceSession and useInstructorState; polling used as
+      infrequent fallback while reconnecting; submit-answer keeps REST path for error feedback.
 
-### Phase 8: Reporting
+### Phase 8: Reporting ✅
 
-- [ ] Implement `GET /api/resonance/:sessionId/report`.
-- [ ] Ship HTML report export in the first implementation.
-- [ ] Optionally add JSON export for utility-view loading and tooling reuse.
-- [ ] Set `reportEndpoint` in `activities/resonance/activity.config.ts` once the route is implemented.
-- [ ] If Resonance needs SyncDeck/session-level aggregation, register a Resonance report builder that returns `ActivityStructuredReportSection`.
-- [ ] Reuse Resonance-local `reportUtils.ts` for shared calculations only if both client and server need the same transforms.
-- [ ] Do not introduce a new repo-wide report contract unless the current `reportEndpoint` plus structured report builder conventions prove insufficient.
+- [x] Implement `GET /api/resonance/:sessionId/report`.
+- [x] Ship HTML report export in the first implementation.
+- [x] Optionally add JSON export for utility-view loading and tooling reuse. (?format=json)
+- [x] Set `reportEndpoint` in `activities/resonance/activity.config.ts` once the route is implemented.
+- [ ] If Resonance needs SyncDeck/session-level aggregation, register a Resonance report builder that returns `ActivityStructuredReportSection`. (deferred — not yet needed)
+- [ ] Reuse Resonance-local `reportUtils.ts` for shared calculations only if both client and server need the same transforms. (not needed — calculations stay server-side)
+- [x] Do not introduce a new repo-wide report contract unless the current `reportEndpoint` plus structured report builder conventions prove insufficient.
 
 ### Phase 9: Verification
 

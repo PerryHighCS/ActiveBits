@@ -15,6 +15,11 @@ import type {
 } from '../shared/types.js'
 import { validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
+import {
+  buildResonanceReport,
+  buildResonanceReportFilename,
+  buildResonanceReportHtml,
+} from './reportRenderer.js'
 
 // ---------------------------------------------------------------------------
 // Route-level types
@@ -23,6 +28,8 @@ import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from '.
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): JsonResponse | void
+  send?(payload: unknown): void
+  setHeader?(name: string, value: string): void
   cookie?(name: string, value: string, options: Record<string, unknown>): void
 }
 
@@ -1090,19 +1097,55 @@ export default function setupResonanceRoutes(
     }
   }
 
-  // GET /api/resonance/:sessionId/report — stub; full implementation in Phase 8
+  // GET /api/resonance/:sessionId/report
+  // Returns an HTML report by default; ?format=json returns the raw report object.
+  // Requires instructor auth via X-Instructor-Passcode header.
   app.get('/api/resonance/:sessionId/report', async (req, res) => {
     const { sessionId } = req.params
     if (!sessionId) {
       res.status(400).json({ error: 'missing sessionId' })
       return
     }
+
     const session = asResonanceSession(await sessions.get(sessionId))
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
     }
-    res.status(501).json({ error: 'report not yet implemented' })
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const report = buildResonanceReport({
+      id: session.id,
+      ...session.data,
+    })
+
+    const formatParam = isPlainObject(req.body)
+      ? null
+      : (req as unknown as { query?: Record<string, unknown> }).query?.format ?? null
+    const wantsJson =
+      formatParam === 'json' ||
+      String(req.headers?.['accept'] ?? '').includes('application/json')
+
+    if (wantsJson) {
+      console.info('[resonance] Report JSON exported', { sessionId })
+      res.json(report)
+      return
+    }
+
+    const html = buildResonanceReportHtml(report)
+    const filename = buildResonanceReportFilename(session.id)
+    console.info('[resonance] Report HTML exported', { sessionId })
+    res.setHeader?.('Content-Type', 'text/html; charset=utf-8')
+    res.setHeader?.('Content-Disposition', `attachment; filename="${filename}"`)
+    if (typeof res.send === 'function') {
+      res.send(html)
+      return
+    }
+    res.json(html)
   })
 
   // ---------------------------------------------------------------------------

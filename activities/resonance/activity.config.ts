@@ -37,6 +37,7 @@ const resonanceConfig: ActivityConfig = {
   manageDashboard: {
     customPersistentLinkBuilder: true,
   },
+  reportEndpoint: '/api/resonance/:sessionId/report',
   waitingRoom: {
     fields: [
       {
