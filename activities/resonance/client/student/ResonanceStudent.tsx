@@ -15,6 +15,18 @@ interface RegisterResponse {
   error?: string
 }
 
+function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
+  if (deadlineAt === null) {
+    return null
+  }
+
+  const remainingMs = Math.max(0, deadlineAt - now)
+  const totalSeconds = Math.ceil(remainingMs / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
 /**
  * Main student-facing view for Resonance.
  *
@@ -33,8 +45,12 @@ export default function ResonanceStudent() {
   const [nameSubmitted, setNameSubmitted] = useState(false)
   const [registered, setRegistered] = useState(false)
   const [registerError, setRegisterError] = useState<string | null>(null)
+  const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
+  const [submittedQuestionIds, setSubmittedQuestionIds] = useState<Set<string>>(new Set())
+  const [countdownNow, setCountdownNow] = useState(() => Date.now())
 
   const mountedRef = useRef(true)
+  const previousActiveQuestionIdsRef = useRef<string[]>([])
 
   // Step 1: resolve entry participant identity from the waiting room.
   useEffect(() => {
@@ -102,10 +118,47 @@ export default function ResonanceStudent() {
     })()
   }, [sessionId, nameSubmitted, registered, studentName, studentId])
 
-  const { snapshot, loading: sessionLoading, error: sessionError } = useResonanceSession(
+  const { snapshot, loading: sessionLoading, error: sessionError, sendMessage } = useResonanceSession(
     registered && sessionId ? sessionId : null,
     studentId,
   )
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setCountdownNow(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (snapshot === null) {
+      return
+    }
+
+    const activeIds = snapshot.activeQuestions.map((question) => question.id)
+    const previousActiveIds = previousActiveQuestionIdsRef.current
+    const reactivatedIds = activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
+    if (reactivatedIds.length > 0) {
+      setSubmittedQuestionIds((current) => {
+        const next = new Set(current)
+        for (const questionId of reactivatedIds) {
+          next.delete(questionId)
+        }
+        return next
+      })
+    }
+    previousActiveQuestionIdsRef.current = activeIds
+
+    if (activeIds.length === 0) {
+      setSelectedQuestionId(null)
+      return
+    }
+
+    setSelectedQuestionId((current) => (current && activeIds.includes(current) ? current : activeIds[0] ?? null))
+  }, [snapshot])
 
   // Guard: no session
   if (!sessionId) {
@@ -154,15 +207,18 @@ export default function ResonanceStudent() {
   }
 
   // Main session view
+  const activeQuestions = snapshot?.activeQuestions ?? []
+  const activeQuestion = activeQuestions.find((question) => question.id === selectedQuestionId) ?? activeQuestions[0] ?? null
+  const activeDeadlineAt = snapshot?.activeQuestionDeadlineAt ?? null
+  const hasExpired = activeDeadlineAt !== null && activeDeadlineAt <= countdownNow
+  const liveCountdown = formatRemainingTime(activeDeadlineAt, countdownNow)
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-xl mx-auto px-4 py-6 space-y-6">
         {/* Header */}
         <header className="flex items-center justify-between">
           <h1 className="text-lg font-semibold text-gray-900">Resonance</h1>
-          {studentName !== null && (
-            <span className="text-sm text-gray-500">{studentName}</span>
-          )}
         </header>
 
         {/* Session loading / error */}
@@ -175,20 +231,74 @@ export default function ResonanceStudent() {
           </p>
         )}
 
-        {/* Active question */}
-        {snapshot !== null && snapshot.activeQuestion !== null && studentId !== null && (
-          <section aria-label="Current question">
+        {/* Active question(s) */}
+        {snapshot !== null && activeQuestion !== null && studentId !== null && (
+          <section aria-label="Current question" className="space-y-4">
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                    {activeQuestions.length > 1 ? 'All questions are live' : 'Question is live'}
+                  </p>
+                  <p className="text-sm text-amber-900">
+                    {activeQuestions.length > 1
+                      ? 'Move between questions and submit each one before time runs out.'
+                      : 'Submit your response before time runs out.'}
+                  </p>
+                </div>
+                {liveCountdown !== null && (
+                  <div className="rounded-lg bg-white px-3 py-2 text-right shadow-sm">
+                    <p className="text-[11px] uppercase tracking-wide text-amber-600">Time left</p>
+                    <p className="text-lg font-semibold text-amber-900">{liveCountdown}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {activeQuestions.length > 1 && (
+              <nav className="flex flex-wrap gap-2" aria-label="Active questions">
+                {activeQuestions.map((question, index) => {
+                  const isSelected = question.id === activeQuestion.id
+                  const isSubmitted = submittedQuestionIds.has(question.id)
+                  return (
+                    <button
+                      key={question.id}
+                      type="button"
+                      onClick={() => setSelectedQuestionId(question.id)}
+                      className={`rounded-full border px-3 py-1.5 text-sm ${
+                        isSelected
+                          ? 'border-rose-400 bg-rose-50 text-rose-700'
+                          : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                      aria-pressed={isSelected}
+                    >
+                      Q{index + 1}{isSubmitted ? ' Submitted' : ''}
+                    </button>
+                  )
+                })}
+              </nav>
+            )}
+
             <QuestionView
-              key={snapshot.activeQuestion.id}
-              question={snapshot.activeQuestion}
+              question={activeQuestion}
               sessionId={sessionId}
               studentId={studentId}
+              disabled={hasExpired}
+              isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
+              onSubmitted={(questionId) => {
+                setSubmittedQuestionIds((current) => {
+                  const next = new Set(current)
+                  next.add(questionId)
+                  return next
+                })
+              }}
+              sendMessage={sendMessage}
             />
           </section>
         )}
 
         {/* Waiting state */}
-        {snapshot !== null && snapshot.activeQuestion === null && snapshot.reveals.length === 0 && (
+        {snapshot !== null && activeQuestions.length === 0 && snapshot.reveals.length === 0 && (
           <p className="text-sm text-gray-500 text-center py-8">
             Waiting for the instructor to activate a question…
           </p>

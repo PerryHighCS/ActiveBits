@@ -30,6 +30,7 @@ import { resolveStudentActiveEmbeddedInstanceKey } from './SyncDeckStudent.js'
 import { resolveStudentActiveEmbeddedInstanceKeyWithFallback } from './SyncDeckStudent.js'
 import { resolveStudentOverlayEmbeddedInstanceKey } from './SyncDeckStudent.js'
 import { resolveStudentOverlayNavigationBaseIndices } from './SyncDeckStudent.js'
+import { shouldRecoverEmbeddedEntryParticipantToken } from './SyncDeckStudent.js'
 import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent.js'
 import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
@@ -985,6 +986,59 @@ void test('normalizeSyncDeckEmbeddedActivities preserves multiple valid late-joi
   assert.deepEqual(Object.keys(normalized).sort(), ['raffle:2:0', 'video-sync:2:1'])
   assert.equal(normalized['raffle:2:0']?.activityId, 'raffle')
   assert.equal(normalized['video-sync:2:1']?.activityId, 'video-sync')
+})
+
+void test('shouldRecoverEmbeddedEntryParticipantToken requests a fresh child handoff for late-join embedded activity sessions', () => {
+  const sessionStorage = {
+    getItem() {
+      return null
+    },
+  }
+  const localStorage = {
+    getItem() {
+      return null
+    },
+  }
+
+  assert.equal(
+    shouldRecoverEmbeddedEntryParticipantToken({
+      sessionId: 'syncdeck-parent',
+      childSessionId: 'CHILD:syncdeck-parent:abcde:resonance',
+      studentId: 'student-1',
+      activityId: 'resonance',
+      sessionStorage,
+      localStorage,
+    }),
+    true,
+  )
+})
+
+void test('shouldRecoverEmbeddedEntryParticipantToken skips refresh when the child identity already exists locally', () => {
+  const sessionStorage = {
+    getItem() {
+      return null
+    },
+  }
+  const localStorage = {
+    getItem(key: string) {
+      if (key === 'session-participant:CHILD:syncdeck-parent:abcde:resonance') {
+        return JSON.stringify({ studentName: 'Ada Lovelace', studentId: 'student-1' })
+      }
+      return null
+    },
+  }
+
+  assert.equal(
+    shouldRecoverEmbeddedEntryParticipantToken({
+      sessionId: 'syncdeck-parent',
+      childSessionId: 'CHILD:syncdeck-parent:abcde:resonance',
+      studentId: 'student-1',
+      activityId: 'resonance',
+      sessionStorage,
+      localStorage,
+    }),
+    false,
+  )
 })
 
 void test('applySyncDeckEmbeddedLifecyclePayload applies start and end updates', () => {

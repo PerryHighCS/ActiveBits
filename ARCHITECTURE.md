@@ -208,6 +208,11 @@ through activity-specific props.
 - Child managers should read that payload through shared bootstrap helpers in the same spirit
   as `createSessionBootstrap` or permalink `selectedOptions`, so reloads and redeploys keep
   the launch intent intact.
+- Activity-owned session normalizers should also stabilize any runtime session state that the
+  embedded manager or student depends on after reload, such as manager auth credentials or
+  authoritative “live run” fields. For example, Resonance now normalizes multi-question runs
+  with `activeQuestionIds` plus a shared `activeQuestionDeadlineAt`, while still backfilling
+  `activeQuestionId` for compatibility with older snapshots.
 
 `client/index.ts` (components/footer only, lazy-loaded chunk):
 ```typescript

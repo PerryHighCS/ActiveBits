@@ -21,7 +21,12 @@ function ResponseCard({ response, question }: { response: SharedResponse; questi
   const reactionEntries = Object.entries(reactions).filter(([, count]) => count > 0)
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 space-y-1">
+    <div className={`rounded-lg border bg-white px-4 py-3 space-y-1 ${response.isOwnResponse ? 'border-rose-300 bg-rose-50/40' : 'border-gray-200'}`}>
+      {response.isOwnResponse && (
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+          Your response was shared
+        </p>
+      )}
       <p className="text-sm text-gray-800">
         {instructorEmoji !== null && (
           <span className="mr-1" aria-label="instructor highlight">
@@ -44,7 +49,7 @@ function ResponseCard({ response, question }: { response: SharedResponse; questi
 }
 
 function RevealSection({ reveal, question }: { reveal: QuestionReveal; question: StudentQuestion | undefined }) {
-  const { sharedResponses, correctOptionIds } = reveal
+  const { sharedResponses, correctOptionIds, viewerResponse } = reveal
 
   // For MCQ poll mode (no correct answer), compute percentages.
   const isPoll =
@@ -62,6 +67,27 @@ function RevealSection({ reveal, question }: { reveal: QuestionReveal; question:
 
   return (
     <div className="space-y-2">
+      {viewerResponse !== null && viewerResponse !== undefined && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 space-y-1">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+            Your response
+          </p>
+          <p className="text-sm text-sky-950">
+            {viewerResponse.instructorEmoji !== null && (
+              <span className="mr-1" aria-label="instructor highlight">
+                {viewerResponse.instructorEmoji}
+              </span>
+            )}
+            {viewerResponse.answer.type === 'free-response'
+              ? viewerResponse.answer.text
+              : getOptionText(question, viewerResponse.answer.selectedOptionId)}
+          </p>
+          {viewerResponse.isShared && (
+            <p className="text-xs text-sky-700">This is the response currently being shared.</p>
+          )}
+        </div>
+      )}
+
       {/* Correct-answer reveal for MCQ with a designated answer */}
       {question?.type === 'multiple-choice' && !isPoll && correctOptionIds !== null && correctOptionIds.length > 0 && (
         <p className="text-sm font-medium text-green-700">
@@ -78,8 +104,8 @@ function RevealSection({ reveal, question }: { reveal: QuestionReveal; question:
             const total = sharedResponses.length
             const pct = total > 0 ? Math.round((count / total) * 100) : 0
             return (
-              <div key={opt.id} className="flex items-center gap-2 text-sm">
-                <span className="w-32 truncate text-gray-700">{opt.text}</span>
+              <div key={opt.id} className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-2 text-sm">
+                <span className="text-gray-700 break-words">{opt.text}</span>
                 <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                   <div
                     className="h-2 bg-rose-500 rounded-full"

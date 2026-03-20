@@ -3,6 +3,7 @@ import type {
   InstructorAnnotation,
   InstructorSessionSnapshot,
   QuestionReveal,
+  ResponseProgress,
   ResponseWithName,
   Student,
 } from '../../shared/types.js'
@@ -12,6 +13,61 @@ const FALLBACK_POLL_INTERVAL_MS = 10_000
 /** Full instructor snapshot returned by GET /api/resonance/:sessionId/responses */
 export interface InstructorStateSnapshot extends InstructorSessionSnapshot {
   responseOrderOverrides: Record<string, string[]>
+}
+
+function normalizeInstructorStateSnapshot(
+  data: Partial<InstructorStateSnapshot> | null | undefined,
+): InstructorStateSnapshot | null {
+  if (!data || typeof data !== 'object') {
+    return null
+  }
+
+  const responses = Array.isArray(data.responses) ? data.responses : []
+  const submittedProgress = responses.map((response) => ({
+    questionId: response.questionId,
+    studentId: response.studentId,
+    studentName: response.studentName,
+    updatedAt: response.submittedAt,
+    status: 'submitted' as const,
+    answer: response.answer,
+    responseId: response.id,
+  }))
+
+  const progressEntries = Array.isArray(data.progress) ? data.progress : []
+  const submittedKeys = new Set(
+    submittedProgress.map((entry) => `${entry.questionId}:${entry.studentId}`),
+  )
+  const workingProgress = progressEntries.filter((entry) => {
+    const key = `${entry.questionId}:${entry.studentId}`
+    return entry.status !== 'submitted' && !submittedKeys.has(key)
+  })
+  const progress = [...submittedProgress, ...workingProgress]
+  const fallbackActiveQuestionId = typeof data.activeQuestionId === 'string' ? data.activeQuestionId : null
+  const activeQuestionIds = Array.isArray(data.activeQuestionIds)
+    ? data.activeQuestionIds.filter((entry): entry is string => typeof entry === 'string')
+    : fallbackActiveQuestionId
+      ? [fallbackActiveQuestionId]
+      : []
+
+  return {
+    sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
+    questions: Array.isArray(data.questions) ? data.questions : [],
+    activeQuestionId: fallbackActiveQuestionId,
+    activeQuestionIds,
+    activeQuestionDeadlineAt:
+      typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
+        ? data.activeQuestionDeadlineAt
+        : null,
+    students: Array.isArray(data.students) ? data.students : [],
+    responses,
+    progress,
+    annotations: typeof data.annotations === 'object' && data.annotations !== null ? data.annotations : {},
+    reveals: Array.isArray(data.reveals) ? data.reveals : [],
+    responseOrderOverrides:
+      data.responseOrderOverrides && typeof data.responseOrderOverrides === 'object'
+        ? data.responseOrderOverrides
+        : {},
+  }
 }
 
 /**
@@ -46,14 +102,23 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
         sessionId: string
         questions: InstructorStateSnapshot['questions']
         activeQuestionId: string | null
+        activeQuestionIds: string[]
+        activeQuestionDeadlineAt: number | null
         students: Student[]
         responses: ResponseWithName[]
+        progress: ResponseProgress[]
         annotations: Record<string, InstructorAnnotation>
         reveals: QuestionReveal[]
         responseOrderOverrides: Record<string, string[]>
       }
       if (!mountedRef.current) return
-      setSnapshot(data as unknown as InstructorStateSnapshot)
+      const normalized = normalizeInstructorStateSnapshot(data)
+      if (!normalized) {
+        setError('Could not load session data')
+        setLoading(false)
+        return
+      }
+      setSnapshot(normalized)
       setError(null)
       setLoading(false)
     } catch {
@@ -109,7 +174,10 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
         try {
           const msg = JSON.parse(String(event.data)) as { type?: string; payload?: unknown }
           if (msg.type === 'resonance:instructor-state' && msg.payload !== undefined) {
-            setSnapshot(msg.payload as InstructorStateSnapshot)
+            const normalized = normalizeInstructorStateSnapshot(msg.payload as Partial<InstructorStateSnapshot>)
+            if (normalized) {
+              setSnapshot(normalized)
+            }
             setLoading(false)
             setError(null)
           } else if (

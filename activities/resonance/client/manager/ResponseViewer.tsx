@@ -2,6 +2,7 @@ import type {
   InstructorAnnotation,
   MCQQuestion,
   Question,
+  ResponseProgress,
   ResponseWithName,
 } from '../../shared/types.js'
 import ResponseCard from './ResponseCard.js'
@@ -9,13 +10,13 @@ import ResponseCard from './ResponseCard.js'
 interface Props {
   question: Question
   responses: ResponseWithName[]
+  progress: ResponseProgress[]
   annotations: Record<string, InstructorAnnotation>
   orderOverrides: string[]
-  shareMode: boolean
-  selectedIds: Set<string>
+  activeSharedResponseId?: string | null
   onAnnotate(responseId: string, patch: Partial<InstructorAnnotation>): void
+  onShareResponse?(responseId: string): void
   onReorder(newOrder: string[]): void
-  onSelectToggle(responseId: string): void
 }
 
 // ---------------------------------------------------------------------------
@@ -24,34 +25,28 @@ interface Props {
 
 function MCQTable({
   question,
-  responses,
+  progress,
   annotations,
-  shareMode,
-  selectedIds,
   onAnnotate,
-  onSelectToggle,
 }: {
   question: MCQQuestion
-  responses: ResponseWithName[]
+  progress: ResponseProgress[]
   annotations: Record<string, InstructorAnnotation>
-  shareMode: boolean
-  selectedIds: Set<string>
   onAnnotate(responseId: string, patch: Partial<InstructorAnnotation>): void
-  onSelectToggle(responseId: string): void
 }) {
   const options = question.options
+  const isPoll = !options.some((option) => option.isCorrect)
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
-            {shareMode && <th className="pr-2 py-1 w-6" aria-label="Select" />}
             <th className="pr-4 py-1 font-medium">Student</th>
             {options.map((opt) => (
               <th
                 key={opt.id}
-                className={`px-2 py-1 font-medium text-center ${opt.isCorrect ? 'text-green-700' : ''}`}
+                className={`min-w-[120px] px-3 py-2 font-medium text-center ${opt.isCorrect ? 'text-green-700' : ''}`}
               >
                 {opt.text}
                 {opt.isCorrect && <span className="ml-1 text-green-600">✓</span>}
@@ -61,52 +56,66 @@ function MCQTable({
           </tr>
         </thead>
         <tbody>
-          {responses.map((resp) => {
+          {progress.map((entry) => {
+            const responseId = entry.responseId
             const selectedOptionId =
-              resp.answer.type === 'multiple-choice' ? resp.answer.selectedOptionId : null
-            const annotation = annotations[resp.id] ?? { starred: false, flagged: false, emoji: null }
+              entry.answer?.type === 'multiple-choice' ? entry.answer.selectedOptionId : null
+            const annotation = responseId
+              ? (annotations[responseId] ?? { starred: false, flagged: false, emoji: null })
+              : { starred: false, flagged: false, emoji: null }
             const selectedOption = options.find((o) => o.id === selectedOptionId)
             const isCorrect = selectedOption?.isCorrect === true
             const isIncorrect = selectedOptionId !== null && selectedOption?.isCorrect === false && options.some((o) => o.isCorrect)
 
             return (
               <tr
-                key={resp.id}
-                className={`border-b border-gray-100 hover:bg-gray-50 ${selectedIds.has(resp.id) ? 'bg-rose-50' : ''}`}
+                key={`${entry.studentId}:${entry.questionId}`}
+                className="border-b border-gray-100 hover:bg-gray-50"
               >
-                {shareMode && (
-                  <td className="pr-2 py-1.5">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(resp.id)}
-                      onChange={() => onSelectToggle(resp.id)}
-                      aria-label={`Select ${resp.studentName}`}
-                      className="accent-rose-600"
-                    />
-                  </td>
-                )}
                 <td className="pr-4 py-1.5 font-medium text-gray-700 max-w-[120px] truncate">
-                  <span title={resp.studentName}>{resp.studentName}</span>
+                  <span title={entry.studentName}>{entry.studentName}</span>
+                  <span className={`ml-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    entry.status === 'submitted'
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    {entry.status === 'submitted' ? 'Submitted' : 'Still working'}
+                  </span>
                   {annotation.starred && <span className="ml-1 text-yellow-400">★</span>}
                   {annotation.flagged && <span className="ml-1 text-red-500">🚩</span>}
                 </td>
                 {options.map((opt) => {
                   const chosen = opt.id === selectedOptionId
                   return (
-                    <td key={opt.id} className="px-2 py-1.5 text-center">
+                    <td
+                      key={opt.id}
+                      className={`px-3 py-2 text-center align-middle ${
+                        chosen
+                          ? isPoll
+                            ? 'bg-sky-50'
+                            : isCorrect
+                            ? 'bg-green-50'
+                            : isIncorrect
+                              ? 'bg-red-50'
+                              : 'bg-rose-50'
+                          : ''
+                      }`}
+                    >
                       {chosen && (
-                        <span
-                          className={`inline-block w-5 h-5 rounded-full text-xs flex items-center justify-center font-bold ${
-                            isCorrect
-                              ? 'bg-green-100 text-green-700'
-                              : isIncorrect
-                                ? 'bg-red-100 text-red-600'
-                                : 'bg-gray-100 text-gray-600'
-                          }`}
-                          aria-label={`Selected${isCorrect ? ', correct' : isIncorrect ? ', incorrect' : ''}`}
-                        >
-                          •
-                        </span>
+                        <div className="flex justify-center">
+                          <span
+                            className={`inline-block h-5 w-5 rounded-full ${
+                              isPoll
+                                ? 'bg-sky-500'
+                                : isCorrect
+                                ? 'bg-green-600'
+                                : isIncorrect
+                                  ? 'bg-red-500'
+                                  : 'bg-rose-500'
+                            }`}
+                            aria-label={`Selected${isCorrect ? ', correct' : isIncorrect ? ', incorrect' : ''}`}
+                          />
+                        </div>
                       )}
                     </td>
                   )
@@ -117,7 +126,12 @@ function MCQTable({
                       type="button"
                       aria-label="Emoji annotation"
                       aria-haspopup="listbox"
-                      onClick={() => onAnnotate(resp.id, {})}
+                      onClick={() => {
+                        if (responseId) {
+                          onAnnotate(responseId, {})
+                        }
+                      }}
+                      disabled={!responseId}
                       className="text-base hover:bg-gray-100 rounded px-0.5"
                     >
                       {annotation.emoji ?? '—'}
@@ -127,10 +141,10 @@ function MCQTable({
               </tr>
             )
           })}
-          {responses.length === 0 && (
+          {progress.length === 0 && (
             <tr>
               <td
-                colSpan={options.length + (shareMode ? 3 : 2)}
+                colSpan={options.length + 2}
                 className="py-4 text-center text-sm text-gray-400"
               >
                 No responses yet.
@@ -149,29 +163,33 @@ function MCQTable({
 
 function FreeResponseList({
   responses,
+  progress,
   annotations,
   orderOverrides,
-  shareMode,
-  selectedIds,
+  activeSharedResponseId,
   onAnnotate,
+  onShareResponse,
   onReorder,
-  onSelectToggle,
 }: {
   responses: ResponseWithName[]
+  progress: ResponseProgress[]
   annotations: Record<string, InstructorAnnotation>
   orderOverrides: string[]
-  shareMode: boolean
-  selectedIds: Set<string>
+  activeSharedResponseId?: string | null
   onAnnotate(responseId: string, patch: Partial<InstructorAnnotation>): void
+  onShareResponse?(responseId: string): void
   onReorder(newOrder: string[]): void
-  onSelectToggle(responseId: string): void
 }) {
   // Apply order overrides: put overridden IDs first in the given order, then any remaining.
   const overrideSet = new Set(orderOverrides)
+  const progressByResponseId = new Map(progress.filter((entry) => entry.responseId).map((entry) => [entry.responseId as string, entry]))
   const ordered = [
     ...orderOverrides.map((id) => responses.find((r) => r.id === id)).filter(Boolean),
     ...responses.filter((r) => !overrideSet.has(r.id)),
   ] as ResponseWithName[]
+  const workingOnly = progress
+    .filter((entry) => entry.status === 'working' && !entry.responseId)
+    .sort((left, right) => right.updatedAt - left.updatedAt)
 
   function moveItem(fromIndex: number, toIndex: number) {
     const ids = ordered.map((r) => r.id)
@@ -185,21 +203,41 @@ function FreeResponseList({
       {ordered.map((resp, idx) => {
         const annotation = annotations[resp.id] ?? { starred: false, flagged: false, emoji: null }
         const answerText = resp.answer.type === 'free-response' ? resp.answer.text : ''
+        const status = progressByResponseId.get(resp.id)?.status ?? 'submitted'
         return (
           <ResponseCard
             key={resp.id}
             response={resp}
             annotation={annotation}
             answerText={answerText}
+            status={status}
             onAnnotate={(patch) => onAnnotate(resp.id, patch)}
+            onShare={onShareResponse ? () => onShareResponse(resp.id) : undefined}
+            shareLabel={activeSharedResponseId === resp.id ? 'Stop sharing' : 'Share'}
+            shareActive={activeSharedResponseId === resp.id}
             onMoveUp={idx > 0 ? () => moveItem(idx, idx - 1) : undefined}
             onMoveDown={idx < ordered.length - 1 ? () => moveItem(idx, idx + 1) : undefined}
-            selected={shareMode ? selectedIds.has(resp.id) : undefined}
-            onSelectToggle={shareMode ? () => onSelectToggle(resp.id) : undefined}
           />
         )
       })}
-      {ordered.length === 0 && (
+      {workingOnly.map((entry) => (
+        <ResponseCard
+          key={`${entry.studentId}:${entry.questionId}`}
+          response={{
+            id: `draft:${entry.studentId}:${entry.questionId}`,
+            questionId: entry.questionId,
+            studentId: entry.studentId,
+            submittedAt: entry.updatedAt,
+            answer: entry.answer ?? { type: 'free-response', text: '' },
+            studentName: entry.studentName,
+          }}
+          annotation={{ starred: false, flagged: false, emoji: null }}
+          answerText={entry.answer?.type === 'free-response' ? entry.answer.text : 'Working on a response…'}
+          status="working"
+          onAnnotate={() => {}}
+        />
+      ))}
+      {ordered.length === 0 && workingOnly.length === 0 && (
         <p className="text-sm text-gray-400 italic">No responses yet.</p>
       )}
     </div>
@@ -218,24 +256,21 @@ function FreeResponseList({
 export default function ResponseViewer({
   question,
   responses,
+  progress,
   annotations,
   orderOverrides,
-  shareMode,
-  selectedIds,
+  activeSharedResponseId,
   onAnnotate,
+  onShareResponse,
   onReorder,
-  onSelectToggle,
 }: Props) {
   if (question.type === 'multiple-choice') {
     return (
       <MCQTable
         question={question}
-        responses={responses}
+        progress={progress}
         annotations={annotations}
-        shareMode={shareMode}
-        selectedIds={selectedIds}
         onAnnotate={onAnnotate}
-        onSelectToggle={onSelectToggle}
       />
     )
   }
@@ -243,13 +278,13 @@ export default function ResponseViewer({
   return (
     <FreeResponseList
       responses={responses}
+      progress={progress}
       annotations={annotations}
       orderOverrides={orderOverrides}
-      shareMode={shareMode}
-      selectedIds={selectedIds}
+      activeSharedResponseId={activeSharedResponseId}
       onAnnotate={onAnnotate}
+      onShareResponse={onShareResponse}
       onReorder={onReorder}
-      onSelectToggle={onSelectToggle}
     />
   )
 }

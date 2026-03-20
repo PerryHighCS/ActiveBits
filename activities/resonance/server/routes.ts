@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import {
+  findHashBySessionId,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   updatePersistentSessionUrlState,
@@ -14,6 +15,7 @@ import type {
   Question,
   QuestionReveal,
   Response,
+  ResponseProgress,
   Student,
 } from '../shared/types.js'
 import { validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
@@ -41,6 +43,7 @@ interface RouteRequest {
   body?: unknown
   cookies?: Record<string, unknown>
   headers?: Record<string, string | undefined>
+  query?: Record<string, unknown>
 }
 
 interface ResonanceRouteApp {
@@ -62,13 +65,24 @@ interface ResonanceSessionData extends Record<string, unknown> {
   instructorPasscode: string
   questions: Question[]
   activeQuestionId: string | null
+  activeQuestionIds: string[]
+  activeQuestionDeadlineAt: number | null
   students: Record<string, Student>
   responses: Response[]
+  responseDrafts: Record<string, {
+    questionId: string
+    studentId: string
+    updatedAt: number
+    answer: Response['answer']
+  }>
   annotations: Record<string, InstructorAnnotation>
   reveals: QuestionReveal[]
   responseOrderOverrides: Record<string, string[]>
   /** Stored when session is created from a persistent link — used for passcode recovery. */
   persistentHash: string | null
+  embeddedParentSessionId?: string
+  embeddedInstanceKey?: string
+  embeddedLaunch?: Record<string, unknown>
 }
 
 interface ResonanceSession extends SessionRecord {
@@ -90,6 +104,11 @@ interface PersistentSessionsCookieEntry {
 
 const MAX_SESSIONS_PER_COOKIE = 20
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
+
+interface EmbeddedParentSessionContext {
+  parentSessionId: string
+  activityName: 'syncdeck'
+}
 
 function parsePersistentSessionsCookie(cookieValue: unknown): PersistentSessionsCookieEntry[] {
   if (cookieValue == null) return []
@@ -114,6 +133,20 @@ function parsePersistentSessionsCookie(cookieValue: unknown): PersistentSessions
     }))
 }
 
+function readEmbeddedParentSessionContext(data: ResonanceSessionData): EmbeddedParentSessionContext | null {
+  const parentSessionId = typeof data.embeddedParentSessionId === 'string'
+    ? data.embeddedParentSessionId.trim()
+    : ''
+  if (!parentSessionId) {
+    return null
+  }
+
+  return {
+    parentSessionId,
+    activityName: 'syncdeck',
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
@@ -124,6 +157,196 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function ensurePlainObject(value: unknown): Record<string, unknown> {
   return isPlainObject(value) ? value : {}
+}
+
+function normalizeInstructorPasscode(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function normalizeActiveQuestionIds(
+  value: unknown,
+  fallbackActiveQuestionId: string | null,
+): string[] {
+  const ids = Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : fallbackActiveQuestionId
+      ? [fallbackActiveQuestionId]
+      : []
+
+  return Array.from(new Set(ids))
+}
+
+function normalizeActiveQuestionDeadlineAt(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null
+  }
+
+  const rounded = Math.round(value)
+  return rounded > 0 ? rounded : null
+}
+
+function setActiveQuestions(
+  sessionData: ResonanceSessionData,
+  questionIds: string[],
+  deadlineAt: number | null,
+): void {
+  sessionData.activeQuestionIds = questionIds
+  sessionData.activeQuestionId = questionIds[0] ?? null
+  sessionData.activeQuestionDeadlineAt = questionIds.length > 0 ? deadlineAt : null
+}
+
+function clearActiveQuestions(sessionData: ResonanceSessionData): void {
+  setActiveQuestions(sessionData, [], null)
+}
+
+function getOrderedExistingQuestionIds(
+  questions: Question[],
+  requestedQuestionIds: string[],
+): string[] {
+  const requested = new Set(requestedQuestionIds)
+  return questions.filter((question) => requested.has(question.id)).map((question) => question.id)
+}
+
+function buildActiveQuestionRun(
+  questions: Question[],
+  questionIds: string[],
+  now: number,
+): { questionIds: string[]; deadlineAt: number | null } {
+  const orderedQuestionIds = getOrderedExistingQuestionIds(questions, questionIds)
+  if (orderedQuestionIds.length === 0) {
+    return { questionIds: [], deadlineAt: null }
+  }
+
+  const totalTimeLimitMs = orderedQuestionIds.reduce((sum, questionId) => {
+    const question = questions.find((entry) => entry.id === questionId)
+    const timeLimitMs = question?.responseTimeLimitMs
+    return typeof timeLimitMs === 'number' && timeLimitMs > 0 ? sum + timeLimitMs : sum
+  }, 0)
+
+  return {
+    questionIds: orderedQuestionIds,
+    deadlineAt: totalTimeLimitMs > 0 ? now + totalTimeLimitMs : null,
+  }
+}
+
+function upsertResponse(
+  responses: Response[],
+  questionId: string,
+  studentId: string,
+  answer: Response['answer'],
+): Response {
+  const existing = responses.find(
+    (response) => response.questionId === questionId && response.studentId === studentId,
+  )
+  const submittedAt = Date.now()
+
+  if (existing) {
+    existing.answer = answer
+    existing.submittedAt = submittedAt
+    return existing
+  }
+
+  const response: Response = {
+    id: `r_${Math.random().toString(36).slice(2, 12)}`,
+    questionId,
+    studentId,
+    submittedAt,
+    answer,
+  }
+  responses.push(response)
+  return response
+}
+
+function clearAllReveals(sessionData: ResonanceSessionData): QuestionReveal[] {
+  const removedReveals = [...sessionData.reveals]
+  sessionData.reveals = []
+  return removedReveals
+}
+
+function expireActiveQuestionRunIfNeeded(session: ResonanceSession): boolean {
+  const deadlineAt = session.data.activeQuestionDeadlineAt
+  if (deadlineAt === null || Date.now() < deadlineAt) {
+    return false
+  }
+
+  clearActiveQuestions(session.data)
+  return true
+}
+
+function resolveRequestedActiveQuestionIds(body: Record<string, unknown>): string[] | null | undefined {
+  if (body.questionId === null) {
+    return null
+  }
+
+  if (Array.isArray(body.questionIds)) {
+    return body.questionIds
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+  }
+
+  if (typeof body.questionId === 'string') {
+    return [body.questionId]
+  }
+
+  return undefined
+}
+
+function buildDraftKey(questionId: string, studentId: string): string {
+  return `${questionId}:${studentId}`
+}
+
+function normalizeDraftAnswerPayload(
+  value: unknown,
+  questionsById: Map<string, Question>,
+  questionId: string,
+): Response['answer'] | null {
+  const question = questionsById.get(questionId)
+  if (!question) {
+    return null
+  }
+  return validateAnswerPayload(value, question)
+}
+
+function normalizeResponseDrafts(
+  value: unknown,
+  questions: Question[],
+): ResonanceSessionData['responseDrafts'] {
+  if (!isPlainObject(value)) {
+    return {}
+  }
+
+  const questionsById = new Map(questions.map((question) => [question.id, question] satisfies [string, Question]))
+  const drafts: ResonanceSessionData['responseDrafts'] = {}
+
+  for (const [key, rawDraft] of Object.entries(value)) {
+    if (!isPlainObject(rawDraft)) {
+      continue
+    }
+
+    const questionId = typeof rawDraft.questionId === 'string' ? rawDraft.questionId : ''
+    const studentId = typeof rawDraft.studentId === 'string' ? rawDraft.studentId : ''
+    const updatedAt = typeof rawDraft.updatedAt === 'number' && Number.isFinite(rawDraft.updatedAt)
+      ? Math.round(rawDraft.updatedAt)
+      : 0
+    const answer = normalizeDraftAnswerPayload(rawDraft.answer, questionsById, questionId)
+
+    if (!questionId || !studentId || updatedAt <= 0 || answer === null) {
+      continue
+    }
+
+    drafts[key] = {
+      questionId,
+      studentId,
+      updatedAt,
+      answer,
+    }
+  }
+
+  return drafts
 }
 
 function normalizeSessionData(data: unknown): ResonanceSessionData {
@@ -145,14 +368,32 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
         persistentHash = embeddedHash
       }
     }
+
+    if (questions.length === 0 && Array.isArray(embedded.questions)) {
+      const validatedQuestionSet = validateQuestionSet(embedded.questions)
+      if (validatedQuestionSet.errors.length === 0 && validatedQuestionSet.questions.length > 0) {
+        questions = validatedQuestionSet.questions
+      }
+    }
   }
 
+  const fallbackActiveQuestionId = typeof source.activeQuestionId === 'string' ? source.activeQuestionId : null
+  const activeQuestionIds = normalizeActiveQuestionIds(source.activeQuestionIds, fallbackActiveQuestionId)
+
   return {
-    instructorPasscode: typeof source.instructorPasscode === 'string' ? source.instructorPasscode : '',
+    ...source,
+    // Embedded child launches (for example from SyncDeck) create the raw session
+    // without going through /create, so ensure a stable instructor passcode exists
+    // before the child manager bootstrap is generated.
+    instructorPasscode: normalizeInstructorPasscode(source.instructorPasscode) ?? generatePasscode(),
     questions,
-    activeQuestionId: typeof source.activeQuestionId === 'string' ? source.activeQuestionId : null,
+    activeQuestionId: activeQuestionIds[0] ?? null,
+    activeQuestionIds,
+    activeQuestionDeadlineAt:
+      activeQuestionIds.length > 0 ? normalizeActiveQuestionDeadlineAt(source.activeQuestionDeadlineAt) : null,
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
     responses: Array.isArray(source.responses) ? (source.responses as Response[]) : [],
+    responseDrafts: normalizeResponseDrafts(source.responseDrafts, questions),
     annotations: isPlainObject(source.annotations)
       ? (source.annotations as Record<string, InstructorAnnotation>)
       : {},
@@ -179,32 +420,120 @@ function toStudentQuestion(q: Question) {
   return { ...q, options: q.options.map(({ id, text }) => ({ id, text })) }
 }
 
-function buildStudentSnapshot(session: ResonanceSession) {
-  const { activeQuestionId, questions, reveals } = session.data
-  const activeQuestion =
-    activeQuestionId !== null ? (questions.find((q) => q.id === activeQuestionId) ?? null) : null
+function buildStudentReveal(
+  reveal: QuestionReveal,
+  session: ResonanceSession,
+  viewerStudentId: string | null,
+): QuestionReveal {
+  const sharedResponses = reveal.sharedResponses.map((sharedResponse) => {
+    const ownerResponse = session.data.responses.find((response) => response.id === sharedResponse.id)
+    return {
+      ...sharedResponse,
+      isOwnResponse: viewerStudentId !== null && ownerResponse?.studentId === viewerStudentId,
+    }
+  })
+
+  if (viewerStudentId === null) {
+    return {
+      ...reveal,
+      sharedResponses,
+      viewerResponse: null,
+    }
+  }
+
+  const viewerResponse = session.data.responses.find(
+    (response) => response.questionId === reveal.questionId && response.studentId === viewerStudentId,
+  )
+
+  return {
+    ...reveal,
+    sharedResponses,
+    viewerResponse: viewerResponse
+      ? {
+          answer: viewerResponse.answer,
+          submittedAt: viewerResponse.submittedAt,
+          instructorEmoji: session.data.annotations[viewerResponse.id]?.emoji ?? null,
+          isShared: sharedResponses.some((sharedResponse) => sharedResponse.id === viewerResponse.id),
+        }
+      : null,
+  }
+}
+
+function buildStudentSnapshot(session: ResonanceSession, viewerStudentId: string | null = null) {
+  const { activeQuestionId, activeQuestionIds, activeQuestionDeadlineAt, questions, reveals } = session.data
+  const activeQuestions = questions
+    .filter((question) => activeQuestionIds.includes(question.id))
+    .map(toStudentQuestion)
+  const activeQuestion = activeQuestions[0] ?? null
   const revealedQuestionIds = new Set(reveals.map((r) => r.questionId))
   const revealedQuestions = questions.filter((q) => revealedQuestionIds.has(q.id)).map(toStudentQuestion)
   return {
     sessionId: session.id,
-    activeQuestion: activeQuestion !== null ? toStudentQuestion(activeQuestion) : null,
-    reveals,
+    activeQuestion: activeQuestionId !== null ? (activeQuestions.find((q) => q.id === activeQuestionId) ?? activeQuestion) : activeQuestion,
+    activeQuestions,
+    activeQuestionIds,
+    activeQuestionDeadlineAt,
+    reveals: reveals.map((reveal) => buildStudentReveal(reveal, session, viewerStudentId)),
     revealedQuestions,
   }
 }
 
 function buildInstructorSnapshot(session: ResonanceSession) {
-  const { questions, activeQuestionId, students, responses, annotations, reveals, responseOrderOverrides } =
+  const {
+    questions,
+    activeQuestionId,
+    activeQuestionIds,
+    activeQuestionDeadlineAt,
+    students,
+    responses,
+    responseDrafts,
+    annotations,
+    reveals,
+    responseOrderOverrides,
+  } =
     session.data
+  const submittedByQuestionStudent = new Set<string>()
+  const progress: ResponseProgress[] = responses.map((response) => {
+    submittedByQuestionStudent.add(buildDraftKey(response.questionId, response.studentId))
+    return {
+      questionId: response.questionId,
+      studentId: response.studentId,
+      studentName: students[response.studentId]?.name ?? 'Unknown',
+      updatedAt: response.submittedAt,
+      status: 'submitted',
+      answer: response.answer,
+      responseId: response.id,
+    }
+  })
+
+  for (const draft of Object.values(responseDrafts)) {
+    if (submittedByQuestionStudent.has(buildDraftKey(draft.questionId, draft.studentId))) {
+      continue
+    }
+
+    progress.push({
+      questionId: draft.questionId,
+      studentId: draft.studentId,
+      studentName: students[draft.studentId]?.name ?? 'Unknown',
+      updatedAt: draft.updatedAt,
+      status: 'working',
+      answer: draft.answer,
+      responseId: null,
+    })
+  }
+
   return {
     sessionId: session.id,
     questions,
     activeQuestionId,
+    activeQuestionIds,
+    activeQuestionDeadlineAt,
     students: Object.values(students),
     responses: responses.map((r) => ({
       ...r,
       studentName: students[r.studentId]?.name ?? 'Unknown',
     })),
+    progress,
     annotations,
     reveals,
     responseOrderOverrides,
@@ -249,6 +578,19 @@ export default function setupResonanceRoutes(
   sessions: SessionStore,
   ws: WsRouter,
 ): void {
+  async function loadResonanceSession(sessionId: string): Promise<ResonanceSession | null> {
+    const session = asResonanceSession(await sessions.get(sessionId))
+    if (!session) {
+      return null
+    }
+
+    if (expireActiveQuestionRunIfNeeded(session)) {
+      await sessions.set(sessionId, session)
+    }
+
+    return session
+  }
+
   function sendToSocket(socket: ResonanceSocket, type: string, payload: unknown, sessionId: string): void {
     if (socket.readyState !== 1) return
     try {
@@ -290,6 +632,19 @@ export default function setupResonanceRoutes(
         socket.isInstructor === isInstructor
       ) {
         sendToSocket(socket, type, payload, sessionId)
+      }
+    }
+  }
+
+  function broadcastStudentSessionState(session: ResonanceSession, sessionId: string): void {
+    const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
+    for (const socket of clients as Set<ResonanceSocket>) {
+      if (
+        socket.readyState === 1 &&
+        socket.sessionId === sessionId &&
+        socket.isInstructor !== true
+      ) {
+        sendToSocket(socket, 'resonance:session-state', buildStudentSnapshot(session, socket.studentId ?? null), sessionId)
       }
     }
   }
@@ -433,27 +788,39 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const session = asResonanceSession(await sessions.get(sessionId))
+    const session = await loadResonanceSession(sessionId)
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
     }
 
-    const { persistentHash } = session.data
-    if (!persistentHash) {
+    const directPersistentHash = session.data.persistentHash
+    const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
+    const recoveryActivityName = directPersistentHash
+      ? 'resonance'
+      : embeddedParentContext?.activityName ?? null
+    const recoverySessionId = directPersistentHash
+      ? sessionId
+      : embeddedParentContext?.parentSessionId ?? null
+    const persistentHash = recoverySessionId
+      ? await findHashBySessionId(recoverySessionId)
+      : null
+
+    if (!persistentHash || !recoveryActivityName) {
       res.status(403).json({ error: 'session was not created from a persistent link' })
       return
     }
 
-    // Verify the teacher owns this persistent session via their cookie
+    // Verify the teacher owns the direct persistent session or the embedded
+    // parent SyncDeck session via their cookie.
     const cookieEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
-    const entry = cookieEntries.find((e) => e.key === `resonance:${persistentHash}`)
+    const entry = cookieEntries.find((e) => e.key === `${recoveryActivityName}:${persistentHash}`)
     if (!entry) {
       res.status(403).json({ error: 'forbidden' })
       return
     }
 
-    const verified = verifyTeacherCodeWithHash('resonance', persistentHash, entry.teacherCode)
+    const verified = verifyTeacherCodeWithHash(recoveryActivityName, persistentHash, entry.teacherCode)
     if (!verified.valid) {
       res.status(403).json({ error: 'forbidden' })
       return
@@ -471,7 +838,7 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const session = asResonanceSession(await sessions.get(sessionId))
+    const session = await loadResonanceSession(sessionId)
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
@@ -512,7 +879,7 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const session = asResonanceSession(await sessions.get(sessionId))
+    const session = await loadResonanceSession(sessionId)
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
@@ -525,24 +892,23 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const { activeQuestionId, questions, responses } = session.data
-    if (!activeQuestionId) {
+    const requestedQuestionId = typeof body.questionId === 'string' ? body.questionId : null
+    const activeQuestionIds = session.data.activeQuestionIds
+    const questionId =
+      requestedQuestionId !== null
+        ? requestedQuestionId
+        : activeQuestionIds.length === 1
+          ? activeQuestionIds[0] ?? null
+          : session.data.activeQuestionId
+
+    if (!questionId || !activeQuestionIds.includes(questionId)) {
       res.status(409).json({ error: 'no active question' })
       return
     }
 
-    const activeQuestion = questions.find((q) => q.id === activeQuestionId) ?? null
+    const activeQuestion = session.data.questions.find((q) => q.id === questionId) ?? null
     if (!activeQuestion) {
       res.status(409).json({ error: 'active question not found' })
-      return
-    }
-
-    // Reject duplicate submissions for the same question.
-    const alreadyAnswered = responses.some(
-      (r) => r.questionId === activeQuestionId && r.studentId === studentId,
-    )
-    if (alreadyAnswered) {
-      res.status(409).json({ error: 'already submitted an answer for this question' })
       return
     }
 
@@ -552,18 +918,11 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const response: Response = {
-      id: `r_${Math.random().toString(36).slice(2, 12)}`,
-      questionId: activeQuestionId,
-      studentId,
-      submittedAt: Date.now(),
-      answer,
-    }
-
-    session.data.responses.push(response)
+    upsertResponse(session.data.responses, questionId, studentId, answer)
+    delete session.data.responseDrafts[buildDraftKey(questionId, studentId)]
     await sessions.set(sessionId, session)
 
-    console.info('[resonance] Answer submitted', { sessionId, studentId, questionId: activeQuestionId })
+    console.info('[resonance] Answer submitted', { sessionId, studentId, questionId })
     res.json({ ok: true })
   })
 
@@ -576,13 +935,14 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const session = asResonanceSession(await sessions.get(sessionId))
+    const session = await loadResonanceSession(sessionId)
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
     }
 
-    res.json(buildStudentSnapshot(session))
+    const requestedStudentId = typeof req.query?.studentId === 'string' ? req.query.studentId : null
+    res.json(buildStudentSnapshot(session, requestedStudentId))
   })
 
   // GET /api/resonance/:sessionId/responses
@@ -594,7 +954,7 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const session = asResonanceSession(await sessions.get(sessionId))
+    const session = await loadResonanceSession(sessionId)
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
@@ -609,7 +969,7 @@ export default function setupResonanceRoutes(
   })
 
   // POST /api/resonance/:sessionId/activate-question
-  // Sets the active question. Pass null to deactivate.
+  // Sets the active question set. Pass null to deactivate all.
   app.post('/api/resonance/:sessionId/activate-question', async (req, res) => {
     const { sessionId } = req.params
     if (!sessionId) {
@@ -617,7 +977,7 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const session = asResonanceSession(await sessions.get(sessionId))
+    const session = await loadResonanceSession(sessionId)
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
@@ -629,26 +989,51 @@ export default function setupResonanceRoutes(
     }
 
     const body = isPlainObject(req.body) ? req.body : {}
-    const questionId = body.questionId === null ? null
-      : typeof body.questionId === 'string' ? body.questionId
-      : undefined
+    const requestedQuestionIds = resolveRequestedActiveQuestionIds(body)
 
-    if (questionId === undefined) {
-      res.status(400).json({ error: 'questionId must be a string or null' })
+    if (requestedQuestionIds === undefined) {
+      res.status(400).json({ error: 'questionId must be a string or null, or questionIds must be an array of strings' })
       return
     }
 
-    if (questionId !== null && !session.data.questions.some((q) => q.id === questionId)) {
+    if (requestedQuestionIds !== null) {
+      const orderedQuestionIds = getOrderedExistingQuestionIds(session.data.questions, requestedQuestionIds)
+      if (orderedQuestionIds.length !== Array.from(new Set(requestedQuestionIds)).length) {
+        res.status(404).json({ error: 'question not found' })
+        return
+      }
+      const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, Date.now())
+      setActiveQuestions(session.data, run.questionIds, run.deadlineAt)
+    } else {
+      clearActiveQuestions(session.data)
+    }
+
+    if (requestedQuestionIds !== null && session.data.activeQuestionIds.length === 0) {
       res.status(404).json({ error: 'question not found' })
       return
     }
-
-    session.data.activeQuestionId = questionId
     await sessions.set(sessionId, session)
 
-    console.info('[resonance] Question activated', { sessionId, questionId })
-    void broadcast('resonance:question-activated', { questionId }, sessionId)
-    res.json({ ok: true, activeQuestionId: questionId })
+    console.info('[resonance] Question activation updated', {
+      sessionId,
+      activeQuestionIds: session.data.activeQuestionIds,
+      activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+    })
+    void broadcast(
+      'resonance:question-activated',
+      {
+        questionId: session.data.activeQuestionId,
+        questionIds: session.data.activeQuestionIds,
+        deadlineAt: session.data.activeQuestionDeadlineAt,
+      },
+      sessionId,
+    )
+    res.json({
+      ok: true,
+      activeQuestionId: session.data.activeQuestionId,
+      activeQuestionIds: session.data.activeQuestionIds,
+      activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+    })
   })
 
   // POST /api/resonance/:sessionId/add-question
@@ -660,7 +1045,7 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const session = asResonanceSession(await sessions.get(sessionId))
+    const session = await loadResonanceSession(sessionId)
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
@@ -701,7 +1086,7 @@ export default function setupResonanceRoutes(
       return
     }
 
-    const session = asResonanceSession(await sessions.get(sessionId))
+    const session = await loadResonanceSession(sessionId)
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
@@ -794,20 +1179,13 @@ export default function setupResonanceRoutes(
         reactions: {} as Record<string, number>,
       }))
 
-    // Replace any existing reveal for this question.
-    const existingIndex = session.data.reveals.findIndex((rv) => rv.questionId === questionId)
     const reveal: QuestionReveal = {
       questionId,
       sharedAt: now,
       correctOptionIds,
       sharedResponses,
     }
-
-    if (existingIndex !== -1) {
-      session.data.reveals[existingIndex] = reveal
-    } else {
-      session.data.reveals.push(reveal)
-    }
+    session.data.reveals = [reveal]
 
     await sessions.set(sessionId, session)
 
@@ -827,6 +1205,41 @@ export default function setupResonanceRoutes(
 
     void broadcast('resonance:results-shared', { reveal, question: studentSafeQuestion }, sessionId)
     res.json({ ok: true, reveal })
+  })
+
+  // POST /api/resonance/:sessionId/stop-sharing
+  // Removes any currently shared reveal.
+  app.post('/api/resonance/:sessionId/stop-sharing', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = await loadResonanceSession(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const removedReveals = clearAllReveals(session.data)
+    if (removedReveals.length === 0) {
+      res.status(404).json({ error: 'nothing is currently shared' })
+      return
+    }
+
+    await sessions.set(sessionId, session)
+    console.info('[resonance] Sharing stopped', {
+      sessionId,
+      questionId: removedReveals[0]?.questionId ?? null,
+    })
+    void broadcast('resonance:sharing-stopped', {}, sessionId)
+    res.json({ ok: true })
   })
 
   // POST /api/resonance/:sessionId/reorder-responses
@@ -926,19 +1339,33 @@ export default function setupResonanceRoutes(
   ): Promise<void> {
     switch (type) {
       case 'resonance:activate-question': {
-        const questionId =
-          payload.questionId === null
-            ? null
-            : typeof payload.questionId === 'string'
-              ? payload.questionId
-              : undefined
-        if (questionId === undefined) return
-        if (questionId !== null && !session.data.questions.some((q) => q.id === questionId)) return
-        session.data.activeQuestionId = questionId
+        const requestedQuestionIds = resolveRequestedActiveQuestionIds(payload)
+        if (requestedQuestionIds === undefined) return
+        if (requestedQuestionIds === null) {
+          clearActiveQuestions(session.data)
+        } else {
+          const uniqueRequestedIds = Array.from(new Set(requestedQuestionIds))
+          const orderedQuestionIds = getOrderedExistingQuestionIds(session.data.questions, uniqueRequestedIds)
+          if (orderedQuestionIds.length !== uniqueRequestedIds.length) return
+          const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, Date.now())
+          setActiveQuestions(session.data, run.questionIds, run.deadlineAt)
+        }
         await sessions.set(sessionId, session)
-        console.info('[resonance] WS activate-question', { sessionId, questionId })
-        void broadcast('resonance:question-activated', { questionId }, sessionId)
-        broadcastToRole('resonance:session-state', buildStudentSnapshot(session), sessionId, false)
+        console.info('[resonance] WS activate-question', {
+          sessionId,
+          activeQuestionIds: session.data.activeQuestionIds,
+          activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+        })
+        void broadcast(
+          'resonance:question-activated',
+          {
+            questionId: session.data.activeQuestionId,
+            questionIds: session.data.activeQuestionIds,
+            deadlineAt: session.data.activeQuestionDeadlineAt,
+          },
+          sessionId,
+        )
+        broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
       }
@@ -981,12 +1408,7 @@ export default function setupResonanceRoutes(
             reactions: {} as Record<string, number>,
           }))
         const reveal: QuestionReveal = { questionId, sharedAt: now, correctOptionIds, sharedResponses }
-        const existingIndex = session.data.reveals.findIndex((rv) => rv.questionId === questionId)
-        if (existingIndex !== -1) {
-          session.data.reveals[existingIndex] = reveal
-        } else {
-          session.data.reveals.push(reveal)
-        }
+        session.data.reveals = [reveal]
         await sessions.set(sessionId, session)
         console.info('[resonance] WS share-results', {
           sessionId,
@@ -999,7 +1421,21 @@ export default function setupResonanceRoutes(
             ? { ...q, options: q.options.map(({ id, text }) => ({ id, text })) }
             : q
         void broadcast('resonance:results-shared', { reveal, question: studentSafeQ }, sessionId)
-        broadcastToRole('resonance:session-state', buildStudentSnapshot(session), sessionId, false)
+        broadcastStudentSessionState(session, sessionId)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:stop-sharing': {
+        const removedReveals = clearAllReveals(session.data)
+        if (removedReveals.length === 0) return
+        await sessions.set(sessionId, session)
+        console.info('[resonance] WS stop-sharing', {
+          sessionId,
+          questionId: removedReveals[0]?.questionId ?? null,
+        })
+        void broadcast('resonance:sharing-stopped', {}, sessionId)
+        broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
       }
@@ -1083,33 +1519,73 @@ export default function setupResonanceRoutes(
         const studentId =
           typeof payload.studentId === 'string' ? payload.studentId : (clientStudentId ?? null)
         if (!studentId || !session.data.students[studentId]) return
-        const { activeQuestionId, questions, responses } = session.data
-        if (!activeQuestionId) return
-        const activeQuestion = questions.find((q) => q.id === activeQuestionId) ?? null
+        const requestedQuestionId = typeof payload.questionId === 'string' ? payload.questionId : null
+        const questionId =
+          requestedQuestionId !== null
+            ? requestedQuestionId
+            : session.data.activeQuestionIds.length === 1
+              ? (session.data.activeQuestionIds[0] ?? null)
+              : session.data.activeQuestionId
+        if (!questionId || !session.data.activeQuestionIds.includes(questionId)) return
+        const activeQuestion = session.data.questions.find((q) => q.id === questionId) ?? null
         if (!activeQuestion) return
-        const alreadyAnswered = responses.some(
-          (r) => r.questionId === activeQuestionId && r.studentId === studentId,
-        )
-        if (alreadyAnswered) return
         const answer = validateAnswerPayload(payload.answer, activeQuestion)
         if (!answer) return
-        const response: Response = {
-          id: `r_${Math.random().toString(36).slice(2, 12)}`,
-          questionId: activeQuestionId,
-          studentId,
-          submittedAt: Date.now(),
-          answer,
-        }
-        session.data.responses.push(response)
+        const response = upsertResponse(session.data.responses, questionId, studentId, answer)
+        delete session.data.responseDrafts[buildDraftKey(questionId, studentId)]
         await sessions.set(sessionId, session)
         console.info('[resonance] WS submit-answer', {
           sessionId,
           studentId,
-          questionId: activeQuestionId,
+          questionId,
         })
         const student = session.data.students[studentId]
         const responseWithName = { ...response, studentName: student?.name ?? 'Unknown' }
         broadcastToRole('resonance:response-received', { response: responseWithName }, sessionId, true)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:update-draft': {
+        const studentId =
+          typeof payload.studentId === 'string' ? payload.studentId : (clientStudentId ?? null)
+        if (!studentId || !session.data.students[studentId]) return
+
+        const questionId = typeof payload.questionId === 'string'
+          ? payload.questionId
+          : session.data.activeQuestionIds.length === 1
+            ? (session.data.activeQuestionIds[0] ?? null)
+            : session.data.activeQuestionId
+        if (!questionId || !session.data.activeQuestionIds.includes(questionId)) return
+
+        const question = session.data.questions.find((entry) => entry.id === questionId) ?? null
+        if (!question) return
+
+        const alreadyAnswered = session.data.responses.some(
+          (response) => response.questionId === questionId && response.studentId === studentId,
+        )
+        if (alreadyAnswered) return
+
+        const draftKey = buildDraftKey(questionId, studentId)
+        if (payload.answer === null) {
+          if (draftKey in session.data.responseDrafts) {
+            delete session.data.responseDrafts[draftKey]
+            await sessions.set(sessionId, session)
+            broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+          }
+          return
+        }
+
+        const answer = validateAnswerPayload(payload.answer, question)
+        if (!answer) return
+
+        session.data.responseDrafts[draftKey] = {
+          questionId,
+          studentId,
+          updatedAt: Date.now(),
+          answer,
+        }
+        await sessions.set(sessionId, session)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
       }
@@ -1131,7 +1607,7 @@ export default function setupResonanceRoutes(
           { questionId, sharedResponseId, reactions: sharedResp.reactions },
           sessionId,
         )
-        broadcastToRole('resonance:session-state', buildStudentSnapshot(session), sessionId, false)
+        broadcastStudentSessionState(session, sessionId)
         break
       }
 
@@ -1208,7 +1684,7 @@ export default function setupResonanceRoutes(
     }
 
     void (async () => {
-      const session = asResonanceSession(await sessions.get(sessionId))
+      const session = await loadResonanceSession(sessionId)
       if (!session) {
         socket.close(1008, 'invalid session')
         return
@@ -1228,7 +1704,7 @@ export default function setupResonanceRoutes(
         client.isInstructor = true
         sendToSocket(client, 'resonance:instructor-state', buildInstructorSnapshot(session), sessionId)
       } else {
-        sendToSocket(client, 'resonance:session-state', buildStudentSnapshot(session), sessionId)
+        sendToSocket(client, 'resonance:session-state', buildStudentSnapshot(session, client.studentId ?? null), sessionId)
       }
 
       console.info('[resonance] WebSocket connected', {
@@ -1246,7 +1722,7 @@ export default function setupResonanceRoutes(
             const msgPayload = isPlainObject(data.payload) ? data.payload : {}
             if (!msgType) return
 
-            const sess = asResonanceSession(await sessions.get(sessionId))
+            const sess = await loadResonanceSession(sessionId)
             if (!sess) {
               socket.close(1011, 'session expired')
               return

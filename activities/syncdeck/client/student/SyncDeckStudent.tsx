@@ -5,6 +5,7 @@ import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
 import {
   buildEntryParticipantStorageKey,
   buildSessionEntryParticipantStorageKey,
+  hasValidEntryParticipantHandoffStorageValue,
   persistEntryParticipantToken,
 } from '@src/components/common/entryParticipantStorage'
 import {
@@ -108,6 +109,11 @@ interface SyncDeckEmbeddedLifecyclePayload {
   activityId?: string
   childSessionId: string
   entryParticipantToken?: string
+}
+
+interface SyncDeckEmbeddedEntryResponse {
+  childSessionId?: unknown
+  entryParticipantToken?: unknown
 }
 
 export type SyncDeckStudentSyncState = 'solo' | 'synchronized' | 'behind' | 'ahead' | 'vertical'
@@ -1466,6 +1472,41 @@ export function resolveStudentOverlayNavigationBaseIndices(params: {
   }
 }
 
+export function shouldRecoverEmbeddedEntryParticipantToken(params: {
+  sessionId: string | null | undefined
+  childSessionId: string | null | undefined
+  studentId: string | null | undefined
+  activityId: string | null | undefined
+  sessionStorage: Pick<Storage, 'getItem'> | null | undefined
+  localStorage: Pick<Storage, 'getItem'> | null | undefined
+}): boolean {
+  if (!params.sessionId || !params.childSessionId || !params.studentId || !params.activityId) {
+    return false
+  }
+
+  if (params.localStorage) {
+    const sharedContextRaw = params.localStorage.getItem(`session-participant:${params.childSessionId}`)
+    const legacyName = params.localStorage.getItem(`student-name-${params.childSessionId}`)
+    const legacyId = params.localStorage.getItem(`student-id-${params.childSessionId}`)
+    if (
+      (typeof sharedContextRaw === 'string' && sharedContextRaw.length > 0)
+      || (typeof legacyName === 'string' && legacyName.trim().length > 0)
+      || (typeof legacyId === 'string' && legacyId.trim().length > 0)
+    ) {
+      return false
+    }
+  }
+
+  if (!params.sessionStorage) {
+    return true
+  }
+
+  return !hasValidEntryParticipantHandoffStorageValue(
+    params.sessionStorage,
+    buildSessionEntryParticipantStorageKey(params.activityId, params.childSessionId),
+  )
+}
+
 export function extractNavigationCapabilitiesFromStateMessage(rawPayload: unknown): NavigationCapabilities | null {
   if (rawPayload == null || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
     return null
@@ -1671,6 +1712,7 @@ const SyncDeckStudent: FC = () => {
   const studentBacktrackOptOutRef = useRef(false)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
   const expectedInstructorLocalTargetRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const recoveredEmbeddedEntryKeysRef = useRef<Set<string>>(new Set())
   const attachSessionEndedHandler = useSessionEndedHandler()
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const [pendingSynchronizedActivityRequest, setPendingSynchronizedActivityRequest] =
@@ -2614,6 +2656,87 @@ const SyncDeckStudent: FC = () => {
       derivedCapabilities: overlayVerticalNavigationCapabilities,
       fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false,
     })
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !sessionId || !activeEmbeddedActivity || !activeEmbeddedInstanceKey) {
+      return
+    }
+
+    const shouldRecover = shouldRecoverEmbeddedEntryParticipantToken({
+      sessionId,
+      childSessionId: activeEmbeddedActivity.childSessionId,
+      studentId: registeredStudentId,
+      activityId: activeEmbeddedActivity.activityId,
+      sessionStorage: window.sessionStorage,
+      localStorage: window.localStorage,
+    })
+    if (!shouldRecover) {
+      return
+    }
+
+    const recoveryKey = `${activeEmbeddedActivity.activityId}:${activeEmbeddedActivity.childSessionId}:${registeredStudentId}`
+    if (recoveredEmbeddedEntryKeysRef.current.has(recoveryKey)) {
+      return
+    }
+    recoveredEmbeddedEntryKeysRef.current.add(recoveryKey)
+
+    let isCancelled = false
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/entry`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            instanceKey: activeEmbeddedInstanceKey,
+            childSessionId: activeEmbeddedActivity.childSessionId,
+            studentId: registeredStudentId,
+          }),
+        })
+
+        if (!response.ok) {
+          if (!isCancelled) {
+            recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
+          }
+          return
+        }
+
+        const payload = (await response.json()) as SyncDeckEmbeddedEntryResponse
+        const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
+        const entryParticipantToken = typeof payload.entryParticipantToken === 'string'
+          ? payload.entryParticipantToken.trim()
+          : ''
+
+        if (!isCancelled && childSessionId && entryParticipantToken) {
+          persistEntryParticipantToken(
+            window.sessionStorage,
+            buildSessionEntryParticipantStorageKey(activeEmbeddedActivity.activityId, childSessionId),
+            entryParticipantToken,
+          )
+          return
+        }
+
+        if (!isCancelled) {
+          recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
+        }
+      } catch {
+        if (!isCancelled) {
+          recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
+        }
+      }
+    })()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [
+    activeEmbeddedActivity,
+    activeEmbeddedInstanceKey,
+    registeredStudentId,
+    sessionId,
+  ])
 
   useEffect(() => {
     if (

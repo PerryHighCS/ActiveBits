@@ -2,11 +2,12 @@ import { useState } from 'react'
 
 interface Props {
   onSubmit(text: string): void | Promise<void>
+  onDraftChange?(text: string): void
   submitting?: boolean
   submitted?: boolean
 }
 
-export default function FreeResponseInput({ onSubmit, submitting = false, submitted = false }: Props) {
+export default function FreeResponseInput({ onSubmit, onDraftChange, submitting = false, submitted = false }: Props) {
   const [text, setText] = useState('')
   const canSubmit = !submitting && !submitted && text.trim().length > 0
 
@@ -37,7 +38,11 @@ export default function FreeResponseInput({ onSubmit, submitting = false, submit
       <textarea
         id="resonance-fr-input"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          const nextValue = e.target.value
+          setText(nextValue)
+          onDraftChange?.(nextValue)
+        }}
         placeholder="Type your answer…"
         rows={4}
         maxLength={2000}

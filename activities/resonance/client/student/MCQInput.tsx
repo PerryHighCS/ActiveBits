@@ -4,11 +4,12 @@ import type { StudentMCQOption } from '../../shared/types.js'
 interface Props {
   options: StudentMCQOption[]
   onSubmit(selectedOptionId: string): void | Promise<void>
+  onDraftChange?(selectedOptionId: string | null): void
   submitting?: boolean
   submitted?: boolean
 }
 
-export default function MCQInput({ options, onSubmit, submitting = false, submitted = false }: Props) {
+export default function MCQInput({ options, onSubmit, onDraftChange, submitting = false, submitted = false }: Props) {
   const [selected, setSelected] = useState<string | null>(null)
   const canSubmit = !submitting && !submitted && selected !== null
 
@@ -50,7 +51,10 @@ export default function MCQInput({ options, onSubmit, submitting = false, submit
                   name="resonance-mcq"
                   value={option.id}
                   checked={isSelected}
-                  onChange={() => setSelected(option.id)}
+                  onChange={() => {
+                    setSelected(option.id)
+                    onDraftChange?.(option.id)
+                  }}
                   disabled={submitting || submitted}
                   className="mt-0.5 accent-rose-600"
                   aria-label={option.text}

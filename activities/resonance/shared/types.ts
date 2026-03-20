@@ -49,6 +49,18 @@ export interface ResponseWithName extends Response {
   studentName: string
 }
 
+export type ResponseProgressStatus = 'working' | 'submitted'
+
+export interface ResponseProgress {
+  questionId: string
+  studentId: string
+  studentName: string
+  updatedAt: number
+  status: ResponseProgressStatus
+  answer: AnswerPayload | null
+  responseId: string | null
+}
+
 export interface InstructorAnnotation {
   starred: boolean
   flagged: boolean
@@ -62,6 +74,14 @@ export interface SharedResponse {
   sharedAt: number
   instructorEmoji: string | null
   reactions: Record<string, number>
+  isOwnResponse?: boolean
+}
+
+export interface ViewerRevealResponse {
+  answer: AnswerPayload
+  submittedAt: number
+  instructorEmoji: string | null
+  isShared: boolean
 }
 
 export interface QuestionReveal {
@@ -69,6 +89,7 @@ export interface QuestionReveal {
   sharedAt: number
   correctOptionIds: string[] | null
   sharedResponses: SharedResponse[]
+  viewerResponse?: ViewerRevealResponse | null
 }
 
 export interface Student {
@@ -81,6 +102,9 @@ export interface Student {
 export interface StudentSessionSnapshot {
   sessionId: string
   activeQuestion: StudentQuestion | null
+  activeQuestions: StudentQuestion[]
+  activeQuestionIds: string[]
+  activeQuestionDeadlineAt: number | null
   reveals: QuestionReveal[]
   /** Student-safe versions of revealed questions, so clients can show option text alongside reveal data. */
   revealedQuestions: StudentQuestion[]
@@ -91,8 +115,11 @@ export interface InstructorSessionSnapshot {
   sessionId: string
   questions: Question[]
   activeQuestionId: string | null
+  activeQuestionIds: string[]
+  activeQuestionDeadlineAt: number | null
   students: Student[]
   responses: ResponseWithName[]
+  progress: ResponseProgress[]
   annotations: Record<string, InstructorAnnotation>
   reveals: QuestionReveal[]
 }

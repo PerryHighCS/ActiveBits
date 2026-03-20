@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import type { InstructorAnnotation, Question } from '../../shared/types.js'
 import { useInstructorState } from '../hooks/useInstructorState.js'
 import ResponseViewer from './ResponseViewer.js'
@@ -16,6 +17,29 @@ function getPasscode(sessionId: string): string | null {
   } catch {
     return null
   }
+}
+
+function setStoredPasscode(sessionId: string, passcode: string): void {
+  try {
+    sessionStorage.setItem(`${STORAGE_KEY_PREFIX}${sessionId}`, passcode)
+  } catch {
+    // Best-effort cache only; the in-memory state still allows manager auth.
+  }
+}
+
+function resolvePasscode(sessionId: string): string | null {
+  // Primary: sessionStorage key written by createSessionBootstrap config.
+  const fromStorage = getPasscode(sessionId)
+  if (fromStorage !== null) return fromStorage
+
+  // Fallback: bootstrap payload stored by the parent session manager
+  // (e.g. SyncDeck) after launching this activity as an embedded session.
+  const bootstrap = consumeCreateSessionBootstrapPayload('resonance', sessionId)
+  if (bootstrap !== null && typeof bootstrap.instructorPasscode === 'string' && bootstrap.instructorPasscode.length > 0) {
+    return bootstrap.instructorPasscode
+  }
+
+  return null
 }
 
 function buildNewQuestion(text: string, type: Question['type']): Question {
@@ -35,64 +59,41 @@ function buildNewQuestion(text: string, type: Question['type']): Question {
   }
 }
 
-// ---------------------------------------------------------------------------
-// SharePanel: inline share-results flow
-// ---------------------------------------------------------------------------
+function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
+  if (deadlineAt === null) {
+    return null
+  }
 
-interface SharePanelProps {
-  questionId: string
-  isMCQ: boolean
-  hasMCQCorrectAnswer: boolean
-  selectedIds: Set<string>
-  onShare(correctOptionIds: string[] | null): void
-  onCancel(): void
-  mcqCorrectOptionIds?: string[]
+  const remainingMs = Math.max(0, deadlineAt - now)
+  const totalSeconds = Math.ceil(remainingMs / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
-function SharePanel({ questionId: _questionId, isMCQ, hasMCQCorrectAnswer, selectedIds, onShare, onCancel, mcqCorrectOptionIds }: SharePanelProps) {
-  const [revealCorrect, setRevealCorrect] = useState(hasMCQCorrectAnswer)
+export function toggleQuestionActivationSelection(current: string[], questionId: string): string[] {
+  return current.includes(questionId)
+    ? current.filter((id) => id !== questionId)
+    : [...current, questionId]
+}
 
-  return (
-    <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 space-y-3">
-      <p className="text-sm font-medium text-rose-800">
-        Share {selectedIds.size} selected response{selectedIds.size !== 1 ? 's' : ''} with students
-      </p>
+export function normalizeActivationSelection(
+  current: string[],
+  availableQuestionIds: string[],
+  liveQuestionIds: string[],
+): string[] {
+  const availableQuestionIdSet = new Set(availableQuestionIds)
+  const filtered = current.filter((questionId) => availableQuestionIdSet.has(questionId))
+  if (filtered.length > 0) {
+    return filtered
+  }
 
-      {isMCQ && mcqCorrectOptionIds !== undefined && mcqCorrectOptionIds.length > 0 && (
-        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={revealCorrect}
-            onChange={(e) => setRevealCorrect(e.target.checked)}
-            className="accent-rose-600"
-          />
-          Reveal correct answer
-        </label>
-      )}
+  const live = liveQuestionIds.filter((questionId) => availableQuestionIdSet.has(questionId))
+  if (live.length > 0) {
+    return live
+  }
 
-      {isMCQ && (mcqCorrectOptionIds === undefined || mcqCorrectOptionIds.length === 0) && (
-        <p className="text-xs text-gray-500">Poll question — no correct answer to reveal.</p>
-      )}
-
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => onShare(isMCQ && revealCorrect && mcqCorrectOptionIds ? mcqCorrectOptionIds : null)}
-          disabled={selectedIds.size === 0}
-          className="rounded bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
-        >
-          Share
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  )
+  return availableQuestionIds[0] ? [availableQuestionIds[0]] : []
 }
 
 // ---------------------------------------------------------------------------
@@ -159,15 +160,65 @@ function AddQuestionForm({ onAdd }: { onAdd(q: Question): void }) {
 export default function ResonanceManager() {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const [passcode, setPasscode] = useState<string | null>(null)
-  const [shareMode, setShareMode] = useState(false)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isResolvingPasscode, setIsResolvingPasscode] = useState(true)
   const [activeTab, setActiveTab] = useState<string | null>(null)
+  const [activationSelectionIds, setActivationSelectionIds] = useState<string[]>([])
+  const [countdownNow, setCountdownNow] = useState(() => Date.now())
 
-  // Resolve passcode from sessionStorage on mount.
+  // Resolve passcode from same-tab bootstrap state first, then recover it from
+  // the server when this manager is running as an embedded child session.
   useEffect(() => {
     if (!sessionId) return
-    const stored = getPasscode(sessionId)
-    setPasscode(stored)
+    let isCancelled = false
+    const resolved = resolvePasscode(sessionId)
+    if (resolved !== null) {
+      setPasscode(resolved)
+      setIsResolvingPasscode(false)
+      return
+    }
+
+    setPasscode(null)
+    setIsResolvingPasscode(true)
+
+    const recoverPasscode = async () => {
+      try {
+        const response = await fetch(`/api/resonance/${encodeURIComponent(sessionId)}/instructor-passcode`, {
+          credentials: 'include',
+        })
+        if (!response.ok) {
+          if (!isCancelled) {
+            setPasscode(null)
+          }
+          return
+        }
+
+        const payload = await response.json() as { instructorPasscode?: unknown }
+        const recoveredPasscode =
+          typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.trim().length > 0
+            ? payload.instructorPasscode.trim()
+            : null
+        if (!isCancelled) {
+          setPasscode(recoveredPasscode)
+          if (recoveredPasscode !== null) {
+            setStoredPasscode(sessionId, recoveredPasscode)
+          }
+        }
+      } catch {
+        if (!isCancelled) {
+          setPasscode(null)
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsResolvingPasscode(false)
+        }
+      }
+    }
+
+    void recoverPasscode()
+
+    return () => {
+      isCancelled = true
+    }
   }, [sessionId])
 
   const { snapshot, loading, error, refresh } = useInstructorState(
@@ -175,12 +226,33 @@ export default function ResonanceManager() {
     passcode,
   )
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setCountdownNow(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [])
+
   // Default active tab to the first question when data loads.
   useEffect(() => {
     if (snapshot !== null && activeTab === null && snapshot.questions.length > 0) {
       setActiveTab(snapshot.questions[0]?.id ?? null)
     }
   }, [snapshot, activeTab])
+
+  useEffect(() => {
+    if (snapshot === null) {
+      return
+    }
+
+    const availableIds = snapshot.questions.map((question) => question.id)
+    setActivationSelectionIds((current) => {
+      return normalizeActivationSelection(current, availableIds, snapshot.activeQuestionIds)
+    })
+  }, [snapshot])
 
   // ---------------------------------------------------------------------------
   // Instructor actions
@@ -207,6 +279,15 @@ export default function ResonanceManager() {
     [callInstructor],
   )
 
+  const activateQuestions = useCallback(
+    (questionIds: string[]) => void callInstructor('/activate-question', { questionIds }),
+    [callInstructor],
+  )
+
+  const toggleActivationSelection = useCallback((questionId: string) => {
+    setActivationSelectionIds((current) => toggleQuestionActivationSelection(current, questionId))
+  }, [])
+
   const annotateResponse = useCallback(
     (responseId: string, patch: Partial<InstructorAnnotation>) =>
       void callInstructor('/annotate-response', { responseId, annotation: patch }),
@@ -225,6 +306,11 @@ export default function ResonanceManager() {
     [callInstructor],
   )
 
+  const stopSharing = useCallback(
+    (questionId: string) => void callInstructor('/stop-sharing', { questionId }),
+    [callInstructor],
+  )
+
   const addQuestion = useCallback(
     (question: Question) => void callInstructor('/add-question', question),
     [callInstructor],
@@ -238,10 +324,18 @@ export default function ResonanceManager() {
     return <div className="p-6 text-gray-500">No active session.</div>
   }
 
+  if (isResolvingPasscode) {
+    return (
+      <div className="p-6 text-gray-500">
+        Loading instructor session…
+      </div>
+    )
+  }
+
   if (passcode === null) {
     return (
       <div className="p-6 text-gray-500">
-        Instructor passcode not found in session storage. Try re-entering from the session creation link.
+        Instructor passcode not found. Try re-entering from the session creation link.
       </div>
     )
   }
@@ -256,7 +350,22 @@ export default function ResonanceManager() {
 
   if (snapshot === null) return null
 
-  const { questions, activeQuestionId, students, responses, annotations, reveals, responseOrderOverrides } = snapshot
+  const {
+    questions,
+    activeQuestionIds,
+    activeQuestionDeadlineAt,
+    students,
+    responses,
+    progress,
+    annotations,
+    reveals,
+    responseOrderOverrides,
+  } = snapshot
+  const hasLiveRun = activeQuestionDeadlineAt === null || activeQuestionDeadlineAt > countdownNow
+  const activeQuestionIdSet = new Set(hasLiveRun ? activeQuestionIds : [])
+  const activationSelectionSet = new Set(activationSelectionIds)
+  const liveCountdown = formatRemainingTime(activeQuestionDeadlineAt, countdownNow)
+  const activeReveal = reveals[0] ?? null
 
   // Question shown in the viewer panel.
   const viewingQuestion = questions.find((q) => q.id === activeTab) ?? null
@@ -265,13 +374,18 @@ export default function ResonanceManager() {
   const viewingResponses = viewingQuestion
     ? responses.filter((r) => r.questionId === viewingQuestion.id)
     : []
+  const viewingProgress = viewingQuestion
+    ? progress.filter((entry) => entry.questionId === viewingQuestion.id)
+    : []
 
   const viewingOrderOverrides =
     viewingQuestion ? (responseOrderOverrides[viewingQuestion.id] ?? []) : []
 
-  const viewingReveal = viewingQuestion
-    ? reveals.find((rv) => rv.questionId === viewingQuestion.id)
-    : null
+  const isViewingQuestionShared = activeReveal?.questionId === viewingQuestion?.id
+  const activeSharedResponseId =
+    viewingQuestion?.type === 'free-response' && isViewingQuestionShared
+      ? (activeReveal?.sharedResponses[0]?.id ?? null)
+      : null
 
   const mcqCorrectOptionIds =
     viewingQuestion?.type === 'multiple-choice'
@@ -316,10 +430,56 @@ export default function ResonanceManager() {
               <p className="text-xs text-gray-400 italic">No questions yet.</p>
             )}
 
+            {questions.length > 1 && (
+              <div className="space-y-2 pb-2">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => activateQuestions(activationSelectionIds)}
+                    disabled={activationSelectionIds.length === 0}
+                    className="rounded bg-rose-600 px-2 py-1 text-xs font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Activate selected ({activationSelectionIds.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivationSelectionIds(questions.map((question) => question.id))}
+                    className="rounded border border-rose-300 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                  >
+                    Select all
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => activateQuestions(questions.map((question) => question.id))}
+                    className="rounded bg-rose-600 px-2 py-1 text-xs font-medium text-white hover:bg-rose-700"
+                  >
+                    Activate all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => activateQuestion(null)}
+                    className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                  >
+                    Stop all
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActivationSelectionIds(activeQuestionIds)}
+                  className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  Match live set
+                </button>
+              </div>
+            )}
+
             {questions.map((q) => {
-              const isActive = q.id === activeQuestionId
+              const isActive = activeQuestionIdSet.has(q.id)
+              const isSelectedForActivation = activationSelectionSet.has(q.id)
               const isViewing = q.id === activeTab
-              const responseCount = responses.filter((r) => r.questionId === q.id).length
+              const responseCount = progress.filter((entry) => entry.questionId === q.id).length
               const hasReveal = reveals.some((rv) => rv.questionId === q.id)
 
               return (
@@ -335,7 +495,20 @@ export default function ResonanceManager() {
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveTab(q.id) }}
                 >
                   <div className="flex items-start justify-between gap-1">
-                    <p className="text-xs text-gray-700 truncate flex-1">{q.text}</p>
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={isSelectedForActivation}
+                        onChange={(e) => {
+                          e.stopPropagation()
+                          toggleActivationSelection(q.id)
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Select ${q.text} for activation`}
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-rose-600 focus:ring-rose-500"
+                      />
+                      <p className="text-xs text-gray-700 truncate flex-1">{q.text}</p>
+                    </div>
                     {isActive && (
                       <span className="text-[10px] bg-rose-500 text-white rounded px-1 shrink-0">Live</span>
                     )}
@@ -348,19 +521,19 @@ export default function ResonanceManager() {
                     <div className="flex gap-1">
                       <button
                         type="button"
-                        aria-label={isActive ? 'Deactivate question' : 'Activate question'}
-                        aria-pressed={isActive}
+                        aria-label={isSelectedForActivation ? 'Remove question from selected activation set' : 'Add question to selected activation set'}
+                        aria-pressed={isSelectedForActivation}
                         onClick={(e) => {
                           e.stopPropagation()
-                          activateQuestion(isActive ? null : q.id)
+                          toggleActivationSelection(q.id)
                         }}
                         className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                          isActive
+                          isSelectedForActivation
                             ? 'bg-rose-100 text-rose-700 hover:bg-rose-200'
                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                         }`}
                       >
-                        {isActive ? 'Stop' : 'Start'}
+                        {isSelectedForActivation ? 'Selected' : 'Select'}
                       </button>
                     </div>
                   </div>
@@ -384,40 +557,50 @@ export default function ResonanceManager() {
               <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 space-y-1">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">
                   {viewingQuestion.type === 'free-response' ? 'Free response' : 'Multiple choice'}
-                  {viewingQuestion.id === activeQuestionId && (
+                  {activeQuestionIdSet.has(viewingQuestion.id) && (
                     <span className="ml-2 text-rose-600 font-medium">● Live</span>
                   )}
                 </p>
                 <p className="text-base font-medium text-gray-900">{viewingQuestion.text}</p>
                 <p className="text-xs text-gray-400">
                   {viewingResponses.length} of {students.length} responded
-                  {viewingReveal !== null && (
+                  {isViewingQuestionShared && (
                     <span className="ml-2 text-green-600">● Results shared</span>
+                  )}
+                  {liveCountdown !== null && activeQuestionIds.length > 0 && (
+                    <span className="ml-2 text-amber-600">⏱ {liveCountdown} remaining</span>
                   )}
                 </p>
               </div>
 
               {/* Action bar */}
               <div className="flex items-center gap-2">
-                {!shareMode ? (
+                {viewingQuestion.type === 'multiple-choice' && (
                   <button
                     type="button"
                     onClick={() => {
-                      setShareMode(true)
-                      setSelectedIds(new Set())
+                      if (isViewingQuestionShared) {
+                        stopSharing(viewingQuestion.id)
+                        return
+                      }
+                      shareResults(
+                        viewingQuestion.id,
+                        viewingResponses.map((response) => response.id),
+                        mcqCorrectOptionIds !== undefined && mcqCorrectOptionIds.length > 0 ? mcqCorrectOptionIds : null,
+                      )
                     }}
                     className="rounded border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50"
                   >
-                    Share results…
+                    {isViewingQuestionShared ? 'Stop sharing' : 'Share'}
                   </button>
-                ) : null}
-                {viewingQuestion.id === activeQuestionId ? (
+                )}
+                {activeQuestionIdSet.has(viewingQuestion.id) ? (
                   <button
                     type="button"
                     onClick={() => activateQuestion(null)}
                     className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
                   >
-                    Stop question
+                    Stop all live questions
                   </button>
                 ) : (
                   <button
@@ -428,49 +611,35 @@ export default function ResonanceManager() {
                     Activate question
                   </button>
                 )}
+                {questions.length > 1 && !activeQuestionIdSet.has(viewingQuestion.id) && (
+                  <button
+                    type="button"
+                    onClick={() => activateQuestions(activationSelectionIds)}
+                    disabled={activationSelectionIds.length === 0}
+                    className="rounded border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50"
+                  >
+                    Activate selected set
+                  </button>
+                )}
               </div>
-
-              {/* Share panel */}
-              {shareMode && (
-                <SharePanel
-                  questionId={viewingQuestion.id}
-                  isMCQ={viewingQuestion.type === 'multiple-choice'}
-                  hasMCQCorrectAnswer={mcqCorrectOptionIds !== undefined && mcqCorrectOptionIds.length > 0}
-                  selectedIds={selectedIds}
-                  mcqCorrectOptionIds={mcqCorrectOptionIds}
-                  onShare={(correctOptionIds) => {
-                    shareResults(viewingQuestion.id, Array.from(selectedIds), correctOptionIds)
-                    setShareMode(false)
-                    setSelectedIds(new Set())
-                  }}
-                  onCancel={() => {
-                    setShareMode(false)
-                    setSelectedIds(new Set())
-                  }}
-                />
-              )}
 
               {/* Response viewer */}
               <ResponseViewer
                 question={viewingQuestion}
                 responses={viewingResponses}
+                progress={viewingProgress}
                 annotations={annotations}
                 orderOverrides={viewingOrderOverrides}
-                shareMode={shareMode}
-                selectedIds={selectedIds}
+                activeSharedResponseId={activeSharedResponseId}
                 onAnnotate={annotateResponse}
+                onShareResponse={(responseId) => {
+                  if (activeSharedResponseId === responseId) {
+                    stopSharing(viewingQuestion.id)
+                    return
+                  }
+                  shareResults(viewingQuestion.id, [responseId], null)
+                }}
                 onReorder={(orderedIds) => reorderResponses(viewingQuestion.id, orderedIds)}
-                onSelectToggle={(id) =>
-                  setSelectedIds((prev) => {
-                    const next = new Set(prev)
-                    if (next.has(id)) {
-                      next.delete(id)
-                    } else {
-                      next.add(id)
-                    }
-                    return next
-                  })
-                }
               />
             </>
           )}

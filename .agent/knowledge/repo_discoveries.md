@@ -1283,3 +1283,27 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
 - Follow-up action: When consuming iframe navigation metadata for overlay controls, always track the indices that emitted the capability payload and ignore it after the deck moves to a different slide.
 - Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | embedded manager bootstrap
+- Discovery: Resonance embedded child sessions need to mint their `instructorPasscode` during session normalization, not only in the standalone `/api/resonance/create` route. SyncDeck embedded launches create the raw child session directly, and the embedded manager auto-auth bootstrap only appears when the child session already has a passcode.
+- Why it matters: Without a child passcode at creation time, embedded Resonance managers opened from SyncDeck fall into the "Instructor passcode not found in session storage" state even though a parent instructor session exists.
+- Evidence: `activities/resonance/server/routes.ts`; `activities/resonance/server/routes.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`
+- Follow-up action: For future instructor-managed embedded activities, ensure any session secret or manager-auth credential is produced by the activity normalizer or child-session creation path rather than only by the standalone create endpoint.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | instructor progress visibility
+- Discovery: Resonance instructor review now needs two parallel data surfaces: final `responses` for submitted answers and `responseDrafts` for in-progress work. The instructor snapshot should merge them into a unified progress view with explicit `working` vs `submitted` status instead of trying to overload the submitted response model.
+- Why it matters: Draft pushes are frequent and ephemeral, while submitted answers remain the authoritative share/report surface. Keeping drafts separate avoids confusing reorder/share/annotation flows with partial work while still letting the instructor watch answers in progress.
+- Evidence: `activities/resonance/server/routes.ts`; `activities/resonance/shared/types.ts`; `activities/resonance/client/student/QuestionView.tsx`; `activities/resonance/client/manager/ResponseViewer.tsx`
+- Follow-up action: If Resonance later adds report exports or richer review filters, treat `responseDrafts` as transient instructor telemetry and keep `responses` as the durable submitted record unless a feature explicitly needs draft history.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | multi-question live runs
+- Discovery: Resonance needs a session-level live-run model (`activeQuestionIds` plus a shared `activeQuestionDeadlineAt`) when multiple questions can be open at once. Keeping only `activeQuestionId` is enough for the old single-question flow but breaks student navigation, question-targeted submissions, and any shared countdown across several live prompts.
+- Why it matters: “Activate all questions” is not just a UI convenience; it changes server validation and student state. Students need to submit against a specific active question, the manager needs a single countdown for the whole run, and older snapshots still need a fallback `activeQuestionId` for compatibility.
+- Evidence: `activities/resonance/server/routes.ts`; `activities/resonance/shared/types.ts`; `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/resonance/client/student/ResonanceStudent.tsx`; `activities/resonance/server/routes.test.ts`
+- Follow-up action: Future Resonance features that depend on “what is live right now” should build on the session run fields first and treat `activeQuestionId` as compatibility state, not the authoritative source.
+- Owner: Codex
