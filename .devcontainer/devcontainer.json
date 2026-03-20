@@ -9,7 +9,7 @@
     },
     "ghcr.io/devcontainers-extra/features/ripgrep:1": {},
     "ghcr.io/devcontainers/features/common-utils:2": {
-      "username": "vscode"
+      "username": "node"
     }
 
   },
@@ -55,5 +55,5 @@
       ]
     }
   },
-  "remoteUser": "vscode"
+  "remoteUser": "node"
 }
