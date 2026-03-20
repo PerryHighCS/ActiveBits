@@ -20,17 +20,30 @@ Resonance should follow the same containment and dashboard patterns used by newe
 
 ### In Scope
 
-- Instructor question builder for free-response and multiple-choice questions.
-- Question set JSON import/export.
+- Instructor question builder for free-response and multiple-choice questions. - using utility/tools link on home page
+- Question set JSON and csv import/export. CSV should be gimkit compatible.
+  - Gimkit csv first row is a single title cell, normally "Gimkit Spreadsheet Import Template", but can be anything
+  - second row column titles: "Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"
+  - third row on - one question per row
 - Permanent links that preserve a question set using an activity-owned deep-link flow.
+  - Incorporate a link builder into instructor utility editor
 - Instructor bootstrap via session-created passcode stored in `sessionStorage`.
 - Student name registration.
 - Student answer submission.
 - Instructor review tools:
   - private star / flag / emoji annotations
-  - anonymous sharing of selected answers
+  - include student names and response
+    - table format for mcqs should have name | a | b | c | d (for example) with student response shown in red/green for correct/incorrect
+    - free-response questions should also support a table-based instructor review
+    - instructor can reorder responses in instructor private review
+  - sharing of selected answers anonymously with all students
+  - instructor emoji annotations can be intentionally shared to students as part of the shared response view
+  - instructor star/flag annotations remain private and never share to students
   - correct-answer reveal for multiple-choice questions
+- Poll questions / mcq without a "correct" answer
+  - when shared, show student choice percentages and a pie chart
 - Student reactions to shared answers.
+- Instructor can set and change question response time limits during question creation and live play.
 - Activity-owned report/export flow for Resonance session results.
 - Embedded-activity-friendly websocket envelope and message namespacing.
 
@@ -98,6 +111,9 @@ Resonance should use an activity-owned builder, similar to SyncDeck's modern pat
 This keeps question-set-specific UX and validation inside the activity instead of adding special
 branches to shared dashboard code.
 
+Because the repo does not have any other persistent store for this workflow, the encrypted
+question payload should live in URL query data for persistent links.
+
 ### Instructor Bootstrap
 
 Resonance session creation should return `instructorPasscode`, and `createSessionBootstrap` should
@@ -111,14 +127,15 @@ Two flows should be supported:
 
 ### Question Set Protection
 
-The older plan proposed encrypted question payloads in the persistent link. That remains a valid
-direction if Resonance embeds answer metadata such as `isCorrect`.
+Resonance persistent links should encrypt question payloads. This encryption is primarily for
+obscuration so answer metadata is not trivially readable in the URL or copied link text.
 
 Current implementation guidance:
 
 - Keep encryption activity-owned in `activities/resonance/server/questionCrypto.ts`.
 - Reuse `PERSISTENT_SESSION_SECRET`-derived key material.
 - Bind ciphertext to the persistent hash as associated data.
+- Treat this as obscuration rather than a long-term secure storage boundary.
 - Do not invent new shared crypto abstractions unless a second activity needs them.
 
 ### Reporting
@@ -127,16 +144,32 @@ Resonance should ship an activity-owned report/export path first.
 
 Current repo convention:
 
-- Reports are implemented directly by the activity manager/server flow.
+- Reports are implemented directly by activity-owned UI and server flow.
 - There is no shared activity report registration API in `types/activity.ts`.
 
 Plan direction:
 
-- Add a Resonance-specific report view/component under `activities/resonance/client/...`.
+- Add a Resonance-specific report view/component under a separate Resonance tool flow, not the
+  live manager view.
 - Add a Resonance-specific export endpoint or download action under
   `activities/resonance/server/routes.ts`.
+- HTML export is required.
+- JSON export may also be included because it can be loaded by the utility view/tooling flow.
 - If a second activity later needs the same HTML/JSON report composition contract, extract the
   shared type only then.
+
+### Manager and Tooling Split
+
+The manager route should focus on live session facilitation only.
+
+Plan direction:
+
+- `/manage/resonance/:sessionId` should show the live instructor view only.
+- Question-set building/import/export should live in a separate Resonance utility tool.
+- Report viewing/export should also live in that separate utility tool, similar in spirit to the
+  gallery-walk review tooling pattern.
+- The live manager should still include a header/action area with the controls needed to launch or
+  navigate to the separate builder/report tool.
 
 ### WebSocket Envelope
 
@@ -171,6 +204,7 @@ export interface BaseQuestion {
   type: QuestionType
   text: string
   order: number
+  responseTimeLimitMs?: number | null
 }
 
 export interface FreeResponseQuestion extends BaseQuestion {
@@ -217,6 +251,7 @@ export interface SharedResponse {
   questionId: string
   answer: AnswerPayload
   sharedAt: number
+  instructorEmoji: string | null
   reactions: Record<string, number>
 }
 
@@ -243,7 +278,7 @@ Resonance-specific report data should stay local to the activity for now, for ex
 | `POST` | `/api/resonance/generate-link` | — | Create authoritative permanent link from `teacherCode` + `Question[]` |
 | `GET` | `/api/resonance/:sessionId/state` | — | Return student-safe snapshot |
 | `GET` | `/api/resonance/:sessionId/responses` | instructor auth | Return instructor-visible responses and annotations |
-| `GET` | `/api/resonance/:sessionId/report` | instructor auth | Return Resonance-owned report payload or downloadable export |
+| `GET` | `/api/resonance/:sessionId/report` | instructor auth | Return Resonance HTML export; JSON export may be added alongside it |
 
 ### WebSocket Messages
 
@@ -263,6 +298,7 @@ Client to server:
 - `resonance:activate-question`
 - `resonance:share-results`
 - `resonance:annotate-response`
+- `resonance:update-question-timer`
 - `resonance:add-question`
 - `resonance:submit-answer`
 - `resonance:react-to-shared`
@@ -281,12 +317,15 @@ activities/resonance/
 │   ├── index.tsx
 │   ├── manager/
 │   │   ├── ResonanceManager.tsx
+│   │   ├── ResponseViewer.tsx
+│   │   └── ResponseCard.tsx
+│   ├── tools/
+│   │   ├── ResonanceToolShell.tsx
 │   │   ├── QuestionBuilder.tsx
 │   │   ├── QuestionCard.tsx
 │   │   ├── CreatePersistentLinkModal.tsx
 │   │   ├── ResonancePersistentLinkBuilder.tsx
-│   │   ├── ResponseViewer.tsx
-│   │   └── ResponseCard.tsx
+│   │   └── ResonanceReport.tsx
 │   ├── student/
 │   │   ├── ResonanceStudent.tsx
 │   │   ├── NameEntryForm.tsx
@@ -296,7 +335,7 @@ activities/resonance/
 │   │   └── SharedResponseFeed.tsx
 │   ├── components/
 │   │   ├── EmojiPicker.tsx
-│   │   └── ResonanceReport.tsx
+│   │   └── ...
 │   └── hooks/
 │       └── useResonanceSession.ts
 └── server/
@@ -324,14 +363,17 @@ activities/resonance/
 - [ ] Add Resonance-local report types in `shared/reportTypes.ts`.
 - [ ] Add request/response validation helpers for question sets, student registration, and answer payloads.
 - [ ] Record any finalized REST or WS contract details in `.agent/knowledge/data-contracts.md`.
+- [ ] Define the route/entry pattern for the separate Resonance utility tool.
 
 ### Phase 3: Permanent Links and Session Bootstrap
 
 - [ ] Implement `POST /api/resonance/create` returning `{ id, instructorPasscode }`.
 - [ ] Implement `ResonancePersistentLinkBuilder` using `ActivityPersistentLinkBuilderProps`.
 - [ ] Implement `POST /api/resonance/generate-link`.
-- [ ] Decide whether question sets are encrypted in the persistent-link flow.
-- [ ] If encrypted, add `server/questionCrypto.ts` with tests for round-trip and tamper detection.
+- [ ] Encrypt question sets in the persistent-link flow for obscuration.
+- [ ] Store the encrypted question payload in URL query data because there is no other persistent
+      store available for this workflow.
+- [ ] Add `server/questionCrypto.ts` with tests for round-trip and tamper detection.
 - [ ] Implement `GET /api/resonance/:sessionId/instructor-passcode` for persistent-link instructor recovery.
 
 ### Phase 4: Student Lifecycle
@@ -345,14 +387,34 @@ activities/resonance/
 ### Phase 5: Live Instructor Workflow
 
 - [ ] Build `ResonanceManager.tsx`.
-- [ ] Build `QuestionBuilder.tsx` and `QuestionCard.tsx`.
-- [ ] Add JSON import/export for question sets.
+- [ ] Keep the manager focused on live view only.
+- [ ] Include a manager header/action area with buttons/links needed to open the separate
+      Resonance tool for question-set editing and report access.
 - [ ] Build response review UI with student names visible only to instructors.
+- [ ] For MCQ private review, support a table-style view such as `name | a | b | c | d`, with the
+      student's selected answer shown in correct/incorrect styling when the question has a correct answer.
+- [ ] For free-response private review, support a reorderable table that includes student name,
+      response content, and instructor annotations.
+- [ ] Allow instructor-side response reordering in private review.
 - [ ] Add private star / flag / emoji annotations.
+- [ ] When an instructor intentionally shares a response, allow the instructor emoji annotation to
+      appear with that shared response for students.
+- [ ] Keep instructor star/flag state private in both live student views and exported shared results.
+- [ ] Support MCQ poll mode without a required correct answer.
 - [ ] Add question activation and ad-hoc question creation.
+- [ ] Allow instructors to set or change question response time limits during live session management.
 - [ ] Add share-results flow that broadcasts anonymous shared responses plus correct-answer reveal.
+- [ ] For poll-style MCQs, include shared choice percentages and a pie chart in the first implementation.
 
-### Phase 6: WebSocket Protocol
+### Phase 6: Builder and Report Tooling
+
+- [ ] Build the separate Resonance tool shell for question-set editing/import/export and report access.
+- [ ] Build `QuestionBuilder.tsx` and `QuestionCard.tsx` in the tool flow.
+- [ ] Allow instructors to set a response time limit while authoring each question.
+- [ ] Add JSON and Gimkit-compatible CSV import/export for question sets.
+- [ ] Build the Resonance report view in the tool flow rather than the live manager route.
+
+### Phase 7: WebSocket Protocol
 
 - [ ] Implement `/ws/resonance` with instructor and student auth flows.
 - [ ] Use the versioned outer envelope with `activity: 'resonance'`.
@@ -361,18 +423,15 @@ activities/resonance/
 - [ ] Broadcast reaction updates for shared responses.
 - [ ] Add focused server tests for REST and websocket behavior.
 
-### Phase 7: Reporting
+### Phase 8: Reporting
 
-- [ ] Implement a Resonance-owned report view under `activities/resonance/client/...`.
 - [ ] Implement `GET /api/resonance/:sessionId/report`.
-- [ ] Choose initial export format:
-  - [ ] HTML download
-  - [ ] JSON export
-  - [ ] both
+- [ ] Ship HTML report export in the first implementation.
+- [ ] Optionally add JSON export for utility-view loading and tooling reuse.
 - [ ] Reuse Resonance-local `reportUtils.ts` for shared calculations only if both client and server need the same transforms.
 - [ ] Do not introduce a shared repo-wide report contract unless another activity needs the same abstraction.
 
-### Phase 8: Verification
+### Phase 9: Verification
 
 - [ ] Add unit tests for request validation, websocket handlers, and persistent-link flow.
 - [ ] Add client tests for builder UX, student registration, and reveal behavior.
@@ -381,8 +440,6 @@ activities/resonance/
 
 ## Open Decisions
 
-- Should Resonance persistent links store encrypted question payloads in the URL, in server-side
-  persistent-session metadata, or in another teacher-authenticated store?
-- Should the first report export be HTML, JSON, or both?
-- Does Resonance need a manager tab layout, or should report/download actions live inline like
-  existing activity-owned report flows?
+- What should the route and navigation shape of the separate Resonance utility tool be?
+- Should the utility tool load JSON reports only from exports/files, or also support direct
+  session-linked loading flows?
