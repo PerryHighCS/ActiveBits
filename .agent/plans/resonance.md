@@ -15,8 +15,10 @@ Resonance should follow the same containment and dashboard patterns used by newe
   creation endpoints.
 - Follow Gallery Walk as a product-pattern precedent for activity-owned helper tooling, but not as
   a routing convention.
-- Keep reporting activity-owned for now. The current repo does not have a shared
-  `reporting` config field or a generic report-section registration system.
+- Keep reporting UI and export rendering activity-owned, while reusing the current lightweight
+  shared reporting seams: `ActivityConfig.reportEndpoint`, `ActivityStructuredReportSection`, and
+  `registerActivityReportBuilder(...)` when Resonance needs to participate in embedded/session
+  report aggregation.
 
 ## Scope
 
@@ -51,7 +53,8 @@ Resonance should follow the same containment and dashboard patterns used by newe
 
 ### Out of Scope
 
-- Shared cross-activity report framework.
+- New shared cross-activity reporting framework additions beyond the current `reportEndpoint` and
+  structured report builder conventions.
 - New `ActivityConfig.reporting` or `types/report.ts` schema additions.
 - Cross-session persistence beyond existing session and persistent-link behavior.
 - Shared websocket multiplexing with parent sessions.
@@ -67,7 +70,12 @@ const resonanceConfig: ActivityConfig = {
   name: 'Resonance',
   description: 'Collect, review, and share class responses in real time',
   color: 'rose',
-  soloMode: false,
+  standaloneEntry: {
+    enabled: false,
+    supportsDirectPath: false,
+    supportsPermalink: false,
+    showOnHome: false,
+  },
   deepLinkGenerator: {
     endpoint: '/api/resonance/generate-link',
     mode: 'replace-url',
@@ -84,6 +92,8 @@ const resonanceConfig: ActivityConfig = {
   manageDashboard: {
     customPersistentLinkBuilder: true,
   },
+  reportEndpoint: '/api/resonance/:sessionId/report',
+  utilMode: true,
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',
 }
@@ -94,7 +104,8 @@ Notes:
 - `deepLinkOptions` is not required if Resonance owns the permanent-link modal UI.
 - `deepLinkGenerator` is still needed so the activity-owned builder can submit validated question
   data to an authoritative server endpoint that returns the final persistent URL.
-- Resonance should not use `soloMode: true` for its builder/report tool.
+- `reportEndpoint` should advertise the activity-owned HTML export route so shared embedded-session
+  surfaces can discover it without importing Resonance-specific server code.
 - The current config schema can carry metadata for a non-solo utility surface, and Resonance
   should target an explicit `/util/...` route/entry convention rather than reusing `/solo/...`.
 - The dashboard should stay activity-agnostic. Question-set authoring, validation, and upload flow
@@ -120,8 +131,12 @@ Resonance should use an activity-owned builder, similar to SyncDeck's modern pat
 6. The builder posts plaintext `Question[]` plus `teacherCode` to
    `POST /api/resonance/generate-link`.
 7. The server performs final validation, encrypts the payload, and returns the authoritative
-   `{ hash, url }`.
-8. Dashboard/session-creation success state uses the returned URL directly.
+   persistent-link result consumed by `onCreated(...)`, including the final URL, hash, and teacher
+   code.
+8. The builder should support both create and edit flows through
+   `ActivityPersistentLinkBuilderProps`, including `editState` when an existing persistent session
+   is being updated.
+9. Dashboard/session-creation success state uses the returned authoritative URL directly.
 
 This keeps question-set-specific UX and validation inside the activity instead of adding special
 branches to shared dashboard code.
@@ -169,8 +184,13 @@ Resonance should ship an activity-owned report/export path first.
 
 Current repo convention:
 
-- Reports are implemented directly by activity-owned UI and server flow.
-- There is no shared activity report registration API in `types/activity.ts`.
+- Activity-owned report downloads are advertised through `ActivityConfig.reportEndpoint`.
+- Embedded/session-level aggregation uses shared structured report types such as
+  `ActivityStructuredReportSection`.
+- Activities that need to contribute structured report data to shared containers can register a
+  server builder with `registerActivityReportBuilder(...)`.
+- Report UI, HTML document structure, auth policy, and activity-specific calculations remain owned
+  by the activity.
 
 Plan direction:
 
@@ -180,8 +200,13 @@ Plan direction:
   `activities/resonance/server/routes.ts`.
 - HTML export is required.
 - JSON export may also be included because it can be loaded by the utility view/tooling flow.
-- If a second activity later needs the same HTML/JSON report composition contract, extract the
-  shared type only then.
+- Set `reportEndpoint` in `activity.config.ts` when the route exists.
+- If Resonance is later embedded in SyncDeck or another aggregate-report host, add a
+  Resonance-owned structured report builder that returns `ActivityStructuredReportSection` instead
+  of inventing a new reporting contract.
+- Do not add new top-level `ActivityConfig.reporting` or parallel report-schema abstractions unless
+  a new cross-activity need appears that the current `reportEndpoint` + structured-builder pattern
+  cannot cover.
 
 ### Manager and Tooling Split
 
@@ -194,8 +219,8 @@ Plan direction:
   `/util/resonance`.
 - Report viewing/export should also live in that separate utility tool, similar in spirit to the
   Gallery Walk review-tool product pattern.
-- The separate Resonance utility tool should use the `/util/...` route/entry pattern rather than
-  the current `/solo/:activityId` route.
+- The separate Resonance utility tool should use the repo's existing `/util/...` route/entry
+  pattern (`utilMode` + `UtilComponent`) rather than the older `/solo/:activityId` path.
 - The live manager should still include a header/action area with the controls needed to launch or
   navigate to the separate builder/report tool.
 - The `/` selector/join surface should continue to rely on the normal activity config discovery
@@ -399,8 +424,7 @@ activities/resonance/
 - [ ] Add Resonance-local report types in `shared/reportTypes.ts`.
 - [ ] Add request/response validation helpers for question sets, student registration, and answer payloads.
 - [ ] Record any finalized REST or WS contract details in `.agent/knowledge/data-contracts.md`.
-- [ ] Define the `/util/resonance` route/entry pattern for the separate Resonance utility tool.
-- [ ] Introduce or document the `/util/...` non-solo utility route convention needed for Resonance.
+- [ ] Wire Resonance into the existing `/util/...` route/entry pattern with `utilMode` and a `UtilComponent`.
 - [ ] Treat Gallery Walk as a product-pattern reference only, not as a routing precedent.
 - [ ] Add utility cards/entry points for Resonance to the `/manage` dashboard, mirroring the
       existing activity-config-driven discovery already available from `/`.
@@ -409,6 +433,7 @@ activities/resonance/
 
 - [ ] Implement `POST /api/resonance/create` returning `{ id, instructorPasscode }`.
 - [ ] Implement `ResonancePersistentLinkBuilder` using `ActivityPersistentLinkBuilderProps`.
+- [ ] Support both create-mode and edit-mode builder flows via `editState`, preserving activity-owned validation on updates as well as creates.
 - [ ] Expose the permalink builder in the Resonance session-creation UI.
 - [ ] Support JSON and Gimkit-compatible CSV upload in the session-creation UI.
 - [ ] Build one shared upload/import component for session creation and permalink creation.
@@ -418,6 +443,7 @@ activities/resonance/
 - [ ] Parse and validate imported files client-side before enabling link generation.
 - [ ] Implement `POST /api/resonance/generate-link`.
 - [ ] Validate imported question payloads server-side in `POST /api/resonance/generate-link`.
+- [ ] Return an authoritative persistent-link result that maps cleanly onto `onCreated(...)` (`fullUrl`, `hash`, `teacherCode`, and any persisted `selectedOptions` as needed).
 - [ ] Compress serialized question payloads before encryption to keep query payloads smaller.
 - [ ] Encrypt question sets in the persistent-link flow for obscuration.
 - [ ] Store the encrypted question payload in URL query data because there is no other persistent
@@ -479,8 +505,10 @@ activities/resonance/
 - [ ] Implement `GET /api/resonance/:sessionId/report`.
 - [ ] Ship HTML report export in the first implementation.
 - [ ] Optionally add JSON export for utility-view loading and tooling reuse.
+- [ ] Set `reportEndpoint` in `activities/resonance/activity.config.ts` once the route is implemented.
+- [ ] If Resonance needs SyncDeck/session-level aggregation, register a Resonance report builder that returns `ActivityStructuredReportSection`.
 - [ ] Reuse Resonance-local `reportUtils.ts` for shared calculations only if both client and server need the same transforms.
-- [ ] Do not introduce a shared repo-wide report contract unless another activity needs the same abstraction.
+- [ ] Do not introduce a new repo-wide report contract unless the current `reportEndpoint` plus structured report builder conventions prove insufficient.
 
 ### Phase 9: Verification
 
