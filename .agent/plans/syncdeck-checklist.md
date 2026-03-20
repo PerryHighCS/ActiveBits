@@ -18,6 +18,39 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
     - [ ] Student panel shows behind/synced/ahead indicator
     - [ ] Instructor header indicates # Students connected / # Students behind
 
+- [ ] Gamification — see `.agent/plans/syncdeck-gamification-plan.md` for detailed design
+    - Phase 0 — Contract design
+      - [ ] Define parent-owned SyncDeck gamification state (`pointsByStudentId`, events, leaderboard summary)
+      - [ ] Define score event schema and duplicate-suppression rules
+      - [ ] Define generic embedded child-to-parent score contribution contract
+      - [ ] Define score modes for repeated play (`accumulate`, `replace`, `max`)
+      - [ ] Define badge, achievement, and progress-milestone timeline shapes
+      - [ ] Define deck-authored badge/achievement definition format
+      - [ ] Define report grouping/output rules for points and achievements at per-activity and session-summary scope
+      - [ ] Decide v1 scope for manual adjustments and negative deltas
+    - Phase 1 — Host-only scoring
+      - [ ] Award points for first-view slide visits
+      - [ ] Persist and hydrate per-student point totals from parent session state
+      - [ ] Surface points in SyncDeck manager and student UI
+      - [ ] Reuse the existing manager student list panel for score display and sorting
+      - [ ] Add simple badge display where parent achievement data exists
+      - [ ] Add tests for dedupe, reconnect, and late-join hydration
+    - Phase 2 — Embedded activity contribution
+      - [ ] Add validated parent score ingest route and structured server logging
+      - [ ] Add shared helper/types for child activities to report points
+      - [ ] Support activity-owned repeated-play score policies (`accumulate`, `replace`, `max`)
+      - [ ] Support child activity achievement/badge publication to parent timeline
+      - [ ] Roll out one reference embedded activity as the first points publisher
+      - [ ] Extend SyncDeck reporting with per-activity score/achievement sections and whole-session gamification summary blocks
+      - [ ] Add tests for aggregation and duplicate suppression
+    - Phase 3 — Leaderboard UX
+      - [ ] Decide whether the upgraded manager student list panel removes the need for a separate leaderboard panel
+      - [ ] Show per-student accumulated points in student UI
+      - [ ] Show emoji badges / achievement chips in leaderboard surfaces
+      - [ ] Show left-to-right progress display with milestone markers
+      - [ ] Add end-of-session celebration / leaderboard surface
+      - [ ] Re-evaluate whether a dedicated embeddable leaderboard activity is still needed
+
 - [ ] Embedded activities — see `.agent/plans/syncdeck-embedded-activities.md` for full design
     - Architecture decision: host-overlay model (activity iframe managed by ActiveBits host page,
       overlaid on presentation iframe — NOT nested inside the deck iframe)
