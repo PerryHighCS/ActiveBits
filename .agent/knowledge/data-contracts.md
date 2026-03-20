@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-20
+- Surface: internal module | activity interface
+- Contract: `activities/resonance/shared/validation.ts` `validateQuestionSet(raw)` treats duplicate question ids as invalid set-level input. If duplicate normalized question ids are detected, it returns `{ questions: [], errors: ['question ids must be unique within a set'] }` instead of returning a partially valid array that still contains conflicting ids.
+- Compatibility constraints: Downstream resonance session state and response lookup paths key by `question.id`, so callers may assume a non-empty `questions` result has unique ids. This is stricter than row-level CSV-style partial acceptance; duplicate-id failure invalidates the whole set.
+- Validation rules: Individual question normalization still happens first, but any duplicate in the resulting normalized ids escalates to a set-level failure. Callers should treat `errors.length > 0` or `questions.length === 0` as invalid import input for this case.
+- Evidence (schema/tests/path): `activities/resonance/shared/validation.ts`; `activities/resonance/shared/validation.test.ts`
+- Follow-up action: If resonance later wants partial acceptance for duplicate ids, it will need a different contract that rewrites ids or reports per-id skips without exposing duplicate keys to session consumers.
+- Owner: Codex
+
 - Date: 2026-03-18
 - Surface: activity interface | internal module
 - Contract: `ActivityConfig.reportEndpoint?: string` declares an activity-owned report download route that shared embedded-session surfaces such as SyncDeck can call without importing activity-specific server code. The value is metadata only; shared code treats it as an opaque non-empty string path and leaves auth, response format, and report generation semantics to the owning activity.

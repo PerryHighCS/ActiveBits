@@ -2730,6 +2730,7 @@ const SyncDeckStudent: FC = () => {
 
     return () => {
       isCancelled = true
+      recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
     }
   }, [
     activeEmbeddedActivity,

@@ -31,7 +31,7 @@ function validateMCQOption(raw: unknown, index: number): { option: MCQOption; er
   }
   const id = normalizeId(raw.id)
   if (!id) {
-    return { option: null as unknown as MCQOption, error: `option[${index}].id must be a non-empty alphanumeric string` }
+    return { option: null as unknown as MCQOption, error: `option[${index}].id must be a non-empty alphanumeric, underscore, or hyphen string` }
   }
   const text = normalizeString(raw.text, 500)
   if (!text) {
@@ -120,7 +120,7 @@ export function validateQuestion(raw: unknown, errors: string[]): Question | nul
 
   const id = normalizeId(raw.id)
   if (!id) {
-    errors.push('question.id must be a non-empty alphanumeric/hyphen string')
+    errors.push('question.id must be a non-empty alphanumeric, underscore, or hyphen string')
     return null
   }
   const text = normalizeString(raw.text, 1000)
@@ -181,6 +181,7 @@ export function validateQuestionSet(raw: unknown): { questions: Question[]; erro
   const ids = questions.map((q) => q.id)
   if (new Set(ids).size !== ids.length) {
     errors.push('question ids must be unique within a set')
+    return { questions: [], errors }
   }
 
   return { questions, errors }

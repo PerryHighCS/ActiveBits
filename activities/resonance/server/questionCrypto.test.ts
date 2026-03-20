@@ -87,16 +87,17 @@ void test('encoded payload contains only URL-safe characters (base64url)', () =>
 })
 
 void test('[TEST] large question set that exceeds size limit produces an oversized payload', () => {
-  // Build a question set large enough to blow the limit (expected noisy output)
+  // Build a question set large enough to blow the limit (expected noisy output).
+  // Text uses per-question numeric sequences to resist deflate compression — unlike
+  // repeated characters, varied base-36 values produce near-incompressible output.
   const bigQuestions: Question[] = Array.from({ length: 100 }, (_, i) => ({
     id: `q${i + 1}`,
     type: 'free-response' as const,
-    text: `This is a very long question text number ${i + 1} designed to inflate the payload size significantly beyond what a typical question set would contain in a real class.`,
+    text: Array.from({ length: 20 }, (__, j) => ((i + 1) * 97 * (j + 1) * 83 + 100003).toString(36)).join(' '),
     order: i,
   }))
 
   const hash = 'abc123def456'
   const { sizeChars } = encryptQuestions(bigQuestions, hash)
-  // Just assert the size is reported correctly — route enforces the limit
-  assert.ok(typeof sizeChars === 'number' && sizeChars > 0, 'sizeChars must be a positive number')
+  assert.ok(sizeChars > MAX_ENCODED_PAYLOAD_CHARS, `expected oversized payload (got ${sizeChars}, limit is ${MAX_ENCODED_PAYLOAD_CHARS})`)
 })
