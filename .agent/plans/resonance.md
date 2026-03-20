@@ -13,6 +13,8 @@ Resonance should follow the same containment and dashboard patterns used by newe
   `PersistentLinkBuilderComponent` for complex permanent-link UX.
 - Use `createSessionBootstrap.sessionStorage` for instructor bootstrap values returned by session
   creation endpoints.
+- Follow Gallery Walk as a product-pattern precedent for activity-owned helper tooling, but not as
+  a routing convention.
 - Keep reporting activity-owned for now. The current repo does not have a shared
   `reporting` config field or a generic report-section registration system.
 
@@ -92,6 +94,9 @@ Notes:
 - `deepLinkOptions` is not required if Resonance owns the permanent-link modal UI.
 - `deepLinkGenerator` is still needed so the activity-owned builder can submit validated question
   data to an authoritative server endpoint that returns the final persistent URL.
+- Resonance should not use `soloMode: true` for its builder/report tool.
+- The current config schema can carry metadata for a non-solo utility surface, but the app needs an
+  explicit non-solo utility route/entry convention for Resonance rather than reusing `/solo/...`.
 - The dashboard should stay activity-agnostic. Question-set authoring, validation, and upload flow
   belong in Resonance-owned components.
 - If Resonance later needs extra dashboard integration, prefer evolving
@@ -105,16 +110,18 @@ Resonance should use an activity-owned builder, similar to SyncDeck's modern pat
 
 1. Instructor can open Resonance permalink building from the session-creation UI or from the
    separate Resonance utility tool.
-2. `PersistentLinkBuilderComponent` handles question-set import or authoring.
-3. The builder accepts uploaded JSON and Gimkit-compatible CSV instead of trying to build complex
+2. Session creation and permalink creation should share the same upload/import component so JSON
+   and Gimkit CSV parsing, preview, and validation only exist in one place.
+3. `PersistentLinkBuilderComponent` handles question-set import or authoring.
+4. The builder accepts uploaded JSON and Gimkit-compatible CSV instead of trying to build complex
    questions inside the shared dashboard UI.
-4. The builder performs client-side parsing and validation, shows question summary/errors, and only
+5. The builder performs client-side parsing and validation, shows question summary/errors, and only
    enables submission when the imported data is valid.
-5. The builder posts plaintext `Question[]` plus `teacherCode` to
+6. The builder posts plaintext `Question[]` plus `teacherCode` to
    `POST /api/resonance/generate-link`.
-6. The server performs final validation, encrypts the payload, and returns the authoritative
+7. The server performs final validation, encrypts the payload, and returns the authoritative
    `{ hash, url }`.
-7. Dashboard/session-creation success state uses the returned URL directly.
+8. Dashboard/session-creation success state uses the returned URL directly.
 
 This keeps question-set-specific UX and validation inside the activity instead of adding special
 branches to shared dashboard code.
@@ -185,7 +192,9 @@ Plan direction:
 - `/manage/resonance/:sessionId` should show the live instructor view only.
 - Question-set building/import/export should live in a separate Resonance utility tool.
 - Report viewing/export should also live in that separate utility tool, similar in spirit to the
-  gallery-walk review tooling pattern.
+  Gallery Walk review-tool product pattern.
+- The separate Resonance utility tool should use an explicit non-solo route/entry pattern rather
+  than the current `/solo/:activityId` route.
 - The live manager should still include a header/action area with the controls needed to launch or
   navigate to the separate builder/report tool.
 - The session-creation flow should also expose Resonance permalink building so instructors can
@@ -344,6 +353,7 @@ activities/resonance/
 │   │   └── ResponseCard.tsx
 │   ├── tools/
 │   │   ├── ResonanceToolShell.tsx
+│   │   ├── ResonanceQuestionSetUploader.tsx
 │   │   ├── QuestionBuilder.tsx
 │   │   ├── QuestionCard.tsx
 │   │   ├── CreatePersistentLinkModal.tsx
@@ -387,6 +397,8 @@ activities/resonance/
 - [ ] Add request/response validation helpers for question sets, student registration, and answer payloads.
 - [ ] Record any finalized REST or WS contract details in `.agent/knowledge/data-contracts.md`.
 - [ ] Define the route/entry pattern for the separate Resonance utility tool.
+- [ ] Introduce or document the explicit non-solo utility route/entry pattern needed for Resonance.
+- [ ] Treat Gallery Walk as a product-pattern reference only, not as a routing precedent.
 
 ### Phase 3: Permanent Links and Session Bootstrap
 
@@ -394,6 +406,7 @@ activities/resonance/
 - [ ] Implement `ResonancePersistentLinkBuilder` using `ActivityPersistentLinkBuilderProps`.
 - [ ] Expose the permalink builder in the Resonance session-creation UI.
 - [ ] Support JSON and Gimkit-compatible CSV upload in the session-creation UI.
+- [ ] Build one shared upload/import component for session creation and permalink creation.
 - [ ] Allow the session-creation UI to create either an ad-hoc live session or a permanent link
       from the uploaded question set.
 - [ ] Support JSON and Gimkit-compatible CSV upload in the builder.
