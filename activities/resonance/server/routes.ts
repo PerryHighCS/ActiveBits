@@ -18,6 +18,7 @@ import type {
   ResponseProgress,
   Student,
 } from '../shared/types.js'
+import { isValidStudentReactionEmoji } from '../shared/emojiSet.js'
 import { validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 import {
@@ -66,6 +67,7 @@ interface ResonanceSessionData extends Record<string, unknown> {
   questions: Question[]
   activeQuestionId: string | null
   activeQuestionIds: string[]
+  activeQuestionRunStartedAt: number | null
   activeQuestionDeadlineAt: number | null
   students: Record<string, Student>
   responses: Response[]
@@ -77,6 +79,7 @@ interface ResonanceSessionData extends Record<string, unknown> {
   }>
   annotations: Record<string, InstructorAnnotation>
   reveals: QuestionReveal[]
+  sharedResponseReactions: Record<string, Record<string, string>>
   responseOrderOverrides: Record<string, string[]>
   /** Stored when session is created from a persistent link — used for passcode recovery. */
   persistentHash: string | null
@@ -193,15 +196,17 @@ function normalizeActiveQuestionDeadlineAt(value: unknown): number | null {
 function setActiveQuestions(
   sessionData: ResonanceSessionData,
   questionIds: string[],
+  runStartedAt: number | null,
   deadlineAt: number | null,
 ): void {
   sessionData.activeQuestionIds = questionIds
   sessionData.activeQuestionId = questionIds[0] ?? null
+  sessionData.activeQuestionRunStartedAt = questionIds.length > 0 ? runStartedAt : null
   sessionData.activeQuestionDeadlineAt = questionIds.length > 0 ? deadlineAt : null
 }
 
 function clearActiveQuestions(sessionData: ResonanceSessionData): void {
-  setActiveQuestions(sessionData, [], null)
+  setActiveQuestions(sessionData, [], null, null)
 }
 
 function getOrderedExistingQuestionIds(
@@ -265,6 +270,7 @@ function upsertResponse(
 function clearAllReveals(sessionData: ResonanceSessionData): QuestionReveal[] {
   const removedReveals = [...sessionData.reveals]
   sessionData.reveals = []
+  sessionData.sharedResponseReactions = {}
   return removedReveals
 }
 
@@ -389,6 +395,12 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     questions,
     activeQuestionId: activeQuestionIds[0] ?? null,
     activeQuestionIds,
+    activeQuestionRunStartedAt:
+      activeQuestionIds.length > 0 &&
+      typeof source.activeQuestionRunStartedAt === 'number' &&
+      Number.isFinite(source.activeQuestionRunStartedAt)
+        ? Math.round(source.activeQuestionRunStartedAt)
+        : null,
     activeQuestionDeadlineAt:
       activeQuestionIds.length > 0 ? normalizeActiveQuestionDeadlineAt(source.activeQuestionDeadlineAt) : null,
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
@@ -398,6 +410,9 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
       ? (source.annotations as Record<string, InstructorAnnotation>)
       : {},
     reveals: Array.isArray(source.reveals) ? (source.reveals as QuestionReveal[]) : [],
+    sharedResponseReactions: isPlainObject(source.sharedResponseReactions)
+      ? (source.sharedResponseReactions as Record<string, Record<string, string>>)
+      : {},
     responseOrderOverrides: isPlainObject(source.responseOrderOverrides)
       ? (source.responseOrderOverrides as Record<string, string[]>)
       : {},
@@ -430,6 +445,10 @@ function buildStudentReveal(
     return {
       ...sharedResponse,
       isOwnResponse: viewerStudentId !== null && ownerResponse?.studentId === viewerStudentId,
+      viewerReaction:
+        viewerStudentId !== null
+          ? session.data.sharedResponseReactions[sharedResponse.id]?.[viewerStudentId] ?? null
+          : null,
     }
   })
 
@@ -460,20 +479,54 @@ function buildStudentReveal(
 }
 
 function buildStudentSnapshot(session: ResonanceSession, viewerStudentId: string | null = null) {
-  const { activeQuestionId, activeQuestionIds, activeQuestionDeadlineAt, questions, reveals } = session.data
+  const { activeQuestionId, activeQuestionIds, activeQuestionRunStartedAt, activeQuestionDeadlineAt, questions, reveals } = session.data
+  const activeQuestionIdSet = new Set(activeQuestionIds)
   const activeQuestions = questions
     .filter((question) => activeQuestionIds.includes(question.id))
     .map(toStudentQuestion)
   const activeQuestion = activeQuestions[0] ?? null
   const revealedQuestionIds = new Set(reveals.map((r) => r.questionId))
   const revealedQuestions = questions.filter((q) => revealedQuestionIds.has(q.id)).map(toStudentQuestion)
+  const submittedAnswers =
+    viewerStudentId === null
+      ? {}
+      : Object.fromEntries(
+          session.data.responses
+            .filter((response) => response.studentId === viewerStudentId)
+            .map((response) => [response.questionId, response.answer] satisfies [string, Response['answer']]),
+        )
+  const reviewedResponses =
+    viewerStudentId === null
+      ? []
+      : session.data.responses
+        .filter((response) => response.studentId === viewerStudentId)
+        .map((response) => {
+          const emoji = session.data.annotations[response.id]?.emoji ?? null
+          const question = questions.find((entry) => entry.id === response.questionId)
+          return emoji !== null &&
+            question !== undefined &&
+            !revealedQuestionIds.has(response.questionId) &&
+            !activeQuestionIdSet.has(response.questionId)
+            ? {
+                question: toStudentQuestion(question),
+                answer: response.answer,
+                submittedAt: response.submittedAt,
+                instructorEmoji: emoji,
+              }
+            : null
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        .sort((left, right) => right.submittedAt - left.submittedAt)
   return {
     sessionId: session.id,
     activeQuestion: activeQuestionId !== null ? (activeQuestions.find((q) => q.id === activeQuestionId) ?? activeQuestion) : activeQuestion,
     activeQuestions,
     activeQuestionIds,
+    activeQuestionRunStartedAt,
     activeQuestionDeadlineAt,
     reveals: reveals.map((reveal) => buildStudentReveal(reveal, session, viewerStudentId)),
+    reviewedResponses,
+    submittedAnswers,
     revealedQuestions,
   }
 }
@@ -483,6 +536,7 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     questions,
     activeQuestionId,
     activeQuestionIds,
+    activeQuestionRunStartedAt,
     activeQuestionDeadlineAt,
     students,
     responses,
@@ -492,26 +546,39 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     responseOrderOverrides,
   } =
     session.data
-  const submittedByQuestionStudent = new Set<string>()
-  const progress: ResponseProgress[] = responses.map((response) => {
-    submittedByQuestionStudent.add(buildDraftKey(response.questionId, response.studentId))
-    return {
+  const activeQuestionIdSet = new Set(activeQuestionIds)
+  const currentRunSubmittedKeys = new Set<string>()
+  const progressByQuestionStudent = new Map<string, ResponseProgress>()
+
+  for (const response of responses) {
+    const key = buildDraftKey(response.questionId, response.studentId)
+    const isStaleActiveResponse =
+      activeQuestionIdSet.has(response.questionId) &&
+      activeQuestionRunStartedAt !== null &&
+      response.submittedAt < activeQuestionRunStartedAt
+
+    if (!isStaleActiveResponse) {
+      currentRunSubmittedKeys.add(key)
+    }
+
+    progressByQuestionStudent.set(key, {
       questionId: response.questionId,
       studentId: response.studentId,
       studentName: students[response.studentId]?.name ?? 'Unknown',
       updatedAt: response.submittedAt,
-      status: 'submitted',
+      status: isStaleActiveResponse ? 'working' : 'submitted',
       answer: response.answer,
       responseId: response.id,
-    }
-  })
+    })
+  }
 
   for (const draft of Object.values(responseDrafts)) {
-    if (submittedByQuestionStudent.has(buildDraftKey(draft.questionId, draft.studentId))) {
+    const key = buildDraftKey(draft.questionId, draft.studentId)
+    if (currentRunSubmittedKeys.has(key)) {
       continue
     }
 
-    progress.push({
+    progressByQuestionStudent.set(key, {
       questionId: draft.questionId,
       studentId: draft.studentId,
       studentName: students[draft.studentId]?.name ?? 'Unknown',
@@ -525,11 +592,11 @@ function buildInstructorSnapshot(session: ResonanceSession) {
   for (const question of questions) {
     for (const student of Object.values(students)) {
       const key = buildDraftKey(question.id, student.studentId)
-      if (submittedByQuestionStudent.has(key) || responseDrafts[key] !== undefined) {
+      if (progressByQuestionStudent.has(key) || responseDrafts[key] !== undefined) {
         continue
       }
 
-      progress.push({
+      progressByQuestionStudent.set(key, {
         questionId: question.id,
         studentId: student.studentId,
         studentName: student.name,
@@ -541,11 +608,14 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     }
   }
 
+  const progress = [...progressByQuestionStudent.values()]
+
   return {
     sessionId: session.id,
     questions,
     activeQuestionId,
     activeQuestionIds,
+    activeQuestionRunStartedAt,
     activeQuestionDeadlineAt,
     students: Object.values(students),
     responses: responses.map((r) => ({
@@ -940,6 +1010,8 @@ export default function setupResonanceRoutes(
     upsertResponse(session.data.responses, questionId, studentId, answer)
     delete session.data.responseDrafts[buildDraftKey(questionId, studentId)]
     await sessions.set(sessionId, session)
+    broadcastStudentSessionState(session, sessionId)
+    broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
 
     console.info('[resonance] Answer submitted', { sessionId, studentId, questionId })
     res.json({ ok: true })
@@ -1021,8 +1093,9 @@ export default function setupResonanceRoutes(
         res.status(404).json({ error: 'question not found' })
         return
       }
-      const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, Date.now())
-      setActiveQuestions(session.data, run.questionIds, run.deadlineAt)
+      const runStartedAt = Date.now()
+      const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, runStartedAt)
+      setActiveQuestions(session.data, run.questionIds, runStartedAt, run.deadlineAt)
     } else {
       clearActiveQuestions(session.data)
     }
@@ -1141,6 +1214,7 @@ export default function setupResonanceRoutes(
 
     session.data.annotations[responseId] = updated
     await sessions.set(sessionId, session)
+    broadcastStudentSessionState(session, sessionId)
 
     res.json({ ok: true, responseId, annotation: updated })
   })
@@ -1205,6 +1279,7 @@ export default function setupResonanceRoutes(
       sharedResponses,
     }
     session.data.reveals = [reveal]
+    session.data.sharedResponseReactions = {}
 
     await sessions.set(sessionId, session)
 
@@ -1366,8 +1441,9 @@ export default function setupResonanceRoutes(
           const uniqueRequestedIds = Array.from(new Set(requestedQuestionIds))
           const orderedQuestionIds = getOrderedExistingQuestionIds(session.data.questions, uniqueRequestedIds)
           if (orderedQuestionIds.length !== uniqueRequestedIds.length) return
-          const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, Date.now())
-          setActiveQuestions(session.data, run.questionIds, run.deadlineAt)
+          const runStartedAt = Date.now()
+          const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, runStartedAt)
+          setActiveQuestions(session.data, run.questionIds, runStartedAt, run.deadlineAt)
         }
         await sessions.set(sessionId, session)
         console.info('[resonance] WS activate-question', {
@@ -1428,6 +1504,7 @@ export default function setupResonanceRoutes(
           }))
         const reveal: QuestionReveal = { questionId, sharedAt: now, correctOptionIds, sharedResponses }
         session.data.reveals = [reveal]
+        session.data.sharedResponseReactions = {}
         await sessions.set(sessionId, session)
         console.info('[resonance] WS share-results', {
           sessionId,
@@ -1480,6 +1557,7 @@ export default function setupResonanceRoutes(
         }
         session.data.annotations[responseId] = updated
         await sessions.set(sessionId, session)
+        broadcastStudentSessionState(session, sessionId)
         broadcastToRole(
           'resonance:annotation-updated',
           { responseId, annotation: updated },
@@ -1610,15 +1688,29 @@ export default function setupResonanceRoutes(
       }
 
       case 'resonance:react-to-shared': {
+        const studentId = clientStudentId ?? null
         const sharedResponseId =
           typeof payload.sharedResponseId === 'string' ? payload.sharedResponseId : null
         const questionId = typeof payload.questionId === 'string' ? payload.questionId : null
         const emoji = typeof payload.emoji === 'string' ? payload.emoji : null
-        if (!sharedResponseId || !questionId || !emoji) return
+        if (!studentId || !sharedResponseId || !questionId || !emoji || !isValidStudentReactionEmoji(emoji)) return
         const reveal = session.data.reveals.find((r) => r.questionId === questionId)
         if (!reveal) return
         const sharedResp = reveal.sharedResponses.find((sr) => sr.id === sharedResponseId)
         if (!sharedResp) return
+        const reactionsByStudent = session.data.sharedResponseReactions[sharedResponseId] ?? {}
+        const previousEmoji = reactionsByStudent[studentId] ?? null
+        if (previousEmoji === emoji) return
+        if (previousEmoji !== null) {
+          const previousCount = sharedResp.reactions[previousEmoji] ?? 0
+          if (previousCount <= 1) {
+            delete sharedResp.reactions[previousEmoji]
+          } else {
+            sharedResp.reactions[previousEmoji] = previousCount - 1
+          }
+        }
+        reactionsByStudent[studentId] = emoji
+        session.data.sharedResponseReactions[sharedResponseId] = reactionsByStudent
         sharedResp.reactions[emoji] = (sharedResp.reactions[emoji] ?? 0) + 1
         await sessions.set(sessionId, session)
         void broadcast(

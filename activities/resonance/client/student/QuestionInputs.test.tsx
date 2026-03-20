@@ -4,6 +4,7 @@ import * as React from 'react'
 import { JSDOM } from 'jsdom'
 import FreeResponseInput from './FreeResponseInput.js'
 import MCQInput from './MCQInput.js'
+import QuestionView from './QuestionView.js'
 
 ;(globalThis as { React?: typeof React }).React = React
 
@@ -111,6 +112,76 @@ void test('MCQInput syncs its selected option when the provided value changes', 
       assert.equal(optionB.checked, true)
     })
   } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('QuestionView submits over websocket first when sendMessage is available', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const previousFetch = globalThis.fetch
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+
+  try {
+    let fetchCalled = false
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (async () => {
+      fetchCalled = true
+      throw new Error('fetch should not be called when websocket submit succeeds')
+    }) as typeof fetch
+
+    const submitted: Array<{ questionId: string; answer: { type: string; text?: string } }> = []
+    const wsMessages: Array<{ type: string; payload: unknown }> = []
+
+    const rendered = render(
+      React.createElement(QuestionView, {
+        question: {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        sendMessage: (type: string, payload: unknown) => {
+          wsMessages.push({ type, payload })
+          return true
+        },
+        onSubmitted: (questionId, answer) => {
+          submitted.push({ questionId, answer })
+        },
+      }),
+    )
+
+    const textarea = rendered.getByLabelText(/your answer/i)
+    fireEvent.change(textarea, { target: { value: 'Fast path answer' } })
+    fireEvent.click(rendered.getByRole('button', { name: 'Submit answer' }))
+
+    await waitFor(() => {
+      assert.equal(wsMessages.length > 0, true)
+    })
+
+    assert.equal(fetchCalled, false)
+    assert.deepEqual(wsMessages[0], {
+      type: 'resonance:submit-answer',
+      payload: {
+        studentId: 'student-1',
+        questionId: 'q1',
+        answer: {
+          type: 'free-response',
+          text: 'Fast path answer',
+        },
+      },
+    })
+    assert.deepEqual(submitted, [
+      {
+        questionId: 'q1',
+        answer: {
+          type: 'free-response',
+          text: 'Fast path answer',
+        },
+      },
+    ])
+  } finally {
+    ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     restoreDomEnvironment()
   }
 })

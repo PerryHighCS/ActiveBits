@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-20
+- Area: activities | resonance | student-reactions
+- Discovery: Student shared-response reactions are client-owned in `SharedResponseFeed`, which sends the existing `resonance:react-to-shared` websocket event only for shared free-response cards, uses the curated `STUDENT_REACTION_EMOJIS` set for the inline popout picker, renders aggregate reaction chips on the instructor's currently shared FRQ card, and now pairs that public reveal path with a separate `reviewedResponses` student-only snapshot payload for emoji-highlighted answers that were not shared publicly.
+- Why it matters: Future reaction and feedback UI tweaks can stay local to the shared-response feed and shared-card display while keeping a clear separation between class-visible reveals and private instructor feedback; MCQ/poll reveal cards should remain non-reactive unless the product decision changes.
+- Evidence: `activities/resonance/client/student/SharedResponseFeed.tsx`; `activities/resonance/client/student/ResonanceStudent.tsx`; `activities/resonance/client/manager/ResponseCard.tsx`; `activities/resonance/client/manager/ResponseViewer.tsx`; `activities/resonance/client/hooks/useResonanceSession.ts`; `activities/resonance/server/routes.ts`; `activities/resonance/shared/types.ts`; `activities/resonance/shared/emojiSet.ts`
+- Follow-up action: If private feedback later needs timestamps or read/unread state, extend `reviewedResponses` directly instead of overloading the public `reveals` list.
+- Owner: Codex
+
 - Date: 2026-03-19
 - Area: activities
 - Discovery: The Resonance plan was updated to align with the current `ActivityConfig` schema and dashboard conventions: use `manageDashboard.customPersistentLinkBuilder`, `createSessionBootstrap.sessionStorage`, and activity-owned report/download flows instead of proposing a new shared `reporting` config or repo-wide report contract up front.
@@ -1330,4 +1338,12 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: Splitting share and emoji away from the star/flag stack makes the per-response actions harder to scan and increases pointer travel during instructor review.
 - Evidence: `activities/resonance/client/manager/ResponseCard.tsx`; `activities/resonance/client/manager/ResponseCard.test.tsx`
 - Follow-up action: If more response-level tools are added later, prefer keeping content actions in the left stack and reserve the opposite edge for ordering or layout controls.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | student graded mcq reveal
+- Discovery: Shared graded MCQ results are clearer in the student view when they use the same percentage breakdown as polls, with a separate `Your response: Correct/Incorrect` summary card above the option list instead of a generic “shared” banner.
+- Why it matters: Students need to see both their own selected answer and the class distribution at once. Treating graded MCQ like a poll with correct/incorrect row styling makes the reveal easier to scan and avoids implying that only one raw response card was shared.
+- Evidence: `activities/resonance/client/student/SharedResponseFeed.tsx`; `activities/resonance/client/student/SharedResponseFeed.test.tsx`
+- Follow-up action: If MCQ reveal styling evolves further, keep the student summary card and the aggregate option breakdown distinct so correctness feedback and class distribution do not compete for the same space.
 - Owner: Codex

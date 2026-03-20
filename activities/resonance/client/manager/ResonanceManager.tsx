@@ -680,6 +680,7 @@ export default function ResonanceManager() {
                   annotations={annotations}
                   orderOverrides={viewingOrderOverrides}
                   activeSharedResponseId={activeSharedResponseId}
+                  activeReveal={isViewingQuestionShared ? activeReveal : null}
                   onAnnotate={annotateResponse}
                   onShareResponse={(responseId) => {
                     if (activeSharedResponseId === responseId) {

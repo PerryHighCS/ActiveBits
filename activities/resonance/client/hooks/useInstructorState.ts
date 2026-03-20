@@ -54,6 +54,10 @@ function normalizeInstructorStateSnapshot(
     questions: Array.isArray(data.questions) ? data.questions : [],
     activeQuestionId: fallbackActiveQuestionId,
     activeQuestionIds,
+    activeQuestionRunStartedAt:
+      typeof data.activeQuestionRunStartedAt === 'number' && Number.isFinite(data.activeQuestionRunStartedAt)
+        ? data.activeQuestionRunStartedAt
+        : null,
     activeQuestionDeadlineAt:
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
@@ -103,6 +107,7 @@ export function useInstructorState(sessionId: string | null, passcode: string | 
         questions: InstructorStateSnapshot['questions']
         activeQuestionId: string | null
         activeQuestionIds: string[]
+        activeQuestionRunStartedAt: number | null
         activeQuestionDeadlineAt: number | null
         students: Student[]
         responses: ResponseWithName[]

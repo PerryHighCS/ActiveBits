@@ -5,6 +5,7 @@ interface Props {
   response: ResponseWithName
   annotation: InstructorAnnotation
   answerText: string
+  reactionSummary?: Record<string, number>
   status?: ResponseProgressStatus
   onAnnotate(patch: Partial<InstructorAnnotation>): void
   onShare?(): void
@@ -31,6 +32,7 @@ export default function ResponseCard({
   response,
   annotation,
   answerText,
+  reactionSummary,
   status = 'submitted',
   onAnnotate,
   onShare,
@@ -47,6 +49,8 @@ export default function ResponseCard({
   onDragOver,
   onDrop,
 }: Props) {
+  const reactionEntries = Object.entries(reactionSummary ?? {}).filter(([, count]) => count > 0)
+
   function setCardDragImage(event: React.DragEvent<HTMLDivElement>) {
     const source = event.currentTarget
     const clone = source.cloneNode(true)
@@ -209,6 +213,15 @@ export default function ResponseCard({
           </span>
         </div>
         <p className="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap break-words">{answerText}</p>
+        {reactionEntries.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-gray-500">
+            {reactionEntries.map(([emoji, count]) => (
+              <span key={emoji} className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-blue-700">
+                {emoji} {count}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       {/* Right-side actions */}
       <div className="flex items-center gap-1 shrink-0">

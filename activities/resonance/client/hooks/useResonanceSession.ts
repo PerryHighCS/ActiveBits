@@ -28,11 +28,20 @@ function normalizeStudentSessionSnapshot(
         ? [fallbackActiveQuestion]
         : [],
     activeQuestionIds,
+    activeQuestionRunStartedAt:
+      typeof data.activeQuestionRunStartedAt === 'number' && Number.isFinite(data.activeQuestionRunStartedAt)
+        ? data.activeQuestionRunStartedAt
+        : null,
     activeQuestionDeadlineAt:
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
         : null,
     reveals: Array.isArray(data.reveals) ? data.reveals : [],
+    reviewedResponses: Array.isArray(data.reviewedResponses) ? data.reviewedResponses : [],
+    submittedAnswers:
+      data.submittedAnswers && typeof data.submittedAnswers === 'object'
+        ? (data.submittedAnswers as StudentSessionSnapshot['submittedAnswers'])
+        : {},
     revealedQuestions: Array.isArray(data.revealedQuestions) ? data.revealedQuestions : [],
   }
 }
@@ -132,6 +141,7 @@ export function useResonanceSession(sessionId: string | null, studentId?: string
             msg.type === 'resonance:results-shared' ||
             msg.type === 'resonance:sharing-stopped' ||
             msg.type === 'resonance:question-activated' ||
+            msg.type === 'resonance:annotation-updated' ||
             msg.type === 'resonance:reaction-updated' ||
             msg.type === 'resonance:question-timer-updated'
           ) {

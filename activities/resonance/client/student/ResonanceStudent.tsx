@@ -53,6 +53,7 @@ export default function ResonanceStudent() {
 
   const mountedRef = useRef(true)
   const previousActiveQuestionIdsRef = useRef<string[]>([])
+  const previousActiveQuestionRunStartedAtRef = useRef<number | null>(null)
 
   // Step 1: resolve entry participant identity from the waiting room.
   useEffect(() => {
@@ -140,19 +141,32 @@ export default function ResonanceStudent() {
       return
     }
 
+    setSubmittedAnswers((current) => ({
+      ...snapshot.submittedAnswers,
+      ...current,
+    }))
+
+    const activeRunStartedAt = snapshot.activeQuestionRunStartedAt
     const activeIds = snapshot.activeQuestions.map((question) => question.id)
     const previousActiveIds = previousActiveQuestionIdsRef.current
     const reactivatedIds = activeIds.filter((questionId) => !previousActiveIds.includes(questionId))
-    if (reactivatedIds.length > 0) {
+    const didRunRestart =
+      activeIds.length > 0 &&
+      activeRunStartedAt !== null &&
+      previousActiveQuestionRunStartedAtRef.current !== null &&
+      activeRunStartedAt !== previousActiveQuestionRunStartedAtRef.current
+
+    if (reactivatedIds.length > 0 || didRunRestart) {
       setSubmittedQuestionIds((current) => {
         const next = new Set(current)
-        for (const questionId of reactivatedIds) {
+        for (const questionId of didRunRestart ? activeIds : reactivatedIds) {
           next.delete(questionId)
         }
         return next
       })
     }
     previousActiveQuestionIdsRef.current = activeIds
+    previousActiveQuestionRunStartedAtRef.current = activeRunStartedAt
 
     if (activeIds.length === 0) {
       setSelectedQuestionId(null)
@@ -220,7 +234,6 @@ export default function ResonanceStudent() {
       <div className="max-w-xl mx-auto px-4 py-6 space-y-6">
         {/* Header */}
         <header className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-gray-900">Resonance</h1>
           {liveCountdown !== null && activeQuestions.length > 0 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-right">
               <p className="text-[11px] uppercase tracking-wide text-amber-700">Time left</p>
@@ -270,7 +283,7 @@ export default function ResonanceStudent() {
               question={activeQuestion}
               sessionId={sessionId}
               studentId={studentId}
-              initialAnswer={submittedAnswers[activeQuestion.id] ?? null}
+              initialAnswer={snapshot.submittedAnswers[activeQuestion.id] ?? submittedAnswers[activeQuestion.id] ?? null}
               disabled={hasExpired}
               isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
               onSubmitted={(questionId, answer) => {
@@ -290,17 +303,25 @@ export default function ResonanceStudent() {
         )}
 
         {/* Waiting state */}
-        {snapshot !== null && activeQuestions.length === 0 && snapshot.reveals.length === 0 && (
+        {snapshot !== null && activeQuestions.length === 0 && snapshot.reveals.length === 0 && snapshot.reviewedResponses.length === 0 && (
           <p className="text-sm text-gray-500 text-center py-8">
             Waiting for the instructor to activate a question…
           </p>
         )}
 
-        {/* Shared responses / reveals */}
-        {snapshot !== null && snapshot.reveals.length > 0 && (
+        {/* Shared responses / reveals / private feedback */}
+        {snapshot !== null && (snapshot.reveals.length > 0 || snapshot.reviewedResponses.length > 0) && (
           <SharedResponseFeed
             reveals={snapshot.reveals}
+            reviewedResponses={snapshot.reviewedResponses}
             revealedQuestions={snapshot.revealedQuestions}
+            onReactToSharedResponse={(questionId, sharedResponseId, emoji) => {
+              sendMessage('resonance:react-to-shared', {
+                questionId,
+                sharedResponseId,
+                emoji,
+              })
+            }}
           />
         )}
       </div>

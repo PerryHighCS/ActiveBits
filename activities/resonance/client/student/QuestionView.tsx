@@ -87,6 +87,20 @@ export default function QuestionView({
     setSubmitting(true)
     setError(null)
 
+    const sentViaWs = sendMessage?.('resonance:submit-answer', {
+      studentId,
+      questionId: question.id,
+      answer,
+    }) ?? false
+
+    if (sentViaWs) {
+      onSubmitted?.(question.id, answer)
+      setDraftAnswer(answer)
+      lastSentDraftRef.current = answer
+      setSubmitting(false)
+      return
+    }
+
     try {
       const resp = await fetch(`/api/resonance/${sessionId}/submit-answer`, {
         method: 'POST',

@@ -150,6 +150,7 @@ function createInstructorResonanceSession(): SessionRecord {
       },
       annotations: {},
       reveals: [],
+      sharedResponseReactions: {},
       responseOrderOverrides: {},
       persistentHash: null,
     },
@@ -195,6 +196,7 @@ function createMultiQuestionSession(): SessionRecord {
       responseDrafts: {},
       annotations: {},
       reveals: [],
+      sharedResponseReactions: {},
       responseOrderOverrides: {},
       persistentHash: null,
     },
@@ -406,6 +408,84 @@ void test('activate-question route can activate all questions with a shared coun
   await sessions.close()
 })
 
+void test('submit-answer route broadcasts an updated instructor snapshot to instructor displays', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  await sessions.set(session.id, session)
+
+  const instructorMessages: Array<{ type?: string; payload?: unknown }> = []
+  ;(ws.wss.clients as Set<unknown>).add({
+    readyState: 1,
+    sessionId: session.id,
+    isInstructor: true,
+    send(message: string) {
+      instructorMessages.push(JSON.parse(message) as { type?: string; payload?: unknown })
+    },
+  })
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  const submitHandler = app.handlers.post['/api/resonance/:sessionId/submit-answer']
+  assert.equal(typeof activateHandler, 'function')
+  assert.equal(typeof submitHandler, 'function')
+
+  const activateRes = createResponse()
+  await activateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {
+        questionId: 'q1',
+      },
+    },
+    activateRes,
+  )
+
+  assert.equal(activateRes.statusCode, 200)
+
+  const submitRes = createResponse()
+  await submitHandler?.(
+    {
+      params: { sessionId: session.id },
+      body: {
+        studentId: 'student1',
+        questionId: 'q1',
+        answer: {
+          type: 'free-response',
+          text: 'Updated live answer',
+        },
+      },
+    },
+    submitRes,
+  )
+
+  assert.equal(submitRes.statusCode, 200)
+  let instructorStateMessage: { type?: string; payload?: unknown } | undefined
+  for (let index = instructorMessages.length - 1; index >= 0; index -= 1) {
+    const message = instructorMessages[index]
+    if (message?.type === 'resonance:instructor-state') {
+      instructorStateMessage = message
+      break
+    }
+  }
+  assert.notEqual(instructorStateMessage, undefined)
+  const payload = instructorStateMessage?.payload as {
+    responses?: Array<{ questionId?: string; studentId?: string; answer?: { text?: string } }>
+  }
+  assert.equal(payload.responses?.some((response) =>
+    response.questionId === 'q1' &&
+    response.studentId === 'student1' &&
+    response.answer?.text === 'Updated live answer'
+  ), true)
+
+  await sessions.close()
+})
+
 void test('submit-answer route updates an existing response when a question is reactivated', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -447,6 +527,7 @@ void test('submit-answer route updates an existing response when a question is r
       responseDrafts: {},
       annotations: {},
       reveals: [],
+      sharedResponseReactions: {},
       responseOrderOverrides: {},
       persistentHash: null,
     },
@@ -484,6 +565,95 @@ void test('submit-answer route updates an existing response when a question is r
     type: 'free-response',
     text: 'Revised answer',
   })
+
+  await sessions.close()
+})
+
+void test('reactivating a question marks prior answers as working instead of submitted in the instructor snapshot', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  const submitHandler = app.handlers.post['/api/resonance/:sessionId/submit-answer']
+  const responsesHandler = app.handlers.get['/api/resonance/:sessionId/responses']
+  assert.equal(typeof activateHandler, 'function')
+  assert.equal(typeof submitHandler, 'function')
+  assert.equal(typeof responsesHandler, 'function')
+
+  const firstActivateRes = createResponse()
+  await activateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {
+        questionId: 'q1',
+      },
+    },
+    firstActivateRes,
+  )
+  assert.equal(firstActivateRes.statusCode, 200)
+
+  const submitRes = createResponse()
+  await submitHandler?.(
+    {
+      params: { sessionId: session.id },
+      body: {
+        studentId: 'student1',
+        questionId: 'q1',
+        answer: {
+          type: 'free-response',
+          text: 'First run answer',
+        },
+      },
+    },
+    submitRes,
+  )
+  assert.equal(submitRes.statusCode, 200)
+  await new Promise((resolve) => setTimeout(resolve, 2))
+
+  const secondActivateRes = createResponse()
+  await activateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {
+        questionId: 'q1',
+      },
+    },
+    secondActivateRes,
+  )
+  assert.equal(secondActivateRes.statusCode, 200)
+
+  const responsesRes = createResponse()
+  await responsesHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+    },
+    responsesRes,
+  )
+
+  assert.equal(responsesRes.statusCode, 200)
+  const body = responsesRes.body as {
+    progress?: Array<{ questionId?: string; studentId?: string; status?: string; answer?: { text?: string } }>
+  }
+  assert.equal(body.progress?.some((entry) =>
+    entry.questionId === 'q1' &&
+    entry.studentId === 'student1' &&
+    entry.status === 'working' &&
+    entry.answer?.text === 'First run answer'
+  ), true)
 
   await sessions.close()
 })
@@ -552,6 +722,7 @@ void test('share-results replaces any previously shared reveal so only one revea
           sharedResponses: [],
         },
       ],
+      sharedResponseReactions: {},
       responseOrderOverrides: {},
       persistentHash: null,
     },
@@ -719,6 +890,11 @@ void test('student state includes the viewer response and marks when their share
           ],
         },
       ],
+      sharedResponseReactions: {
+        r1: {
+          student1: '🔥',
+        },
+      },
       responseOrderOverrides: {},
       persistentHash: null,
     },
@@ -744,11 +920,12 @@ void test('student state includes the viewer response and marks when their share
   assert.equal(res.statusCode, 200)
   const body = res.body as {
     reveals?: Array<{
-      sharedResponses?: Array<{ isOwnResponse?: boolean }>
+      sharedResponses?: Array<{ isOwnResponse?: boolean; viewerReaction?: string | null }>
       viewerResponse?: { instructorEmoji?: string | null; isShared?: boolean; answer?: { text?: string } }
     }>
   }
   assert.equal(body.reveals?.[0]?.sharedResponses?.[0]?.isOwnResponse, true)
+  assert.equal(body.reveals?.[0]?.sharedResponses?.[0]?.viewerReaction, '🔥')
   assert.deepEqual(body.reveals?.[0]?.viewerResponse, {
     answer: {
       type: 'free-response',
@@ -758,6 +935,297 @@ void test('student state includes the viewer response and marks when their share
     instructorEmoji: '👏',
     isShared: true,
   })
+
+  await sessions.close()
+})
+
+void test('annotate-response route updates the student viewer response emoji for shared results', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const submittedAt = now - 500
+  const session: SessionRecord = {
+    id: 'resonance-session-annotation-student-view',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: null,
+      activeQuestionIds: [],
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [
+        {
+          id: 'r1',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt,
+          answer: {
+            type: 'free-response',
+            text: 'My answer',
+          },
+        },
+      ],
+      responseDrafts: {},
+      annotations: {
+        r1: {
+          starred: false,
+          flagged: false,
+          emoji: null,
+        },
+      },
+      reveals: [
+        {
+          questionId: 'q1',
+          sharedAt: now - 100,
+          correctOptionIds: null,
+          sharedResponses: [
+            {
+              id: 'r1',
+              questionId: 'q1',
+              answer: {
+                type: 'free-response',
+                text: 'My answer',
+              },
+              sharedAt: now - 100,
+              instructorEmoji: null,
+              reactions: {},
+            },
+          ],
+        },
+      ],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const annotateHandler = app.handlers.post['/api/resonance/:sessionId/annotate-response']
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof annotateHandler, 'function')
+  assert.equal(typeof stateHandler, 'function')
+
+  const annotateRes = createResponse()
+  await annotateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {
+        responseId: 'r1',
+        annotation: {
+          emoji: '💡',
+        },
+      },
+    },
+    annotateRes,
+  )
+
+  assert.equal(annotateRes.statusCode, 200)
+
+  const stateRes = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+    },
+    stateRes,
+  )
+
+  assert.equal(stateRes.statusCode, 200)
+  const body = stateRes.body as {
+    reveals?: Array<{
+      viewerResponse?: { instructorEmoji?: string | null; answer?: { text?: string } }
+    }>
+  }
+  assert.equal(body.reveals?.[0]?.viewerResponse?.instructorEmoji, '💡')
+  assert.equal(body.reveals?.[0]?.viewerResponse?.answer?.text, 'My answer')
+
+  await sessions.close()
+})
+
+void test('student state includes reviewed responses for annotated answers that were not shared publicly', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-private-feedback',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: null,
+      activeQuestionIds: [],
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [
+        {
+          id: 'r1',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          answer: {
+            type: 'free-response',
+            text: 'My answer',
+          },
+        },
+      ],
+      responseDrafts: {},
+      annotations: {
+        r1: {
+          starred: false,
+          flagged: false,
+          emoji: '💡',
+        },
+      },
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    reveals?: unknown[]
+    reviewedResponses?: Array<{
+      instructorEmoji?: string
+      answer?: { text?: string }
+      question?: { text?: string }
+    }>
+  }
+  assert.deepEqual(body.reveals, [])
+  assert.equal(body.reviewedResponses?.[0]?.instructorEmoji, '💡')
+  assert.equal(body.reviewedResponses?.[0]?.answer?.text, 'My answer')
+  assert.equal(body.reviewedResponses?.[0]?.question?.text, 'Explain your reasoning.')
+
+  await sessions.close()
+})
+
+void test('student state hides reviewed responses for annotated answers when the question is active again', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-private-feedback-reactivated',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: 'q1',
+      activeQuestionIds: ['q1'],
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [
+        {
+          id: 'r1',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          answer: {
+            type: 'free-response',
+            text: 'My answer',
+          },
+        },
+      ],
+      responseDrafts: {},
+      annotations: {
+        r1: {
+          starred: false,
+          flagged: false,
+          emoji: '💡',
+        },
+      },
+      reveals: [],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    reviewedResponses?: unknown[]
+    submittedAnswers?: Record<string, { text?: string }>
+  }
+  assert.deepEqual(body.reviewedResponses, [])
+  assert.equal(body.submittedAnswers?.q1?.text, 'My answer')
 
   await sessions.close()
 })

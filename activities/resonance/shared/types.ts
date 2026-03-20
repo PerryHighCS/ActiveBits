@@ -75,6 +75,7 @@ export interface SharedResponse {
   instructorEmoji: string | null
   reactions: Record<string, number>
   isOwnResponse?: boolean
+  viewerReaction?: string | null
 }
 
 export interface ViewerRevealResponse {
@@ -82,6 +83,13 @@ export interface ViewerRevealResponse {
   submittedAt: number
   instructorEmoji: string | null
   isShared: boolean
+}
+
+export interface ReviewedResponse {
+  question: StudentQuestion
+  answer: AnswerPayload
+  submittedAt: number
+  instructorEmoji: string
 }
 
 export interface QuestionReveal {
@@ -104,8 +112,11 @@ export interface StudentSessionSnapshot {
   activeQuestion: StudentQuestion | null
   activeQuestions: StudentQuestion[]
   activeQuestionIds: string[]
+  activeQuestionRunStartedAt: number | null
   activeQuestionDeadlineAt: number | null
   reveals: QuestionReveal[]
+  reviewedResponses: ReviewedResponse[]
+  submittedAnswers: Record<string, AnswerPayload>
   /** Student-safe versions of revealed questions, so clients can show option text alongside reveal data. */
   revealedQuestions: StudentQuestion[]
 }
@@ -116,6 +127,7 @@ export interface InstructorSessionSnapshot {
   questions: Question[]
   activeQuestionId: string | null
   activeQuestionIds: string[]
+  activeQuestionRunStartedAt: number | null
   activeQuestionDeadlineAt: number | null
   students: Student[]
   responses: ResponseWithName[]

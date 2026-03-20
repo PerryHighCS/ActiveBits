@@ -3,6 +3,7 @@ import type {
   InstructorAnnotation,
   MCQQuestion,
   Question,
+  QuestionReveal,
   ResponseProgress,
   ResponseWithName,
 } from '../../shared/types.js'
@@ -68,6 +69,7 @@ interface Props {
   annotations: Record<string, InstructorAnnotation>
   orderOverrides: string[]
   activeSharedResponseId?: string | null
+  activeReveal?: QuestionReveal | null
   onAnnotate(responseId: string, patch: Partial<InstructorAnnotation>): void
   onShareResponse?(responseId: string): void
   onReorder(newOrder: string[]): void
@@ -202,6 +204,7 @@ function FreeResponseList({
   annotations,
   orderOverrides,
   activeSharedResponseId,
+  activeReveal,
   onAnnotate,
   onShareResponse,
   onReorder,
@@ -211,6 +214,7 @@ function FreeResponseList({
   annotations: Record<string, InstructorAnnotation>
   orderOverrides: string[]
   activeSharedResponseId?: string | null
+  activeReveal?: QuestionReveal | null
   onAnnotate(responseId: string, patch: Partial<InstructorAnnotation>): void
   onShareResponse?(responseId: string): void
   onReorder(newOrder: string[]): void
@@ -266,6 +270,9 @@ function FreeResponseList({
   ]
   const displayItemIds = displayItems.map((item) => item.id)
   const [displayOrderIds, setDisplayOrderIds] = useState<string[]>(displayItemIds)
+  const activeReactionSummaryByResponseId = new Map<string, Record<string, number>>(
+    (activeReveal?.sharedResponses ?? []).map((sharedResponse: QuestionReveal['sharedResponses'][number]) => [sharedResponse.id, sharedResponse.reactions]),
+  )
 
   useEffect(() => {
     setDisplayOrderIds((current) => {
@@ -322,6 +329,7 @@ function FreeResponseList({
               response={item.response}
               annotation={item.annotation}
               answerText={item.answerText}
+              reactionSummary={item.submittedResponseId !== null ? activeReactionSummaryByResponseId.get(item.submittedResponseId) : undefined}
               status={item.status}
               onAnnotate={(patch) => {
                 if (item.submittedResponseId !== null) {
@@ -400,6 +408,7 @@ export default function ResponseViewer({
   annotations,
   orderOverrides,
   activeSharedResponseId,
+  activeReveal,
   onAnnotate,
   onShareResponse,
   onReorder,
@@ -421,6 +430,7 @@ export default function ResponseViewer({
       annotations={annotations}
       orderOverrides={orderOverrides}
       activeSharedResponseId={activeSharedResponseId}
+      activeReveal={activeReveal}
       onAnnotate={onAnnotate}
       onShareResponse={onShareResponse}
       onReorder={onReorder}
