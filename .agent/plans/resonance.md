@@ -147,9 +147,12 @@ obscuration so answer metadata is not trivially readable in the URL or copied li
 
 Current implementation guidance:
 
+- Serialize and compress question payloads before encryption to reduce URL size.
 - Keep encryption activity-owned in `activities/resonance/server/questionCrypto.ts`.
 - Reuse `PERSISTENT_SESSION_SECRET`-derived key material.
 - Bind ciphertext to the persistent hash as associated data.
+- Use a URL-safe encoded output format after compression/encryption for query transport.
+- Add payload-size guardrails because even compressed question sets may still exceed practical URL limits.
 - Treat this as obscuration rather than a long-term secure storage boundary.
 - Do not invent new shared crypto abstractions unless a second activity needs them.
 
@@ -397,10 +400,13 @@ activities/resonance/
 - [ ] Parse and validate imported files client-side before enabling link generation.
 - [ ] Implement `POST /api/resonance/generate-link`.
 - [ ] Validate imported question payloads server-side in `POST /api/resonance/generate-link`.
+- [ ] Compress serialized question payloads before encryption to keep query payloads smaller.
 - [ ] Encrypt question sets in the persistent-link flow for obscuration.
 - [ ] Store the encrypted question payload in URL query data because there is no other persistent
       store available for this workflow.
-- [ ] Add `server/questionCrypto.ts` with tests for round-trip and tamper detection.
+- [ ] Use URL-safe encoding for encrypted query payload transport.
+- [ ] Add payload-size validation/failure handling for oversized question sets.
+- [ ] Add `server/questionCrypto.ts` with tests for round-trip, tamper detection, and compressed payload handling.
 - [ ] Implement `GET /api/resonance/:sessionId/instructor-passcode` for persistent-link instructor recovery.
 
 ### Phase 4: Student Lifecycle
