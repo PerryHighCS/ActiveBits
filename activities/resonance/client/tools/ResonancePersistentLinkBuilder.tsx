@@ -1,11 +1,152 @@
+import { useState } from 'react'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
+import type { Question } from '../../shared/types.js'
+import ResonanceQuestionSetUploader from './ResonanceQuestionSetUploader.js'
 
-export default function ResonancePersistentLinkBuilder({ activityId }: ActivityPersistentLinkBuilderProps) {
+interface GenerateLinkResponse {
+  hash?: string
+  url?: string
+  error?: string
+  details?: string[]
+}
+
+/**
+ * Activity-owned persistent-link builder for Resonance.
+ *
+ * Accepts a JSON or Gimkit CSV question set, validates it client-side,
+ * posts to /api/resonance/generate-link for server-side validation and
+ * encryption, then calls onCreated with the authoritative result.
+ *
+ * Supports both create-mode (no editState) and edit-mode (editState provided).
+ * In edit mode the teacher code is pre-filled and any previously saved
+ * questions stored in selectedOptions are pre-loaded into the uploader.
+ */
+export default function ResonancePersistentLinkBuilder({
+  activityId: _activityId,
+  editState,
+  onCreated,
+}: ActivityPersistentLinkBuilderProps) {
+  // Recover questions from a prior onCreated call stored in selectedOptions.
+  const rawSavedQuestions = editState?.selectedOptions?.questions
+  const savedQuestions: Question[] | null =
+    Array.isArray(rawSavedQuestions) && rawSavedQuestions.length > 0
+      ? (rawSavedQuestions as Question[])
+      : null
+
+  const [teacherCode, setTeacherCode] = useState(editState?.teacherCode ?? '')
+  const [questions, setQuestions] = useState<Question[] | null>(savedQuestions)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  const isEdit = Boolean(editState)
+  const canSubmit = !submitting && teacherCode.trim().length >= 6 && questions !== null && questions.length > 0
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!canSubmit || questions === null) return
+
+    setSubmitting(true)
+    setSubmitError(null)
+
+    try {
+      const resp = await fetch('/api/resonance/generate-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teacherCode: teacherCode.trim(), questions }),
+      })
+
+      const data = (await resp.json()) as GenerateLinkResponse
+
+      if (!resp.ok || !data.hash || !data.url) {
+        setSubmitError(data.error ?? 'Failed to generate link — please try again')
+        setSubmitting(false)
+        return
+      }
+
+      const fullUrl = /^https?:\/\//i.test(data.url)
+        ? data.url
+        : `${window.location.origin}${data.url}`
+
+      await onCreated({
+        fullUrl,
+        hash: data.hash,
+        teacherCode: teacherCode.trim(),
+        // Store plaintext questions so edit mode can pre-populate the uploader.
+        selectedOptions: { questions },
+      })
+    } catch {
+      setSubmitError('Network error — please check your connection and try again')
+      setSubmitting(false)
+    }
+  }
+
   return (
-    <div className="p-4">
-      <p className="text-sm text-gray-500">
-        [{activityId} — Resonance link builder coming soon]
-      </p>
-    </div>
+    <form
+      onSubmit={(e) => {
+        void handleSubmit(e)
+      }}
+      className="space-y-5 p-1"
+      aria-label={isEdit ? 'Update Resonance persistent link' : 'Create Resonance persistent link'}
+    >
+      {/* Teacher code */}
+      <div>
+        <label
+          htmlFor="resonance-plb-teacher-code"
+          className="block text-sm font-medium text-gray-700 mb-1"
+        >
+          Teacher code
+        </label>
+        <input
+          id="resonance-plb-teacher-code"
+          type="text"
+          value={teacherCode}
+          onChange={(e) => setTeacherCode(e.target.value)}
+          placeholder="Minimum 6 characters"
+          autoComplete="off"
+          spellCheck={false}
+          className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
+          aria-describedby="resonance-plb-teacher-code-hint"
+          disabled={submitting}
+        />
+        <p id="resonance-plb-teacher-code-hint" className="mt-0.5 text-xs text-gray-500">
+          Proves you own this session. Keep it private — you can re-enter your session with it.
+        </p>
+      </div>
+
+      {/* Question set upload */}
+      <div>
+        <p className="block text-sm font-medium text-gray-700 mb-1" id="resonance-plb-file-label">
+          Question set
+        </p>
+        <ResonanceQuestionSetUploader
+          onQuestionsChanged={setQuestions}
+          initialQuestions={savedQuestions}
+        />
+      </div>
+
+      {/* Submit error */}
+      {submitError && (
+        <p className="text-sm text-red-600" role="alert">
+          {submitError}
+        </p>
+      )}
+
+      {/* Submit */}
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        aria-busy={submitting}
+        aria-disabled={!canSubmit}
+        className="w-full rounded bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {submitting
+          ? isEdit
+            ? 'Updating link…'
+            : 'Generating link…'
+          : isEdit
+            ? 'Update link'
+            : 'Generate link'}
+      </button>
+    </form>
   )
 }

@@ -1,5 +1,9 @@
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
+import {
+  generatePersistentHash,
+  verifyTeacherCodeWithHash,
+} from 'activebits-server/core/persistentSessions.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   InstructorAnnotation,
@@ -8,6 +12,8 @@ import type {
   Response,
   Student,
 } from '../shared/types.js'
+import { validateQuestionSet } from '../shared/validation.js'
+import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 
 // ---------------------------------------------------------------------------
 // Route-level types
@@ -16,6 +22,7 @@ import type {
 interface JsonResponse {
   status(code: number): JsonResponse
   json(payload: unknown): JsonResponse | void
+  cookie?(name: string, value: string, options: Record<string, unknown>): void
 }
 
 interface RouteRequest {
@@ -49,11 +56,45 @@ interface ResonanceSessionData extends Record<string, unknown> {
   annotations: Record<string, InstructorAnnotation>
   reveals: QuestionReveal[]
   responseOrderOverrides: Record<string, string[]>
+  /** Stored when session is created from a persistent link — used for passcode recovery. */
+  persistentHash: string | null
 }
 
 interface ResonanceSession extends SessionRecord {
   type?: string
   data: ResonanceSessionData
+}
+
+// ---------------------------------------------------------------------------
+// Cookie types and helpers
+// ---------------------------------------------------------------------------
+
+interface PersistentSessionsCookieEntry {
+  key: string
+  teacherCode: string
+}
+
+const MAX_SESSIONS_PER_COOKIE = 20
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
+
+function parsePersistentSessionsCookie(cookieValue: unknown): PersistentSessionsCookieEntry[] {
+  if (cookieValue == null) return []
+  let parsed: unknown
+  try {
+    parsed = typeof cookieValue === 'string' ? JSON.parse(cookieValue) : cookieValue
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  return parsed
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        isPlainObject(entry) && typeof entry.key === 'string' && typeof entry.teacherCode === 'string',
+    )
+    .map((entry) => ({
+      key: String(entry.key),
+      teacherCode: String(entry.teacherCode),
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +124,7 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     responseOrderOverrides: isPlainObject(source.responseOrderOverrides)
       ? (source.responseOrderOverrides as Record<string, string[]>)
       : {},
+    persistentHash: typeof source.persistentHash === 'string' ? source.persistentHash : null,
   }
 }
 
@@ -127,21 +169,158 @@ export default function setupResonanceRoutes(
     }
   }
 
+  // ---------------------------------------------------------------------------
   // POST /api/resonance/create
-  app.post('/api/resonance/create', async (_req, res) => {
+  // Creates a new session. Optionally accepts encoded questions from a
+  // persistent link so they can be pre-loaded into the session.
+  // ---------------------------------------------------------------------------
+  app.post('/api/resonance/create', async (req, res) => {
+    const body = isPlainObject(req.body) ? req.body : {}
     const instructorPasscode = generatePasscode()
+
+    let questions: Question[] = []
+    let persistentHash: string | null = null
+
+    // If a persistent link is being entered, decrypt the pre-loaded question set.
+    const encodedQuestions = typeof body.encodedQuestions === 'string' ? body.encodedQuestions : null
+    const candidateHash = typeof body.persistentHash === 'string' ? body.persistentHash : null
+
+    if (encodedQuestions && candidateHash) {
+      const decrypted = decryptQuestions(encodedQuestions, candidateHash)
+      if (decrypted !== null && decrypted.length > 0) {
+        questions = decrypted
+        persistentHash = candidateHash
+      } else {
+        console.warn('[resonance] Persistent link question decryption failed', { candidateHash })
+      }
+    }
+
     const session = await createSession(sessions, {
-      data: normalizeSessionData({ instructorPasscode }),
+      data: normalizeSessionData({ instructorPasscode, questions, persistentHash }),
     })
     session.type = 'resonance'
     await sessions.set(session.id, session)
-    console.info('[resonance] Session created', { sessionId: session.id })
+
+    console.info('[resonance] Session created', {
+      sessionId: session.id,
+      questionCount: questions.length,
+      fromPersistentLink: persistentHash !== null,
+    })
+
     res.json({ id: session.id, instructorPasscode })
   })
 
-  // POST /api/resonance/generate-link — stub; full implementation in Phase 3
-  app.post('/api/resonance/generate-link', async (_req, res) => {
-    res.status(501).json({ error: 'generate-link not yet implemented' })
+  // ---------------------------------------------------------------------------
+  // POST /api/resonance/generate-link
+  // Validates and encrypts a question set, stores the teacher code in the
+  // persistent_sessions cookie, and returns the authoritative persistent URL.
+  // ---------------------------------------------------------------------------
+  app.post('/api/resonance/generate-link', async (req, res) => {
+    const body = isPlainObject(req.body) ? req.body : {}
+
+    // Validate teacher code
+    const teacherCode = typeof body.teacherCode === 'string' ? body.teacherCode.trim() : ''
+    if (teacherCode.length < 6) {
+      res.status(400).json({ error: 'teacherCode must be at least 6 characters' })
+      return
+    }
+    if (teacherCode.length > 100) {
+      res.status(400).json({ error: 'teacherCode must be at most 100 characters' })
+      return
+    }
+
+    // Validate questions
+    if (!Array.isArray(body.questions)) {
+      res.status(400).json({ error: 'questions must be an array' })
+      return
+    }
+    const { questions, errors } = validateQuestionSet(body.questions)
+    if (errors.length > 0) {
+      res.status(400).json({ error: errors[0], details: errors })
+      return
+    }
+    if (questions.length === 0) {
+      res.status(400).json({ error: 'question set must not be empty' })
+      return
+    }
+
+    // Generate hash and encrypt the question payload
+    const { hash } = generatePersistentHash('resonance', teacherCode)
+    const { encoded, sizeChars } = encryptQuestions(questions, hash)
+
+    if (sizeChars > MAX_ENCODED_PAYLOAD_CHARS) {
+      res
+        .status(422)
+        .json({ error: `Question set is too large for a persistent link (${sizeChars} chars, limit ${MAX_ENCODED_PAYLOAD_CHARS})` })
+      return
+    }
+
+    // Store teacher code in the persistent_sessions cookie so it can be
+    // recovered later via GET /api/resonance/:sessionId/instructor-passcode.
+    const cookieName = 'persistent_sessions'
+    let sessionEntries = parsePersistentSessionsCookie(req.cookies?.[cookieName])
+    const cookieKey = `resonance:${hash}`
+    const existingIndex = sessionEntries.findIndex((e) => e.key === cookieKey)
+    if (existingIndex !== -1) {
+      sessionEntries.splice(existingIndex, 1)
+    }
+    sessionEntries.push({ key: cookieKey, teacherCode })
+    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
+      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
+    }
+
+    res.cookie?.(cookieName, JSON.stringify(sessionEntries), {
+      maxAge: ONE_YEAR_MS,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+    })
+
+    const url = `/manage/resonance?h=${hash}&q=${encoded}`
+    console.info('[resonance] Persistent link generated', { hash, questionCount: questions.length, sizeChars })
+    res.json({ hash, url })
+  })
+
+  // ---------------------------------------------------------------------------
+  // GET /api/resonance/:sessionId/instructor-passcode
+  // Lets an instructor recover their passcode for an existing session by
+  // proving ownership via the persistent_sessions cookie.
+  // ---------------------------------------------------------------------------
+  app.get('/api/resonance/:sessionId/instructor-passcode', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asResonanceSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    const { persistentHash } = session.data
+    if (!persistentHash) {
+      res.status(403).json({ error: 'session was not created from a persistent link' })
+      return
+    }
+
+    // Verify the teacher owns this persistent session via their cookie
+    const cookieEntries = parsePersistentSessionsCookie(req.cookies?.persistent_sessions)
+    const entry = cookieEntries.find((e) => e.key === `resonance:${persistentHash}`)
+    if (!entry) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const verified = verifyTeacherCodeWithHash('resonance', persistentHash, entry.teacherCode)
+    if (!verified.valid) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    console.info('[resonance] Instructor passcode recovered', { sessionId })
+    res.json({ instructorPasscode: session.data.instructorPasscode })
   })
 
   // POST /api/resonance/:sessionId/register-student — stub; full implementation in Phase 4
@@ -157,21 +336,6 @@ export default function setupResonanceRoutes(
       return
     }
     res.status(501).json({ error: 'register-student not yet implemented' })
-  })
-
-  // GET /api/resonance/:sessionId/instructor-passcode — stub; full implementation in Phase 3
-  app.get('/api/resonance/:sessionId/instructor-passcode', async (req, res) => {
-    const { sessionId } = req.params
-    if (!sessionId) {
-      res.status(400).json({ error: 'missing sessionId' })
-      return
-    }
-    const session = asResonanceSession(await sessions.get(sessionId))
-    if (!session) {
-      res.status(404).json({ error: 'session not found' })
-      return
-    }
-    res.status(501).json({ error: 'instructor-passcode recovery not yet implemented' })
   })
 
   // GET /api/resonance/:sessionId/state
