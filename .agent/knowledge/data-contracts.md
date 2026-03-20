@@ -60,6 +60,33 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: Add dedicated student-side unit tests for `state` -> `command.setState` translation when adding more plugin command support.
 - Owner: Codex
 
+- Date: 2026-03-20
+- Surface: REST + websocket + activity interface
+- Contract: Resonance REST endpoints — `POST /api/resonance/create` → `{ id, instructorPasscode }`; `POST /api/resonance/:sessionId/register-student` body `{ name }` → `{ studentId, name }`; `POST /api/resonance/generate-link` body `{ teacherCode, questions: Question[] }` → `{ hash, url }`; `GET /api/resonance/:sessionId/state` → student-safe snapshot (no isCorrect, no response data); `GET /api/resonance/:sessionId/responses` (instructor auth) → responses + annotations; `GET /api/resonance/:sessionId/instructor-passcode` (teacher cookie) → `{ instructorPasscode }`; `GET /api/resonance/:sessionId/report` (instructor auth) → HTML or JSON export.
+- Compatibility constraints: `isCorrect` must never appear in student-facing payloads before a reveal; instructor passcode is never included in student snapshots; annotations (star/flag) are instructor-private and excluded from shared-response payloads.
+- Validation rules: Questions validated by `activities/resonance/shared/validation.ts`; student name trimmed, max 80 chars; answer payload type must match active question type; selectedOptionId must be a valid option id on the target question.
+- Evidence (schema/tests/path): `activities/resonance/shared/types.ts`; `activities/resonance/shared/validation.ts`; `activities/resonance/server/routes.ts`.
+- Follow-up action: Add route tests for each endpoint in Phase 9; add WebSocket message contract entry when Phase 7 is implemented.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Surface: activity interface
+- Contract: `ActivityConfig.utilMode?: boolean` advertises that the activity exposes a utility/tools page at `/util/:activityId`, rendered from the client module's `UtilComponent` export. `ActivityClientModule.UtilComponent` is only loaded by the registry when `utilMode: true`.
+- Compatibility constraints: Flag is optional and defaults to undefined/false; existing activities without the flag are unaffected. Route `/util/:activityId` is registered in App.tsx only for activities that have `UtilComponent`.
+- Validation rules: Schema validates `utilMode` as boolean when provided.
+- Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/activities/index.ts`; `client/src/App.tsx`; `activities/resonance/activity.config.ts`.
+- Follow-up action: If a second activity adopts `utilMode`, document any shared navigation or shell conventions needed in this contract.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Surface: websocket
+- Contract: Resonance WebSocket envelope — `{ version: '1', activity: 'resonance', sessionId: string, type: string, timestamp: number, payload: unknown }`. All message types use a `resonance:` prefix (e.g. `resonance:question-activated`). Instructor connects with `role=instructor&instructorPasscode=<code>`. Student connects with `studentId=<id>`.
+- Compatibility constraints: Envelope `version` field must be checked before processing; unknown types must be silently ignored on client; never include `isCorrect` or `instructorPasscode` in student-bound payloads.
+- Validation rules: Server closes socket with code 1008 on missing sessionId, unknown session, or invalid instructor passcode.
+- Evidence (schema/tests/path): `activities/resonance/shared/types.ts` (ResonanceWsEnvelope); `activities/resonance/server/routes.ts`.
+- Follow-up action: Flesh out full message dispatch and add WS tests in Phase 7.
+- Owner: Codex
+
 - Date: 2026-03-02
 - Surface: internal module
 - Contract: SyncDeck reveal-sync protocol version is centralized in `activities/syncdeck/shared/revealSyncProtocol.ts` and must be reused by manager, student, server, and preflight handshake code.

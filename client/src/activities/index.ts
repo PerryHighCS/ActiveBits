@@ -193,11 +193,21 @@ export const activities: ActivityRegistryEntry[] = preferredConfigEntries
       activityId,
       'PersistentLinkBuilderComponent',
     )
+    const UtilComponent = cfg.utilMode
+      ? createLazyComponent(
+          clientLoader,
+          (resolved) => resolved.UtilComponent as ComponentType<unknown> | null | undefined,
+          undefined,
+          activityId,
+          'UtilComponent',
+        )
+      : null
 
     return {
       ...cfg,
       ManagerComponent,
       StudentComponent,
+      UtilComponent,
       FooterComponent,
       PersistentLinkBuilderComponent,
     }

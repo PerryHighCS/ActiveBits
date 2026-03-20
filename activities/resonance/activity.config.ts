@@ -23,6 +23,7 @@ const resonanceConfig: ActivityConfig = {
     customPersistentLinkBuilder: true,
   },
   isDev: true,
+  utilMode: true,
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',
 }

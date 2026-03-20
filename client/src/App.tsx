@@ -1,4 +1,4 @@
-import { Fragment, Suspense, type ComponentType } from 'react'
+import React, { Fragment, Suspense, type ComponentType } from 'react'
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
 import SessionRouter from './components/common/SessionRouter'
 import SessionEnded from './components/common/SessionEnded'
@@ -52,30 +52,51 @@ function AppShell() {
 
           {activities.map((activity) => {
             const ManagerComponent = activity.ManagerComponent
-            if (!ManagerComponent) return null
+            const UtilComponent = activity.UtilComponent
+            if (!ManagerComponent && !UtilComponent) return null
 
-            const TypedManagerComponent = ManagerComponent as AnyComponent
+            const routes: React.ReactElement[] = []
 
-            return (
-              <Fragment key={activity.id}>
+            if (ManagerComponent) {
+              const TypedManagerComponent = ManagerComponent as AnyComponent
+              routes.push(
                 <Route
+                  key="manage"
                   path={`/manage/${activity.id}`}
                   element={
                     <Suspense fallback={<LoadingFallback />}>
                       <TypedManagerComponent />
                     </Suspense>
                   }
-                />
+                />,
                 <Route
+                  key="manage-session"
                   path={`/manage/${activity.id}/:sessionId`}
                   element={
                     <Suspense fallback={<LoadingFallback />}>
                       <TypedManagerComponent />
                     </Suspense>
                   }
-                />
-              </Fragment>
-            )
+                />,
+              )
+            }
+
+            if (UtilComponent) {
+              const TypedUtilComponent = UtilComponent as AnyComponent
+              routes.push(
+                <Route
+                  key="util"
+                  path={`/util/${activity.id}`}
+                  element={
+                    <Suspense fallback={<LoadingFallback />}>
+                      <TypedUtilComponent />
+                    </Suspense>
+                  }
+                />,
+              )
+            }
+
+            return <Fragment key={activity.id}>{routes}</Fragment>
           })}
 
           <Route path="/activity/:activityName/:hash" element={<SessionRouter />} />
