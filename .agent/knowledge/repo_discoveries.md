@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-20
+- Area: activities | syncdeck | embedded activity console
+- Discovery: SyncDeck’s instructor embedded-activity UX is split between an ad hoc `Activities` launcher and a separate `Running activities` manager, but both surfaces already depend on the same local embedded-activity state (`embeddedActivities`, `activeEmbeddedInstanceKey`, and instance-key anchor helpers). A unified activities panel can stay client-side by reusing the existing launch flow for new instances and the existing resync/navigation helpers for switching to running instances.
+- Why it matters: This is a UI/state composition problem more than a data-contract problem. Future embedded-activity console changes should prefer reusing instance-key navigation helpers instead of introducing new server state just to support switching among running embedded sessions.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/COMBINED_ACTIVITIES_CONTROL_PLAN.md`
+- Follow-up action: If the unified panel is implemented, keep launch actions and running-instance actions distinct in the UI so switching never accidentally creates a second child session on the same anchor.
+- Owner: Codex
+
 - Date: 2026-03-19
 - Area: server | activities | persistent-bootstrap
 - Discovery: Persistent-session startup now copies canonical permalink `selectedOptions` into the started live session's `data.embeddedLaunch.selectedOptions`, and Algorithm Demo manager bootstrap reads its initial algorithm from that embedded-launch state instead of the manage-route query string.
