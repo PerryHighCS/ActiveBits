@@ -14,6 +14,7 @@ interface Props {
   onMoveDown?(): void
   draggable?: boolean
   isDragging?: boolean
+  hideWhileDragging?: boolean
   isDragTarget?: boolean
   onDragStart?(): void
   onDragEnd?(): void
@@ -39,17 +40,56 @@ export default function ResponseCard({
   onMoveDown,
   draggable = false,
   isDragging = false,
+  hideWhileDragging = false,
   isDragTarget = false,
   onDragStart,
   onDragEnd,
   onDragOver,
   onDrop,
 }: Props) {
+  function setCardDragImage(event: React.DragEvent<HTMLDivElement>) {
+    const source = event.currentTarget
+    const clone = source.cloneNode(true)
+    if (!(clone instanceof HTMLElement)) {
+      return
+    }
+
+    clone.style.position = 'fixed'
+    clone.style.top = '-1000px'
+    clone.style.left = '-1000px'
+    clone.style.width = `${source.offsetWidth}px`
+    clone.style.pointerEvents = 'none'
+    clone.style.transform = 'rotate(1deg)'
+    clone.style.boxShadow = '0 12px 30px rgba(15, 23, 42, 0.18)'
+    clone.style.opacity = '0.96'
+    document.body.appendChild(clone)
+    event.dataTransfer.setDragImage(clone, 24, 24)
+    window.setTimeout(() => {
+      clone.remove()
+    }, 150)
+  }
+
   return (
     <div
+      draggable={draggable}
       className={`flex items-start gap-3 rounded-lg border px-3 py-2 ${
         shareActive ? 'border-blue-300 bg-blue-50/40' : 'border-gray-200 bg-white'
-      } ${isDragging ? 'opacity-60' : ''} ${isDragTarget ? 'ring-2 ring-blue-200 ring-offset-1' : ''}`}
+      } ${draggable ? 'cursor-grab' : ''} ${isDragging ? 'scale-[1.01] opacity-60 shadow-lg' : ''} ${hideWhileDragging ? 'pointer-events-none opacity-0' : ''} ${isDragTarget ? 'ring-2 ring-blue-200 ring-offset-1' : ''} transition-[box-shadow,transform,opacity]`}
+      onDragStart={(event) => {
+        if (!draggable) {
+          return
+        }
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/plain', response.id)
+        setCardDragImage(event)
+        onDragStart?.()
+      }}
+      onDragEnd={() => {
+        if (!draggable) {
+          return
+        }
+        onDragEnd?.()
+      }}
       onDragOver={(event) => {
         if (onDragOver === undefined) {
           return
@@ -69,14 +109,8 @@ export default function ResponseCard({
         <button
           type="button"
           aria-label={`Drag to reorder response from ${response.studentName}`}
-          draggable
-          onDragStart={(event) => {
-            event.dataTransfer.effectAllowed = 'move'
-            event.dataTransfer.setData('text/plain', response.id)
-            onDragStart?.()
-          }}
-          onDragEnd={() => onDragEnd?.()}
-          className="self-stretch cursor-grab rounded-md border border-transparent px-1 text-lg leading-none text-gray-300 hover:border-gray-200 hover:bg-gray-50 hover:text-gray-500 active:cursor-grabbing"
+          tabIndex={-1}
+          className="self-stretch rounded-md border border-transparent px-1 text-lg leading-none text-gray-300 hover:border-gray-200 hover:bg-gray-50 hover:text-gray-500"
         >
           <span className="flex h-full items-center">⋮⋮</span>
         </button>

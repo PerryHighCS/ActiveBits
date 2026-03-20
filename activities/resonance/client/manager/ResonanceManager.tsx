@@ -624,7 +624,7 @@ export default function ResonanceManager() {
         </aside>
 
         {/* Right panel: response viewer */}
-        <main className="flex-1 overflow-y-auto p-4 space-y-4">
+        <main className="flex flex-1 flex-col overflow-y-auto p-4 gap-4">
           {viewingQuestion === null ? (
             <div className="flex items-center justify-center h-full text-gray-400 text-sm">
               Select a question from the left panel.
@@ -672,23 +672,25 @@ export default function ResonanceManager() {
               )}
 
               {/* Response viewer */}
-              <ResponseViewer
-                question={viewingQuestion}
-                responses={viewingResponses}
-                progress={viewingProgress}
-                annotations={annotations}
-                orderOverrides={viewingOrderOverrides}
-                activeSharedResponseId={activeSharedResponseId}
-                onAnnotate={annotateResponse}
-                onShareResponse={(responseId) => {
-                  if (activeSharedResponseId === responseId) {
-                    stopSharing(viewingQuestion.id)
-                    return
-                  }
-                  shareResults(viewingQuestion.id, [responseId], null)
-                }}
-                onReorder={(orderedIds) => reorderResponses(viewingQuestion.id, orderedIds)}
-              />
+              <div className="flex-1">
+                <ResponseViewer
+                  question={viewingQuestion}
+                  responses={viewingResponses}
+                  progress={viewingProgress}
+                  annotations={annotations}
+                  orderOverrides={viewingOrderOverrides}
+                  activeSharedResponseId={activeSharedResponseId}
+                  onAnnotate={annotateResponse}
+                  onShareResponse={(responseId) => {
+                    if (activeSharedResponseId === responseId) {
+                      stopSharing(viewingQuestion.id)
+                      return
+                    }
+                    shareResults(viewingQuestion.id, [responseId], null)
+                  }}
+                  onReorder={(orderedIds) => reorderResponses(viewingQuestion.id, orderedIds)}
+                />
+              </div>
             </>
           )}
         </main>

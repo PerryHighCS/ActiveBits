@@ -47,7 +47,11 @@ void test('ResponseCard renders drag, star, flag, and emoji controls in the lead
   assert.notEqual(shareIndex, -1, 'Expected share button in rendered response card')
   assert.ok(shareIndex > answerIndex, 'Expected share button to render after the response content on the right side')
   assert.ok(
-    markup.includes('self-stretch cursor-grab'),
+    markup.includes('draggable="true"'),
+    'Expected the full response card to be draggable',
+  )
+  assert.ok(
+    markup.includes('self-stretch rounded-md'),
     'Expected drag handle to render as a full-height leading handle',
   )
 })

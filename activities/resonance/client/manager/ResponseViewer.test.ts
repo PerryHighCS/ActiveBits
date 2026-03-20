@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mergeDisplayOrder, reorderResponseIds } from './ResponseViewer.js'
+import { mergeDisplayOrder, moveResponseIdToEnd, reorderResponseIds } from './ResponseViewer.js'
 
 void test('reorderResponseIds moves the dragged response to the target position', () => {
   assert.deepEqual(
@@ -26,6 +26,18 @@ void test('reorderResponseIds leaves the order unchanged for no-op or invalid dr
   )
 })
 
+void test('moveResponseIdToEnd moves a dragged response to the last slot', () => {
+  assert.deepEqual(
+    moveResponseIdToEnd(['r1', 'r2', 'r3'], 'r1'),
+    ['r2', 'r3', 'r1'],
+  )
+
+  assert.deepEqual(
+    moveResponseIdToEnd(['r1', 'r2', 'r3'], 'r3'),
+    ['r1', 'r2', 'r3'],
+  )
+})
+
 void test('mergeDisplayOrder preserves local order for existing items and appends new ones', () => {
   assert.deepEqual(
     mergeDisplayOrder(['draft:s1:q1', 'r2', 'r1'], ['r1', 'r2', 'draft:s1:q1', 'draft:s2:q1']),
@@ -35,5 +47,12 @@ void test('mergeDisplayOrder preserves local order for existing items and append
   assert.deepEqual(
     mergeDisplayOrder(['r2', 'missing', 'r1'], ['r1', 'r2']),
     ['r2', 'r1'],
+  )
+})
+
+void test('reorder helpers tolerate unexpected runtime shapes upstream', () => {
+  assert.deepEqual(
+    mergeDisplayOrder([], ['r1']),
+    ['r1'],
   )
 })

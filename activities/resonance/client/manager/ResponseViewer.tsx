@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
   InstructorAnnotation,
   MCQQuestion,
@@ -28,6 +28,21 @@ export function reorderResponseIds(currentIds: string[], draggedId: string, targ
   return reordered
 }
 
+export function moveResponseIdToEnd(currentIds: string[], draggedId: string): string[] {
+  const fromIndex = currentIds.indexOf(draggedId)
+  if (fromIndex === -1 || fromIndex === currentIds.length - 1) {
+    return currentIds
+  }
+
+  const reordered = [...currentIds]
+  const [moved] = reordered.splice(fromIndex, 1)
+  if (moved === undefined) {
+    return currentIds
+  }
+  reordered.push(moved)
+  return reordered
+}
+
 export function mergeDisplayOrder(currentIds: string[], availableIds: string[]): string[] {
   const availableIdSet = new Set(availableIds)
   const preserved = currentIds.filter((id) => availableIdSet.has(id))
@@ -38,6 +53,12 @@ export function mergeDisplayOrder(currentIds: string[], availableIds: string[]):
 
 function areIdsEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((id, index) => id === right[index])
+}
+
+function normalizeOrderOverrides(orderOverrides: string[] | unknown): string[] {
+  return Array.isArray(orderOverrides)
+    ? orderOverrides.filter((entry): entry is string => typeof entry === 'string')
+    : []
 }
 
 interface Props {
@@ -195,12 +216,15 @@ function FreeResponseList({
   onReorder(newOrder: string[]): void
 }) {
   const [draggedResponseId, setDraggedResponseId] = useState<string | null>(null)
+  const [hiddenDraggedResponseId, setHiddenDraggedResponseId] = useState<string | null>(null)
   const [dragOverResponseId, setDragOverResponseId] = useState<string | null>(null)
+  const dragStartOrderRef = useRef<string[] | null>(null)
+  const normalizedOrderOverrides = normalizeOrderOverrides(orderOverrides)
   // Apply order overrides: put overridden IDs first in the given order, then any remaining.
-  const overrideSet = new Set(orderOverrides)
+  const overrideSet = new Set(normalizedOrderOverrides)
   const progressByResponseId = new Map(progress.filter((entry) => entry.responseId).map((entry) => [entry.responseId as string, entry]))
   const submittedResponses = [
-    ...orderOverrides.map((id) => responses.find((r) => r.id === id)).filter(Boolean),
+    ...normalizedOrderOverrides.map((id) => responses.find((r) => r.id === id)).filter(Boolean),
     ...responses.filter((r) => !overrideSet.has(r.id)),
   ] as ResponseWithName[]
   const pendingWithoutSubmission = progress
@@ -260,11 +284,13 @@ function FreeResponseList({
 
   function clearDragState() {
     setDraggedResponseId(null)
+    setHiddenDraggedResponseId(null)
     setDragOverResponseId(null)
+    dragStartOrderRef.current = null
   }
 
   return (
-    <div className="space-y-2">
+    <div className="flex h-full min-h-[24rem] flex-col gap-2">
       {displayOrderIds.map((itemId, idx) => {
         const item = displayItems.find((entry) => entry.id === itemId)
         if (!item) {
@@ -272,47 +298,85 @@ function FreeResponseList({
         }
 
         return (
-          <ResponseCard
+          <div
             key={item.id}
-            response={item.response}
-            annotation={item.annotation}
-            answerText={item.answerText}
-            status={item.status}
-            onAnnotate={(patch) => {
-              if (item.submittedResponseId !== null) {
-                onAnnotate(item.submittedResponseId, patch)
-              }
-            }}
-            onShare={item.submittedResponseId !== null && onShareResponse ? () => onShareResponse(item.submittedResponseId) : undefined}
-            shareLabel={item.submittedResponseId !== null && activeSharedResponseId === item.submittedResponseId ? 'Stop sharing' : 'Share'}
-            shareActive={item.submittedResponseId !== null && activeSharedResponseId === item.submittedResponseId}
-            draggable
-            isDragging={draggedResponseId === item.id}
-            isDragTarget={draggedResponseId !== null && dragOverResponseId === item.id && draggedResponseId !== item.id}
-            onDragStart={() => {
-              setDraggedResponseId(item.id)
-              setDragOverResponseId(item.id)
-            }}
-            onDragEnd={clearDragState}
-            onDragOver={() => {
+            className="space-y-2"
+            onDragOver={(event) => {
+              event.preventDefault()
               if (draggedResponseId !== null && draggedResponseId !== item.id) {
+                const reorderedIds = reorderResponseIds(displayOrderIds, draggedResponseId, item.id)
+                setDisplayOrderIds((current) => (areIdsEqual(current, reorderedIds) ? current : reorderedIds))
                 setDragOverResponseId(item.id)
               }
             }}
-            onDrop={() => {
+            onDrop={(event) => {
+              event.preventDefault()
               if (draggedResponseId === null) {
                 return
               }
-              const reorderedIds = reorderResponseIds(displayOrderIds, draggedResponseId, item.id)
-              setDisplayOrderIds(reorderedIds)
-              onReorder(reorderedIds.filter((id) => !id.startsWith('draft:')))
+              onReorder(displayOrderIds.filter((id) => !id.startsWith('draft:')))
               clearDragState()
             }}
-            onMoveUp={idx > 0 ? () => moveItem(idx, idx - 1) : undefined}
-            onMoveDown={idx < displayOrderIds.length - 1 ? () => moveItem(idx, idx + 1) : undefined}
-          />
+          >
+            <ResponseCard
+              response={item.response}
+              annotation={item.annotation}
+              answerText={item.answerText}
+              status={item.status}
+              onAnnotate={(patch) => {
+                if (item.submittedResponseId !== null) {
+                  onAnnotate(item.submittedResponseId, patch)
+                }
+              }}
+              onShare={item.submittedResponseId !== null && onShareResponse ? () => onShareResponse(item.submittedResponseId) : undefined}
+              shareLabel={item.submittedResponseId !== null && activeSharedResponseId === item.submittedResponseId ? 'Stop sharing' : 'Share'}
+              shareActive={item.submittedResponseId !== null && activeSharedResponseId === item.submittedResponseId}
+              draggable
+              isDragging={false}
+              hideWhileDragging={hiddenDraggedResponseId === item.id}
+              isDragTarget={draggedResponseId !== null && dragOverResponseId === item.id && draggedResponseId !== item.id}
+              onDragStart={() => {
+                dragStartOrderRef.current = [...displayOrderIds]
+                setDraggedResponseId(item.id)
+                setDragOverResponseId(item.id)
+                window.setTimeout(() => {
+                  setHiddenDraggedResponseId(item.id)
+                }, 0)
+              }}
+              onDragEnd={() => {
+                if (dragStartOrderRef.current !== null) {
+                  setDisplayOrderIds(dragStartOrderRef.current)
+                }
+                clearDragState()
+              }}
+              onMoveUp={idx > 0 ? () => moveItem(idx, idx - 1) : undefined}
+              onMoveDown={idx < displayOrderIds.length - 1 ? () => moveItem(idx, idx + 1) : undefined}
+            />
+          </div>
         )
       })}
+      {draggedResponseId !== null && (
+        <div
+          aria-label="Move response to end"
+          className="min-h-28 flex-1"
+          onDragOver={(event) => {
+            event.preventDefault()
+            const reorderedIds = moveResponseIdToEnd(displayOrderIds, draggedResponseId)
+            setDisplayOrderIds((current) => (areIdsEqual(current, reorderedIds) ? current : reorderedIds))
+            setDragOverResponseId('__end__')
+          }}
+          onDrop={(event) => {
+            event.preventDefault()
+            if (draggedResponseId === null) {
+              return
+            }
+            const reorderedIds = moveResponseIdToEnd(displayOrderIds, draggedResponseId)
+            setDisplayOrderIds(reorderedIds)
+            onReorder(reorderedIds.filter((id) => !id.startsWith('draft:')))
+            clearDragState()
+          }}
+        />
+      )}
       {displayItems.length === 0 && (
         <p className="text-sm text-gray-400 italic">No responses yet.</p>
       )}
