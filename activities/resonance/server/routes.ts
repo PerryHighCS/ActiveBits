@@ -12,7 +12,7 @@ import type {
   Response,
   Student,
 } from '../shared/types.js'
-import { validateQuestionSet } from '../shared/validation.js'
+import { validateAnswerPayload, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 
 // ---------------------------------------------------------------------------
@@ -323,35 +323,149 @@ export default function setupResonanceRoutes(
     res.json({ instructorPasscode: session.data.instructorPasscode })
   })
 
-  // POST /api/resonance/:sessionId/register-student — stub; full implementation in Phase 4
+  // POST /api/resonance/:sessionId/register-student
   app.post('/api/resonance/:sessionId/register-student', async (req, res) => {
     const { sessionId } = req.params
     if (!sessionId) {
       res.status(400).json({ error: 'missing sessionId' })
       return
     }
+
     const session = asResonanceSession(await sessions.get(sessionId))
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
     }
-    res.status(501).json({ error: 'register-student not yet implemented' })
+
+    const validated = validateStudentRegistration(req.body)
+    if (!validated) {
+      res.status(400).json({ error: 'name must be a non-empty string (max 80 characters)' })
+      return
+    }
+
+    // Accept a client-provided studentId (from entry participant handoff) or generate one.
+    const body = isPlainObject(req.body) ? req.body : {}
+    const requestedId = typeof body.studentId === 'string' && /^[\w-]+$/.test(body.studentId)
+      ? body.studentId
+      : null
+    const studentId = requestedId ?? `s_${Math.random().toString(36).slice(2, 12)}`
+
+    const student: Student = {
+      studentId,
+      name: validated.name,
+      joinedAt: Date.now(),
+    }
+
+    session.data.students[studentId] = student
+    await sessions.set(sessionId, session)
+
+    console.info('[resonance] Student registered', { sessionId, studentId, name: validated.name })
+    res.json({ studentId, name: validated.name })
+  })
+
+  // POST /api/resonance/:sessionId/submit-answer
+  // Temporary REST path for Phase 4; Phase 7 WS will be the primary channel.
+  app.post('/api/resonance/:sessionId/submit-answer', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asResonanceSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    const body = isPlainObject(req.body) ? req.body : {}
+    const studentId = typeof body.studentId === 'string' ? body.studentId : null
+    if (!studentId || !session.data.students[studentId]) {
+      res.status(400).json({ error: 'invalid studentId' })
+      return
+    }
+
+    const { activeQuestionId, questions, responses } = session.data
+    if (!activeQuestionId) {
+      res.status(409).json({ error: 'no active question' })
+      return
+    }
+
+    const activeQuestion = questions.find((q) => q.id === activeQuestionId) ?? null
+    if (!activeQuestion) {
+      res.status(409).json({ error: 'active question not found' })
+      return
+    }
+
+    // Reject duplicate submissions for the same question.
+    const alreadyAnswered = responses.some(
+      (r) => r.questionId === activeQuestionId && r.studentId === studentId,
+    )
+    if (alreadyAnswered) {
+      res.status(409).json({ error: 'already submitted an answer for this question' })
+      return
+    }
+
+    const answer = validateAnswerPayload(body.answer, activeQuestion)
+    if (!answer) {
+      res.status(400).json({ error: 'invalid answer payload' })
+      return
+    }
+
+    const response: Response = {
+      id: `r_${Math.random().toString(36).slice(2, 12)}`,
+      questionId: activeQuestionId,
+      studentId,
+      submittedAt: Date.now(),
+      answer,
+    }
+
+    session.data.responses.push(response)
+    await sessions.set(sessionId, session)
+
+    console.info('[resonance] Answer submitted', { sessionId, studentId, questionId: activeQuestionId })
+    res.json({ ok: true })
   })
 
   // GET /api/resonance/:sessionId/state
+  // Returns a StudentSessionSnapshot — no isCorrect fields exposed before reveal.
   app.get('/api/resonance/:sessionId/state', async (req, res) => {
     const { sessionId } = req.params
     if (!sessionId) {
       res.status(400).json({ error: 'missing sessionId' })
       return
     }
+
     const session = asResonanceSession(await sessions.get(sessionId))
     if (!session) {
       res.status(404).json({ error: 'session not found' })
       return
     }
+
     const { activeQuestionId, questions, reveals } = session.data
-    res.json({ sessionId, activeQuestionId, questions, reveals })
+
+    // Strip isCorrect from MCQ options for student-safe representation.
+    function toStudentQuestion(q: Question) {
+      if (q.type === 'free-response') return q
+      return { ...q, options: q.options.map(({ id, text }) => ({ id, text })) }
+    }
+
+    const activeQuestion =
+      activeQuestionId !== null
+        ? (questions.find((q) => q.id === activeQuestionId) ?? null)
+        : null
+
+    const revealedQuestionIds = new Set(reveals.map((r) => r.questionId))
+    const revealedQuestions = questions
+      .filter((q) => revealedQuestionIds.has(q.id))
+      .map(toStudentQuestion)
+
+    res.json({
+      sessionId,
+      activeQuestion: activeQuestion !== null ? toStudentQuestion(activeQuestion) : null,
+      reveals,
+      revealedQuestions,
+    })
   })
 
   // GET /api/resonance/:sessionId/responses — stub; full implementation in Phase 5

@@ -82,6 +82,8 @@ export interface StudentSessionSnapshot {
   sessionId: string
   activeQuestion: StudentQuestion | null
   reveals: QuestionReveal[]
+  /** Student-safe versions of revealed questions, so clients can show option text alongside reveal data. */
+  revealedQuestions: StudentQuestion[]
 }
 
 /** Session state snapshot for instructor — includes all response data */

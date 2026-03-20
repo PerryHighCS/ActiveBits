@@ -1,0 +1,76 @@
+import { useState } from 'react'
+import type { StudentMCQOption } from '../../shared/types.js'
+
+interface Props {
+  options: StudentMCQOption[]
+  onSubmit(selectedOptionId: string): void | Promise<void>
+  submitting?: boolean
+  submitted?: boolean
+}
+
+export default function MCQInput({ options, onSubmit, submitting = false, submitted = false }: Props) {
+  const [selected, setSelected] = useState<string | null>(null)
+  const canSubmit = !submitting && !submitted && selected !== null
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!canSubmit || selected === null) return
+    await onSubmit(selected)
+  }
+
+  if (submitted && selected !== null) {
+    return (
+      <p className="text-sm text-gray-500 italic" aria-live="polite">
+        Answer submitted — waiting for the instructor to continue.
+      </p>
+    )
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        void handleSubmit(e)
+      }}
+      className="space-y-3"
+    >
+      <fieldset>
+        <legend className="sr-only">Choose an answer</legend>
+        <div className="space-y-2">
+          {options.map((option) => {
+            const isSelected = selected === option.id
+            return (
+              <label
+                key={option.id}
+                className={`flex items-start gap-3 rounded-lg border-2 px-4 py-3 cursor-pointer transition-colors ${
+                  isSelected ? 'border-rose-500 bg-rose-50' : 'border-gray-200 hover:border-gray-300'
+                } ${submitting || submitted ? 'pointer-events-none opacity-60' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="resonance-mcq"
+                  value={option.id}
+                  checked={isSelected}
+                  onChange={() => setSelected(option.id)}
+                  disabled={submitting || submitted}
+                  className="mt-0.5 accent-rose-600"
+                  aria-label={option.text}
+                />
+                <span className="text-sm text-gray-800">{option.text}</span>
+              </label>
+            )
+          })}
+        </div>
+      </fieldset>
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        aria-busy={submitting}
+        aria-disabled={!canSubmit}
+        className="w-full rounded bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {submitting ? 'Submitting…' : 'Submit answer'}
+      </button>
+    </form>
+  )
+}

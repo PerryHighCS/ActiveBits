@@ -37,6 +37,17 @@ const resonanceConfig: ActivityConfig = {
   manageDashboard: {
     customPersistentLinkBuilder: true,
   },
+  waitingRoom: {
+    fields: [
+      {
+        id: 'displayName',
+        label: 'Your name',
+        type: 'text' as const,
+        required: true,
+        placeholder: 'Enter your display name',
+      },
+    ],
+  },
   isDev: true,
   utilMode: true,
   clientEntry: './client/index.tsx',
