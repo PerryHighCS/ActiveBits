@@ -26,6 +26,9 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
       - [ ] Define score modes for repeated play (`accumulate`, `replace`, `max`)
       - [ ] Define badge, achievement, and progress-milestone timeline shapes
       - [ ] Define deck-authored badge/achievement definition format
+      - [ ] Define manual badge-award flow and repeat rules
+      - [ ] Define slide-driven badge prompt metadata and instructor prompt flow
+      - [ ] Document the v1 global points policy and defaults
       - [ ] Define report grouping/output rules for points and achievements at per-activity and session-summary scope
       - [ ] Decide v1 scope for manual adjustments and negative deltas
     - Phase 1 — Host-only scoring
@@ -34,6 +37,8 @@ Use this checklist to track implementation progress for SyncDeck. Update this fi
       - [ ] Surface points in SyncDeck manager and student UI
       - [ ] Reuse the existing manager student list panel for score display and sorting
       - [ ] Add simple badge display where parent achievement data exists
+      - [ ] Add manual badge-award control for instructors
+      - [ ] Add slide-triggered instructor badge prompt panel
       - [ ] Add tests for dedupe, reconnect, and late-join hydration
     - Phase 2 — Embedded activity contribution
       - [ ] Add validated parent score ingest route and structured server logging

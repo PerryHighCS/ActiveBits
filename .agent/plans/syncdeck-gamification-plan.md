@@ -39,6 +39,7 @@ Additive parent session shape:
 - `session.data.gamification.enabled`
 - `session.data.gamification.pointsByStudentId`
 - `session.data.gamification.events`
+- `session.data.gamification.eventsByInstanceKey`
 - `session.data.gamification.leaderboard`
 - `session.data.gamification.badgesByStudentId`
 - `session.data.gamification.achievementTimelineByStudentId`
@@ -51,12 +52,16 @@ Recommended event shape:
 - `displayName`
 - `sourceType`: `slide-view | embedded-activity | manual-adjustment`
 - `sourceId`: slide key or `instanceKey`
+- `activityId`
+- `instanceKey`
+- `slideKey`
 - `scoreKey`
 - `mode`
 - `pointsDelta`
 - `pointsValue`
 - `awardedAt`
 - `metadata`
+- `activityData`
 
 Recommended badge/achievement shape:
 
@@ -64,7 +69,7 @@ Recommended badge/achievement shape:
 - `badge`
 - `label`
 - `description`
-- `sourceType`: `deck | slide-view | embedded-activity`
+- `sourceType`: `deck | slide-view | embedded-activity | manual-award`
 - `sourceId`
 - `awardedAt`
 - `milestoneType`: `slide-view | activity-achievement | badge`
@@ -102,6 +107,7 @@ Initial candidates:
 Guardrails:
 
 - Deduplicate per student per slide key
+- Use first view as the v1 slide-award rule
 - Keep the rule simple at first: one award for first visit, no repeat farming
 
 #### Channel B: child activity contribution
@@ -142,20 +148,31 @@ Achievement semantics:
 - Child activities may optionally emit achievement awards alongside score updates.
 - Achievement awards should be additive and append-only in the parent timeline.
 - Duplicate suppression should key off `achievementId` per student unless the activity explicitly declares an achievement repeatable.
+- SyncDeck should also support instructor-issued manual badge awards for ad hoc recognition during live teaching.
 
 Parent-rollup recommendation:
 
 - Keep the parent ledger event-based for auditability.
+- Group events primarily by `instanceKey`, with slide metadata kept on each event for reporting and display.
 - Also maintain per-student per-`scoreKey` rollups so `replace` and `max` can recalculate totals deterministically.
 - Treat `scoreKey` as activity-owned and opaque to SyncDeck, for example `quiz-1`, `round-2`, or `practice-set-a`.
 - Maintain a separate per-student ordered achievement timeline that stores deck milestones, activity achievements, and badge awards for progress-graph rendering.
 - Store enough source metadata on score and achievement events to group report output by both `instanceKey` and activity id.
+- Allow optional `activityData` on events so activities can attach their own shaped metadata while SyncDeck keeps the core contract generic.
+- On rerun, SyncDeck should be able to clear or archive the event bucket for that `instanceKey` and rebuild totals from the new run.
 
 ### 3. Deck-authored achievements and badge definitions
 
 Recommended capability:
 
 - Let a deck define optional achievement and badge metadata that SyncDeck can ingest at session start or from slide metadata.
+- Let instructors manually award one of the configured badges during a session.
+- Let slides provide badge-award prompts that suggest a badge moment and open an instructor selection panel.
+
+Recommended authoring split:
+
+- Per-slide metadata should hold slide-specific triggers, prompts, and checkpoint markers.
+- Deck-level data should hold shared badge and achievement definitions reused across slides.
 
 Examples:
 
@@ -175,11 +192,31 @@ Recommended deck-owned definition fields:
 - `pointsAward`
 - `repeatable`
 
+Recommended slide prompt fields:
+
+- `promptId`
+- `badgeId`
+- `label`
+- `description`
+- `triggerSlide`
+- `autoOpenForInstructor`
+- `allowSkip`
+
+Prompt authoring recommendation:
+
+- Reusable or cross-slide badge prompts should be defined in deck-level data.
+- Per-slide metadata should reference those deck-level prompts by id when possible.
+- Use slide-local prompt definitions only when a prompt is truly specific to one slide and not worth sharing.
+
 Why:
 
 - Presentation authors can theme the experience without adding SyncDeck-specific code.
 - SyncDeck remains generic and only evaluates definitions plus incoming events.
 - Emoji badges are easy to render in headers, lists, reports, and celebration slides.
+- Manual award support lets instructors use the same badge catalog for classroom moments that are not captured automatically.
+- Slide-driven prompts let the deck guide instructors toward good recognition moments without forcing automatic awards.
+- Separating deck-level definitions from per-slide triggers keeps slide metadata lighter and avoids duplicating badge definitions across the deck.
+- The same pattern should apply to badge prompts so decks can reuse prompt definitions without copying them onto many slides.
 
 ### 4. Header and leaderboard surfaces
 
@@ -187,8 +224,10 @@ Recommended rollout:
 
 - Manager header: show class total points and a quick student-score entry point
 - Student view: show the current student's total points in a compact header/status chip
-- Student leaderboard: show badges and a compact progress display that grows left-to-right
+- Student leaderboard/activity: may show richer celebration visuals outside the manager panel
 - End of deck: support a leaderboard celebration slide/activity
+- Manager controls: allow manual badge awarding from the student list panel or a lightweight badge action menu
+- Slide prompts: when a configured slide is reached, optionally open a badge selection panel for the instructor
 
 Leaderboard options:
 
@@ -197,13 +236,11 @@ Leaderboard options:
 
 Progress display recommendation:
 
-- Add a compact sparkline-style or segmented progress line per student row.
-- Plot timeline growth from left to right.
-- Render milestone markers for:
-  - slide-view milestones
-  - embedded activity achievements
-  - badge awards
-- Keep v1 visual and simple rather than building a full charting system.
+- Keep the instructor's student list panel simple in v1.
+- Show points totals inline for each student.
+- Add button(s) to assign deck-level badges.
+- Add a lightweight milestones list popup rather than an inline graph or chart.
+- If richer visualization is still wanted later, prefer putting it in the dedicated leaderboard activity instead of crowding the manager panel.
 
 ### 5. Reporting expectations
 
@@ -223,22 +260,39 @@ Whole-session summary reporting should include:
 
 - total points per student
 - total points by source type
+- per-activity and per-score-key breakdowns
 - earned badges/achievements across the whole deck
 - end-of-session leaderboard summary
 - cross-activity milestone timeline for each student
+- summarized milestone blocks as the primary storytelling/reporting surface
 
 Implementation recommendation:
 
 - Extend child activity structured reports so they can optionally contribute score and achievement blocks.
 - Let SyncDeck add host-owned slide-view points and deck-authored achievements on top of child activity report sections.
 - Keep the final SyncDeck report self-contained HTML, consistent with the existing report architecture.
+- Default to summary-first report rendering.
+- Include selective raw event detail only for meaningful events such as activity score changes, reruns, manual badge awards, and major achievement awards.
+- Omit full raw slide-view event dumps from v1 reports unless later debugging needs prove they add value.
 
 Recommendation:
 
 - Reuse the existing manager-side student list panel first instead of creating a second score panel.
 - Build the generic parent score ledger and leaderboard data first.
-- Add achievement markers to the reused student list panel only after the underlying timeline contract exists.
-- Delay a standalone leaderboard activity until the shared data contract is proven.
+- Keep the reused student list panel intentionally simple: points, badge actions, and milestone popup first.
+- Use a dedicated embeddable leaderboard activity for the end-of-deck celebration rather than building a separate built-in SyncDeck celebration screen.
+- Use one global points policy for v1 core scoring.
+- Surface one combined points total in the live v1 UI.
+- Put the richer per-activity and per-score-key breakdowns in exported reports.
+- Make exported reports summary-first, not audit-log-first.
+- Treat deck-authored achievements, badges, and slide prompts as the first customization layer.
+- Limit manual badge awards to deck-defined badges in v1.
+- Treat ad hoc live-session badges as an early follow-up enhancement, not a v1 requirement.
+- Use a mixed authoring model: deck-level data for shared definitions, per-slide metadata for local triggers/prompts.
+- For badge prompts specifically, prefer deck-level prompt definitions plus per-slide references to avoid duplication.
+- Defer full per-session point-rule customization until the base scoring/reporting model is stable.
+- Use event-style updates as the primary child-activity scoring contract.
+- Group those events by slide/activity instance so reruns can clear one bucket cleanly without disturbing the rest of the session.
 
 ## Rollout Phases
 
@@ -250,7 +304,12 @@ Recommendation:
 - [ ] Define per-score-key rollup semantics for `accumulate`, `replace`, and `max`
 - [ ] Define badge, achievement, and milestone timeline shapes
 - [ ] Define deck-authored achievement and badge definition format
+- [ ] Define manual badge-award flow and duplicate/repeat rules
+- [ ] Define slide-driven badge prompt format and instructor prompt behavior
+- [ ] Define per-instance event-bucket storage and rerun-clearing behavior
+- [ ] Define optional `activityData` metadata rules for child activity events
 - [ ] Define report grouping rules for points, badges, and achievements at activity and session-summary scope
+- [ ] Document the v1 global points policy and its default values
 - [ ] Decide whether negative deltas/manual adjustments are supported in v1
 - [ ] Document rollout-safe defaults for activities that do not emit scores
 
@@ -266,6 +325,8 @@ Exit criteria:
 - [ ] Show current points in SyncDeck header/status UI
 - [ ] Extend the existing manager student list panel with score columns/sorting
 - [ ] Add simple badge display for students where data exists
+- [ ] Add manual badge-award control for instructors
+- [ ] Support slide-triggered instructor badge prompt panels
 - [ ] Add tests for dedupe and reconnect/late-join hydration
 
 Why first:
@@ -279,42 +340,36 @@ Why first:
 - [ ] Add shared helper/types for child activities to report point deltas
 - [ ] Support activity-owned repeated-play score policies (`accumulate`, `replace`, `max`)
 - [ ] Support child activity achievement/badge publication into the parent timeline
+- [ ] Store child activity score events by `instanceKey` and support rerun clearing/archive
 - [ ] Update one reference embedded activity to emit points
 - [ ] Extend SyncDeck report manifest to include gamification summary blocks and per-activity score/achievement sections
 - [ ] Add tests for validation, duplicate suppression, and aggregation
 
 Reference activity recommendation:
 
-- Start with a low-risk embedded activity that already tracks clear per-student completion events.
+- Tentatively start with `resonance`, since it is already being developed in parallel and may be a natural early consumer of score and achievement events.
+- Reconfirm branch readiness and contract fit before implementation begins so the gamification contract does not block or destabilize the parallel `resonance` work.
 
 ### Phase 3: Leaderboard and celebration UX
 
 - [ ] Decide whether the upgraded manager student list panel is sufficient or whether a separate leaderboard surface still adds value
 - [ ] Add student-facing personal score indicator
 - [ ] Add badge chips or emoji badges to manager/student leaderboard surfaces
-- [ ] Add per-student left-to-right progress line with milestone markers
-- [ ] Add optional end-of-session leaderboard view in SyncDeck
-- [ ] Decide whether a dedicated embeddable leaderboard activity is still needed
+- [ ] Add milestones list popup from the manager student list panel
+- [ ] Build dedicated embeddable leaderboard activity for end-of-deck celebration
+- [ ] Feed leaderboard activity from parent SyncDeck gamification data
 
 ### Phase 4: Optional controls and richer rules
 
 - [ ] Teacher-configurable point rules per deck or session
 - [ ] Bonus point triggers for completion streaks or perfect accuracy
 - [ ] Manual point adjustments
+- [ ] Ad hoc one-off live-session badges created by instructors
 - [ ] Badge packs, deck themes, or richer achievement taxonomies if still useful
 - [ ] Cross-activity badges or achievements if still desired after points rollout
 
 ## Open Questions
 
-- Should slide-view points award when the student first reaches a slide, when they stay on it for a threshold, or only when an instructor marks it complete?
-- Do we want one global points policy for all SyncDeck sessions first, or per-session point-rule configuration?
-- Should child activities send only event-style updates, or also publish summary snapshots for recovery/reconciliation?
-- Is the end-of-deck celebration best served by a built-in SyncDeck screen, an embeddable leaderboard activity, or both?
-- Which existing embedded activity is the safest first consumer of the score contribution contract?
-- Do we want to expose only one combined points total in v1, or also surface per-activity/per-score-key breakdowns?
-- Should deck-authored achievement definitions live in slide metadata, a deck-level manifest, or both?
-- What is the minimum viable progress visualization for the student list panel: sparkline, segmented bar, or simple milestone dots?
-- How much raw event detail should appear in exported reports versus summarized milestone blocks?
 
 ## Validation Plan
 
