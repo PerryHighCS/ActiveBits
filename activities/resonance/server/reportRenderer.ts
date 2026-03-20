@@ -204,6 +204,12 @@ export function buildResonanceReportHtml(report: ResonanceReport): string {
  * Generates a safe filename for the HTML report download.
  */
 export function buildResonanceReportFilename(sessionId: string): string {
+  const safeSessionId = sessionId
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+
   const date = new Date().toISOString().slice(0, 10)
-  return `resonance-report-${sessionId.slice(0, 8)}-${date}.html`
+  return `resonance-report-${safeSessionId || 'session'}-${date}.html`
 }

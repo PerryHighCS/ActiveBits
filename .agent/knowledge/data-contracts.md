@@ -16,6 +16,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-03-20
+- Surface: activity interface | internal module
+- Contract: Custom persistent-link builders cannot rely on `selectedOptions` retaining nested objects/arrays across the shared persistent-link pipeline; stored/edit-state options are normalized to allowed deep-link keys and string values. `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx` now recovers editable question drafts from local storage keyed by persistent-link hash (`resonance-question-draft:<hash>`) instead of relying on `selectedOptions.questions` round-tripping.
+- Compatibility constraints: Resonance edit mode pre-population now depends on a same-browser local cache entry for the hash. Missing cache falls back gracefully to empty uploader state and does not break link editing.
+- Validation rules: Cached payload is parsed through `validateQuestionSet` before use; malformed/invalid cache entries are removed.
+- Evidence (schema/tests/path): `types/activity.ts`; `client/src/components/common/manageDashboardUtils.ts`; `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx`; `activities/resonance/client/tools/resonanceQuestionDraftCache.ts`; `activities/resonance/client/tools/resonanceQuestionDraftCache.test.ts`
+- Follow-up action: If cross-device or long-lived edit recovery is required, add a teacher-authenticated server endpoint to retrieve/decrypt question sets by hash and treat local cache as best-effort only.
+- Owner: Codex
+
+- Date: 2026-03-20
 - Surface: internal module | activity interface
 - Contract: `activities/resonance/shared/validation.ts` `validateQuestionSet(raw)` treats duplicate question ids as invalid set-level input. If duplicate normalized question ids are detected, it returns `{ questions: [], errors: ['question ids must be unique within a set'] }` instead of returning a partially valid array that still contains conflicting ids.
 - Compatibility constraints: Downstream resonance session state and response lookup paths key by `question.id`, so callers may assume a non-empty `questions` result has unique ids. This is stricter than row-level CSV-style partial acceptance; duplicate-id failure invalidates the whole set.

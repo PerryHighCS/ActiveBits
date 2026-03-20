@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import type { Question } from '../../shared/types.js'
+import { cacheResonanceQuestionDraft, loadResonanceQuestionDraft } from './resonanceQuestionDraftCache.js'
 import ResonanceQuestionSetUploader from './ResonanceQuestionSetUploader.js'
 
 interface GenerateLinkResponse {
@@ -18,20 +19,22 @@ interface GenerateLinkResponse {
  * encryption, then calls onCreated with the authoritative result.
  *
  * Supports both create-mode (no editState) and edit-mode (editState provided).
- * In edit mode the teacher code is pre-filled and any previously saved
- * questions stored in selectedOptions are pre-loaded into the uploader.
+ * In edit mode the teacher code is pre-filled and questions are recovered from
+ * a local cache keyed by persistent-link hash.
  */
 export default function ResonancePersistentLinkBuilder({
   activityId: _activityId,
   editState,
   onCreated,
 }: ActivityPersistentLinkBuilderProps) {
-  // Recover questions from a prior onCreated call stored in selectedOptions.
+  // Backward compatibility for legacy builder state while preferring local cache.
   const rawSavedQuestions = editState?.selectedOptions?.questions
-  const savedQuestions: Question[] | null =
+  const savedQuestionsFromEditState: Question[] | null =
     Array.isArray(rawSavedQuestions) && rawSavedQuestions.length > 0
       ? (rawSavedQuestions as Question[])
       : null
+  const cachedQuestions = editState?.hash ? loadResonanceQuestionDraft(editState.hash) : null
+  const savedQuestions = savedQuestionsFromEditState ?? cachedQuestions
 
   const [teacherCode, setTeacherCode] = useState(editState?.teacherCode ?? '')
   const [questions, setQuestions] = useState<Question[] | null>(savedQuestions)
@@ -67,12 +70,12 @@ export default function ResonancePersistentLinkBuilder({
         ? data.url
         : `${window.location.origin}${data.url}`
 
+      cacheResonanceQuestionDraft(data.hash, questions)
+
       await onCreated({
         fullUrl,
         hash: data.hash,
         teacherCode: teacherCode.trim(),
-        // Store plaintext questions so edit mode can pre-populate the uploader.
-        selectedOptions: { questions },
       })
     } catch {
       setSubmitError('Network error — please check your connection and try again')

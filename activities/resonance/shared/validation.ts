@@ -21,6 +21,8 @@ function normalizeId(value: unknown): string | null {
   return /^[\w-]+$/.test(s) ? s : null
 }
 
+const MAX_QUESTION_SET_SIZE = 100
+
 // ---------------------------------------------------------------------------
 // Question validation
 // ---------------------------------------------------------------------------
@@ -168,8 +170,8 @@ export function validateQuestionSet(raw: unknown): { questions: Question[]; erro
   if (raw.length === 0) {
     return { questions: [], errors: ['question set must not be empty'] }
   }
-  if (raw.length > 100) {
-    return { questions: [], errors: ['question set may contain at most 100 questions'] }
+  if (raw.length > MAX_QUESTION_SET_SIZE) {
+    return { questions: [], errors: [`question set may contain at most ${MAX_QUESTION_SET_SIZE} questions`] }
   }
 
   const questions: Question[] = []
@@ -238,6 +240,10 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
 
     if (incorrectAnswers.length === 0) {
       // No incorrect answers → free-response
+      if (questions.length >= MAX_QUESTION_SET_SIZE) {
+        errors.push(`question set may contain at most ${MAX_QUESTION_SET_SIZE} questions`)
+        return { questions: [], errors }
+      }
       questions.push({ id, type: 'free-response', text: questionText, order: orderCounter })
     } else {
       // Has incorrect answers → multiple-choice
@@ -245,6 +251,10 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
         { id: `${id}_c`, text: correctAnswer, isCorrect: true },
         ...incorrectAnswers.map((text, i) => ({ id: `${id}_i${i + 1}`, text })),
       ]
+      if (questions.length >= MAX_QUESTION_SET_SIZE) {
+        errors.push(`question set may contain at most ${MAX_QUESTION_SET_SIZE} questions`)
+        return { questions: [], errors }
+      }
       questions.push({
         id,
         type: 'multiple-choice',

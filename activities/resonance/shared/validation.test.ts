@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { validateQuestion, validateQuestionSet } from './validation.js'
+import { parseGimkitCSV, validateQuestion, validateQuestionSet } from './validation.js'
 
 void test('validateQuestion accepts underscore ids', () => {
   const errors: string[] = []
@@ -37,4 +37,34 @@ void test('validateQuestionSet treats duplicate question ids as invalid input', 
 
   assert.deepEqual(result.questions, [])
   assert.deepEqual(result.errors, ['question ids must be unique within a set'])
+})
+
+void test('parseGimkitCSV enforces max 100 parsed questions', () => {
+  const header = [
+    'Title',
+    '"Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"',
+  ]
+
+  const rows = Array.from({ length: 101 }, (_, i) => `"Question ${i + 1}","Correct ${i + 1}","Wrong ${i + 1}"`)
+  const csv = [...header, ...rows].join('\n')
+
+  const result = parseGimkitCSV(csv)
+
+  assert.deepEqual(result.questions, [])
+  assert.deepEqual(result.errors, ['question set may contain at most 100 questions'])
+})
+
+void test('parseGimkitCSV accepts exactly 100 parsed questions', () => {
+  const header = [
+    'Title',
+    '"Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"',
+  ]
+
+  const rows = Array.from({ length: 100 }, (_, i) => `"Question ${i + 1}","Correct ${i + 1}","Wrong ${i + 1}"`)
+  const csv = [...header, ...rows].join('\n')
+
+  const result = parseGimkitCSV(csv)
+
+  assert.equal(result.errors.length, 0)
+  assert.equal(result.questions.length, 100)
 })
