@@ -24,6 +24,16 @@ const resonanceConfig: ActivityConfig = {
       },
     ],
   },
+  utilities: [
+    {
+      id: 'resonance-tools',
+      label: 'Resonance Tools',
+      action: 'go-to-url' as const,
+      path: '/util/resonance',
+      description: 'Build question sets, import/export, and review session reports.',
+      surfaces: ['manage' as const],
+    },
+  ],
   manageDashboard: {
     customPersistentLinkBuilder: true,
   },
