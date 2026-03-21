@@ -3,16 +3,19 @@ import type { StudentSessionSnapshot } from '../../shared/types.js'
 
 const FALLBACK_POLL_INTERVAL_MS = 15_000
 
-function normalizeStudentSessionSnapshot(
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function normalizeStudentSessionSnapshot(
   data: Partial<StudentSessionSnapshot> | null | undefined,
 ): StudentSessionSnapshot | null {
-  if (!data || typeof data !== 'object') {
+  if (!isRecord(data)) {
     return null
   }
 
   const activeQuestions = Array.isArray(data.activeQuestions) ? data.activeQuestions : []
-  const fallbackActiveQuestion =
-    data.activeQuestion && typeof data.activeQuestion === 'object' ? data.activeQuestion : null
+  const fallbackActiveQuestion = isRecord(data.activeQuestion) ? data.activeQuestion : null
   const activeQuestionIds = Array.isArray(data.activeQuestionIds)
     ? data.activeQuestionIds.filter((entry): entry is string => typeof entry === 'string')
     : fallbackActiveQuestion
@@ -39,7 +42,7 @@ function normalizeStudentSessionSnapshot(
     reveals: Array.isArray(data.reveals) ? data.reveals : [],
     reviewedResponses: Array.isArray(data.reviewedResponses) ? data.reviewedResponses : [],
     submittedAnswers:
-      data.submittedAnswers && typeof data.submittedAnswers === 'object'
+      isRecord(data.submittedAnswers)
         ? (data.submittedAnswers as StudentSessionSnapshot['submittedAnswers'])
         : {},
     revealedQuestions: Array.isArray(data.revealedQuestions) ? data.revealedQuestions : [],

@@ -10,15 +10,19 @@ import type {
 
 const FALLBACK_POLL_INTERVAL_MS = 10_000
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
 /** Full instructor snapshot returned by GET /api/resonance/:sessionId/responses */
 export interface InstructorStateSnapshot extends InstructorSessionSnapshot {
   responseOrderOverrides: Record<string, string[]>
 }
 
-function normalizeInstructorStateSnapshot(
+export function normalizeInstructorStateSnapshot(
   data: Partial<InstructorStateSnapshot> | null | undefined,
 ): InstructorStateSnapshot | null {
-  if (!data || typeof data !== 'object') {
+  if (!isRecord(data)) {
     return null
   }
 
@@ -65,10 +69,10 @@ function normalizeInstructorStateSnapshot(
     students: Array.isArray(data.students) ? data.students : [],
     responses,
     progress,
-    annotations: typeof data.annotations === 'object' && data.annotations !== null ? data.annotations : {},
+    annotations: isRecord(data.annotations) ? data.annotations : {},
     reveals: Array.isArray(data.reveals) ? data.reveals : [],
     responseOrderOverrides:
-      data.responseOrderOverrides && typeof data.responseOrderOverrides === 'object'
+      isRecord(data.responseOrderOverrides)
         ? data.responseOrderOverrides
         : {},
   }

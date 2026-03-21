@@ -330,7 +330,7 @@ function parseCSVRow(line: string): string[] {
 // Student registration validation
 // ---------------------------------------------------------------------------
 
-/** Max byte length for a student display name. */
+/** Max character length for a student display name. */
 const MAX_NAME_LENGTH = 80
 
 /**

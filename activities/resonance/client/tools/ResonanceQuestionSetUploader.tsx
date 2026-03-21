@@ -14,8 +14,8 @@ interface ParseResult {
   errors: string[]
 }
 
-function parseFile(file: File, text: string): ParseResult {
-  if (file.name.endsWith('.csv')) {
+export function parseFile(file: File, text: string): ParseResult {
+  if (file.name.toLowerCase().endsWith('.csv')) {
     return parseGimkitCSV(text)
   }
 
