@@ -481,6 +481,7 @@ activities/resonance/
       appear with that shared response for students.
 - [x] Keep instructor star/flag state private in both live student views and exported shared results.
 - [x] Support MCQ poll mode without a required correct answer.
+- [ ] Future work: add student multi-select question support (data model, validation, submit payloads, student input UI, instructor review/reveal behavior).
 - [x] Add question activation and ad-hoc question creation.
 - [x] Allow instructors to set or change question response time limits during live session management.
 - [x] Add share-results flow that broadcasts anonymous shared responses plus correct-answer reveal.
