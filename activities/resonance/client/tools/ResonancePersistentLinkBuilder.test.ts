@@ -76,14 +76,10 @@ void test('normalizeEditStateQuestions returns null for empty arrays', () => {
 void test('ResonancePersistentLinkBuilder re-enables submit after onCreated resolves without unmounting', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch
-  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { act, fireEvent, render } = await import('@testing-library/react')
   const { default: ResonancePersistentLinkBuilder } = await import('./ResonancePersistentLinkBuilder.js')
   let rendered: ReturnType<typeof render> | null = null
-
-  let resolveOnCreated!: () => void
-  const onCreatedPromise = new Promise<void>((resolve) => {
-    resolveOnCreated = resolve
-  })
+  const createdPayloads: Array<{ fullUrl: string; hash: string; teacherCode: string }> = []
 
   try {
     ;(globalThis as { fetch?: typeof fetch }).fetch = (async () => ({
@@ -111,24 +107,30 @@ void test('ResonancePersistentLinkBuilder re-enables submit after onCreated reso
             ],
           },
         },
-        onCreated: async () => onCreatedPromise,
+        onCreated: async (payload) => {
+          createdPayloads.push(payload)
+        },
       }),
     )
 
     const activeRender = rendered
     const submitButton = activeRender.getByRole('button', { name: 'Update link' }) as HTMLButtonElement
-    fireEvent.click(submitButton)
-
-    await waitFor(() => {
-      assert.equal(activeRender.getByRole('button', { name: 'Updating link…' }).hasAttribute('disabled'), true)
+    await act(async () => {
+      fireEvent.click(submitButton)
+      await Promise.resolve()
+      await Promise.resolve()
     })
 
-    resolveOnCreated()
+    const enabledButton = activeRender.getByRole('button', { name: 'Update link' }) as HTMLButtonElement
+    assert.equal(enabledButton.disabled, false)
 
-    await waitFor(() => {
-      const enabledButton = activeRender.getByRole('button', { name: 'Update link' }) as HTMLButtonElement
-      assert.equal(enabledButton.disabled, false)
-    })
+    assert.deepEqual(createdPayloads, [
+      {
+        fullUrl: 'https://activebits.local/activity/resonance/hash-123',
+        hash: 'hash-123',
+        teacherCode: 'teacher-code',
+      },
+    ])
   } finally {
     ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     rendered?.unmount()
