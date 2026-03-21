@@ -495,6 +495,7 @@ activities/resonance/
 - [x] Allow instructors to set a response time limit while authoring each question.
 - [x] Add JSON and Gimkit-compatible CSV import/export for question sets.
 - [x] Build the Resonance report view in the tool flow rather than the live manager route.
+- [ ] Future work: add image support for question stems and response content across authoring, student submission, instructor review, and report export surfaces.
 
 ### Phase 7: WebSocket Protocol ✅
 
