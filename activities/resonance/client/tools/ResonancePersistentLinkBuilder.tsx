@@ -67,7 +67,6 @@ export default function ResonancePersistentLinkBuilder({
 
       if (!resp.ok || !data.hash || !data.url) {
         setSubmitError(data.error ?? 'Failed to generate link — please try again')
-        setSubmitting(false)
         return
       }
 
@@ -84,6 +83,7 @@ export default function ResonancePersistentLinkBuilder({
       })
     } catch {
       setSubmitError('Network error — please check your connection and try again')
+    } finally {
       setSubmitting(false)
     }
   }
