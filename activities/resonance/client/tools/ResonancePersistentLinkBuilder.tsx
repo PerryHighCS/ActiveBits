@@ -35,11 +35,13 @@ export function clearPreparedResonanceLinkSelection(
  *
  * Accepts a JSON or Gimkit CSV question set, validates it client-side,
  * posts to /api/resonance/prepare-link-options for server-side validation and
- * encryption, then hands prepared `selectedOptions` back to the shared dashboard.
+ * encryption, and reports prepared `selectedOptions` plus submit-readiness back
+ * to the shared dashboard.
  *
  * Supports both create-mode (no editState) and edit-mode (editState provided).
- * In edit mode the teacher code is pre-filled and questions are recovered from
- * a local cache keyed by persistent-link hash.
+ * ManageDashboard owns the teacher-code field and final permalink submission.
+ * In edit mode the question set is recovered from a local cache keyed by the
+ * activity-specific prepared hash when available.
  */
 export default function ResonancePersistentLinkBuilder({
   activityId: _activityId,

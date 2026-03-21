@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ChangeEvent } from 'react'
+import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react'
 import Button from '@src/components/ui/Button'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
@@ -24,6 +24,7 @@ export default function SyncDeckPersistentLinkBuilder({
   preflightRunner = runSyncDeckPresentationPreflight,
 }: SyncDeckPersistentLinkBuilderComponentProps) {
   const presentationUrlInputId = useId()
+  const preflightRequestIdRef = useRef(0)
   const isEditing = Boolean(editState?.hash)
   const editPresentationUrl = readSelectedPresentationUrl(editState?.selectedOptions)
   const controlledPresentationUrl = typeof selectedOptions?.presentationUrl === 'string'
@@ -40,6 +41,7 @@ export default function SyncDeckPersistentLinkBuilder({
   }, [controlledPresentationUrl])
 
   useEffect(() => {
+    preflightRequestIdRef.current += 1
     setIsPreflightChecking(false)
     setPreflightValidatedUrl(null)
     setPreflightPreviewUrl(null)
@@ -67,9 +69,14 @@ export default function SyncDeckPersistentLinkBuilder({
       return
     }
 
+    const requestId = preflightRequestIdRef.current + 1
+    preflightRequestIdRef.current = requestId
     setIsPreflightChecking(true)
     try {
       const preflightResult = await preflightRunner(normalizedPresentationUrl)
+      if (requestId !== preflightRequestIdRef.current) {
+        return
+      }
       if (preflightResult.valid) {
         setPreflightValidatedUrl(normalizedPresentationUrl)
         setPreflightWarning(null)
@@ -85,11 +92,16 @@ export default function SyncDeckPersistentLinkBuilder({
           : 'Unable to verify this presentation URL right now. Please try again.',
       )
     } catch {
+      if (requestId !== preflightRequestIdRef.current) {
+        return
+      }
       setPreflightValidatedUrl(null)
       setPreflightPreviewUrl(null)
       setPreflightWarning('Unable to verify this presentation URL right now. Please try again.')
     } finally {
-      setIsPreflightChecking(false)
+      if (requestId === preflightRequestIdRef.current) {
+        setIsPreflightChecking(false)
+      }
     }
   }
 
@@ -100,6 +112,8 @@ export default function SyncDeckPersistentLinkBuilder({
       presentationUrl: nextValue,
     })
     if (nextValue.trim() !== preflightValidatedUrl) {
+      preflightRequestIdRef.current += 1
+      setIsPreflightChecking(false)
       onSubmitReadinessChange?.(false)
       setPreflightValidatedUrl(null)
       setPreflightPreviewUrl(null)

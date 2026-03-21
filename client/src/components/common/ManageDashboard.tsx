@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useId, useState, type ComponentType, type SyntheticEvent } from 'react'
+import { Suspense, useCallback, useEffect, useId, useRef, useState, type ComponentType, type SyntheticEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { activities, runActivityDeepLinkPreflight } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
@@ -179,6 +179,7 @@ function renderPersistentEntryPolicyControl(
 export default function ManageDashboard() {
   const navigate = useNavigate()
   const teacherCodeInputId = useId()
+  const preflightRequestIdRef = useRef(0)
   const [showPersistentModal, setShowPersistentModal] = useState(false)
   const [selectedActivity, setSelectedActivity] = useState<DashboardActivity | null>(null)
   const [editingPersistentSession, setEditingPersistentSession] = useState<PersistentSession | null>(null)
@@ -271,6 +272,7 @@ export default function ManageDashboard() {
   }
 
   const openPersistentModal = (activity: DashboardActivity, session: PersistentSession | null = null): void => {
+    preflightRequestIdRef.current += 1
     setSelectedActivity(activity)
     setEditingPersistentSession(session)
     setShowPersistentModal(true)
@@ -295,6 +297,7 @@ export default function ManageDashboard() {
   }
 
   const closePersistentModal = (): void => {
+    preflightRequestIdRef.current += 1
     setShowPersistentModal(false)
     setSelectedActivity(null)
     setEditingPersistentSession(null)
@@ -460,11 +463,16 @@ export default function ManageDashboard() {
     }
 
     setError(null)
+    const requestId = preflightRequestIdRef.current + 1
+    preflightRequestIdRef.current = requestId
     setIsPreflightChecking(true)
     setPreflightWarning(null)
 
     try {
       const result = await runActivityDeepLinkPreflight(selectedActivity.id, preflight, normalizedValue)
+      if (requestId !== preflightRequestIdRef.current) {
+        return
+      }
       if (!result.valid) {
         setPreflightValidatedValue(null)
         setPreflightWarning(
@@ -478,10 +486,15 @@ export default function ManageDashboard() {
       setPreflightValidatedValue(normalizedValue)
       setPreflightWarning(null)
     } catch {
+      if (requestId !== preflightRequestIdRef.current) {
+        return
+      }
       setPreflightValidatedValue(null)
       setPreflightWarning('Unable to verify this value right now. Please try again.')
     } finally {
-      setIsPreflightChecking(false)
+      if (requestId === preflightRequestIdRef.current) {
+        setIsPreflightChecking(false)
+      }
     }
   }
 
@@ -698,15 +711,17 @@ export default function ManageDashboard() {
                       value={persistentOptions[key] ?? ''}
                       onChange={(event) => {
                         const nextValue = event.target.value
-                        setPersistentOptions((previous) => ({
-                          ...previous,
-                          [key]: nextValue,
-                        }))
-                        if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
-                          setPreflightValidatedValue(null)
-                          setPreflightWarning(null)
-                        }
-                      }}
+                                setPersistentOptions((previous) => ({
+                                  ...previous,
+                                  [key]: nextValue,
+                                }))
+                                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
+                                  preflightRequestIdRef.current += 1
+                                  setPreflightValidatedValue(null)
+                                  setPreflightWarning(null)
+                                  setIsPreflightChecking(false)
+                                }
+                              }}
                       className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
                     >
                       {(option.options || []).map((entry) => (
@@ -736,15 +751,17 @@ export default function ManageDashboard() {
                       value={persistentOptions[key] ?? ''}
                       onChange={(event) => {
                         const nextValue = event.target.value
-                        setPersistentOptions((previous) => ({
-                          ...previous,
-                          [key]: nextValue,
-                        }))
-                        if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
-                          setPreflightValidatedValue(null)
-                          setPreflightWarning(null)
-                        }
-                      }}
+                                setPersistentOptions((previous) => ({
+                                  ...previous,
+                                  [key]: nextValue,
+                                }))
+                                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
+                                  preflightRequestIdRef.current += 1
+                                  setPreflightValidatedValue(null)
+                                  setPreflightWarning(null)
+                                  setIsPreflightChecking(false)
+                                }
+                              }}
                       className={`w-full border-2 rounded px-3 py-2 ${persistentOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
                     />
                     {selectedActivityPreflight?.optionKey === key && (
