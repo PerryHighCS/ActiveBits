@@ -14,6 +14,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
+function isValidInstructorResponse(value: unknown): value is ResponseWithName {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return typeof value.id === 'string'
+    && typeof value.questionId === 'string'
+    && typeof value.studentId === 'string'
+    && typeof value.studentName === 'string'
+    && typeof value.submittedAt === 'number'
+    && value.answer !== undefined
+}
+
+function isValidInstructorProgress(value: unknown): value is ResponseProgress {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return typeof value.questionId === 'string'
+    && typeof value.studentId === 'string'
+    && typeof value.studentName === 'string'
+    && typeof value.updatedAt === 'number'
+    && (value.status === 'idle' || value.status === 'working' || value.status === 'submitted')
+}
+
 /** Full instructor snapshot returned by GET /api/resonance/:sessionId/responses */
 export interface InstructorStateSnapshot extends InstructorSessionSnapshot {
   responseOrderOverrides: Record<string, string[]>
@@ -26,7 +51,9 @@ export function normalizeInstructorStateSnapshot(
     return null
   }
 
-  const responses = Array.isArray(data.responses) ? data.responses : []
+  const responses = Array.isArray(data.responses)
+    ? data.responses.filter(isValidInstructorResponse)
+    : []
   const submittedProgress = responses.map((response) => ({
     questionId: response.questionId,
     studentId: response.studentId,
@@ -37,7 +64,9 @@ export function normalizeInstructorStateSnapshot(
     responseId: response.id,
   }))
 
-  const progressEntries = Array.isArray(data.progress) ? data.progress : []
+  const progressEntries = Array.isArray(data.progress)
+    ? data.progress.filter(isValidInstructorProgress)
+    : []
   const submittedKeys = new Set(
     submittedProgress.map((entry) => `${entry.questionId}:${entry.studentId}`),
   )

@@ -1,10 +1,86 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { StudentSessionSnapshot } from '../../shared/types.js'
+import type { StudentMCQOption, StudentQuestion, StudentSessionSnapshot } from '../../shared/types.js'
 
 const FALLBACK_POLL_INTERVAL_MS = 15_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function normalizeStudentMcqOption(value: unknown): StudentMCQOption | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  if (typeof value.id !== 'string' || value.id.trim().length === 0) {
+    return null
+  }
+
+  if (typeof value.text !== 'string') {
+    return null
+  }
+
+  return {
+    id: value.id,
+    text: value.text,
+  }
+}
+
+function normalizeStudentQuestion(value: unknown): StudentQuestion | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  if (typeof value.id !== 'string' || value.id.trim().length === 0) {
+    return null
+  }
+
+  if (value.type !== 'free-response' && value.type !== 'multiple-choice') {
+    return null
+  }
+
+  if (typeof value.text !== 'string') {
+    return null
+  }
+
+  const order = typeof value.order === 'number' && Number.isFinite(value.order) ? value.order : 0
+  const responseTimeLimitMs =
+    value.responseTimeLimitMs === null
+      ? null
+      : typeof value.responseTimeLimitMs === 'number' && Number.isFinite(value.responseTimeLimitMs)
+        ? value.responseTimeLimitMs
+        : undefined
+
+  if (value.type === 'free-response') {
+    return {
+      id: value.id,
+      type: 'free-response',
+      text: value.text,
+      order,
+      ...(responseTimeLimitMs !== undefined ? { responseTimeLimitMs } : {}),
+    }
+  }
+
+  if (!Array.isArray(value.options)) {
+    return null
+  }
+
+  const options = value.options
+    .map(normalizeStudentMcqOption)
+    .filter((option): option is StudentMCQOption => option !== null)
+
+  if (options.length !== value.options.length) {
+    return null
+  }
+
+  return {
+    id: value.id,
+    type: 'multiple-choice',
+    text: value.text,
+    order,
+    options,
+    ...(responseTimeLimitMs !== undefined ? { responseTimeLimitMs } : {}),
+  }
 }
 
 export function normalizeStudentSessionSnapshot(
@@ -14,22 +90,25 @@ export function normalizeStudentSessionSnapshot(
     return null
   }
 
-  const activeQuestions = Array.isArray(data.activeQuestions) ? data.activeQuestions : []
-  const fallbackActiveQuestion = isRecord(data.activeQuestion) ? data.activeQuestion : null
-  const activeQuestionIds = Array.isArray(data.activeQuestionIds)
-    ? data.activeQuestionIds.filter((entry): entry is string => typeof entry === 'string')
+  const activeQuestions = Array.isArray(data.activeQuestions)
+    ? data.activeQuestions
+      .map(normalizeStudentQuestion)
+      .filter((question): question is StudentQuestion => question !== null)
+    : []
+  const fallbackActiveQuestion = normalizeStudentQuestion(data.activeQuestion)
+  const normalizedActiveQuestions = activeQuestions.length > 0
+    ? activeQuestions
     : fallbackActiveQuestion
-      ? [fallbackActiveQuestion.id]
+      ? [fallbackActiveQuestion]
       : []
+  const activeQuestionIds = Array.isArray(data.activeQuestionIds)
+    ? data.activeQuestionIds.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : normalizedActiveQuestions.map((question) => question.id)
 
   return {
     sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
-    activeQuestion: activeQuestions[0] ?? fallbackActiveQuestion,
-    activeQuestions: activeQuestions.length > 0
-      ? activeQuestions
-      : fallbackActiveQuestion
-        ? [fallbackActiveQuestion]
-        : [],
+    activeQuestion: normalizedActiveQuestions[0] ?? null,
+    activeQuestions: normalizedActiveQuestions,
     activeQuestionIds,
     activeQuestionRunStartedAt:
       typeof data.activeQuestionRunStartedAt === 'number' && Number.isFinite(data.activeQuestionRunStartedAt)
@@ -45,7 +124,11 @@ export function normalizeStudentSessionSnapshot(
       isRecord(data.submittedAnswers)
         ? (data.submittedAnswers as StudentSessionSnapshot['submittedAnswers'])
         : {},
-    revealedQuestions: Array.isArray(data.revealedQuestions) ? data.revealedQuestions : [],
+    revealedQuestions: Array.isArray(data.revealedQuestions)
+      ? data.revealedQuestions
+        .map(normalizeStudentQuestion)
+        .filter((question): question is StudentQuestion => question !== null)
+      : [],
   }
 }
 
