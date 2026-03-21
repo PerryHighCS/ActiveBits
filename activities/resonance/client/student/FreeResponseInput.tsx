@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { SubmitEvent } from 'react'
 
 interface Props {
   value?: string
@@ -22,7 +23,7 @@ export default function FreeResponseInput({
     setText(value)
   }, [value])
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!canSubmit) return
     await onSubmit(text.trim())

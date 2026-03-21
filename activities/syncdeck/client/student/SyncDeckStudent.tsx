@@ -2603,6 +2603,8 @@ const SyncDeckStudent: FC = () => {
   const activeEmbeddedActivity = activeEmbeddedInstanceKey
     ? (embeddedActivities[activeEmbeddedInstanceKey] ?? null)
     : null
+  const activeEmbeddedActivityId = activeEmbeddedActivity?.activityId ?? null
+  const activeEmbeddedChildSessionId = activeEmbeddedActivity?.childSessionId ?? null
   const activeSoloOverlay = activeEmbeddedInstanceKey
     ? null
     : (studentIndicesState ? (soloOverlays[`${studentIndicesState.h}:${studentIndicesState.v}`] ?? null) : null)
@@ -2658,15 +2660,21 @@ const SyncDeckStudent: FC = () => {
     })
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !sessionId || !activeEmbeddedActivity || !activeEmbeddedInstanceKey) {
+    if (
+      typeof window === 'undefined'
+      || !sessionId
+      || !activeEmbeddedInstanceKey
+      || !activeEmbeddedActivityId
+      || !activeEmbeddedChildSessionId
+    ) {
       return
     }
 
     const shouldRecover = shouldRecoverEmbeddedEntryParticipantToken({
       sessionId,
-      childSessionId: activeEmbeddedActivity.childSessionId,
+      childSessionId: activeEmbeddedChildSessionId,
       studentId: registeredStudentId,
-      activityId: activeEmbeddedActivity.activityId,
+      activityId: activeEmbeddedActivityId,
       sessionStorage: window.sessionStorage,
       localStorage: window.localStorage,
     })
@@ -2674,7 +2682,7 @@ const SyncDeckStudent: FC = () => {
       return
     }
 
-    const recoveryKey = `${activeEmbeddedActivity.activityId}:${activeEmbeddedActivity.childSessionId}:${registeredStudentId}`
+    const recoveryKey = `${activeEmbeddedActivityId}:${activeEmbeddedChildSessionId}:${registeredStudentId}`
     if (recoveredEmbeddedEntryKeysRef.current.has(recoveryKey)) {
       return
     }
@@ -2691,7 +2699,7 @@ const SyncDeckStudent: FC = () => {
           },
           body: JSON.stringify({
             instanceKey: activeEmbeddedInstanceKey,
-            childSessionId: activeEmbeddedActivity.childSessionId,
+            childSessionId: activeEmbeddedChildSessionId,
             studentId: registeredStudentId,
           }),
         })
@@ -2712,7 +2720,7 @@ const SyncDeckStudent: FC = () => {
         if (!isCancelled && childSessionId && entryParticipantToken) {
           persistEntryParticipantToken(
             window.sessionStorage,
-            buildSessionEntryParticipantStorageKey(activeEmbeddedActivity.activityId, childSessionId),
+            buildSessionEntryParticipantStorageKey(activeEmbeddedActivityId, childSessionId),
             entryParticipantToken,
           )
           return
@@ -2730,10 +2738,10 @@ const SyncDeckStudent: FC = () => {
 
     return () => {
       isCancelled = true
-      recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
     }
   }, [
-    activeEmbeddedActivity,
+    activeEmbeddedActivityId,
+    activeEmbeddedChildSessionId,
     activeEmbeddedInstanceKey,
     registeredStudentId,
     sessionId,

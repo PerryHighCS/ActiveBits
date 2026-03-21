@@ -1,3 +1,4 @@
+import type { DragEvent } from 'react'
 import type { InstructorAnnotation, ResponseProgressStatus, ResponseWithName } from '../../shared/types.js'
 import { INSTRUCTOR_ANNOTATION_EMOJIS } from '../../shared/emojiSet.js'
 
@@ -51,7 +52,7 @@ export default function ResponseCard({
 }: Props) {
   const reactionEntries = Object.entries(reactionSummary ?? {}).filter(([, count]) => count > 0)
 
-  function setCardDragImage(event: React.DragEvent<HTMLDivElement>) {
+  function setCardDragImage(event: DragEvent<HTMLDivElement>) {
     const source = event.currentTarget
     const clone = source.cloneNode(true)
     if (!(clone instanceof HTMLElement)) {

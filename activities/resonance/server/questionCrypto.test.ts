@@ -59,6 +59,11 @@ void test('decryptQuestions returns null for malformed input', () => {
   assert.equal(decryptQuestions('YWJj', 'hash'), null, 'too short to be valid')
 })
 
+void test('[TEST] decryptQuestions rejects encoded payloads larger than MAX_ENCODED_PAYLOAD_CHARS', () => {
+  const oversized = 'a'.repeat(MAX_ENCODED_PAYLOAD_CHARS + 1)
+  assert.equal(decryptQuestions(oversized, 'hash'), null)
+})
+
 void test('decryptQuestions returns null when ciphertext is bit-flipped (tamper detection)', () => {
   const hash = 'abc123def456'
   const { encoded } = encryptQuestions(SAMPLE_QUESTIONS, hash)

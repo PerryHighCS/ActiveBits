@@ -29,6 +29,7 @@ const KEY_DERIVATION_CONTEXT = 'resonance-question-encryption-v1'
  * query-string length limits and avoids oversized copy-paste URLs.
  */
 export const MAX_ENCODED_PAYLOAD_CHARS = 3500
+const MAX_DECODED_PAYLOAD_BYTES = Math.ceil((MAX_ENCODED_PAYLOAD_CHARS * 3) / 4)
 
 function deriveKey(): Buffer {
   const secret = resolvePersistentSessionSecret()
@@ -71,10 +72,18 @@ export function encryptQuestions(questions: Question[], hash: string): EncryptRe
  * payload is malformed.
  */
 export function decryptQuestions(encoded: string, hash: string): Question[] | null {
+  if (encoded.length > MAX_ENCODED_PAYLOAD_CHARS) {
+    return null
+  }
+
   let combined: Buffer
   try {
     combined = Buffer.from(encoded, 'base64url')
   } catch {
+    return null
+  }
+
+  if (combined.length > MAX_DECODED_PAYLOAD_BYTES) {
     return null
   }
 

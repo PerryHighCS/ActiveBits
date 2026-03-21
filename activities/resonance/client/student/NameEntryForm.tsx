@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { SubmitEvent } from 'react'
 
 interface Props {
   sessionId: string
@@ -17,7 +18,7 @@ export default function NameEntryForm({ sessionId, onRegistered }: Props) {
   const trimmedName = name.trim()
   const canSubmit = !submitting && trimmedName.length > 0 && trimmedName.length <= 80
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!canSubmit) return
 

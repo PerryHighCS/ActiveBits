@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { SubmitEvent } from 'react'
 import type { StudentMCQOption } from '../../shared/types.js'
 
 interface Props {
@@ -25,7 +26,7 @@ export default function MCQInput({
     setSelected(value)
   }, [value])
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!canSubmit || selected === null) return
     await onSubmit(selected)

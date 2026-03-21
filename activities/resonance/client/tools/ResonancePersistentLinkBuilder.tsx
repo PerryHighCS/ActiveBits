@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { SubmitEvent } from 'react'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import type { Question } from '../../shared/types.js'
 import { cacheResonanceQuestionDraft, loadResonanceQuestionDraft } from './resonanceQuestionDraftCache.js'
@@ -44,7 +45,7 @@ export default function ResonancePersistentLinkBuilder({
   const isEdit = Boolean(editState)
   const canSubmit = !submitting && teacherCode.trim().length >= 6 && questions !== null && questions.length > 0
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!canSubmit || questions === null) return
 
