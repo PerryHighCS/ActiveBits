@@ -39,6 +39,22 @@ void test('isGimkitCsvExportCompatibleQuestion only accepts single-correct multi
     }),
     false,
   )
+  assert.equal(
+    isGimkitCsvExportCompatibleQuestion({
+      id: 'q4',
+      type: 'multiple-choice',
+      text: 'Too many options',
+      order: 3,
+      options: [
+        { id: 'q4_a', text: 'A', isCorrect: true },
+        { id: 'q4_b', text: 'B' },
+        { id: 'q4_c', text: 'C' },
+        { id: 'q4_d', text: 'D' },
+        { id: 'q4_e', text: 'E' },
+      ],
+    }),
+    false,
+  )
 })
 
 void test('questionsToCsv exports only Gimkit-compatible questions', () => {
@@ -58,6 +74,19 @@ void test('questionsToCsv exports only Gimkit-compatible questions', () => {
       options: [
         { id: 'poll_a', text: 'Red' },
         { id: 'poll_b', text: 'Blue' },
+      ],
+    },
+    {
+      id: 'too-many-options',
+      type: 'multiple-choice',
+      text: 'Choose the best letter',
+      order: 3,
+      options: [
+        { id: 'too-many-options_a', text: 'A', isCorrect: true },
+        { id: 'too-many-options_b', text: 'B' },
+        { id: 'too-many-options_c', text: 'C' },
+        { id: 'too-many-options_d', text: 'D' },
+        { id: 'too-many-options_e', text: 'E' },
       ],
     },
   ])

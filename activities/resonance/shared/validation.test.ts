@@ -98,3 +98,43 @@ void test('parseGimkitCSV rejects rows without any incorrect answers', () => {
     'Row 3: Gimkit CSV requires at least one incorrect answer for multiple-choice questions',
   ])
 })
+
+void test('parseGimkitCSV rejects rows with more than three incorrect answers', () => {
+  const csv = [
+    'Title',
+    '"Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"',
+    '"Pick one","A","B","C","D","E"',
+  ].join('\n')
+
+  const result = parseGimkitCSV(csv)
+
+  assert.deepEqual(result.questions, [])
+  assert.deepEqual(result.errors, [
+    'Row 3: Gimkit CSV supports at most 3 incorrect answers',
+  ])
+})
+
+void test('parseGimkitCSV returns normalized validated questions', () => {
+  const csv = [
+    'Title',
+    '"Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"',
+    '"  Pick one  ","  Right  "," Wrong 1 "," Wrong 2 ",""',
+  ].join('\n')
+
+  const result = parseGimkitCSV(csv)
+
+  assert.deepEqual(result.errors, [])
+  assert.deepEqual(result.questions, [
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Pick one',
+      order: 0,
+      options: [
+        { id: 'q1_c', text: 'Right', isCorrect: true },
+        { id: 'q1_i1', text: 'Wrong 1' },
+        { id: 'q1_i2', text: 'Wrong 2' },
+      ],
+    },
+  ])
+})

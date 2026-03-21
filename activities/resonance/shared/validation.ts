@@ -238,6 +238,10 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
       errors.push(`Row ${rowNumber}: Gimkit CSV requires at least one incorrect answer for multiple-choice questions`)
       continue
     }
+    if (incorrectAnswers.length > 3) {
+      errors.push(`Row ${rowNumber}: Gimkit CSV supports at most 3 incorrect answers`)
+      continue
+    }
 
     const id = `q${orderCounter + 1}`
     const allAnswers: MCQOption[] = [
@@ -264,7 +268,11 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
     errors.push('CSV contained no valid questions')
   }
 
-  return { questions, errors }
+  if (errors.length > 0) {
+    return { questions, errors }
+  }
+
+  return validateQuestionSet(questions)
 }
 
 function splitCSVLines(content: string): string[] {

@@ -34,7 +34,7 @@ export function isGimkitCsvExportCompatibleQuestion(question: Question): questio
     return false
   }
 
-  return question.options.filter((option) => option.isCorrect === true).length === 1
+  return question.options.length <= 4 && question.options.filter((option) => option.isCorrect === true).length === 1
 }
 
 export function questionsToCsv(questions: Question[]): string {
@@ -145,7 +145,8 @@ function QuestionSetPanel() {
             </div>
           </div>
           <p className="text-xs text-gray-400">
-            Gimkit CSV export includes only multiple-choice questions with exactly one correct answer.
+            Gimkit CSV export includes only multiple-choice questions with exactly one correct answer and up to
+            three incorrect answers.
           </p>
 
           {questions.map((q, idx) => (

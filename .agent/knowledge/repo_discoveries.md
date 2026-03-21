@@ -14,6 +14,22 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-21
+- Area: activities | resonance | validation
+- Discovery: `parseGimkitCSV(...)` should enforce the documented maximum of three incorrect answers per row and then run parsed questions back through `validateQuestionSet(...)` before returning.
+- Why it matters: This keeps CSV import behavior aligned with the rest of Resonance question validation, avoids producing out-of-bounds MCQs from extra trailing columns, and ensures imported rows get the same trimming and structural guarantees as JSON uploads.
+- Evidence: `activities/resonance/shared/validation.ts`; `activities/resonance/shared/validation.test.ts`
+- Follow-up action: If future CSV support expands beyond Gimkit's schema, update both the parser contract and exporter compatibility gate together.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | tools
+- Discovery: Resonance's Gimkit CSV export compatibility gate must enforce the file format's four-option ceiling, not just the single-correct-answer rule, because the exporter only has columns for one correct answer plus three incorrect answers.
+- Why it matters: Without the option-count guard, valid-looking multiple-choice questions with extra distractors would export lossy CSV rows that silently drop options and no longer match the authored question set.
+- Evidence: `activities/resonance/client/tools/ResonanceToolShell.tsx`; `activities/resonance/client/tools/ResonanceToolShell.test.ts`
+- Follow-up action: If the product ever needs wider CSV export support, add an explicit alternate export format or user-facing warning rather than truncating extra options.
+- Owner: Codex
+
 - Date: 2026-03-20
 - Area: activities | resonance | student-reactions
 - Discovery: Student shared-response reactions are client-owned in `SharedResponseFeed`, which sends the existing `resonance:react-to-shared` websocket event only for shared free-response cards, uses the curated `STUDENT_REACTION_EMOJIS` set for the inline popout picker, renders aggregate reaction chips on the instructor's currently shared FRQ card, and now pairs that public reveal path with a separate `reviewedResponses` student-only snapshot payload for emoji-highlighted answers that were not shared publicly.
