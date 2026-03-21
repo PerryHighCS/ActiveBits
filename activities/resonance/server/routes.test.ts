@@ -279,6 +279,47 @@ void test('instructor-passcode route returns passcode for embedded child session
   await sessions.close()
 })
 
+void test('prepare-link-options returns encrypted resonance selectedOptions without creating a persistent session', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const handler = app.handlers.post['/api/resonance/prepare-link-options']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: {},
+      body: {
+        teacherCode: 'teacher-code',
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'What stood out?',
+            order: 0,
+          },
+        ],
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as { selectedOptions?: { q?: string; h?: string } }
+  assert.equal(typeof body.selectedOptions?.q, 'string')
+  assert.equal(typeof body.selectedOptions?.h, 'string')
+  assert.ok((body.selectedOptions?.q ?? '').length > 0)
+  assert.equal((body.selectedOptions?.h ?? '').length, 20)
+
+  await sessions.close()
+})
+
 void test('responses route includes submitted, working, and idle progress entries for the instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()

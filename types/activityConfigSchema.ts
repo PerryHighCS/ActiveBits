@@ -360,18 +360,12 @@ function parseManageDashboard(raw: unknown, context: string): ActivityConfig['ma
   }
 
   const customPersistentLinkBuilder = readOptionalBoolean(raw, 'customPersistentLinkBuilder', `${context}.manageDashboard`)
-  const persistentLinkBuilderMode = raw.persistentLinkBuilderMode
-  if (
-    persistentLinkBuilderMode !== undefined
-    && persistentLinkBuilderMode !== 'activity-submit'
-    && persistentLinkBuilderMode !== 'shared-submit'
-  ) {
-    throw new Error(`${context}.manageDashboard: "persistentLinkBuilderMode" must be "activity-submit" or "shared-submit" when provided`)
+  if ('persistentLinkBuilderMode' in raw && raw.persistentLinkBuilderMode != null) {
+    throw new Error(`${context}.manageDashboard: "persistentLinkBuilderMode" is no longer supported`)
   }
 
   return {
     ...(customPersistentLinkBuilder !== undefined ? { customPersistentLinkBuilder } : {}),
-    ...(persistentLinkBuilderMode !== undefined ? { persistentLinkBuilderMode } : {}),
   }
 }
 

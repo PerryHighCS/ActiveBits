@@ -1462,16 +1462,24 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-21
 - Area: client | manage dashboard | activity-owned permalink builders
-- Discovery: The clean split for activity-owned permalink builders is two explicit modes: `activity-submit` for activities like Resonance that mint their own authoritative URL payloads, and `shared-submit` for activities like SyncDeck that need custom option/verification UI but should still hand normalized options back to `ManageDashboard` for the final signed permalink request.
-- Why it matters: That preserves shared ownership of entry mode, teacher-code semantics, and final URL signing, while still letting activities own rich validation and preview controls when generic option fields are not enough.
+- Discovery: The clean split for activity-owned permalink builders is a single shared-submit contract: activities own rich option UI, validation, previews, and preparation of string `selectedOptions`, while `ManageDashboard` always owns teacher-code semantics, entry mode, and the final signed persistent-link request.
+- Why it matters: That keeps shared permalink behavior centralized and prevents activities from quietly forking create/update semantics just because they need richer custom controls than the generic option form.
 - Evidence: `client/src/components/common/ManageDashboard.tsx`; `types/activity.ts`; `types/activityConfigSchema.ts`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`; `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx`
-- Follow-up action: When adding future custom permalink builders, choose the submit mode up front in `activity.config.ts`; prefer `shared-submit` when the activity only needs richer option UX or preflight, and reserve `activity-submit` for flows that truly need activity-owned payload generation.
+- Follow-up action: When adding future custom permalink builders, keep them on the shared-submit contract unless the repo deliberately introduces a new generic capability for richer builder outputs.
 - Owner: Codex
 
 - Date: 2026-03-21
 - Area: activities | syncdeck | permalink builder ownership
-- Discovery: SyncDeck permalink setup should keep its custom presentation URL control, reveal-sync verification, and preview iframe, but delegate the final create/update request back to `ManageDashboard` through shared-submit callbacks instead of posting to persistent-session routes directly.
+- Discovery: SyncDeck permalink setup should keep its custom presentation URL control, reveal-sync verification, and preview iframe, but delegate the final create/update request back to `ManageDashboard` through the shared custom-builder callbacks instead of posting to persistent-session routes directly.
 - Why it matters: SyncDeck keeps the deck-specific UX teachers need, while shared code still owns entry mode changes and the final signed permalink body so SyncDeck cannot accidentally fork shared permalink behavior.
 - Evidence: `activities/syncdeck/activity.config.ts`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`; `client/src/components/common/ManageDashboard.tsx`
 - Follow-up action: If SyncDeck later adds more deck-specific permalink inputs, keep them flowing through `selectedOptions` + submit-readiness callbacks unless the server-side signing contract itself needs to become activity-owned.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | permalink builder ownership
+- Discovery: Resonance can use the same shared custom-builder permalink flow as SyncDeck as long as it treats encrypted question payload preparation as activity-specific data shaping, not as the platform's persistent-link signing step.
+- Why it matters: The clean boundary is for Resonance to keep its upload/editor UI and server-side `q`/`h` preparation, while `ManageDashboard` continues to own teacher code UI, entry mode, and the final persistent-session create/update request. That keeps shared permalink behavior consistent without forcing shared code to understand Resonance question structures.
+- Evidence: `activities/resonance/activity.config.ts`; `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx`; `activities/resonance/server/routes.ts`; `client/src/components/common/ManageDashboard.tsx`
+- Follow-up action: If future activities need custom permalink preparation, prefer returning finalized string `selectedOptions` plus submit readiness instead of letting the activity mint the full permalink URL.
 - Owner: Codex

@@ -273,7 +273,7 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Surface: activity interface
 - Contract: `ActivityConfig.manageDashboard.customPersistentLinkBuilder?: boolean` advertises that the activity provides an activity-owned persistent-link modal UI via client-module export `PersistentLinkBuilderComponent`, and shared `ManageDashboard` should render that component instead of the generic `deepLinkOptions` form.
 - Compatibility constraints: Flag is optional and defaults to `false`; activities without the flag or without a component continue to use the generic dashboard permanent-link flow. Shared dashboard placement and success-state behavior remain standardized.
-- Validation rules: Runtime `activity.config` schema validates `manageDashboard.customPersistentLinkBuilder` as boolean when present. Client module component must implement standardized props (`activityId`, `onCreated(...)`) so dashboard can persist/show the resulting authoritative link.
+- Validation rules: Runtime `activity.config` schema validates `manageDashboard.customPersistentLinkBuilder` as boolean when present. Client module component must implement the shared-submit props (`activityId`, `teacherCode`, string `selectedOptions`, `onSelectedOptionsChange(...)`, `onSubmitReadinessChange(...)`) so dashboard can keep final permalink creation centralized.
 - Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/activities/index.ts`; `client/src/components/common/ManageDashboard.tsx`; `client/src/components/common/manageDashboardViewUtils.ts`; `client/src/components/common/ManageDashboard.test.tsx`; `activities/syncdeck/activity.config.ts`; `activities/syncdeck/client/components/SyncDeckPersistentLinkBuilder.tsx`.
 - Follow-up action: Expand `ActivityPersistentLinkBuilderProps` only when multiple activities need additional shared callbacks or state; avoid pushing activity-specific protocol/UI details back into shared dashboard code.
 - Owner: Codex
@@ -303,6 +303,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Validation rules: Questions validated by `activities/resonance/shared/validation.ts`; student name trimmed, max 80 chars; answer payload type must match active question type; selectedOptionId must be a valid option id on the target question.
 - Evidence (schema/tests/path): `activities/resonance/shared/types.ts`; `activities/resonance/shared/validation.ts`; `activities/resonance/server/routes.ts`.
 - Follow-up action: Add route tests for each endpoint in Phase 9; add WebSocket message contract entry when Phase 7 is implemented.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Surface: REST | activity interface
+- Contract: Resonance permalink preparation now uses `POST /api/resonance/prepare-link-options` body `{ teacherCode, questions: Question[] }` → `{ selectedOptions: { q, h } }`, where `q` is the encrypted question payload and `h` is the activity-specific decryption hash. This endpoint prepares activity data only; it does not create or update the platform persistent session.
+- Compatibility constraints: `q`/`h` are internal deep-link options consumed by Resonance create/update flows via shared `ManageDashboard`. The platform persistent-link hash remains separate and continues to be minted by `/api/persistent-session/create|update`. Resonance question-edit recovery may use local draft cache keyed by `h`, but permalink storage itself still carries only string `selectedOptions`.
+- Validation rules: `teacherCode` must be 6-100 chars after trimming; `questions` must pass `validateQuestionSet(...)`; oversized encrypted payloads must fail with `422` when they exceed `MAX_ENCODED_PAYLOAD_CHARS`.
+- Evidence (schema/tests/path): `activities/resonance/server/routes.ts`; `activities/resonance/server/routes.test.ts`; `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx`
+- Follow-up action: Keep any future Resonance permalink metadata additive and string-valued so it can continue flowing through the shared persistent-link pipeline without special casing.
 - Owner: Codex
 
 - Date: 2026-03-20

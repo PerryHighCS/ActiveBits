@@ -73,26 +73,31 @@ void test('normalizeEditStateQuestions returns null for empty arrays', () => {
   assert.equal(normalizeEditStateQuestions([]), null)
 })
 
-void test('ResonancePersistentLinkBuilder re-enables submit after onCreated resolves without unmounting', async () => {
+void test('ResonancePersistentLinkBuilder prepares selectedOptions and submit readiness for shared submit', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch
-  const { act, fireEvent, render } = await import('@testing-library/react')
+  const { act, render, waitFor } = await import('@testing-library/react')
   const { default: ResonancePersistentLinkBuilder } = await import('./ResonancePersistentLinkBuilder.js')
   let rendered: ReturnType<typeof render> | null = null
-  const createdPayloads: Array<{ fullUrl: string; hash: string; teacherCode: string }> = []
+  const selectedOptionsSnapshots: Array<Record<string, string>> = []
+  const readinessChanges: boolean[] = []
 
   try {
     ;(globalThis as { fetch?: typeof fetch }).fetch = (async () => ({
       ok: true,
       json: async () => ({
-        hash: 'hash-123',
-        url: '/activity/resonance/hash-123',
+        selectedOptions: {
+          q: 'encoded-questions',
+          h: 'prep-hash-123',
+        },
       }),
     })) as unknown as typeof fetch
 
     rendered = render(
       React.createElement(ResonancePersistentLinkBuilder, {
         activityId: 'resonance',
+        teacherCode: 'teacher-code',
+        selectedOptions: {},
         editState: {
           hash: 'hash-123',
           teacherCode: 'teacher-code',
@@ -107,30 +112,26 @@ void test('ResonancePersistentLinkBuilder re-enables submit after onCreated reso
             ],
           },
         },
-        onCreated: async (payload) => {
-          createdPayloads.push(payload)
+        onSelectedOptionsChange: (nextSelectedOptions) => {
+          selectedOptionsSnapshots.push(nextSelectedOptions)
+        },
+        onSubmitReadinessChange: (canSubmit) => {
+          readinessChanges.push(canSubmit)
         },
       }),
     )
 
-    const activeRender = rendered
-    const submitButton = activeRender.getByRole('button', { name: 'Update link' }) as HTMLButtonElement
     await act(async () => {
-      fireEvent.click(submitButton)
-      await Promise.resolve()
       await Promise.resolve()
     })
 
-    const enabledButton = activeRender.getByRole('button', { name: 'Update link' }) as HTMLButtonElement
-    assert.equal(enabledButton.disabled, false)
-
-    assert.deepEqual(createdPayloads, [
-      {
-        fullUrl: 'https://activebits.local/activity/resonance/hash-123',
-        hash: 'hash-123',
-        teacherCode: 'teacher-code',
-      },
-    ])
+    await waitFor(() => {
+      assert.deepEqual(selectedOptionsSnapshots.at(-1), {
+        q: 'encoded-questions',
+        h: 'prep-hash-123',
+      })
+      assert.equal(readinessChanges.at(-1), true)
+    })
   } finally {
     ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     rendered?.unmount()

@@ -64,7 +64,6 @@ void test('SyncDeckPersistentLinkBuilder reports selected options and readiness 
         onSubmitReadinessChange: (canSubmit) => {
           readinessChanges.push(canSubmit)
         },
-        onCreated: async () => undefined,
       }),
     )
 
@@ -108,7 +107,6 @@ void test('SyncDeckPersistentLinkBuilder resets readiness and preview when the U
         onSubmitReadinessChange: (canSubmit) => {
           readinessChanges.push(canSubmit)
         },
-        onCreated: async () => undefined,
       }),
     )
 
@@ -130,4 +128,3 @@ void test('SyncDeckPersistentLinkBuilder resets readiness and preview when the U
     restoreDomEnvironment()
   }
 })
-

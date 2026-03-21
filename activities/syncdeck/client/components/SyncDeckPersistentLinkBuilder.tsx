@@ -21,7 +21,6 @@ export default function SyncDeckPersistentLinkBuilder({
   selectedOptions,
   onSelectedOptionsChange,
   onSubmitReadinessChange,
-  onCreated: _onCreated,
   preflightRunner = runSyncDeckPresentationPreflight,
 }: SyncDeckPersistentLinkBuilderComponentProps) {
   const presentationUrlInputId = useId()

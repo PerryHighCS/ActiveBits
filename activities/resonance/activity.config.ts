@@ -17,11 +17,6 @@ const resonanceConfig: ActivityConfig = {
     q: {},
     h: {},
   },
-  deepLinkGenerator: {
-    endpoint: '/api/resonance/generate-link',
-    mode: 'replace-url',
-    expectsSelectedOptions: false,
-  },
   createSessionBootstrap: {
     sessionStorage: [
       {

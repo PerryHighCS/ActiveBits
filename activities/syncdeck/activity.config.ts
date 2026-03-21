@@ -48,7 +48,6 @@ const syncdeckConfig: ActivityConfig = {
   },
   manageDashboard: {
     customPersistentLinkBuilder: true,
-    persistentLinkBuilderMode: 'shared-submit',
   },
   manageLayout: {
     expandShell: true,
