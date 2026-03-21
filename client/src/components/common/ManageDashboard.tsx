@@ -582,7 +582,7 @@ export default function ManageDashboard() {
     | null
   const usesCustomPersistentLinkBuilder = CustomPersistentLinkBuilder != null
   const activePersistentModalContent = usesCustomPersistentLinkBuilder && selectedActivity ? (
-    <div className="flex flex-col gap-4">
+    <form onSubmit={handlePersistentLinkSubmit} className="flex flex-col gap-4">
       <p className="text-gray-700">
         Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL,
         they'll wait until you start the session with your teacher code.
@@ -643,17 +643,14 @@ export default function ManageDashboard() {
       {error !== null && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
 
       <Button
-        type="button"
-        onClick={() => {
-          void submitPersistentLink()
-        }}
+        type="submit"
         disabled={isCreating || teacherCode.trim().length < 6 || hasPersistentOptionErrors || !customBuilderCanSubmit}
       >
         {isCreating
           ? ((editingPersistentSession == null || createsNewLinkFromTeacherCodeChange) ? 'Creating...' : 'Saving...')
           : (createsNewLinkFromTeacherCodeChange ? 'Create New Link' : (editingPersistentSession ? 'Save Changes' : 'Generate Link'))}
       </Button>
-    </div>
+    </form>
   ) : (
     <form onSubmit={handlePersistentLinkSubmit} className="flex flex-col gap-4">
       <p className="text-gray-700">
