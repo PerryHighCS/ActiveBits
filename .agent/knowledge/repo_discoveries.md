@@ -1379,3 +1379,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/resonance/client/tools/ResonanceReport.tsx`; `activities/resonance/client/tools/ResonanceReport.test.ts`
 - Follow-up action: Whenever the report viewer starts dereferencing additional reveal fields, extend the upload validator in the same change so parsing stays aligned with render assumptions.
 - Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | gimkit csv compatibility
+- Discovery: Resonance should treat Gimkit CSV export as a narrow compatibility format: only multiple-choice questions with exactly one correct answer should be written to CSV.
+- Why it matters: The tools UI can build free-response prompts and poll-style MCQs that do not map cleanly onto the Gimkit CSV schema. Exporting those rows creates CSVs that cannot round-trip through the importer without inventing placeholder answers or changing question semantics.
+- Evidence: `activities/resonance/client/tools/ResonanceToolShell.tsx`; `activities/resonance/client/tools/ResonanceToolShell.test.ts`; `activities/resonance/shared/validation.ts`
+- Follow-up action: Keep JSON export as the full-fidelity path for mixed question sets, and keep `parseGimkitCSV(...)` aligned with the same single-correct-MCQ-only contract rather than accepting broader Resonance-specific semantics.
+- Owner: Codex

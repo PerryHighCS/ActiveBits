@@ -68,3 +68,33 @@ void test('parseGimkitCSV accepts exactly 100 parsed questions', () => {
   assert.equal(result.errors.length, 0)
   assert.equal(result.questions.length, 100)
 })
+
+void test('parseGimkitCSV rejects rows without a correct answer', () => {
+  const csv = [
+    'Title',
+    '"Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"',
+    '"Favorite color","","Red","Blue",""',
+  ].join('\n')
+
+  const result = parseGimkitCSV(csv)
+
+  assert.deepEqual(result.questions, [])
+  assert.deepEqual(result.errors, [
+    'Row 3: Gimkit CSV requires a correct answer for multiple-choice questions',
+  ])
+})
+
+void test('parseGimkitCSV rejects rows without any incorrect answers', () => {
+  const csv = [
+    'Title',
+    '"Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"',
+    '"Explain why","Because","","",""',
+  ].join('\n')
+
+  const result = parseGimkitCSV(csv)
+
+  assert.deepEqual(result.questions, [])
+  assert.deepEqual(result.errors, [
+    'Row 3: Gimkit CSV requires at least one incorrect answer for multiple-choice questions',
+  ])
+})

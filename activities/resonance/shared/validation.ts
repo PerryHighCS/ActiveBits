@@ -201,9 +201,8 @@ export function validateQuestionSet(raw: unknown): { questions: Question[]; erro
  *   Row 2: "Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"
  *   Row 3+: one question per row
  *
- * Questions with only a correct answer and no incorrect answers become
- * free-response questions. Questions with at least one incorrect answer
- * become multiple-choice questions.
+ * Resonance treats Gimkit CSV as a compatibility format for single-correct
+ * multiple-choice questions only.
  */
 export function parseGimkitCSV(content: string): { questions: Question[]; errors: string[] } {
   const errors: string[] = []
@@ -232,37 +231,31 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
       continue
     }
     if (!correctAnswer) {
-      errors.push(`Row ${rowNumber}: correct answer is required`)
+      errors.push(`Row ${rowNumber}: Gimkit CSV requires a correct answer for multiple-choice questions`)
+      continue
+    }
+    if (incorrectAnswers.length === 0) {
+      errors.push(`Row ${rowNumber}: Gimkit CSV requires at least one incorrect answer for multiple-choice questions`)
       continue
     }
 
     const id = `q${orderCounter + 1}`
+    const allAnswers: MCQOption[] = [
+      { id: `${id}_c`, text: correctAnswer, isCorrect: true },
+      ...incorrectAnswers.map((text, i) => ({ id: `${id}_i${i + 1}`, text })),
+    ]
 
-    if (incorrectAnswers.length === 0) {
-      // No incorrect answers → free-response
-      if (questions.length >= MAX_QUESTION_SET_SIZE) {
-        errors.push(`question set may contain at most ${MAX_QUESTION_SET_SIZE} questions`)
-        return { questions: [], errors }
-      }
-      questions.push({ id, type: 'free-response', text: questionText, order: orderCounter })
-    } else {
-      // Has incorrect answers → multiple-choice
-      const allAnswers: MCQOption[] = [
-        { id: `${id}_c`, text: correctAnswer, isCorrect: true },
-        ...incorrectAnswers.map((text, i) => ({ id: `${id}_i${i + 1}`, text })),
-      ]
-      if (questions.length >= MAX_QUESTION_SET_SIZE) {
-        errors.push(`question set may contain at most ${MAX_QUESTION_SET_SIZE} questions`)
-        return { questions: [], errors }
-      }
-      questions.push({
-        id,
-        type: 'multiple-choice',
-        text: questionText,
-        order: orderCounter,
-        options: allAnswers,
-      })
+    if (questions.length >= MAX_QUESTION_SET_SIZE) {
+      errors.push(`question set may contain at most ${MAX_QUESTION_SET_SIZE} questions`)
+      return { questions: [], errors }
     }
+    questions.push({
+      id,
+      type: 'multiple-choice',
+      text: questionText,
+      order: orderCounter,
+      options: allAnswers,
+    })
 
     orderCounter++
   }

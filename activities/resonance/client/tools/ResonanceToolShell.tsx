@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Question } from '../../shared/types.js'
+import type { MCQQuestion } from '../../shared/types.js'
 import QuestionBuilder from './QuestionBuilder.js'
 import QuestionCard from './QuestionCard.js'
 import ResonanceQuestionSetUploader from './ResonanceQuestionSetUploader.js'
@@ -28,26 +29,34 @@ function downloadJSON(data: unknown, filename: string) {
   downloadBlob(blob, filename)
 }
 
-function questionsToCsv(questions: Question[]): string {
+export function isGimkitCsvExportCompatibleQuestion(question: Question): question is MCQQuestion {
+  if (question.type !== 'multiple-choice') {
+    return false
+  }
+
+  return question.options.filter((option) => option.isCorrect === true).length === 1
+}
+
+export function questionsToCsv(questions: Question[]): string {
   const rows: string[] = [
     'Resonance Question Set Export',
     '"Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"',
   ]
   for (const q of questions) {
-    if (q.type === 'free-response') {
-      rows.push(`"${q.text.replace(/"/g, '""')}","","","",""`)
-    } else {
-      const correct = q.options.find((o) => o.isCorrect)
-      const incorrect = q.options.filter((o) => !o.isCorrect)
-      const cells = [
-        q.text,
-        correct?.text ?? '',
-        incorrect[0]?.text ?? '',
-        incorrect[1]?.text ?? '',
-        incorrect[2]?.text ?? '',
-      ].map((c) => `"${c.replace(/"/g, '""')}"`)
-      rows.push(cells.join(','))
+    if (!isGimkitCsvExportCompatibleQuestion(q)) {
+      continue
     }
+
+    const correct = q.options.find((o) => o.isCorrect)
+    const incorrect = q.options.filter((o) => !o.isCorrect)
+    const cells = [
+      q.text,
+      correct?.text ?? '',
+      incorrect[0]?.text ?? '',
+      incorrect[1]?.text ?? '',
+      incorrect[2]?.text ?? '',
+    ].map((c) => `"${c.replace(/"/g, '""')}"`)
+    rows.push(cells.join(','))
   }
   return rows.join('\n')
 }
@@ -66,6 +75,7 @@ function QuestionSetPanel() {
   const [questions, setQuestions] = useState<Question[]>([])
   const [buildingNew, setBuildingNew] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const gimkitCsvCompatibleCount = questions.filter(isGimkitCsvExportCompatibleQuestion).length
 
   function moveQuestion(from: number, to: number) {
     setQuestions((qs) => {
@@ -126,12 +136,17 @@ function QuestionSetPanel() {
               <button
                 type="button"
                 onClick={() => downloadCSV(questions, 'resonance-questions.csv')}
+                disabled={gimkitCsvCompatibleCount === 0}
+                aria-disabled={gimkitCsvCompatibleCount === 0}
                 className="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 rounded px-2 py-1"
               >
                 Export CSV
               </button>
             </div>
           </div>
+          <p className="text-xs text-gray-400">
+            Gimkit CSV export includes only multiple-choice questions with exactly one correct answer.
+          </p>
 
           {questions.map((q, idx) => (
             <QuestionCard
