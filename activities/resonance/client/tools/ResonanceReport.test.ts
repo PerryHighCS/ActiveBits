@@ -88,6 +88,34 @@ void test('parseResonanceReport rejects a multiple-choice question with no optio
   assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
 })
 
+void test('parseResonanceReport rejects a multiple-choice question with malformed option entries', () => {
+  const bad = {
+    ...((MINIMAL_QUESTION as Record<string, unknown>)),
+    question: {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Q?',
+      order: 0,
+      options: [null, 1, { id: '', text: 'A' }, { id: 'b', text: '   ' }],
+    },
+  }
+  assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
+})
+
+void test('parseResonanceReport rejects a multiple-choice question with non-boolean isCorrect', () => {
+  const bad = {
+    ...((MINIMAL_QUESTION as Record<string, unknown>)),
+    question: {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Q?',
+      order: 0,
+      options: [{ id: 'a', text: 'A', isCorrect: 'yes' }],
+    },
+  }
+  assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
+})
+
 void test('parseResonanceReport rejects a question entry with non-array responses', () => {
   const bad = { ...((MINIMAL_QUESTION as Record<string, unknown>)), responses: null }
   assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)

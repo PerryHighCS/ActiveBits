@@ -1355,3 +1355,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/resonance/client/student/SharedResponseFeed.tsx`; `activities/resonance/client/student/SharedResponseFeed.test.tsx`
 - Follow-up action: If MCQ reveal styling evolves further, keep the student summary card and the aggregate option breakdown distinct so correctness feedback and class distribution do not compete for the same space.
 - Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | uploaded report parsing
+- Discovery: `parseResonanceReport` must validate each uploaded multiple-choice option as an object with non-empty string `id` and `text`, plus optional boolean `isCorrect`, instead of only checking that `options` is an array.
+- Why it matters: Resonance report JSON is user-supplied. Accepting arrays like `[null, 1]` lets malformed uploads reach the report viewer, which then dereferences `opt.id` and `opt.text` and can crash instead of rejecting the file cleanly.
+- Evidence: `activities/resonance/client/tools/ResonanceReport.tsx`; `activities/resonance/client/tools/ResonanceReport.test.ts`
+- Follow-up action: When new uploadable report fields are added, validate every nested structure that render paths dereference rather than relying on top-level array checks alone.
+- Owner: Codex

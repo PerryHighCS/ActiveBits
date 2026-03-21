@@ -22,6 +22,14 @@ function isValidReportResponse(response: unknown): boolean {
   return isValidReportAnswer(response.answer)
 }
 
+function isValidReportOption(option: unknown): boolean {
+  if (!isRecord(option)) return false
+  if (typeof option.id !== 'string' || option.id.trim().length === 0) return false
+  if (typeof option.text !== 'string' || option.text.trim().length === 0) return false
+  if (option.isCorrect !== undefined && typeof option.isCorrect !== 'boolean') return false
+  return true
+}
+
 /**
  * Performs a structural validation of a value parsed from an uploaded JSON
  * file and returns it typed as ResonanceReport, or null if it is malformed.
@@ -45,7 +53,10 @@ export function parseResonanceReport(raw: unknown): ResonanceReport | null {
     if (typeof q.id !== 'string' || q.id.trim().length === 0) return null
     if (q.type !== 'free-response' && q.type !== 'multiple-choice') return null
     if (typeof q.text !== 'string') return null
-    if (q.type === 'multiple-choice' && !Array.isArray(q.options)) return null
+    if (q.type === 'multiple-choice') {
+      if (!Array.isArray(q.options)) return null
+      if (!q.options.every(isValidReportOption)) return null
+    }
     if (!Array.isArray(entry.responses)) return null
     if (!entry.responses.every(isValidReportResponse)) return null
     const reveal = entry.reveal === undefined ? null : entry.reveal
