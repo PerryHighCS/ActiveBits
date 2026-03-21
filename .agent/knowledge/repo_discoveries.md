@@ -31,6 +31,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-21
+- Area: tooling | devcontainer
+- Discovery: This devcontainer uses `/usr/local/bin/git` with exec path `/usr/local/libexec/git-core`, while `git-subtree` is installed at `/usr/lib/git-core/git-subtree`, so `.devcontainer/setup-dev.sh` now symlinks `git-subtree` into the active exec path during bootstrap.
+- Why it matters: Without the symlink, `git subtree` fails unless contributors manually override `GIT_EXEC_PATH`, which makes subtree-based skill maintenance brittle for both humans and agents.
+- Evidence: `.devcontainer/setup-dev.sh`; `git --exec-path`; `/usr/lib/git-core/git-subtree`
+- Follow-up action: If the base image or git installation changes later, re-check whether the symlink workaround is still needed or whether the exec path is already consistent.
+- Owner: Codex
+
+- Date: 2026-03-21
 - Area: activities | resonance | validation
 - Discovery: `parseGimkitCSV(...)` should enforce the documented maximum of three incorrect answers per row and then run parsed questions back through `validateQuestionSet(...)` before returning.
 - Why it matters: This keeps CSV import behavior aligned with the rest of Resonance question validation, avoids producing out-of-bounds MCQs from extra trailing columns, and ensures imported rows get the same trimming and structural guarantees as JSON uploads.

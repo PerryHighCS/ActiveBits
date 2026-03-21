@@ -69,6 +69,21 @@ if command -v npm >/dev/null 2>&1; then
   fi
 fi
 
+# Some images install `git` under /usr/local while `git-subtree` lives under
+# /usr/lib/git-core. Mirror the helper into git's exec path so `git subtree`
+# works without extra environment overrides in this devcontainer.
+git_exec_path="$(git --exec-path 2>/dev/null || true)"
+if [ -n "$git_exec_path" ] \
+  && [ ! -x "$git_exec_path/git-subtree" ] \
+  && [ -x /usr/lib/git-core/git-subtree ]; then
+  echo "⏳ Linking git-subtree into git exec path..."
+  if run_with_available_privilege ln -sf /usr/lib/git-core/git-subtree "$git_exec_path/git-subtree"; then
+    echo "✅ git-subtree linked into $git_exec_path"
+  else
+    echo "⚠️ Unable to link git-subtree into $git_exec_path"
+  fi
+fi
+
 # Fallback: some devcontainer feature combinations can skip installRg.
 if ! command -v rg >/dev/null 2>&1; then
   echo "⏳ ripgrep (rg) not found; installing..."
