@@ -31,6 +31,7 @@ import { resolveStudentActiveEmbeddedInstanceKeyWithFallback } from './SyncDeckS
 import { resolveStudentOverlayEmbeddedInstanceKey } from './SyncDeckStudent.js'
 import { resolveStudentOverlayNavigationBaseIndices } from './SyncDeckStudent.js'
 import { shouldRecoverEmbeddedEntryParticipantToken } from './SyncDeckStudent.js'
+import { persistRecoveredEmbeddedEntryParticipantToken } from './SyncDeckStudent.js'
 import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent.js'
 import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
@@ -1380,6 +1381,49 @@ void test('extractNavigationCapabilitiesFromStateMessage reads four-direction na
     canGoUp: false,
     canGoDown: true,
   })
+})
+
+void test('persistRecoveredEmbeddedEntryParticipantToken returns true when handoff is persisted', () => {
+  const storage = new Map<string, string>()
+  const sessionStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      storage.set(key, value)
+    },
+    removeItem: (key: string) => {
+      storage.delete(key)
+    },
+  }
+
+  const persisted = persistRecoveredEmbeddedEntryParticipantToken({
+    sessionStorage,
+    activityId: 'resonance',
+    childSessionId: 'child-1',
+    entryParticipantToken: 'entry-token-1',
+  })
+
+  assert.equal(persisted, true)
+})
+
+void test('persistRecoveredEmbeddedEntryParticipantToken returns false when storage write fails', () => {
+  const sessionStorage = {
+    getItem: (_key: string) => null,
+    setItem: (_key: string, _value: string) => {
+      throw new Error('quota exceeded')
+    },
+    removeItem: (_key: string) => {
+      // no-op
+    },
+  }
+
+  const persisted = persistRecoveredEmbeddedEntryParticipantToken({
+    sessionStorage,
+    activityId: 'resonance',
+    childSessionId: 'child-1',
+    entryParticipantToken: 'entry-token-1',
+  })
+
+  assert.equal(persisted, false)
 })
 
 void test('extractNavigationCapabilitiesFromStateMessage normalizes canGoLeft/canGoRight aliases from ready payload', () => {

@@ -36,6 +36,8 @@ export function parseResonanceReport(raw: unknown): ResonanceReport | null {
   if (!Array.isArray(raw.students)) return null
   if (!Array.isArray(raw.questions)) return null
 
+  const normalizedQuestions: ResonanceReport['questions'] = []
+
   for (const entry of raw.questions) {
     if (!isRecord(entry)) return null
     const q = entry.question
@@ -46,11 +48,20 @@ export function parseResonanceReport(raw: unknown): ResonanceReport | null {
     if (q.type === 'multiple-choice' && !Array.isArray(q.options)) return null
     if (!Array.isArray(entry.responses)) return null
     if (!entry.responses.every(isValidReportResponse)) return null
-    if (entry.reveal !== null && !isRecord(entry.reveal)) return null
+    const reveal = entry.reveal === undefined ? null : entry.reveal
+    if (reveal !== null && !isRecord(reveal)) return null
     if (!isRecord(entry.annotations)) return null
+
+    normalizedQuestions.push({
+      ...entry,
+      reveal,
+    } as ResonanceReport['questions'][number])
   }
 
-  return raw as unknown as ResonanceReport
+  return {
+    ...raw,
+    questions: normalizedQuestions,
+  } as ResonanceReport
 }
 
 interface Props {

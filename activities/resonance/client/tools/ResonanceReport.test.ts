@@ -119,6 +119,17 @@ void test('parseResonanceReport rejects a question entry with non-null non-objec
   assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
 })
 
+void test('parseResonanceReport normalizes missing reveal to null', () => {
+  const withoutReveal = {
+    question: { id: 'q1', type: 'free-response', text: 'Q?', order: 0 },
+    responses: [],
+    annotations: {},
+  }
+  const parsed = parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [withoutReveal] })
+  assert.ok(parsed !== null)
+  assert.equal(parsed.questions[0]?.reveal, null)
+})
+
 void test('parseResonanceReport rejects a question entry with non-object annotations', () => {
   const bad = { ...((MINIMAL_QUESTION as Record<string, unknown>)), annotations: [] }
   assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)

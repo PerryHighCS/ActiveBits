@@ -1,4 +1,4 @@
-import React, { Fragment, Suspense, type ComponentType } from 'react'
+import { Fragment, Suspense, type ComponentType, type ReactElement } from 'react'
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
 import SessionRouter from './components/common/SessionRouter'
 import SessionEnded from './components/common/SessionEnded'
@@ -55,7 +55,7 @@ function AppShell() {
             const UtilComponent = activity.UtilComponent
             if (!ManagerComponent && !UtilComponent) return null
 
-            const routes: React.ReactElement[] = []
+            const routes: ReactElement[] = []
 
             if (ManagerComponent) {
               const TypedManagerComponent = ManagerComponent as AnyComponent

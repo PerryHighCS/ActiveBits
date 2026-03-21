@@ -1507,6 +1507,21 @@ export function shouldRecoverEmbeddedEntryParticipantToken(params: {
   )
 }
 
+export function persistRecoveredEmbeddedEntryParticipantToken(params: {
+  sessionStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+  activityId: string
+  childSessionId: string
+  entryParticipantToken: string
+}): boolean {
+  const storageKey = buildSessionEntryParticipantStorageKey(params.activityId, params.childSessionId)
+  persistEntryParticipantToken(
+    params.sessionStorage,
+    storageKey,
+    params.entryParticipantToken,
+  )
+  return hasValidEntryParticipantHandoffStorageValue(params.sessionStorage, storageKey)
+}
+
 export function extractNavigationCapabilitiesFromStateMessage(rawPayload: unknown): NavigationCapabilities | null {
   if (rawPayload == null || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
     return null
@@ -2719,11 +2734,16 @@ const SyncDeckStudent: FC = () => {
           : ''
 
         if (!abortController.signal.aborted && childSessionId && entryParticipantToken) {
-          persistEntryParticipantToken(
-            window.sessionStorage,
-            buildSessionEntryParticipantStorageKey(activeEmbeddedActivityId, childSessionId),
+          const persisted = persistRecoveredEmbeddedEntryParticipantToken({
+            sessionStorage: window.sessionStorage,
+            activityId: activeEmbeddedActivityId,
+            childSessionId,
             entryParticipantToken,
-          )
+          })
+          if (persisted) {
+            return
+          }
+          recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
           return
         }
 
