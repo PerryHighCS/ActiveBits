@@ -13,7 +13,7 @@ This folder contains shared agent skills vendored into ActiveBits.
 - Push updates back upstream with:
 
 ```bash
-GIT_EXEC_PATH=/usr/lib/git-core PATH=/usr/lib/git-core:$PATH git subtree push --prefix=skills/syncdeck syncdeck-agent-skills main
+git subtree push --prefix=skills/syncdeck syncdeck-agent-skills main
 ```
 
 ## Important
