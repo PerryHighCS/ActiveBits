@@ -23,6 +23,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-03-21
+- Area: docs | tooling | skills
+- Discovery: ActiveBits now consumes the shared SyncDeck skill as a git subtree at `skills/syncdeck`, with `syncdeck-agent-skills` configured as the upstream remote and subtree push performed from that path.
+- Why it matters: Future edits to the shared skill should happen in `skills/syncdeck` and be published with subtree push, rather than by maintaining a separate source copy in this repo.
+- Evidence: `skills/README.md`; `skills/syncdeck/SKILL.md`; git remote `syncdeck-agent-skills`
+- Follow-up action: If another shared skill is added, document its upstream remote and subtree path in `skills/README.md` so the edit/publish workflow stays discoverable.
+- Owner: Codex
+
+- Date: 2026-03-21
 - Area: activities | resonance | validation
 - Discovery: `parseGimkitCSV(...)` should enforce the documented maximum of three incorrect answers per row and then run parsed questions back through `validateQuestionSet(...)` before returning.
 - Why it matters: This keeps CSV import behavior aligned with the rest of Resonance question validation, avoids producing out-of-bounds MCQs from extra trailing columns, and ensures imported rows get the same trimming and structural guarantees as JSON uploads.
