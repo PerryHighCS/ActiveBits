@@ -16,7 +16,7 @@
     }
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh ${containerWorkspaceFolder} --privileged",
-  "postStartCommand": "bash .devcontainer/setup-dev.sh || echo 'Setup script failed'",
+  "postStartCommand": "bash .devcontainer/post-start-bootstrap.sh ${containerWorkspaceFolder} --privileged && bash .devcontainer/setup-dev.sh || echo 'Setup script failed'",
   "forwardPorts": [
     6379,
     3000,
