@@ -7,7 +7,7 @@ this checklist should be modified as plans change with new or updated goals.
 
 ## Scope
 
-Future planning is currently organized into three tracks:
+Future planning is currently organized into four tracks:
 1. Student position enhancements
 2. Embedded activities
 3. Gamification

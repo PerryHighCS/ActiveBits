@@ -3,11 +3,20 @@ set -euo pipefail
 
 workspace_folder="${1:-.}"
 
+# --privileged: opt-in flag passed only by the privileged devcontainer variant.
+# Enables broad (ALL) sudo expansion needed by nested sandbox tooling.
+privileged_mode=0
+for _arg in "${@:2}"; do
+  [[ "$_arg" == "--privileged" ]] && privileged_mode=1
+done
+
 echo "🛠️ Running ActiveBits post-create setup..."
 
-# Ensure the runtime user can sudo as any user without a password.
-# The common-utils feature configures NOPASSWD for root only; we extend it to ALL.
-if command -v sudo >/dev/null 2>&1 && id -un | grep -Eq '^(node|vscode)$'; then
+# In the privileged devcontainer, extend NOPASSWD sudo to all target users so
+# nested sandbox tooling can switch identities at will.  In the standard
+# devcontainer this expansion is unnecessary: common-utils already grants
+# NOPASSWD for root, which is sufficient for the git-ownership fix below.
+if [[ "$privileged_mode" -eq 1 ]] && command -v sudo >/dev/null 2>&1 && id -un | grep -Eq '^(node|vscode)$'; then
   sudoers_file="/etc/sudoers.d/$(id -un)-all-users"
   if [ ! -f "$sudoers_file" ]; then
     echo "$(id -un) ALL=(ALL) NOPASSWD: ALL" | sudo SUDO_EDITOR='tee' visudo -f "$sudoers_file" >/dev/null || \
