@@ -225,15 +225,13 @@ void test(
       }),
     )
 
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 600))
+    await waitFor(() => {
+      const initialRequestSignal = firstRequestSignal
+      if (initialRequestSignal === null) {
+        throw new Error('Expected the initial prepare request to start')
+      }
+      assert.equal((initialRequestSignal as AbortSignalLike).aborted, false)
     })
-
-    const initialRequestSignal = firstRequestSignal
-    if (initialRequestSignal === null) {
-      throw new Error('Expected the initial prepare request to start')
-    }
-    assert.equal((initialRequestSignal as AbortSignalLike).aborted, false)
 
     rendered.rerender(
       React.createElement(ResonancePersistentLinkBuilder, {
