@@ -61,6 +61,10 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
           },
         ],
       },
+      manageDashboard: {
+        customPersistentLinkBuilder: true,
+        persistentLinkBuilderMode: 'shared-submit',
+      },
       embeddedRuntime: {
         instructorGated: 'runtime',
       },
@@ -104,6 +108,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
     responseField: 'instructorPasscode',
   })
   assert.deepEqual(parsed.createSessionBootstrap?.historyState, ['instructorPasscode'])
+  assert.equal(parsed.manageDashboard?.persistentLinkBuilderMode, 'shared-submit')
   assert.equal(parsed.embeddedRuntime?.instructorGated, 'runtime')
   assert.equal(parsed.reportEndpoint, '/api/syncdeck/s1/report')
   assert.deepEqual(parsed.utilities, [
@@ -234,6 +239,30 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
         'bad-config-4',
       ),
     /utilities\[0\].*action/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad6',
+          name: 'Bad6',
+          description: 'desc',
+          color: 'teal',
+          standaloneEntry: {
+            enabled: false,
+            supportsDirectPath: false,
+            supportsPermalink: false,
+            showOnHome: false,
+          },
+          manageDashboard: {
+            customPersistentLinkBuilder: true,
+            persistentLinkBuilderMode: 'builder-only',
+          },
+        },
+        'bad-config-6',
+      ),
+    /persistentLinkBuilderMode/,
   )
 
   assert.throws(

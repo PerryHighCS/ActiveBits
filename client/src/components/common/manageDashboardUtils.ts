@@ -64,6 +64,22 @@ export interface ManageDashboardUtilityLike {
   description?: string
 }
 
+export function resolvePersistentLinkPreflightValue(
+  optionKey: string | null | undefined,
+  selection: Record<string, string>,
+): string {
+  return optionKey != null && typeof selection[optionKey] === 'string' ? selection[optionKey].trim() : ''
+}
+
+export function isPersistentLinkPreflightVerified(
+  optionKey: string | null | undefined,
+  selection: Record<string, string>,
+  validatedValue: string | null,
+): boolean {
+  const normalizedValue = resolvePersistentLinkPreflightValue(optionKey, selection)
+  return optionKey == null || (normalizedValue.length > 0 && validatedValue === normalizedValue)
+}
+
 const CREATE_SESSION_BOOTSTRAP_TTL_MS = 5 * 60 * 1000
 const MAX_CREATE_SESSION_BOOTSTRAP_PAYLOADS = 100
 const CREATE_SESSION_BOOTSTRAP_SESSION_STORAGE_PREFIX = 'create-session-bootstrap:'

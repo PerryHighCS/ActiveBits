@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ComponentType } from 'react'
+import {
+  isPersistentLinkPreflightVerified,
+  resolvePersistentLinkPreflightValue,
+} from './manageDashboardUtils'
 import { resolveCustomPersistentLinkBuilder } from './manageDashboardViewUtils'
 
 function DummyBuilder(): null {
@@ -34,4 +38,51 @@ void test('resolveCustomPersistentLinkBuilder returns activity-owned builder whe
   } satisfies NonNullable<DashboardActivityLike>
 
   assert.equal(resolveCustomPersistentLinkBuilder(activity), DummyBuilder)
+})
+
+void test('resolvePersistentLinkPreflightValue trims the configured option value only', () => {
+  assert.equal(
+    resolvePersistentLinkPreflightValue('presentationUrl', {
+      presentationUrl: '  https://slides.example/deck  ',
+      ignored: ' value ',
+    }),
+    'https://slides.example/deck',
+  )
+  assert.equal(resolvePersistentLinkPreflightValue('missing', { presentationUrl: 'https://slides.example/deck' }), '')
+  assert.equal(resolvePersistentLinkPreflightValue(null, { presentationUrl: 'https://slides.example/deck' }), '')
+})
+
+void test('isPersistentLinkPreflightVerified requires the configured option to match the last verified value', () => {
+  assert.equal(
+    isPersistentLinkPreflightVerified(
+      'presentationUrl',
+      { presentationUrl: 'https://slides.example/deck' },
+      'https://slides.example/deck',
+    ),
+    true,
+  )
+  assert.equal(
+    isPersistentLinkPreflightVerified(
+      'presentationUrl',
+      { presentationUrl: 'https://slides.example/updated' },
+      'https://slides.example/deck',
+    ),
+    false,
+  )
+  assert.equal(
+    isPersistentLinkPreflightVerified(
+      'presentationUrl',
+      { presentationUrl: '' },
+      null,
+    ),
+    false,
+  )
+  assert.equal(
+    isPersistentLinkPreflightVerified(
+      null,
+      { presentationUrl: 'https://slides.example/deck' },
+      null,
+    ),
+    true,
+  )
 })

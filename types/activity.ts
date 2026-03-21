@@ -59,7 +59,10 @@ export interface ActivityPersistentLinkBuilderEditState {
 
 export interface ActivityPersistentLinkBuilderProps {
   activityId: string
+  selectedOptions?: Record<string, string>
   editState?: ActivityPersistentLinkBuilderEditState | null
+  onSelectedOptionsChange?(selectedOptions: Record<string, string>): void
+  onSubmitReadinessChange?(canSubmit: boolean): void
   onCreated(result: ActivityPersistentLinkBuildResult): void | Promise<void>
 }
 
@@ -197,6 +200,7 @@ export interface ActivityConfig {
   createSessionBootstrap?: ActivityCreateSessionBootstrapConfig
   manageDashboard?: {
     customPersistentLinkBuilder?: boolean
+    persistentLinkBuilderMode?: 'activity-submit' | 'shared-submit'
   }
   manageLayout?: {
     expandShell?: boolean
