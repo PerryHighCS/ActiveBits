@@ -152,8 +152,15 @@ Reveal.initialize({
   plugins: [RevealIframeSync].filter(Boolean),
   iframeSync: {
     deckId: 'my-unique-deck-id',
+    // IMPORTANT:
+    // - In development you may be tempted to use hostOrigin: '*' and allowedOrigins: ['*'].
+    //   That disables origin validation and MUST NOT be used in production decks.
+    // - In production, always restrict to the exact host origin(s) that are allowed to
+    //   control this deck via postMessage.
     hostOrigin: '*',
-    allowedOrigins: ['*'],
+    allowedOrigins: [
+      '*',
+    ],
   },
 });
 </script>
