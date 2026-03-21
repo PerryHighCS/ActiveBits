@@ -135,11 +135,7 @@ interface RenderedScreenLike {
 }
 
 async function openPermanentLinkModal(rendered: RenderedScreenLike) {
-  const activityHeading = rendered.getByRole('heading', { name: 'Test Activity' })
-  const activityCard = activityHeading.parentElement?.parentElement
-  assert.ok(activityCard)
-  const { within } = await import('@testing-library/react')
-  within(activityCard).getByRole('button', { name: 'Create Permanent Link' }).click()
+  rendered.getByRole('button', { name: 'Create Permanent Link' }).click()
 }
 
 function installFetchStub() {
@@ -252,7 +248,7 @@ void test('isPersistentLinkPreflightVerified matches the submit-time preflight r
   )
 })
 
-void test('ManageDashboard generic preflight option requires verify before submit and invalidates on change', async () => {
+void test('ManageDashboard generic preflight option requires verify before submit and invalidates on change', { concurrency: false }, async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const fetchStub = installFetchStub()
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
@@ -308,7 +304,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
   }
 })
 
-void test('ManageDashboard custom builders must signal readiness before submit proceeds', async () => {
+void test('ManageDashboard custom builders must signal readiness before submit proceeds', { concurrency: false }, async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const fetchStub = installFetchStub()
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
