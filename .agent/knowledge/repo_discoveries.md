@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-21
+- Area: docs | tooling | skills
+- Discovery: Shared Codex skills are easiest to reuse across repos when the exported repo keeps a plain `skills/<skill-name>/...` tree and pushes repo-specific instructions into local overlay docs instead of modifying the vendored shared skill directly.
+- Why it matters: This keeps subtree updates reviewable, avoids merge drift in vendored skill files, and gives agents a stable read order of shared base skill first and local overrides second.
+- Evidence: `skills/slidedeck/SKILL.md`; `skills/slidedeck/references/EMBEDDED_ACTIVITIES.md`
+- Follow-up action: When this skill is published to its own repo, keep consuming-repo specifics in a sibling local override file rather than editing the vendored subtree copy.
+- Owner: Codex
+
+- Date: 2026-03-21
 - Area: activities | resonance | validation
 - Discovery: `parseGimkitCSV(...)` should enforce the documented maximum of three incorrect answers per row and then run parsed questions back through `validateQuestionSet(...)` before returning.
 - Why it matters: This keeps CSV import behavior aligned with the rest of Resonance question validation, avoids producing out-of-bounds MCQs from extra trailing columns, and ensures imported rows get the same trimming and structural guarantees as JSON uploads.
