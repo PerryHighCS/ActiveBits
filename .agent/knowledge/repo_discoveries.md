@@ -22,6 +22,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: If private feedback later needs timestamps or read/unread state, extend `reviewedResponses` directly instead of overloading the public `reveals` list.
 - Owner: Codex
 
+- Date: 2026-03-20
+- Area: activities | syncdeck | gamification-planning
+- Discovery: SyncDeck already has a strong parent/child embedded-session foundation, including parent-owned child lifecycle, persisted `embeddedLaunch.selectedOptions`, child-session parent linkage, and host-to-activity `activebits-embedded` `syncContext` messaging. It does not yet have a generic reverse child-to-parent telemetry contract for embedded activities to report points or other aggregate progress back to the parent SyncDeck session.
+- Why it matters: Gamification and cross-activity aggregation should extend the existing parent-owned SyncDeck session model rather than introducing activity-specific ad hoc callbacks. A parent-owned score ledger plus a small generic child score-ingest contract will fit the current architecture better than trying to make SyncDeck understand each child activity's internal session schema.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `client/src/components/common/embeddedLaunchBootstrap.ts`; `.agent/plans/syncdeck-gamification-plan.md`
+- Follow-up action: Implement SyncDeck gamification as an additive parent-session contract first, then roll one embedded activity onto that contract before expanding to more activities.
+- Owner: Codex
+
 - Date: 2026-03-19
 - Area: activities
 - Discovery: The Resonance plan was updated to align with the current `ActivityConfig` schema and dashboard conventions: use `manageDashboard.customPersistentLinkBuilder`, `createSessionBootstrap.sessionStorage`, and activity-owned report/download flows instead of proposing a new shared `reporting` config or repo-wide report contract up front.

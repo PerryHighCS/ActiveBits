@@ -7,10 +7,11 @@ this checklist should be modified as plans change with new or updated goals.
 
 ## Scope
 
-Future planning is currently organized into three tracks:
+Future planning is currently organized into four tracks:
 1. Student position enhancements
 2. Embedded activities
-3. Chalkboard evolution
+3. Gamification
+4. Chalkboard evolution
 
 ---
 
@@ -85,7 +86,30 @@ Tracked in `syncdeck-checklist.md` under "Embedded activities".
 
 ---
 
-## 3) Chalkboard Evolution
+## 3) Gamification
+
+Detailed plan: `.agent/plans/syncdeck-gamification-plan.md`
+
+### Goals
+- Add a parent-owned point ledger for SyncDeck sessions.
+- Accumulate points across slides and embedded child activities.
+- Show point progress in SyncDeck UI and celebrate class progress with a leaderboard.
+
+### Planned Work
+- Parent-owned gamification state in SyncDeck session data.
+- Host-observable scoring for slide views with duplicate suppression.
+- Generic child-activity score contribution contract back to SyncDeck.
+- Header score display and reuse of the existing manager student list panel for score UI.
+- Optional leaderboard end-slide/activity after the shared contract is proven.
+
+### Notes
+- SyncDeck already has host-to-activity `syncContext`, but there is no generic reverse child-to-parent score telemetry contract yet.
+- The authoritative points ledger should stay on the parent SyncDeck session, not in child activity sessions.
+- Build the parent score ledger first, then add one reference embedded activity as the first score publisher.
+
+---
+
+## 4) Chalkboard Evolution
 
 ### Goals
 - Move from basic controls to richer collaborative chalkboard behavior.
