@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useState, type ComponentType, type FormEvent } from 'react'
+import { Suspense, useCallback, useEffect, useId, useState, type ComponentType, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { activities, runActivityDeepLinkPreflight } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
@@ -178,6 +178,7 @@ function renderPersistentEntryPolicyControl(
 
 export default function ManageDashboard() {
   const navigate = useNavigate()
+  const teacherCodeInputId = useId()
   const [showPersistentModal, setShowPersistentModal] = useState(false)
   const [selectedActivity, setSelectedActivity] = useState<DashboardActivity | null>(null)
   const [editingPersistentSession, setEditingPersistentSession] = useState<PersistentSession | null>(null)
@@ -579,8 +580,9 @@ export default function ManageDashboard() {
       </div>
 
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+        <label htmlFor={teacherCodeInputId} className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
         <input
+          id={teacherCodeInputId}
           type="text"
           value={teacherCode}
           onChange={(event) => setTeacherCode(event.target.value)}
@@ -651,8 +653,9 @@ export default function ManageDashboard() {
       </div>
 
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+        <label htmlFor={teacherCodeInputId} className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
         <input
+          id={teacherCodeInputId}
           type="text"
           value={teacherCode}
           onChange={(event) => setTeacherCode(event.target.value)}
