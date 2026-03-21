@@ -51,8 +51,20 @@ function draftToQuestion(draft: QuestionDraft, id: string, order: number): Quest
   return { ...base, type: 'multiple-choice', options }
 }
 
-function newOptionId(): string {
-  return `opt_${Math.random().toString(36).slice(2, 8)}`
+export function newOptionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `opt_${crypto.randomUUID()}`
+  }
+
+  return `opt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+export function newQuestionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `q_${crypto.randomUUID()}`
+  }
+
+  return `q_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }
 
 function defaultOptions(): OptionDraft[] {
@@ -152,7 +164,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
 
   function handleSave() {
     if (!canSave) return
-    const id = editTarget?.id ?? `q_${Date.now().toString(36)}`
+    const id = editTarget?.id ?? newQuestionId()
     const order = editTarget?.order ?? nextOrder
     onSave(draftToQuestion(draft, id, order))
   }

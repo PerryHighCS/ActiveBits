@@ -1387,3 +1387,19 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/resonance/client/tools/ResonanceToolShell.tsx`; `activities/resonance/client/tools/ResonanceToolShell.test.ts`; `activities/resonance/shared/validation.ts`
 - Follow-up action: Keep JSON export as the full-fidelity path for mixed question sets, and keep `parseGimkitCSV(...)` aligned with the same single-correct-MCQ-only contract rather than accepting broader Resonance-specific semantics.
 - Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | client-side option ids
+- Discovery: Resonance question-builder option ids should use `crypto.randomUUID()` when available, with a timestamp-plus-random fallback, instead of a short `Math.random()` slice.
+- Why it matters: Option ids participate in MCQ selection, correctness lookup, and validation. Short random slices can collide within a draft and create duplicate option ids that break selection or reveal behavior before validation catches them.
+- Evidence: `activities/resonance/client/tools/QuestionBuilder.tsx`; `activities/resonance/client/tools/QuestionBuilder.test.ts`
+- Follow-up action: Keep future client-generated Resonance question ids and option ids on the same UUID-first pattern used elsewhere in the repo unless a deterministic id source is available.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | syncdeck | embedded entry recovery
+- Discovery: SyncDeck embedded entry-token recovery should only persist a recovered token when the response `childSessionId` exactly matches the currently active embedded child session.
+- Why it matters: Recovery requests can resolve late or stale. Persisting a returned token under a different child-session key can poison another embedded activity’s handoff storage and block the right session from retrying cleanly.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep future embedded recovery responses keyed and validated against the currently active child session before writing session storage or marking a recovery attempt successful.
+- Owner: Codex
