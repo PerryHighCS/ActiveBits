@@ -14,7 +14,7 @@ Track durable local-development and devcontainer behavior that future contributo
 ## Entries
 
 - Date: 2026-03-21
-- Change: Hardened privileged bootstrap sudo behavior: `.devcontainer/post-start-bootstrap.sh` now grants `(ALL) NOPASSWD: ALL` only when explicitly enabled via `ACTIVEBITS_ENABLE_BROAD_SUDO=1` or marker file `.devcontainer/privileged/enable-broad-sudo.local`. Without opt-in, no broad sudo rule is created, and any stale broad rule is removed.
+- Change: Hardened privileged bootstrap sudo behavior: `.devcontainer/post-start-bootstrap.sh` now grants `(ALL) NOPASSWD: ALL` only when explicitly enabled via `ACTIVEBITS_ENABLE_BROAD_SUDO=1` or marker file `.devcontainer/privileged/enable-broad-sudo.local`. Without opt-in, no broad sudo rule is created, and any stale broad rule is removed. When enabling, the script now writes to a root-owned `0440` temporary drop-in under `/etc/sudoers.d`, validates with `visudo -cf`, and only then moves it into place.
 - Risk: Nested sandbox tooling that genuinely requires arbitrary-user launches may fail until opt-in is set; this is an intentional secure default.
 - Evidence: `.devcontainer/post-start-bootstrap.sh`
 - Follow-up action: If a durable minimal command allowlist for sandbox tooling is identified, replace broad sudo opt-in with that command allowlist.
