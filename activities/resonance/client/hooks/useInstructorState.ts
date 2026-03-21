@@ -39,6 +39,26 @@ function isValidInstructorProgress(value: unknown): value is ResponseProgress {
     && (value.status === 'idle' || value.status === 'working' || value.status === 'submitted')
 }
 
+function isValidInstructorReveal(value: unknown): value is QuestionReveal {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  if (typeof value.questionId !== 'string' || value.questionId.trim().length === 0) {
+    return false
+  }
+
+  if (typeof value.sharedAt !== 'number' || !Number.isFinite(value.sharedAt)) {
+    return false
+  }
+
+  if (value.correctOptionIds !== null && (!Array.isArray(value.correctOptionIds) || value.correctOptionIds.some((entry) => typeof entry !== 'string'))) {
+    return false
+  }
+
+  return Array.isArray(value.sharedResponses)
+}
+
 /** Full instructor snapshot returned by GET /api/resonance/:sessionId/responses */
 export interface InstructorStateSnapshot extends InstructorSessionSnapshot {
   responseOrderOverrides: Record<string, string[]>
@@ -99,7 +119,9 @@ export function normalizeInstructorStateSnapshot(
     responses,
     progress,
     annotations: isRecord(data.annotations) ? data.annotations : {},
-    reveals: Array.isArray(data.reveals) ? data.reveals : [],
+    reveals: Array.isArray(data.reveals)
+      ? data.reveals.filter(isValidInstructorReveal)
+      : [],
     responseOrderOverrides:
       isRecord(data.responseOrderOverrides)
         ? data.responseOrderOverrides

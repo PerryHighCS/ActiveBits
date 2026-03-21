@@ -65,3 +65,50 @@ void test('normalizeStudentSessionSnapshot ignores malformed fallback activeQues
   assert.deepEqual(result.activeQuestions, [])
   assert.deepEqual(result.activeQuestionIds, [])
 })
+
+void test('normalizeStudentSessionSnapshot filters malformed reveals and reviewedResponses entries', () => {
+  const result = normalizeStudentSessionSnapshot(({
+    sessionId: 'session-1',
+    reveals: [
+      {
+        questionId: 'q1',
+        sharedAt: 100,
+        correctOptionIds: ['a'],
+        sharedResponses: [
+          {
+            id: 'shared-1',
+            questionId: 'q1',
+            answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+            sharedAt: 100,
+            instructorEmoji: null,
+            reactions: {},
+          },
+        ],
+      },
+      {
+        questionId: 'q2',
+        sharedAt: 'later',
+        correctOptionIds: ['b'],
+        sharedResponses: [],
+      },
+    ],
+    reviewedResponses: [
+      {
+        question: { id: 'q3', type: 'free-response', text: 'Prompt', order: 0 },
+        answer: { type: 'free-response', text: 'answer' },
+        submittedAt: 200,
+        instructorEmoji: 'star',
+      },
+      {
+        question: null,
+        answer: { type: 'free-response', text: 'bad' },
+        submittedAt: 300,
+        instructorEmoji: 'star',
+      },
+    ],
+  }) as unknown as Partial<StudentSessionSnapshot>)
+
+  assert.ok(result)
+  assert.deepEqual(result.reveals.map((reveal) => reveal.questionId), ['q1'])
+  assert.deepEqual(result.reviewedResponses.map((response) => response.question.id), ['q3'])
+})

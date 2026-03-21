@@ -105,3 +105,33 @@ void test('normalizeInstructorStateSnapshot filters malformed responses and prog
     ],
   )
 })
+
+void test('normalizeInstructorStateSnapshot filters malformed reveal entries', () => {
+  const result = normalizeInstructorStateSnapshot(({
+    sessionId: 'session-1',
+    reveals: [
+      null,
+      {
+        questionId: 'q1',
+        sharedAt: 123,
+        correctOptionIds: ['a'],
+        sharedResponses: [],
+      },
+      {
+        questionId: 'q2',
+        sharedAt: 'later',
+        correctOptionIds: ['b'],
+        sharedResponses: [],
+      },
+      {
+        questionId: 'q3',
+        sharedAt: 456,
+        correctOptionIds: 5,
+        sharedResponses: [],
+      },
+    ],
+  }) as unknown as Partial<InstructorStateSnapshot>)
+
+  assert.ok(result)
+  assert.deepEqual(result.reveals.map((reveal) => reveal.questionId), ['q1'])
+})

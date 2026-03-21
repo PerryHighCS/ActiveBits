@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { StudentMCQOption, StudentQuestion, StudentSessionSnapshot } from '../../shared/types.js'
+import type {
+  AnswerPayload,
+  QuestionReveal,
+  ReviewedResponse,
+  SharedResponse,
+  StudentMCQOption,
+  StudentQuestion,
+  StudentSessionSnapshot,
+} from '../../shared/types.js'
 
 const FALLBACK_POLL_INTERVAL_MS = 15_000
 
@@ -83,6 +91,136 @@ function normalizeStudentQuestion(value: unknown): StudentQuestion | null {
   }
 }
 
+function normalizeAnswerPayload(value: unknown): AnswerPayload | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  if (value.type === 'free-response') {
+    if (typeof value.text !== 'string') {
+      return null
+    }
+
+    return {
+      type: 'free-response',
+      text: value.text,
+    }
+  }
+
+  if (value.type === 'multiple-choice') {
+    if (typeof value.selectedOptionId !== 'string' || value.selectedOptionId.trim().length === 0) {
+      return null
+    }
+
+    return {
+      type: 'multiple-choice',
+      selectedOptionId: value.selectedOptionId,
+    }
+  }
+
+  return null
+}
+
+function normalizeSharedResponse(value: unknown): SharedResponse | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  if (typeof value.id !== 'string' || value.id.trim().length === 0) {
+    return null
+  }
+
+  if (typeof value.questionId !== 'string' || value.questionId.trim().length === 0) {
+    return null
+  }
+
+  if (typeof value.sharedAt !== 'number' || !Number.isFinite(value.sharedAt)) {
+    return null
+  }
+
+  const answer = normalizeAnswerPayload(value.answer)
+  if (!answer) {
+    return null
+  }
+
+  return {
+    id: value.id,
+    questionId: value.questionId,
+    answer,
+    sharedAt: value.sharedAt,
+    instructorEmoji: typeof value.instructorEmoji === 'string' ? value.instructorEmoji : null,
+    reactions: isRecord(value.reactions) ? (value.reactions as SharedResponse['reactions']) : {},
+    ...(typeof value.isOwnResponse === 'boolean' ? { isOwnResponse: value.isOwnResponse } : {}),
+    ...(typeof value.viewerReaction === 'string' || value.viewerReaction === null
+      ? { viewerReaction: value.viewerReaction }
+      : {}),
+  }
+}
+
+function normalizeQuestionReveal(value: unknown): QuestionReveal | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  if (typeof value.questionId !== 'string' || value.questionId.trim().length === 0) {
+    return null
+  }
+
+  if (typeof value.sharedAt !== 'number' || !Number.isFinite(value.sharedAt)) {
+    return null
+  }
+
+  if (value.correctOptionIds !== null && (!Array.isArray(value.correctOptionIds) || value.correctOptionIds.some((entry) => typeof entry !== 'string'))) {
+    return null
+  }
+
+  if (!Array.isArray(value.sharedResponses)) {
+    return null
+  }
+
+  const sharedResponses = value.sharedResponses
+    .map(normalizeSharedResponse)
+    .filter((response): response is SharedResponse => response !== null)
+
+  if (sharedResponses.length !== value.sharedResponses.length) {
+    return null
+  }
+
+  return {
+    questionId: value.questionId,
+    sharedAt: value.sharedAt,
+    correctOptionIds: value.correctOptionIds as string[] | null,
+    sharedResponses,
+  }
+}
+
+function normalizeReviewedResponse(value: unknown): ReviewedResponse | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const question = normalizeStudentQuestion(value.question)
+  const answer = normalizeAnswerPayload(value.answer)
+  if (!question || !answer) {
+    return null
+  }
+
+  if (typeof value.submittedAt !== 'number' || !Number.isFinite(value.submittedAt)) {
+    return null
+  }
+
+  if (typeof value.instructorEmoji !== 'string') {
+    return null
+  }
+
+  return {
+    question,
+    answer,
+    submittedAt: value.submittedAt,
+    instructorEmoji: value.instructorEmoji,
+  }
+}
+
 export function normalizeStudentSessionSnapshot(
   data: Partial<StudentSessionSnapshot> | null | undefined,
 ): StudentSessionSnapshot | null {
@@ -118,8 +256,16 @@ export function normalizeStudentSessionSnapshot(
       typeof data.activeQuestionDeadlineAt === 'number' && Number.isFinite(data.activeQuestionDeadlineAt)
         ? data.activeQuestionDeadlineAt
         : null,
-    reveals: Array.isArray(data.reveals) ? data.reveals : [],
-    reviewedResponses: Array.isArray(data.reviewedResponses) ? data.reviewedResponses : [],
+    reveals: Array.isArray(data.reveals)
+      ? data.reveals
+        .map(normalizeQuestionReveal)
+        .filter((reveal): reveal is QuestionReveal => reveal !== null)
+      : [],
+    reviewedResponses: Array.isArray(data.reviewedResponses)
+      ? data.reviewedResponses
+        .map(normalizeReviewedResponse)
+        .filter((response): response is ReviewedResponse => response !== null)
+      : [],
     submittedAnswers:
       isRecord(data.submittedAnswers)
         ? (data.submittedAnswers as StudentSessionSnapshot['submittedAnswers'])

@@ -1406,16 +1406,16 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-03-21
 - Area: activities | resonance | student snapshot normalization
-- Discovery: `normalizeStudentSessionSnapshot(...)` should filter `activeQuestions`, `activeQuestion`, and `revealedQuestions` through a minimal student-question validator before exposing them to the student UI.
-- Why it matters: REST and websocket payloads are defensive boundaries. Passing through malformed entries like `null` or objects without a string `id` lets `ResonanceStudent` and reveal views crash when they dereference `question.id`.
+- Discovery: `normalizeStudentSessionSnapshot(...)` should filter `activeQuestions`, `activeQuestion`, `revealedQuestions`, `reveals`, and `reviewedResponses` through minimal validators before exposing them to the student UI.
+- Why it matters: REST and websocket payloads are defensive boundaries. Passing through malformed entries like `null`, reveals without numeric `sharedAt`, or reviewed responses without a valid `question` lets `ResonanceStudent` and reveal views crash when they sort or dereference nested fields.
 - Evidence: `activities/resonance/client/hooks/useResonanceSession.ts`; `activities/resonance/client/hooks/useResonanceSession.test.ts`; `activities/resonance/client/student/ResonanceStudent.tsx`
 - Follow-up action: When student snapshot consumers start dereferencing more nested question fields, extend the normalizer at the same time rather than pushing new guards into each consumer.
 - Owner: Codex
 
 - Date: 2026-03-21
 - Area: activities | resonance | instructor snapshot normalization
-- Discovery: `normalizeInstructorStateSnapshot(...)` should filter `responses` and `progress` entries to minimally valid instructor shapes before deriving submitted progress.
-- Why it matters: The instructor REST/websocket snapshot is also a defensive boundary. A malformed `responses` item like `null` or an object missing `studentId` can otherwise throw during `submittedProgress` derivation and take down the instructor view.
+- Discovery: `normalizeInstructorStateSnapshot(...)` should filter `responses`, `progress`, and `reveals` entries to minimally valid instructor shapes before deriving submitted progress or exposing reveal data to the manager UI.
+- Why it matters: The instructor REST/websocket snapshot is also a defensive boundary. Malformed `responses` can throw during `submittedProgress` derivation, and malformed `reveals` can crash manager views that dereference `reveal.questionId` or assume reveal entries are objects.
 - Evidence: `activities/resonance/client/hooks/useInstructorState.ts`; `activities/resonance/client/hooks/useInstructorState.test.ts`
 - Follow-up action: Keep derived instructor state built only from validated snapshot entries, and extend the normalizer whenever new consumer code starts dereferencing additional nested fields.
 - Owner: Codex
