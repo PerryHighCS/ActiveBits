@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useId, useState, type ComponentType, type FormEvent } from 'react'
+import { Suspense, useCallback, useEffect, useId, useState, type ComponentType, type SyntheticEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { activities, runActivityDeepLinkPreflight } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
@@ -326,9 +326,7 @@ export default function ManageDashboard() {
     [refreshPersistentSessions],
   )
 
-  const createPersistentLink = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
-
+  const submitPersistentLink = async (): Promise<void> => {
     if (!selectedActivity) {
       setError('No activity selected')
       return
@@ -428,6 +426,11 @@ export default function ManageDashboard() {
       setIsCreating(false)
       setIsPreflightChecking(false)
     }
+  }
+
+  const handlePersistentLinkSubmit = (event: SyntheticEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    void submitPersistentLink()
   }
 
   const verifyPersistentLinkPreflight = async (): Promise<void> => {
@@ -629,7 +632,7 @@ export default function ManageDashboard() {
       <Button
         type="button"
         onClick={() => {
-          void createPersistentLink({ preventDefault() {} } as FormEvent<HTMLFormElement>)
+          void submitPersistentLink()
         }}
         disabled={isCreating || teacherCode.trim().length < 6 || hasPersistentOptionErrors || !customBuilderCanSubmit}
       >
@@ -639,7 +642,7 @@ export default function ManageDashboard() {
       </Button>
     </div>
   ) : (
-    <form onSubmit={createPersistentLink} className="flex flex-col gap-4">
+    <form onSubmit={handlePersistentLinkSubmit} className="flex flex-col gap-4">
       <p className="text-gray-700">
         Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL,
         they'll wait until you start the session with your teacher code.
