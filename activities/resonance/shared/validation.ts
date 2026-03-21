@@ -27,17 +27,17 @@ const MAX_QUESTION_SET_SIZE = 100
 // Question validation
 // ---------------------------------------------------------------------------
 
-function validateMCQOption(raw: unknown, index: number): { option: MCQOption; error: string | null } {
+function validateMCQOption(raw: unknown, index: number): { option: MCQOption | null; error: string | null } {
   if (!isRecord(raw)) {
-    return { option: null as unknown as MCQOption, error: `option[${index}] must be an object` }
+    return { option: null, error: `option[${index}] must be an object` }
   }
   const id = normalizeId(raw.id)
   if (!id) {
-    return { option: null as unknown as MCQOption, error: `option[${index}].id must be a non-empty alphanumeric, underscore, or hyphen string` }
+    return { option: null, error: `option[${index}].id must be a non-empty alphanumeric, underscore, or hyphen string` }
   }
   const text = normalizeString(raw.text, 500)
   if (!text) {
-    return { option: null as unknown as MCQOption, error: `option[${index}].text must be non-empty` }
+    return { option: null, error: `option[${index}].text must be non-empty` }
   }
   const isCorrect =
     raw.isCorrect === undefined || raw.isCorrect === null
@@ -48,7 +48,7 @@ function validateMCQOption(raw: unknown, index: number): { option: MCQOption; er
 
   if (isCorrect === null) {
     return {
-      option: null as unknown as MCQOption,
+      option: null,
       error: `option[${index}].isCorrect must be boolean when provided`,
     }
   }
@@ -72,7 +72,7 @@ function validateMCQQuestion(raw: Record<string, unknown>, id: string, text: str
   const options: MCQOption[] = []
   for (let i = 0; i < raw.options.length; i++) {
     const { option, error } = validateMCQOption(raw.options[i], i)
-    if (error) {
+    if (error || option === null) {
       errors.push(`question "${id}": ${error}`)
       return null
     }
