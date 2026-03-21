@@ -46,12 +46,6 @@ export default function SyncDeckPersistentLinkBuilder({
     setPreflightWarning(null)
   }, [controlledPresentationUrl, editState?.hash])
 
-  useEffect(() => {
-    onSelectedOptionsChange?.({
-      presentationUrl,
-    })
-  }, [onSelectedOptionsChange, presentationUrl])
-
   const normalizedPresentationUrl = presentationUrl.trim()
   const presentationUrlError =
     normalizedPresentationUrl.length === 0
@@ -102,7 +96,11 @@ export default function SyncDeckPersistentLinkBuilder({
   const handlePresentationUrlChange = (event: ChangeEvent<HTMLInputElement>): void => {
     const nextValue = event.target.value
     setPresentationUrl(nextValue)
+    onSelectedOptionsChange?.({
+      presentationUrl: nextValue,
+    })
     if (nextValue.trim() !== preflightValidatedUrl) {
+      onSubmitReadinessChange?.(false)
       setPreflightValidatedUrl(null)
       setPreflightPreviewUrl(null)
       setPreflightWarning(null)

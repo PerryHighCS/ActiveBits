@@ -832,10 +832,6 @@ export default function setupResonanceRoutes(
       return
     }
 
-    console.info('[resonance] Persistent link options prepared', {
-      questionCount: prepared.questionCount,
-      sizeChars: prepared.sizeChars,
-    })
     res.json({ selectedOptions: prepared.selectedOptions })
   })
 

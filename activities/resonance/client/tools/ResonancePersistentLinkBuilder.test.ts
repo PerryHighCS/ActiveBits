@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as React from 'react'
 import { JSDOM } from 'jsdom'
-import { normalizeEditStateQuestions } from './ResonancePersistentLinkBuilder.js'
+import { clearPreparedResonanceLinkSelection, normalizeEditStateQuestions } from './ResonancePersistentLinkBuilder.js'
 
 ;(globalThis as { React?: typeof React }).React = React
 
@@ -75,6 +75,23 @@ void test('normalizeEditStateQuestions returns null for invalid question shapes'
 
 void test('normalizeEditStateQuestions returns null for empty arrays', () => {
   assert.equal(normalizeEditStateQuestions([]), null)
+})
+
+void test('clearPreparedResonanceLinkSelection immediately clears selectedOptions and submit readiness', () => {
+  const selectedOptionsSnapshots: Array<Record<string, string>> = []
+  const readinessChanges: boolean[] = []
+
+  clearPreparedResonanceLinkSelection(
+    (nextSelectedOptions) => {
+      selectedOptionsSnapshots.push(nextSelectedOptions)
+    },
+    (canSubmit) => {
+      readinessChanges.push(canSubmit)
+    },
+  )
+
+  assert.deepEqual(selectedOptionsSnapshots, [{}])
+  assert.deepEqual(readinessChanges, [false])
 })
 
 void test('ResonancePersistentLinkBuilder prepares selectedOptions and submit readiness for shared submit', async () => {

@@ -22,6 +22,14 @@ export function normalizeEditStateQuestions(rawSavedQuestions: unknown): Questio
   return questions
 }
 
+export function clearPreparedResonanceLinkSelection(
+  onSelectedOptionsChange?: (selectedOptions: Record<string, string>) => void,
+  onSubmitReadinessChange?: (canSubmit: boolean) => void,
+): void {
+  onSelectedOptionsChange?.({})
+  onSubmitReadinessChange?.(false)
+}
+
 /**
  * Activity-owned persistent-link builder for Resonance.
  *
@@ -60,16 +68,24 @@ export default function ResonancePersistentLinkBuilder({
   const normalizedTeacherCode = teacherCode.trim()
   const canPrepare = normalizedTeacherCode.length >= 6 && questions !== null && questions.length > 0
 
+  const invalidatePreparedState = (): void => {
+    setPreparing(false)
+    setPrepareError(null)
+    setPreparedHash(null)
+    clearPreparedResonanceLinkSelection(onSelectedOptionsChange, onSubmitReadinessChange)
+  }
+
+  const handleQuestionsChanged = (nextQuestions: Question[] | null): void => {
+    invalidatePreparedState()
+    setQuestions(nextQuestions)
+  }
+
   useEffect(() => {
     let cancelled = false
     const abortController = new AbortController()
 
     if (!canPrepare || questions === null) {
-      setPreparing(false)
-      setPrepareError(null)
-      setPreparedHash(null)
-      onSelectedOptionsChange?.({})
-      onSubmitReadinessChange?.(false)
+      invalidatePreparedState()
       return () => {
         cancelled = true
       }
@@ -144,7 +160,7 @@ export default function ResonancePersistentLinkBuilder({
           Question set
         </p>
         <ResonanceQuestionSetUploader
-          onQuestionsChanged={setQuestions}
+          onQuestionsChanged={handleQuestionsChanged}
           initialQuestions={savedQuestions}
         />
       </div>
