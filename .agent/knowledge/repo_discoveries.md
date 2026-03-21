@@ -15,6 +15,30 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-21
+- Area: docs | tooling | skills
+- Discovery: Shared Codex skills are easiest to reuse across repos when the exported repo keeps a plain `skills/<skill-name>/...` tree and pushes repo-specific instructions into local overlay docs instead of modifying the vendored shared skill directly.
+- Why it matters: This keeps subtree updates reviewable, avoids merge drift in vendored skill files, and gives agents a stable read order of shared base skill first and local overrides second.
+- Evidence: `skills/syncdeck/SKILL.md`; `skills/syncdeck/references/EMBEDDED_ACTIVITIES.md`
+- Follow-up action: When this skill is published to its own repo, keep consuming-repo specifics in a sibling local override file rather than editing the vendored subtree copy.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: docs | tooling | skills
+- Discovery: ActiveBits now consumes the shared SyncDeck skill as a git subtree at `skills/syncdeck`, with `syncdeck-agent-skills` configured as the upstream remote and subtree push performed from that path.
+- Why it matters: Future edits to the shared skill should happen in `skills/syncdeck` and be published with subtree push, rather than by maintaining a separate source copy in this repo.
+- Evidence: `skills/README.md`; `skills/syncdeck/SKILL.md`; git remote `syncdeck-agent-skills`
+- Follow-up action: If another shared skill is added, document its upstream remote and subtree path in `skills/README.md` so the edit/publish workflow stays discoverable.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: tooling | devcontainer
+- Discovery: This devcontainer uses `/usr/local/bin/git` with exec path `/usr/local/libexec/git-core`, while `git-subtree` is installed at `/usr/lib/git-core/git-subtree`, so `.devcontainer/setup-dev.sh` now symlinks `git-subtree` into the active exec path during bootstrap.
+- Why it matters: Without the symlink, `git subtree` fails unless contributors manually override `GIT_EXEC_PATH`, which makes subtree-based skill maintenance brittle for both humans and agents.
+- Evidence: `.devcontainer/setup-dev.sh`; `git --exec-path`; `/usr/lib/git-core/git-subtree`
+- Follow-up action: If the base image or git installation changes later, re-check whether the symlink workaround is still needed or whether the exec path is already consistent.
+- Owner: Codex
+
+- Date: 2026-03-21
 - Area: activities | resonance | validation
 - Discovery: `parseGimkitCSV(...)` should enforce the documented maximum of three incorrect answers per row and then run parsed questions back through `validateQuestionSet(...)` before returning.
 - Why it matters: This keeps CSV import behavior aligned with the rest of Resonance question validation, avoids producing out-of-bounds MCQs from extra trailing columns, and ensures imported rows get the same trimming and structural guarantees as JSON uploads.
