@@ -2688,7 +2688,7 @@ const SyncDeckStudent: FC = () => {
     }
     recoveredEmbeddedEntryKeysRef.current.add(recoveryKey)
 
-    let isCancelled = false
+    const abortController = new AbortController()
 
     void (async () => {
       try {
@@ -2702,10 +2702,11 @@ const SyncDeckStudent: FC = () => {
             childSessionId: activeEmbeddedChildSessionId,
             studentId: registeredStudentId,
           }),
+          signal: abortController.signal,
         })
 
         if (!response.ok) {
-          if (!isCancelled) {
+          if (!abortController.signal.aborted) {
             recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
           }
           return
@@ -2717,7 +2718,7 @@ const SyncDeckStudent: FC = () => {
           ? payload.entryParticipantToken.trim()
           : ''
 
-        if (!isCancelled && childSessionId && entryParticipantToken) {
+        if (!abortController.signal.aborted && childSessionId && entryParticipantToken) {
           persistEntryParticipantToken(
             window.sessionStorage,
             buildSessionEntryParticipantStorageKey(activeEmbeddedActivityId, childSessionId),
@@ -2726,18 +2727,19 @@ const SyncDeckStudent: FC = () => {
           return
         }
 
-        if (!isCancelled) {
+        if (!abortController.signal.aborted) {
           recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
         }
       } catch {
-        if (!isCancelled) {
+        if (!abortController.signal.aborted) {
           recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
         }
       }
     })()
 
     return () => {
-      isCancelled = true
+      abortController.abort()
+      recoveredEmbeddedEntryKeysRef.current.delete(recoveryKey)
     }
   }, [
     activeEmbeddedActivityId,

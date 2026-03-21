@@ -16,6 +16,7 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto'
 import { deflateSync, inflateSync } from 'node:zlib'
 import { resolvePersistentSessionSecret } from 'activebits-server/core/persistentSessions.js'
+import { validateQuestionSet } from '../shared/validation.js'
 import type { Question } from '../shared/types.js'
 
 const ALGORITHM = 'aes-256-gcm'
@@ -30,6 +31,7 @@ const KEY_DERIVATION_CONTEXT = 'resonance-question-encryption-v1'
  */
 export const MAX_ENCODED_PAYLOAD_CHARS = 3500
 const MAX_DECODED_PAYLOAD_BYTES = Math.ceil((MAX_ENCODED_PAYLOAD_CHARS * 3) / 4)
+const MAX_INFLATED_JSON_BYTES = 64 * 1024
 
 function deriveKey(): Buffer {
   const secret = resolvePersistentSessionSecret()
@@ -103,8 +105,11 @@ export function decryptQuestions(encoded: string, hash: string): Question[] | nu
     decipher.setAAD(Buffer.from(hash, 'utf8'))
 
     const compressed = Buffer.concat([decipher.update(ciphertext), decipher.final()])
-    const json = inflateSync(compressed).toString('utf8')
-    return JSON.parse(json) as Question[]
+    const json = inflateSync(compressed, { maxOutputLength: MAX_INFLATED_JSON_BYTES }).toString('utf8')
+    const parsed: unknown = JSON.parse(json)
+    const { questions, errors } = validateQuestionSet(parsed)
+    if (errors.length > 0) return null
+    return questions
   } catch {
     return null
   }

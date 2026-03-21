@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-03-21
+- Area: resonance persistent-link question payload decryption
+- Threat or risk: Authenticated but attacker-controlled compressed payloads can trigger very large inflation output (zip-bomb style), causing high memory pressure during `inflateSync` before JSON parsing.
+- Control or mitigation: `decryptQuestions` now enforces a hard inflate output ceiling via `inflateSync(..., { maxOutputLength })` and returns `null` when decompression exceeds the cap.
+- Residual risk: The cap constrains worst-case inflate memory, but decryption/inflate CPU cost for malformed high-entropy inputs is still non-zero; rate limiting remains a broader transport-layer concern.
+- Validation (test/review/path): `activities/resonance/server/questionCrypto.ts`; `activities/resonance/server/questionCrypto.test.ts`.
+- Follow-up action: If payload complexity grows (for example image support), re-evaluate the output cap and consider streaming decompression for stricter incremental control.
+- Owner: Codex
+
 - Date: 2026-03-14
 - Area: devcontainer privilege model
 - Threat or risk: Granting `SYS_ADMIN` and disabling AppArmor/seccomp in the default devcontainer materially increases local container privilege and can surprise contributors or CI-like environments that expect the repo's base dev setup to stay constrained.

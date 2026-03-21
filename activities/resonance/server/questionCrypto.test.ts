@@ -106,3 +106,39 @@ void test('[TEST] large question set that exceeds size limit produces an oversiz
   const { sizeChars } = encryptQuestions(bigQuestions, hash)
   assert.ok(sizeChars > MAX_ENCODED_PAYLOAD_CHARS, `expected oversized payload (got ${sizeChars}, limit is ${MAX_ENCODED_PAYLOAD_CHARS})`)
 })
+
+void test('decryptQuestions strips extra fields through validateQuestionSet normalization', () => {
+  // Prove that validateQuestionSet runs on the parsed payload, not just JSON.parse.
+  // encryptQuestions accepts Question[], but at runtime extra fields survive JSON.stringify.
+  const hash = 'abc123def456'
+  const questionsWithExtra = [{ ...SAMPLE_QUESTIONS[0], unknownField: 'should-be-stripped' }]
+  const { encoded } = encryptQuestions(questionsWithExtra as unknown as Question[], hash)
+  const result = decryptQuestions(encoded, hash)
+  assert.ok(result !== null, 'valid questions with extra fields should still decrypt')
+  assert.ok(!('unknownField' in result[0]!), 'validateQuestionSet must strip unknown fields')
+})
+
+void test('decryptQuestions returns null when decrypted JSON has questions with invalid structure', () => {
+  // Prove that validateQuestionSet rejects structurally invalid question data.
+  const hash = 'abc123def456'
+  const badQuestions = [{ id: 'q1', type: 'not-a-valid-type', text: 'test', order: 0 }]
+  const { encoded } = encryptQuestions(badQuestions as unknown as Question[], hash)
+  assert.equal(decryptQuestions(encoded, hash), null, 'invalid question type must be rejected by validateQuestionSet')
+})
+
+void test('[TEST] decryptQuestions rejects compressed payloads that inflate beyond safe JSON size', () => {
+  const hash = 'abc123def456'
+  const bombLikeQuestions: Question[] = [
+    {
+      id: 'q1',
+      type: 'free-response',
+      // Highly-compressible content keeps encoded length small while inflating large.
+      text: 'A'.repeat(120_000),
+      order: 0,
+    },
+  ]
+
+  const { encoded, sizeChars } = encryptQuestions(bombLikeQuestions, hash)
+  assert.ok(sizeChars <= MAX_ENCODED_PAYLOAD_CHARS, 'encoded payload should still fit URL-size guard')
+  assert.equal(decryptQuestions(encoded, hash), null, 'decryption must fail if inflate output exceeds hard cap')
+})

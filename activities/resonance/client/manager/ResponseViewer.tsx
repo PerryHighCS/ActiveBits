@@ -319,6 +319,7 @@ function FreeResponseList({
     })),
   ]
   const displayItemIds = displayItems.map((item) => item.id)
+  const displayItemsById = new Map(displayItems.map((item) => [item.id, item]))
   const [displayOrderIds, setDisplayOrderIds] = useState<string[]>(displayItemIds)
   const activeReactionSummaryByResponseId = new Map<string, Record<string, number>>(
     (activeReveal?.sharedResponses ?? []).map((sharedResponse: QuestionReveal['sharedResponses'][number]) => [sharedResponse.id, sharedResponse.reactions]),
@@ -349,7 +350,7 @@ function FreeResponseList({
   return (
     <div className="flex h-full min-h-[24rem] flex-col gap-2">
       {displayOrderIds.map((itemId, idx) => {
-        const item = displayItems.find((entry) => entry.id === itemId)
+        const item = displayItemsById.get(itemId)
         if (!item) {
           return null
         }

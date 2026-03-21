@@ -1,6 +1,40 @@
 import { useRef, useState } from 'react'
 import type { ResonanceReport } from '../../shared/reportTypes.js'
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v != null && typeof v === 'object' && !Array.isArray(v)
+}
+
+/**
+ * Performs a structural validation of a value parsed from an uploaded JSON
+ * file and returns it typed as ResonanceReport, or null if it is malformed.
+ * Only the shape needed to safely render the report is checked; extra fields
+ * are tolerated so older/future versions remain loadable.
+ */
+export function parseResonanceReport(raw: unknown): ResonanceReport | null {
+  if (!isRecord(raw)) return null
+  if (raw.version !== 1) return null
+  if (typeof raw.sessionId !== 'string' || raw.sessionId.trim().length === 0) return null
+  if (typeof raw.exportedAt !== 'number') return null
+  if (!Array.isArray(raw.students)) return null
+  if (!Array.isArray(raw.questions)) return null
+
+  for (const entry of raw.questions) {
+    if (!isRecord(entry)) return null
+    const q = entry.question
+    if (!isRecord(q)) return null
+    if (typeof q.id !== 'string' || q.id.trim().length === 0) return null
+    if (q.type !== 'free-response' && q.type !== 'multiple-choice') return null
+    if (typeof q.text !== 'string') return null
+    if (q.type === 'multiple-choice' && !Array.isArray(q.options)) return null
+    if (!Array.isArray(entry.responses)) return null
+    if (entry.reveal !== null && !isRecord(entry.reveal)) return null
+    if (!isRecord(entry.annotations)) return null
+  }
+
+  return raw as unknown as ResonanceReport
+}
+
 interface Props {
   report: ResonanceReport
 }
@@ -133,12 +167,12 @@ export default function ResonanceReport() {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        const parsed = JSON.parse(String(e.target?.result)) as ResonanceReport
-        if (parsed.version !== 1 || !parsed.sessionId) {
+        const report = parseResonanceReport(JSON.parse(String(e.target?.result)))
+        if (report === null) {
           setError('Not a valid Resonance report file')
           return
         }
-        setReport(parsed)
+        setReport(report)
         setError(null)
       } catch {
         setError('Could not parse report file')
