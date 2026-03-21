@@ -158,9 +158,9 @@ Reveal.initialize({
     //   That disables origin validation and MUST NOT be used in production decks.
     // - In production, always restrict to the exact host origin(s) that are allowed to
     //   control this deck via postMessage.
-    hostOrigin: '*',
+    hostOrigin: 'https://bits.mycode.run',
     allowedOrigins: [
-      '*',
+      'https://bits.mycode.run',
     ],
   },
 });
