@@ -2,6 +2,8 @@
 
 Use this file when a Reveal deck should launch or coordinate interactive activities from within SyncDeck.
 
+For concrete activity payload formats, also read `ACTIVITY_PAYLOADS.md` in this folder. That reference captures the current deck-facing launch payload shapes used for activities such as Resonance, Video Sync, Algorithm Demo, Gallery Walk, Raffle, and simple embedded test harnesses.
+
 ## Core Principle
 
 The deck declares launch intent. The host owns lifecycle.
@@ -94,6 +96,7 @@ Payload guidance:
 - include `instanceKey` when known
 - include source indices when helpful for host-side debugging or fallback derivation
 - include only the activity launch options the child actually needs
+- keep payloads aligned with the activity-specific examples in `ACTIVITY_PAYLOADS.md`
 
 ## Child Host Contract
 

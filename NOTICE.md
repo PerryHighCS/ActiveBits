@@ -1,4 +1,4 @@
-# Slidedeck Skill Attribution
+# SyncDeck Skill Attribution
 
 This skill includes material derived from work by Zara Zhang and continues the same broad Reveal.js authoring lineage as the earlier `frontend-slides` style of skill, adapted here for SyncDeck-hosted Reveal presentations, storyboard integration, iframe sync, and embedded activity launch patterns.
 

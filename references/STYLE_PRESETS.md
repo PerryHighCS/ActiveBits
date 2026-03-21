@@ -47,7 +47,7 @@ body,
   --accent: #00ffcc;
 
   --font-display: 'Sora', sans-serif;
-  --font-body: 'Inter', sans-serif;
+  --font-body: 'IBM Plex Sans', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
 
   --title: 100px;
