@@ -94,7 +94,10 @@ void test('clearPreparedResonanceLinkSelection immediately clears selectedOption
   assert.deepEqual(readinessChanges, [false])
 })
 
-void test('ResonancePersistentLinkBuilder prepares selectedOptions and submit readiness for shared submit', async () => {
+void test(
+  'ResonancePersistentLinkBuilder prepares selectedOptions and submit readiness for shared submit',
+  { concurrency: false },
+  async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch
   const { act, render, waitFor } = await import('@testing-library/react')
@@ -158,9 +161,13 @@ void test('ResonancePersistentLinkBuilder prepares selectedOptions and submit re
     rendered?.unmount()
     restoreDomEnvironment()
   }
-})
+  },
+)
 
-void test('ResonancePersistentLinkBuilder aborts stale prepare requests when inputs change', async () => {
+void test(
+  'ResonancePersistentLinkBuilder aborts stale prepare requests when inputs change',
+  { concurrency: false },
+  async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch
   const { act, render, waitFor } = await import('@testing-library/react')
@@ -273,4 +280,5 @@ void test('ResonancePersistentLinkBuilder aborts stale prepare requests when inp
     rendered?.unmount()
     restoreDomEnvironment()
   }
-})
+  },
+)
