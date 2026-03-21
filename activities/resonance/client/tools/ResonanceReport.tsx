@@ -5,6 +5,23 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return v != null && typeof v === 'object' && !Array.isArray(v)
 }
 
+function isValidReportAnswer(answer: unknown): boolean {
+  if (!isRecord(answer)) return false
+  if (answer.type === 'free-response') {
+    return typeof answer.text === 'string'
+  }
+  if (answer.type === 'multiple-choice') {
+    return typeof answer.selectedOptionId === 'string'
+  }
+  return false
+}
+
+function isValidReportResponse(response: unknown): boolean {
+  if (!isRecord(response)) return false
+  if (typeof response.id !== 'string') return false
+  return isValidReportAnswer(response.answer)
+}
+
 /**
  * Performs a structural validation of a value parsed from an uploaded JSON
  * file and returns it typed as ResonanceReport, or null if it is malformed.
@@ -28,6 +45,7 @@ export function parseResonanceReport(raw: unknown): ResonanceReport | null {
     if (typeof q.text !== 'string') return null
     if (q.type === 'multiple-choice' && !Array.isArray(q.options)) return null
     if (!Array.isArray(entry.responses)) return null
+    if (!entry.responses.every(isValidReportResponse)) return null
     if (entry.reveal !== null && !isRecord(entry.reveal)) return null
     if (!isRecord(entry.annotations)) return null
   }

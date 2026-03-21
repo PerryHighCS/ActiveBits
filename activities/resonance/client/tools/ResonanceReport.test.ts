@@ -93,6 +93,27 @@ void test('parseResonanceReport rejects a question entry with non-array response
   assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
 })
 
+void test('parseResonanceReport rejects response entries that are not objects', () => {
+  const bad = { ...((MINIMAL_QUESTION as Record<string, unknown>)), responses: ['bad'] }
+  assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
+})
+
+void test('parseResonanceReport rejects response entries with malformed answer payloads', () => {
+  const bad = {
+    ...((MINIMAL_QUESTION as Record<string, unknown>)),
+    responses: [{ id: 'r1', answer: { type: 'free-response' } }],
+  }
+  assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
+})
+
+void test('parseResonanceReport rejects response entries with unsupported answer type', () => {
+  const bad = {
+    ...((MINIMAL_QUESTION as Record<string, unknown>)),
+    responses: [{ id: 'r1', answer: { type: 'essay', text: 'x' } }],
+  }
+  assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
+})
+
 void test('parseResonanceReport rejects a question entry with non-null non-object reveal', () => {
   const bad = { ...((MINIMAL_QUESTION as Record<string, unknown>)), reveal: 'yes' }
   assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)

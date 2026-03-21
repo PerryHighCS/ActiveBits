@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { SubmitEvent } from 'react'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
 import type { Question } from '../../shared/types.js'
+import { validateQuestionSet } from '../../shared/validation.js'
 import { cacheResonanceQuestionDraft, loadResonanceQuestionDraft } from './resonanceQuestionDraftCache.js'
 import ResonanceQuestionSetUploader from './ResonanceQuestionSetUploader.js'
 
@@ -10,6 +11,12 @@ interface GenerateLinkResponse {
   url?: string
   error?: string
   details?: string[]
+}
+
+export function normalizeEditStateQuestions(rawSavedQuestions: unknown): Question[] | null {
+  const { questions, errors } = validateQuestionSet(rawSavedQuestions)
+  if (errors.length > 0 || questions.length === 0) return null
+  return questions
 }
 
 /**
@@ -30,10 +37,7 @@ export default function ResonancePersistentLinkBuilder({
 }: ActivityPersistentLinkBuilderProps) {
   // Backward compatibility for legacy builder state while preferring local cache.
   const rawSavedQuestions = editState?.selectedOptions?.questions
-  const savedQuestionsFromEditState: Question[] | null =
-    Array.isArray(rawSavedQuestions) && rawSavedQuestions.length > 0
-      ? (rawSavedQuestions as Question[])
-      : null
+  const savedQuestionsFromEditState = normalizeEditStateQuestions(rawSavedQuestions)
   const cachedQuestions = editState?.hash ? loadResonanceQuestionDraft(editState.hash) : null
   const savedQuestions = savedQuestionsFromEditState ?? cachedQuestions
 
