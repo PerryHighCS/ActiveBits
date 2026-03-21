@@ -16,6 +16,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-03-21
+- Surface: file import | internal module | activity interface
+- Contract: `parseGimkitCSV(...)` must always return `Question` objects that have passed through `validateQuestionSet(...)`, even when some CSV rows produced row-level parse errors. The parser should merge row errors with set-validation errors instead of returning pre-normalized successful rows early.
+- Compatibility constraints: Resonance uploader flows treat `errors.length > 0 && questions.length > 0` as a partial-import state, so preserving normalized successful rows is important for UX. Successful CSV rows must receive the same trimming, length caps, and structural filtering as JSON imports and decrypted question sets.
+- Validation rules: Gimkit row-level requirements still apply first (required prompt/correct answer, 1-3 incorrect answers, max 100 parsed rows). After accumulation, all surviving rows run through `validateQuestionSet(...)`; any resulting validation errors are appended to the returned `errors`.
+- Evidence (schema/tests/path): `activities/resonance/shared/validation.ts`; `activities/resonance/shared/validation.test.ts`; `activities/resonance/client/tools/ResonanceQuestionSetUploader.tsx`
+- Follow-up action: If CSV import ever needs row-specific set-validation messages, preserve this normalization-first contract and add row metadata to the accumulated errors rather than bypassing `validateQuestionSet(...)`.
+- Owner: Codex
+
+- Date: 2026-03-21
 - Surface: REST | client normalizer | activity interface
 - Contract: Resonance student `/state` reveal payloads may include `QuestionReveal.viewerResponse` with `{ answer, submittedAt, instructorEmoji, isShared }`, and the client-side `normalizeStudentSessionSnapshot` path must preserve that object when each field validates successfully.
 - Compatibility constraints: `viewerResponse` is optional and may be `null`, but when present it is the only student-safe source for "Your response" summary and correct/incorrect reveal UI in `SharedResponseFeed`. Dropping it in normalization is a behavior regression even when `sharedResponses` still render. `sharedResponses[*].reactions` is also rendered directly, so the client normalizer must not trust arbitrary transport values there.

@@ -268,11 +268,15 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
     errors.push('CSV contained no valid questions')
   }
 
-  if (errors.length > 0) {
-    return { questions, errors }
+  if (questions.length === 0) {
+    return { questions: [], errors }
   }
 
-  return validateQuestionSet(questions)
+  const validated = validateQuestionSet(questions)
+  return {
+    questions: validated.questions,
+    errors: [...errors, ...validated.errors],
+  }
 }
 
 function splitCSVLines(content: string): string[] {

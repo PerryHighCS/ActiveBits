@@ -138,3 +138,33 @@ void test('parseGimkitCSV returns normalized validated questions', () => {
     },
   ])
 })
+
+void test('parseGimkitCSV still normalizes valid rows when other rows have errors', () => {
+  const longPrompt = `  ${'A'.repeat(1005)}  `
+  const longCorrect = `  ${'B'.repeat(505)}  `
+  const longIncorrect = `  ${'C'.repeat(505)}  `
+  const csv = [
+    'Title',
+    '"Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"',
+    `"${longPrompt}","${longCorrect}","${longIncorrect}"`,
+    '"Missing correct","","Wrong","",""',
+  ].join('\n')
+
+  const result = parseGimkitCSV(csv)
+
+  assert.deepEqual(result.errors, [
+    'Row 4: Gimkit CSV requires a correct answer for multiple-choice questions',
+  ])
+  assert.deepEqual(result.questions, [
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'A'.repeat(1000),
+      order: 0,
+      options: [
+        { id: 'q1_c', text: 'B'.repeat(500), isCorrect: true },
+        { id: 'q1_i1', text: 'C'.repeat(500) },
+      ],
+    },
+  ])
+})
