@@ -78,8 +78,8 @@ const testActivity: ActivityRegistryEntry = {
 }
 
 const testActivityRegistryHooks = {
-  activities: [testActivity],
-  runActivityDeepLinkPreflight: async (
+  activityRegistry: [testActivity],
+  runDeepLinkPreflight: async (
     activityId: string,
     preflight: { optionKey: string },
     rawValue: string,
@@ -92,9 +92,6 @@ const testActivityRegistryHooks = {
     }
   },
 }
-
-;(globalThis as { __ACTIVEBITS_TEST_ACTIVITY_REGISTRY__?: typeof testActivityRegistryHooks })
-  .__ACTIVEBITS_TEST_ACTIVITY_REGISTRY__ = testActivityRegistryHooks
 
 type DashboardActivityLike = Parameters<typeof resolveCustomPersistentLinkBuilder>[0]
 
@@ -132,6 +129,11 @@ interface RenderedScreenLike {
   getByRole: (role: string, options?: { name?: string | RegExp }) => HTMLElement
   getByLabelText: (text: string | RegExp) => HTMLElement
   queryByText: (text: string | RegExp) => HTMLElement | null
+}
+
+interface ManageDashboardTestProps {
+  activityRegistry: ActivityRegistryEntry[]
+  runDeepLinkPreflight: typeof testActivityRegistryHooks.runDeepLinkPreflight
 }
 
 async function openPermanentLinkModal(rendered: RenderedScreenLike) {
@@ -260,8 +262,16 @@ void test('ManageDashboard generic preflight option requires verify before submi
   try {
     const { fireEvent, render, waitFor } = await import('@testing-library/react')
     const { default: ManageDashboard } = await import('./ManageDashboard.js')
+    const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
     const rendered = render(
-      React.createElement(MemoryRouter, null, React.createElement(ManageDashboard)),
+      React.createElement(
+        MemoryRouter,
+        null,
+        React.createElement(TypedManageDashboard, {
+          activityRegistry: testActivityRegistryHooks.activityRegistry,
+          runDeepLinkPreflight: testActivityRegistryHooks.runDeepLinkPreflight,
+        }),
+      ),
     )
 
     await openPermanentLinkModal(rendered)
@@ -316,8 +326,16 @@ void test('ManageDashboard custom builders must signal readiness before submit p
   try {
     const { fireEvent, render, waitFor } = await import('@testing-library/react')
     const { default: ManageDashboard } = await import('./ManageDashboard.js')
+    const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
     const rendered = render(
-      React.createElement(MemoryRouter, null, React.createElement(ManageDashboard)),
+      React.createElement(
+        MemoryRouter,
+        null,
+        React.createElement(TypedManageDashboard, {
+          activityRegistry: testActivityRegistryHooks.activityRegistry,
+          runDeepLinkPreflight: testActivityRegistryHooks.runDeepLinkPreflight,
+        }),
+      ),
     )
 
     await openPermanentLinkModal(rendered)

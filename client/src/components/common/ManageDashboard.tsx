@@ -3,7 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { activities, runActivityDeepLinkPreflight } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
 import { useClipboard } from '@src/hooks/useClipboard'
-import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
+import type {
+  ActivityDeepLinkPreflightConfig,
+  ActivityDeepLinkPreflightResult,
+  ActivityPersistentLinkBuilderProps,
+  ActivityRegistryEntry,
+} from '../../../../types/activity.js'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import {
   buildPersistentLinkRequestBody,
@@ -34,7 +39,7 @@ import {
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 
-type DashboardActivity = (typeof activities)[number]
+type DashboardActivity = ActivityRegistryEntry
 const DEFAULT_PERSISTENT_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
 
 function supportsStandalonePermalink(activity: DashboardActivity): boolean {
@@ -131,18 +136,6 @@ function getWindowOrigin(): string {
   return typeof window !== 'undefined' ? window.location.origin : ''
 }
 
-function getActivityById(activityId: string): DashboardActivity | undefined {
-  return activities.find((activity) => activity.id === activityId)
-}
-
-function getActivityName(activityId: string): string {
-  return getActivityById(activityId)?.name || activityId
-}
-
-function getActivityColor(activityId: string): string {
-  return getActivityById(activityId)?.color || 'blue'
-}
-
 function renderPersistentEntryPolicyControl(
   persistentEntryPolicy: PersistentSessionEntryPolicy,
   persistentEntryPolicyOptions: readonly {
@@ -176,7 +169,19 @@ function renderPersistentEntryPolicyControl(
   )
 }
 
-export default function ManageDashboard() {
+interface ManageDashboardProps {
+  activityRegistry?: DashboardActivity[]
+  runDeepLinkPreflight?: (
+    activityId: string,
+    preflight: ActivityDeepLinkPreflightConfig,
+    rawValue: string,
+  ) => Promise<ActivityDeepLinkPreflightResult>
+}
+
+export default function ManageDashboard({
+  activityRegistry = activities,
+  runDeepLinkPreflight = runActivityDeepLinkPreflight,
+}: ManageDashboardProps = {}) {
   const navigate = useNavigate()
   const teacherCodeInputId = useId()
   const preflightRequestIdRef = useRef(0)
@@ -201,6 +206,27 @@ export default function ManageDashboard() {
   const [isPreflightChecking, setIsPreflightChecking] = useState(false)
   const [preflightWarning, setPreflightWarning] = useState<string | null>(null)
   const [preflightValidatedValue, setPreflightValidatedValue] = useState<string | null>(null)
+
+  const getActivityById = useCallback(
+    (activityId: string): DashboardActivity | undefined => {
+      return activityRegistry.find((activity) => activity.id === activityId)
+    },
+    [activityRegistry],
+  )
+
+  const getActivityName = useCallback(
+    (activityId: string): string => {
+      return getActivityById(activityId)?.name || activityId
+    },
+    [getActivityById],
+  )
+
+  const getActivityColor = useCallback(
+    (activityId: string): string => {
+      return getActivityById(activityId)?.color || 'blue'
+    },
+    [getActivityById],
+  )
 
   const refreshPersistentSessions = useCallback(async (): Promise<void> => {
     try {
@@ -469,7 +495,7 @@ export default function ManageDashboard() {
     setPreflightWarning(null)
 
     try {
-      const result = await runActivityDeepLinkPreflight(selectedActivity.id, preflight, normalizedValue)
+      const result = await runDeepLinkPreflight(selectedActivity.id, preflight, normalizedValue)
       if (requestId !== preflightRequestIdRef.current) {
         return
       }
@@ -820,7 +846,7 @@ export default function ManageDashboard() {
       <p className="text-center text-gray-600 mb-8">Choose an activity to start a new session</p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {activities.map((activity) => {
+        {activityRegistry.map((activity) => {
           const utilityLinks = (activity.utilities ?? []).filter((utility) => utility.surfaces?.includes('manage'))
 
           return (

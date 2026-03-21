@@ -30,24 +30,12 @@ interface ActivityClientModuleExports extends Record<string, unknown> {
 }
 
 type ActivityClientLoader = () => Promise<ActivityClientModuleExports>
-
-interface ActivityRegistryTestHooks {
-  activities?: ActivityRegistryEntry[]
-  runActivityDeepLinkPreflight?: (
-    activityId: string,
-    preflight: ActivityDeepLinkPreflightConfig,
-    rawValue: string,
-  ) => Promise<ActivityDeepLinkPreflightResult>
-}
-
-const activityRegistryTestHooks = (globalThis as { __ACTIVEBITS_TEST_ACTIVITY_REGISTRY__?: ActivityRegistryTestHooks })
-  .__ACTIVEBITS_TEST_ACTIVITY_REGISTRY__
-const configModules = activityRegistryTestHooks?.activities
-  ? {}
-  : import.meta.glob<ActivityConfigModule>('@activities/*/activity.config.{js,ts}', { eager: true })
-const clientModules = activityRegistryTestHooks?.activities
-  ? {}
-  : import.meta.glob<ActivityClientModuleExports>('@activities/*/client/index.{js,jsx,ts,tsx}')
+const configModules = typeof import.meta.glob === 'function'
+  ? import.meta.glob<ActivityConfigModule>('@activities/*/activity.config.{js,ts}', { eager: true })
+  : {}
+const clientModules = typeof import.meta.glob === 'function'
+  ? import.meta.glob<ActivityClientModuleExports>('@activities/*/client/index.{js,jsx,ts,tsx}')
+  : {}
 
 const CONFIG_EXTENSION_PRIORITY = ['.ts', '.js'] as const
 const CLIENT_EXTENSION_PRIORITY = ['.tsx', '.ts', '.jsx', '.js'] as const
@@ -157,7 +145,7 @@ function createLazyComponent(
   })
 }
 
-export const activities: ActivityRegistryEntry[] = activityRegistryTestHooks?.activities ?? preferredConfigEntries
+export const activities: ActivityRegistryEntry[] = preferredConfigEntries
   .map<ActivityRegistryEntry | null>(([, mod]) => {
     const cfg = mod.default
     if (!cfg?.id) {
@@ -245,10 +233,6 @@ export async function runActivityDeepLinkPreflight(
   preflight: ActivityDeepLinkPreflightConfig,
   rawValue: string,
 ): Promise<ActivityDeepLinkPreflightResult> {
-  if (typeof activityRegistryTestHooks?.runActivityDeepLinkPreflight === 'function') {
-    return await activityRegistryTestHooks.runActivityDeepLinkPreflight(activityId, preflight, rawValue)
-  }
-
   const clientLoader = findClientLoader(activityId)
   if (!clientLoader) {
     return { valid: false, warning: 'Validation is unavailable for this activity.' }
