@@ -622,7 +622,7 @@ export default function ManageDashboard() {
         />
       </Suspense>
 
-      {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
+      {error !== null && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
 
       <Button
         type="button"
@@ -679,7 +679,7 @@ export default function ManageDashboard() {
         )}
       </div>
 
-      {selectedActivity && Object.keys(selectedActivityOptions).length > 0 && (
+      {selectedActivity !== null && Object.keys(selectedActivityOptions).length > 0 && (
         <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
           <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
           <div className="flex flex-col gap-3">
@@ -756,12 +756,12 @@ export default function ManageDashboard() {
                     )}
                   </div>
                 )}
-                {persistentOptionErrors[key] && (
+                {persistentOptionErrors[key] !== undefined && (
                   <span className="block mt-1 text-xs text-red-600">{persistentOptionErrors[key]}</span>
                 )}
-                {!persistentOptionErrors[key] && selectedActivityPreflight?.optionKey === key && (persistentOptions[key] ?? '').trim().length > 0 && (
-                  <span className={`block mt-1 text-xs ${isPreflightVerified ? 'text-green-700' : 'text-gray-600'}`}>
-                    {isPreflightVerified
+                {persistentOptionErrors[key] === undefined && selectedActivityPreflight?.optionKey === key && (persistentOptions[key] ?? '').trim().length > 0 && (
+                  <span className={`block mt-1 text-xs ${isPreflightVerified === true ? 'text-green-700' : 'text-gray-600'}`}>
+                    {isPreflightVerified === true
                       ? 'Value verified. You can now create the link.'
                       : 'Verify this value before creating the link.'}
                   </span>
@@ -772,14 +772,14 @@ export default function ManageDashboard() {
         </div>
       )}
 
-      {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
-      {preflightWarning && (
+      {error !== null && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
+      {preflightWarning !== null && (
         <p className="text-amber-700 text-sm bg-amber-50 border border-amber-200 p-2 rounded">{preflightWarning}</p>
       )}
 
       <Button
         type="submit"
-        disabled={isCreating || isPreflightChecking || teacherCode.trim().length < 6 || hasPersistentOptionErrors || !isPreflightVerified}
+        disabled={isCreating || isPreflightChecking || teacherCode.trim().length < 6 || hasPersistentOptionErrors || isPreflightVerified === false}
       >
         {isCreating
           ? ((editingPersistentSession == null || createsNewLinkFromTeacherCodeChange) ? 'Creating...' : 'Saving...')
