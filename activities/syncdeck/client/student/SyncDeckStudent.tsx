@@ -117,6 +117,29 @@ interface SyncDeckEmbeddedEntryResponse {
   entryParticipantToken?: unknown
 }
 
+export function shouldPersistRecoveredEmbeddedEntryResponse(params: {
+  response: SyncDeckEmbeddedEntryResponse
+  activeEmbeddedChildSessionId: string
+}): { childSessionId: string; entryParticipantToken: string } | null {
+  const childSessionId = typeof params.response.childSessionId === 'string' ? params.response.childSessionId.trim() : ''
+  const entryParticipantToken = typeof params.response.entryParticipantToken === 'string'
+    ? params.response.entryParticipantToken.trim()
+    : ''
+
+  if (!childSessionId || !entryParticipantToken) {
+    return null
+  }
+
+  if (childSessionId !== params.activeEmbeddedChildSessionId) {
+    return null
+  }
+
+  return {
+    childSessionId,
+    entryParticipantToken,
+  }
+}
+
 export type SyncDeckStudentSyncState = 'solo' | 'synchronized' | 'behind' | 'ahead' | 'vertical'
 
 interface NavigationCapabilities {
@@ -2722,17 +2745,17 @@ const SyncDeckStudent: FC = () => {
         }
 
         const payload = (await response.json()) as SyncDeckEmbeddedEntryResponse
-        const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
-        const entryParticipantToken = typeof payload.entryParticipantToken === 'string'
-          ? payload.entryParticipantToken.trim()
-          : ''
+        const recoveredEntry = shouldPersistRecoveredEmbeddedEntryResponse({
+          response: payload,
+          activeEmbeddedChildSessionId,
+        })
 
-        if (!abortController.signal.aborted && childSessionId && entryParticipantToken) {
+        if (!abortController.signal.aborted && recoveredEntry) {
           const persisted = persistRecoveredEmbeddedEntryParticipantToken({
             sessionStorage: window.sessionStorage,
             activityId: activeEmbeddedActivityId,
-            childSessionId,
-            entryParticipantToken,
+            childSessionId: recoveredEntry.childSessionId,
+            entryParticipantToken: recoveredEntry.entryParticipantToken,
           })
           if (persisted) {
             return

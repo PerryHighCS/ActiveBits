@@ -32,6 +32,7 @@ import { resolveStudentOverlayEmbeddedInstanceKey } from './SyncDeckStudent.js'
 import { resolveStudentOverlayNavigationBaseIndices } from './SyncDeckStudent.js'
 import { shouldRecoverEmbeddedEntryParticipantToken } from './SyncDeckStudent.js'
 import { persistRecoveredEmbeddedEntryParticipantToken } from './SyncDeckStudent.js'
+import { shouldPersistRecoveredEmbeddedEntryResponse } from './SyncDeckStudent.js'
 import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent.js'
 import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
@@ -1509,6 +1510,35 @@ void test('persistRecoveredEmbeddedEntryParticipantToken returns false when stor
   })
 
   assert.equal(persisted, false)
+})
+
+void test('shouldPersistRecoveredEmbeddedEntryResponse returns trimmed values for matching child session ids', () => {
+  assert.deepEqual(
+    shouldPersistRecoveredEmbeddedEntryResponse({
+      response: {
+        childSessionId: ' child-1 ',
+        entryParticipantToken: ' token-1 ',
+      },
+      activeEmbeddedChildSessionId: 'child-1',
+    }),
+    {
+      childSessionId: 'child-1',
+      entryParticipantToken: 'token-1',
+    },
+  )
+})
+
+void test('shouldPersistRecoveredEmbeddedEntryResponse rejects mismatched child session ids', () => {
+  assert.equal(
+    shouldPersistRecoveredEmbeddedEntryResponse({
+      response: {
+        childSessionId: 'child-stale',
+        entryParticipantToken: 'token-1',
+      },
+      activeEmbeddedChildSessionId: 'child-active',
+    }),
+    null,
+  )
 })
 
 void test('extractNavigationCapabilitiesFromStateMessage normalizes canGoLeft/canGoRight aliases from ready payload', () => {
