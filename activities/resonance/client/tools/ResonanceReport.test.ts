@@ -147,6 +147,58 @@ void test('parseResonanceReport rejects a question entry with non-null non-objec
   assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
 })
 
+void test('parseResonanceReport rejects a reveal with non-array correctOptionIds', () => {
+  const bad = {
+    ...((MCQ_QUESTION as Record<string, unknown>)),
+    reveal: {
+      questionId: 'q2',
+      sharedAt: 123456,
+      correctOptionIds: 123,
+      sharedResponses: [],
+    },
+  }
+  assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
+})
+
+void test('parseResonanceReport rejects a reveal with non-string correctOptionIds entries', () => {
+  const bad = {
+    ...((MCQ_QUESTION as Record<string, unknown>)),
+    reveal: {
+      questionId: 'q2',
+      sharedAt: 123456,
+      correctOptionIds: ['a', 1],
+      sharedResponses: [],
+    },
+  }
+  assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
+})
+
+void test('parseResonanceReport rejects a reveal with non-array sharedResponses', () => {
+  const bad = {
+    ...((MCQ_QUESTION as Record<string, unknown>)),
+    reveal: {
+      questionId: 'q2',
+      sharedAt: 123456,
+      correctOptionIds: ['a'],
+      sharedResponses: 'x',
+    },
+  }
+  assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
+})
+
+void test('parseResonanceReport rejects a reveal with non-number sharedAt', () => {
+  const bad = {
+    ...((MCQ_QUESTION as Record<string, unknown>)),
+    reveal: {
+      questionId: 'q2',
+      sharedAt: 'later',
+      correctOptionIds: ['a'],
+      sharedResponses: [],
+    },
+  }
+  assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
+})
+
 void test('parseResonanceReport normalizes missing reveal to null', () => {
   const withoutReveal = {
     question: { id: 'q1', type: 'free-response', text: 'Q?', order: 0 },

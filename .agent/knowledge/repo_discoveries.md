@@ -1363,3 +1363,19 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/resonance/client/tools/ResonanceReport.tsx`; `activities/resonance/client/tools/ResonanceReport.test.ts`
 - Follow-up action: When new uploadable report fields are added, validate every nested structure that render paths dereference rather than relying on top-level array checks alone.
 - Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | syncdeck | embedded entry participant recovery
+- Discovery: SyncDeck embedded child-session recovery should rely on `readStoredSessionParticipantIdentity(...)` instead of treating any non-empty `session-participant:*` localStorage value as a valid child identity.
+- Why it matters: Malformed shared context like bad JSON or `{}` can block embedded token recovery even though the child session has no usable stored identity. Reusing the shared reader clears invalid payloads, preserves valid legacy `student-name-*` / `student-id-*` fallbacks, and only suppresses recovery when a real identity exists.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `client/src/components/common/entryParticipantIdentityUtils.ts`; `client/src/components/common/sessionParticipantContext.ts`
+- Follow-up action: Keep embedded-session recovery checks on the same shared identity-normalization path used by entry flows so storage cleanup and legacy migration stay consistent.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | uploaded report reveal parsing
+- Discovery: `parseResonanceReport` should validate nested reveal fields used by the viewer, not just that `reveal` is an object. At minimum, `questionId` must be a non-empty string, `sharedAt` a number, `correctOptionIds` either `null` or `string[]`, and `sharedResponses` an array.
+- Why it matters: Uploaded report JSON is untrusted. Malformed reveal payloads can otherwise survive parsing and reach render paths that call `.length` or `.includes` on `correctOptionIds`, leading to avoidable runtime failures instead of a clean “invalid report” rejection.
+- Evidence: `activities/resonance/client/tools/ResonanceReport.tsx`; `activities/resonance/client/tools/ResonanceReport.test.ts`
+- Follow-up action: Whenever the report viewer starts dereferencing additional reveal fields, extend the upload validator in the same change so parsing stays aligned with render assumptions.
+- Owner: Codex

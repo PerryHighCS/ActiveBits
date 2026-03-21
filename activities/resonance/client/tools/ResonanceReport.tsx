@@ -30,6 +30,19 @@ function isValidReportOption(option: unknown): boolean {
   return true
 }
 
+function isValidStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+}
+
+function isValidReportReveal(reveal: unknown): boolean {
+  if (!isRecord(reveal)) return false
+  if (typeof reveal.questionId !== 'string' || reveal.questionId.trim().length === 0) return false
+  if (typeof reveal.sharedAt !== 'number') return false
+  if (reveal.correctOptionIds !== null && !isValidStringArray(reveal.correctOptionIds)) return false
+  if (!Array.isArray(reveal.sharedResponses)) return false
+  return true
+}
+
 /**
  * Performs a structural validation of a value parsed from an uploaded JSON
  * file and returns it typed as ResonanceReport, or null if it is malformed.
@@ -60,7 +73,7 @@ export function parseResonanceReport(raw: unknown): ResonanceReport | null {
     if (!Array.isArray(entry.responses)) return null
     if (!entry.responses.every(isValidReportResponse)) return null
     const reveal = entry.reveal === undefined ? null : entry.reveal
-    if (reveal !== null && !isRecord(reveal)) return null
+    if (reveal !== null && !isValidReportReveal(reveal)) return null
     if (!isRecord(entry.annotations)) return null
 
     normalizedQuestions.push({
