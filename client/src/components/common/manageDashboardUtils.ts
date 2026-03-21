@@ -77,7 +77,7 @@ export function isPersistentLinkPreflightVerified(
   validatedValue: string | null,
 ): boolean {
   const normalizedValue = resolvePersistentLinkPreflightValue(optionKey, selection)
-  return optionKey == null || (normalizedValue.length > 0 && validatedValue === normalizedValue)
+  return optionKey == null || normalizedValue.length === 0 || validatedValue === normalizedValue
 }
 
 const CREATE_SESSION_BOOTSTRAP_TTL_MS = 5 * 60 * 1000

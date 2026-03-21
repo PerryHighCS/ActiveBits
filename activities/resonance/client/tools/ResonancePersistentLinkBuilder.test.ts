@@ -6,6 +6,10 @@ import { normalizeEditStateQuestions } from './ResonancePersistentLinkBuilder.js
 
 ;(globalThis as { React?: typeof React }).React = React
 
+interface AbortSignalLike {
+  aborted: boolean
+}
+
 function installDomEnvironment() {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: 'https://activebits.local/',
@@ -129,6 +133,121 @@ void test('ResonancePersistentLinkBuilder prepares selectedOptions and submit re
       assert.deepEqual(selectedOptionsSnapshots.at(-1), {
         q: 'encoded-questions',
         h: 'prep-hash-123',
+      })
+      assert.equal(readinessChanges.at(-1), true)
+    })
+  } finally {
+    ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
+    rendered?.unmount()
+    restoreDomEnvironment()
+  }
+})
+
+void test('ResonancePersistentLinkBuilder aborts stale prepare requests when inputs change', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const previousFetch = globalThis.fetch
+  const { act, render, waitFor } = await import('@testing-library/react')
+  const { default: ResonancePersistentLinkBuilder } = await import('./ResonancePersistentLinkBuilder.js')
+  let rendered: ReturnType<typeof render> | null = null
+  const selectedOptionsSnapshots: Array<Record<string, string>> = []
+  const readinessChanges: boolean[] = []
+  let firstRequestSignal: AbortSignalLike | null = null
+
+  try {
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (firstRequestSignal === null) {
+        firstRequestSignal = (init?.signal as AbortSignalLike | undefined) ?? null
+        return await new Promise<Response>(() => {
+          // Keep the first request pending so the rerender cleanup must abort it.
+        })
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          selectedOptions: {
+            q: 'encoded-questions-2',
+            h: 'prep-hash-456',
+          },
+        }),
+      } as Response
+    }) as unknown as typeof fetch
+
+    rendered = render(
+      React.createElement(ResonancePersistentLinkBuilder, {
+        activityId: 'resonance',
+        teacherCode: 'teacher-code',
+        selectedOptions: {},
+        editState: {
+          hash: 'hash-123',
+          teacherCode: 'teacher-code',
+          selectedOptions: {
+            questions: [
+              {
+                id: 'q1',
+                type: 'free-response',
+                text: 'What stands out?',
+                order: 0,
+              },
+            ],
+          },
+        },
+        onSelectedOptionsChange: (nextSelectedOptions) => {
+          selectedOptionsSnapshots.push(nextSelectedOptions)
+        },
+        onSubmitReadinessChange: (canSubmit) => {
+          readinessChanges.push(canSubmit)
+        },
+      }),
+    )
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 600))
+    })
+
+    const initialRequestSignal = firstRequestSignal
+    if (initialRequestSignal === null) {
+      throw new Error('Expected the initial prepare request to start')
+    }
+    assert.equal((initialRequestSignal as AbortSignalLike).aborted, false)
+
+    rendered.rerender(
+      React.createElement(ResonancePersistentLinkBuilder, {
+        activityId: 'resonance',
+        teacherCode: 'teacher-code-updated',
+        selectedOptions: {},
+        editState: {
+          hash: 'hash-123',
+          teacherCode: 'teacher-code-updated',
+          selectedOptions: {
+            questions: [
+              {
+                id: 'q1',
+                type: 'free-response',
+                text: 'What stands out now?',
+                order: 0,
+              },
+            ],
+          },
+        },
+        onSelectedOptionsChange: (nextSelectedOptions) => {
+          selectedOptionsSnapshots.push(nextSelectedOptions)
+        },
+        onSubmitReadinessChange: (canSubmit) => {
+          readinessChanges.push(canSubmit)
+        },
+      }),
+    )
+
+    await waitFor(() => {
+      const abortedRequestSignal = firstRequestSignal
+      if (abortedRequestSignal === null) {
+        throw new Error('Expected the stale prepare request signal to exist')
+      }
+      assert.equal((abortedRequestSignal as AbortSignalLike).aborted, true)
+      assert.deepEqual(selectedOptionsSnapshots.at(-1), {
+        q: 'encoded-questions-2',
+        h: 'prep-hash-456',
       })
       assert.equal(readinessChanges.at(-1), true)
     })

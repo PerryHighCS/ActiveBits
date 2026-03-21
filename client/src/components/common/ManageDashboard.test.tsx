@@ -52,7 +52,7 @@ void test('resolvePersistentLinkPreflightValue trims the configured option value
   assert.equal(resolvePersistentLinkPreflightValue(null, { presentationUrl: 'https://slides.example/deck' }), '')
 })
 
-void test('isPersistentLinkPreflightVerified requires the configured option to match the last verified value', () => {
+void test('isPersistentLinkPreflightVerified matches the submit-time preflight rule', () => {
   assert.equal(
     isPersistentLinkPreflightVerified(
       'presentationUrl',
@@ -75,7 +75,7 @@ void test('isPersistentLinkPreflightVerified requires the configured option to m
       { presentationUrl: '' },
       null,
     ),
-    false,
+    true,
   )
   assert.equal(
     isPersistentLinkPreflightVerified(

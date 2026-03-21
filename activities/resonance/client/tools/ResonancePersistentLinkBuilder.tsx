@@ -14,6 +14,8 @@ interface PrepareLinkOptionsResponse {
   details?: string[]
 }
 
+const PREPARE_LINK_OPTIONS_DEBOUNCE_MS = 500
+
 export function normalizeEditStateQuestions(rawSavedQuestions: unknown): Question[] | null {
   const { questions, errors } = validateQuestionSet(rawSavedQuestions)
   if (errors.length > 0 || questions.length === 0) return null
@@ -60,6 +62,7 @@ export default function ResonancePersistentLinkBuilder({
 
   useEffect(() => {
     let cancelled = false
+    const abortController = new AbortController()
 
     if (!canPrepare || questions === null) {
       setPreparing(false)
@@ -83,6 +86,7 @@ export default function ResonancePersistentLinkBuilder({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ teacherCode: normalizedTeacherCode, questions }),
+            signal: abortController.signal,
           })
 
           const data = (await resp.json()) as PrepareLinkOptionsResponse
@@ -110,6 +114,9 @@ export default function ResonancePersistentLinkBuilder({
           if (cancelled) {
             return
           }
+          if ((error instanceof DOMException && error.name === 'AbortError') || abortController.signal.aborted) {
+            return
+          }
 
           setPreparedHash(null)
           setPrepareError(error instanceof Error ? error.message : 'Failed to prepare link options — please try again')
@@ -121,11 +128,12 @@ export default function ResonancePersistentLinkBuilder({
           }
         }
       })()
-    }, 250)
+    }, PREPARE_LINK_OPTIONS_DEBOUNCE_MS)
 
     return () => {
       cancelled = true
       window.clearTimeout(timeoutId)
+      abortController.abort()
     }
   }, [canPrepare, normalizedTeacherCode, onSelectedOptionsChange, onSubmitReadinessChange, questions])
 
