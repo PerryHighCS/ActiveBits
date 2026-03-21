@@ -15,6 +15,42 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-21
+- Surface: file import | internal module | activity interface
+- Contract: `parseGimkitCSV(...)` must always return `Question` objects that have passed through `validateQuestionSet(...)`, even when some CSV rows produced row-level parse errors. The parser should merge row errors with set-validation errors instead of returning pre-normalized successful rows early.
+- Compatibility constraints: Resonance uploader flows treat `errors.length > 0 && questions.length > 0` as a partial-import state, so preserving normalized successful rows is important for UX. Successful CSV rows must receive the same trimming, length caps, and structural filtering as JSON imports and decrypted question sets.
+- Validation rules: Gimkit row-level requirements still apply first (required prompt/correct answer, 1-3 incorrect answers, max 100 parsed rows). After accumulation, all surviving rows run through `validateQuestionSet(...)`; any resulting validation errors are appended to the returned `errors`.
+- Evidence (schema/tests/path): `activities/resonance/shared/validation.ts`; `activities/resonance/shared/validation.test.ts`; `activities/resonance/client/tools/ResonanceQuestionSetUploader.tsx`
+- Follow-up action: If CSV import ever needs row-specific set-validation messages, preserve this normalization-first contract and add row metadata to the accumulated errors rather than bypassing `validateQuestionSet(...)`.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Surface: REST | client normalizer | activity interface
+- Contract: Resonance student `/state` reveal payloads may include `QuestionReveal.viewerResponse` with `{ answer, submittedAt, instructorEmoji, isShared }`, and the client-side `normalizeStudentSessionSnapshot` path must preserve that object when each field validates successfully.
+- Compatibility constraints: `viewerResponse` is optional and may be `null`, but when present it is the only student-safe source for "Your response" summary and correct/incorrect reveal UI in `SharedResponseFeed`. Dropping it in normalization is a behavior regression even when `sharedResponses` still render. `sharedResponses[*].reactions` is also rendered directly, so the client normalizer must not trust arbitrary transport values there.
+- Validation rules: `viewerResponse.answer` must satisfy the existing `AnswerPayload` contract; `submittedAt` must be a finite number; `instructorEmoji` must be `string | null`; `isShared` must be boolean. Invalid `viewerResponse` invalidates the containing reveal during normalization. `sharedResponses[*].reactions` is sanitized to a `Record<string, number>` by keeping only known student reaction emoji keys with finite non-negative numeric counts; invalid keys/counts are dropped rather than invalidating the whole response.
+- Evidence (schema/tests/path): `activities/resonance/shared/types.ts`; `activities/resonance/server/routes.ts`; `activities/resonance/client/hooks/useResonanceSession.ts`; `activities/resonance/client/hooks/useResonanceSession.test.ts`; `activities/resonance/client/student/SharedResponseFeed.tsx`
+- Follow-up action: Keep any future student snapshot normalizers aligned with `buildStudentReveal(...)` so student-only enrichment fields do not get stripped on reload/poll paths.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Surface: activity interface | internal module
+- Contract: Custom persistent-link builders cannot rely on `selectedOptions` retaining nested objects/arrays across the shared persistent-link pipeline; stored/edit-state options are normalized to allowed deep-link keys and string values. `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx` now recovers editable question drafts from local storage keyed by persistent-link hash (`resonance-question-draft:<hash>`) instead of relying on `selectedOptions.questions` round-tripping.
+- Compatibility constraints: Resonance edit mode pre-population now depends on a same-browser local cache entry for the hash. Missing cache falls back gracefully to empty uploader state and does not break link editing.
+- Validation rules: Cached payload is parsed through `validateQuestionSet` before use; malformed/invalid cache entries are removed.
+- Evidence (schema/tests/path): `types/activity.ts`; `client/src/components/common/manageDashboardUtils.ts`; `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx`; `activities/resonance/client/tools/resonanceQuestionDraftCache.ts`; `activities/resonance/client/tools/resonanceQuestionDraftCache.test.ts`
+- Follow-up action: If cross-device or long-lived edit recovery is required, add a teacher-authenticated server endpoint to retrieve/decrypt question sets by hash and treat local cache as best-effort only.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Surface: internal module | activity interface
+- Contract: `activities/resonance/shared/validation.ts` `validateQuestionSet(raw)` treats duplicate question ids as invalid set-level input. If duplicate normalized question ids are detected, it returns `{ questions: [], errors: ['question ids must be unique within a set'] }` instead of returning a partially valid array that still contains conflicting ids.
+- Compatibility constraints: Downstream resonance session state and response lookup paths key by `question.id`, so callers may assume a non-empty `questions` result has unique ids. This is stricter than row-level CSV-style partial acceptance; duplicate-id failure invalidates the whole set.
+- Validation rules: Individual question normalization still happens first, but any duplicate in the resulting normalized ids escalates to a set-level failure. Callers should treat `errors.length > 0` or `questions.length === 0` as invalid import input for this case.
+- Evidence (schema/tests/path): `activities/resonance/shared/validation.ts`; `activities/resonance/shared/validation.test.ts`
+- Follow-up action: If resonance later wants partial acceptance for duplicate ids, it will need a different contract that rewrites ids or reports per-id skips without exposing duplicate keys to session consumers.
+- Owner: Codex
+
 - Date: 2026-03-18
 - Surface: activity interface | internal module
 - Contract: `ActivityConfig.reportEndpoint?: string` declares an activity-owned report download route that shared embedded-session surfaces such as SyncDeck can call without importing activity-specific server code. The value is metadata only; shared code treats it as an opaque non-empty string path and leaves auth, response format, and report generation semantics to the owning activity.
@@ -258,6 +294,33 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Validation rules: Instructor websocket requires `role=instructor` plus matching `instructorPasscode`; students connect by `sessionId` only. Invalid/unknown ws messages are ignored.
 - Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts` (snapshot + relay tests); `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `.agent/plans/reveal-iframe-sync-message-schema.md`.
 - Follow-up action: Add dedicated student-side unit tests for `state` -> `command.setState` translation when adding more plugin command support.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Surface: REST + websocket + activity interface
+- Contract: Resonance REST endpoints — `POST /api/resonance/create` → `{ id, instructorPasscode }`; `POST /api/resonance/:sessionId/register-student` body `{ name }` → `{ studentId, name }`; `POST /api/resonance/generate-link` body `{ teacherCode, questions: Question[] }` → `{ hash, url }`; `GET /api/resonance/:sessionId/state` → student-safe snapshot (no isCorrect, no response data); `GET /api/resonance/:sessionId/responses` (instructor auth) → responses + annotations; `GET /api/resonance/:sessionId/instructor-passcode` (teacher cookie) → `{ instructorPasscode }`; `GET /api/resonance/:sessionId/report` (instructor auth) → HTML or JSON export.
+- Compatibility constraints: `isCorrect` must never appear in student-facing payloads before a reveal; instructor passcode is never included in student snapshots; annotations (star/flag) are instructor-private and excluded from shared-response payloads.
+- Validation rules: Questions validated by `activities/resonance/shared/validation.ts`; student name trimmed, max 80 chars; answer payload type must match active question type; selectedOptionId must be a valid option id on the target question.
+- Evidence (schema/tests/path): `activities/resonance/shared/types.ts`; `activities/resonance/shared/validation.ts`; `activities/resonance/server/routes.ts`.
+- Follow-up action: Add route tests for each endpoint in Phase 9; add WebSocket message contract entry when Phase 7 is implemented.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Surface: activity interface
+- Contract: `ActivityConfig.utilMode?: boolean` advertises that the activity exposes a utility/tools page at `/util/:activityId`, rendered from the client module's `UtilComponent` export. `ActivityClientModule.UtilComponent` is only loaded by the registry when `utilMode: true`.
+- Compatibility constraints: Flag is optional and defaults to undefined/false; existing activities without the flag are unaffected. Route `/util/:activityId` is registered in App.tsx only for activities that have `UtilComponent`.
+- Validation rules: Schema validates `utilMode` as boolean when provided.
+- Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/activities/index.ts`; `client/src/App.tsx`; `activities/resonance/activity.config.ts`.
+- Follow-up action: If a second activity adopts `utilMode`, document any shared navigation or shell conventions needed in this contract.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Surface: websocket
+- Contract: Resonance WebSocket envelope — `{ version: '1', activity: 'resonance', sessionId: string, type: string, timestamp: number, payload: unknown }`. All message types use a `resonance:` prefix (e.g. `resonance:question-activated`). Instructor connects with `role=instructor&instructorPasscode=<code>`. Student connects with `studentId=<id>`.
+- Compatibility constraints: Envelope `version` field must be checked before processing; unknown types must be silently ignored on client; never include `isCorrect` or `instructorPasscode` in student-bound payloads.
+- Validation rules: Server closes socket with code 1008 on missing sessionId, unknown session, or invalid instructor passcode.
+- Evidence (schema/tests/path): `activities/resonance/shared/types.ts` (ResonanceWsEnvelope); `activities/resonance/server/routes.ts`.
+- Follow-up action: Flesh out full message dispatch and add WS tests in Phase 7.
 - Owner: Codex
 
 - Date: 2026-03-02

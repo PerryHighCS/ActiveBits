@@ -30,6 +30,9 @@ import { resolveStudentActiveEmbeddedInstanceKey } from './SyncDeckStudent.js'
 import { resolveStudentActiveEmbeddedInstanceKeyWithFallback } from './SyncDeckStudent.js'
 import { resolveStudentOverlayEmbeddedInstanceKey } from './SyncDeckStudent.js'
 import { resolveStudentOverlayNavigationBaseIndices } from './SyncDeckStudent.js'
+import { shouldRecoverEmbeddedEntryParticipantToken } from './SyncDeckStudent.js'
+import { persistRecoveredEmbeddedEntryParticipantToken } from './SyncDeckStudent.js'
+import { shouldPersistRecoveredEmbeddedEntryResponse } from './SyncDeckStudent.js'
 import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent.js'
 import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
@@ -987,6 +990,144 @@ void test('normalizeSyncDeckEmbeddedActivities preserves multiple valid late-joi
   assert.equal(normalized['video-sync:2:1']?.activityId, 'video-sync')
 })
 
+void test('shouldRecoverEmbeddedEntryParticipantToken requests a fresh child handoff for late-join embedded activity sessions', () => {
+  const sessionStorage = {
+    getItem() {
+      return null
+    },
+  }
+  const localStorage = {
+    getItem() {
+      return null
+    },
+    setItem() {},
+    removeItem() {},
+  }
+
+  assert.equal(
+    shouldRecoverEmbeddedEntryParticipantToken({
+      sessionId: 'syncdeck-parent',
+      childSessionId: 'CHILD:syncdeck-parent:abcde:resonance',
+      studentId: 'student-1',
+      activityId: 'resonance',
+      sessionStorage,
+      localStorage,
+    }),
+    true,
+  )
+})
+
+void test('shouldRecoverEmbeddedEntryParticipantToken skips refresh when the child identity already exists locally', () => {
+  const sessionStorage = {
+    getItem() {
+      return null
+    },
+  }
+  const localStorage = {
+    getItem(key: string) {
+      if (key === 'session-participant:CHILD:syncdeck-parent:abcde:resonance') {
+        return JSON.stringify({ studentName: 'Ada Lovelace', studentId: 'student-1' })
+      }
+      return null
+    },
+    setItem() {},
+    removeItem() {},
+  }
+
+  assert.equal(
+    shouldRecoverEmbeddedEntryParticipantToken({
+      sessionId: 'syncdeck-parent',
+      childSessionId: 'CHILD:syncdeck-parent:abcde:resonance',
+      studentId: 'student-1',
+      activityId: 'resonance',
+      sessionStorage,
+      localStorage,
+    }),
+    false,
+  )
+})
+
+void test('shouldRecoverEmbeddedEntryParticipantToken clears malformed shared context and still recovers', () => {
+  const removedKeys: string[] = []
+  const sessionStorage = {
+    getItem() {
+      return null
+    },
+  }
+  const localStorage = {
+    getItem(key: string) {
+      if (key === 'session-participant:CHILD:syncdeck-parent:abcde:resonance') {
+        return '{not-json'
+      }
+      return null
+    },
+    setItem() {},
+    removeItem(key: string) {
+      removedKeys.push(key)
+    },
+  }
+
+  assert.equal(
+    shouldRecoverEmbeddedEntryParticipantToken({
+      sessionId: 'syncdeck-parent',
+      childSessionId: 'CHILD:syncdeck-parent:abcde:resonance',
+      studentId: 'student-1',
+      activityId: 'resonance',
+      sessionStorage,
+      localStorage,
+    }),
+    true,
+  )
+
+  assert.deepEqual(removedKeys, ['session-participant:CHILD:syncdeck-parent:abcde:resonance'])
+})
+
+void test('shouldRecoverEmbeddedEntryParticipantToken ignores empty shared context but still honors valid legacy identity', () => {
+  const persistedLegacyContexts: Array<{ key: string; value: string }> = []
+  const sessionStorage = {
+    getItem() {
+      return null
+    },
+  }
+  const localStorage = {
+    getItem(key: string) {
+      if (key === 'session-participant:CHILD:syncdeck-parent:abcde:resonance') {
+        return '{}'
+      }
+      if (key === 'student-name-CHILD:syncdeck-parent:abcde:resonance') {
+        return 'Ada Lovelace'
+      }
+      if (key === 'student-id-CHILD:syncdeck-parent:abcde:resonance') {
+        return 'student-1'
+      }
+      return null
+    },
+    setItem(key: string, value: string) {
+      persistedLegacyContexts.push({ key, value })
+    },
+    removeItem() {},
+  }
+
+  assert.equal(
+    shouldRecoverEmbeddedEntryParticipantToken({
+      sessionId: 'syncdeck-parent',
+      childSessionId: 'CHILD:syncdeck-parent:abcde:resonance',
+      studentId: 'student-1',
+      activityId: 'resonance',
+      sessionStorage,
+      localStorage,
+    }),
+    false,
+  )
+
+  assert.deepEqual(persistedLegacyContexts, [
+    {
+      key: 'session-participant:CHILD:syncdeck-parent:abcde:resonance',
+      value: JSON.stringify({ studentName: 'Ada Lovelace', studentId: 'student-1' }),
+    },
+  ])
+})
+
 void test('applySyncDeckEmbeddedLifecyclePayload applies start and end updates', () => {
   const started = applySyncDeckEmbeddedLifecyclePayload({}, {
     type: 'embedded-activity-start',
@@ -1326,6 +1467,78 @@ void test('extractNavigationCapabilitiesFromStateMessage reads four-direction na
     canGoUp: false,
     canGoDown: true,
   })
+})
+
+void test('persistRecoveredEmbeddedEntryParticipantToken returns true when handoff is persisted', () => {
+  const storage = new Map<string, string>()
+  const sessionStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      storage.set(key, value)
+    },
+    removeItem: (key: string) => {
+      storage.delete(key)
+    },
+  }
+
+  const persisted = persistRecoveredEmbeddedEntryParticipantToken({
+    sessionStorage,
+    activityId: 'resonance',
+    childSessionId: 'child-1',
+    entryParticipantToken: 'entry-token-1',
+  })
+
+  assert.equal(persisted, true)
+})
+
+void test('persistRecoveredEmbeddedEntryParticipantToken returns false when storage write fails', () => {
+  const sessionStorage = {
+    getItem: (_key: string) => null,
+    setItem: (_key: string, _value: string) => {
+      throw new Error('quota exceeded')
+    },
+    removeItem: (_key: string) => {
+      // no-op
+    },
+  }
+
+  const persisted = persistRecoveredEmbeddedEntryParticipantToken({
+    sessionStorage,
+    activityId: 'resonance',
+    childSessionId: 'child-1',
+    entryParticipantToken: 'entry-token-1',
+  })
+
+  assert.equal(persisted, false)
+})
+
+void test('shouldPersistRecoveredEmbeddedEntryResponse returns trimmed values for matching child session ids', () => {
+  assert.deepEqual(
+    shouldPersistRecoveredEmbeddedEntryResponse({
+      response: {
+        childSessionId: ' child-1 ',
+        entryParticipantToken: ' token-1 ',
+      },
+      activeEmbeddedChildSessionId: 'child-1',
+    }),
+    {
+      childSessionId: 'child-1',
+      entryParticipantToken: 'token-1',
+    },
+  )
+})
+
+void test('shouldPersistRecoveredEmbeddedEntryResponse rejects mismatched child session ids', () => {
+  assert.equal(
+    shouldPersistRecoveredEmbeddedEntryResponse({
+      response: {
+        childSessionId: 'child-stale',
+        entryParticipantToken: 'token-1',
+      },
+      activeEmbeddedChildSessionId: 'child-active',
+    }),
+    null,
+  )
 })
 
 void test('extractNavigationCapabilitiesFromStateMessage normalizes canGoLeft/canGoRight aliases from ready payload', () => {

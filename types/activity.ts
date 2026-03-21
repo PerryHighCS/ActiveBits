@@ -205,6 +205,8 @@ export interface ActivityConfig {
   reportEndpoint?: string
   waitingRoom?: ActivityWaitingRoomConfig
   isDev?: boolean
+  /** When true, the activity exposes a utility/tools page at /util/:id. */
+  utilMode?: boolean
   clientEntry?: string
   serverEntry?: string
   [key: string]: unknown
@@ -213,6 +215,8 @@ export interface ActivityConfig {
 export interface ActivityClientModule {
   ManagerComponent?: ComponentType<unknown>
   StudentComponent?: ComponentType<unknown>
+  /** Rendered at /util/:activityId for activities with utilMode: true. */
+  UtilComponent?: ComponentType<unknown>
   footerContent?: ReactNode | (() => ReactNode)
   PersistentLinkBuilderComponent?: ComponentType<ActivityPersistentLinkBuilderProps>
   ReportSectionComponent?: ComponentType<ActivityReportSectionProps>
@@ -229,6 +233,8 @@ export interface ActivityClientModule {
 export interface ActivityRegistryEntry extends ActivityConfig {
   ManagerComponent?: ActivityRenderableComponent | null
   StudentComponent?: ActivityRenderableComponent | null
+  /** Rendered at /util/:activityId for activities with utilMode: true. */
+  UtilComponent?: ActivityRenderableComponent | null
   FooterComponent?: ActivityRenderableComponent | null
   PersistentLinkBuilderComponent?: ActivityRenderableComponent | null
 }

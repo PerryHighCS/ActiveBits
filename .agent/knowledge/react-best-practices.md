@@ -198,6 +198,19 @@ Stateful on/off buttons should expose pressed state explicitly:
 
 When handlers need to update both local UI and server state:
 
+### Reset Submit Flags In `finally`
+
+Async submit handlers that set `isSubmitting`/`isCreating` should clear that flag in a `finally`
+block, not only in error branches.
+
+**Why it helps:**
+- Success callbacks like `onCreated` do not always navigate or unmount immediately.
+- Clearing the flag in `finally` prevents buttons and inputs from staying disabled if the view
+  remains mounted after a successful await chain.
+
+**Evidence:**
+- `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx`
+
 ```tsx
 // ❌ Avoid: Early return prevents UI update
 const handleChange = (value) => {

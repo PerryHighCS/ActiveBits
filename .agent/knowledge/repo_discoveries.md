@@ -14,12 +14,52 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-21
+- Area: activities | resonance | validation
+- Discovery: `parseGimkitCSV(...)` should enforce the documented maximum of three incorrect answers per row and then run parsed questions back through `validateQuestionSet(...)` before returning.
+- Why it matters: This keeps CSV import behavior aligned with the rest of Resonance question validation, avoids producing out-of-bounds MCQs from extra trailing columns, and ensures imported rows get the same trimming and structural guarantees as JSON uploads.
+- Evidence: `activities/resonance/shared/validation.ts`; `activities/resonance/shared/validation.test.ts`
+- Follow-up action: If future CSV support expands beyond Gimkit's schema, update both the parser contract and exporter compatibility gate together.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | tools
+- Discovery: Resonance's Gimkit CSV export compatibility gate must enforce the file format's four-option ceiling, not just the single-correct-answer rule, because the exporter only has columns for one correct answer plus three incorrect answers.
+- Why it matters: Without the option-count guard, valid-looking multiple-choice questions with extra distractors would export lossy CSV rows that silently drop options and no longer match the authored question set.
+- Evidence: `activities/resonance/client/tools/ResonanceToolShell.tsx`; `activities/resonance/client/tools/ResonanceToolShell.test.ts`
+- Follow-up action: If the product ever needs wider CSV export support, add an explicit alternate export format or user-facing warning rather than truncating extra options.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | student-reactions
+- Discovery: Student shared-response reactions are client-owned in `SharedResponseFeed`, which sends the existing `resonance:react-to-shared` websocket event only for shared free-response cards, uses the curated `STUDENT_REACTION_EMOJIS` set for the inline popout picker, renders aggregate reaction chips on the instructor's currently shared FRQ card, and now pairs that public reveal path with a separate `reviewedResponses` student-only snapshot payload for emoji-highlighted answers that were not shared publicly.
+- Why it matters: Future reaction and feedback UI tweaks can stay local to the shared-response feed and shared-card display while keeping a clear separation between class-visible reveals and private instructor feedback; MCQ/poll reveal cards should remain non-reactive unless the product decision changes.
+- Evidence: `activities/resonance/client/student/SharedResponseFeed.tsx`; `activities/resonance/client/student/ResonanceStudent.tsx`; `activities/resonance/client/manager/ResponseCard.tsx`; `activities/resonance/client/manager/ResponseViewer.tsx`; `activities/resonance/client/hooks/useResonanceSession.ts`; `activities/resonance/server/routes.ts`; `activities/resonance/shared/types.ts`; `activities/resonance/shared/emojiSet.ts`
+- Follow-up action: If private feedback later needs timestamps or read/unread state, extend `reviewedResponses` directly instead of overloading the public `reveals` list.
+- Owner: Codex
+
 - Date: 2026-03-20
 - Area: activities | syncdeck | gamification-planning
 - Discovery: SyncDeck already has a strong parent/child embedded-session foundation, including parent-owned child lifecycle, persisted `embeddedLaunch.selectedOptions`, child-session parent linkage, and host-to-activity `activebits-embedded` `syncContext` messaging. It does not yet have a generic reverse child-to-parent telemetry contract for embedded activities to report points or other aggregate progress back to the parent SyncDeck session.
 - Why it matters: Gamification and cross-activity aggregation should extend the existing parent-owned SyncDeck session model rather than introducing activity-specific ad hoc callbacks. A parent-owned score ledger plus a small generic child score-ingest contract will fit the current architecture better than trying to make SyncDeck understand each child activity's internal session schema.
 - Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `client/src/components/common/embeddedLaunchBootstrap.ts`; `.agent/plans/syncdeck-gamification-plan.md`
 - Follow-up action: Implement SyncDeck gamification as an additive parent-session contract first, then roll one embedded activity onto that contract before expanding to more activities.
+- Owner: Codex
+
+- Date: 2026-03-19
+- Area: activities
+- Discovery: The Resonance plan was updated to align with the current `ActivityConfig` schema and dashboard conventions: use `manageDashboard.customPersistentLinkBuilder`, `createSessionBootstrap.sessionStorage`, and activity-owned report/download flows instead of proposing a new shared `reporting` config or repo-wide report contract up front.
+- Why it matters: Future Resonance work should build on the existing activity extension points already implemented in shared code, which keeps dashboard and registry layers activity-agnostic and avoids speculative schema churn.
+- Evidence: `.agent/plans/resonance.md`; `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/java-string-practice/client/manager/JavaStringPracticeManager.tsx`
+- Follow-up action: Only extract a shared reporting schema or report registration contract after a second activity demonstrates the same need.
+- Owner: Codex
+
+- Date: 2026-03-03
+- Area: activities
+- Discovery: The Resonance embedded-activity plan now targets the same versioned websocket envelope shape as `video-sync`: `version`, `activity`, `sessionId`, `type`, `timestamp`, and `payload`, while keeping activity-specific namespacing in the `type` field (for example `resonance:session-state`).
+- Why it matters: Future embeddable activities should converge on one outer message wrapper for shared-socket routing and forward compatibility instead of inventing per-activity envelope formats.
+- Evidence: `.agent/plans/resonance.md`; `activities/video-sync/client/protocol.ts`
+- Follow-up action: Reuse this outer envelope for future embedded-activity protocol plans unless a shared cross-activity transport spec supersedes it.
 - Owner: Codex
 
 - Date: 2026-03-19
@@ -1274,4 +1314,124 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: In vertical stacks like `2:0 -> 2:1 -> 2:2`, the instructor can move correctly while the overlay controls stay visually wrong, for example leaving `up` disabled at `2:1` or leaving `down` enabled at `2:2`.
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
 - Follow-up action: When consuming iframe navigation metadata for overlay controls, always track the indices that emitted the capability payload and ignore it after the deck moves to a different slide.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | embedded manager bootstrap
+- Discovery: Resonance embedded child sessions need to mint their `instructorPasscode` during session normalization, not only in the standalone `/api/resonance/create` route. SyncDeck embedded launches create the raw child session directly, and the embedded manager auto-auth bootstrap only appears when the child session already has a passcode.
+- Why it matters: Without a child passcode at creation time, embedded Resonance managers opened from SyncDeck fall into the "Instructor passcode not found in session storage" state even though a parent instructor session exists.
+- Evidence: `activities/resonance/server/routes.ts`; `activities/resonance/server/routes.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`
+- Follow-up action: For future instructor-managed embedded activities, ensure any session secret or manager-auth credential is produced by the activity normalizer or child-session creation path rather than only by the standalone create endpoint.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | instructor progress visibility
+- Discovery: Resonance instructor review now needs two parallel data surfaces: final `responses` for submitted answers and `responseDrafts` for in-progress work. The instructor snapshot should merge them into a unified progress view with explicit `working` vs `submitted` status instead of trying to overload the submitted response model.
+- Why it matters: Draft pushes are frequent and ephemeral, while submitted answers remain the authoritative share/report surface. Keeping drafts separate avoids confusing reorder/share/annotation flows with partial work while still letting the instructor watch answers in progress.
+- Evidence: `activities/resonance/server/routes.ts`; `activities/resonance/shared/types.ts`; `activities/resonance/client/student/QuestionView.tsx`; `activities/resonance/client/manager/ResponseViewer.tsx`
+- Follow-up action: If Resonance later adds report exports or richer review filters, treat `responseDrafts` as transient instructor telemetry and keep `responses` as the durable submitted record unless a feature explicitly needs draft history.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | multi-question live runs
+- Discovery: Resonance needs a session-level live-run model (`activeQuestionIds` plus a shared `activeQuestionDeadlineAt`) when multiple questions can be open at once. Keeping only `activeQuestionId` is enough for the old single-question flow but breaks student navigation, question-targeted submissions, and any shared countdown across several live prompts.
+- Why it matters: “Activate all questions” is not just a UI convenience; it changes server validation and student state. Students need to submit against a specific active question, the manager needs a single countdown for the whole run, and older snapshots still need a fallback `activeQuestionId` for compatibility.
+- Evidence: `activities/resonance/server/routes.ts`; `activities/resonance/shared/types.ts`; `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/resonance/client/student/ResonanceStudent.tsx`; `activities/resonance/server/routes.test.ts`
+- Follow-up action: Future Resonance features that depend on “what is live right now” should build on the session run fields first and treat `activeQuestionId` as compatibility state, not the authoritative source.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | manager question panel
+- Discovery: The selected-question panel in Resonance manager should stay focused on review and sharing, not on starting or stopping live runs. Live activation controls still belong in the question list/sidebar where multi-question runs are managed.
+- Why it matters: Duplicating activation actions inside the selected-question panel makes the manager UI harder to scan and creates overlapping control surfaces for the same live-run state.
+- Evidence: `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/resonance/client/manager/ResonanceManager.test.ts`
+- Follow-up action: If Resonance adds more question-panel actions later, keep them scoped to review/share workflows unless the product explicitly wants a second live-run control surface there.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | manager question list truncation
+- Discovery: The Resonance manager question list should show `Show more` based on actual rendered text overflow, not a fixed character-count guess. The narrow sidebar can truncate stems well before they pass an arbitrary length threshold.
+- Why it matters: Character-count heuristics miss real truncation cases like medium-length prompts in narrow layouts, leaving users with cut-off stems and no way to expand them.
+- Evidence: `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/resonance/client/manager/ResonanceManager.test.ts`
+- Follow-up action: If the question list layout changes again, keep the expansion affordance tied to measured overflow rather than copy length so it stays accurate across widths and font changes.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | manager response cards
+- Discovery: Free-response `ResponseCard` actions read better when the student-specific tools stay grouped in one left control stack. Star, flag, emoji, and share belong together, while reorder arrows can stay separated as layout controls.
+- Why it matters: Splitting share and emoji away from the star/flag stack makes the per-response actions harder to scan and increases pointer travel during instructor review.
+- Evidence: `activities/resonance/client/manager/ResponseCard.tsx`; `activities/resonance/client/manager/ResponseCard.test.tsx`
+- Follow-up action: If more response-level tools are added later, prefer keeping content actions in the left stack and reserve the opposite edge for ordering or layout controls.
+- Owner: Codex
+
+- Date: 2026-03-20
+- Area: activities | resonance | student graded mcq reveal
+- Discovery: Shared graded MCQ results are clearer in the student view when they use the same percentage breakdown as polls, with a separate `Your response: Correct/Incorrect` summary card above the option list instead of a generic “shared” banner.
+- Why it matters: Students need to see both their own selected answer and the class distribution at once. Treating graded MCQ like a poll with correct/incorrect row styling makes the reveal easier to scan and avoids implying that only one raw response card was shared.
+- Evidence: `activities/resonance/client/student/SharedResponseFeed.tsx`; `activities/resonance/client/student/SharedResponseFeed.test.tsx`
+- Follow-up action: If MCQ reveal styling evolves further, keep the student summary card and the aggregate option breakdown distinct so correctness feedback and class distribution do not compete for the same space.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | uploaded report parsing
+- Discovery: `parseResonanceReport` must validate each uploaded multiple-choice option as an object with non-empty string `id` and `text`, plus optional boolean `isCorrect`, instead of only checking that `options` is an array.
+- Why it matters: Resonance report JSON is user-supplied. Accepting arrays like `[null, 1]` lets malformed uploads reach the report viewer, which then dereferences `opt.id` and `opt.text` and can crash instead of rejecting the file cleanly.
+- Evidence: `activities/resonance/client/tools/ResonanceReport.tsx`; `activities/resonance/client/tools/ResonanceReport.test.ts`
+- Follow-up action: When new uploadable report fields are added, validate every nested structure that render paths dereference rather than relying on top-level array checks alone.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | syncdeck | embedded entry participant recovery
+- Discovery: SyncDeck embedded child-session recovery should rely on `readStoredSessionParticipantIdentity(...)` instead of treating any non-empty `session-participant:*` localStorage value as a valid child identity.
+- Why it matters: Malformed shared context like bad JSON or `{}` can block embedded token recovery even though the child session has no usable stored identity. Reusing the shared reader clears invalid payloads, preserves valid legacy `student-name-*` / `student-id-*` fallbacks, and only suppresses recovery when a real identity exists.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `client/src/components/common/entryParticipantIdentityUtils.ts`; `client/src/components/common/sessionParticipantContext.ts`
+- Follow-up action: Keep embedded-session recovery checks on the same shared identity-normalization path used by entry flows so storage cleanup and legacy migration stay consistent.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | uploaded report reveal parsing
+- Discovery: `parseResonanceReport` should validate nested reveal fields used by the viewer, not just that `reveal` is an object. At minimum, `questionId` must be a non-empty string, `sharedAt` a number, `correctOptionIds` either `null` or `string[]`, and `sharedResponses` an array.
+- Why it matters: Uploaded report JSON is untrusted. Malformed reveal payloads can otherwise survive parsing and reach render paths that call `.length` or `.includes` on `correctOptionIds`, leading to avoidable runtime failures instead of a clean “invalid report” rejection.
+- Evidence: `activities/resonance/client/tools/ResonanceReport.tsx`; `activities/resonance/client/tools/ResonanceReport.test.ts`
+- Follow-up action: Whenever the report viewer starts dereferencing additional reveal fields, extend the upload validator in the same change so parsing stays aligned with render assumptions.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | gimkit csv compatibility
+- Discovery: Resonance should treat Gimkit CSV export as a narrow compatibility format: only multiple-choice questions with exactly one correct answer should be written to CSV.
+- Why it matters: The tools UI can build free-response prompts and poll-style MCQs that do not map cleanly onto the Gimkit CSV schema. Exporting those rows creates CSVs that cannot round-trip through the importer without inventing placeholder answers or changing question semantics.
+- Evidence: `activities/resonance/client/tools/ResonanceToolShell.tsx`; `activities/resonance/client/tools/ResonanceToolShell.test.ts`; `activities/resonance/shared/validation.ts`
+- Follow-up action: Keep JSON export as the full-fidelity path for mixed question sets, and keep `parseGimkitCSV(...)` aligned with the same single-correct-MCQ-only contract rather than accepting broader Resonance-specific semantics.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | client-side option ids
+- Discovery: Resonance question-builder option ids should use `crypto.randomUUID()` when available, with a timestamp-plus-random fallback, instead of a short `Math.random()` slice.
+- Why it matters: Option ids participate in MCQ selection, correctness lookup, and validation. Short random slices can collide within a draft and create duplicate option ids that break selection or reveal behavior before validation catches them.
+- Evidence: `activities/resonance/client/tools/QuestionBuilder.tsx`; `activities/resonance/client/tools/QuestionBuilder.test.ts`
+- Follow-up action: Keep future client-generated Resonance question ids and option ids on the same UUID-first pattern used elsewhere in the repo unless a deterministic id source is available.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | syncdeck | embedded entry recovery
+- Discovery: SyncDeck embedded entry-token recovery should only persist a recovered token when the response `childSessionId` exactly matches the currently active embedded child session.
+- Why it matters: Recovery requests can resolve late or stale. Persisting a returned token under a different child-session key can poison another embedded activity’s handoff storage and block the right session from retrying cleanly.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep future embedded recovery responses keyed and validated against the currently active child session before writing session storage or marking a recovery attempt successful.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | student snapshot normalization
+- Discovery: `normalizeStudentSessionSnapshot(...)` should filter `activeQuestions`, `activeQuestion`, `revealedQuestions`, `reveals`, and `reviewedResponses` through minimal validators before exposing them to the student UI.
+- Why it matters: REST and websocket payloads are defensive boundaries. Passing through malformed entries like `null`, reveals without numeric `sharedAt`, or reviewed responses without a valid `question` lets `ResonanceStudent` and reveal views crash when they sort or dereference nested fields.
+- Evidence: `activities/resonance/client/hooks/useResonanceSession.ts`; `activities/resonance/client/hooks/useResonanceSession.test.ts`; `activities/resonance/client/student/ResonanceStudent.tsx`
+- Follow-up action: When student snapshot consumers start dereferencing more nested question fields, extend the normalizer at the same time rather than pushing new guards into each consumer.
+- Owner: Codex
+
+- Date: 2026-03-21
+- Area: activities | resonance | instructor snapshot normalization
+- Discovery: `normalizeInstructorStateSnapshot(...)` should filter `responses`, `progress`, and `reveals` entries to minimally valid instructor shapes before deriving submitted progress or exposing reveal data to the manager UI.
+- Why it matters: The instructor REST/websocket snapshot is also a defensive boundary. Malformed `responses` can throw during `submittedProgress` derivation, and malformed `reveals` can crash manager views that dereference `reveal.questionId` or assume reveal entries are objects.
+- Evidence: `activities/resonance/client/hooks/useInstructorState.ts`; `activities/resonance/client/hooks/useInstructorState.test.ts`
+- Follow-up action: Keep derived instructor state built only from validated snapshot entries, and extend the normalizer whenever new consumer code starts dereferencing additional nested fields.
 - Owner: Codex
