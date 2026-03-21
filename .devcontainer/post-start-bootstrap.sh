@@ -16,7 +16,7 @@ broad_sudo_enabled=0
 if [[ "${ACTIVEBITS_ENABLE_BROAD_SUDO:-0}" == "1" ]]; then
   broad_sudo_enabled=1
 fi
-if [[ -f "$workspace_folder/.devcontainer/privileged/enable-broad-sudo" ]]; then
+if [[ -f "$workspace_folder/.devcontainer/privileged/enable-broad-sudo.local" ]]; then
   broad_sudo_enabled=1
 fi
 
@@ -28,12 +28,19 @@ if [[ "$privileged_mode" -eq 1 ]] && command -v sudo >/dev/null 2>&1 && id -un |
   sudoers_file="/etc/sudoers.d/$(id -un)-all-users"
   if [[ "$broad_sudo_enabled" -eq 1 ]]; then
     if [ ! -f "$sudoers_file" ]; then
-      echo "$(id -un) ALL=(ALL) NOPASSWD: ALL" | sudo SUDO_EDITOR='tee' visudo -f "$sudoers_file" >/dev/null || \
-        echo "⚠️ Could not extend sudo rules for $(id -un)."
+      temp_sudoers_file="$(mktemp)"
+      printf '%s\n' "$(id -un) ALL=(ALL) NOPASSWD: ALL" > "$temp_sudoers_file"
+      if sudo visudo -cf "$temp_sudoers_file" >/dev/null 2>&1; then
+        sudo install -m 0440 "$temp_sudoers_file" "$sudoers_file" || \
+          echo "⚠️ Could not install sudo rules for $(id -un)."
+      else
+        echo "⚠️ Generated sudoers rules failed validation; not enabling broad sudo."
+      fi
+      rm -f "$temp_sudoers_file"
     fi
   elif [ -f "$sudoers_file" ]; then
     sudo rm -f "$sudoers_file" || echo "⚠️ Could not remove broad sudo rule at $sudoers_file."
-    echo "ℹ️ Broad sudo disabled. To opt in for nested sandbox tooling, set ACTIVEBITS_ENABLE_BROAD_SUDO=1 or create .devcontainer/privileged/enable-broad-sudo."
+    echo "ℹ️ Broad sudo disabled. To opt in for nested sandbox tooling, set ACTIVEBITS_ENABLE_BROAD_SUDO=1 or create .devcontainer/privileged/enable-broad-sudo.local."
   fi
 fi
 
