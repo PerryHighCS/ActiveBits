@@ -1,14 +1,15 @@
 ---
-name: slidedeck
+name: syncdeck
 description: Build Reveal.js slide decks and SyncDeck-compatible presentations. Use when the user wants to create a presentation, convert PPT/PPTX content to web slides, add storyboard or iframe-sync behavior, or embed interactive activities inside a SyncDeck-hosted Reveal deck.
 ---
 
-# Slidedeck Skill
+# SyncDeck Skill
 
 Create production-quality Reveal.js presentations that can run standalone or inside a SyncDeck iframe host.
 
 Read this file first. Then load only the references you need:
 
+- `references/AVAILABLE_ACTIVITIES.md` to see which embedded activities are currently available and what each one is good for
 - `references/STYLE_PRESETS.md` for visual directions and required base CSS
 - `references/EXTENSIONS.md` for optional deck features such as YouTube slides and student-controlled stacks
 - `references/EMBEDDED_ACTIVITIES.md` when the deck should launch or host embedded activities

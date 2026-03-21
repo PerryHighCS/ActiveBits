@@ -27,6 +27,8 @@ Before making changes, read these files when relevant:
 7. Use structured logging for all server-side events.
 8. Never expose, log, or commit secrets, API keys, or other sensitive information.
 9. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
+10. When adding or changing SyncDeck-embedded activity launch formats, update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same branch so the shared skill docs stay aligned with the real payloads used by the repo.
+11. If a `skills/syncdeck/...` doc change is intended to be shared across repos, push the updated subtree back to `syncdeck-agent-skills` as part of the completion flow.
  
 ## Preflight Checklist
 
