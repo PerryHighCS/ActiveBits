@@ -40,6 +40,13 @@ export default function SyncDeckPersistentLinkBuilder({
   }, [controlledPresentationUrl])
 
   useEffect(() => {
+    setIsPreflightChecking(false)
+    setPreflightValidatedUrl(null)
+    setPreflightPreviewUrl(null)
+    setPreflightWarning(null)
+  }, [controlledPresentationUrl, editState?.hash])
+
+  useEffect(() => {
     onSelectedOptionsChange?.({
       presentationUrl,
     })
@@ -135,19 +142,19 @@ export default function SyncDeckPersistentLinkBuilder({
             {isPreflightChecking ? 'Verifying...' : 'Verify URL'}
           </Button>
         </div>
-        {!presentationUrlError && normalizedPresentationUrl && (
+        {!presentationUrlError && normalizedPresentationUrl.length > 0 && (
           <p className={`text-xs mt-1 ${isUrlVerified ? 'text-green-700' : 'text-gray-600'}`}>
             {isUrlVerified ? 'URL verified. You can now create the link.' : 'Verify this URL before creating the link.'}
           </p>
         )}
-        {presentationUrlError && <p className="text-xs text-red-600 mt-1">{presentationUrlError}</p>}
+        {presentationUrlError !== null && <p className="text-xs text-red-600 mt-1">{presentationUrlError}</p>}
       </div>
 
-      {preflightWarning && (
+      {preflightWarning !== null && (
         <p className="text-amber-700 text-sm bg-amber-50 border border-amber-200 p-2 rounded">{preflightWarning}</p>
       )}
 
-      {preflightPreviewUrl && (
+      {preflightPreviewUrl !== null && (
         <div className="space-y-2">
           <p className="text-sm font-semibold text-gray-700">Deck preview (first visible slide)</p>
           <div className="border border-gray-200 rounded overflow-hidden bg-white w-full max-w-md aspect-video">

@@ -128,3 +128,70 @@ void test('SyncDeckPersistentLinkBuilder resets readiness and preview when the U
     restoreDomEnvironment()
   }
 })
+
+void test('SyncDeckPersistentLinkBuilder resets verified state when edit target changes while mounted', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { default: SyncDeckPersistentLinkBuilder } = await import('./SyncDeckPersistentLinkBuilder.js')
+
+  try {
+    const readinessChanges: boolean[] = []
+    const rendered = render(
+      React.createElement(SyncDeckPersistentLinkBuilder, {
+        activityId: 'syncdeck',
+        selectedOptions: {
+          presentationUrl: 'https://slides.example/deck-one',
+        },
+        editState: {
+          hash: 'hash-one',
+          teacherCode: 'teacher-code',
+          selectedOptions: {
+            presentationUrl: 'https://slides.example/deck-one',
+          },
+        },
+        preflightRunner: async (): Promise<SyncDeckPreflightResult> => ({ valid: true, warning: null }),
+        onSelectedOptionsChange: () => undefined,
+        onSubmitReadinessChange: (canSubmit) => {
+          readinessChanges.push(canSubmit)
+        },
+      }),
+    )
+
+    fireEvent.click(rendered.getByRole('button', { name: /verify url/i }))
+
+    await waitFor(() => {
+      assert.equal(readinessChanges.at(-1), true)
+      assert.notEqual(rendered.queryByTitle('SyncDeck link preflight preview'), null)
+    })
+
+    rendered.rerender(
+      React.createElement(SyncDeckPersistentLinkBuilder, {
+        activityId: 'syncdeck',
+        selectedOptions: {
+          presentationUrl: 'https://slides.example/deck-two',
+        },
+        editState: {
+          hash: 'hash-two',
+          teacherCode: 'teacher-code',
+          selectedOptions: {
+            presentationUrl: 'https://slides.example/deck-two',
+          },
+        },
+        preflightRunner: async (): Promise<SyncDeckPreflightResult> => ({ valid: true, warning: null }),
+        onSelectedOptionsChange: () => undefined,
+        onSubmitReadinessChange: (canSubmit) => {
+          readinessChanges.push(canSubmit)
+        },
+      }),
+    )
+
+    await waitFor(() => {
+      assert.equal((rendered.getByLabelText(/presentation url/i) as HTMLInputElement).value, 'https://slides.example/deck-two')
+      assert.equal(readinessChanges.at(-1), false)
+      assert.equal(rendered.queryByTitle('SyncDeck link preflight preview'), null)
+      assert.notEqual(rendered.queryByText('Verify this URL before creating the link.'), null)
+    })
+  } finally {
+    restoreDomEnvironment()
+  }
+})

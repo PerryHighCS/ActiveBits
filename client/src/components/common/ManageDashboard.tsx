@@ -69,7 +69,7 @@ interface CreatedPersistentLinkResult {
   fullUrl: string
   hash: string
   teacherCode: string
-  selectedOptions?: Record<string, unknown>
+  selectedOptions?: DeepLinkSelection
 }
 
 function formatPersistentLinkPreflightWarning(warning: string): string {
