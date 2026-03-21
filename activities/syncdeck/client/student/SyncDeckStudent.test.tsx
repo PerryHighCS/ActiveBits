@@ -999,6 +999,8 @@ void test('shouldRecoverEmbeddedEntryParticipantToken requests a fresh child han
     getItem() {
       return null
     },
+    setItem() {},
+    removeItem() {},
   }
 
   assert.equal(
@@ -1027,6 +1029,8 @@ void test('shouldRecoverEmbeddedEntryParticipantToken skips refresh when the chi
       }
       return null
     },
+    setItem() {},
+    removeItem() {},
   }
 
   assert.equal(
@@ -1040,6 +1044,87 @@ void test('shouldRecoverEmbeddedEntryParticipantToken skips refresh when the chi
     }),
     false,
   )
+})
+
+void test('shouldRecoverEmbeddedEntryParticipantToken clears malformed shared context and still recovers', () => {
+  const removedKeys: string[] = []
+  const sessionStorage = {
+    getItem() {
+      return null
+    },
+  }
+  const localStorage = {
+    getItem(key: string) {
+      if (key === 'session-participant:CHILD:syncdeck-parent:abcde:resonance') {
+        return '{not-json'
+      }
+      return null
+    },
+    setItem() {},
+    removeItem(key: string) {
+      removedKeys.push(key)
+    },
+  }
+
+  assert.equal(
+    shouldRecoverEmbeddedEntryParticipantToken({
+      sessionId: 'syncdeck-parent',
+      childSessionId: 'CHILD:syncdeck-parent:abcde:resonance',
+      studentId: 'student-1',
+      activityId: 'resonance',
+      sessionStorage,
+      localStorage,
+    }),
+    true,
+  )
+
+  assert.deepEqual(removedKeys, ['session-participant:CHILD:syncdeck-parent:abcde:resonance'])
+})
+
+void test('shouldRecoverEmbeddedEntryParticipantToken ignores empty shared context but still honors valid legacy identity', () => {
+  const persistedLegacyContexts: Array<{ key: string; value: string }> = []
+  const sessionStorage = {
+    getItem() {
+      return null
+    },
+  }
+  const localStorage = {
+    getItem(key: string) {
+      if (key === 'session-participant:CHILD:syncdeck-parent:abcde:resonance') {
+        return '{}'
+      }
+      if (key === 'student-name-CHILD:syncdeck-parent:abcde:resonance') {
+        return 'Ada Lovelace'
+      }
+      if (key === 'student-id-CHILD:syncdeck-parent:abcde:resonance') {
+        return 'student-1'
+      }
+      return null
+    },
+    setItem(key: string, value: string) {
+      persistedLegacyContexts.push({ key, value })
+    },
+    removeItem() {},
+  }
+
+  assert.equal(
+    shouldRecoverEmbeddedEntryParticipantToken({
+      sessionId: 'syncdeck-parent',
+      childSessionId: 'CHILD:syncdeck-parent:abcde:resonance',
+      studentId: 'student-1',
+      activityId: 'resonance',
+      sessionStorage,
+      localStorage,
+    }),
+    false,
+  )
+
+  assert.deepEqual(persistedLegacyContexts, [
+    {
+      key: 'session-participant:CHILD:syncdeck-parent:abcde:resonance',
+      value: JSON.stringify({ studentName: 'Ada Lovelace', studentId: 'student-1' }),
+    },
+  ])
 })
 
 void test('applySyncDeckEmbeddedLifecyclePayload applies start and end updates', () => {

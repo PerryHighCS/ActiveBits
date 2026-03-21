@@ -10,6 +10,7 @@ import {
 } from '@src/components/common/entryParticipantStorage'
 import {
   persistSessionParticipantIdentity,
+  readStoredSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
 } from '@src/components/common/entryParticipantIdentityUtils'
 import {
@@ -1478,21 +1479,14 @@ export function shouldRecoverEmbeddedEntryParticipantToken(params: {
   studentId: string | null | undefined
   activityId: string | null | undefined
   sessionStorage: Pick<Storage, 'getItem'> | null | undefined
-  localStorage: Pick<Storage, 'getItem'> | null | undefined
+  localStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null | undefined
 }): boolean {
   if (!params.sessionId || !params.childSessionId || !params.studentId || !params.activityId) {
     return false
   }
 
   if (params.localStorage) {
-    const sharedContextRaw = params.localStorage.getItem(`session-participant:${params.childSessionId}`)
-    const legacyName = params.localStorage.getItem(`student-name-${params.childSessionId}`)
-    const legacyId = params.localStorage.getItem(`student-id-${params.childSessionId}`)
-    if (
-      (typeof sharedContextRaw === 'string' && sharedContextRaw.length > 0)
-      || (typeof legacyName === 'string' && legacyName.trim().length > 0)
-      || (typeof legacyId === 'string' && legacyId.trim().length > 0)
-    ) {
+    if (readStoredSessionParticipantIdentity(params.localStorage, params.childSessionId)) {
       return false
     }
   }
