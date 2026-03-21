@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   getMcqSelectionTone,
+  isIncorrectMcqSelection,
   mergeDisplayOrder,
   moveResponseIdToEnd,
   reorderResponseIds,
@@ -85,5 +86,29 @@ void test('getMcqSelectionTone uses green for correct answers and red for incorr
       cellClassName: 'bg-sky-50',
       dotClassName: 'bg-sky-500',
     },
+  )
+})
+
+void test('isIncorrectMcqSelection marks undefined-isCorrect distractors as incorrect when question has a correct option', () => {
+  const options = [
+    { id: 'a', text: 'Correct', isCorrect: true },
+    { id: 'b', text: 'Distractor' },
+  ]
+
+  assert.equal(
+    isIncorrectMcqSelection({ selectedOptionId: 'b', options }),
+    true,
+  )
+})
+
+void test('isIncorrectMcqSelection does not mark poll selections as incorrect', () => {
+  const options = [
+    { id: 'a', text: 'Option A' },
+    { id: 'b', text: 'Option B' },
+  ]
+
+  assert.equal(
+    isIncorrectMcqSelection({ selectedOptionId: 'b', options }),
+    false,
   )
 })

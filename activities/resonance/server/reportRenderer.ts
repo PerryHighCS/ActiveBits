@@ -24,13 +24,28 @@ export interface ResonanceReportSessionData {
 export function buildResonanceReport(session: ResonanceReportSessionData): ResonanceReport {
   const { questions, students, responses, annotations, reveals } = session
 
+  const responsesByQuestionId = new Map<string, Response[]>()
+  for (const response of responses) {
+    const existing = responsesByQuestionId.get(response.questionId)
+    if (existing) {
+      existing.push(response)
+    } else {
+      responsesByQuestionId.set(response.questionId, [response])
+    }
+  }
+
+  const revealsByQuestionId = new Map<string, QuestionReveal>()
+  for (const reveal of reveals) {
+    revealsByQuestionId.set(reveal.questionId, reveal)
+  }
+
   const questionSections: ResonanceReportQuestion[] = questions.map((q) => {
-    const qResponses = responses.filter((r) => r.questionId === q.id)
+    const qResponses = responsesByQuestionId.get(q.id) ?? []
     const enriched = qResponses.map((r) => ({
       ...r,
       studentName: students[r.studentId]?.name ?? 'Unknown',
     }))
-    const reveal = reveals.find((rv) => rv.questionId === q.id) ?? null
+    const reveal = revealsByQuestionId.get(q.id) ?? null
     const qAnnotations: ResonanceReportQuestion['annotations'] = {}
     for (const r of qResponses) {
       const ann = annotations[r.id]
@@ -66,10 +81,11 @@ function pct(count: number, total: number): number {
 
 function renderQuestionSection(sec: ResonanceReportQuestion): string {
   const { question, responses, reveal, annotations } = sec
+  const hasCorrectOption = question.type === 'multiple-choice' && question.options.some((option) => option.isCorrect === true)
   const label =
     question.type === 'free-response'
       ? 'Free response'
-      : reveal?.correctOptionIds === null || (reveal?.correctOptionIds?.length ?? 0) === 0
+      : !hasCorrectOption
         ? 'Poll'
         : 'Multiple choice'
 
@@ -119,7 +135,15 @@ function renderQuestionSection(sec: ResonanceReportQuestion): string {
   if (reveal !== null && reveal.sharedResponses.length > 0) {
     body += '<p class="shared-label">Shared responses:</p><ul class="shared">'
     for (const sr of reveal.sharedResponses) {
-      const text = sr.answer.type === 'free-response' ? sr.answer.text : sr.answer.selectedOptionId
+      let text: string
+      if (sr.answer.type === 'free-response') {
+        text = sr.answer.text
+      } else {
+        const { selectedOptionId } = sr.answer
+        text = question.type === 'multiple-choice'
+          ? (question.options.find((opt) => opt.id === selectedOptionId)?.text ?? selectedOptionId)
+          : selectedOptionId
+      }
       const emoji = sr.instructorEmoji !== null ? esc(sr.instructorEmoji) + ' ' : ''
       body += `<li>${emoji}${esc(text)}</li>`
     }

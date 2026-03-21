@@ -18,10 +18,11 @@ function PercentBar({ pct }: { pct: number }) {
 
 function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
   const { question, responses, reveal } = q
+  const hasCorrectOption = question.type === 'multiple-choice' && question.options.some((option) => option.isCorrect === true)
 
   // MCQ poll summary: per-option counts
   const isPoll = question.type === 'multiple-choice' &&
-    (reveal === null || reveal.correctOptionIds === null || reveal.correctOptionIds.length === 0)
+    !hasCorrectOption
 
   const optionCounts: Map<string, number> = new Map()
   if (question.type === 'multiple-choice') {

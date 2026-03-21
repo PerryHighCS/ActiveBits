@@ -101,6 +101,26 @@ export function getMcqSelectionTone({
   }
 }
 
+export function isIncorrectMcqSelection({
+  selectedOptionId,
+  options,
+}: {
+  selectedOptionId: string | null
+  options: MCQQuestion['options']
+}): boolean {
+  if (selectedOptionId === null) {
+    return false
+  }
+
+  const hasCorrectOption = options.some((option) => option.isCorrect === true)
+  if (!hasCorrectOption) {
+    return false
+  }
+
+  const selectedOption = options.find((option) => option.id === selectedOptionId)
+  return selectedOption?.isCorrect !== true
+}
+
 interface Props {
   question: Question
   responses: ResponseWithName[]
@@ -157,7 +177,7 @@ function MCQTable({
               : { starred: false, flagged: false, emoji: null }
             const selectedOption = options.find((o) => o.id === selectedOptionId)
             const isCorrect = selectedOption?.isCorrect === true
-            const isIncorrect = selectedOptionId !== null && selectedOption?.isCorrect === false && options.some((o) => o.isCorrect)
+            const isIncorrect = isIncorrectMcqSelection({ selectedOptionId, options })
 
             return (
               <tr
