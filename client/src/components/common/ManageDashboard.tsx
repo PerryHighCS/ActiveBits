@@ -725,12 +725,18 @@ export default function ManageDashboard({
         <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
           <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
           <div className="flex flex-col gap-3">
-            {Object.entries(selectedActivityOptions).map(([key, option]) => (
-              <label key={key} className="text-sm text-gray-700">
-                <span className="block font-semibold mb-1">{option.label || key}</span>
+            {Object.entries(selectedActivityOptions).map(([key, option]) => {
+              const optionInputId = `persistent-link-option-${key}`
+
+              return (
+              <div key={key} className="text-sm text-gray-700">
+                <label htmlFor={optionInputId} className="block font-semibold mb-1">
+                  {option.label || key}
+                </label>
                 {option.type === 'select' ? (
                   <>
                     <select
+                      id={optionInputId}
                       value={persistentOptions[key] ?? ''}
                       onChange={(event) => {
                         const nextValue = event.target.value
@@ -770,6 +776,7 @@ export default function ManageDashboard({
                 ) : (
                   <div className="flex items-center gap-2">
                     <input
+                      id={optionInputId}
                       type="text"
                       value={persistentOptions[key] ?? ''}
                       onChange={(event) => {
@@ -812,8 +819,9 @@ export default function ManageDashboard({
                       : 'Verify this value before creating the link.'}
                   </span>
                 )}
-              </label>
-            ))}
+              </div>
+              )
+            })}
           </div>
         </div>
       )}

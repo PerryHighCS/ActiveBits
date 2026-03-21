@@ -95,6 +95,71 @@ void test('clearPreparedResonanceLinkSelection immediately clears selectedOption
 })
 
 void test(
+  'ResonancePersistentLinkBuilder keeps existing prepared selectedOptions ready without re-preparing',
+  { concurrency: false },
+  async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const previousFetch = globalThis.fetch
+  const { render, waitFor } = await import('@testing-library/react')
+  const { default: ResonancePersistentLinkBuilder } = await import('./ResonancePersistentLinkBuilder.js')
+  let rendered: ReturnType<typeof render> | null = null
+  const selectedOptionsSnapshots: Array<Record<string, string>> = []
+  const readinessChanges: boolean[] = []
+  let fetchCallCount = 0
+
+  try {
+    ;(globalThis as { fetch?: typeof fetch }).fetch = (async () => {
+      fetchCallCount += 1
+      throw new Error('prepare-link-options should not be called when edit state is already prepared')
+    }) as unknown as typeof fetch
+
+    rendered = render(
+      React.createElement(ResonancePersistentLinkBuilder, {
+        activityId: 'resonance',
+        teacherCode: 'teacher-code',
+        selectedOptions: {
+          q: 'encoded-questions',
+          h: 'prep-hash-123',
+        },
+        editState: {
+          hash: 'hash-123',
+          teacherCode: 'teacher-code',
+          selectedOptions: {
+            h: 'prep-hash-123',
+            questions: [
+              {
+                id: 'q1',
+                type: 'free-response',
+                text: 'What stands out?',
+                order: 0,
+              },
+            ],
+          },
+        },
+        onSelectedOptionsChange: (nextSelectedOptions) => {
+          selectedOptionsSnapshots.push(nextSelectedOptions)
+        },
+        onSubmitReadinessChange: (canSubmit) => {
+          readinessChanges.push(canSubmit)
+        },
+      }),
+    )
+
+    await waitFor(() => {
+      assert.equal(fetchCallCount, 0)
+      assert.equal(readinessChanges.at(-1), true)
+    })
+
+    assert.deepEqual(selectedOptionsSnapshots, [])
+  } finally {
+    ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
+    rendered?.unmount()
+    restoreDomEnvironment()
+  }
+  },
+)
+
+void test(
   'ResonancePersistentLinkBuilder prepares selectedOptions and submit readiness for shared submit',
   { concurrency: false },
   async () => {

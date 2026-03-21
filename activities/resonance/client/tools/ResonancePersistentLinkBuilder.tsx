@@ -16,6 +16,17 @@ interface PrepareLinkOptionsResponse {
 
 const PREPARE_LINK_OPTIONS_DEBOUNCE_MS = 500
 
+function buildPreparedInputSignature(teacherCode: string, questions: Question[] | null): string | null {
+  if (teacherCode.trim().length < 6 || questions === null || questions.length === 0) {
+    return null
+  }
+
+  return JSON.stringify({
+    teacherCode: teacherCode.trim(),
+    questions,
+  })
+}
+
 export function normalizeEditStateQuestions(rawSavedQuestions: unknown): Question[] | null {
   const { questions, errors } = validateQuestionSet(rawSavedQuestions)
   if (errors.length > 0 || questions.length === 0) return null
@@ -65,15 +76,25 @@ export default function ResonancePersistentLinkBuilder({
   const [preparedHash, setPreparedHash] = useState<string | null>(
     typeof selectedOptions?.h === 'string' ? selectedOptions.h : null,
   )
+  const [preparedInputSignature, setPreparedInputSignature] = useState<string | null>(() => {
+    const hasPreparedSelectedOptions = typeof selectedOptions?.q === 'string' && typeof selectedOptions?.h === 'string'
+    return hasPreparedSelectedOptions ? buildPreparedInputSignature(teacherCode, savedQuestions) : null
+  })
 
   const isEdit = Boolean(editState)
   const normalizedTeacherCode = teacherCode.trim()
   const canPrepare = normalizedTeacherCode.length >= 6 && questions !== null && questions.length > 0
+  const currentPreparedInputSignature = buildPreparedInputSignature(normalizedTeacherCode, questions)
+  const hasPreparedSelectedOptions = typeof selectedOptions?.q === 'string' && typeof selectedOptions?.h === 'string'
+  const isPreparedForCurrentInputs = hasPreparedSelectedOptions
+    && currentPreparedInputSignature !== null
+    && preparedInputSignature === currentPreparedInputSignature
 
   const invalidatePreparedState = (): void => {
     setPreparing(false)
     setPrepareError(null)
     setPreparedHash(null)
+    setPreparedInputSignature(null)
     clearPreparedResonanceLinkSelection(onSelectedOptionsChange, onSubmitReadinessChange)
   }
 
@@ -88,6 +109,16 @@ export default function ResonancePersistentLinkBuilder({
 
     if (!canPrepare || questions === null) {
       invalidatePreparedState()
+      return () => {
+        cancelled = true
+      }
+    }
+
+    if (isPreparedForCurrentInputs) {
+      setPreparing(false)
+      setPrepareError(null)
+      setPreparedHash(typeof selectedOptions?.h === 'string' ? selectedOptions.h : null)
+      onSubmitReadinessChange?.(true)
       return () => {
         cancelled = true
       }
@@ -122,6 +153,7 @@ export default function ResonancePersistentLinkBuilder({
 
           cacheResonanceQuestionDraft(preparedHashValue, questions)
           setPreparedHash(preparedHashValue)
+          setPreparedInputSignature(currentPreparedInputSignature)
           setPrepareError(null)
           onSelectedOptionsChange?.({
             q: preparedQuestionPayload,
@@ -153,7 +185,16 @@ export default function ResonancePersistentLinkBuilder({
       window.clearTimeout(timeoutId)
       abortController.abort()
     }
-  }, [canPrepare, normalizedTeacherCode, onSelectedOptionsChange, onSubmitReadinessChange, questions])
+  }, [
+    canPrepare,
+    currentPreparedInputSignature,
+    isPreparedForCurrentInputs,
+    normalizedTeacherCode,
+    onSelectedOptionsChange,
+    onSubmitReadinessChange,
+    questions,
+    selectedOptions?.h,
+  ])
 
   return (
     <div className="space-y-5 p-1" aria-label={isEdit ? 'Update Resonance persistent link' : 'Create Resonance persistent link'}>
