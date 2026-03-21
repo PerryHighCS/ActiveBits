@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-21
+- Surface: REST | client normalizer | activity interface
+- Contract: Resonance student `/state` reveal payloads may include `QuestionReveal.viewerResponse` with `{ answer, submittedAt, instructorEmoji, isShared }`, and the client-side `normalizeStudentSessionSnapshot` path must preserve that object when each field validates successfully.
+- Compatibility constraints: `viewerResponse` is optional and may be `null`, but when present it is the only student-safe source for "Your response" summary and correct/incorrect reveal UI in `SharedResponseFeed`. Dropping it in normalization is a behavior regression even when `sharedResponses` still render. `sharedResponses[*].reactions` is also rendered directly, so the client normalizer must not trust arbitrary transport values there.
+- Validation rules: `viewerResponse.answer` must satisfy the existing `AnswerPayload` contract; `submittedAt` must be a finite number; `instructorEmoji` must be `string | null`; `isShared` must be boolean. Invalid `viewerResponse` invalidates the containing reveal during normalization. `sharedResponses[*].reactions` is sanitized to a `Record<string, number>` by keeping only known student reaction emoji keys with finite non-negative numeric counts; invalid keys/counts are dropped rather than invalidating the whole response.
+- Evidence (schema/tests/path): `activities/resonance/shared/types.ts`; `activities/resonance/server/routes.ts`; `activities/resonance/client/hooks/useResonanceSession.ts`; `activities/resonance/client/hooks/useResonanceSession.test.ts`; `activities/resonance/client/student/SharedResponseFeed.tsx`
+- Follow-up action: Keep any future student snapshot normalizers aligned with `buildStudentReveal(...)` so student-only enrichment fields do not get stripped on reload/poll paths.
+- Owner: Codex
+
 - Date: 2026-03-20
 - Surface: activity interface | internal module
 - Contract: Custom persistent-link builders cannot rely on `selectedOptions` retaining nested objects/arrays across the shared persistent-link pipeline; stored/edit-state options are normalized to allowed deep-link keys and string values. `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx` now recovers editable question drafts from local storage keyed by persistent-link hash (`resonance-question-draft:<hash>`) instead of relying on `selectedOptions.questions` round-tripping.

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { isValidStudentReactionEmoji } from '../../shared/emojiSet.js'
 import type {
   AnswerPayload,
   QuestionReveal,
@@ -7,6 +8,7 @@ import type {
   StudentMCQOption,
   StudentQuestion,
   StudentSessionSnapshot,
+  ViewerRevealResponse,
 } from '../../shared/types.js'
 
 const FALLBACK_POLL_INTERVAL_MS = 15_000
@@ -121,6 +123,27 @@ function normalizeAnswerPayload(value: unknown): AnswerPayload | null {
   return null
 }
 
+function normalizeSharedResponseReactions(value: unknown): Record<string, number> {
+  if (!isRecord(value)) {
+    return {}
+  }
+
+  const reactions: Record<string, number> = {}
+  for (const [emoji, count] of Object.entries(value)) {
+    if (!isValidStudentReactionEmoji(emoji)) {
+      continue
+    }
+
+    if (typeof count !== 'number' || !Number.isFinite(count) || count < 0) {
+      continue
+    }
+
+    reactions[emoji] = count
+  }
+
+  return reactions
+}
+
 function normalizeSharedResponse(value: unknown): SharedResponse | null {
   if (!isRecord(value)) {
     return null
@@ -149,7 +172,7 @@ function normalizeSharedResponse(value: unknown): SharedResponse | null {
     answer,
     sharedAt: value.sharedAt,
     instructorEmoji: typeof value.instructorEmoji === 'string' ? value.instructorEmoji : null,
-    reactions: isRecord(value.reactions) ? (value.reactions as SharedResponse['reactions']) : {},
+    reactions: normalizeSharedResponseReactions(value.reactions),
     ...(typeof value.isOwnResponse === 'boolean' ? { isOwnResponse: value.isOwnResponse } : {}),
     ...(typeof value.viewerReaction === 'string' || value.viewerReaction === null
       ? { viewerReaction: value.viewerReaction }
@@ -186,11 +209,51 @@ function normalizeQuestionReveal(value: unknown): QuestionReveal | null {
     return null
   }
 
+  let viewerResponse: ViewerRevealResponse | null | undefined
+  if (value.viewerResponse === null) {
+    viewerResponse = null
+  } else if (value.viewerResponse !== undefined) {
+    if (!isRecord(value.viewerResponse)) {
+      return null
+    }
+
+    const answer = normalizeAnswerPayload(value.viewerResponse.answer)
+    if (!answer) {
+      return null
+    }
+
+    if (
+      typeof value.viewerResponse.submittedAt !== 'number' ||
+      !Number.isFinite(value.viewerResponse.submittedAt)
+    ) {
+      return null
+    }
+
+    if (
+      value.viewerResponse.instructorEmoji !== null &&
+      typeof value.viewerResponse.instructorEmoji !== 'string'
+    ) {
+      return null
+    }
+
+    if (typeof value.viewerResponse.isShared !== 'boolean') {
+      return null
+    }
+
+    viewerResponse = {
+      answer,
+      submittedAt: value.viewerResponse.submittedAt,
+      instructorEmoji: value.viewerResponse.instructorEmoji,
+      isShared: value.viewerResponse.isShared,
+    }
+  }
+
   return {
     questionId: value.questionId,
     sharedAt: value.sharedAt,
     correctOptionIds: value.correctOptionIds as string[] | null,
     sharedResponses,
+    ...(viewerResponse !== undefined ? { viewerResponse } : {}),
   }
 }
 

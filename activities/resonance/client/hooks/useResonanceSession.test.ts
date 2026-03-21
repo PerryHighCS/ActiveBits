@@ -112,3 +112,90 @@ void test('normalizeStudentSessionSnapshot filters malformed reveals and reviewe
   assert.deepEqual(result.reveals.map((reveal) => reveal.questionId), ['q1'])
   assert.deepEqual(result.reviewedResponses.map((response) => response.question.id), ['q3'])
 })
+
+void test('normalizeStudentSessionSnapshot keeps valid reveal viewerResponse payloads', () => {
+  const result = normalizeStudentSessionSnapshot(({
+    sessionId: 'session-1',
+    reveals: [
+      {
+        questionId: 'q1',
+        sharedAt: 100,
+        correctOptionIds: ['a'],
+        sharedResponses: [],
+        viewerResponse: {
+          answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+          submittedAt: 90,
+          instructorEmoji: '🔥',
+          isShared: true,
+        },
+      },
+    ],
+  }) as unknown as Partial<StudentSessionSnapshot>)
+
+  assert.ok(result)
+  assert.deepEqual(result.reveals[0]?.viewerResponse, {
+    answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+    submittedAt: 90,
+    instructorEmoji: '🔥',
+    isShared: true,
+  })
+})
+
+void test('normalizeStudentSessionSnapshot sanitizes shared response reactions', () => {
+  const result = normalizeStudentSessionSnapshot(({
+    sessionId: 'session-1',
+    reveals: [
+      {
+        questionId: 'q1',
+        sharedAt: 100,
+        correctOptionIds: null,
+        sharedResponses: [
+          {
+            id: 'shared-1',
+            questionId: 'q1',
+            answer: { type: 'free-response', text: 'answer' },
+            sharedAt: 100,
+            instructorEmoji: null,
+            reactions: {
+              '👍': 2,
+              '🔥': 0,
+              bogus: 5,
+              '💡': Number.NaN,
+              '😮': -1,
+              '❤️': '3',
+            },
+          },
+        ],
+      },
+    ],
+  }) as unknown as Partial<StudentSessionSnapshot>)
+
+  assert.ok(result)
+  assert.deepEqual(result.reveals[0]?.sharedResponses[0]?.reactions, {
+    '👍': 2,
+    '🔥': 0,
+  })
+})
+
+void test('normalizeStudentSessionSnapshot drops malformed reveal viewerResponse payloads', () => {
+  const result = normalizeStudentSessionSnapshot(({
+    sessionId: 'session-1',
+    reveals: [
+      {
+        questionId: 'q1',
+        sharedAt: 100,
+        correctOptionIds: ['a'],
+        sharedResponses: [],
+        viewerResponse: {
+          answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+          submittedAt: '90',
+          instructorEmoji: '🔥',
+          isShared: true,
+        },
+      },
+    ],
+  }) as unknown as Partial<StudentSessionSnapshot>)
+
+  assert.ok(result)
+  assert.deepEqual(result.reveals, [])
+})
