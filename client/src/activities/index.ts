@@ -30,10 +30,10 @@ interface ActivityClientModuleExports extends Record<string, unknown> {
 }
 
 type ActivityClientLoader = () => Promise<ActivityClientModuleExports>
-const configModules = typeof import.meta.glob === 'function'
+const configModules: Record<string, ActivityConfigModule> = typeof import.meta.glob === 'function'
   ? import.meta.glob<ActivityConfigModule>('@activities/*/activity.config.{js,ts}', { eager: true })
   : {}
-const clientModules = typeof import.meta.glob === 'function'
+const clientModules: Record<string, ActivityClientLoader> = typeof import.meta.glob === 'function'
   ? import.meta.glob<ActivityClientModuleExports>('@activities/*/client/index.{js,jsx,ts,tsx}')
   : {}
 

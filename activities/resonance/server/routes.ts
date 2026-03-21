@@ -103,7 +103,7 @@ interface PersistentSessionsCookieEntry {
 }
 
 function prepareResonanceLinkOptions(body: Record<string, unknown>):
-  | { ok: true; selectedOptions: { q: string; h: string }; questionCount: number; sizeChars: number }
+  | { ok: true; selectedOptions: { q: string; h: string } }
   | { ok: false; status: number; payload: { error: string; details?: string[] } } {
   const teacherCode = typeof body.teacherCode === 'string' ? body.teacherCode.trim() : ''
   if (teacherCode.length < 6) {
@@ -143,8 +143,6 @@ function prepareResonanceLinkOptions(body: Record<string, unknown>):
   return {
     ok: true,
     selectedOptions: { q: encoded, h: hash },
-    questionCount: questions.length,
-    sizeChars,
   }
 }
 

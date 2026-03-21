@@ -170,7 +170,7 @@ void test(
   async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch
-  const { act, render, waitFor } = await import('@testing-library/react')
+  const { render, waitFor } = await import('@testing-library/react')
   const { default: ResonancePersistentLinkBuilder } = await import('./ResonancePersistentLinkBuilder.js')
   let rendered: ReturnType<typeof render> | null = null
   const selectedOptionsSnapshots: Array<Record<string, string>> = []
