@@ -22,13 +22,14 @@ Before making changes, read these files when relevant:
 2. Treat generated outputs (`dist`, caches, `node_modules`) as out of scope for manual edits.
 3. Add or update tests for the code you change, even if nobody asked.
 4. For tests that intentionally exercise failure/error paths, add explicit `[TEST]` log messages so expected noisy output is clearly distinguishable from real regressions.
-5. Frontend controls must include appropriate accessibility semantics for their role and state. Use native elements when possible, and add relevant attributes such as `aria-label`, `aria-labelledby`, `aria-describedby`, `aria-controls`, `aria-expanded`, `aria-pressed`, `aria-selected`, and `disabled` when the control behavior requires them.
-6. All API endpoints must include proper error handling and logging.
-7. Use structured logging for all server-side events.
-8. Never expose, log, or commit secrets, API keys, or other sensitive information.
-9. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
-10. When adding or changing SyncDeck-embedded activity launch formats, update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same branch so the shared skill docs stay aligned with the real payloads used by the repo.
-11. If a `skills/syncdeck/...` doc change is intended to be shared across repos, push the updated subtree back to `syncdeck-agent-skills` as part of the completion flow.
+5. Use the shared Playwright harness for browser-level coverage that crosses routing, fetch, storage, and websocket/runtime boundaries. Keep Playwright tests under the repo-root `playwright/` directory and run them with the root `npm run test:e2e` scripts rather than ad hoc browser commands.
+6. Frontend controls must include appropriate accessibility semantics for their role and state. Use native elements when possible, and add relevant attributes such as `aria-label`, `aria-labelledby`, `aria-describedby`, `aria-controls`, `aria-expanded`, `aria-pressed`, `aria-selected`, and `disabled` when the control behavior requires them.
+7. All API endpoints must include proper error handling and logging.
+8. Use structured logging for all server-side events.
+9. Never expose, log, or commit secrets, API keys, or other sensitive information.
+10. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
+11. When adding or changing SyncDeck-embedded activity launch formats, update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same branch so the shared skill docs stay aligned with the real payloads used by the repo.
+12. If a `skills/syncdeck/...` doc change is intended to be shared across repos, push the updated subtree back to `syncdeck-agent-skills` as part of the completion flow.
  
 ## Preflight Checklist
 
@@ -48,11 +49,14 @@ Run these minimum checks based on scope:
    - Verify links/commands in changed docs are accurate.
 2. Workspace specific changes
    - Run the appropriate npm workspace tests, be sure to include lint and typecheck
+   - If browser-visible shared flows or routing surfaces changed, include `npm run test:e2e`
 3. Cross-workspace changes
    - `npm test` (runs unit tests + typecheck + linting across all workspaces)
+   - Add `npm run test:e2e` when the change affects shared client routing, activity-card surfacing, waiting-room/permalink flow, or other browser-level interaction seams
 4. Sandbox/agent environments that block local port binding
    - Keep `npm test` as the primary merge gate when available.
    - If port-binding tests fail due environment constraints (for example `EPERM` on listen), run `npm run test:codex` and record the limitation in validation notes.
+   - If Playwright needs real local port binding, run `npm run test:e2e` in a canonical environment or with the required escalation, and record that limitation/exception in validation notes.
 
 ## Destructive Command Policy
 

@@ -161,9 +161,9 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-22
 - Scope: e2e
-- Pattern: For first-pass Playwright coverage in this repo, point the harness at the real app surface through `npm run dev` on `http://127.0.0.1:3000`, and start with registry-backed smoke checks for `/` and `/manage` before deeper flows.
-- Why it helps: The join page and manage dashboard are both driven by the shared activity registry, so browser assertions on their rendered cards catch whole-app regressions like missing emitted activity cards that unit tests around individual helpers can miss.
-- Example (file/path): `playwright.config.ts`; `playwright/home-and-manage.spec.ts`
-- Failure signal: An activity silently drops out of the join page or dashboard in the browser even though local unit tests for its helpers and config parsing still pass.
-- Follow-up action: Expand from these registry smoke checks into higher-value browser flows next, especially permalink waiting-room transitions and teacher/student handoff paths.
+- Pattern: For first-pass Playwright coverage in this repo, run the shared root harness against the real built app on `http://127.0.0.1:3100` via the isolated `playwright.config.ts` web server, and start with registry-backed smoke checks for `/` and `/manage` before deeper flows.
+- Why it helps: The join page and manage dashboard are both driven by the shared activity registry, so browser assertions on their rendered cards catch whole-app regressions like missing emitted activity cards that unit tests around individual helpers can miss, while avoiding the dev-server `localhost:3000` launch behavior.
+- Example (file/path): `playwright.config.ts`; `playwright/home-and-manage.spec.ts`; `package.json`
+- Failure signal: An activity silently drops out of the join page or dashboard in the browser even though local unit tests for its helpers and config parsing still pass, or the Playwright harness starts depending on the interactive dev server instead of the isolated browser-test startup path.
+- Follow-up action: Expand from these registry smoke checks into higher-value browser flows next, especially permalink waiting-room transitions and teacher/student handoff paths, while keeping browser runs on the shared root scripts (`npm run test:e2e`, `test:e2e:headed`, `test:e2e:ui`).
 - Owner: Codex
