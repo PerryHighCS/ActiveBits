@@ -1,24 +1,16 @@
 {
   "groups": [
     {
-      "name": "syncdeck-light",
-      "activities": ["syncdeck", "raffle", "www-sim"]
-    },
-    {
-      "name": "resonance-small",
-      "activities": ["resonance", "embedded-test", "java-string-practice"]
-    },
-    {
-      "name": "algorithm-python",
-      "activities": ["algorithm-demo", "python-list-practice"]
-    },
-    {
-      "name": "travel-gallery",
-      "activities": ["traveling-salesman", "gallery-walk"]
-    },
-    {
       "name": "java-video",
       "activities": ["java-format-practice", "video-sync"]
+    },
+    {
+      "name": "resonance-syncdeck",
+      "activities": ["resonance", "embedded-test", "java-string-practice", "syncdeck", "raffle", "www-sim"]
+    },
+    {
+      "name": "algorithm-travel",
+      "activities": ["algorithm-demo", "python-list-practice", "traveling-salesman", "gallery-walk"]
     }
   ]
 }

@@ -233,6 +233,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-22
 - Scope: CI
+- Pattern: Rebalance activity test buckets using observed per-bucket wall time from CI, not just test-file counts; a slightly uneven file-count split can still be the faster real-world matrix.
+- Why it helps: Activities vary a lot in runtime cost, so grouping by actual measured duration keeps the matrix balanced better than counting files alone.
+- Example (file/path): `ci/activity-test-groups.json`; `.github/workflows/ci.yml`
+- Failure signal: One activity bucket consistently dominates CI even though the manifest looks numerically balanced by file count or raw test count.
+- Follow-up action: When timings drift, adjust only the manifest grouping and keep the verifier untouched.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
 - Pattern: Use the Playwright container image only for browser-facing jobs, and run lint, typecheck, unit/integration tests, and server/build verification on plain `ubuntu-latest` unless they truly need browser binaries or Playwright system packages.
 - Why it helps: Non-browser jobs avoid heavier container startup and keep the workflow intent clearer, while the Playwright-specific environment remains pinned exactly where browser coverage needs it.
 - Example (file/path): `.github/workflows/ci.yml`; `scripts/verify-playwright-version-sync.mjs`
