@@ -1507,3 +1507,11 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/resonance/activity.config.ts`; `activities/resonance/client/tools/ResonancePersistentLinkBuilder.tsx`; `activities/resonance/server/routes.ts`; `client/src/components/common/ManageDashboard.tsx`
 - Follow-up action: If future activities need custom permalink preparation, prefer returning finalized string `selectedOptions` plus submit readiness instead of letting the activity mint the full permalink URL.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Area: tooling | e2e | playwright
+- Discovery: On this Linux Arm64 dev environment, Playwright can be installed successfully with `@playwright/test` plus `npx playwright install chromium webkit`, but branded `chrome` is not supported here and Safari coverage should be represented by the Playwright `webkit` engine instead.
+- Why it matters: Future browser-test setup should target `chromium` and `webkit` in local/devcontainer automation on Arm64 rather than assuming branded Chrome or native Safari binaries are available.
+- Evidence: `package.json`; `package-lock.json`; local install command output from `npx playwright install chrome webkit` and `npx playwright install chromium webkit`
+- Follow-up action: When adding the Playwright config, default projects to `chromium` and `webkit` in this repo, and only add branded-browser channels where the host platform supports them.
+- Owner: Codex

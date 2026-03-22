@@ -158,3 +158,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: `eslint` exits with `Invalid option '--target'`, or a supposedly scoped activities test run starts executing unrelated activity suites.
 - Follow-up action: Prefer the env-style invocation in agent notes, docs, and future validation commands until the script interface is changed.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: e2e
+- Pattern: For first-pass Playwright coverage in this repo, point the harness at the real app surface through `npm run dev` on `http://127.0.0.1:3000`, and start with registry-backed smoke checks for `/` and `/manage` before deeper flows.
+- Why it helps: The join page and manage dashboard are both driven by the shared activity registry, so browser assertions on their rendered cards catch whole-app regressions like missing emitted activity cards that unit tests around individual helpers can miss.
+- Example (file/path): `playwright.config.ts`; `playwright/home-and-manage.spec.ts`
+- Failure signal: An activity silently drops out of the join page or dashboard in the browser even though local unit tests for its helpers and config parsing still pass.
+- Follow-up action: Expand from these registry smoke checks into higher-value browser flows next, especially permalink waiting-room transitions and teacher/student handoff paths.
+- Owner: Codex
