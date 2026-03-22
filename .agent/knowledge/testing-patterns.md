@@ -230,3 +230,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: A new activity lands without CI coverage because its name was never added to a hard-coded workflow list, or activity names drift between multiple duplicated YAML lists.
 - Follow-up action: Rebalance the manifest buckets when timing shifts, but keep the verifier strict so coverage remains complete as activities are added.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: Use the Playwright container image only for browser-facing jobs, and run lint, typecheck, unit/integration tests, and server/build verification on plain `ubuntu-latest` unless they truly need browser binaries or Playwright system packages.
+- Why it helps: Non-browser jobs avoid heavier container startup and keep the workflow intent clearer, while the Playwright-specific environment remains pinned exactly where browser coverage needs it.
+- Example (file/path): `.github/workflows/ci.yml`; `scripts/verify-playwright-version-sync.mjs`
+- Failure signal: Most CI jobs run inside the Playwright image even though only browser smoke tests exercise Playwright, increasing runtime or making container-specific workflow issues harder to reason about.
+- Follow-up action: If another job later gains a real browser dependency, move just that job onto the Playwright image and keep the version verifier aligned with the remaining image references.
+- Owner: Codex

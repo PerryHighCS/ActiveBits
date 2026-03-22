@@ -9,8 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       activity-test-matrix: ${{ steps.activity-test-groups.outputs.matrix }}
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,8 +33,6 @@ jobs:
 
   client-checks:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,8 +65,6 @@ jobs:
 
   server-checks:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -103,8 +97,6 @@ jobs:
 
   activities-checks:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -137,8 +129,6 @@ jobs:
 
   client-tests:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -168,8 +158,6 @@ jobs:
 
   server-tests:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -203,8 +191,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.metadata-checks.outputs.activity-test-matrix) }}
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -234,8 +220,6 @@ jobs:
 
   verify-build-and-server:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
