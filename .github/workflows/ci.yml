@@ -68,6 +68,25 @@ jobs:
       - name: Run server tests
         run: npm --workspace server test
 
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        uses: ./.github/actions/install-dependencies
+
+      - name: Verify deploy build
+        run: npm run verify:deploy
+
+      - name: Verify server smoke
+        run: npm run verify:server
+
+
   activities-checks:
     runs-on: ubuntu-latest
     steps:
@@ -110,28 +129,6 @@ jobs:
 
       - name: Run activity group tests
         run: node scripts/run-activity-test-group.mjs ${{ matrix.name }}
-
-  verify-build-and-server:
-    needs: metadata-checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        uses: ./.github/actions/install-dependencies
-
-      - name: Verify deploy build
-        run: npm run verify:deploy
-
-      - name: Verify server smoke
-        run: npm run verify:server
 
   browser-smoke:
     runs-on: ubuntu-latest
