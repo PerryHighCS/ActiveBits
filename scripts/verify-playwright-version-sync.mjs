@@ -6,6 +6,7 @@ const scriptFilePath = fileURLToPath(import.meta.url);
 const scriptDir = dirname(scriptFilePath);
 const repoRoot = resolve(scriptDir, '..');
 const packageJsonPath = resolve(repoRoot, 'package.json');
+const packageLockPath = resolve(repoRoot, 'package-lock.json');
 const ciWorkflowPath = resolve(repoRoot, '.github/workflows/ci.yml');
 
 function readJson(path) {
@@ -38,16 +39,33 @@ try {
   process.exit(1);
 }
 
-const packageVersionRaw = packageJson?.devDependencies?.['@playwright/test'];
-if (typeof packageVersionRaw !== 'string' || packageVersionRaw.trim().length === 0) {
+const packageRangeRaw = packageJson?.devDependencies?.['@playwright/test'];
+if (typeof packageRangeRaw !== 'string' || packageRangeRaw.trim().length === 0) {
   console.error('[playwright-version-sync] package.json is missing devDependencies["@playwright/test"].');
   process.exit(1);
 }
 
-const expectedVersion = normalizePlaywrightVersion(packageVersionRaw);
+let packageLock;
+try {
+  packageLock = readJson(packageLockPath);
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[playwright-version-sync] ${message}`);
+  process.exit(1);
+}
+
+const lockedVersionRaw = packageLock?.packages?.['node_modules/@playwright/test']?.version;
+if (typeof lockedVersionRaw !== 'string' || lockedVersionRaw.trim().length === 0) {
+  console.error(
+    '[playwright-version-sync] package-lock.json is missing packages["node_modules/@playwright/test"].version.',
+  );
+  process.exit(1);
+}
+
+const expectedVersion = normalizePlaywrightVersion(lockedVersionRaw);
 if (!expectedVersion) {
   console.error(
-    `[playwright-version-sync] Could not normalize @playwright/test version from ${packageVersionRaw}.`,
+    `[playwright-version-sync] Could not normalize locked @playwright/test version from ${lockedVersionRaw}.`,
   );
   process.exit(1);
 }
@@ -78,11 +96,11 @@ const workflowVersion = match[1];
 
 if (workflowVersion !== expectedVersion) {
   console.error(
-    `[playwright-version-sync] Version mismatch: package.json has ${expectedVersion}, workflow container uses ${workflowVersion}.`,
+    `[playwright-version-sync] Version mismatch: package-lock.json locks @playwright/test to ${expectedVersion} (package.json range ${packageRangeRaw}), workflow container uses ${workflowVersion}.`,
   );
   process.exit(1);
 }
 
 console.log(
-  `[playwright-version-sync] OK: package.json and CI workflow both use Playwright ${expectedVersion}.`,
+  `[playwright-version-sync] OK: package-lock.json locks @playwright/test to ${expectedVersion}, matching the CI workflow image (package.json range ${packageRangeRaw}).`,
 );

@@ -239,3 +239,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: Most CI jobs run inside the Playwright image even though only browser smoke tests exercise Playwright, increasing runtime or making container-specific workflow issues harder to reason about.
 - Follow-up action: If another job later gains a real browser dependency, move just that job onto the Playwright image and keep the version verifier aligned with the remaining image references.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: For Playwright image drift checks, compare the workflow image tag against the lockfile-resolved `@playwright/test` version rather than the semver range in `package.json`.
+- Why it helps: A caret range like `^1.58.2` can still resolve to a newer installed Playwright version after lockfile updates, so the lockfile is the actual source of truth for the browser build CI should match.
+- Example (file/path): `scripts/verify-playwright-version-sync.mjs`; `package-lock.json`; `.github/workflows/ci.yml`
+- Failure signal: The verifier still passes after a lockfile-only Playwright bump within the same semver range, leaving the CI browser image on an older Playwright build than the installed test runner expects.
+- Follow-up action: If the repo ever pins `@playwright/test` exactly in `package.json`, keep the verifier on the lockfile anyway so install reality remains the guardrail.
+- Owner: Codex
