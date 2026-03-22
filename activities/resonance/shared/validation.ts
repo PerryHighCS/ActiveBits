@@ -23,6 +23,8 @@ function normalizeId(value: unknown): string | null {
 
 const MAX_QUESTION_SET_SIZE = 100
 
+type RandomSource = () => number
+
 // ---------------------------------------------------------------------------
 // Question validation
 // ---------------------------------------------------------------------------
@@ -205,6 +207,13 @@ export function validateQuestionSet(raw: unknown): { questions: Question[]; erro
  * multiple-choice questions only.
  */
 export function parseGimkitCSV(content: string): { questions: Question[]; errors: string[] } {
+  return parseGimkitCSVWithRandom(content, Math.random)
+}
+
+export function parseGimkitCSVWithRandom(
+  content: string,
+  random: RandomSource,
+): { questions: Question[]; errors: string[] } {
   const errors: string[] = []
   const lines = splitCSVLines(content)
 
@@ -244,10 +253,13 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
     }
 
     const id = `q${orderCounter + 1}`
-    const allAnswers: MCQOption[] = [
+    const allAnswers = shuffleOptions(
+      [
       { id: `${id}_c`, text: correctAnswer, isCorrect: true },
       ...incorrectAnswers.map((text, i) => ({ id: `${id}_i${i + 1}`, text })),
-    ]
+      ],
+      random,
+    )
 
     if (questions.length >= MAX_QUESTION_SET_SIZE) {
       errors.push(`question set may contain at most ${MAX_QUESTION_SET_SIZE} questions`)
@@ -277,6 +289,17 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
     questions: validated.questions,
     errors: [...errors, ...validated.errors],
   }
+}
+
+function shuffleOptions(options: MCQOption[], random: RandomSource): MCQOption[] {
+  const shuffled = [...options]
+
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(random() * (index + 1))
+    ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex]!, shuffled[index]!]
+  }
+
+  return shuffled
 }
 
 function splitCSVLines(content: string): string[] {
