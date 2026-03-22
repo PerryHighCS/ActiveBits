@@ -112,7 +112,19 @@ for (const activity of group.activities) {
   const capturedOutput = readFileSync(resolve(tempDir, 'activity-output.log'), 'utf8');
   rmSync(tempDir, { recursive: true, force: true });
 
-  if (typeof result.status === 'number' && result.status !== 0) {
+  if (typeof result.signal === 'string' && result.signal.length > 0) {
+    console.log('::endgroup::');
+    console.error(`[activity-test-group] ${activity} was terminated by signal ${result.signal}.`);
+    process.exit(1);
+  }
+
+  if (result.status == null) {
+    console.log('::endgroup::');
+    console.error(`[activity-test-group] ${activity} exited without a status code.`);
+    process.exit(1);
+  }
+
+  if (result.status !== 0) {
     console.log('::endgroup::');
     process.exit(result.status);
   }

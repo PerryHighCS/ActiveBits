@@ -260,6 +260,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-22
 - Scope: CI
+- Pattern: When a grouped test runner shells out to per-activity test processes, treat `spawnSync` signal exits or `null` status as hard failures, not implicit success.
+- Why it helps: CI timeouts or runner terminations can otherwise let a killed child process look like a passed activity bucket, which undermines the whole grouped-test guardrail.
+- Example (file/path): `scripts/run-activity-test-group.mjs`
+- Failure signal: A bucket process is terminated by `SIGTERM` or similar, but the wrapper keeps going to the next activity and may exit zero.
+- Follow-up action: Keep signal/null-status handling next to the normal exit-code check whenever this runner grows additional subprocess paths.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
 - Pattern: Use the Playwright container image only for browser-facing jobs, and run lint, typecheck, unit/integration tests, and server/build verification on plain `ubuntu-latest` unless they truly need browser binaries or Playwright system packages.
 - Why it helps: Non-browser jobs avoid heavier container startup and keep the workflow intent clearer, while the Playwright-specific environment remains pinned exactly where browser coverage needs it.
 - Example (file/path): `.github/workflows/ci.yml`; `scripts/verify-playwright-version-sync.mjs`
