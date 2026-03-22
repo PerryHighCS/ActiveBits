@@ -1,6 +1,14 @@
+import { randomBytes } from 'node:crypto'
 import { defineConfig, devices } from '@playwright/test'
 
 const baseURL = 'http://127.0.0.1:3100'
+const baseUrl = new URL(baseURL)
+const serverHost = baseUrl.hostname
+const serverPort =
+  baseUrl.port || (baseUrl.protocol === 'https:' ? '443' : '80')
+const persistentSessionSecret =
+  process.env.PLAYWRIGHT_PERSISTENT_SESSION_SECRET ??
+  randomBytes(32).toString('hex')
 
 export default defineConfig({
   testDir: './playwright',
@@ -16,12 +24,12 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run build --workspace client && PORT=3100 HOST=127.0.0.1 NODE_ENV=production npm run start --prefix server',
+    command: 'npm run build --workspace client && npm run start --prefix server',
     env: {
-      HOST: '127.0.0.1',
+      HOST: serverHost,
       NODE_ENV: 'production',
-      PORT: '3100',
-      PERSISTENT_SESSION_SECRET: 'playwright-test-secret-0123456789abcdef',
+      PORT: serverPort,
+      PERSISTENT_SESSION_SECRET: persistentSessionSecret,
     },
     url: baseURL,
     reuseExistingServer: !process.env.CI,

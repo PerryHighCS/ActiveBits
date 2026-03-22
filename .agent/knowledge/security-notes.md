@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-03-22
+- Area: Playwright production-mode test secret handling
+- Threat or risk: Committing a fixed `PERSISTENT_SESSION_SECRET` in the Playwright harness creates secret-scanner noise and normalizes checking pseudo-secrets into the repo, even when the value is test-only.
+- Control or mitigation: `playwright.config.ts` now generates a random 32-byte hex secret at config-load time and passes it through `webServer.env`; CI or other deterministic environments can override it with `PLAYWRIGHT_PERSISTENT_SESSION_SECRET`.
+- Residual risk: A caller that reuses the same override value across many runs still has a long-lived test secret by choice, but it is no longer embedded in version control.
+- Validation (test/review/path): `playwright.config.ts`; `npm run test:e2e -- --list`.
+- Follow-up action: Reuse the same runtime-generation pattern for any other local test harness secret that only exists to satisfy production-mode startup checks.
+- Owner: Codex
+
 - Date: 2026-03-21
 - Area: resonance persistent-link question payload decryption
 - Threat or risk: Authenticated but attacker-controlled compressed payloads can trigger very large inflation output (zip-bomb style), causing high memory pressure during `inflateSync` before JSON parsing.

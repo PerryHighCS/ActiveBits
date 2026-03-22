@@ -167,3 +167,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: An activity silently drops out of the join page or dashboard in the browser even though local unit tests for its helpers and config parsing still pass, or the Playwright harness starts depending on the interactive dev server instead of the isolated browser-test startup path.
 - Follow-up action: Expand from these registry smoke checks into higher-value browser flows next, especially permalink waiting-room transitions and teacher/student handoff paths, while keeping browser runs on the shared root scripts (`npm run test:e2e`, `test:e2e:headed`, `test:e2e:ui`).
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: e2e
+- Pattern: In Playwright config, derive `webServer.env.HOST` and `PORT` from the shared `baseURL` and keep the start command free of inline `HOST=... PORT=...` assignments.
+- Why it helps: The browser harness then has one source of truth for the server bind address and the URL Playwright probes, which prevents silent drift when the test port or host changes later.
+- Example (file/path): `playwright.config.ts`
+- Failure signal: `webServer.url` and the actual server bind target diverge after a port/host edit, leading to startup timeouts or tests probing the wrong address.
+- Follow-up action: Reuse the same pattern for any future Playwright projects or alternate browser configs in this repo.
+- Owner: Codex
