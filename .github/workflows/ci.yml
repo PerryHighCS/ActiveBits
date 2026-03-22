@@ -68,18 +68,6 @@ jobs:
       - name: Run server tests
         run: npm --workspace server test
 
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        uses: ./.github/actions/install-dependencies
-
       - name: Verify deploy build
         run: npm run verify:deploy
 
