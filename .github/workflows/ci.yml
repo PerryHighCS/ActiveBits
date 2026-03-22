@@ -35,7 +35,7 @@ jobs:
           npm run verify:activity-test-groups
           echo "matrix=$(node scripts/verify-activity-test-groups.mjs --matrix)" >> "$GITHUB_OUTPUT"
 
-  client-checks-tests:
+  server-client-checks-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -58,21 +58,6 @@ jobs:
 
       - name: Run client tests
         run: npm --workspace client test
-
-  server-checks-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        uses: ./.github/actions/install-dependencies
 
       - name: Lint server
         run: npm --workspace server run lint
