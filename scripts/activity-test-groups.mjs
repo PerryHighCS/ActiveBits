@@ -23,7 +23,13 @@ function collectActivityTestFileCount(rootDir) {
   let count = 0;
 
   function walk(currentDir) {
-    const entries = readdirSync(currentDir, { withFileTypes: true });
+    let entries;
+    try {
+      entries = readdirSync(currentDir, { withFileTypes: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Unable to read activity test files in ${currentDir}: ${message}`);
+    }
 
     for (const entry of entries) {
       if (entry.name === 'node_modules') {

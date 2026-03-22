@@ -228,7 +228,7 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Why it helps: The workflow avoids a fragile checked-in activity list while still letting us tune CI fan-out from one place as activities are added or the browser job remains the dominant cost.
 - Example (file/path): `scripts/activity-test-groups.mjs`; `scripts/verify-activity-test-groups.mjs`; `.github/workflows/ci.yml`
 - Failure signal: Adding a new activity requires touching a separate grouping manifest even though the desired behavior is simply “spread activities across N buckets automatically.”
-- Follow-up action: If simple auto-balancing becomes too inaccurate later, add weighting inputs or timing history to the generator before going back to hand-maintained group lists.
+- Follow-up action: If simple auto-balancing becomes too inaccurate later, add weighting inputs or timing history to the generator before going back to hand-maintained group lists, and keep recursive filesystem errors annotated with the unreadable directory path so CI failures stay diagnosable.
 - Owner: Codex
 
 - Date: 2026-03-22

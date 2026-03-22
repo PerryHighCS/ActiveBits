@@ -108,30 +108,37 @@ for (const activity of group.activities) {
 
   const tempDir = mkdtempSync(resolve(tmpdir(), 'activebits-activity-test-'));
   const outputLogPath = resolve(tempDir, 'activity-output.log');
-  const result = spawnSync(
-    'bash',
-    [
-      '-lc',
-      'set -euo pipefail; output_file="$1"; shift; node --import tsx --test --import ../scripts/jsx-loader-register.mjs "$@" 2>&1 | tee "$output_file"',
-      'bash',
-      outputLogPath,
-      ...testFiles.map(toActivityRelativeTestFile),
-    ],
-    {
-      stdio: 'inherit',
-      cwd: resolve(repoRoot, 'activities'),
-    },
-  );
+  let result = null;
+  let capturedOutput = '';
 
-  if (result.error) {
+  try {
+    result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        'set -euo pipefail; output_file="$1"; shift; node --import tsx --test --import ../scripts/jsx-loader-register.mjs "$@" 2>&1 | tee "$output_file"',
+        'bash',
+        outputLogPath,
+        ...testFiles.map(toActivityRelativeTestFile),
+      ],
+      {
+        stdio: 'inherit',
+        cwd: resolve(repoRoot, 'activities'),
+      },
+    );
+
+    if (existsSync(outputLogPath)) {
+      capturedOutput = readFileSync(outputLogPath, 'utf8');
+    }
+  } finally {
     rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  if (result?.error) {
     console.log('::endgroup::');
     console.error(`[activity-test-group] Failed to run ${activity}: ${result.error.message}`);
     process.exit(1);
   }
-
-  const capturedOutput = existsSync(outputLogPath) ? readFileSync(outputLogPath, 'utf8') : '';
-  rmSync(tempDir, { recursive: true, force: true });
 
   if (typeof result.signal === 'string' && result.signal.length > 0) {
     console.log('::endgroup::');
