@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { loadActivityTestGroups, repoRoot, validateActivityTestGroups } from './activity-test-groups.mjs';
@@ -30,25 +32,85 @@ function formatElapsedMs(elapsedMs) {
   return `${(elapsedMs / 1000).toFixed(2)}s`;
 }
 
+function parseTestCount(output) {
+  if (typeof output !== 'string' || output.length === 0) {
+    return null;
+  }
+
+  const match = output.match(/^\u2139 tests (\d+)$/m);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function collectTestFiles(rootDir) {
+  const testFiles = [];
+
+  function walk(currentDir) {
+    const entries = readdirSync(currentDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.name === 'node_modules') {
+        continue;
+      }
+
+      const fullPath = resolve(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+
+      if (
+        entry.isFile() &&
+        (entry.name.endsWith('.test.ts') || entry.name.endsWith('.test.tsx'))
+      ) {
+        testFiles.push(fullPath);
+      }
+    }
+  }
+
+  walk(rootDir);
+  testFiles.sort();
+  return testFiles;
+}
+
 const groupStartedAt = Date.now();
+const activityTimings = [];
 
 for (const activity of group.activities) {
   const activityStartedAt = Date.now();
   console.log(`::group::[activity-test-group] ${activity}`);
   console.log(`[activity-test-group] Running ${activity}...`);
+  const activityDir = resolve(repoRoot, 'activities', activity);
+  const testFiles = collectTestFiles(activityDir);
+
+  if (testFiles.length === 0) {
+    console.log(`[activity-test-group] No tests found under ${activity}.`);
+    activityTimings.push({ activity, elapsedMs: 0, testCount: 0 });
+    console.log('::endgroup::');
+    continue;
+  }
+
+  const tempDir = mkdtempSync(resolve(tmpdir(), 'activebits-activity-test-'));
   const result = spawnSync(
     'sh',
     [
       '-c',
-      'set -e; activity="$1"; files=$(find "$activity" -path "*/node_modules/*" -prune -o \\( -name "*.test.ts" -o -name "*.test.tsx" \\) -print); if [ -z "$files" ]; then echo "No tests found under $activity"; exit 0; fi; node --import tsx --test --import ../scripts/jsx-loader-register.mjs $files',
+      'set -e; output_file="$1"; shift; node --import tsx --test --import ../scripts/jsx-loader-register.mjs "$@" 2>&1 | tee "$output_file"',
       'sh',
-      activity,
+      resolve(tempDir, 'activity-output.log'),
+      ...testFiles.map((file) => file.replace(`${resolve(repoRoot, 'activities')}/`, '')),
     ],
     {
       stdio: 'inherit',
       cwd: resolve(repoRoot, 'activities'),
     },
   );
+  const capturedOutput = readFileSync(resolve(tempDir, 'activity-output.log'), 'utf8');
+  rmSync(tempDir, { recursive: true, force: true });
 
   if (typeof result.status === 'number' && result.status !== 0) {
     console.log('::endgroup::');
@@ -62,6 +124,8 @@ for (const activity of group.activities) {
   }
 
   const activityElapsedMs = Date.now() - activityStartedAt;
+  const testCount = parseTestCount(capturedOutput);
+  activityTimings.push({ activity, elapsedMs: activityElapsedMs, testCount });
   console.log(
     `[activity-test-group] ${activity} completed in ${formatElapsedMs(activityElapsedMs)}.`,
   );
@@ -69,6 +133,12 @@ for (const activity of group.activities) {
 }
 
 const groupElapsedMs = Date.now() - groupStartedAt;
+console.log('[activity-test-group] Activity timing summary:');
+for (const timing of activityTimings) {
+  const testLabel =
+    typeof timing.testCount === 'number' ? `${timing.testCount} tests` : 'test count unavailable';
+  console.log(`- ${timing.activity}: ${formatElapsedMs(timing.elapsedMs)} (${testLabel})`);
+}
 console.log(
   `[activity-test-group] Completed ${group.activities.length} activities for group "${group.name}" in ${formatElapsedMs(groupElapsedMs)}.`,
 );

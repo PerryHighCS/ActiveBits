@@ -251,6 +251,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-22
 - Scope: CI
+- Pattern: After grouped activity runs finish, print a short end-of-bucket timing summary outside the collapsed log groups so the slowest activity stays visible even when the detailed logs remain collapsed.
+- Why it helps: GitHub log groups reduce noise, but they also hide the timing details by default; a final rollup keeps rebalancing signals visible at a glance.
+- Example (file/path): `scripts/run-activity-test-group.mjs`
+- Failure signal: Contributors have to expand every grouped activity section just to see which one was slow, so the new logging still does not help quick CI tuning.
+- Follow-up action: Keep the summary short and timing-only; if richer reporting is needed later, emit JSON or step summaries rather than bloating the console output.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
 - Pattern: Use the Playwright container image only for browser-facing jobs, and run lint, typecheck, unit/integration tests, and server/build verification on plain `ubuntu-latest` unless they truly need browser binaries or Playwright system packages.
 - Why it helps: Non-browser jobs avoid heavier container startup and keep the workflow intent clearer, while the Playwright-specific environment remains pinned exactly where browser coverage needs it.
 - Example (file/path): `.github/workflows/ci.yml`; `scripts/verify-playwright-version-sync.mjs`
