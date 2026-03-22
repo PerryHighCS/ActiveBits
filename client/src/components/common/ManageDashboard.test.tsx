@@ -254,6 +254,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
   const restoreDomEnvironment = installDomEnvironment()
   const fetchStub = installFetchStub()
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
+  let unmount: (() => void) | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: false,
@@ -273,6 +274,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
         }),
       ),
     )
+    unmount = rendered.unmount
 
     await openPermanentLinkModal(rendered)
 
@@ -305,6 +307,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
       assert.notEqual(rendered.queryByText('Verify this value before creating the link.'), null)
     })
   } finally {
+    unmount?.()
     testActivity.manageDashboard = {
       ...testActivity.manageDashboard,
       ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),
@@ -318,6 +321,7 @@ void test('ManageDashboard custom builders must signal readiness before submit p
   const restoreDomEnvironment = installDomEnvironment()
   const fetchStub = installFetchStub()
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
+  let unmount: (() => void) | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: true,
@@ -337,6 +341,7 @@ void test('ManageDashboard custom builders must signal readiness before submit p
         }),
       ),
     )
+    unmount = rendered.unmount
 
     await openPermanentLinkModal(rendered)
 
@@ -373,6 +378,7 @@ void test('ManageDashboard custom builders must signal readiness before submit p
       ])
     })
   } finally {
+    unmount?.()
     testActivity.manageDashboard = {
       ...testActivity.manageDashboard,
       ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),
