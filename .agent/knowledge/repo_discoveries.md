@@ -14,6 +14,30 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-22
+- Area: client | activities | vite
+- Discovery: Vite 7 `import.meta.glob(...)` usage for cross-workspace activity discovery should use explicit relative/rooted filesystem globs, not the `@activities` path alias used for normal module imports.
+- Why it matters: The shared activity registry and SyncDeck activity picker can end up with empty config maps at runtime even when the alias works for ordinary imports, which strips dashboard/activity cards from `/manage` and other picker surfaces.
+- Evidence: `client/src/activities/index.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `client/vite.config.ts`; `node_modules/vite/dist/node/chunks/config.js`
+- Follow-up action: Keep future `import.meta.glob` additions on `./`, `../`, or `/`-style paths and avoid alias-based glob patterns unless Vite explicitly documents support.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Area: client | activities | vite
+- Discovery: Guarding transformed `import.meta.glob(...)` calls with `typeof import.meta.glob === 'function'` breaks runtime discovery in the browser because Vite rewrites the glob call but leaves the condition, and `import.meta.glob` itself is not a runtime function.
+- Why it matters: After transform, the condition evaluates false in the browser and collapses the generated module maps to `{}`, which removes activity cards from `/manage` and home standalone surfaces even though the transformed module still contains the discovered imports.
+- Evidence: `client/src/activities/index.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; live dev transform from `http://127.0.0.1:5173/src/activities/index.ts`
+- Follow-up action: When test environments need a guard, key it off `import.meta.env` (or isolate the Vite-only module) rather than `typeof import.meta.glob`.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Area: client | server | activities | resonance
+- Discovery: `activities/resonance/activity.config.ts` is now treated as a production activity config, so leaving `isDev: true` on Resonance removes its routes and dashboard card from non-dev builds.
+- Why it matters: Both the client registry (`/manage` card emission and route registration) and server registry filter dev-only activities in production, so the flag makes Resonance effectively inaccessible outside development.
+- Evidence: `activities/resonance/activity.config.ts`; `client/src/activities/index.ts`; `server/activities/activityRegistry.ts`
+- Follow-up action: If Resonance needs a temporary hidden state again, use an explicit product gate instead of reusing the dev-only registry flag.
+- Owner: Codex
+
 - Date: 2026-03-21
 - Area: docs | tooling | skills
 - Discovery: Shared Codex skills are easiest to reuse across repos when the exported repo keeps a plain `skills/<skill-name>/...` tree and pushes repo-specific instructions into local overlay docs instead of modifying the vendored shared skill directly.

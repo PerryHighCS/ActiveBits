@@ -112,6 +112,7 @@ ActiveBits supports two session storage modes:
 3. Visit your Render URL (e.g., `https://activebits.onrender.com`)
 4. Test health check: `https://activebits.onrender.com/health-check`
 5. Create a test activity session and verify it persists after redeployment
+6. Verify the production activity registry surfaces all intended dashboard cards, including Resonance on `/manage`
 
 ## Environment Variables Reference
 

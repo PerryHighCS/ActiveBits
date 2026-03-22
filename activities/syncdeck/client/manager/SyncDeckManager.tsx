@@ -478,8 +478,8 @@ interface SyncDeckActivityConfigModule {
 }
 
 const activityPickerConfigModules =
-  typeof import.meta.glob === 'function'
-    ? import.meta.glob<SyncDeckActivityConfigModule>('@activities/*/activity.config.{js,ts}', { eager: true })
+  (import.meta.env?.DEV || import.meta.env?.PROD)
+    ? import.meta.glob<SyncDeckActivityConfigModule>('../../../*/activity.config.{js,ts}', { eager: true })
     : {}
 
 interface SyncDeckManagerNavigationCapabilities {

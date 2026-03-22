@@ -7,6 +7,7 @@ Current activity areas include:
 - Raffle-based search and problem-solving activities
 - Network and web-systems simulations
 - Algorithm demonstrations
+- Live response collection and class discussion activities
 - Java and Python practice activities
 - Standalone practice and utility flows for independent student work
 
