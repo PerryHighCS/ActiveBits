@@ -176,3 +176,21 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: `webServer.url` and the actual server bind target diverge after a port/host edit, leading to startup timeouts or tests probing the wrong address.
 - Follow-up action: Reuse the same pattern for any future Playwright projects or alternate browser configs in this repo.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: e2e | CI
+- Pattern: In GitHub Actions, prefer running browser smoke tests inside a version-matched Playwright container image rather than calling `npx playwright install --with-deps` during the job.
+- Why it helps: The job starts with browsers and OS dependencies already present, which removes a network-heavy install step and keeps CI closer to a fixed, reproducible browser runtime.
+- Example (file/path): `.github/workflows/ci.yml`
+- Failure signal: CI spends time reinstalling Playwright browsers every run or flakes in the browser-install step despite the JS dependencies already being locked.
+- Follow-up action: Keep the container tag aligned with the repo's `@playwright/test` version when upgrading Playwright.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: Guard Playwright container drift with a repo script that compares `package.json` `devDependencies["@playwright/test"]` against the Playwright image tag in `.github/workflows/ci.yml`, and run it both in CI and the root `npm test` chain.
+- Why it helps: Version alignment becomes an enforced contract instead of a tribal-memory task, so Playwright upgrades fail fast if only the npm package or only the CI container tag is changed.
+- Example (file/path): `scripts/verify-playwright-version-sync.mjs`; `package.json`; `.github/workflows/ci.yml`
+- Failure signal: A Playwright dependency bump lands without the matching CI image tag update, or the workflow image tag changes independently and browser behavior drifts from the locked test runner version.
+- Follow-up action: If additional workflows start using Playwright containers, either extend the verifier to cover them too or centralize the image tag in one reusable workflow path.
+- Owner: Codex
