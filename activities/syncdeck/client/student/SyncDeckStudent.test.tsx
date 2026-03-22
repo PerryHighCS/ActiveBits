@@ -278,6 +278,8 @@ void test('toRevealCommandMessage converts legacy slidechanged snapshots into se
     payload: { h: 6, v: 0, f: 0 },
   })
 
+  assert.equal((result as { role?: string } | null)?.role, 'instructor')
+  assert.equal((result as { source?: string } | null)?.source, 'activebits-syncdeck-host')
   assert.equal((result?.payload as { name?: string })?.name, 'setState')
   assert.deepEqual((result?.payload as { payload?: { state?: unknown } })?.payload?.state, {
     indexh: 6,

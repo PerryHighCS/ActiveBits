@@ -829,13 +829,24 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
       return null
     }
 
-    return buildRevealCommandMessage('setState', {
-      state: {
-        indexh: indices.h,
-        indexv: indices.v,
-        indexf: indices.f,
+    return {
+      type: 'reveal-sync',
+      version: REVEAL_SYNC_PROTOCOL_VERSION,
+      action: 'command',
+      source: 'activebits-syncdeck-host',
+      role: 'instructor',
+      ts: Date.now(),
+      payload: {
+        name: 'setState',
+        payload: {
+          state: {
+            indexh: indices.h,
+            indexv: indices.v,
+            indexf: indices.f,
+          },
+        },
       },
-    })
+    }
   }
 
   const message = rawPayload as RevealSyncEnvelope
