@@ -1,13 +1,34 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { JSDOM } from 'jsdom'
+import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import {
   isQuestionStemVisuallyTruncated,
   normalizeActivationSelection,
+  resolvePasscode,
   shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
   toggleExpandedQuestionStem,
   toggleQuestionActivationSelection,
 } from './ResonanceManager.js'
+
+function installDomEnvironment() {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+    url: 'https://activebits.local/',
+  })
+
+  const previousWindow = globalThis.window
+  const previousDocument = globalThis.document
+
+  ;(globalThis as { window?: Window & typeof globalThis }).window = dom.window as unknown as Window & typeof globalThis
+  ;(globalThis as { document?: Document }).document = dom.window.document
+
+  return () => {
+    dom.window.close()
+    ;(globalThis as { window?: Window & typeof globalThis }).window = previousWindow
+    ;(globalThis as { document?: Document }).document = previousDocument
+  }
+}
 
 void test('toggleQuestionActivationSelection adds and removes question ids', () => {
   assert.deepEqual(toggleQuestionActivationSelection(['q1'], 'q2'), ['q1', 'q2'])
@@ -99,4 +120,24 @@ void test('isQuestionStemVisuallyTruncated uses rendered overflow rather than st
     false,
   )
   assert.equal(isQuestionStemVisuallyTruncated(null), false)
+})
+
+void test('resolvePasscode persists embedded bootstrap passcodes for later manager re-entry', () => {
+  const restoreDomEnvironment = installDomEnvironment()
+
+  try {
+    storeCreateSessionBootstrapPayload('resonance', 'child-session-1', {
+      instructorPasscode: 'embedded-passcode',
+    })
+
+    assert.equal(resolvePasscode('child-session-1'), 'embedded-passcode')
+    assert.equal(
+      window.sessionStorage.getItem('resonance_instructor_child-session-1'),
+      'embedded-passcode',
+    )
+
+    assert.equal(resolvePasscode('child-session-1'), 'embedded-passcode')
+  } finally {
+    restoreDomEnvironment()
+  }
 })

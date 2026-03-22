@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-22
+- Surface: activity interface | client bootstrap
+- Contract: SyncDeck embedded manager bootstrap payloads are one-shot transport data. Child managers that recover instructor credentials from `consumeCreateSessionBootstrapPayload(...)` must persist those credentials into their normal per-session storage key on first use if they need manager auth to survive later unmount/remount cycles in the same tab.
+- Compatibility constraints: This especially matters for embedded activities that can be revisited from multiple slides or by leaving and returning to the same slide. Student runtime state may still persist correctly even when manager auth would otherwise be lost, so missing persistence can present as an instructor-only regression.
+- Validation rules: A recovered bootstrap instructor passcode must be treated the same as a dashboard-provided passcode for same-tab re-entry. Do not rely on the bootstrap payload remaining available after first consumption.
+- Evidence (schema/tests/path): `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/resonance/client/manager/ResonanceManager.test.ts`; `client/src/components/common/manageDashboardUtils.ts`
+- Follow-up action: Reuse the same persistence pattern for any other embedded child managers that currently consume bootstrap payloads without writing them into their activity-owned session storage.
+- Owner: Codex
+
 - Date: 2026-03-21
 - Surface: file import | internal module | activity interface
 - Contract: `parseGimkitCSV(...)` must always return `Question` objects that have passed through `validateQuestionSet(...)`, even when some CSV rows produced row-level parse errors. The parser should merge row errors with set-validation errors instead of returning pre-normalized successful rows early.

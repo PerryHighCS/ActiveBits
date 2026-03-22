@@ -14,7 +14,9 @@ const STORAGE_KEY_PREFIX = 'resonance_instructor_'
 
 function getPasscode(sessionId: string): string | null {
   try {
-    return sessionStorage.getItem(`${STORAGE_KEY_PREFIX}${sessionId}`)
+    return typeof window === 'undefined' || window.sessionStorage == null
+      ? null
+      : window.sessionStorage.getItem(`${STORAGE_KEY_PREFIX}${sessionId}`)
   } catch {
     return null
   }
@@ -22,13 +24,17 @@ function getPasscode(sessionId: string): string | null {
 
 function setStoredPasscode(sessionId: string, passcode: string): void {
   try {
-    sessionStorage.setItem(`${STORAGE_KEY_PREFIX}${sessionId}`, passcode)
+    if (typeof window === 'undefined' || window.sessionStorage == null) {
+      return
+    }
+
+    window.sessionStorage.setItem(`${STORAGE_KEY_PREFIX}${sessionId}`, passcode)
   } catch {
     // Best-effort cache only; the in-memory state still allows manager auth.
   }
 }
 
-function resolvePasscode(sessionId: string): string | null {
+export function resolvePasscode(sessionId: string): string | null {
   // Primary: sessionStorage key written by createSessionBootstrap config.
   const fromStorage = getPasscode(sessionId)
   if (fromStorage !== null) return fromStorage
@@ -37,6 +43,7 @@ function resolvePasscode(sessionId: string): string | null {
   // (e.g. SyncDeck) after launching this activity as an embedded session.
   const bootstrap = consumeCreateSessionBootstrapPayload('resonance', sessionId)
   if (bootstrap !== null && typeof bootstrap.instructorPasscode === 'string' && bootstrap.instructorPasscode.length > 0) {
+    setStoredPasscode(sessionId, bootstrap.instructorPasscode)
     return bootstrap.instructorPasscode
   }
 
