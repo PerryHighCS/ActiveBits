@@ -24,6 +24,8 @@ import { shouldSuppressInstructorVerticalSetStateSync } from './SyncDeckStudent.
 import { shouldSuppressInstructorRevealCommandForwarding } from './SyncDeckStudent.js'
 import { extractIndicesFromRevealStateMessage } from './SyncDeckStudent.js'
 import { resolveInboundPayloadType } from './SyncDeckStudent.js'
+import { resolveSemanticInstructorCommandName } from './SyncDeckStudent.js'
+import { shouldQueuePayloadUntilIframeReady } from './SyncDeckStudent.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckStudent.js'
 import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckStudent.js'
 import { resolveStudentActiveEmbeddedInstanceKey } from './SyncDeckStudent.js'
@@ -267,6 +269,20 @@ void test('toRevealCommandMessage accepts navigation.current indices without pay
     indexh: 8,
     indexv: 2,
     indexf: 1,
+  })
+})
+
+void test('toRevealCommandMessage converts legacy slidechanged snapshots into setState commands', () => {
+  const result = toRevealCommandMessage({
+    type: 'slidechanged',
+    payload: { h: 6, v: 0, f: 0 },
+  })
+
+  assert.equal((result?.payload as { name?: string })?.name, 'setState')
+  assert.deepEqual((result?.payload as { payload?: { state?: unknown } })?.payload?.state, {
+    indexh: 6,
+    indexv: 0,
+    indexf: 0,
   })
 })
 
@@ -621,6 +637,31 @@ void test('extractIndicesFromRevealStateMessage reads indices from ready navigat
   assert.deepEqual(indices, { h: 5, v: 3, f: 0 })
 })
 
+void test('resolveSemanticInstructorCommandName treats legacy slidechanged snapshots as authoritative setState', () => {
+  assert.equal(
+    resolveSemanticInstructorCommandName({
+      type: 'slidechanged',
+      payload: { h: 4, v: 0, f: 0 },
+    }),
+    'setState',
+  )
+})
+
+void test('shouldQueuePayloadUntilIframeReady queues reveal commands but not the bootstrap role command', () => {
+  assert.equal(
+    shouldQueuePayloadUntilIframeReady(buildStudentRoleCommandMessage()),
+    false,
+  )
+
+  assert.equal(
+    shouldQueuePayloadUntilIframeReady(toRevealCommandMessage({
+      type: 'slidechanged',
+      payload: { h: 4, v: 0, f: 0 },
+    })),
+    true,
+  )
+})
+
 void test('buildStudentRoleCommandMessage emits setRole student command by default', () => {
   const message = buildStudentRoleCommandMessage()
 
@@ -947,6 +988,19 @@ void test('shouldForceFollowInstructorSetState treats authoritative state envelo
         owner: 'syncdeck-instructor',
       },
     },
+  })
+
+  assert.equal(result, true)
+})
+
+void test('shouldForceFollowInstructorSetState treats late-join snapshots like setState when student has no local position yet', () => {
+  const result = shouldForceFollowInstructorSetState({
+    semanticInstructorCommandName: 'setState',
+    studentHasBacktrackOptOut: false,
+    localStudentPosition: null,
+    previousInstructorPosition: null,
+    instructorPosition: { h: 5, v: 0, f: 0 },
+    embeddedActivities: {},
   })
 
   assert.equal(result, true)

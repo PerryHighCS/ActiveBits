@@ -822,6 +822,22 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
     return null
   }
 
+  const legacyMessage = rawPayload as { type?: unknown; payload?: unknown }
+  if (legacyMessage.type === 'slidechanged') {
+    const indices = extractIndicesFromRevealStateMessage(rawPayload)
+    if (!indices) {
+      return null
+    }
+
+    return buildRevealCommandMessage('setState', {
+      state: {
+        indexh: indices.h,
+        indexv: indices.v,
+        indexf: indices.f,
+      },
+    })
+  }
+
   const message = rawPayload as RevealSyncEnvelope
   if (message.type !== 'reveal-sync') {
     return null
@@ -903,6 +919,14 @@ export function buildStandaloneBootstrapCommandMessages(): Record<string, unknow
     buildStudentRoleCommandMessage('standalone'),
     buildRevealCommandMessage('clearBoundary', {}),
   ]
+}
+
+export function shouldQueuePayloadUntilIframeReady(rawPayload: unknown): boolean {
+  if (!isRevealSyncMessage(rawPayload) || rawPayload.action !== 'command' || !isPlainObject(rawPayload.payload)) {
+    return false
+  }
+
+  return rawPayload.payload.name !== 'setRole'
 }
 
 function extractStoryboardDisplayed(data: unknown): boolean | null {
@@ -1087,6 +1111,25 @@ function extractRevealCommandName(rawPayload: unknown): string | null {
 
   const name = (message.payload as { name?: unknown }).name
   return typeof name === 'string' ? name : null
+}
+
+export function resolveSemanticInstructorCommandName(rawPayload: unknown): string | null {
+  const inboundCommandName = extractRevealCommandName(rawPayload)
+  if (inboundCommandName != null) {
+    return inboundCommandName
+  }
+
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const legacyMessage = rawPayload as { type?: unknown }
+  if (legacyMessage.type === 'slidechanged') {
+    return 'setState'
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  return isRevealSyncMessage(message) && message.action === 'state' ? 'setState' : null
 }
 
 export function shouldSuppressForwardInstructorSync(
@@ -1900,6 +1943,14 @@ const SyncDeckStudent: FC = () => {
       return
     }
 
+    if (!hasSeenIframeReadySignalRef.current && shouldQueuePayloadUntilIframeReady(payload)) {
+      pendingPayloadQueueRef.current.push(payload)
+      traceSync('queue_payload_waiting_for_iframe_ready', {
+        queueDepth: pendingPayloadQueueRef.current.length,
+      })
+      return
+    }
+
     try {
       target.postMessage(payload, targetOrigin)
       traceSync('post_message_to_iframe', {
@@ -2059,9 +2110,7 @@ const SyncDeckStudent: FC = () => {
           lastInstructorIndicesRef.current = instructorIndices
 
           const inboundCommandName = extractRevealCommandName(parsed.payload)
-          const semanticInstructorCommandName =
-            inboundCommandName
-            ?? (isRevealSyncMessage(parsed.payload) && parsed.payload.action === 'state' ? 'setState' : null)
+          const semanticInstructorCommandName = resolveSemanticInstructorCommandName(parsed.payload)
           const shouldFollowInstructorSetState = shouldForceFollowInstructorSetState({
             semanticInstructorCommandName,
             studentHasBacktrackOptOut: studentBacktrackOptOutRef.current,
@@ -2129,9 +2178,7 @@ const SyncDeckStudent: FC = () => {
           }
         } else {
           const inboundCommandName = extractRevealCommandName(parsed.payload)
-          const semanticInstructorCommandName =
-            inboundCommandName
-            ?? (isRevealSyncMessage(parsed.payload) && parsed.payload.action === 'state' ? 'setState' : null)
+          const semanticInstructorCommandName = resolveSemanticInstructorCommandName(parsed.payload)
           const incomingInstructorIndices = extractIndicesFromRevealStateMessage(parsed.payload)
           const {
             suppressForwardSync,
@@ -2196,10 +2243,7 @@ const SyncDeckStudent: FC = () => {
 
     const revealCommand = toRevealCommandMessage(payload)
     if (revealCommand != null) {
-      const inboundCommandName = extractRevealCommandName(payload)
-      const semanticInstructorCommandName =
-        inboundCommandName
-        ?? (isRevealSyncMessage(payload) && payload.action === 'state' ? 'setState' : null)
+      const semanticInstructorCommandName = resolveSemanticInstructorCommandName(payload)
       const incomingInstructorIndices = extractIndicesFromRevealStateMessage(payload)
       const { suppressForwardSync } = shouldSuppressInstructorRevealCommandForwarding({
         semanticInstructorCommandName,
