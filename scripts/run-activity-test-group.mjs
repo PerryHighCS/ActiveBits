@@ -3,7 +3,12 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
-import { loadActivityTestGroups, repoRoot, validateActivityTestGroups } from './activity-test-groups.mjs';
+import {
+  generateActivityTestGroups,
+  repoRoot,
+  resolveActivityTestGroupCount,
+  validateActivityTestGroups,
+} from './activity-test-groups.mjs';
 
 const groupName = process.argv[2];
 
@@ -14,7 +19,9 @@ if (!groupName) {
 
 let validation;
 try {
-  validation = validateActivityTestGroups(loadActivityTestGroups());
+  const groupCount = resolveActivityTestGroupCount();
+  const generated = generateActivityTestGroups(groupCount);
+  validation = validateActivityTestGroups(generated.groups, generated.discoveredActivities);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`[activity-test-group] ${message}`);

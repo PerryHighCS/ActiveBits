@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+env:
+  ACTIVITY_TEST_GROUP_COUNT: '3'
+
 jobs:
   metadata-checks:
     runs-on: ubuntu-latest

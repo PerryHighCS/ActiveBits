@@ -1,6 +1,7 @@
 import {
   buildActivityTestMatrix,
-  loadActivityTestGroups,
+  generateActivityTestGroups,
+  resolveActivityTestGroupCount,
   validateActivityTestGroups,
 } from './activity-test-groups.mjs';
 
@@ -8,7 +9,9 @@ const emitMatrix = process.argv.includes('--matrix');
 
 let validation;
 try {
-  validation = validateActivityTestGroups(loadActivityTestGroups());
+  const groupCount = resolveActivityTestGroupCount();
+  const generated = generateActivityTestGroups(groupCount);
+  validation = validateActivityTestGroups(generated.groups, generated.discoveredActivities);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`[activity-test-groups] ${message}`);
@@ -21,5 +24,5 @@ if (emitMatrix) {
 }
 
 console.log(
-  `[activity-test-groups] OK: ${validation.groups.length} groups cover ${validation.discoveredActivities.length} activities.`,
+  `[activity-test-groups] OK: ${validation.groups.length} generated groups cover ${validation.discoveredActivities.length} activities.`,
 );

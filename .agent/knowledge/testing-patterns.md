@@ -224,11 +224,11 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-22
 - Scope: CI
-- Pattern: Keep activity test bucketing in one checked-in manifest (`ci/activity-test-groups.json`), validate that every `activities/*` directory appears exactly once, and have GitHub Actions derive the matrix from that manifest instead of hard-coding activity names in workflow YAML.
-- Why it helps: New activities fail loudly until they are assigned to a bucket, duplicate assignments are caught automatically, and rebalancing only touches one data file instead of duplicating fragile lists across workflow expressions.
-- Example (file/path): `ci/activity-test-groups.json`; `scripts/verify-activity-test-groups.mjs`; `scripts/run-activity-test-group.mjs`; `.github/workflows/ci.yml`
-- Failure signal: A new activity lands without CI coverage because its name was never added to a hard-coded workflow list, or activity names drift between multiple duplicated YAML lists.
-- Follow-up action: Rebalance the manifest buckets when timing shifts, but keep the verifier strict so coverage remains complete as activities are added.
+- Pattern: Generate activity test buckets automatically from discovered `activities/*` directories, and drive the number of buckets from one workflow env var such as `ACTIVITY_TEST_GROUP_COUNT`.
+- Why it helps: The workflow avoids a fragile checked-in activity list while still letting us tune CI fan-out from one place as activities are added or the browser job remains the dominant cost.
+- Example (file/path): `scripts/activity-test-groups.mjs`; `scripts/verify-activity-test-groups.mjs`; `.github/workflows/ci.yml`
+- Failure signal: Adding a new activity requires touching a separate grouping manifest even though the desired behavior is simply “spread activities across N buckets automatically.”
+- Follow-up action: If simple auto-balancing becomes too inaccurate later, add weighting inputs or timing history to the generator before going back to hand-maintained group lists.
 - Owner: Codex
 
 - Date: 2026-03-22
