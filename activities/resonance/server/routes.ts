@@ -4,11 +4,8 @@ import { registerSessionNormalizer } from 'activebits-server/core/sessionNormali
 import {
   findHashBySessionId,
   generatePersistentHash,
-  getOrCreateActivePersistentSession,
-  updatePersistentSessionUrlState,
   verifyTeacherCodeWithHash,
 } from 'activebits-server/core/persistentSessions.js'
-import { buildPersistentLinkUrlQuery } from 'activebits-server/core/persistentLinkUrlState.js'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import type {
   InstructorAnnotation,
@@ -105,8 +102,49 @@ interface PersistentSessionsCookieEntry {
   urlHash?: string
 }
 
-const MAX_SESSIONS_PER_COOKIE = 20
-const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
+function prepareResonanceLinkOptions(body: Record<string, unknown>):
+  | { ok: true; selectedOptions: { q: string; h: string } }
+  | { ok: false; status: number; payload: { error: string; details?: string[] } } {
+  const teacherCode = typeof body.teacherCode === 'string' ? body.teacherCode.trim() : ''
+  if (teacherCode.length < 6) {
+    return { ok: false, status: 400, payload: { error: 'teacherCode must be at least 6 characters' } }
+  }
+  if (teacherCode.length > 100) {
+    return { ok: false, status: 400, payload: { error: 'teacherCode must be at most 100 characters' } }
+  }
+
+  if (!Array.isArray(body.questions)) {
+    return { ok: false, status: 400, payload: { error: 'questions must be an array' } }
+  }
+
+  const { questions, errors } = validateQuestionSet(body.questions)
+  if (errors.length > 0) {
+    return { ok: false, status: 400, payload: { error: errors[0] ?? 'invalid question set', details: errors } }
+  }
+  if (questions.length === 0) {
+    return { ok: false, status: 400, payload: { error: 'question set must not be empty' } }
+  }
+
+  // The payload decryption hash is activity-specific and distinct from the
+  // shared persistent permalink hash that the platform signs around this data.
+  const { hash } = generatePersistentHash('resonance', teacherCode)
+  const { encoded, sizeChars } = encryptQuestions(questions, hash)
+
+  if (sizeChars > MAX_ENCODED_PAYLOAD_CHARS) {
+    return {
+      ok: false,
+      status: 422,
+      payload: {
+        error: `Question set is too large for a persistent link (${sizeChars} chars, limit ${MAX_ENCODED_PAYLOAD_CHARS})`,
+      },
+    }
+  }
+
+  return {
+    ok: true,
+    selectedOptions: { q: encoded, h: hash },
+  }
+}
 
 interface EmbeddedParentSessionContext {
   parentSessionId: string
@@ -780,89 +818,19 @@ export default function setupResonanceRoutes(
   })
 
   // ---------------------------------------------------------------------------
-  // POST /api/resonance/generate-link
-  // Validates and encrypts a question set, stores the teacher code in the
-  // persistent_sessions cookie, and returns the authoritative persistent URL.
+  // POST /api/resonance/prepare-link-options
+  // Validates and encrypts a question set, returning activity-specific
+  // selectedOptions that the shared persistent-session flow will sign.
   // ---------------------------------------------------------------------------
-  app.post('/api/resonance/generate-link', async (req, res) => {
+  app.post('/api/resonance/prepare-link-options', async (req, res) => {
     const body = isPlainObject(req.body) ? req.body : {}
-
-    // Validate teacher code
-    const teacherCode = typeof body.teacherCode === 'string' ? body.teacherCode.trim() : ''
-    if (teacherCode.length < 6) {
-      res.status(400).json({ error: 'teacherCode must be at least 6 characters' })
-      return
-    }
-    if (teacherCode.length > 100) {
-      res.status(400).json({ error: 'teacherCode must be at most 100 characters' })
+    const prepared = prepareResonanceLinkOptions(body)
+    if (!prepared.ok) {
+      res.status(prepared.status).json(prepared.payload)
       return
     }
 
-    // Validate questions
-    if (!Array.isArray(body.questions)) {
-      res.status(400).json({ error: 'questions must be an array' })
-      return
-    }
-    const { questions, errors } = validateQuestionSet(body.questions)
-    if (errors.length > 0) {
-      res.status(400).json({ error: errors[0], details: errors })
-      return
-    }
-    if (questions.length === 0) {
-      res.status(400).json({ error: 'question set must not be empty' })
-      return
-    }
-
-    // Generate hash and encrypt the question payload
-    const { hash, hashedTeacherCode } = generatePersistentHash('resonance', teacherCode)
-    const { encoded, sizeChars } = encryptQuestions(questions, hash)
-
-    if (sizeChars > MAX_ENCODED_PAYLOAD_CHARS) {
-      res
-        .status(422)
-        .json({ error: `Question set is too large for a persistent link (${sizeChars} chars, limit ${MAX_ENCODED_PAYLOAD_CHARS})` })
-      return
-    }
-
-    // Register the persistent session in the store and pre-load the encoded
-    // question set so the platform WS session creator can bootstrap it.
-    // selectedOptions.h carries the hash for in-session decryption (see normalizeSessionData).
-    const selectedOptions = { q: encoded, h: hash }
-    await getOrCreateActivePersistentSession('resonance', hash, hashedTeacherCode, 'instructor-required')
-    await updatePersistentSessionUrlState(hash, { selectedOptions, entryPolicy: 'instructor-required' })
-
-    // Build the canonical persistent link URL with HMAC-verified query params.
-    const query = buildPersistentLinkUrlQuery({
-      hash,
-      entryPolicy: 'instructor-required',
-      selectedOptions,
-    })
-    const urlHash = query.get('urlHash') ?? ''
-
-    // Store teacher code in the persistent_sessions cookie so it can be
-    // recovered later via GET /api/resonance/:sessionId/instructor-passcode.
-    const cookieName = 'persistent_sessions'
-    let sessionEntries = parsePersistentSessionsCookie(req.cookies?.[cookieName])
-    const cookieKey = `resonance:${hash}`
-    const existingIndex = sessionEntries.findIndex((e) => e.key === cookieKey)
-    if (existingIndex !== -1) {
-      sessionEntries.splice(existingIndex, 1)
-    }
-    sessionEntries.push({ key: cookieKey, teacherCode, selectedOptions, entryPolicy: 'instructor-required', urlHash })
-    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
-      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
-    }
-
-    res.cookie?.(cookieName, JSON.stringify(sessionEntries), {
-      maxAge: ONE_YEAR_MS,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-    })
-
-    const url = `/activity/resonance/${hash}?${query.toString()}`
-    console.info('[resonance] Persistent link generated', { hash, questionCount: questions.length, sizeChars })
-    res.json({ hash, url })
+    res.json({ selectedOptions: prepared.selectedOptions })
   })
 
   // ---------------------------------------------------------------------------

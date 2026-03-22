@@ -1,9 +1,14 @@
-import { Suspense, useCallback, useEffect, useState, type ComponentType, type FormEvent } from 'react'
+import { Suspense, useCallback, useEffect, useId, useRef, useState, type ComponentType, type SyntheticEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { activities } from '@src/activities'
+import { activities, runActivityDeepLinkPreflight } from '@src/activities'
 import { arrayToCsv, downloadCsv } from '@src/utils/csvUtils'
 import { useClipboard } from '@src/hooks/useClipboard'
-import type { ActivityPersistentLinkBuildResult, ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
+import type {
+  ActivityDeepLinkPreflightConfig,
+  ActivityDeepLinkPreflightResult,
+  ActivityPersistentLinkBuilderProps,
+  ActivityRegistryEntry,
+} from '../../../../types/activity.js'
 import type { PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import {
   buildPersistentLinkRequestBody,
@@ -15,11 +20,13 @@ import {
   describeSelectedOptions,
   filterPersistentEntryPolicyOptionsForActivity,
   initializeDeepLinkOptions,
+  isPersistentLinkPreflightVerified,
   normalizePersistentEntryPolicyForActivity,
   normalizeSelectedOptions,
   persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkGenerator,
   parseDeepLinkOptions,
+  resolvePersistentLinkPreflightValue,
   validateDeepLinkSelection,
   type DeepLinkSelection,
 } from './manageDashboardUtils'
@@ -32,7 +39,7 @@ import {
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 
-type DashboardActivity = (typeof activities)[number]
+type DashboardActivity = ActivityRegistryEntry
 const DEFAULT_PERSISTENT_ENTRY_POLICY: PersistentSessionEntryPolicy = 'instructor-required'
 
 function supportsStandalonePermalink(activity: DashboardActivity): boolean {
@@ -61,6 +68,17 @@ interface PersistentLinkCreateResponse {
   error?: string
   url?: string
   hash?: string
+}
+
+interface CreatedPersistentLinkResult {
+  fullUrl: string
+  hash: string
+  teacherCode: string
+  selectedOptions?: DeepLinkSelection
+}
+
+function formatPersistentLinkPreflightWarning(warning: string): string {
+  return warning.replace(/\s*You can continue anyway\.?\s*$/i, ' Please fix the option and verify again.')
 }
 
 const colorClasses: Record<string, string> = {
@@ -118,20 +136,55 @@ function getWindowOrigin(): string {
   return typeof window !== 'undefined' ? window.location.origin : ''
 }
 
-function getActivityById(activityId: string): DashboardActivity | undefined {
-  return activities.find((activity) => activity.id === activityId)
+function renderPersistentEntryPolicyControl(
+  persistentEntryPolicy: PersistentSessionEntryPolicy,
+  persistentEntryPolicyOptions: readonly {
+    value: PersistentSessionEntryPolicy
+    label: string
+    description: string
+  }[],
+  onChange: (entryPolicy: PersistentSessionEntryPolicy) => void,
+) {
+  return (
+    <div>
+      <label htmlFor="persistent-entry-policy" className="block text-sm font-semibold text-gray-700 mb-2">
+        Entry mode
+      </label>
+      <select
+        id="persistent-entry-policy"
+        value={persistentEntryPolicy}
+        onChange={(event) => onChange(event.target.value as PersistentSessionEntryPolicy)}
+        className="border-2 border-gray-300 rounded px-4 py-2 w-full bg-white focus:outline-none focus:border-blue-500"
+      >
+        {persistentEntryPolicyOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-gray-500 mt-1">
+        {getPersistentSessionEntryPolicyDescription(persistentEntryPolicy)}
+      </p>
+    </div>
+  )
 }
 
-function getActivityName(activityId: string): string {
-  return getActivityById(activityId)?.name || activityId
+interface ManageDashboardProps {
+  activityRegistry?: DashboardActivity[]
+  runDeepLinkPreflight?: (
+    activityId: string,
+    preflight: ActivityDeepLinkPreflightConfig,
+    rawValue: string,
+  ) => Promise<ActivityDeepLinkPreflightResult>
 }
 
-function getActivityColor(activityId: string): string {
-  return getActivityById(activityId)?.color || 'blue'
-}
-
-export default function ManageDashboard() {
+export default function ManageDashboard({
+  activityRegistry = activities,
+  runDeepLinkPreflight = runActivityDeepLinkPreflight,
+}: ManageDashboardProps = {}) {
   const navigate = useNavigate()
+  const teacherCodeInputId = useId()
+  const preflightRequestIdRef = useRef(0)
   const [showPersistentModal, setShowPersistentModal] = useState(false)
   const [selectedActivity, setSelectedActivity] = useState<DashboardActivity | null>(null)
   const [editingPersistentSession, setEditingPersistentSession] = useState<PersistentSession | null>(null)
@@ -148,6 +201,31 @@ export default function ManageDashboard() {
   const [persistentOptions, setPersistentOptions] = useState<DeepLinkSelection>({})
   const [persistentEntryPolicy, setPersistentEntryPolicy] = useState<PersistentSessionEntryPolicy>(
     DEFAULT_PERSISTENT_ENTRY_POLICY,
+  )
+  const [customBuilderCanSubmit, setCustomBuilderCanSubmit] = useState(true)
+  const [isPreflightChecking, setIsPreflightChecking] = useState(false)
+  const [preflightWarning, setPreflightWarning] = useState<string | null>(null)
+  const [preflightValidatedValue, setPreflightValidatedValue] = useState<string | null>(null)
+
+  const getActivityById = useCallback(
+    (activityId: string): DashboardActivity | undefined => {
+      return activityRegistry.find((activity) => activity.id === activityId)
+    },
+    [activityRegistry],
+  )
+
+  const getActivityName = useCallback(
+    (activityId: string): string => {
+      return getActivityById(activityId)?.name || activityId
+    },
+    [getActivityById],
+  )
+
+  const getActivityColor = useCallback(
+    (activityId: string): string => {
+      return getActivityById(activityId)?.color || 'blue'
+    },
+    [getActivityById],
   )
 
   const refreshPersistentSessions = useCallback(async (): Promise<void> => {
@@ -220,12 +298,17 @@ export default function ManageDashboard() {
   }
 
   const openPersistentModal = (activity: DashboardActivity, session: PersistentSession | null = null): void => {
+    preflightRequestIdRef.current += 1
     setSelectedActivity(activity)
     setEditingPersistentSession(session)
     setShowPersistentModal(true)
     setTeacherCode(session ? (savedSessions[buildPersistentSessionKey(session.activityName, session.hash)] || '') : '')
     setPersistentUrl(null)
     setError(null)
+    setCustomBuilderCanSubmit(false)
+    setIsPreflightChecking(false)
+    setPreflightWarning(null)
+    setPreflightValidatedValue(null)
     setPersistentOptions(
       session
         ? normalizeSelectedOptions(activity.deepLinkOptions, session.selectedOptions || {})
@@ -240,6 +323,7 @@ export default function ManageDashboard() {
   }
 
   const closePersistentModal = (): void => {
+    preflightRequestIdRef.current += 1
     setShowPersistentModal(false)
     setSelectedActivity(null)
     setEditingPersistentSession(null)
@@ -247,13 +331,17 @@ export default function ManageDashboard() {
     setPersistentUrl(null)
     setError(null)
     setIsCreating(false)
+    setCustomBuilderCanSubmit(true)
+    setIsPreflightChecking(false)
+    setPreflightWarning(null)
+    setPreflightValidatedValue(null)
     setLastPersistentSubmitMode('created')
     setPersistentOptions({})
     setPersistentEntryPolicy(DEFAULT_PERSISTENT_ENTRY_POLICY)
   }
 
   const handlePersistentLinkCreated = useCallback(
-    async (activityId: string, result: ActivityPersistentLinkBuildResult): Promise<void> => {
+    async (activityId: string, result: CreatedPersistentLinkResult): Promise<void> => {
       setError(null)
       setPersistentUrl(result.fullUrl)
 
@@ -267,9 +355,7 @@ export default function ManageDashboard() {
     [refreshPersistentSessions],
   )
 
-  const createPersistentLink = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
-
+  const submitPersistentLink = async (): Promise<void> => {
     if (!selectedActivity) {
       setError('No activity selected')
       return
@@ -281,12 +367,26 @@ export default function ManageDashboard() {
       return
     }
 
-    setError(null)
-    setIsCreating(true)
-
     try {
       const selectedOptions = normalizeSelectedOptions(selectedActivity.deepLinkOptions, persistentOptions)
-      const deepLinkGenerator = parseDeepLinkGenerator(selectedActivity.deepLinkGenerator)
+      const usesCustomPersistentLinkBuilder = resolveCustomPersistentLinkBuilder(selectedActivity) != null
+      const deepLinkGenerator = usesCustomPersistentLinkBuilder ? null : parseDeepLinkGenerator(selectedActivity.deepLinkGenerator)
+      const preflight = deepLinkGenerator?.preflight ?? null
+      const normalizedPreflightValue = resolvePersistentLinkPreflightValue(preflight?.optionKey, selectedOptions)
+
+      if (usesCustomPersistentLinkBuilder && !customBuilderCanSubmit) {
+        setError('Finish the activity-specific link setup before creating the link.')
+        return
+      }
+
+      if (!usesCustomPersistentLinkBuilder && preflight != null && normalizedPreflightValue.length > 0 && preflightValidatedValue !== normalizedPreflightValue) {
+        setError('Verify the link option before creating the link.')
+        return
+      }
+
+      setError(null)
+      setIsCreating(true)
+
       const isEditing = editingPersistentSession != null
       const normalizedTeacherCode = teacherCode.trim()
       const existingTeacherCode = isEditing
@@ -353,6 +453,74 @@ export default function ManageDashboard() {
       setError(createError instanceof Error ? createError.message : String(createError))
     } finally {
       setIsCreating(false)
+      setIsPreflightChecking(false)
+    }
+  }
+
+  const handlePersistentLinkSubmit = (event: SyntheticEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    void submitPersistentLink()
+  }
+
+  const verifyPersistentLinkPreflight = async (): Promise<void> => {
+    if (!selectedActivity) {
+      setError('No activity selected')
+      return
+    }
+
+    const deepLinkGenerator = parseDeepLinkGenerator(selectedActivity.deepLinkGenerator)
+    const preflight = deepLinkGenerator?.preflight ?? null
+    if (preflight == null) {
+      return
+    }
+
+    const optionValidationErrors = validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)
+    if (optionValidationErrors[preflight.optionKey]) {
+      setError('Please fix the highlighted link options')
+      return
+    }
+
+    const selectedOptions = normalizeSelectedOptions(selectedActivity.deepLinkOptions, persistentOptions)
+    const normalizedValue = resolvePersistentLinkPreflightValue(preflight.optionKey, selectedOptions)
+
+    if (normalizedValue.length === 0) {
+      setError('Enter a value to verify first.')
+      return
+    }
+
+    setError(null)
+    const requestId = preflightRequestIdRef.current + 1
+    preflightRequestIdRef.current = requestId
+    setIsPreflightChecking(true)
+    setPreflightWarning(null)
+
+    try {
+      const result = await runDeepLinkPreflight(selectedActivity.id, preflight, normalizedValue)
+      if (requestId !== preflightRequestIdRef.current) {
+        return
+      }
+      if (!result.valid) {
+        setPreflightValidatedValue(null)
+        setPreflightWarning(
+          result.warning
+            ? formatPersistentLinkPreflightWarning(result.warning)
+            : 'Unable to verify this value right now. Please try again.',
+        )
+        return
+      }
+
+      setPreflightValidatedValue(normalizedValue)
+      setPreflightWarning(null)
+    } catch {
+      if (requestId !== preflightRequestIdRef.current) {
+        return
+      }
+      setPreflightValidatedValue(null)
+      setPreflightWarning('Unable to verify this value right now. Please try again.')
+    } finally {
+      if (requestId === preflightRequestIdRef.current) {
+        setIsPreflightChecking(false)
+      }
     }
   }
 
@@ -412,6 +580,8 @@ export default function ManageDashboard() {
   }
 
   const selectedActivityOptions = selectedActivity ? parseDeepLinkOptions(selectedActivity.deepLinkOptions) : {}
+  const selectedActivityDeepLinkGenerator = selectedActivity ? parseDeepLinkGenerator(selectedActivity.deepLinkGenerator) : null
+  const selectedActivityPreflight = selectedActivityDeepLinkGenerator?.preflight ?? null
   const persistentEntryPolicyOptions = selectedActivity
     ? filterPersistentEntryPolicyOptionsForActivity(
       PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS,
@@ -422,6 +592,11 @@ export default function ManageDashboard() {
     ? validateDeepLinkSelection(selectedActivity.deepLinkOptions, persistentOptions)
     : {}
   const hasPersistentOptionErrors = Object.keys(persistentOptionErrors).length > 0
+  const isPreflightVerified = isPersistentLinkPreflightVerified(
+    selectedActivityPreflight?.optionKey,
+    persistentOptions,
+    preflightValidatedValue,
+  )
   const existingTeacherCodeForEdit = editingPersistentSession
     ? (savedSessions[buildPersistentSessionKey(editingPersistentSession.activityName, editingPersistentSession.hash)] ?? '').trim()
     : ''
@@ -431,6 +606,241 @@ export default function ManageDashboard() {
   const CustomPersistentLinkBuilder = resolveCustomPersistentLinkBuilder(selectedActivity) as
     | ComponentType<ActivityPersistentLinkBuilderProps>
     | null
+  const usesCustomPersistentLinkBuilder = CustomPersistentLinkBuilder != null
+  const activePersistentModalContent = usesCustomPersistentLinkBuilder && selectedActivity ? (
+    <form onSubmit={handlePersistentLinkSubmit} className="flex flex-col gap-4">
+      <p className="text-gray-700">
+        Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL,
+        they'll wait until you start the session with your teacher code.
+      </p>
+
+      <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-2">
+        <p className="text-sm text-yellow-800">
+          <strong>⚠️ Security Note:</strong> This is for convenience, not security. The teacher code is stored in
+          your browser cookies and is not encrypted. Do not use sensitive passwords.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor={teacherCodeInputId} className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+        <input
+          id={teacherCodeInputId}
+          type="text"
+          value={teacherCode}
+          onChange={(event) => setTeacherCode(event.target.value)}
+          className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
+          placeholder={editingPersistentSession
+            ? 'Keep code to update this link, or enter a new code to create a new link'
+            : 'Create a Teacher Code for this link'}
+          minLength={6}
+          required
+          autoComplete="off"
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          {editingPersistentSession
+            ? 'Changing the teacher code creates a new permanent link hash. Existing links are not replaced.'
+            : 'Remember this code! You\'ll need it to start sessions from this link.'}
+        </p>
+      </div>
+
+      {renderPersistentEntryPolicyControl(
+        persistentEntryPolicy,
+        persistentEntryPolicyOptions,
+        setPersistentEntryPolicy,
+      )}
+      <Suspense fallback={<p className="text-sm text-gray-600">Loading link builder...</p>}>
+        <CustomPersistentLinkBuilder
+          activityId={selectedActivity.id}
+          teacherCode={teacherCode}
+          selectedOptions={persistentOptions}
+          editState={editingPersistentSession
+            ? {
+              hash: editingPersistentSession.hash,
+              teacherCode: savedSessions[buildPersistentSessionKey(selectedActivity.id, editingPersistentSession.hash)] || '',
+              selectedOptions: editingPersistentSession.selectedOptions || {},
+              entryPolicy: editingPersistentSession.entryPolicy,
+            }
+            : null}
+          onSelectedOptionsChange={setPersistentOptions}
+          onSubmitReadinessChange={setCustomBuilderCanSubmit}
+        />
+      </Suspense>
+
+      {error !== null && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
+
+      <Button
+        type="submit"
+        disabled={isCreating || teacherCode.trim().length < 6 || hasPersistentOptionErrors || !customBuilderCanSubmit}
+      >
+        {isCreating
+          ? ((editingPersistentSession == null || createsNewLinkFromTeacherCodeChange) ? 'Creating...' : 'Saving...')
+          : (createsNewLinkFromTeacherCodeChange ? 'Create New Link' : (editingPersistentSession ? 'Save Changes' : 'Generate Link'))}
+      </Button>
+    </form>
+  ) : (
+    <form onSubmit={handlePersistentLinkSubmit} className="flex flex-col gap-4">
+      <p className="text-gray-700">
+        Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL,
+        they'll wait until you start the session with your teacher code.
+      </p>
+
+      <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-2">
+        <p className="text-sm text-yellow-800">
+          <strong>⚠️ Security Note:</strong> This is for convenience, not security. The teacher code is stored in
+          your browser cookies and is not encrypted. Do not use sensitive passwords.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor={teacherCodeInputId} className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
+        <input
+          id={teacherCodeInputId}
+          type="text"
+          value={teacherCode}
+          onChange={(event) => setTeacherCode(event.target.value)}
+          className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
+          placeholder={editingPersistentSession
+            ? 'Keep code to update this link, or enter a new code to create a new link'
+            : 'Create a Teacher Code for this link'}
+          minLength={6}
+          required
+          autoComplete="off"
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          {editingPersistentSession
+            ? 'Changing the teacher code creates a new permanent link hash. Existing links are not replaced.'
+            : 'Remember this code! You\'ll need it to start sessions from this link.'}
+        </p>
+      </div>
+
+      <div>
+        {renderPersistentEntryPolicyControl(
+          persistentEntryPolicy,
+          persistentEntryPolicyOptions,
+          setPersistentEntryPolicy,
+        )}
+      </div>
+
+      {selectedActivity !== null && Object.keys(selectedActivityOptions).length > 0 && (
+        <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
+          <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
+          <div className="flex flex-col gap-3">
+            {Object.entries(selectedActivityOptions).map(([key, option]) => {
+              const optionInputId = `persistent-link-option-${key}`
+
+              return (
+              <div key={key} className="text-sm text-gray-700">
+                <label htmlFor={optionInputId} className="block font-semibold mb-1">
+                  {option.label || key}
+                </label>
+                {option.type === 'select' ? (
+                  <>
+                    <select
+                      id={optionInputId}
+                      value={persistentOptions[key] ?? ''}
+                      onChange={(event) => {
+                        const nextValue = event.target.value
+                                setPersistentOptions((previous) => ({
+                                  ...previous,
+                                  [key]: nextValue,
+                                }))
+                                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
+                                  preflightRequestIdRef.current += 1
+                                  setPreflightValidatedValue(null)
+                                  setPreflightWarning(null)
+                                  setIsPreflightChecking(false)
+                                }
+                              }}
+                      className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
+                    >
+                      {(option.options || []).map((entry) => (
+                        <option key={entry.value} value={entry.value}>
+                          {entry.label}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedActivityPreflight?.optionKey === key && (
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          void verifyPersistentLinkPreflight()
+                        }}
+                        disabled={isCreating || isPreflightChecking || Boolean(persistentOptionErrors[key]) || (persistentOptions[key] ?? '').trim().length === 0}
+                        variant="outline"
+                        className="mt-2 whitespace-nowrap"
+                      >
+                        {isPreflightChecking ? 'Verifying...' : 'Verify'}
+                      </Button>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      id={optionInputId}
+                      type="text"
+                      value={persistentOptions[key] ?? ''}
+                      onChange={(event) => {
+                        const nextValue = event.target.value
+                                setPersistentOptions((previous) => ({
+                                  ...previous,
+                                  [key]: nextValue,
+                                }))
+                                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
+                                  preflightRequestIdRef.current += 1
+                                  setPreflightValidatedValue(null)
+                                  setPreflightWarning(null)
+                                  setIsPreflightChecking(false)
+                                }
+                              }}
+                      className={`w-full border-2 rounded px-3 py-2 ${persistentOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
+                    />
+                    {selectedActivityPreflight?.optionKey === key && (
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          void verifyPersistentLinkPreflight()
+                        }}
+                        disabled={isCreating || isPreflightChecking || Boolean(persistentOptionErrors[key]) || (persistentOptions[key] ?? '').trim().length === 0}
+                        variant="outline"
+                        className="whitespace-nowrap"
+                      >
+                        {isPreflightChecking ? 'Verifying...' : 'Verify URL'}
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {persistentOptionErrors[key] !== undefined && (
+                  <span className="block mt-1 text-xs text-red-600">{persistentOptionErrors[key]}</span>
+                )}
+                {persistentOptionErrors[key] === undefined && selectedActivityPreflight?.optionKey === key && (persistentOptions[key] ?? '').trim().length > 0 && (
+                  <span className={`block mt-1 text-xs ${isPreflightVerified === true ? 'text-green-700' : 'text-gray-600'}`}>
+                    {isPreflightVerified === true
+                      ? 'Value verified. You can now create the link.'
+                      : 'Verify this value before creating the link.'}
+                  </span>
+                )}
+              </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {error !== null && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
+      {preflightWarning !== null && (
+        <p className="text-amber-700 text-sm bg-amber-50 border border-amber-200 p-2 rounded">{preflightWarning}</p>
+      )}
+
+      <Button
+        type="submit"
+        disabled={isCreating || isPreflightChecking || teacherCode.trim().length < 6 || hasPersistentOptionErrors || isPreflightVerified === false}
+      >
+        {isCreating
+          ? ((editingPersistentSession == null || createsNewLinkFromTeacherCodeChange) ? 'Creating...' : 'Saving...')
+          : (createsNewLinkFromTeacherCodeChange ? 'Create New Link' : (editingPersistentSession ? 'Save Changes' : 'Generate Link'))}
+      </Button>
+    </form>
+  )
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -444,7 +854,7 @@ export default function ManageDashboard() {
       <p className="text-center text-gray-600 mb-8">Choose an activity to start a new session</p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {activities.map((activity) => {
+        {activityRegistry.map((activity) => {
           const utilityLinks = (activity.utilities ?? []).filter((utility) => utility.surfaces?.includes('manage'))
 
           return (
@@ -610,139 +1020,7 @@ export default function ManageDashboard() {
         onClose={closePersistentModal}
         title={`${editingPersistentSession ? 'Edit' : 'Create'} Permanent Link - ${selectedActivity?.name}`}
       >
-        {!persistentUrl ? (
-          CustomPersistentLinkBuilder && selectedActivity ? (
-            <Suspense fallback={<p className="text-sm text-gray-600">Loading link builder...</p>}>
-              <CustomPersistentLinkBuilder
-                activityId={selectedActivity.id}
-                editState={editingPersistentSession
-                  ? {
-                    hash: editingPersistentSession.hash,
-                    teacherCode: savedSessions[buildPersistentSessionKey(selectedActivity.id, editingPersistentSession.hash)] || '',
-                    selectedOptions: editingPersistentSession.selectedOptions || {},
-                    entryPolicy: editingPersistentSession.entryPolicy,
-                  }
-                  : null}
-                onCreated={async (result: ActivityPersistentLinkBuildResult) => {
-                  await handlePersistentLinkCreated(selectedActivity.id, result)
-                }}
-              />
-            </Suspense>
-          ) : (
-            <form onSubmit={createPersistentLink} className="flex flex-col gap-4">
-              <p className="text-gray-700">
-                Create a permanent URL that you can use in presentations or bookmark. When anyone visits this URL,
-                they'll wait until you start the session with your teacher code.
-              </p>
-
-              <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-2">
-                <p className="text-sm text-yellow-800">
-                  <strong>⚠️ Security Note:</strong> This is for convenience, not security. The teacher code is stored in
-                  your browser cookies and is not encrypted. Do not use sensitive passwords.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code (min. 6 characters)</label>
-                <input
-                  type="text"
-                  value={teacherCode}
-                  onChange={(event) => setTeacherCode(event.target.value)}
-                  className="border-2 border-gray-300 rounded px-4 py-2 w-full focus:outline-none focus:border-blue-500"
-                  placeholder={editingPersistentSession
-                    ? 'Keep code to update this link, or enter a new code to create a new link'
-                    : 'Create a Teacher Code for this link'}
-                  minLength={6}
-                  required
-                  autoComplete="off"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  {editingPersistentSession
-                    ? 'Changing the teacher code creates a new permanent link hash. Existing links are not replaced.'
-                    : 'Remember this code! You\'ll need it to start sessions from this link.'}
-                </p>
-              </div>
-
-              <div>
-                <label htmlFor="persistent-entry-policy" className="block text-sm font-semibold text-gray-700 mb-2">
-                  Entry mode
-                </label>
-                <select
-                  id="persistent-entry-policy"
-                  value={persistentEntryPolicy}
-                  onChange={(event) => setPersistentEntryPolicy(event.target.value as PersistentSessionEntryPolicy)}
-                  className="border-2 border-gray-300 rounded px-4 py-2 w-full bg-white focus:outline-none focus:border-blue-500"
-                >
-                  {persistentEntryPolicyOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  {getPersistentSessionEntryPolicyDescription(persistentEntryPolicy)}
-                </p>
-              </div>
-
-              {selectedActivity && Object.keys(selectedActivityOptions).length > 0 && (
-                <div className="border-2 border-gray-200 rounded p-3 bg-gray-50">
-                  <p className="text-sm font-semibold text-gray-700 mb-2">Link options</p>
-                  <div className="flex flex-col gap-3">
-                    {Object.entries(selectedActivityOptions).map(([key, option]) => (
-                      <label key={key} className="text-sm text-gray-700">
-                        <span className="block font-semibold mb-1">{option.label || key}</span>
-                        {option.type === 'select' ? (
-                          <select
-                            value={persistentOptions[key] ?? ''}
-                            onChange={(event) =>
-                              setPersistentOptions((previous) => ({
-                                ...previous,
-                                [key]: event.target.value,
-                              }))
-                            }
-                            className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
-                          >
-                            {(option.options || []).map((entry) => (
-                              <option key={entry.value} value={entry.value}>
-                                {entry.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            type="text"
-                            value={persistentOptions[key] ?? ''}
-                            onChange={(event) =>
-                              setPersistentOptions((previous) => ({
-                                ...previous,
-                                [key]: event.target.value,
-                              }))
-                            }
-                            className={`w-full border-2 rounded px-3 py-2 ${persistentOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
-                          />
-                        )}
-                        {persistentOptionErrors[key] && (
-                          <span className="block mt-1 text-xs text-red-600">{persistentOptionErrors[key]}</span>
-                        )}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
-
-              <Button
-                type="submit"
-                disabled={isCreating || teacherCode.trim().length < 6 || hasPersistentOptionErrors}
-              >
-                {isCreating
-                  ? ((editingPersistentSession == null || createsNewLinkFromTeacherCodeChange) ? 'Creating...' : 'Saving...')
-                  : (createsNewLinkFromTeacherCodeChange ? 'Create New Link' : (editingPersistentSession ? 'Save Changes' : 'Generate Link'))}
-              </Button>
-            </form>
-          )
-        ) : (
+        {!persistentUrl ? activePersistentModalContent : (
           <div className="flex flex-col gap-4">
             <p className="text-green-600 font-semibold">
               ✓ Permanent link {lastPersistentSubmitMode} successfully!

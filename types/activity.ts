@@ -43,13 +43,6 @@ export interface ActivityPersistentSoloLaunchResult {
   navigateTo?: string
 }
 
-export interface ActivityPersistentLinkBuildResult {
-  fullUrl: string
-  hash: string
-  teacherCode: string
-  selectedOptions?: Record<string, unknown>
-}
-
 export interface ActivityPersistentLinkBuilderEditState {
   hash: string
   teacherCode: string
@@ -59,8 +52,11 @@ export interface ActivityPersistentLinkBuilderEditState {
 
 export interface ActivityPersistentLinkBuilderProps {
   activityId: string
+  teacherCode?: string
+  selectedOptions?: Record<string, string>
   editState?: ActivityPersistentLinkBuilderEditState | null
-  onCreated(result: ActivityPersistentLinkBuildResult): void | Promise<void>
+  onSelectedOptionsChange?(selectedOptions: Record<string, string>): void
+  onSubmitReadinessChange?(canSubmit: boolean): void
 }
 
 export interface ActivityCreateSessionBootstrapSessionStorageEntry {

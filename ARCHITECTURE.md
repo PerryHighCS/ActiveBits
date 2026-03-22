@@ -357,7 +357,9 @@ Activities can override the default link-generation endpoint using `activity.con
 
 For simple permanent-link UX, shared `ManageDashboard` can render generic fields from `deepLinkOptions` and submit to the configured generator endpoint.
 
-For advanced or protocol-specific UX (for example iframe preview / custom validation), an activity can set `activity.config.ts > manageDashboard.customPersistentLinkBuilder = true` and export `PersistentLinkBuilderComponent` from its client entry. In that mode, the activity owns the modal form/preflight/submit flow while `ManageDashboard` only provides the placement shell and post-create success display.
+For advanced or protocol-specific UX (for example iframe preview, upload-driven validation, or custom previews), an activity can set `activity.config.ts > manageDashboard.customPersistentLinkBuilder = true` and export `PersistentLinkBuilderComponent` from its client entry.
+
+In that mode, the activity owns only activity-specific UI, validation, and `selectedOptions` preparation. Shared `ManageDashboard` still owns teacher-code input, entry-mode selection, and the final `/api/persistent-session/create|update` request.
 
 `deepLinkGenerator.preflight` remains activity metadata, but shared dashboard code should not interpret activity-specific preflight protocol names directly.
 

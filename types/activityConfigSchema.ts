@@ -360,6 +360,10 @@ function parseManageDashboard(raw: unknown, context: string): ActivityConfig['ma
   }
 
   const customPersistentLinkBuilder = readOptionalBoolean(raw, 'customPersistentLinkBuilder', `${context}.manageDashboard`)
+  if ('persistentLinkBuilderMode' in raw && raw.persistentLinkBuilderMode != null) {
+    throw new Error(`${context}.manageDashboard: "persistentLinkBuilderMode" is no longer supported`)
+  }
+
   return {
     ...(customPersistentLinkBuilder !== undefined ? { customPersistentLinkBuilder } : {}),
   }

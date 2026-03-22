@@ -12,15 +12,10 @@ const resonanceConfig: ActivityConfig = {
     showOnHome: false,
   },
   deepLinkOptions: {
-    // q: encrypted question set; h: persistent hash used for decryption
+    // q: encrypted question set; h: activity-specific decryption/AAD hash
     // Both are internal and managed by the custom link builder — not shown in generic UI.
     q: {},
     h: {},
-  },
-  deepLinkGenerator: {
-    endpoint: '/api/resonance/generate-link',
-    mode: 'replace-url',
-    expectsSelectedOptions: false,
   },
   createSessionBootstrap: {
     sessionStorage: [
