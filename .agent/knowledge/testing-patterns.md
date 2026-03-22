@@ -251,6 +251,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-22
 - Scope: CI
+- Pattern: When grouped activity runners pass discovered test files to `node --test`, derive the paths with `path.relative(...)` from the `activities/` root and normalize separators instead of stripping prefixes with a hard-coded `/`.
+- Why it helps: The runner stays portable across platforms and avoids subtle path bugs when absolute prefixes do not match exactly or the filesystem uses non-POSIX separators.
+- Example (file/path): `scripts/run-activity-test-group.mjs`
+- Failure signal: Grouped activity tests work on Linux but break on Windows or other environments because the relative test-file arguments contain backslashes or an untrimmed absolute prefix.
+- Follow-up action: Keep path derivation centralized in a small helper whenever this runner grows more subprocess arguments.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
 - Pattern: After grouped activity runs finish, print a short end-of-bucket timing summary outside the collapsed log groups so the slowest activity stays visible even when the detailed logs remain collapsed.
 - Why it helps: GitHub log groups reduce noise, but they also hide the timing details by default; a final rollup keeps rebalancing signals visible at a glance.
 - Example (file/path): `scripts/run-activity-test-group.mjs`
@@ -264,7 +273,7 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Why it helps: CI timeouts or runner terminations can otherwise let a killed child process look like a passed activity bucket, which undermines the whole grouped-test guardrail.
 - Example (file/path): `scripts/run-activity-test-group.mjs`
 - Failure signal: A bucket process is terminated by `SIGTERM` or similar, but the wrapper keeps going to the next activity and may exit zero.
-- Follow-up action: Keep signal/null-status handling next to the normal exit-code check whenever this runner grows additional subprocess paths.
+- Follow-up action: Keep signal/null-status handling next to the normal exit-code check whenever this runner grows additional subprocess paths, avoid shell pipelines like `node --test | tee ...` unless the wrapper also enforces `pipefail`, and do not let missing log files mask a failed spawn.
 - Owner: Codex
 
 - Date: 2026-03-22

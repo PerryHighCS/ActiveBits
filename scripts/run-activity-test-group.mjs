@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 
 import {
   generateActivityTestGroups,
@@ -84,6 +84,11 @@ function collectTestFiles(rootDir) {
   return testFiles;
 }
 
+function toActivityRelativeTestFile(filePath) {
+  const relativePath = relative(resolve(repoRoot, 'activities'), filePath);
+  return sep === '/' ? relativePath : relativePath.split(sep).join('/');
+}
+
 const groupStartedAt = Date.now();
 const activityTimings = [];
 
@@ -102,21 +107,30 @@ for (const activity of group.activities) {
   }
 
   const tempDir = mkdtempSync(resolve(tmpdir(), 'activebits-activity-test-'));
+  const outputLogPath = resolve(tempDir, 'activity-output.log');
   const result = spawnSync(
-    'sh',
+    'bash',
     [
-      '-c',
-      'set -e; output_file="$1"; shift; node --import tsx --test --import ../scripts/jsx-loader-register.mjs "$@" 2>&1 | tee "$output_file"',
-      'sh',
-      resolve(tempDir, 'activity-output.log'),
-      ...testFiles.map((file) => file.replace(`${resolve(repoRoot, 'activities')}/`, '')),
+      '-lc',
+      'set -euo pipefail; output_file="$1"; shift; node --import tsx --test --import ../scripts/jsx-loader-register.mjs "$@" 2>&1 | tee "$output_file"',
+      'bash',
+      outputLogPath,
+      ...testFiles.map(toActivityRelativeTestFile),
     ],
     {
       stdio: 'inherit',
       cwd: resolve(repoRoot, 'activities'),
     },
   );
-  const capturedOutput = readFileSync(resolve(tempDir, 'activity-output.log'), 'utf8');
+
+  if (result.error) {
+    rmSync(tempDir, { recursive: true, force: true });
+    console.log('::endgroup::');
+    console.error(`[activity-test-group] Failed to run ${activity}: ${result.error.message}`);
+    process.exit(1);
+  }
+
+  const capturedOutput = existsSync(outputLogPath) ? readFileSync(outputLogPath, 'utf8') : '';
   rmSync(tempDir, { recursive: true, force: true });
 
   if (typeof result.signal === 'string' && result.signal.length > 0) {
@@ -134,12 +148,6 @@ for (const activity of group.activities) {
   if (result.status !== 0) {
     console.log('::endgroup::');
     process.exit(result.status);
-  }
-
-  if (result.error) {
-    console.log('::endgroup::');
-    console.error(`[activity-test-group] Failed to run ${activity}: ${result.error.message}`);
-    process.exit(1);
   }
 
   const activityElapsedMs = Date.now() - activityStartedAt;
