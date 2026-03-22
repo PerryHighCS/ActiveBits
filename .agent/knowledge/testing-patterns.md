@@ -212,3 +212,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: CI runtime is dominated by one long serialized job even though the underlying checks are independent and already cached well enough to run concurrently.
 - Follow-up action: If repeated `npm ci` time starts to dominate after parallelizing, consider a reusable setup action or dependency/build artifact sharing as a second-stage optimization.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: After splitting the main test workflow, break lint and typecheck into per-workspace jobs (`client`, `server`, `activities`) before attempting finer-grained test matrices.
+- Why it helps: This is usually the simplest next CI parallelization step because the workspace scripts already exist, so wall-clock time drops without introducing activity-level matrix complexity or new script surfaces.
+- Example (file/path): `.github/workflows/ci.yml`; `client/package.json`; `server/package.json`; `activities/package.json`
+- Failure signal: A combined checks job remains one of the longest CI stages even after test suites have been parallelized, and it is still just serially calling workspace lint/typecheck commands.
+- Follow-up action: If the combined `activities` test job remains the next bottleneck afterward, split that suite by activity or by a small matrix of the slowest activity groups.
+- Owner: Codex
