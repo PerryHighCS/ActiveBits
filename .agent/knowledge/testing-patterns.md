@@ -183,7 +183,7 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Why it helps: The job starts with browsers and OS dependencies already present, which removes a network-heavy install step and keeps CI closer to a fixed, reproducible browser runtime.
 - Example (file/path): `.github/workflows/ci.yml`
 - Failure signal: CI spends time reinstalling Playwright browsers every run or flakes in the browser-install step despite the JS dependencies already being locked.
-- Follow-up action: Keep the container tag aligned with the repo's `@playwright/test` version when upgrading Playwright.
+- Follow-up action: Keep the container tag aligned with the repo's `@playwright/test` version when upgrading Playwright, and set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` for workflow `npm ci` steps so non-browser jobs do not trigger Playwright postinstall downloads they never use.
 - Owner: Codex
 
 - Date: 2026-03-22
@@ -197,11 +197,11 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-22
 - Scope: e2e | CI
-- Pattern: When CI already built `client/dist` earlier in the job, let the Playwright `webServer.command` reuse that output and skip the Vite build; keep the command able to build on demand for local runs when `client/dist` is missing.
-- Why it helps: Browser smoke tests stay self-sufficient for local development while avoiding a redundant client rebuild in CI after `verify:deploy` already produced production assets.
+- Pattern: When CI already built `client/dist` earlier in the job, let the Playwright `webServer.command` reuse that output and skip the Vite build, but rebuild unconditionally for local runs unless an explicit opt-in flag such as `PLAYWRIGHT_REUSE_CLIENT_DIST=1` is set.
+- Why it helps: CI keeps the artifact-reuse speedup while local Playwright runs default to fresh assets, which avoids false-green browser tests against stale `client/dist` output after source changes.
 - Example (file/path): `playwright.config.ts`; `package.json`
-- Failure signal: CI spends time rebuilding the same production client bundle right before `npm run test:e2e`, or local Playwright runs fail because the harness assumes a prebuilt client dist exists.
-- Follow-up action: If the server build also becomes part of the pre-e2e pipeline later, apply the same “reuse existing artifact when present” rule there rather than baking more unconditional rebuilds into Playwright startup.
+- Failure signal: Local `npm run test:e2e` passes against an old production bundle after source edits, or CI loses time by rebuilding the same production client bundle right before browser smoke.
+- Follow-up action: Keep artifact reuse behind explicit opt-in flags for local runs, and if the server build also becomes part of the pre-e2e pipeline later, apply the same “CI reuse, local rebuild by default” rule there.
 - Owner: Codex
 
 - Date: 2026-03-22
@@ -292,4 +292,13 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Example (file/path): `scripts/verify-playwright-version-sync.mjs`; `.github/workflows/ci.yml`
 - Failure signal: Switching browser smoke away from the Playwright container immediately breaks metadata checks because the verifier insists an image tag must exist even though the workflow intentionally installs browsers at runtime.
 - Follow-up action: If the repo settles permanently on runtime installs, keep the verifier message explicit so future contributors understand why image drift checks are skipped.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: When many jobs share the same retrying `npm ci` logic, centralize it in a local composite action instead of repeating the shell loop in each workflow job.
+- Why it helps: Install flags, retry counts, and logging stay in one place, so future CI tuning does not depend on keeping a long list of copied YAML snippets in sync.
+- Example (file/path): `.github/actions/install-dependencies/action.yml`; `.github/workflows/ci.yml`
+- Failure signal: One job quietly diverges onto different install behavior because a copied `Install dependencies` block was edited in some jobs but not others.
+- Follow-up action: Keep the shared install action thin; if install setup later needs outputs or cross-job orchestration, promote it to a reusable workflow instead of reintroducing duplication.
 - Owner: Codex

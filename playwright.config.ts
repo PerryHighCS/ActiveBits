@@ -3,19 +3,25 @@ import { defineConfig, devices } from '@playwright/test'
 
 const baseURL = 'http://127.0.0.1:3100'
 const baseUrl = new URL(baseURL)
+const isCi = Boolean(process.env.CI)
 const serverHost = baseUrl.hostname
 const serverPort =
   baseUrl.port || (baseUrl.protocol === 'https:' ? '443' : '80')
 const persistentSessionSecret =
   process.env.PLAYWRIGHT_PERSISTENT_SESSION_SECRET ??
   randomBytes(32).toString('hex')
+const shouldReuseClientBuild =
+  isCi || process.env.PLAYWRIGHT_REUSE_CLIENT_DIST === '1'
+const webServerCommand = shouldReuseClientBuild
+  ? "sh -c 'if [ -d client/dist ]; then echo \"Reusing existing client build for Playwright\"; else npm run build --workspace client; fi && npm run start --prefix server'"
+  : "sh -c 'npm run build --workspace client && npm run start --prefix server'"
 
 export default defineConfig({
   testDir: './playwright',
   fullyParallel: true,
-  forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  forbidOnly: isCi,
+  retries: isCi ? 2 : 0,
+  workers: isCi ? 2 : undefined,
   reporter: 'list',
   use: {
     baseURL,
@@ -24,8 +30,7 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command:
-      "sh -c 'if [ -d client/dist ]; then echo \"Reusing existing client build for Playwright\"; else npm run build --workspace client; fi && npm run start --prefix server'",
+    command: webServerCommand,
     env: {
       HOST: serverHost,
       NODE_ENV: 'production',
@@ -33,7 +38,7 @@ export default defineConfig({
       PERSISTENT_SESSION_SECRET: persistentSessionSecret,
     },
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !isCi,
     timeout: 180_000,
   },
   projects: [

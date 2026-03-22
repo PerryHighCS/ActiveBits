@@ -6,6 +6,7 @@ on:
 
 env:
   ACTIVITY_TEST_GROUP_COUNT: '3'
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 
 jobs:
   metadata-checks:
@@ -47,18 +48,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
+        uses: ./.github/actions/install-dependencies
 
       - name: Lint client
         run: npm --workspace client run lint
@@ -79,18 +69,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
+        uses: ./.github/actions/install-dependencies
 
       - name: Lint server
         run: npm --workspace server run lint
@@ -111,18 +90,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
+        uses: ./.github/actions/install-dependencies
 
       - name: Lint activities
         run: npm --workspace activities run lint
@@ -143,18 +111,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
+        uses: ./.github/actions/install-dependencies
 
       - name: Run client tests
         run: npm --workspace client test
@@ -172,18 +129,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
+        uses: ./.github/actions/install-dependencies
 
       - name: Run server tests
         run: npm --workspace server test
@@ -205,18 +151,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
+        uses: ./.github/actions/install-dependencies
 
       - name: Run activity group tests
         run: node scripts/run-activity-test-group.mjs ${{ matrix.name }}
@@ -234,18 +169,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
+        uses: ./.github/actions/install-dependencies
 
       - name: Verify deploy build
         run: npm run verify:deploy
@@ -268,18 +192,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
+        uses: ./.github/actions/install-dependencies
 
       - name: Run browser smoke tests
         run: npm run test:e2e
