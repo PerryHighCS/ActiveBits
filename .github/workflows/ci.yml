@@ -252,8 +252,6 @@ jobs:
 
   browser-smoke:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -277,6 +275,9 @@ jobs:
           done
           echo "Dependency install failed after 3 attempts"
           exit 1
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Run browser smoke tests
         run: npm run test:e2e

@@ -248,3 +248,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: The verifier still passes after a lockfile-only Playwright bump within the same semver range, leaving the CI browser image on an older Playwright build than the installed test runner expects.
 - Follow-up action: If the repo ever pins `@playwright/test` exactly in `package.json`, keep the verifier on the lockfile anyway so install reality remains the guardrail.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: When browser smoke runs on plain `ubuntu-latest` with `npx playwright install --with-deps` instead of a Playwright container image, let the Playwright version verifier succeed with a clear “no image configured” message rather than treating the missing image tag as drift.
+- Why it helps: The same verifier still protects image-based setups, but runtime-install experiments do not fail spuriously just because the workflow has no Playwright image reference to compare.
+- Example (file/path): `scripts/verify-playwright-version-sync.mjs`; `.github/workflows/ci.yml`
+- Failure signal: Switching browser smoke away from the Playwright container immediately breaks metadata checks because the verifier insists an image tag must exist even though the workflow intentionally installs browsers at runtime.
+- Follow-up action: If the repo settles permanently on runtime installs, keep the verifier message explicit so future contributors understand why image drift checks are skipped.
+- Owner: Codex

@@ -86,10 +86,10 @@ const inlineTagPattern =
 const match = workflowRaw.match(envTagPattern) ?? workflowRaw.match(inlineTagPattern);
 
 if (!match) {
-  console.error(
-    '[playwright-version-sync] Could not find a Playwright container image tag in .github/workflows/ci.yml.',
+  console.log(
+    `[playwright-version-sync] OK: no Playwright container image is configured in .github/workflows/ci.yml; browser jobs will use the installed Playwright ${expectedVersion}.`,
   );
-  process.exit(1);
+  process.exit(0);
 }
 
 const workflowVersion = match[1];
