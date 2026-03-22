@@ -235,9 +235,9 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Scope: CI
 - Pattern: Rebalance activity test buckets using observed per-bucket wall time from CI, not just test-file counts; a slightly uneven file-count split can still be the faster real-world matrix.
 - Why it helps: Activities vary a lot in runtime cost, so grouping by actual measured duration keeps the matrix balanced better than counting files alone.
-- Example (file/path): `ci/activity-test-groups.json`; `.github/workflows/ci.yml`
-- Failure signal: One activity bucket consistently dominates CI even though the manifest looks numerically balanced by file count or raw test count.
-- Follow-up action: When timings drift, adjust only the manifest grouping and keep the verifier untouched.
+- Example (file/path): `scripts/activity-test-groups.mjs`; `scripts/run-activity-test-group.mjs`; `.github/workflows/ci.yml`
+- Failure signal: One generated activity bucket consistently dominates CI even though the current grouping heuristic looks balanced by file count or raw test count.
+- Follow-up action: When timings drift, adjust the grouping heuristic or target group count while keeping the generator and verifier aligned.
 - Owner: Codex
 
 - Date: 2026-03-22
@@ -246,7 +246,7 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Why it helps: You keep the lower job count of grouped buckets while still being able to see which specific activity is dominating a bucket's runtime without rerunning everything as one-activity-per-job.
 - Example (file/path): `scripts/run-activity-test-group.mjs`
 - Failure signal: A grouped activity bucket is slow in CI, but the logs do not show which activity consumed the time, so rebalancing remains guesswork.
-- Follow-up action: If one activity still dominates after logging, move only that activity between manifest buckets instead of expanding the whole matrix unnecessarily.
+- Follow-up action: If one activity still dominates after logging, tune the generator inputs or bucket count before expanding the whole matrix unnecessarily.
 - Owner: Codex
 
 - Date: 2026-03-22
