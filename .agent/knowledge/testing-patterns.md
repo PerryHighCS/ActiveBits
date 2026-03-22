@@ -215,9 +215,18 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-22
 - Scope: CI
-- Pattern: After splitting the main test workflow, break lint and typecheck into per-workspace jobs (`client`, `server`, `activities`) before attempting finer-grained test matrices.
-- Why it helps: This is usually the simplest next CI parallelization step because the workspace scripts already exist, so wall-clock time drops without introducing activity-level matrix complexity or new script surfaces.
+- Pattern: After splitting the main test workflow, prefer one combined check job per workspace (`client`, `server`, `activities`) that runs lint and typecheck together, rather than doubling job count with separate lint and typecheck jobs for each workspace.
+- Why it helps: This keeps the major workspace-level parallelism while reducing workflow overhead and visual noise in GitHub Actions, which is often a better tradeoff unless lint and typecheck durations are independently dominant.
 - Example (file/path): `.github/workflows/ci.yml`; `client/package.json`; `server/package.json`; `activities/package.json`
-- Failure signal: A combined checks job remains one of the longest CI stages even after test suites have been parallelized, and it is still just serially calling workspace lint/typecheck commands.
+- Failure signal: CI has many tiny check jobs with repeated setup cost and cluttered status output, but the wall-clock improvement over one-per-workspace check jobs is marginal.
 - Follow-up action: If the combined `activities` test job remains the next bottleneck afterward, split that suite by activity or by a small matrix of the slowest activity groups.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: Keep activity test bucketing in one checked-in manifest (`ci/activity-test-groups.json`), validate that every `activities/*` directory appears exactly once, and have GitHub Actions derive the matrix from that manifest instead of hard-coding activity names in workflow YAML.
+- Why it helps: New activities fail loudly until they are assigned to a bucket, duplicate assignments are caught automatically, and rebalancing only touches one data file instead of duplicating fragile lists across workflow expressions.
+- Example (file/path): `ci/activity-test-groups.json`; `scripts/verify-activity-test-groups.mjs`; `scripts/run-activity-test-group.mjs`; `.github/workflows/ci.yml`
+- Failure signal: A new activity lands without CI coverage because its name was never added to a hard-coded workflow list, or activity names drift between multiple duplicated YAML lists.
+- Follow-up action: Rebalance the manifest buckets when timing shifts, but keep the verifier strict so coverage remains complete as activities are added.
 - Owner: Codex

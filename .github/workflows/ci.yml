@@ -7,6 +7,8 @@ on:
 jobs:
   metadata-checks:
     runs-on: ubuntu-latest
+    outputs:
+      activity-test-matrix: ${{ steps.activity-test-groups.outputs.matrix }}
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
@@ -25,21 +27,13 @@ jobs:
       - name: Verify Playwright version sync
         run: npm run verify:playwright-version-sync
 
-      - name: Install dependencies
+      - name: Verify activity test groups
+        id: activity-test-groups
         run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
+          npm run verify:activity-test-groups
+          echo "matrix=$(node scripts/verify-activity-test-groups.mjs --matrix)" >> "$GITHUB_OUTPUT"
 
-  lint-client:
+  client-checks:
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-noble
@@ -70,7 +64,10 @@ jobs:
       - name: Lint client
         run: npm --workspace client run lint
 
-  lint-server:
+      - name: Typecheck client
+        run: npm --workspace client run typecheck
+
+  server-checks:
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-noble
@@ -101,7 +98,10 @@ jobs:
       - name: Lint server
         run: npm --workspace server run lint
 
-  lint-activities:
+      - name: Typecheck server
+        run: npm --workspace server run typecheck
+
+  activities-checks:
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-noble
@@ -131,96 +131,6 @@ jobs:
 
       - name: Lint activities
         run: npm --workspace activities run lint
-
-  typecheck-client:
-    runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
-
-      - name: Typecheck client
-        run: npm --workspace client run typecheck
-
-  typecheck-server:
-    runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
-
-      - name: Typecheck server
-        run: npm --workspace server run typecheck
-
-  typecheck-activities:
-    runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Install failed (attempt $attempt). Retrying after short delay..."
-              sleep 3
-            fi
-          done
-          echo "Dependency install failed after 3 attempts"
-          exit 1
 
       - name: Typecheck activities
         run: npm --workspace activities run typecheck
@@ -288,7 +198,11 @@ jobs:
         run: npm --workspace server test
 
   activities-tests:
+    needs: metadata-checks
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.metadata-checks.outputs.activity-test-matrix) }}
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
@@ -315,8 +229,8 @@ jobs:
           echo "Dependency install failed after 3 attempts"
           exit 1
 
-      - name: Run activities tests
-        run: npm --workspace activities test
+      - name: Run activity group tests
+        run: node scripts/run-activity-test-group.mjs ${{ matrix.name }}
 
   verify-build-and-server:
     runs-on: ubuntu-latest
