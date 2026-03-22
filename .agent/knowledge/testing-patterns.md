@@ -203,3 +203,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: CI spends time rebuilding the same production client bundle right before `npm run test:e2e`, or local Playwright runs fail because the harness assumes a prebuilt client dist exists.
 - Follow-up action: If the server build also becomes part of the pre-e2e pipeline later, apply the same “reuse existing artifact when present” rule there rather than baking more unconditional rebuilds into Playwright startup.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: When the root `npm test` chain is much slower than browser smoke tests, split GitHub Actions into parallel jobs for checks, workspace test suites, deploy/server verification, and Playwright smoke instead of running `npm test` serially in one job.
+- Why it helps: The workflow wall clock becomes bounded by the slowest suite rather than by the sum of all suites, which is usually a larger gain than shaving a few seconds off an already-fast smoke test.
+- Example (file/path): `.github/workflows/ci.yml`
+- Failure signal: CI runtime is dominated by one long serialized job even though the underlying checks are independent and already cached well enough to run concurrently.
+- Follow-up action: If repeated `npm ci` time starts to dominate after parallelizing, consider a reusable setup action or dependency/build artifact sharing as a second-stage optimization.
+- Owner: Codex

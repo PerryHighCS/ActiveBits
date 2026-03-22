@@ -4,11 +4,14 @@ on:
   push:
   pull_request:
 
+env:
+  PLAYWRIGHT_CONTAINER_IMAGE: mcr.microsoft.com/playwright:v1.58.2-noble
+
 jobs:
-  test:
+  checks:
     runs-on: ubuntu-latest
     container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
+      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,9 +42,166 @@ jobs:
           echo "Dependency install failed after 3 attempts"
           exit 1
 
+      - name: Typecheck
+        run: npm run typecheck
 
-      - name: Run tests
-        run: npm test
+      - name: Lint
+        run: npm run lint
+
+  client-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Install failed (attempt $attempt). Retrying after short delay..."
+              sleep 3
+            fi
+          done
+          echo "Dependency install failed after 3 attempts"
+          exit 1
+
+      - name: Run client tests
+        run: npm --workspace client test
+
+  server-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Install failed (attempt $attempt). Retrying after short delay..."
+              sleep 3
+            fi
+          done
+          echo "Dependency install failed after 3 attempts"
+          exit 1
+
+      - name: Run server tests
+        run: npm --workspace server test
+
+  activities-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Install failed (attempt $attempt). Retrying after short delay..."
+              sleep 3
+            fi
+          done
+          echo "Dependency install failed after 3 attempts"
+          exit 1
+
+      - name: Run activities tests
+        run: npm --workspace activities test
+
+  verify-build-and-server:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Install failed (attempt $attempt). Retrying after short delay..."
+              sleep 3
+            fi
+          done
+          echo "Dependency install failed after 3 attempts"
+          exit 1
+
+      - name: Verify deploy build
+        run: npm run verify:deploy
+
+      - name: Verify server smoke
+        run: npm run verify:server
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm_config_production=false npm ci --workspaces --include-workspace-root; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Install failed (attempt $attempt). Retrying after short delay..."
+              sleep 3
+            fi
+          done
+          echo "Dependency install failed after 3 attempts"
+          exit 1
 
       - name: Run browser smoke tests
         run: npm run test:e2e

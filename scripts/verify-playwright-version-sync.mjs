@@ -61,8 +61,11 @@ try {
   process.exit(1);
 }
 
-const containerTagPattern = /mcr\.microsoft\.com\/playwright:v([0-9]+\.[0-9]+\.[0-9]+)(?:-[^\s'"]+)?/;
-const match = workflowRaw.match(containerTagPattern);
+const envTagPattern =
+  /PLAYWRIGHT_CONTAINER_IMAGE:\s*mcr\.microsoft\.com\/playwright:v([0-9]+\.[0-9]+\.[0-9]+)(?:-[^\s'"]+)?/;
+const inlineTagPattern =
+  /mcr\.microsoft\.com\/playwright:v([0-9]+\.[0-9]+\.[0-9]+)(?:-[^\s'"]+)?/;
+const match = workflowRaw.match(envTagPattern) ?? workflowRaw.match(inlineTagPattern);
 
 if (!match) {
   console.error(
