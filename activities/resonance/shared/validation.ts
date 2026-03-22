@@ -23,6 +23,9 @@ function normalizeId(value: unknown): string | null {
 
 const MAX_QUESTION_SET_SIZE = 100
 
+type RandomSource = () => number
+type ShufflableOption = Pick<MCQOption, 'text' | 'isCorrect'>
+
 // ---------------------------------------------------------------------------
 // Question validation
 // ---------------------------------------------------------------------------
@@ -205,6 +208,21 @@ export function validateQuestionSet(raw: unknown): { questions: Question[]; erro
  * multiple-choice questions only.
  */
 export function parseGimkitCSV(content: string): { questions: Question[]; errors: string[] } {
+  return parseGimkitCSVWithRandom(content, Math.random)
+}
+
+/**
+ * Test seam for Gimkit CSV parsing that allows deterministic answer shuffling.
+ * Production callers should use `parseGimkitCSV`, which injects `Math.random`.
+ *
+ * `random` must behave like `Math.random`, returning a finite number in the
+ * range `[0, 1)`. Values outside that contract throw so invalid injected
+ * PRNGs fail fast instead of corrupting the shuffle.
+ */
+export function parseGimkitCSVWithRandom(
+  content: string,
+  random: RandomSource,
+): { questions: Question[]; errors: string[] } {
   const errors: string[] = []
   const lines = splitCSVLines(content)
 
@@ -244,10 +262,17 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
     }
 
     const id = `q${orderCounter + 1}`
-    const allAnswers: MCQOption[] = [
-      { id: `${id}_c`, text: correctAnswer, isCorrect: true },
-      ...incorrectAnswers.map((text, i) => ({ id: `${id}_i${i + 1}`, text })),
-    ]
+    const allAnswers = shuffleOptions(
+      [
+        { text: correctAnswer, isCorrect: true },
+        ...incorrectAnswers.map((text) => ({ text })),
+      ],
+      random,
+    ).map((option, optionIndex) => ({
+      id: `${id}_o${optionIndex + 1}`,
+      text: option.text,
+      ...(option.isCorrect === true ? { isCorrect: true } : {}),
+    }))
 
     if (questions.length >= MAX_QUESTION_SET_SIZE) {
       errors.push(`question set may contain at most ${MAX_QUESTION_SET_SIZE} questions`)
@@ -277,6 +302,21 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
     questions: validated.questions,
     errors: [...errors, ...validated.errors],
   }
+}
+
+function shuffleOptions(options: ShufflableOption[], random: RandomSource): ShufflableOption[] {
+  const shuffled = [...options]
+
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const randomValue = random()
+    if (!Number.isFinite(randomValue) || randomValue < 0 || randomValue >= 1) {
+      throw new Error(`parseGimkitCSVWithRandom expected random() to return a finite value in [0, 1), received: ${String(randomValue)}`)
+    }
+    const swapIndex = Math.floor(randomValue * (index + 1))
+    ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex]!, shuffled[index]!]
+  }
+
+  return shuffled
 }
 
 function splitCSVLines(content: string): string[] {
