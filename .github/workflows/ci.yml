@@ -5,7 +5,7 @@ on:
   pull_request:
 
 env:
-  ACTIVITY_TEST_GROUP_COUNT: '3'
+  ACTIVITY_TEST_GROUP_COUNT: '2'
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 
 jobs:
