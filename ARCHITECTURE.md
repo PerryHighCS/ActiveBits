@@ -17,6 +17,10 @@ ActiveBits/
 │   │   ├── dev-presentations/       # Optional dev-only sample decks, served locally only
 │   │   ├── client/
 │   │   └── server/
+│   ├── resonance/
+│   │   ├── activity.config.ts
+│   │   ├── client/
+│   │   └── server/
 │   ├── www-sim/
 │   │   ├── activity.config.ts
 │   │   ├── client/

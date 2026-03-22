@@ -50,7 +50,6 @@ const resonanceConfig: ActivityConfig = {
       },
     ],
   },
-  isDev: true,
   utilMode: true,
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',
