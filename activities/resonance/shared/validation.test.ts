@@ -133,9 +133,9 @@ void test('parseGimkitCSV returns normalized validated questions', () => {
       text: 'Pick one',
       order: 0,
       options: [
-        { id: 'q1_c', text: 'Right', isCorrect: true },
-        { id: 'q1_i1', text: 'Wrong 1' },
-        { id: 'q1_i2', text: 'Wrong 2' },
+        { id: 'q1_o1', text: 'Right', isCorrect: true },
+        { id: 'q1_o2', text: 'Wrong 1' },
+        { id: 'q1_o3', text: 'Wrong 2' },
       ],
     },
   ])
@@ -164,8 +164,8 @@ void test('parseGimkitCSV still normalizes valid rows when other rows have error
       text: 'A'.repeat(1000),
       order: 0,
       options: [
-        { id: 'q1_c', text: 'B'.repeat(500), isCorrect: true },
-        { id: 'q1_i1', text: 'C'.repeat(500) },
+        { id: 'q1_o1', text: 'B'.repeat(500), isCorrect: true },
+        { id: 'q1_o2', text: 'C'.repeat(500) },
       ],
     },
   ])
@@ -184,8 +184,22 @@ void test('parseGimkitCSV can randomize Gimkit answer order so the correct answe
   const firstQuestion = result.questions[0]
   assert.equal(firstQuestion?.type, 'multiple-choice')
   assert.deepEqual(firstQuestion?.options, [
-    { id: 'q1_i1', text: 'Wrong 1' },
-    { id: 'q1_i2', text: 'Wrong 2' },
-    { id: 'q1_c', text: 'Right', isCorrect: true },
+    { id: 'q1_o1', text: 'Wrong 1' },
+    { id: 'q1_o2', text: 'Wrong 2' },
+    { id: 'q1_o3', text: 'Right', isCorrect: true },
   ])
+  assert.ok(firstQuestion.options.every((option) => !option.id.includes('_c')))
+})
+
+void test('parseGimkitCSVWithRandom rejects invalid random sources', () => {
+  const csv = [
+    'Title',
+    '"Question","Correct Answer","Incorrect Answer 1","Incorrect Answer 2 (Optional)","Incorrect Answer 3 (Optional)"',
+    '"Pick one","Right","Wrong 1","Wrong 2",""',
+  ].join('\n')
+
+  assert.throws(
+    () => parseGimkitCSVWithRandom(csv, () => Number.NaN),
+    /expected random\(\) to return a finite value in \[0, 1\)/,
+  )
 })

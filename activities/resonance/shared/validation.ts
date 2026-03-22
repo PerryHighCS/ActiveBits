@@ -24,6 +24,7 @@ function normalizeId(value: unknown): string | null {
 const MAX_QUESTION_SET_SIZE = 100
 
 type RandomSource = () => number
+type ShufflableOption = Pick<MCQOption, 'text' | 'isCorrect'>
 
 // ---------------------------------------------------------------------------
 // Question validation
@@ -259,11 +260,15 @@ export function parseGimkitCSVWithRandom(
     const id = `q${orderCounter + 1}`
     const allAnswers = shuffleOptions(
       [
-      { id: `${id}_c`, text: correctAnswer, isCorrect: true },
-      ...incorrectAnswers.map((text, i) => ({ id: `${id}_i${i + 1}`, text })),
+        { text: correctAnswer, isCorrect: true },
+        ...incorrectAnswers.map((text) => ({ text })),
       ],
       random,
-    )
+    ).map((option, optionIndex) => ({
+      id: `${id}_o${optionIndex + 1}`,
+      text: option.text,
+      ...(option.isCorrect === true ? { isCorrect: true } : {}),
+    }))
 
     if (questions.length >= MAX_QUESTION_SET_SIZE) {
       errors.push(`question set may contain at most ${MAX_QUESTION_SET_SIZE} questions`)
@@ -295,11 +300,15 @@ export function parseGimkitCSVWithRandom(
   }
 }
 
-function shuffleOptions(options: MCQOption[], random: RandomSource): MCQOption[] {
+function shuffleOptions(options: ShufflableOption[], random: RandomSource): ShufflableOption[] {
   const shuffled = [...options]
 
   for (let index = shuffled.length - 1; index > 0; index--) {
-    const swapIndex = Math.floor(random() * (index + 1))
+    const randomValue = random()
+    if (!Number.isFinite(randomValue) || randomValue < 0 || randomValue >= 1) {
+      throw new Error(`parseGimkitCSVWithRandom expected random() to return a finite value in [0, 1), received: ${String(randomValue)}`)
+    }
+    const swapIndex = Math.floor(randomValue * (index + 1))
     ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex]!, shuffled[index]!]
   }
 
