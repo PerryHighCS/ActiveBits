@@ -194,3 +194,12 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: A Playwright dependency bump lands without the matching CI image tag update, or the workflow image tag changes independently and browser behavior drifts from the locked test runner version.
 - Follow-up action: If additional workflows start using Playwright containers, either extend the verifier to cover them too or centralize the image tag in one reusable workflow path.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: e2e | CI
+- Pattern: When CI already built `client/dist` earlier in the job, let the Playwright `webServer.command` reuse that output and skip the Vite build; keep the command able to build on demand for local runs when `client/dist` is missing.
+- Why it helps: Browser smoke tests stay self-sufficient for local development while avoiding a redundant client rebuild in CI after `verify:deploy` already produced production assets.
+- Example (file/path): `playwright.config.ts`; `package.json`
+- Failure signal: CI spends time rebuilding the same production client bundle right before `npm run test:e2e`, or local Playwright runs fail because the harness assumes a prebuilt client dist exists.
+- Follow-up action: If the server build also becomes part of the pre-e2e pipeline later, apply the same “reuse existing artifact when present” rule there rather than baking more unconditional rebuilds into Playwright startup.
+- Owner: Codex

@@ -24,7 +24,8 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run build --workspace client && npm run start --prefix server',
+    command:
+      "sh -c 'if [ -d client/dist ]; then echo \"Reusing existing client build for Playwright\"; else npm run build --workspace client; fi && npm run start --prefix server'",
     env: {
       HOST: serverHost,
       NODE_ENV: 'production',

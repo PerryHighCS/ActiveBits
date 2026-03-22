@@ -20,7 +20,7 @@
         "test:activities:activity": "npm --workspace activities run test:activity",
         "test:activities:scope:hb": "sh scripts/with-heartbeat.sh \"activities scope test\" npm run test:activities:scope",
         "test:activities:activity:hb": "sh scripts/with-heartbeat.sh \"activity test\" npm run test:activities:activity",
-        "verify:deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
+        "verify:deploy": "npm run build --workspace client",
         "verify:node-version-sync": "node scripts/verify-node-version-sync.mjs",
         "verify:playwright-version-sync": "node scripts/verify-playwright-version-sync.mjs",
         "verify:server": "node --import tsx scripts/verify-server.ts",
