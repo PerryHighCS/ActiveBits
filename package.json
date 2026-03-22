@@ -20,8 +20,10 @@
         "test:activities:activity": "npm --workspace activities run test:activity",
         "test:activities:scope:hb": "sh scripts/with-heartbeat.sh \"activities scope test\" npm run test:activities:scope",
         "test:activities:activity:hb": "sh scripts/with-heartbeat.sh \"activity test\" npm run test:activities:activity",
-        "verify:deploy": "npm install --include=dev --workspaces --include-workspace-root && npm run build --workspace client",
+        "verify:deploy": "npm run build --workspace client",
+        "verify:activity-test-groups": "node scripts/verify-activity-test-groups.mjs",
         "verify:node-version-sync": "node scripts/verify-node-version-sync.mjs",
+        "verify:playwright-version-sync": "node scripts/verify-playwright-version-sync.mjs",
         "verify:server": "node --import tsx scripts/verify-server.ts",
         "verify:source-extensions": "bash scripts/verify-no-js-sources.sh",
         "typecheck": "npm run typecheck --workspaces --if-present",
@@ -30,8 +32,11 @@
         "test:chunks:hb": "sh scripts/with-heartbeat.sh \"typecheck\" npm run typecheck && sh scripts/with-heartbeat.sh \"client test\" npm --workspace client test && sh scripts/with-heartbeat.sh \"server test\" npm --workspace server test && sh scripts/with-heartbeat.sh \"activities test\" npm --workspace activities test",
         "test:codex": "npm run typecheck && npm run lint && npm --workspace client test && npm --workspace server run test:nonport && npm --workspace activities test",
         "test:codex:hb": "sh scripts/with-heartbeat.sh \"test:codex\" npm run test:codex",
+        "test:e2e": "playwright test",
+        "test:e2e:headed": "playwright test --headed",
+        "test:e2e:ui": "playwright test --ui",
         "test:hb": "sh scripts/with-heartbeat.sh \"npm test\" npm test",
-        "test": "npm run typecheck && npm run lint && npm --workspace client test && npm --workspace server test && npm --workspace activities test && npm run verify:deploy && npm run verify:server"
+        "test": "npm run typecheck && npm run lint && npm --workspace client test && npm --workspace server test && npm --workspace activities test && npm run verify:deploy && npm run verify:node-version-sync && npm run verify:playwright-version-sync && npm run verify:activity-test-groups && npm run verify:server"
     },
     "keywords": [],
     "author": "",
@@ -46,6 +51,7 @@
         "ws": "^8.18.3"
     },
     "devDependencies": {
+        "@playwright/test": "^1.58.2",
         "@types/node": "^25.2.1",
         "concurrently": "^9.1.2",
         "tsx": "^4.20.6",

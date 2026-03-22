@@ -43,6 +43,26 @@ function installDomEnvironment() {
   }
 }
 
+async function unmountRendered(
+  rendered: { unmount: () => void } | null,
+  act: ((callback: () => Promise<void>) => Promise<void>) | null,
+) {
+  if (rendered === null) {
+    return
+  }
+
+  if (act !== null) {
+    await act(async () => {
+      rendered.unmount()
+      await Promise.resolve()
+    })
+    return
+  }
+
+  rendered.unmount()
+  await Promise.resolve()
+}
+
 void test('normalizeEditStateQuestions returns normalized non-empty questions for valid input', () => {
   const result = normalizeEditStateQuestions([
     {
@@ -100,7 +120,7 @@ void test(
   async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch
-  const { render, waitFor } = await import('@testing-library/react')
+  const { act, render, waitFor } = await import('@testing-library/react')
   const { default: ResonancePersistentLinkBuilder } = await import('./ResonancePersistentLinkBuilder.js')
   let rendered: ReturnType<typeof render> | null = null
   const selectedOptionsSnapshots: Array<Record<string, string>> = []
@@ -153,7 +173,7 @@ void test(
     assert.deepEqual(selectedOptionsSnapshots, [])
   } finally {
     ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
-    rendered?.unmount()
+    await unmountRendered(rendered, act)
     restoreDomEnvironment()
   }
   },
@@ -223,7 +243,7 @@ void test(
     })
   } finally {
     ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
-    rendered?.unmount()
+    await unmountRendered(rendered, act)
     restoreDomEnvironment()
   }
   },
@@ -235,7 +255,7 @@ void test(
   async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch
-  const { render, waitFor } = await import('@testing-library/react')
+  const { act, render, waitFor } = await import('@testing-library/react')
   const { default: ResonancePersistentLinkBuilder } = await import('./ResonancePersistentLinkBuilder.js')
   let rendered: ReturnType<typeof render> | null = null
   const selectedOptionsSnapshots: Array<Record<string, string>> = []
@@ -340,7 +360,7 @@ void test(
     })
   } finally {
     ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
-    rendered?.unmount()
+    await unmountRendered(rendered, act)
     restoreDomEnvironment()
   }
   },

@@ -158,3 +158,156 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Failure signal: `eslint` exits with `Invalid option '--target'`, or a supposedly scoped activities test run starts executing unrelated activity suites.
 - Follow-up action: Prefer the env-style invocation in agent notes, docs, and future validation commands until the script interface is changed.
 - Owner: Codex
+
+- Date: 2026-03-22
+- Scope: e2e
+- Pattern: For first-pass Playwright coverage in this repo, run the shared root harness against the real built app on `http://127.0.0.1:3100` via the isolated `playwright.config.ts` web server, and start with registry-backed smoke checks for `/` and `/manage` before deeper flows.
+- Why it helps: The join page and manage dashboard are both driven by the shared activity registry, so browser assertions on their rendered cards catch whole-app regressions like missing emitted activity cards that unit tests around individual helpers can miss, while avoiding the dev-server `localhost:3000` launch behavior.
+- Example (file/path): `playwright.config.ts`; `playwright/home-and-manage.spec.ts`; `package.json`
+- Failure signal: An activity silently drops out of the join page or dashboard in the browser even though local unit tests for its helpers and config parsing still pass, or the Playwright harness starts depending on the interactive dev server instead of the isolated browser-test startup path.
+- Follow-up action: Expand from these registry smoke checks into higher-value browser flows next, especially permalink waiting-room transitions and teacher/student handoff paths, while keeping browser runs on the shared root scripts (`npm run test:e2e`, `test:e2e:headed`, `test:e2e:ui`).
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: e2e
+- Pattern: In Playwright config, derive `webServer.env.HOST` and `PORT` from the shared `baseURL` and keep the start command free of inline `HOST=... PORT=...` assignments.
+- Why it helps: The browser harness then has one source of truth for the server bind address and the URL Playwright probes, which prevents silent drift when the test port or host changes later.
+- Example (file/path): `playwright.config.ts`
+- Failure signal: `webServer.url` and the actual server bind target diverge after a port/host edit, leading to startup timeouts or tests probing the wrong address.
+- Follow-up action: Reuse the same pattern for any future Playwright projects or alternate browser configs in this repo.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: e2e | CI
+- Pattern: In GitHub Actions, prefer running browser smoke tests inside a version-matched Playwright container image rather than calling `npx playwright install --with-deps` during the job.
+- Why it helps: The job starts with browsers and OS dependencies already present, which removes a network-heavy install step and keeps CI closer to a fixed, reproducible browser runtime.
+- Example (file/path): `.github/workflows/ci.yml`
+- Failure signal: CI spends time reinstalling Playwright browsers every run or flakes in the browser-install step despite the JS dependencies already being locked.
+- Follow-up action: Keep the container tag aligned with the repo's `@playwright/test` version when upgrading Playwright, and set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` for workflow `npm ci` steps so non-browser jobs do not trigger Playwright postinstall downloads they never use.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: Guard Playwright container drift with a repo script that compares `package.json` `devDependencies["@playwright/test"]` against the Playwright image tag in `.github/workflows/ci.yml`, and run it both in CI and the root `npm test` chain.
+- Why it helps: Version alignment becomes an enforced contract instead of a tribal-memory task, so Playwright upgrades fail fast if only the npm package or only the CI container tag is changed.
+- Example (file/path): `scripts/verify-playwright-version-sync.mjs`; `package.json`; `.github/workflows/ci.yml`
+- Failure signal: A Playwright dependency bump lands without the matching CI image tag update, or the workflow image tag changes independently and browser behavior drifts from the locked test runner version.
+- Follow-up action: If additional workflows start using Playwright containers, either extend the verifier to cover them too or centralize the image tag in one reusable workflow path.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: e2e | CI
+- Pattern: When CI already built `client/dist` earlier in the job, let the Playwright `webServer.command` reuse that output and skip the Vite build, but rebuild unconditionally for local runs unless an explicit opt-in flag such as `PLAYWRIGHT_REUSE_CLIENT_DIST=1` is set.
+- Why it helps: CI keeps the artifact-reuse speedup while local Playwright runs default to fresh assets, which avoids false-green browser tests against stale `client/dist` output after source changes.
+- Example (file/path): `playwright.config.ts`; `package.json`
+- Failure signal: Local `npm run test:e2e` passes against an old production bundle after source edits, or CI loses time by rebuilding the same production client bundle right before browser smoke.
+- Follow-up action: Keep artifact reuse behind explicit opt-in flags for local runs, and if the server build also becomes part of the pre-e2e pipeline later, apply the same “CI reuse, local rebuild by default” rule there.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: When the root `npm test` chain is much slower than browser smoke tests, split GitHub Actions into parallel jobs for checks, workspace test suites, deploy/server verification, and Playwright smoke instead of running `npm test` serially in one job.
+- Why it helps: The workflow wall clock becomes bounded by the slowest suite rather than by the sum of all suites, which is usually a larger gain than shaving a few seconds off an already-fast smoke test.
+- Example (file/path): `.github/workflows/ci.yml`
+- Failure signal: CI runtime is dominated by one long serialized job even though the underlying checks are independent and already cached well enough to run concurrently.
+- Follow-up action: If repeated `npm ci` time starts to dominate after parallelizing, consider a reusable setup action or dependency/build artifact sharing as a second-stage optimization.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: After splitting the main test workflow, prefer one combined check job per workspace (`client`, `server`, `activities`) that runs lint and typecheck together, rather than doubling job count with separate lint and typecheck jobs for each workspace.
+- Why it helps: This keeps the major workspace-level parallelism while reducing workflow overhead and visual noise in GitHub Actions, which is often a better tradeoff unless lint and typecheck durations are independently dominant.
+- Example (file/path): `.github/workflows/ci.yml`; `client/package.json`; `server/package.json`; `activities/package.json`
+- Failure signal: CI has many tiny check jobs with repeated setup cost and cluttered status output, but the wall-clock improvement over one-per-workspace check jobs is marginal.
+- Follow-up action: If the combined `activities` test job remains the next bottleneck afterward, split that suite by activity or by a small matrix of the slowest activity groups.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: Generate activity test buckets automatically from discovered `activities/*` directories, and drive the number of buckets from one workflow env var such as `ACTIVITY_TEST_GROUP_COUNT`.
+- Why it helps: The workflow avoids a fragile checked-in activity list while still letting us tune CI fan-out from one place as activities are added or the browser job remains the dominant cost.
+- Example (file/path): `scripts/activity-test-groups.mjs`; `scripts/verify-activity-test-groups.mjs`; `.github/workflows/ci.yml`
+- Failure signal: Adding a new activity requires touching a separate grouping manifest even though the desired behavior is simply “spread activities across N buckets automatically.”
+- Follow-up action: If simple auto-balancing becomes too inaccurate later, add weighting inputs or timing history to the generator before going back to hand-maintained group lists, and keep recursive filesystem errors annotated with the unreadable directory path so CI failures stay diagnosable.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: Rebalance activity test buckets using observed per-bucket wall time from CI, not just test-file counts; a slightly uneven file-count split can still be the faster real-world matrix.
+- Why it helps: Activities vary a lot in runtime cost, so grouping by actual measured duration keeps the matrix balanced better than counting files alone.
+- Example (file/path): `scripts/activity-test-groups.mjs`; `scripts/run-activity-test-group.mjs`; `.github/workflows/ci.yml`
+- Failure signal: One generated activity bucket consistently dominates CI even though the current grouping heuristic looks balanced by file count or raw test count.
+- Follow-up action: When timings drift, adjust the grouping heuristic or target group count while keeping the generator and verifier aligned.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: When multiple activities run inside one matrix bucket, wrap each activity run in GitHub log groups and print per-activity elapsed time from the bucket runner script.
+- Why it helps: You keep the lower job count of grouped buckets while still being able to see which specific activity is dominating a bucket's runtime without rerunning everything as one-activity-per-job.
+- Example (file/path): `scripts/run-activity-test-group.mjs`
+- Failure signal: A grouped activity bucket is slow in CI, but the logs do not show which activity consumed the time, so rebalancing remains guesswork.
+- Follow-up action: If one activity still dominates after logging, tune the generator inputs or bucket count before expanding the whole matrix unnecessarily.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: When grouped activity runners pass discovered test files to `node --test`, derive the paths with `path.relative(...)` from the `activities/` root and normalize separators instead of stripping prefixes with a hard-coded `/`.
+- Why it helps: The runner stays portable across platforms and avoids subtle path bugs when absolute prefixes do not match exactly or the filesystem uses non-POSIX separators.
+- Example (file/path): `scripts/run-activity-test-group.mjs`
+- Failure signal: Grouped activity tests work on Linux but break on Windows or other environments because the relative test-file arguments contain backslashes or an untrimmed absolute prefix.
+- Follow-up action: Keep path derivation centralized in a small helper whenever this runner grows more subprocess arguments.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: After grouped activity runs finish, print a short end-of-bucket timing summary outside the collapsed log groups so the slowest activity stays visible even when the detailed logs remain collapsed.
+- Why it helps: GitHub log groups reduce noise, but they also hide the timing details by default; a final rollup keeps rebalancing signals visible at a glance.
+- Example (file/path): `scripts/run-activity-test-group.mjs`
+- Failure signal: Contributors have to expand every grouped activity section just to see which one was slow, so the new logging still does not help quick CI tuning.
+- Follow-up action: Keep the summary short and timing-only; if richer reporting is needed later, emit JSON or step summaries rather than bloating the console output.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: When a grouped test runner shells out to per-activity test processes, treat `spawnSync` signal exits or `null` status as hard failures, not implicit success.
+- Why it helps: CI timeouts or runner terminations can otherwise let a killed child process look like a passed activity bucket, which undermines the whole grouped-test guardrail.
+- Example (file/path): `scripts/run-activity-test-group.mjs`
+- Failure signal: A bucket process is terminated by `SIGTERM` or similar, but the wrapper keeps going to the next activity and may exit zero.
+- Follow-up action: Keep signal/null-status handling next to the normal exit-code check whenever this runner grows additional subprocess paths, avoid shell pipelines like `node --test | tee ...` unless the wrapper also enforces `pipefail`, and do not let missing log files mask a failed spawn.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: Use the Playwright container image only for browser-facing jobs, and run lint, typecheck, unit/integration tests, and server/build verification on plain `ubuntu-latest` unless they truly need browser binaries or Playwright system packages.
+- Why it helps: Non-browser jobs avoid heavier container startup and keep the workflow intent clearer, while the Playwright-specific environment remains pinned exactly where browser coverage needs it.
+- Example (file/path): `.github/workflows/ci.yml`; `scripts/verify-playwright-version-sync.mjs`
+- Failure signal: Most CI jobs run inside the Playwright image even though only browser smoke tests exercise Playwright, increasing runtime or making container-specific workflow issues harder to reason about.
+- Follow-up action: If another job later gains a real browser dependency, move just that job onto the Playwright image and keep the version verifier aligned with the remaining image references.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: For Playwright image drift checks, compare the workflow image tag against the lockfile-resolved `@playwright/test` version rather than the semver range in `package.json`.
+- Why it helps: A caret range like `^1.58.2` can still resolve to a newer installed Playwright version after lockfile updates, so the lockfile is the actual source of truth for the browser build CI should match.
+- Example (file/path): `scripts/verify-playwright-version-sync.mjs`; `package-lock.json`; `.github/workflows/ci.yml`
+- Failure signal: The verifier still passes after a lockfile-only Playwright bump within the same semver range, leaving the CI browser image on an older Playwright build than the installed test runner expects.
+- Follow-up action: If the repo ever pins `@playwright/test` exactly in `package.json`, keep the verifier on the lockfile anyway so install reality remains the guardrail.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: When browser smoke runs on plain `ubuntu-latest` with `npx playwright install --with-deps` instead of a Playwright container image, let the Playwright version verifier succeed with a clear “no image configured” message rather than treating the missing image tag as drift.
+- Why it helps: The same verifier still protects image-based setups, but runtime-install experiments do not fail spuriously just because the workflow has no Playwright image reference to compare.
+- Example (file/path): `scripts/verify-playwright-version-sync.mjs`; `.github/workflows/ci.yml`
+- Failure signal: Switching browser smoke away from the Playwright container immediately breaks metadata checks because the verifier insists an image tag must exist even though the workflow intentionally installs browsers at runtime.
+- Follow-up action: If the repo settles permanently on runtime installs, keep the verifier message explicit so future contributors understand why image drift checks are skipped.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
+- Pattern: When many jobs share the same retrying `npm ci` logic, centralize it in a local composite action instead of repeating the shell loop in each workflow job.
+- Why it helps: Install flags, retry counts, and logging stay in one place, so future CI tuning does not depend on keeping a long list of copied YAML snippets in sync.
+- Example (file/path): `.github/actions/install-dependencies/action.yml`; `.github/workflows/ci.yml`
+- Failure signal: One job quietly diverges onto different install behavior because a copied `Install dependencies` block was edited in some jobs but not others.
+- Follow-up action: Keep the shared install action thin; if install setup later needs outputs or cross-job orchestration, promote it to a reusable workflow instead of reintroducing duplication.
+- Owner: Codex
