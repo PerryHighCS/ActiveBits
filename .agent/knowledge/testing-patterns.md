@@ -219,7 +219,7 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Why it helps: This keeps the major workspace-level parallelism while reducing workflow overhead and visual noise in GitHub Actions, which is often a better tradeoff unless lint and typecheck durations are independently dominant.
 - Example (file/path): `.github/workflows/ci.yml`; `client/package.json`; `server/package.json`; `activities/package.json`
 - Failure signal: CI has many tiny check jobs with repeated setup cost and cluttered status output, but the wall-clock improvement over one-per-workspace check jobs is marginal.
-- Follow-up action: If the combined `activities` test job remains the next bottleneck afterward, split that suite by activity or by a small matrix of the slowest activity groups.
+- Follow-up action: If the combined `activities` test job remains the next bottleneck afterward, split that suite by activity or by a small matrix of the slowest activity groups; when signal quality matters more than maximum concurrency, it is also reasonable to re-linearize selected workspace lanes, and when setup reuse matters more than separate status checks, collapsing related workspace lanes back into one job (for example one combined client+server lane) is also a reasonable tradeoff.
 - Owner: Codex
 
 - Date: 2026-03-22

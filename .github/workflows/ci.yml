@@ -5,7 +5,7 @@ on:
   pull_request:
 
 env:
-  ACTIVITY_TEST_GROUP_COUNT: '3'
+  ACTIVITY_TEST_GROUP_COUNT: '2'
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 
 jobs:
@@ -35,7 +35,7 @@ jobs:
           npm run verify:activity-test-groups
           echo "matrix=$(node scripts/verify-activity-test-groups.mjs --matrix)" >> "$GITHUB_OUTPUT"
 
-  client-checks:
+  server-client-checks-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -56,26 +56,24 @@ jobs:
       - name: Typecheck client
         run: npm --workspace client run typecheck
 
-  server-checks:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        uses: ./.github/actions/install-dependencies
+      - name: Run client tests
+        run: npm --workspace client test
 
       - name: Lint server
         run: npm --workspace server run lint
 
       - name: Typecheck server
         run: npm --workspace server run typecheck
+
+      - name: Run server tests
+        run: npm --workspace server test
+
+      - name: Verify deploy build
+        run: npm run verify:deploy
+
+      - name: Verify server smoke
+        run: npm run verify:server
+
 
   activities-checks:
     runs-on: ubuntu-latest
@@ -98,42 +96,6 @@ jobs:
       - name: Typecheck activities
         run: npm --workspace activities run typecheck
 
-  client-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        uses: ./.github/actions/install-dependencies
-
-      - name: Run client tests
-        run: npm --workspace client test
-
-  server-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        uses: ./.github/actions/install-dependencies
-
-      - name: Run server tests
-        run: npm --workspace server test
-
   activities-tests:
     needs: metadata-checks
     runs-on: ubuntu-latest
@@ -155,27 +117,6 @@ jobs:
 
       - name: Run activity group tests
         run: node scripts/run-activity-test-group.mjs ${{ matrix.name }}
-
-  verify-build-and-server:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        uses: ./.github/actions/install-dependencies
-
-      - name: Verify deploy build
-        run: npm run verify:deploy
-
-      - name: Verify server smoke
-        run: npm run verify:server
 
   browser-smoke:
     runs-on: ubuntu-latest
