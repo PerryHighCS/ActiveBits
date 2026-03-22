@@ -4,14 +4,11 @@ on:
   push:
   pull_request:
 
-env:
-  PLAYWRIGHT_CONTAINER_IMAGE: mcr.microsoft.com/playwright:v1.58.2-noble
-
 jobs:
   checks:
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,7 +48,7 @@ jobs:
   client-tests:
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,7 +79,7 @@ jobs:
   server-tests:
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -113,7 +110,7 @@ jobs:
   activities-tests:
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -144,7 +141,7 @@ jobs:
   verify-build-and-server:
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -178,7 +175,7 @@ jobs:
   browser-smoke:
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.PLAYWRIGHT_CONTAINER_IMAGE }}
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
