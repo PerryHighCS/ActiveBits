@@ -242,6 +242,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 - Date: 2026-03-22
 - Scope: CI
+- Pattern: When multiple activities run inside one matrix bucket, wrap each activity run in GitHub log groups and print per-activity elapsed time from the bucket runner script.
+- Why it helps: You keep the lower job count of grouped buckets while still being able to see which specific activity is dominating a bucket's runtime without rerunning everything as one-activity-per-job.
+- Example (file/path): `scripts/run-activity-test-group.mjs`
+- Failure signal: A grouped activity bucket is slow in CI, but the logs do not show which activity consumed the time, so rebalancing remains guesswork.
+- Follow-up action: If one activity still dominates after logging, move only that activity between manifest buckets instead of expanding the whole matrix unnecessarily.
+- Owner: Codex
+
+- Date: 2026-03-22
+- Scope: CI
 - Pattern: Use the Playwright container image only for browser-facing jobs, and run lint, typecheck, unit/integration tests, and server/build verification on plain `ubuntu-latest` unless they truly need browser binaries or Playwright system packages.
 - Why it helps: Non-browser jobs avoid heavier container startup and keep the workflow intent clearer, while the Playwright-specific environment remains pinned exactly where browser coverage needs it.
 - Example (file/path): `.github/workflows/ci.yml`; `scripts/verify-playwright-version-sync.mjs`

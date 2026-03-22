@@ -26,7 +26,15 @@ if (!group) {
   process.exit(1);
 }
 
+function formatElapsedMs(elapsedMs) {
+  return `${(elapsedMs / 1000).toFixed(2)}s`;
+}
+
+const groupStartedAt = Date.now();
+
 for (const activity of group.activities) {
+  const activityStartedAt = Date.now();
+  console.log(`::group::[activity-test-group] ${activity}`);
   console.log(`[activity-test-group] Running ${activity}...`);
   const result = spawnSync(
     'sh',
@@ -43,15 +51,24 @@ for (const activity of group.activities) {
   );
 
   if (typeof result.status === 'number' && result.status !== 0) {
+    console.log('::endgroup::');
     process.exit(result.status);
   }
 
   if (result.error) {
+    console.log('::endgroup::');
     console.error(`[activity-test-group] Failed to run ${activity}: ${result.error.message}`);
     process.exit(1);
   }
+
+  const activityElapsedMs = Date.now() - activityStartedAt;
+  console.log(
+    `[activity-test-group] ${activity} completed in ${formatElapsedMs(activityElapsedMs)}.`,
+  );
+  console.log('::endgroup::');
 }
 
+const groupElapsedMs = Date.now() - groupStartedAt;
 console.log(
-  `[activity-test-group] Completed ${group.activities.length} activities for group "${group.name}".`,
+  `[activity-test-group] Completed ${group.activities.length} activities for group "${group.name}" in ${formatElapsedMs(groupElapsedMs)}.`,
 );
