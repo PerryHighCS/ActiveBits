@@ -287,6 +287,5 @@ jobs:
         with:
           name: playwright-artifacts
           path: |
-            playwright-report/
             test-results/
           if-no-files-found: ignore
