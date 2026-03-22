@@ -214,6 +214,10 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
 /**
  * Test seam for Gimkit CSV parsing that allows deterministic answer shuffling.
  * Production callers should use `parseGimkitCSV`, which injects `Math.random`.
+ *
+ * `random` must behave like `Math.random`, returning a finite number in the
+ * range `[0, 1)`. Values outside that contract throw so invalid injected
+ * PRNGs fail fast instead of corrupting the shuffle.
  */
 export function parseGimkitCSVWithRandom(
   content: string,
