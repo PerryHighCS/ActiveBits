@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { parseGimkitCSV, parseGimkitCSVWithRandom, validateQuestion, validateQuestionSet } from './validation.js'
 
+const preserveOrderRandom = () => 0.999999
+
 void test('validateQuestion accepts underscore ids', () => {
   const errors: string[] = []
   const result = validateQuestion(
@@ -121,7 +123,7 @@ void test('parseGimkitCSV returns normalized validated questions', () => {
     '"  Pick one  ","  Right  "," Wrong 1 "," Wrong 2 ",""',
   ].join('\n')
 
-  const result = parseGimkitCSVWithRandom(csv, () => 0)
+  const result = parseGimkitCSVWithRandom(csv, preserveOrderRandom)
 
   assert.deepEqual(result.errors, [])
   assert.deepEqual(result.questions, [
@@ -131,9 +133,9 @@ void test('parseGimkitCSV returns normalized validated questions', () => {
       text: 'Pick one',
       order: 0,
       options: [
+        { id: 'q1_c', text: 'Right', isCorrect: true },
         { id: 'q1_i1', text: 'Wrong 1' },
         { id: 'q1_i2', text: 'Wrong 2' },
-        { id: 'q1_c', text: 'Right', isCorrect: true },
       ],
     },
   ])
@@ -150,7 +152,7 @@ void test('parseGimkitCSV still normalizes valid rows when other rows have error
     '"Missing correct","","Wrong","",""',
   ].join('\n')
 
-  const result = parseGimkitCSVWithRandom(csv, () => 0)
+  const result = parseGimkitCSVWithRandom(csv, preserveOrderRandom)
 
   assert.deepEqual(result.errors, [
     'Row 4: Gimkit CSV requires a correct answer for multiple-choice questions',
@@ -162,8 +164,8 @@ void test('parseGimkitCSV still normalizes valid rows when other rows have error
       text: 'A'.repeat(1000),
       order: 0,
       options: [
-        { id: 'q1_i1', text: 'C'.repeat(500) },
         { id: 'q1_c', text: 'B'.repeat(500), isCorrect: true },
+        { id: 'q1_i1', text: 'C'.repeat(500) },
       ],
     },
   ])

@@ -210,6 +210,10 @@ export function parseGimkitCSV(content: string): { questions: Question[]; errors
   return parseGimkitCSVWithRandom(content, Math.random)
 }
 
+/**
+ * Test seam for Gimkit CSV parsing that allows deterministic answer shuffling.
+ * Production callers should use `parseGimkitCSV`, which injects `Math.random`.
+ */
 export function parseGimkitCSVWithRandom(
   content: string,
   random: RandomSource,
