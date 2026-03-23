@@ -174,6 +174,7 @@ interface SyncDeckSoloActivityRequest {
 }
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
+const MAX_PENDING_IFRAME_PAYLOADS = 25
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
   if (a.h !== b.h) return a.h - b.h
@@ -822,6 +823,33 @@ export function toRevealCommandMessage(rawPayload: unknown): Record<string, unkn
     return null
   }
 
+  const legacyMessage = rawPayload as { type?: unknown; payload?: unknown }
+  if (legacyMessage.type === 'slidechanged') {
+    const indices = extractIndicesFromRevealStateMessage(rawPayload)
+    if (!indices) {
+      return null
+    }
+
+    return {
+      type: 'reveal-sync',
+      version: REVEAL_SYNC_PROTOCOL_VERSION,
+      action: 'command',
+      source: 'activebits-syncdeck-host',
+      role: 'instructor',
+      ts: Date.now(),
+      payload: {
+        name: 'setState',
+        payload: {
+          state: {
+            indexh: indices.h,
+            indexv: indices.v,
+            indexf: indices.f,
+          },
+        },
+      },
+    }
+  }
+
   const message = rawPayload as RevealSyncEnvelope
   if (message.type !== 'reveal-sync') {
     return null
@@ -903,6 +931,69 @@ export function buildStandaloneBootstrapCommandMessages(): Record<string, unknow
     buildStudentRoleCommandMessage('standalone'),
     buildRevealCommandMessage('clearBoundary', {}),
   ]
+}
+
+export function shouldQueuePayloadUntilIframeReady(rawPayload: unknown): boolean {
+  if (!isRevealSyncMessage(rawPayload) || rawPayload.action !== 'command' || !isPlainObject(rawPayload.payload)) {
+    return false
+  }
+
+  return rawPayload.payload.name !== 'setRole'
+}
+
+function resolvePendingIframePayloadCoalesceKey(rawPayload: unknown): string | null {
+  if (!isRevealSyncMessage(rawPayload) || rawPayload.action !== 'command' || !isPlainObject(rawPayload.payload)) {
+    return null
+  }
+
+  const name = rawPayload.payload.name
+  if (name === 'setState') {
+    return 'setState'
+  }
+
+  if (name === 'setStudentBoundary' || name === 'clearBoundary') {
+    return 'boundary'
+  }
+
+  return null
+}
+
+export function enqueuePendingIframePayload(
+  queue: unknown[],
+  payload: unknown,
+  maxQueueLength = MAX_PENDING_IFRAME_PAYLOADS,
+): {
+  queue: unknown[]
+  coalesced: boolean
+  droppedCount: number
+} {
+  const coalesceKey = resolvePendingIframePayloadCoalesceKey(payload)
+  let coalesced = false
+  let nextQueue = queue
+
+  if (coalesceKey != null) {
+    const existingIndex = nextQueue.findIndex((entry) => resolvePendingIframePayloadCoalesceKey(entry) === coalesceKey)
+    if (existingIndex >= 0) {
+      nextQueue = nextQueue.filter((_, index) => index !== existingIndex)
+      coalesced = true
+    }
+  }
+
+  nextQueue = [...nextQueue, payload]
+
+  const safeMaxQueueLength = Number.isFinite(maxQueueLength) && maxQueueLength > 0
+    ? Math.floor(maxQueueLength)
+    : MAX_PENDING_IFRAME_PAYLOADS
+  const droppedCount = Math.max(0, nextQueue.length - safeMaxQueueLength)
+  if (droppedCount > 0) {
+    nextQueue = nextQueue.slice(-safeMaxQueueLength)
+  }
+
+  return {
+    queue: nextQueue,
+    coalesced,
+    droppedCount,
+  }
 }
 
 function extractStoryboardDisplayed(data: unknown): boolean | null {
@@ -1087,6 +1178,25 @@ function extractRevealCommandName(rawPayload: unknown): string | null {
 
   const name = (message.payload as { name?: unknown }).name
   return typeof name === 'string' ? name : null
+}
+
+export function resolveSemanticInstructorCommandName(rawPayload: unknown): string | null {
+  const inboundCommandName = extractRevealCommandName(rawPayload)
+  if (inboundCommandName != null) {
+    return inboundCommandName
+  }
+
+  if (!isPlainObject(rawPayload)) {
+    return null
+  }
+
+  const legacyMessage = rawPayload as { type?: unknown }
+  if (legacyMessage.type === 'slidechanged') {
+    return 'setState'
+  }
+
+  const message = rawPayload as RevealSyncEnvelope
+  return isRevealSyncMessage(message) && message.action === 'state' ? 'setState' : null
 }
 
 export function shouldSuppressForwardInstructorSync(
@@ -1869,20 +1979,42 @@ const SyncDeckStudent: FC = () => {
     }
   }, [])
 
+  const queuePendingIframePayload = useCallback((payload: unknown, reason: string) => {
+    const result = enqueuePendingIframePayload(pendingPayloadQueueRef.current, payload)
+    pendingPayloadQueueRef.current = result.queue
+
+    if (result.coalesced) {
+      traceSync('coalesce_pending_iframe_payload', {
+        reason,
+        queueDepth: result.queue.length,
+      })
+    }
+
+    if (result.droppedCount > 0) {
+      traceSync('drop_pending_iframe_payloads_due_to_cap', {
+        reason,
+        droppedCount: result.droppedCount,
+        queueDepth: result.queue.length,
+      })
+    }
+
+    return result.queue.length
+  }, [traceSync])
+
   const sendPayloadToIframe = useCallback((payload: unknown) => {
     if (!presentationOrigin) {
-      pendingPayloadQueueRef.current.push(payload)
+      const queueDepth = queuePendingIframePayload(payload, 'missing-presentation-origin')
       traceSync('queue_payload_missing_presentation_origin', {
-        queueDepth: pendingPayloadQueueRef.current.length,
+        queueDepth,
       })
       return
     }
 
     const target = iframeRef.current?.contentWindow
     if (!target) {
-      pendingPayloadQueueRef.current.push(payload)
+      const queueDepth = queuePendingIframePayload(payload, 'missing-iframe-window')
       traceSync('queue_payload_missing_iframe_window', {
-        queueDepth: pendingPayloadQueueRef.current.length,
+        queueDepth,
       })
       return
     }
@@ -1893,9 +2025,17 @@ const SyncDeckStudent: FC = () => {
       iframeRuntimeOrigin: getIframeRuntimeOrigin(),
     })
     if (!targetOrigin) {
-      pendingPayloadQueueRef.current.push(payload)
+      const queueDepth = queuePendingIframePayload(payload, 'missing-target-origin')
       traceSync('queue_payload_missing_target_origin', {
-        queueDepth: pendingPayloadQueueRef.current.length,
+        queueDepth,
+      })
+      return
+    }
+
+    if (!hasSeenIframeReadySignalRef.current && shouldQueuePayloadUntilIframeReady(payload)) {
+      const queueDepth = queuePendingIframePayload(payload, 'waiting-for-iframe-ready')
+      traceSync('queue_payload_waiting_for_iframe_ready', {
+        queueDepth,
       })
       return
     }
@@ -1906,12 +2046,12 @@ const SyncDeckStudent: FC = () => {
         targetOrigin,
       })
     } catch {
-      pendingPayloadQueueRef.current.push(payload)
+      const queueDepth = queuePendingIframePayload(payload, 'post-message-error')
       traceSync('queue_payload_post_message_error', {
-        queueDepth: pendingPayloadQueueRef.current.length,
+        queueDepth,
       })
     }
-  }, [getIframeRuntimeOrigin, presentationOrigin, traceSync])
+  }, [getIframeRuntimeOrigin, presentationOrigin, queuePendingIframePayload, traceSync])
 
   const setBacktrackOptOut = useCallback((value: boolean) => {
     studentBacktrackOptOutRef.current = value
@@ -2059,9 +2199,7 @@ const SyncDeckStudent: FC = () => {
           lastInstructorIndicesRef.current = instructorIndices
 
           const inboundCommandName = extractRevealCommandName(parsed.payload)
-          const semanticInstructorCommandName =
-            inboundCommandName
-            ?? (isRevealSyncMessage(parsed.payload) && parsed.payload.action === 'state' ? 'setState' : null)
+          const semanticInstructorCommandName = resolveSemanticInstructorCommandName(parsed.payload)
           const shouldFollowInstructorSetState = shouldForceFollowInstructorSetState({
             semanticInstructorCommandName,
             studentHasBacktrackOptOut: studentBacktrackOptOutRef.current,
@@ -2129,9 +2267,7 @@ const SyncDeckStudent: FC = () => {
           }
         } else {
           const inboundCommandName = extractRevealCommandName(parsed.payload)
-          const semanticInstructorCommandName =
-            inboundCommandName
-            ?? (isRevealSyncMessage(parsed.payload) && parsed.payload.action === 'state' ? 'setState' : null)
+          const semanticInstructorCommandName = resolveSemanticInstructorCommandName(parsed.payload)
           const incomingInstructorIndices = extractIndicesFromRevealStateMessage(parsed.payload)
           const {
             suppressForwardSync,
@@ -2196,10 +2332,7 @@ const SyncDeckStudent: FC = () => {
 
     const revealCommand = toRevealCommandMessage(payload)
     if (revealCommand != null) {
-      const inboundCommandName = extractRevealCommandName(payload)
-      const semanticInstructorCommandName =
-        inboundCommandName
-        ?? (isRevealSyncMessage(payload) && payload.action === 'state' ? 'setState' : null)
+      const semanticInstructorCommandName = resolveSemanticInstructorCommandName(payload)
       const incomingInstructorIndices = extractIndicesFromRevealStateMessage(payload)
       const { suppressForwardSync } = shouldSuppressInstructorRevealCommandForwarding({
         semanticInstructorCommandName,
