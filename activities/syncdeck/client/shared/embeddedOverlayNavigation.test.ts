@@ -4,6 +4,7 @@ import { consumeEmbeddedOverlayNavigationEvent } from './embeddedOverlayNavigati
 import { resolveOptimisticEmbeddedOverlayIndices } from './embeddedOverlayNavigation.js'
 import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from './embeddedOverlayNavigation.js'
 import { resolveEmbeddedOverlayVerticalMoveAllowed } from './embeddedOverlayNavigation.js'
+import { reduceEmbeddedOverlayNavigationPointerDownState } from './embeddedOverlayNavigation.js'
 
 void test('consumeEmbeddedOverlayNavigationEvent stops default click handling and propagation', () => {
   const calls: string[] = []
@@ -18,6 +19,40 @@ void test('consumeEmbeddedOverlayNavigationEvent stops default click handling an
   })
 
   assert.deepEqual(calls, ['preventDefault', 'stopPropagation'])
+})
+
+void test('reduceEmbeddedOverlayNavigationPointerDownState clears handled pointer state after click and interrupted gestures', () => {
+  assert.deepEqual(
+    reduceEmbeddedOverlayNavigationPointerDownState(false, 'pointerdown'),
+    {
+      didHandlePointerDown: true,
+      shouldSkipClickNavigation: false,
+    },
+  )
+
+  assert.deepEqual(
+    reduceEmbeddedOverlayNavigationPointerDownState(true, 'click'),
+    {
+      didHandlePointerDown: false,
+      shouldSkipClickNavigation: true,
+    },
+  )
+
+  assert.deepEqual(
+    reduceEmbeddedOverlayNavigationPointerDownState(true, 'pointercancel'),
+    {
+      didHandlePointerDown: false,
+      shouldSkipClickNavigation: false,
+    },
+  )
+
+  assert.deepEqual(
+    reduceEmbeddedOverlayNavigationPointerDownState(true, 'timeout'),
+    {
+      didHandlePointerDown: false,
+      shouldSkipClickNavigation: false,
+    },
+  )
 })
 
 void test('resolveOptimisticEmbeddedOverlayIndices uses directional horizontal navigation across slide columns', () => {

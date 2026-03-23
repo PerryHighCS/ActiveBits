@@ -9,8 +9,10 @@ import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import {
   EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS,
+  EMBEDDED_OVERLAY_NAVIGATION_POINTER_DOWN_RESET_TIMEOUT_MS,
   consumeEmbeddedOverlayNavigationEvent,
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
+  reduceEmbeddedOverlayNavigationPointerDownState,
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
 } from '../shared/embeddedOverlayNavigation.js'
@@ -1611,6 +1613,7 @@ const SyncDeckManager: FC = () => {
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const overlayNavClickShieldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const overlayNavPointerDownResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const didHandleOverlayNavPointerDownRef = useRef(false)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
@@ -1642,6 +1645,32 @@ const SyncDeckManager: FC = () => {
       overlayNavClickShieldTimeoutRef.current = null
     }
   }, [])
+
+  const clearOverlayNavPointerDownResetTimeout = useCallback((): void => {
+    if (overlayNavPointerDownResetTimeoutRef.current != null) {
+      clearTimeout(overlayNavPointerDownResetTimeoutRef.current)
+      overlayNavPointerDownResetTimeoutRef.current = null
+    }
+  }, [])
+
+  const resetOverlayNavPointerDownHandling = useCallback((): void => {
+    didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
+      didHandleOverlayNavPointerDownRef.current,
+      'pointercancel',
+    ).didHandlePointerDown
+    clearOverlayNavPointerDownResetTimeout()
+  }, [clearOverlayNavPointerDownResetTimeout])
+
+  const scheduleOverlayNavPointerDownReset = useCallback((): void => {
+    clearOverlayNavPointerDownResetTimeout()
+    overlayNavPointerDownResetTimeoutRef.current = setTimeout(() => {
+      overlayNavPointerDownResetTimeoutRef.current = null
+      didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
+        didHandleOverlayNavPointerDownRef.current,
+        'timeout',
+      ).didHandlePointerDown
+    }, EMBEDDED_OVERLAY_NAVIGATION_POINTER_DOWN_RESET_TIMEOUT_MS)
+  }, [clearOverlayNavPointerDownResetTimeout])
 
   const activateOverlayNavClickShield = useCallback((): void => {
     if (overlayNavClickShieldRef.current) {
@@ -2957,8 +2986,13 @@ const SyncDeckManager: FC = () => {
     () => () => {
       clearRestoreSuppressionTimeout()
       clearOverlayNavClickShieldTimeout()
+      clearOverlayNavPointerDownResetTimeout()
     },
-    [clearOverlayNavClickShieldTimeout, clearRestoreSuppressionTimeout],
+    [
+      clearOverlayNavClickShieldTimeout,
+      clearOverlayNavPointerDownResetTimeout,
+      clearRestoreSuppressionTimeout,
+    ],
   )
 
   if (!sessionId) {
@@ -3051,8 +3085,13 @@ const SyncDeckManager: FC = () => {
     direction: 'left' | 'right' | 'up' | 'down',
   ): void => {
     consumeEmbeddedOverlayNavigationEvent(event)
-    if (didHandleOverlayNavPointerDownRef.current) {
-      didHandleOverlayNavPointerDownRef.current = false
+    const pointerDownState = reduceEmbeddedOverlayNavigationPointerDownState(
+      didHandleOverlayNavPointerDownRef.current,
+      'click',
+    )
+    didHandleOverlayNavPointerDownRef.current = pointerDownState.didHandlePointerDown
+    clearOverlayNavPointerDownResetTimeout()
+    if (pointerDownState.shouldSkipClickNavigation) {
       return
     }
     sendEmbeddedOverlayNavigation(direction)
@@ -3066,7 +3105,11 @@ const SyncDeckManager: FC = () => {
       return
     }
     consumeEmbeddedOverlayNavigationEvent(event)
-    didHandleOverlayNavPointerDownRef.current = true
+    didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
+      didHandleOverlayNavPointerDownRef.current,
+      'pointerdown',
+    ).didHandlePointerDown
+    scheduleOverlayNavPointerDownReset()
     activateOverlayNavClickShield()
     sendEmbeddedOverlayNavigation(direction)
   }
@@ -3565,6 +3608,7 @@ const SyncDeckManager: FC = () => {
                       type="button"
                       className="absolute left-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                       onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'left')}
+                      onPointerCancel={resetOverlayNavPointerDownHandling}
                       onClick={(event) => handleManagerOverlayNavigationClick(event, 'left')}
                       aria-label="Move left"
                       title="Move left"
@@ -3576,6 +3620,7 @@ const SyncDeckManager: FC = () => {
                       type="button"
                       className="absolute top-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                       onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'up')}
+                      onPointerCancel={resetOverlayNavPointerDownHandling}
                       onClick={(event) => handleManagerOverlayNavigationClick(event, 'up')}
                       aria-label="Move up"
                       title="Move up"
@@ -3587,6 +3632,7 @@ const SyncDeckManager: FC = () => {
                       type="button"
                       className="absolute right-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                       onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'right')}
+                      onPointerCancel={resetOverlayNavPointerDownHandling}
                       onClick={(event) => handleManagerOverlayNavigationClick(event, 'right')}
                       aria-label="Move right"
                       title="Move right"
@@ -3598,6 +3644,7 @@ const SyncDeckManager: FC = () => {
                       type="button"
                       className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                       onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'down')}
+                      onPointerCancel={resetOverlayNavPointerDownHandling}
                       onClick={(event) => handleManagerOverlayNavigationClick(event, 'down')}
                       aria-label="Move down"
                       title="Move down"

@@ -1,5 +1,6 @@
 export type EmbeddedOverlayDirection = 'left' | 'right' | 'up' | 'down'
 export const EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS = 250
+export const EMBEDDED_OVERLAY_NAVIGATION_POINTER_DOWN_RESET_TIMEOUT_MS = 500
 const PRE_FRAGMENT_INDEX = -1
 
 export interface EmbeddedOverlayIndices {
@@ -19,6 +20,39 @@ export function consumeEmbeddedOverlayNavigationEvent(event: {
 }): void {
   event.preventDefault()
   event.stopPropagation()
+}
+
+export type EmbeddedOverlayNavigationPointerTransition =
+  | 'pointerdown'
+  | 'click'
+  | 'pointercancel'
+  | 'timeout'
+
+export function reduceEmbeddedOverlayNavigationPointerDownState(
+  didHandlePointerDown: boolean,
+  transition: EmbeddedOverlayNavigationPointerTransition,
+): {
+  didHandlePointerDown: boolean
+  shouldSkipClickNavigation: boolean
+} {
+  if (transition === 'pointerdown') {
+    return {
+      didHandlePointerDown: true,
+      shouldSkipClickNavigation: false,
+    }
+  }
+
+  if (transition === 'click') {
+    return {
+      didHandlePointerDown: false,
+      shouldSkipClickNavigation: didHandlePointerDown,
+    }
+  }
+
+  return {
+    didHandlePointerDown: false,
+    shouldSkipClickNavigation: false,
+  }
 }
 
 export function resolveEmbeddedOverlayVerticalMoveAllowed(params: {
