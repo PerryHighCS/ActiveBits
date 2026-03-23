@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as React from 'react'
 import { JSDOM } from 'jsdom'
+import { buildSyncDeckPasscodeKey } from '../shared/authStorage.js'
 
 ;(globalThis as { React?: typeof React }).React = React
 
@@ -86,7 +87,7 @@ void test('launchHostedSyncDeckPresentation validates, creates, configures, stor
       standaloneMode: false,
     },
   )
-  assert.equal(sessionStorageWrites.get('syncdeck_instructor_syncdeck-utility-1'), 'launch-passcode')
+  assert.equal(sessionStorageWrites.get(buildSyncDeckPasscodeKey('syncdeck-utility-1')), 'launch-passcode')
   assert.deepEqual(redirects, ['/manage/syncdeck/syncdeck-utility-1'])
 })
 
@@ -110,7 +111,7 @@ void test('launchHostedSyncDeckPresentation rejects presentations that fail Sync
   )
 })
 
-void test('SyncDeckLaunchPresentation shows a missing-url error before launch starts', async () => {
+void test('SyncDeckLaunchPresentation shows a launch form when presentationUrl is missing', async () => {
   const restoreDomEnvironment = installDomEnvironment('https://bits.mycode.run/util/syncdeck/launch-presentation')
   const { render, waitFor } = await import('@testing-library/react')
   const { MemoryRouter } = await import('react-router-dom')
@@ -128,7 +129,8 @@ void test('SyncDeckLaunchPresentation shows a missing-url error before launch st
     )
 
     await waitFor(() => {
-      assert.notEqual(rendered.queryByText(/missing required presentationurl query parameter/i), null)
+      assert.notEqual(rendered.queryByLabelText(/presentation url/i), null)
+      assert.notEqual(rendered.queryByRole('button', { name: /launch in syncdeck/i }), null)
     })
   } finally {
     restoreDomEnvironment()
