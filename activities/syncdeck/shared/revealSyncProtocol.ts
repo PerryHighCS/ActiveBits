@@ -1,4 +1,4 @@
-export const REVEAL_SYNC_PROTOCOL_VERSION = '2.0.0'
+export const REVEAL_SYNC_PROTOCOL_VERSION = '2.1.0'
 
 export interface RevealSyncProtocolCompatibility {
   compatible: boolean

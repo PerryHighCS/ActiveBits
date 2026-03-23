@@ -7,7 +7,7 @@ This document defines the `postMessage` protocol used by `reveal-iframe-sync.js`
 ```json
 {
   "type": "reveal-sync",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "action": "ready",
   "deckId": "2d-arrays",
   "role": "student",
@@ -20,9 +20,12 @@ This document defines the `postMessage` protocol used by `reveal-iframe-sync.js`
 Fields:
 - `type` (string): protocol channel. Default is `reveal-sync`.
 - `version` (string): protocol/plugin version (semantic version).
-- `action` (string): high-level message type (`command`, `state`, `ready`, etc.).
+- `action` (string): high-level message type (`command`, `state`, `ready`, `metadata`, etc.).
 - `deckId` (string | null): optional logical deck identifier.
-- `role` (string): sender role (`student` or `instructor`).
+- `role` (string): sender role (`standalone`, `student`, or `instructor`).
+  The runtime initializes in `standalone` mode until the host sends `setRole`, so
+  early upward messages such as `ready` and `metadata` may legitimately carry
+  `role: "standalone"`.
 - `source` (string): fixed sender marker (`reveal-iframe-sync`).
 - `ts` (number): unix timestamp in milliseconds.
 - `payload` (object): action-specific data.
@@ -396,6 +399,28 @@ Sent on init (if `autoAnnounceReady`) and when role changes.
 }
 ```
 
+### `metadata`
+
+Sent when the iframe wants to publish presentation-level descriptive fields that the host can
+use without reading iframe DOM directly.
+
+```json
+{
+  "action": "metadata",
+  "payload": {
+    "title": "Bridge Critique Day"
+  }
+}
+```
+
+Payload fields:
+- `title` (string, optional): human-readable presentation title. Hosts should trim whitespace and ignore empty values.
+
+Library implementation expectations:
+- Emit `metadata` opportunistically when a stable presentation title is known, such as during init or after deck load.
+- `metadata` should not be treated as a readiness/handshake replacement; continue emitting `ready`/`state` for sync bootstrap.
+- Additional metadata fields may be added later, but hosts must ignore unknown keys.
+
 `overview` reflects whether the **custom storyboard strip** is currently open — not Reveal's native grid overview (which is always suppressed). `true` = strip is visible.
 
 `navigation` provides host-ready arrow state derived from both Reveal's local route availability and SyncDeck boundary enforcement:
@@ -617,7 +642,7 @@ function isCompatibleProtocol(hostVersion, messageVersion) {
 }
 
 // Usage in message handler
-const HOST_SYNC_PROTOCOL = '2.0.0';
+const HOST_SYNC_PROTOCOL = '2.1.0';
 if (!isCompatibleProtocol(HOST_SYNC_PROTOCOL, data.version)) {
   // Ignore message or request iframe reload/update
   return;
