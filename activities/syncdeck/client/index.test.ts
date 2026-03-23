@@ -90,3 +90,7 @@ void test('launchSyncDeckPersistentSoloEntry rejects permalink launches without 
 void test('syncdeck client module exports persistent solo launcher', () => {
   assert.equal(typeof syncdeckClientModule.launchPersistentSoloEntry, 'function')
 })
+
+void test('syncdeck client module exports utility launcher component', () => {
+  assert.equal(typeof syncdeckClientModule.UtilComponent, 'function')
+})

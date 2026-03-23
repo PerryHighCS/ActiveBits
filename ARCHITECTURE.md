@@ -121,6 +121,14 @@ export default {
       surfaces: ['home'],
       standaloneSessionId: 'solo-gallery-walk',
     },
+    {
+      id: 'syncdeck-launch-presentation',
+      label: 'Launch Presentation',
+      action: 'go-to-url',
+      path: '/util/syncdeck/launch-presentation',
+      renderTarget: 'util',      // optional: render the activity UtilComponent for this utility path
+      // omit "surfaces" to keep the route hidden from /manage and /
+    },
   ],
   // Optional: shared permanent-link modal options and server-side link generation
   deepLinkOptions: {
@@ -282,6 +290,8 @@ export const myActivity = {
 6. **Deep Linking Support**: Direct standalone routes can still support query parameters for pre-configuration, e.g., `/solo/algorithm-demo?algorithm=merge-sort`
 
 Activities can also support standalone via permalink without supporting `/solo/:activityId`. SyncDeck is the motivating example for that split.
+
+SyncDeck also supports an ActiveBits-owned utility launch flow for statically hosted decks. In that flow, the external presentation redirects the browser to `/util/syncdeck/launch-presentation?presentationUrl=...`, ActiveBits runs the normal SyncDeck Reveal preflight on its own origin, then creates/configures the hosted session and redirects into `/manage/syncdeck/:sessionId`. This avoids cross-origin browser fetch/CORS requirements while keeping session bootstrap and instructor credentials entirely on the ActiveBits origin.
 
 ### Solo Mode vs. Teacher Mode
 

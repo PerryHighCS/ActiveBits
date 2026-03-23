@@ -436,6 +436,13 @@ void test('findUtilityRouteMatch resolves configured utility paths', () => {
           surfaces: ['manage'],
           standaloneSessionId: 'solo-gallery-walk',
         },
+        {
+          id: 'gallery-walk-hidden-launch',
+          label: 'Launch Hidden Utility',
+          action: 'go-to-url',
+          path: '/util/gallery-walk/launch-hidden',
+          renderTarget: 'util',
+        },
       ],
     },
     {
@@ -456,5 +463,28 @@ void test('findUtilityRouteMatch resolves configured utility paths', () => {
   assert.equal(match?.utility.id, 'gallery-walk-review-copy')
   assert.equal(match?.utility.label, 'Copy Gallery Walk Review Link')
   assert.equal(match?.utility.standaloneSessionId, 'solo-gallery-walk')
+  assert.equal(findUtilityRouteMatch([
+    {
+      id: 'gallery-walk',
+      name: 'Gallery Walk',
+      description: 'G',
+      color: 'blue',
+      standaloneEntry: {
+        enabled: false,
+        supportsDirectPath: false,
+        supportsPermalink: false,
+        showOnHome: false,
+      },
+      utilities: [
+        {
+          id: 'gallery-walk-hidden-launch',
+          label: 'Launch Hidden Utility',
+          action: 'go-to-url',
+          path: '/util/gallery-walk/launch-hidden',
+          renderTarget: 'util',
+        },
+      ],
+    },
+  ], '/util/gallery-walk/launch-hidden')?.utility.renderTarget, 'util')
   assert.equal(findUtilityRouteMatch([], '/util/gallery-walk/viewer'), null)
 })

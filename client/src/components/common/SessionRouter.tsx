@@ -462,6 +462,21 @@ const SessionRouter = () => {
   }
 
   if (utilityRouteMatch) {
+    if (utilityRouteMatch.utility.renderTarget === 'util') {
+      const UtilComponent = utilityRouteMatch.activity.UtilComponent
+      if (!UtilComponent) {
+        return <div className="text-center">Utility view is unavailable for this activity.</div>
+      }
+
+      const TypedUtilComponent = UtilComponent as ActivityStudentComponent
+
+      return (
+        <Suspense fallback={<LoadingFallback />}>
+          <TypedUtilComponent />
+        </Suspense>
+      )
+    }
+
     const StudentComponent = utilityRouteMatch.activity.StudentComponent
 
     if (!StudentComponent) {

@@ -306,6 +306,11 @@ function parseUtilities(raw: unknown, context: string): ActivityUtility[] | unde
       }
     }
 
+    const renderTarget = entry.renderTarget
+    if (renderTarget !== undefined && renderTarget !== 'student' && renderTarget !== 'util') {
+      throw new Error(`${context}.utilities[${index}]: "renderTarget" must be "student" or "util" when provided`)
+    }
+
     return {
       id: readRequiredString(entry, 'id', `${context}.utilities[${index}]`),
       label: readRequiredString(entry, 'label', `${context}.utilities[${index}]`),
@@ -318,6 +323,7 @@ function parseUtilities(raw: unknown, context: string): ActivityUtility[] | unde
         ? { standaloneSessionId: readOptionalString(entry, 'standaloneSessionId', `${context}.utilities[${index}]`) }
         : {}),
       ...(surfaces !== undefined ? { surfaces: surfaces as Array<'manage' | 'home'> } : {}),
+      ...(renderTarget !== undefined ? { renderTarget } : {}),
     }
   })
 }

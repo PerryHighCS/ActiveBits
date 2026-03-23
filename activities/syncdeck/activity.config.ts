@@ -38,6 +38,16 @@ const syncdeckConfig: ActivityConfig = {
       optionKey: 'presentationUrl',
     },
   },
+  utilities: [
+    {
+      id: 'launch-presentation',
+      label: 'Launch Presentation',
+      action: 'go-to-url',
+      path: '/util/syncdeck/launch-presentation',
+      description: 'Validate a public presentation URL and start a hosted SyncDeck manager session.',
+      renderTarget: 'util',
+    },
+  ],
   createSessionBootstrap: {
     sessionStorage: [
       {
@@ -52,6 +62,7 @@ const syncdeckConfig: ActivityConfig = {
   manageLayout: {
     expandShell: true,
   },
+  utilMode: true,
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',
 }

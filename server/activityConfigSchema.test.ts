@@ -34,6 +34,13 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
           path: '/util/gallery-walk/viewer',
           surfaces: ['home'],
         },
+        {
+          id: 'syncdeck-launch',
+          label: 'Launch SyncDeck Presentation',
+          action: 'go-to-url',
+          path: '/util/syncdeck/launch-presentation',
+          renderTarget: 'util',
+        },
       ],
       deepLinkOptions: {
         presentationUrl: {
@@ -126,6 +133,13 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
       action: 'go-to-url',
       path: '/util/gallery-walk/viewer',
       surfaces: ['home'],
+    },
+    {
+      id: 'syncdeck-launch',
+      label: 'Launch SyncDeck Presentation',
+      action: 'go-to-url',
+      path: '/util/syncdeck/launch-presentation',
+      renderTarget: 'util',
     },
   ])
   assert.equal(parsed.waitingRoom?.fields[0]?.type, 'text')
@@ -291,6 +305,35 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
         'bad-config-5',
       ),
     /utilities\[0\].*surfaces/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad8',
+          name: 'Bad8',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: false,
+            supportsDirectPath: false,
+            supportsPermalink: false,
+            showOnHome: false,
+          },
+          utilities: [
+            {
+              id: 'utility',
+              label: 'Broken Utility',
+              action: 'go-to-url',
+              path: '/util/broken',
+              renderTarget: 'manager',
+            },
+          ],
+        },
+        'bad-config-8',
+      ),
+    /utilities\[0\].*renderTarget/,
   )
 
   assert.throws(

@@ -10,6 +10,8 @@ import SyncDeckPersistentLinkBuilder from './components/SyncDeckPersistentLinkBu
 import SyncDeckManager from './manager/SyncDeckManager.js'
 import SyncDeckStudent from './student/SyncDeckStudent.js'
 import { runSyncDeckPresentationPreflight } from './shared/presentationPreflight.js'
+import { createConfiguredSyncDeckSession } from './shared/sessionLaunch.js'
+import SyncDeckLaunchPresentation from './util/SyncDeckLaunchPresentation.js'
 
 async function runSyncDeckDeepLinkPreflight(
   preflight: ActivityDeepLinkPreflightConfig,
@@ -22,51 +24,21 @@ async function runSyncDeckDeepLinkPreflight(
   return await runSyncDeckPresentationPreflight(rawValue, { timeoutMs: preflight.timeoutMs })
 }
 
-interface SyncDeckCreateSessionResponse {
-  id?: unknown
-  instructorPasscode?: unknown
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
-}
-
 export async function launchSyncDeckPersistentSoloEntry(
   params: ActivityPersistentSoloLaunchParams,
 ): Promise<ActivityPersistentSoloLaunchResult> {
-  const presentationUrl = readString(params.selectedOptions.presentationUrl)
+  const presentationUrl =
+    typeof params.selectedOptions.presentationUrl === 'string' && params.selectedOptions.presentationUrl.trim().length > 0
+      ? params.selectedOptions.presentationUrl.trim()
+      : null
   if (!presentationUrl) {
     throw new Error('Solo mode is unavailable because this link is missing a presentation URL.')
   }
 
-  const createResponse = await fetch('/api/syncdeck/create', {
-    method: 'POST',
+  const { sessionId } = await createConfiguredSyncDeckSession({
+    presentationUrl,
+    standaloneMode: true,
   })
-  if (!createResponse.ok) {
-    throw new Error('Unable to start solo mode right now.')
-  }
-
-  const createPayload = (await createResponse.json()) as SyncDeckCreateSessionResponse
-  const sessionId = readString(createPayload.id)
-  const instructorPasscode = readString(createPayload.instructorPasscode)
-  if (!sessionId || !instructorPasscode) {
-    throw new Error('Unable to start solo mode right now.')
-  }
-
-  const configureResponse = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/configure`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      presentationUrl,
-      instructorPasscode,
-      standaloneMode: true,
-    }),
-  })
-  if (!configureResponse.ok) {
-    throw new Error('Unable to load this presentation in solo mode right now.')
-  }
 
   return {
     sessionId,
@@ -76,6 +48,7 @@ export async function launchSyncDeckPersistentSoloEntry(
 const syncdeckActivity: ActivityClientModule = {
   ManagerComponent: SyncDeckManager as ComponentType<unknown>,
   StudentComponent: SyncDeckStudent as ComponentType<unknown>,
+  UtilComponent: SyncDeckLaunchPresentation as ComponentType<unknown>,
   PersistentLinkBuilderComponent: SyncDeckPersistentLinkBuilder as ComponentType<ActivityPersistentLinkBuilderProps>,
   footerContent: null,
   runDeepLinkPreflight: runSyncDeckDeepLinkPreflight,

@@ -1531,3 +1531,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `playwright.config.ts`; `package.json`
 - Follow-up action: Keep future Playwright docs, commands, and CI wiring pointed at the root `npm run test:e2e` scripts and the shared root config instead of adding one-off dev-server browser test commands.
 - Owner: Codex
+- Date: 2026-03-23
+- Area: activities | syncdeck | utility launch routing
+- Discovery: SyncDeck static-host launch should be modeled as a hidden utility route (`/util/syncdeck/launch-presentation`) declared in `activity.config.*`, with the utility entry omitting `surfaces` so it stays routable but does not appear on `/manage` or the home page.
+- Why it matters: This keeps the flow activity-owned and compatible with the existing utility-route machinery while avoiding cross-origin browser CORS problems for statically hosted presentations.
+- Evidence: `activities/syncdeck/activity.config.ts`; `client/src/components/common/SessionRouter.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
+- Follow-up action: If more activities need hidden utility routes that render `UtilComponent`, keep using `utilities[].renderTarget = 'util'` rather than adding one-off router branches.
+- Owner: Codex
