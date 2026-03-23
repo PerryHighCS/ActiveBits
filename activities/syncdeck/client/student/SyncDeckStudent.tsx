@@ -26,6 +26,11 @@ import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import {
+  buildSyncDeckDocumentTitle,
+  extractRevealMetadataTitle,
+  isRevealIframeReadySignal,
+} from '../shared/presentationMetadata.js'
+import {
   consumeEmbeddedOverlayNavigationEvent,
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
   resolveEmbeddedOverlayVerticalMoveAllowed,
@@ -1872,7 +1877,9 @@ const SyncDeckStudent: FC = () => {
   const [navigationCapabilities, setNavigationCapabilities] = useState<NavigationCapabilities | null>(null)
   const [navigationCapabilityIndices, setNavigationCapabilityIndices] = useState<{ h: number; v: number; f: number } | null>(null)
   const [soloOverlays, setSoloOverlays] = useState<SyncDeckSoloOverlaysMap>({})
+  const [presentationTitle, setPresentationTitle] = useState<string | null>(null)
   const embeddedActivityIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const restoreDocumentTitleRef = useRef<string | null>(null)
 
   useEffect(() => {
     syncDebugEnabledRef.current = isSyncDeckDebugEnabled()
@@ -1977,6 +1984,31 @@ const SyncDeckStudent: FC = () => {
       presentationUrlError,
     }),
     [presentationUrl, presentationUrlError],
+  )
+
+  useEffect(() => {
+    setPresentationTitle(null)
+  }, [presentationUrl])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    if (restoreDocumentTitleRef.current == null) {
+      restoreDocumentTitleRef.current = document.title
+    }
+
+    document.title = buildSyncDeckDocumentTitle(presentationTitle)
+  }, [presentationTitle])
+
+  useEffect(
+    () => () => {
+      if (typeof document !== 'undefined' && restoreDocumentTitleRef.current != null) {
+        document.title = restoreDocumentTitleRef.current
+      }
+    },
+    [],
   )
 
   const getIframeRuntimeOrigin = useCallback((): string | null => {
@@ -2192,6 +2224,11 @@ const SyncDeckStudent: FC = () => {
           }
         }
 
+        const metadataTitle = extractRevealMetadataTitle(parsed.payload)
+        if (metadataTitle != null) {
+          setPresentationTitle(metadataTitle)
+        }
+
         const drawingToolMode = parseDrawingToolModePayload(parsed.payload)
         if (drawingToolMode) {
           applyDrawingToolModeToIframe(drawingToolMode)
@@ -2373,6 +2410,11 @@ const SyncDeckStudent: FC = () => {
       }
 
       if (isRevealSyncMessage(event.data)) {
+        const metadataTitle = extractRevealMetadataTitle(event.data)
+        if (metadataTitle != null) {
+          setPresentationTitle(metadataTitle)
+        }
+
         if (event.data.action === 'activityRequest') {
           const currentSyncState = computeStudentEmbeddedSyncState(
             localStudentIndicesRef.current,
@@ -2488,7 +2530,7 @@ const SyncDeckStudent: FC = () => {
         setNavigationCapabilityIndices(localIndices ?? localStudentIndicesRef.current)
       }
 
-      if (!hasSeenIframeReadySignalRef.current && isRevealSyncMessage(event.data)) {
+      if (!hasSeenIframeReadySignalRef.current && isRevealIframeReadySignal(event.data)) {
         hasSeenIframeReadySignalRef.current = true
         if (pendingPayloadQueueRef.current.length > 0) {
           const queuedPayloads = [...pendingPayloadQueueRef.current]

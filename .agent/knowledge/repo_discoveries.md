@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-23
+- Area: client | activities | syncdeck
+- Discovery: SyncDeck manager and student should not treat every inbound `reveal-sync` envelope as an iframe-ready signal now that the protocol includes descriptive `metadata` messages.
+- Why it matters: A metadata-first emission order can otherwise flush queued commands and restore/replay state before the iframe has announced actual sync readiness, which risks brittle startup behavior while adding title metadata support.
+- Evidence: `activities/syncdeck/client/shared/presentationMetadata.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Keep future non-readiness iframe actions out of the ready-signal allowlist unless they truly guarantee the deck can accept restore and sync commands.
+- Owner: Codex
+
 - Date: 2026-03-22
 - Area: client | activities | vite
 - Discovery: Vite 7 `import.meta.glob(...)` usage for cross-workspace activity discovery should use explicit relative/rooted filesystem globs, not the `@activities` path alias used for normal module imports.

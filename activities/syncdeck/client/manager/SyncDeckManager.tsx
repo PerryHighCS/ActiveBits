@@ -8,6 +8,11 @@ import {
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import {
+  buildSyncDeckDocumentTitle,
+  extractRevealMetadataTitle,
+  isRevealIframeReadySignal,
+} from '../shared/presentationMetadata.js'
+import {
   consumeEmbeddedOverlayNavigationEvent,
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
   resolveEmbeddedOverlayVerticalMoveAllowed,
@@ -1590,7 +1595,9 @@ const SyncDeckManager: FC = () => {
   const [preflightValidatedUrl, setPreflightValidatedUrl] = useState<string | null>(null)
   const [allowUnverifiedStartForUrl, setAllowUnverifiedStartForUrl] = useState<string | null>(null)
   const [confirmStartForUrl, setConfirmStartForUrl] = useState<string | null>(null)
+  const [presentationTitle, setPresentationTitle] = useState<string | null>(null)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const restoreDocumentTitleRef = useRef<string | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastInstructorPayloadRef = useRef<unknown>(null)
   const lastInstructorStatePayloadRef = useRef<unknown>(null)
@@ -1667,6 +1674,31 @@ const SyncDeckManager: FC = () => {
       return null
     }
   }, [presentationUrl])
+
+  useEffect(() => {
+    setPresentationTitle(null)
+  }, [presentationUrl])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    if (restoreDocumentTitleRef.current == null) {
+      restoreDocumentTitleRef.current = document.title
+    }
+
+    document.title = buildSyncDeckDocumentTitle(presentationTitle)
+  }, [presentationTitle])
+
+  useEffect(
+    () => () => {
+      if (typeof document !== 'undefined' && restoreDocumentTitleRef.current != null) {
+        document.title = restoreDocumentTitleRef.current
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     isInstructorSyncEnabledRef.current = isInstructorSyncEnabled
@@ -2695,6 +2727,11 @@ const SyncDeckManager: FC = () => {
         setOverlayNavigationCapabilityIndices(extractIndicesFromRevealPayload(event.data))
       }
 
+      const metadataTitle = extractRevealMetadataTitle(event.data)
+      if (metadataTitle != null) {
+        setPresentationTitle(metadataTitle)
+      }
+
       const storyboardDisplayed = extractStoryboardDisplayed(event.data)
       if (typeof storyboardDisplayed === 'boolean') {
         setIsStoryboardOpen(storyboardDisplayed)
@@ -2709,7 +2746,7 @@ const SyncDeckManager: FC = () => {
         setIsPresentationPaused(pausedStateFromCommand)
       }
 
-      if (!hasSeenInstructorIframeReadySignalRef.current && envelope?.type === 'reveal-sync') {
+      if (!hasSeenInstructorIframeReadySignalRef.current && isRevealIframeReadySignal(event.data)) {
         hasSeenInstructorIframeReadySignalRef.current = true
         const targetWindow = presentationIframeRef.current?.contentWindow
         if (targetWindow && presentationOrigin) {

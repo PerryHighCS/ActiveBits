@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-23
+- Surface: activity interface | internal module
+- Contract: SyncDeck's reveal iframe sync protocol now reserves an iframe-to-host `metadata` action with object payloads such as `{ title }`. Hosts must treat the payload as optional descriptive metadata, trim string values, ignore unknown keys, and avoid using `metadata` as the iframe-ready handshake.
+- Compatibility constraints: Existing `ready` and `state` bootstrap behavior remains authoritative for host restore/replay timing. Older decks that never emit `metadata` remain fully supported; title updates are best-effort only until iframe libraries adopt the new message.
+- Validation rules: `payload.title` is only usable when it is a non-empty trimmed string. Empty strings and non-string values normalize to absent metadata.
+- Evidence (schema/tests/path): `activities/syncdeck/shared/revealSyncProtocol.ts`; `activities/syncdeck/client/shared/presentationMetadata.ts`; `activities/syncdeck/client/shared/presentationMetadata.test.ts`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: When `reveal-iframe-sync.js` is updated, have it emit `metadata` near deck initialization so manager and student titles can populate without same-origin DOM access.
+- Owner: Codex
+
 - Date: 2026-03-22
 - Surface: activity interface | client bootstrap
 - Contract: SyncDeck embedded manager bootstrap payloads are one-shot transport data. Child managers that recover instructor credentials from `consumeCreateSessionBootstrapPayload(...)` must persist those credentials into their normal per-session storage key on first use if they need manager auth to survive later unmount/remount cycles in the same tab.
