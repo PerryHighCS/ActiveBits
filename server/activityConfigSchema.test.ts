@@ -75,6 +75,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
         instructorGated: 'runtime',
       },
       reportEndpoint: '/api/syncdeck/s1/report',
+      utilMode: true,
       waitingRoom: {
         fields: [
           {
@@ -334,6 +335,35 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
         'bad-config-8',
       ),
     /utilities\[0\].*renderTarget/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad9',
+          name: 'Bad9',
+          description: 'desc',
+          color: 'slate',
+          standaloneEntry: {
+            enabled: false,
+            supportsDirectPath: false,
+            supportsPermalink: false,
+            showOnHome: false,
+          },
+          utilities: [
+            {
+              id: 'utility',
+              label: 'Utility View',
+              action: 'go-to-url',
+              path: '/util/bad9/utility',
+              renderTarget: 'util',
+            },
+          ],
+        },
+        'bad-config-9',
+      ),
+    /renderTarget: util.*utilMode: true/i,
   )
 
   assert.throws(

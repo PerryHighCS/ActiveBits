@@ -48,6 +48,7 @@ interface SessionData extends SessionCacheRecord {
 }
 
 type ActivityStudentComponent = ComponentType<Record<string, unknown>>
+type UtilityComponent = ComponentType<Record<string, unknown>>
 
 const colorClasses: Record<string, string> = {
   blue: 'bg-blue-600',
@@ -468,7 +469,7 @@ const SessionRouter = () => {
         return <div className="text-center">Utility view is unavailable for this activity.</div>
       }
 
-      const TypedUtilComponent = UtilComponent as ActivityStudentComponent
+      const TypedUtilComponent = UtilComponent as UtilityComponent
 
       return (
         <Suspense fallback={<LoadingFallback />}>

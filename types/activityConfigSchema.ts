@@ -517,6 +517,10 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const reportEndpoint = readOptionalString(rawConfig, 'reportEndpoint', context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)
 
+  if (utilities?.some((utility) => utility.renderTarget === 'util') && utilMode !== true) {
+    throw new Error(`${context}: utilities with "renderTarget: util" require "utilMode: true"`)
+  }
+
   assignOptionalField(parsed, 'title', title)
   assignOptionalField(parsed, 'clientEntry', clientEntry)
   assignOptionalField(parsed, 'serverEntry', serverEntry)

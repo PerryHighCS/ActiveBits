@@ -18,6 +18,26 @@ export interface CreateConfiguredSyncDeckSessionResult {
   instructorPasscode: string
 }
 
+async function bestEffortDeleteSyncDeckSession(params: {
+  sessionId: string
+  instructorPasscode: string
+  fetchFn: typeof fetch
+}): Promise<void> {
+  try {
+    await params.fetchFn(`/api/syncdeck/${encodeURIComponent(params.sessionId)}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        instructorPasscode: params.instructorPasscode,
+      }),
+    })
+  } catch {
+    // Best-effort cleanup only. Preserve the original create/configure failure.
+  }
+}
+
 export async function createConfiguredSyncDeckSession(
   params: CreateConfiguredSyncDeckSessionParams,
 ): Promise<CreateConfiguredSyncDeckSessionResult> {
@@ -53,6 +73,11 @@ export async function createConfiguredSyncDeckSession(
     }),
   })
   if (!configureResponse.ok) {
+    await bestEffortDeleteSyncDeckSession({
+      sessionId,
+      instructorPasscode,
+      fetchFn,
+    })
     throw new Error(params.standaloneMode
       ? 'Unable to load this presentation in solo mode right now.'
       : 'Unable to load this presentation in SyncDeck right now.')

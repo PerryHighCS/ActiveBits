@@ -87,6 +87,64 @@ void test('launchSyncDeckPersistentSoloEntry rejects permalink launches without 
   )
 })
 
+void test('launchSyncDeckPersistentSoloEntry best-effort deletes the session when configure fails', async () => {
+  const originalFetch = globalThis.fetch
+  const requests: Array<{ input: string; init?: RequestInit }> = []
+
+  globalThis.fetch = (async (input, init) => {
+    requests.push({ input: String(input), init })
+
+    if (String(input) === '/api/syncdeck/create') {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 'syncdeck-solo-2',
+          instructorPasscode: 'pass-456',
+        }),
+      } as Response
+    }
+
+    if (String(input) === '/api/syncdeck/syncdeck-solo-2/configure') {
+      return {
+        ok: false,
+        json: async () => ({}),
+      } as Response
+    }
+
+    if (String(input) === '/api/syncdeck/syncdeck-solo-2') {
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as Response
+    }
+
+    throw new Error(`Unexpected fetch: ${String(input)}`)
+  }) as typeof fetch
+
+  try {
+    await assert.rejects(
+      launchSyncDeckPersistentSoloEntry({
+        hash: 'hash-2',
+        search: '?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+        selectedOptions: {
+          presentationUrl: 'https://slides.example/deck',
+        },
+      }),
+      /solo mode right now/i,
+    )
+
+    assert.equal(requests.length, 3)
+    assert.equal(requests[2]?.input, '/api/syncdeck/syncdeck-solo-2')
+    assert.equal(requests[2]?.init?.method, 'DELETE')
+    assert.deepEqual(
+      JSON.parse(String(requests[2]?.init?.body ?? '{}')),
+      { instructorPasscode: 'pass-456' },
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 void test('syncdeck client module exports persistent solo launcher', () => {
   assert.equal(typeof syncdeckClientModule.launchPersistentSoloEntry, 'function')
 })
