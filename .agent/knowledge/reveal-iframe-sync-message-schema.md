@@ -291,6 +291,11 @@ The presentation-side flow for cross-origin ad hoc hosting is:
 4. Request a redirect-safe manager bootstrap token.
 5. Redirect the browser to the returned hosted manager URL on the ActiveBits origin.
 
+Current deployment constraint:
+- ActiveBits does not currently emit CORS headers for these SyncDeck API routes.
+- That means browser `fetch` from an external presentation origin will be blocked unless the deck is effectively same-origin with ActiveBits or a reverse proxy/CDN layer adds a narrow CORS allowlist for the presentation origin.
+- The fetch examples below assume one of those deployment conditions is true.
+
 #### Step 1: Create session
 
 `POST /api/syncdeck/create`
