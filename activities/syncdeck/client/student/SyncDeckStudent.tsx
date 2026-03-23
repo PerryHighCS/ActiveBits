@@ -26,14 +26,12 @@ import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import {
-  EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS,
-  EMBEDDED_OVERLAY_NAVIGATION_POINTER_DOWN_RESET_TIMEOUT_MS,
   consumeEmbeddedOverlayNavigationEvent,
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
-  reduceEmbeddedOverlayNavigationPointerDownState,
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
 } from '../shared/embeddedOverlayNavigation.js'
+import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
 
 interface SessionResponsePayload {
   session?: {
@@ -1845,7 +1843,13 @@ const SyncDeckStudent: FC = () => {
   const [registeredStudentId, setRegisteredStudentId] = useState('')
   const [joinError, setJoinError] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
-  const overlayNavClickShieldRef = useRef<HTMLDivElement | null>(null)
+  const {
+    overlayNavClickShieldRef,
+    activateOverlayNavClickShield,
+    beginOverlayNavPointerDownHandling,
+    consumeOverlayNavClick,
+    resetOverlayNavPointerDownHandling,
+  } = useEmbeddedOverlayNavigationInteraction()
   const pendingPayloadQueueRef = useRef<unknown[]>([])
   const localStudentIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const lastInstructorIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
@@ -1853,9 +1857,6 @@ const SyncDeckStudent: FC = () => {
   const latestInstructorPayloadRef = useRef<unknown>(null)
   const activeDrawingToolModeRef = useRef<SyncDeckDrawingToolMode>('none')
   const pendingDrawingToolModeRef = useRef<SyncDeckDrawingToolMode | null>(null)
-  const overlayNavClickShieldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const overlayNavPointerDownResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const didHandleOverlayNavPointerDownRef = useRef(false)
   const hasSeenIframeReadySignalRef = useRef(false)
   const lastObservedIframeOriginRef = useRef<string | null>(null)
   const suppressFallbackToInstructorRef = useRef(false)
@@ -1888,52 +1889,6 @@ const SyncDeckStudent: FC = () => {
     })
   }, [])
 
-  const clearOverlayNavClickShieldTimeout = useCallback((): void => {
-    if (overlayNavClickShieldTimeoutRef.current != null) {
-      clearTimeout(overlayNavClickShieldTimeoutRef.current)
-      overlayNavClickShieldTimeoutRef.current = null
-    }
-  }, [])
-
-  const clearOverlayNavPointerDownResetTimeout = useCallback((): void => {
-    if (overlayNavPointerDownResetTimeoutRef.current != null) {
-      clearTimeout(overlayNavPointerDownResetTimeoutRef.current)
-      overlayNavPointerDownResetTimeoutRef.current = null
-    }
-  }, [])
-
-  const resetOverlayNavPointerDownHandling = useCallback((): void => {
-    didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
-      didHandleOverlayNavPointerDownRef.current,
-      'pointercancel',
-    ).didHandlePointerDown
-    clearOverlayNavPointerDownResetTimeout()
-  }, [clearOverlayNavPointerDownResetTimeout])
-
-  const scheduleOverlayNavPointerDownReset = useCallback((): void => {
-    clearOverlayNavPointerDownResetTimeout()
-    overlayNavPointerDownResetTimeoutRef.current = setTimeout(() => {
-      overlayNavPointerDownResetTimeoutRef.current = null
-      didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
-        didHandleOverlayNavPointerDownRef.current,
-        'timeout',
-      ).didHandlePointerDown
-    }, EMBEDDED_OVERLAY_NAVIGATION_POINTER_DOWN_RESET_TIMEOUT_MS)
-  }, [clearOverlayNavPointerDownResetTimeout])
-
-  const activateOverlayNavClickShield = useCallback((): void => {
-    if (overlayNavClickShieldRef.current) {
-      overlayNavClickShieldRef.current.style.pointerEvents = 'auto'
-    }
-    clearOverlayNavClickShieldTimeout()
-    overlayNavClickShieldTimeoutRef.current = setTimeout(() => {
-      overlayNavClickShieldTimeoutRef.current = null
-      if (overlayNavClickShieldRef.current) {
-        overlayNavClickShieldRef.current.style.pointerEvents = 'none'
-      }
-    }, EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS)
-  }, [clearOverlayNavClickShieldTimeout])
-
   const sendSyncContextToEmbeddedIframe = useCallback((): void => {
     const target = embeddedActivityIframeRef.current?.contentWindow
     if (!target) {
@@ -1956,13 +1911,6 @@ const SyncDeckStudent: FC = () => {
       // ignore postMessage errors
     }
   }, [])
-
-  useEffect(() => {
-    return () => {
-      clearOverlayNavClickShieldTimeout()
-      clearOverlayNavPointerDownResetTimeout()
-    }
-  }, [clearOverlayNavClickShieldTimeout, clearOverlayNavPointerDownResetTimeout])
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -3242,13 +3190,7 @@ const SyncDeckStudent: FC = () => {
     direction: 'left' | 'right' | 'up' | 'down',
   ): void => {
     consumeEmbeddedOverlayNavigationEvent(event)
-    const pointerDownState = reduceEmbeddedOverlayNavigationPointerDownState(
-      didHandleOverlayNavPointerDownRef.current,
-      'click',
-    )
-    didHandleOverlayNavPointerDownRef.current = pointerDownState.didHandlePointerDown
-    clearOverlayNavPointerDownResetTimeout()
-    if (pointerDownState.shouldSkipClickNavigation) {
+    if (consumeOverlayNavClick()) {
       return
     }
     if (direction === 'left') {
@@ -3274,12 +3216,7 @@ const SyncDeckStudent: FC = () => {
       return
     }
     consumeEmbeddedOverlayNavigationEvent(event)
-    didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
-      didHandleOverlayNavPointerDownRef.current,
-      'pointerdown',
-    ).didHandlePointerDown
-    scheduleOverlayNavPointerDownReset()
-    activateOverlayNavClickShield()
+    beginOverlayNavPointerDownHandling()
     if (direction === 'left') {
       handleStudentOverlayBack()
       return

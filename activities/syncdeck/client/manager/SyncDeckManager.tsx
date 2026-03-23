@@ -8,14 +8,12 @@ import {
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import {
-  EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS,
-  EMBEDDED_OVERLAY_NAVIGATION_POINTER_DOWN_RESET_TIMEOUT_MS,
   consumeEmbeddedOverlayNavigationEvent,
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
-  reduceEmbeddedOverlayNavigationPointerDownState,
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
 } from '../shared/embeddedOverlayNavigation.js'
+import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
@@ -1593,7 +1591,6 @@ const SyncDeckManager: FC = () => {
   const [allowUnverifiedStartForUrl, setAllowUnverifiedStartForUrl] = useState<string | null>(null)
   const [confirmStartForUrl, setConfirmStartForUrl] = useState<string | null>(null)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
-  const overlayNavClickShieldRef = useRef<HTMLDivElement | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastInstructorPayloadRef = useRef<unknown>(null)
   const lastInstructorStatePayloadRef = useRef<unknown>(null)
@@ -1607,14 +1604,18 @@ const SyncDeckManager: FC = () => {
   const hasAppliedReloadChalkboardStateRef = useRef(false)
   const lastInstructorIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const explicitBoundaryRef = useRef<{ h: number; v: number; f: number } | null>(null)
+  const {
+    overlayNavClickShieldRef,
+    activateOverlayNavClickShield,
+    beginOverlayNavPointerDownHandling,
+    consumeOverlayNavClick,
+    resetOverlayNavPointerDownHandling,
+  } = useEmbeddedOverlayNavigationInteraction()
   const hasSeenInstructorIframeReadySignalRef = useRef(false)
   const suppressOutboundStateUntilRestoreRef = useRef(false)
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const overlayNavClickShieldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const overlayNavPointerDownResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const didHandleOverlayNavPointerDownRef = useRef(false)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
   useEffect(() => {
@@ -1638,52 +1639,6 @@ const SyncDeckManager: FC = () => {
       restoreSuppressionTimeoutRef.current = null
     }
   }, [])
-
-  const clearOverlayNavClickShieldTimeout = useCallback((): void => {
-    if (overlayNavClickShieldTimeoutRef.current != null) {
-      clearTimeout(overlayNavClickShieldTimeoutRef.current)
-      overlayNavClickShieldTimeoutRef.current = null
-    }
-  }, [])
-
-  const clearOverlayNavPointerDownResetTimeout = useCallback((): void => {
-    if (overlayNavPointerDownResetTimeoutRef.current != null) {
-      clearTimeout(overlayNavPointerDownResetTimeoutRef.current)
-      overlayNavPointerDownResetTimeoutRef.current = null
-    }
-  }, [])
-
-  const resetOverlayNavPointerDownHandling = useCallback((): void => {
-    didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
-      didHandleOverlayNavPointerDownRef.current,
-      'pointercancel',
-    ).didHandlePointerDown
-    clearOverlayNavPointerDownResetTimeout()
-  }, [clearOverlayNavPointerDownResetTimeout])
-
-  const scheduleOverlayNavPointerDownReset = useCallback((): void => {
-    clearOverlayNavPointerDownResetTimeout()
-    overlayNavPointerDownResetTimeoutRef.current = setTimeout(() => {
-      overlayNavPointerDownResetTimeoutRef.current = null
-      didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
-        didHandleOverlayNavPointerDownRef.current,
-        'timeout',
-      ).didHandlePointerDown
-    }, EMBEDDED_OVERLAY_NAVIGATION_POINTER_DOWN_RESET_TIMEOUT_MS)
-  }, [clearOverlayNavPointerDownResetTimeout])
-
-  const activateOverlayNavClickShield = useCallback((): void => {
-    if (overlayNavClickShieldRef.current) {
-      overlayNavClickShieldRef.current.style.pointerEvents = 'auto'
-    }
-    clearOverlayNavClickShieldTimeout()
-    overlayNavClickShieldTimeoutRef.current = setTimeout(() => {
-      overlayNavClickShieldTimeoutRef.current = null
-      if (overlayNavClickShieldRef.current) {
-        overlayNavClickShieldRef.current.style.pointerEvents = 'none'
-      }
-    }, EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS)
-  }, [clearOverlayNavClickShieldTimeout])
 
   const releaseRestoreSuppression = useCallback((): void => {
     suppressOutboundStateUntilRestoreRef.current = false
@@ -2985,14 +2940,8 @@ const SyncDeckManager: FC = () => {
   useEffect(
     () => () => {
       clearRestoreSuppressionTimeout()
-      clearOverlayNavClickShieldTimeout()
-      clearOverlayNavPointerDownResetTimeout()
     },
-    [
-      clearOverlayNavClickShieldTimeout,
-      clearOverlayNavPointerDownResetTimeout,
-      clearRestoreSuppressionTimeout,
-    ],
+    [clearRestoreSuppressionTimeout],
   )
 
   if (!sessionId) {
@@ -3085,13 +3034,7 @@ const SyncDeckManager: FC = () => {
     direction: 'left' | 'right' | 'up' | 'down',
   ): void => {
     consumeEmbeddedOverlayNavigationEvent(event)
-    const pointerDownState = reduceEmbeddedOverlayNavigationPointerDownState(
-      didHandleOverlayNavPointerDownRef.current,
-      'click',
-    )
-    didHandleOverlayNavPointerDownRef.current = pointerDownState.didHandlePointerDown
-    clearOverlayNavPointerDownResetTimeout()
-    if (pointerDownState.shouldSkipClickNavigation) {
+    if (consumeOverlayNavClick()) {
       return
     }
     sendEmbeddedOverlayNavigation(direction)
@@ -3105,12 +3048,7 @@ const SyncDeckManager: FC = () => {
       return
     }
     consumeEmbeddedOverlayNavigationEvent(event)
-    didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
-      didHandleOverlayNavPointerDownRef.current,
-      'pointerdown',
-    ).didHandlePointerDown
-    scheduleOverlayNavPointerDownReset()
-    activateOverlayNavClickShield()
+    beginOverlayNavPointerDownHandling()
     sendEmbeddedOverlayNavigation(direction)
   }
 
