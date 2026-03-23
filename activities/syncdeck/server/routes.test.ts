@@ -2969,7 +2969,7 @@ void test('manager-bootstrap route issues one-time bootstrap token for configure
   assert.equal(typeof issuedPayload.bootstrapToken, 'string')
   assert.match(issuedPayload.bootstrapToken ?? '', /^[a-f0-9]{48}$/)
   assert.equal(typeof issuedPayload.manageUrl, 'string')
-  assert.match(issuedPayload.manageUrl ?? '', /^\/manage\/syncdeck\/s1\?bootstrap=[a-f0-9]{48}$/)
+  assert.match(issuedPayload.manageUrl ?? '', /^\/manage\/syncdeck\/s1#bootstrap=[a-f0-9]{48}$/)
   assert.equal(issuedPayload.expiresInMs, 5 * 60 * 1000)
 
   const storedBootstraps = (storeState.store.s1?.data as { managerBootstraps?: unknown[] }).managerBootstraps
@@ -3046,6 +3046,59 @@ void test('manager-bootstrap consume rejects expired bootstrap tokens', async ()
   } finally {
     Date.now = originalDateNow
   }
+})
+
+void test('manager-bootstrap consume rejects malformed bootstrap tokens before hashing', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+  ;(storeState.store.s1?.data as Record<string, unknown>).presentationUrl = 'https://example.com/deck'
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const issueHandler = app.handlers.post['/api/syncdeck/:sessionId/manager-bootstrap']
+  const consumeHandler = app.handlers.post['/api/syncdeck/:sessionId/consume-manager-bootstrap']
+  assert.equal(typeof issueHandler, 'function')
+  assert.equal(typeof consumeHandler, 'function')
+
+  const issueRes = createResponse()
+  await issueHandler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: 'teacher-pass' },
+    ),
+    issueRes,
+  )
+
+  const issuedPayload = issueRes.body as { bootstrapToken?: string }
+  const storedBootstrapsBefore = (storeState.store.s1?.data as { managerBootstraps?: unknown[] }).managerBootstraps
+  assert.equal(storedBootstrapsBefore?.length, 1)
+
+  const malformedPayloads = [
+    { bootstrapToken: '   ' },
+    { bootstrapToken: 'abc123' },
+    { bootstrapToken: `${issuedPayload.bootstrapToken}00` },
+    { bootstrapToken: 'g'.repeat(48) },
+    { bootstrapToken: `${issuedPayload.bootstrapToken?.slice(0, 47)}Z` },
+  ]
+
+  for (const payload of malformedPayloads) {
+    const consumeRes = createResponse()
+    await consumeHandler?.(
+      createRequest(
+        { sessionId: 's1' },
+        payload,
+      ),
+      consumeRes,
+    )
+
+    assert.equal(consumeRes.statusCode, 400)
+    assert.deepEqual(consumeRes.body, { error: 'invalid payload' })
+  }
+
+  const storedBootstrapsAfter = (storeState.store.s1?.data as { managerBootstraps?: unknown[] }).managerBootstraps
+  assert.equal(storedBootstrapsAfter?.length, 1)
 })
 
 void test('configure route accepts urlHash when session has persistent mapping', async () => {

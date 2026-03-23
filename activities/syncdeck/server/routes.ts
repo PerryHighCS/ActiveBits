@@ -162,6 +162,7 @@ const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
 const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const MAX_CHALKBOARD_DELTA_STROKES = 200
 const SYNCDECK_MANAGER_BOOTSTRAP_TTL_MS = 5 * 60 * 1000
+const SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_LENGTH = 48
 const MAX_SYNCDECK_MANAGER_BOOTSTRAPS = 10
 const SYNCDECK_EMBEDDED_OWNER = 'syncdeck-instructor'
 const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === '1'
@@ -1062,6 +1063,19 @@ function createSyncDeckManagerBootstrapToken(): string {
   return randomBytes(24).toString('hex')
 }
 
+function normalizeSyncDeckManagerBootstrapToken(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length !== SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_LENGTH) {
+    return null
+  }
+
+  return /^[a-f0-9]{48}$/.test(trimmed) ? trimmed : null
+}
+
 function issueSyncDeckManagerBootstrap(sessionData: SyncDeckSessionData, now = Date.now()): string {
   const bootstrapToken = createSyncDeckManagerBootstrapToken()
   const bootstrapRecord: SyncDeckManagerBootstrapRecord = {
@@ -1076,6 +1090,20 @@ function issueSyncDeckManagerBootstrap(sessionData: SyncDeckSessionData, now = D
   return bootstrapToken
 }
 
+function matchesSyncDeckManagerBootstrapTokenHash(expectedHash: string, candidateHash: string): boolean {
+  const expectedBuffer = Buffer.from(expectedHash, 'utf8')
+  const candidateBuffer = Buffer.from(candidateHash, 'utf8')
+  if (expectedBuffer.length !== candidateBuffer.length) {
+    return false
+  }
+
+  try {
+    return timingSafeEqual(expectedBuffer, candidateBuffer)
+  } catch {
+    return false
+  }
+}
+
 function consumeSyncDeckManagerBootstrap(
   sessionData: SyncDeckSessionData,
   bootstrapToken: string,
@@ -1085,7 +1113,7 @@ function consumeSyncDeckManagerBootstrap(
   let matched = false
 
   sessionData.managerBootstraps = normalizeManagerBootstraps(sessionData.managerBootstraps, now).filter((record) => {
-    if (!matched && record.tokenHash === tokenHash) {
+    if (!matched && matchesSyncDeckManagerBootstrapTokenHash(record.tokenHash, tokenHash)) {
       matched = true
       return false
     }
@@ -1453,14 +1481,10 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const bootstrapToken = issueSyncDeckManagerBootstrap(session.data)
     await sessions.set(session.id, session)
 
-    const params = new URLSearchParams({
-      bootstrap: bootstrapToken,
-    })
-
     res.json({
       sessionId: session.id,
       bootstrapToken,
-      manageUrl: `/manage/syncdeck/${encodeURIComponent(session.id)}?${params.toString()}`,
+      manageUrl: `/manage/syncdeck/${encodeURIComponent(session.id)}#bootstrap=${bootstrapToken}`,
       expiresInMs: SYNCDECK_MANAGER_BOOTSTRAP_TTL_MS,
     })
   })
@@ -1478,7 +1502,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const bootstrapToken = readStringField(req.body, 'bootstrapToken')
+    const bootstrapToken = normalizeSyncDeckManagerBootstrapToken(readStringField(req.body, 'bootstrapToken'))
     if (!bootstrapToken) {
       res.status(400).json({ error: 'invalid payload' })
       return

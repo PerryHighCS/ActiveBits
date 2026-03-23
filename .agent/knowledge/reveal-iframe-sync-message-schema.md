@@ -344,7 +344,7 @@ Response:
 {
   "sessionId": "syncdeck-12345",
   "bootstrapToken": "48-char-hex-token",
-  "manageUrl": "/manage/syncdeck/syncdeck-12345?bootstrap=48-char-hex-token",
+  "manageUrl": "/manage/syncdeck/syncdeck-12345#bootstrap=48-char-hex-token",
   "expiresInMs": 300000
 }
 ```
@@ -352,20 +352,20 @@ Response:
 Notes:
 - `bootstrapToken` is a one-time short-lived redirect artifact, not a long-lived credential.
 - The presentation app should prefer redirecting to `manageUrl` exactly as returned.
-- The returned `manageUrl` is intentionally the only URL that should carry bootstrap material.
+- The returned `manageUrl` intentionally carries bootstrap material in the URL fragment, not the query string, so normal cross-origin `Referer` forwarding does not include the token.
 
 #### Step 4: Redirect
 
 Presentation-side browser redirect target:
 
 ```text
-https://<activebits-origin>/manage/syncdeck/:sessionId?bootstrap=...
+https://<activebits-origin>/manage/syncdeck/:sessionId#bootstrap=...
 ```
 
 What ActiveBits does after redirect:
 - The hosted manager page consumes the bootstrap token with `POST /api/syncdeck/:sessionId/consume-manager-bootstrap`.
 - ActiveBits persists the real instructor auth state on its own origin.
-- ActiveBits removes `bootstrap` from the URL after successful consumption.
+- ActiveBits removes `bootstrap` from the URL fragment after successful consumption.
 - The manager then continues with the normal hosted SyncDeck websocket/auth flow.
 
 #### Failure handling guidance

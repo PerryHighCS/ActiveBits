@@ -517,16 +517,18 @@ export function normalizeStoredInstructorPasscode(value: string | null): string 
   return trimmed.length > 0 ? trimmed : null
 }
 
-export function resolveSyncDeckManagerBootstrapToken(search: string): string | null {
-  const token = new URLSearchParams(search).get('bootstrap')
+export function resolveSyncDeckManagerBootstrapToken(hash: string): string | null {
+  const normalizedHash = hash.startsWith('#') ? hash.slice(1) : hash
+  const token = new URLSearchParams(normalizedHash).get('bootstrap')
   return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
 }
 
-export function buildSyncDeckSearchWithoutManagerBootstrap(search: string): string {
-  const params = new URLSearchParams(search)
+export function buildSyncDeckHashWithoutManagerBootstrap(hash: string): string {
+  const normalizedHash = hash.startsWith('#') ? hash.slice(1) : hash
+  const params = new URLSearchParams(normalizedHash)
   params.delete('bootstrap')
-  const nextSearch = params.toString()
-  return nextSearch.length > 0 ? `?${nextSearch}` : ''
+  const nextHash = params.toString()
+  return nextHash.length > 0 ? `#${nextHash}` : ''
 }
 
 export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
@@ -1779,8 +1781,8 @@ const SyncDeckManager: FC = () => {
   const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
   const queryEntryPolicy = new URLSearchParams(location.search).get('entryPolicy')
   const managerBootstrapToken = useMemo(
-    () => resolveSyncDeckManagerBootstrapToken(location.search),
-    [location.search],
+    () => resolveSyncDeckManagerBootstrapToken(location.hash),
+    [location.hash],
   )
   const urlHash = resolvePersistentUrlHashForConfigure(queryUrlHash, persistentUrlHashFallback)
   const entryPolicy = resolvePersistentEntryPolicyForConfigure(
@@ -2131,12 +2133,13 @@ const SyncDeckManager: FC = () => {
               }
             }
 
-            const nextSearch = buildSyncDeckSearchWithoutManagerBootstrap(location.search)
-            if (!isCancelled && nextSearch !== location.search) {
+            const nextHash = buildSyncDeckHashWithoutManagerBootstrap(location.hash)
+            if (!isCancelled && nextHash !== location.hash) {
               void navigate(
                 {
                   pathname: location.pathname,
-                  search: nextSearch,
+                  search: location.search,
+                  hash: nextHash,
                 },
                 { replace: true },
               )
@@ -2214,7 +2217,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, location.pathname, location.search, managerBootstrapToken, navigate, sessionId, userAgent])
+  }, [hostProtocol, location.hash, location.pathname, location.search, managerBootstrapToken, navigate, sessionId, userAgent])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
