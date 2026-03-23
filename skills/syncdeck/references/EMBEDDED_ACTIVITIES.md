@@ -160,7 +160,6 @@ Example MCQ fallback structure:
 <section
   data-activity-id="resonance"
   data-activity-trigger="slide-enter"
-  data-activity-instance-key="resonance:5:0"
   data-activity-options='...'>
 
   <div class="slide-inner">
