@@ -381,6 +381,94 @@ What ActiveBits does after redirect:
 - The presentation app should not attempt to emulate ActiveBits manager storage on the cross-origin page.
 - The presentation app should not cache bootstrap tokens for later reuse.
 
+#### Example presentation-side implementation
+
+```ts
+interface CreateSyncDeckSessionResponse {
+  id?: string
+  instructorPasscode?: string
+}
+
+interface ManagerBootstrapResponse {
+  sessionId?: string
+  bootstrapToken?: string
+  manageUrl?: string
+  expiresInMs?: number
+}
+
+function readRequiredString(value: unknown, fieldName: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Missing ${fieldName}`)
+  }
+
+  return value.trim()
+}
+
+export async function hostDeckInSyncDeck(params: {
+  activeBitsOrigin: string
+  presentationUrl: string
+}): Promise<void> {
+  const activeBitsOrigin = params.activeBitsOrigin.replace(/\/+$/, '')
+  const presentationUrl = params.presentationUrl.trim()
+
+  // 1. Create a SyncDeck session.
+  const createResponse = await fetch(`${activeBitsOrigin}/api/syncdeck/create`, {
+    method: 'POST',
+    credentials: 'include',
+  })
+  if (!createResponse.ok) {
+    throw new Error('Unable to create SyncDeck session')
+  }
+
+  const createPayload = (await createResponse.json()) as CreateSyncDeckSessionResponse
+  const sessionId = readRequiredString(createPayload.id, 'session id')
+  const instructorPasscode = readRequiredString(createPayload.instructorPasscode, 'instructor passcode')
+
+  // 2. Configure the created session to host this presentation.
+  const configureResponse = await fetch(`${activeBitsOrigin}/api/syncdeck/${encodeURIComponent(sessionId)}/configure`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      presentationUrl,
+      instructorPasscode,
+      standaloneMode: false,
+    }),
+  })
+  if (!configureResponse.ok) {
+    throw new Error('Unable to configure SyncDeck session')
+  }
+
+  // 3. Mint a one-time redirect-safe bootstrap token for the hosted manager.
+  const bootstrapResponse = await fetch(`${activeBitsOrigin}/api/syncdeck/${encodeURIComponent(sessionId)}/manager-bootstrap`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      instructorPasscode,
+    }),
+  })
+  if (!bootstrapResponse.ok) {
+    throw new Error('Unable to create SyncDeck manager bootstrap')
+  }
+
+  const bootstrapPayload = (await bootstrapResponse.json()) as ManagerBootstrapResponse
+  const manageUrl = readRequiredString(bootstrapPayload.manageUrl, 'manage URL')
+
+  // 4. Redirect the browser to the hosted manager page on the ActiveBits origin.
+  window.location.assign(new URL(manageUrl, activeBitsOrigin).toString())
+}
+```
+
+Implementation notes:
+- Keep `instructorPasscode` only in local function scope if possible.
+- Prefer `window.location.assign(...)` or an equivalent full-page navigation rather than trying to iframe the hosted manager.
+- If the presentation app has multiple candidate URLs for the same deck, choose the canonical one before calling `configure`.
+
 #### `chalkboardState`
 
 Full state sync. Replace the target iframe's entire drawing storage with a snapshot and immediately redraw the current slide.
