@@ -42,6 +42,20 @@ void test('extractRevealMetadataTitle ignores non-metadata and empty titles', ()
   )
 })
 
+void test('extractRevealMetadataTitle accepts early standalone-role metadata messages', () => {
+  assert.equal(
+    extractRevealMetadataTitle({
+      type: 'reveal-sync',
+      action: 'metadata',
+      role: 'standalone',
+      payload: {
+        title: 'Standalone Intro Deck',
+      },
+    }),
+    'Standalone Intro Deck',
+  )
+})
+
 void test('isRevealIframeReadySignal excludes metadata but accepts ready and state envelopes', () => {
   assert.equal(
     isRevealIframeReadySignal({
@@ -65,6 +79,18 @@ void test('isRevealIframeReadySignal excludes metadata but accepts ready and sta
     isRevealIframeReadySignal({
       type: 'reveal-sync',
       action: 'state',
+      payload: {},
+    }),
+    true,
+  )
+})
+
+void test('isRevealIframeReadySignal accepts early standalone-role ready messages', () => {
+  assert.equal(
+    isRevealIframeReadySignal({
+      type: 'reveal-sync',
+      action: 'ready',
+      role: 'standalone',
       payload: {},
     }),
     true,
