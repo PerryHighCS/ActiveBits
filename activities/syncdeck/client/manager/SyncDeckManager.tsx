@@ -2124,6 +2124,18 @@ const SyncDeckManager: FC = () => {
             }),
           })
 
+          const nextHash = buildSyncDeckHashWithoutManagerBootstrap(location.hash)
+          if (!isCancelled && nextHash !== location.hash) {
+            void navigate(
+              {
+                pathname: location.pathname,
+                search: location.search,
+                hash: nextHash,
+              },
+              { replace: true },
+            )
+          }
+
           if (bootstrapResponse.ok) {
             const bootstrapPayload = (await bootstrapResponse.json()) as ConsumeManagerBootstrapResponsePayload
             const bootstrapPasscode = normalizeStoredInstructorPasscode(
@@ -2137,18 +2149,6 @@ const SyncDeckManager: FC = () => {
               if (!isCancelled) {
                 setInstructorPasscode(bootstrapPasscode)
               }
-            }
-
-            const nextHash = buildSyncDeckHashWithoutManagerBootstrap(location.hash)
-            if (!isCancelled && nextHash !== location.hash) {
-              void navigate(
-                {
-                  pathname: location.pathname,
-                  search: location.search,
-                  hash: nextHash,
-                },
-                { replace: true },
-              )
             }
           }
         } catch {

@@ -18,6 +18,7 @@ import {
   type SessionRecord,
   type SessionStore,
 } from 'activebits-server/core/sessions.js'
+import type { ValkeySessionStore } from 'activebits-server/core/valkeyStore.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
@@ -138,6 +139,10 @@ interface SyncDeckSession extends SessionRecord {
   data: SyncDeckSessionData
 }
 
+type SyncDeckSessionStore = SessionStore & {
+  valkeyStore?: Pick<ValkeySessionStore, 'client'>
+}
+
 interface SyncDeckSocket extends ActiveBitsWebSocket {
   isInstructor?: boolean
   sessionId?: string | null
@@ -170,6 +175,58 @@ const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === 
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS = 5 * 60 * 1000
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_MAX_KEYS = 500
 const loggedProtocolWarningKeys = new Map<string, number>()
+const SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_PATTERN = new RegExp(`^[a-f0-9]{${SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_LENGTH}}$`)
+const SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_HASH_PATTERN = new RegExp(`^[a-f0-9]{${SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_HASH_LENGTH}}$`)
+const CONSUME_SYNCDECK_MANAGER_BOOTSTRAP_LUA = `
+-- syncdeck-manager-bootstrap-consume
+local key = KEYS[1]
+local tokenHash = ARGV[1]
+local nowMs = tonumber(ARGV[2])
+local raw = redis.call('GET', key)
+if not raw then
+  return ''
+end
+
+local ok, session = pcall(cjson.decode, raw)
+if not ok or type(session) ~= 'table' or type(session.data) ~= 'table' then
+  return ''
+end
+
+if type(session.data.instructorPasscode) ~= 'string' then
+  return ''
+end
+
+local records = session.data.managerBootstraps
+if type(records) ~= 'table' then
+  records = {}
+end
+
+local retained = {}
+local matched = false
+
+for _, record in ipairs(records) do
+  if type(record) == 'table'
+      and type(record.tokenHash) == 'string'
+      and type(record.createdAt) == 'number'
+      and type(record.expiresAt) == 'number'
+      and record.expiresAt > nowMs then
+    if (not matched) and record.tokenHash == tokenHash then
+      matched = true
+    else
+      retained[#retained + 1] = record
+    end
+  end
+end
+
+session.data.managerBootstraps = retained
+redis.call('SET', key, cjson.encode(session), 'KEEPTTL')
+
+if matched then
+  return session.data.instructorPasscode
+end
+
+return ''
+`
 
 type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'
 
@@ -430,7 +487,7 @@ function normalizeManagerBootstrapRecord(value: unknown): SyncDeckManagerBootstr
   const expiresAt = normalizeNullableFiniteNumber(value.expiresAt)
   if (
     tokenHash.length !== SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_HASH_LENGTH
-    || !/^[a-f0-9]{64}$/.test(tokenHash)
+    || !SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_HASH_PATTERN.test(tokenHash)
     || createdAt == null
     || expiresAt == null
   ) {
@@ -766,6 +823,10 @@ function sendSyncDeckState(socket: ActiveBitsWebSocket, payload: unknown): void 
   }
 }
 
+function setNoStoreCacheControl(res: JsonResponse): void {
+  res.setHeader?.('Cache-Control', 'no-store')
+}
+
 function normalizeStudentId(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null
@@ -1079,7 +1140,7 @@ function normalizeSyncDeckManagerBootstrapToken(value: unknown): string | null {
     return null
   }
 
-  return new RegExp(`^[a-f0-9]{${SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_LENGTH}}$`).test(trimmed) ? trimmed : null
+  return SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_PATTERN.test(trimmed) ? trimmed : null
 }
 
 function issueSyncDeckManagerBootstrap(sessionData: SyncDeckSessionData, now = Date.now()): string {
@@ -1128,6 +1189,31 @@ function consumeSyncDeckManagerBootstrap(
   })
 
   return matched
+}
+
+async function consumeSyncDeckManagerBootstrapAtomically(
+  sessions: SyncDeckSessionStore,
+  sessionId: string,
+  bootstrapToken: string,
+  now = Date.now(),
+): Promise<{ supported: boolean; instructorPasscode: string | null }> {
+  if (sessions.valkeyStore == null) {
+    return { supported: false, instructorPasscode: null }
+  }
+
+  const tokenHash = hashSyncDeckManagerBootstrapToken(bootstrapToken)
+  const result = await sessions.valkeyStore.client.eval(
+    CONSUME_SYNCDECK_MANAGER_BOOTSTRAP_LUA,
+    1,
+    `session:${sessionId}`,
+    tokenHash,
+    now,
+  )
+
+  return {
+    supported: true,
+    instructorPasscode: typeof result === 'string' ? normalizeInstructorPasscode(result) : null,
+  }
 }
 
 function normalizeInstanceKey(value: unknown): string | null {
@@ -1212,7 +1298,7 @@ registerSessionNormalizer('syncdeck', (session) => {
   session.data = normalizeSessionData(session.data)
 })
 
-export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
+export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SyncDeckSessionStore, ws: WsRouter): void {
   const broadcastStudentsToInstructors = async (sessionId: string): Promise<void> => {
     const session = asSyncDeckSession(await sessions.get(sessionId))
     if (!session) {
@@ -1370,6 +1456,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         ? candidateUrlHash
         : null
 
+    setNoStoreCacheControl(res)
     res.json({
       instructorPasscode: session.data.instructorPasscode,
       persistentEntryPolicy,
@@ -1457,6 +1544,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     await sessions.set(session.id, session)
 
     const response = res as unknown as JsonResponse
+    setNoStoreCacheControl(response)
     response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
   })
 
@@ -1487,6 +1575,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const bootstrapToken = issueSyncDeckManagerBootstrap(session.data)
     await sessions.set(session.id, session)
 
+    setNoStoreCacheControl(res)
     res.json({
       sessionId: session.id,
       bootstrapToken,
@@ -1514,6 +1603,24 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
+    const atomicConsumeResult = await consumeSyncDeckManagerBootstrapAtomically(
+      sessions,
+      session.id,
+      bootstrapToken,
+    )
+    if (atomicConsumeResult.supported) {
+      if (!atomicConsumeResult.instructorPasscode) {
+        res.status(403).json({ error: 'forbidden' })
+        return
+      }
+
+      setNoStoreCacheControl(res)
+      res.json({
+        instructorPasscode: atomicConsumeResult.instructorPasscode,
+      })
+      return
+    }
+
     if (!consumeSyncDeckManagerBootstrap(session.data, bootstrapToken)) {
       await sessions.set(session.id, session)
       res.status(403).json({ error: 'forbidden' })
@@ -1521,6 +1628,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     await sessions.set(session.id, session)
+    setNoStoreCacheControl(res)
     res.json({
       instructorPasscode: session.data.instructorPasscode,
     })
@@ -1639,6 +1747,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const managerBootstrap = normalizedChildSession
       ? buildEmbeddedManagerBootstrapPayload(normalizedChildSession)
       : null
+    if (managerBootstrap) {
+      setNoStoreCacheControl(res)
+    }
     res.json({
       childSessionId: childSession.id,
       instanceKey,

@@ -130,3 +130,12 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Validation (test/review/path): `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/server/routes.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `activities/syncdeck/server/routes.test.ts`; `npm test`.
 - Follow-up action: Add optional hostname/domain allowlist policy if deployment requires restricting presentation origins.
 - Owner: Codex
+
+- Date: 2026-03-23
+- Area: syncdeck manager bootstrap token consumption
+- Threat or risk: One-time manager bootstrap tokens were previously consumed by loading the session, removing the matching token in memory, and blindly writing the whole session back. On a multi-instance Valkey-backed deployment, two parallel consume requests could both read the same token and both obtain the instructor passcode before either overwrite landed.
+- Control or mitigation: `POST /api/syncdeck/:sessionId/consume-manager-bootstrap` now uses a SyncDeck-specific Valkey Lua script on the production-backed store path to atomically prune expired bootstrap records, remove the matching token, and return the instructor passcode only once. If the atomic path is available and finds no token, the route returns `403` and does not fall back to the stale in-memory snapshot.
+- Residual risk: The in-memory fallback used in tests/local dev still does not provide cross-process atomicity, because there is no shared transaction primitive in the generic `SessionStore` contract yet. Production safety depends on running the shared Valkey-backed session store.
+- Validation (test/review/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `npm test --workspace activities -- syncdeck/server/routes.test.ts`.
+- Follow-up action: If more activities need one-time secret consumption, promote an atomic compare-and-consume helper into the shared session store layer instead of duplicating Valkey scripts per activity.
+- Owner: Codex

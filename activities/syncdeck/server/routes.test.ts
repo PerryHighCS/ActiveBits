@@ -1,4 +1,5 @@
 import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import type { ValkeySessionStore } from 'activebits-server/core/valkeyStore.js'
 import { acceptEntryParticipant } from 'activebits-server/core/acceptedEntryParticipants.js'
 import {
   computePersistentLinkUrlHash,
@@ -123,14 +124,90 @@ function createRequest(
   return { params, body, cookies, headers }
 }
 
-function createSessionStore(initial: Record<string, SessionRecord>) {
-  const store = { ...initial }
+function cloneSessionRecord(session: SessionRecord): SessionRecord {
+  return structuredClone(session)
+}
+
+function createMockSyncDeckValkeyStore(sharedStore: Record<string, SessionRecord>): Pick<ValkeySessionStore, 'client'> {
+  return {
+    client: {
+      async eval(script: string, numKeys: number, ...args: Array<string | number>) {
+        assert.equal(numKeys, 1)
+        assert.match(script, /syncdeck-manager-bootstrap-consume/)
+
+        const [keyArg, tokenHashArg, nowArg] = args
+        const key = String(keyArg)
+        const tokenHash = String(tokenHashArg)
+        const nowMs = Number(nowArg)
+        const sessionId = key.replace(/^session:/, '')
+        const session = sharedStore[sessionId]
+        if (!session) {
+          return ''
+        }
+
+        const sessionData = asRecord(session.data)
+        if (!sessionData || typeof sessionData.instructorPasscode !== 'string') {
+          return ''
+        }
+
+        const managerBootstraps = Array.isArray(sessionData.managerBootstraps)
+          ? sessionData.managerBootstraps
+          : []
+        let matched = false
+        const retainedBootstraps = managerBootstraps.filter((record) => {
+          const bootstrapRecord = asRecord(record)
+          if (!bootstrapRecord) {
+            return false
+          }
+
+          const recordTokenHash = typeof bootstrapRecord.tokenHash === 'string' ? bootstrapRecord.tokenHash : ''
+          const createdAt = typeof bootstrapRecord.createdAt === 'number' ? bootstrapRecord.createdAt : NaN
+          const expiresAt = typeof bootstrapRecord.expiresAt === 'number' ? bootstrapRecord.expiresAt : NaN
+          if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt) || expiresAt <= nowMs) {
+            return false
+          }
+
+          if (!matched && recordTokenHash === tokenHash) {
+            matched = true
+            return false
+          }
+
+          return true
+        })
+
+        sharedStore[sessionId] = {
+          ...session,
+          data: {
+            ...session.data,
+            managerBootstraps: retainedBootstraps,
+          },
+        }
+
+        return matched ? sessionData.instructorPasscode : ''
+      },
+    },
+  } as Pick<ValkeySessionStore, 'client'>
+}
+
+function createSessionStore(
+  initial: Record<string, SessionRecord>,
+  options: {
+    sharedStore?: Record<string, SessionRecord>
+    valkeyStore?: Pick<ValkeySessionStore, 'client'>
+    cloneSessions?: boolean
+  } = {},
+) {
+  const store = options.sharedStore ?? { ...initial }
   const sessions: SessionStore = {
     async get(id: string) {
-      return store[id] ?? null
+      const session = store[id]
+      if (!session) {
+        return null
+      }
+      return options.cloneSessions ? cloneSessionRecord(session) : session
     },
     async set(id: string, session: SessionRecord) {
-      store[id] = session
+      store[id] = options.cloneSessions ? cloneSessionRecord(session) : session
     },
     async delete(id: string) {
       const existed = Boolean(store[id])
@@ -144,7 +221,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
       return true
     },
     async getAll() {
-      return Object.values(store)
+      return options.cloneSessions ? Object.values(store).map(cloneSessionRecord) : Object.values(store)
     },
     async getAllIds() {
       return Object.keys(store)
@@ -152,6 +229,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
     cleanup() {},
     async close() {},
     subscribeToBroadcast() {},
+    ...(options.valkeyStore ? { valkeyStore: options.valkeyStore as ValkeySessionStore } : {}),
   }
 
   return {
@@ -1440,6 +1518,7 @@ void test('instructor-passcode route returns passcode when teacher cookie matche
     persistentPresentationUrl: presentationUrl,
     persistentUrlHash: urlHash,
   })
+  assert.equal(res.headers['Cache-Control'], 'no-store')
 })
 
 void test('instructor-passcode route returns recovered persistent entryPolicy for syncdeck links', async () => {
@@ -2875,6 +2954,7 @@ void test('create route initializes syncdeck session state', async () => {
   assert.equal(typeof body.id, 'string')
   assert.equal(typeof body.instructorPasscode, 'string')
   assert.equal(body.instructorPasscode?.length, 32)
+  assert.equal(res.headers['Cache-Control'], 'no-store')
 })
 
 void test('configure route sets presentation url for valid passcode', async () => {
@@ -2971,6 +3051,7 @@ void test('manager-bootstrap route issues one-time bootstrap token for configure
   assert.equal(typeof issuedPayload.manageUrl, 'string')
   assert.match(issuedPayload.manageUrl ?? '', /^\/manage\/syncdeck\/s1#bootstrap=[a-f0-9]{48}$/)
   assert.equal(issuedPayload.expiresInMs, 5 * 60 * 1000)
+  assert.equal(issueRes.headers['Cache-Control'], 'no-store')
 
   const storedBootstraps = (storeState.store.s1?.data as { managerBootstraps?: unknown[] }).managerBootstraps
   assert.equal(Array.isArray(storedBootstraps), true)
@@ -2988,6 +3069,7 @@ void test('manager-bootstrap route issues one-time bootstrap token for configure
 
   assert.equal(consumeRes.statusCode, 200)
   assert.deepEqual(consumeRes.body, { instructorPasscode: 'teacher-pass' })
+  assert.equal(consumeRes.headers['Cache-Control'], 'no-store')
   assert.deepEqual((storeState.store.s1?.data as { managerBootstraps?: unknown[] }).managerBootstraps, [])
 
   const consumeAgainRes = createResponse()
@@ -3046,6 +3128,73 @@ void test('manager-bootstrap consume rejects expired bootstrap tokens', async ()
   } finally {
     Date.now = originalDateNow
   }
+})
+
+void test('manager-bootstrap consume is one-time across parallel Valkey-backed requests', async () => {
+  const sharedStore = {
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  }
+  ;(sharedStore.s1.data as Record<string, unknown>).presentationUrl = 'https://example.com/deck'
+  const valkeyStore = createMockSyncDeckValkeyStore(sharedStore)
+
+  const appA = createMockApp()
+  const appB = createMockApp()
+  const wsA = createMockWs()
+  const wsB = createMockWs()
+  const instanceA = createSessionStore({}, { sharedStore, valkeyStore, cloneSessions: true })
+  const instanceB = createSessionStore({}, { sharedStore, valkeyStore, cloneSessions: true })
+
+  setupSyncDeckRoutes(appA, instanceA.sessions, wsA)
+  setupSyncDeckRoutes(appB, instanceB.sessions, wsB)
+
+  const issueHandler = appA.handlers.post['/api/syncdeck/:sessionId/manager-bootstrap']
+  const consumeHandlerA = appA.handlers.post['/api/syncdeck/:sessionId/consume-manager-bootstrap']
+  const consumeHandlerB = appB.handlers.post['/api/syncdeck/:sessionId/consume-manager-bootstrap']
+  assert.equal(typeof issueHandler, 'function')
+  assert.equal(typeof consumeHandlerA, 'function')
+  assert.equal(typeof consumeHandlerB, 'function')
+
+  const issueRes = createResponse()
+  await issueHandler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: 'teacher-pass' },
+    ),
+    issueRes,
+  )
+
+  assert.equal(issueRes.statusCode, 200)
+  const bootstrapToken = (issueRes.body as { bootstrapToken?: string }).bootstrapToken
+  assert.equal(typeof bootstrapToken, 'string')
+
+  const consumeResA = createResponse()
+  const consumeResB = createResponse()
+  await Promise.all([
+    consumeHandlerA?.(
+      createRequest(
+        { sessionId: 's1' },
+        { bootstrapToken },
+      ),
+      consumeResA,
+    ),
+    consumeHandlerB?.(
+      createRequest(
+        { sessionId: 's1' },
+        { bootstrapToken },
+      ),
+      consumeResB,
+    ),
+  ])
+
+  const statusCodes = [consumeResA.statusCode, consumeResB.statusCode].sort((a, b) => a - b)
+  assert.deepEqual(statusCodes, [200, 403])
+
+  const successResponse = consumeResA.statusCode === 200 ? consumeResA : consumeResB
+  const failureResponse = consumeResA.statusCode === 403 ? consumeResA : consumeResB
+  assert.deepEqual(successResponse.body, { instructorPasscode: 'teacher-pass' })
+  assert.equal(successResponse.headers['Cache-Control'], 'no-store')
+  assert.deepEqual(failureResponse.body, { error: 'forbidden' })
+  assert.deepEqual((sharedStore.s1.data as { managerBootstraps?: unknown[] }).managerBootstraps, [])
 })
 
 void test('manager-bootstrap consume rejects malformed bootstrap tokens before hashing', async () => {
