@@ -26,6 +26,7 @@ import { extractIndicesFromRevealStateMessage } from './SyncDeckStudent.js'
 import { resolveInboundPayloadType } from './SyncDeckStudent.js'
 import { resolveSemanticInstructorCommandName } from './SyncDeckStudent.js'
 import { shouldQueuePayloadUntilIframeReady } from './SyncDeckStudent.js'
+import { enqueuePendingIframePayload } from './SyncDeckStudent.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckStudent.js'
 import { applySyncDeckEmbeddedLifecyclePayload } from './SyncDeckStudent.js'
 import { resolveStudentActiveEmbeddedInstanceKey } from './SyncDeckStudent.js'
@@ -662,6 +663,47 @@ void test('shouldQueuePayloadUntilIframeReady queues reveal commands but not the
     })),
     true,
   )
+})
+
+void test('enqueuePendingIframePayload coalesces repeated setState updates and caps queue length', () => {
+  const firstSetState = toRevealCommandMessage({
+    type: 'slidechanged',
+    payload: { h: 1, v: 0, f: 0 },
+  })
+  const secondSetState = toRevealCommandMessage({
+    type: 'slidechanged',
+    payload: { h: 2, v: 0, f: 0 },
+  })
+  const boundaryPayload = toRevealBoundaryCommandMessage({
+    type: 'reveal-sync',
+    action: 'studentBoundaryChanged',
+    payload: {
+      studentBoundary: { h: 2, v: 0, f: 0 },
+      indices: { h: 2, v: 0, f: 0 },
+    },
+  })
+
+  const afterFirst = enqueuePendingIframePayload([], firstSetState, 2)
+  assert.equal(afterFirst.coalesced, false)
+  assert.equal(afterFirst.droppedCount, 0)
+  assert.equal(afterFirst.queue.length, 1)
+
+  const afterSecond = enqueuePendingIframePayload(afterFirst.queue, secondSetState, 2)
+  assert.equal(afterSecond.coalesced, true)
+  assert.equal(afterSecond.droppedCount, 0)
+  assert.equal(afterSecond.queue.length, 1)
+  assert.deepEqual(
+    (afterSecond.queue[0] as { payload?: { payload?: { state?: unknown } } }).payload?.payload?.state,
+    { indexh: 2, indexv: 0, indexf: 0 },
+  )
+
+  const afterBoundary = enqueuePendingIframePayload(afterSecond.queue, boundaryPayload, 2)
+  assert.equal(afterBoundary.queue.length, 2)
+
+  const capped = enqueuePendingIframePayload(afterBoundary.queue, { type: 'custom-non-coalesced' }, 2)
+  assert.equal(capped.coalesced, false)
+  assert.equal(capped.droppedCount, 1)
+  assert.equal(capped.queue.length, 2)
 })
 
 void test('buildStudentRoleCommandMessage emits setRole student command by default', () => {
