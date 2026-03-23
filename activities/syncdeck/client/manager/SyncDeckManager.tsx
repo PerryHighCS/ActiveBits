@@ -18,7 +18,7 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent, type MouseEvent, type PointerEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 
@@ -1576,7 +1576,6 @@ const SyncDeckManager: FC = () => {
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
   const [downloadingEmbeddedReportInstanceKey, setDownloadingEmbeddedReportInstanceKey] = useState<string | null>(null)
   const [isDownloadingSessionReport, setIsDownloadingSessionReport] = useState(false)
-  const [isOverlayNavClickShieldActive, setIsOverlayNavClickShieldActive] = useState(false)
   const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
   const [overlayNavigationCapabilityIndices, setOverlayNavigationCapabilityIndices] =
     useState<{ h: number; v: number; f: number } | null>(null)
@@ -1592,6 +1591,7 @@ const SyncDeckManager: FC = () => {
   const [allowUnverifiedStartForUrl, setAllowUnverifiedStartForUrl] = useState<string | null>(null)
   const [confirmStartForUrl, setConfirmStartForUrl] = useState<string | null>(null)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
+  const overlayNavClickShieldRef = useRef<HTMLDivElement | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastInstructorPayloadRef = useRef<unknown>(null)
   const lastInstructorStatePayloadRef = useRef<unknown>(null)
@@ -1611,6 +1611,7 @@ const SyncDeckManager: FC = () => {
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const overlayNavClickShieldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const didHandleOverlayNavPointerDownRef = useRef(false)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
   useEffect(() => {
@@ -1643,11 +1644,15 @@ const SyncDeckManager: FC = () => {
   }, [])
 
   const activateOverlayNavClickShield = useCallback((): void => {
-    setIsOverlayNavClickShieldActive(true)
+    if (overlayNavClickShieldRef.current) {
+      overlayNavClickShieldRef.current.style.pointerEvents = 'auto'
+    }
     clearOverlayNavClickShieldTimeout()
     overlayNavClickShieldTimeoutRef.current = setTimeout(() => {
       overlayNavClickShieldTimeoutRef.current = null
-      setIsOverlayNavClickShieldActive(false)
+      if (overlayNavClickShieldRef.current) {
+        overlayNavClickShieldRef.current.style.pointerEvents = 'none'
+      }
     }, EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS)
   }, [clearOverlayNavClickShieldTimeout])
 
@@ -3046,6 +3051,23 @@ const SyncDeckManager: FC = () => {
     direction: 'left' | 'right' | 'up' | 'down',
   ): void => {
     consumeEmbeddedOverlayNavigationEvent(event)
+    if (didHandleOverlayNavPointerDownRef.current) {
+      didHandleOverlayNavPointerDownRef.current = false
+      return
+    }
+    sendEmbeddedOverlayNavigation(direction)
+  }
+
+  const handleManagerOverlayNavigationPointerDown = (
+    event: PointerEvent<HTMLButtonElement>,
+    direction: 'left' | 'right' | 'up' | 'down',
+  ): void => {
+    if (event.button !== 0) {
+      return
+    }
+    consumeEmbeddedOverlayNavigationEvent(event)
+    didHandleOverlayNavPointerDownRef.current = true
+    activateOverlayNavClickShield()
     sendEmbeddedOverlayNavigation(direction)
   }
 
@@ -3516,9 +3538,11 @@ const SyncDeckManager: FC = () => {
                   onLoad={handlePresentationIframeLoad}
                 />
 
-                {isOverlayNavClickShieldActive ? (
-                  <div aria-hidden="true" className="absolute inset-0 z-[25] bg-transparent" />
-                ) : null}
+                <div
+                  ref={overlayNavClickShieldRef}
+                  aria-hidden="true"
+                  className="absolute inset-0 z-[25] bg-transparent pointer-events-none"
+                />
 
                 {activeEmbeddedActivity && (
                   <div className="absolute inset-0 z-20 bg-white overflow-hidden">
@@ -3540,6 +3564,7 @@ const SyncDeckManager: FC = () => {
                     <button
                       type="button"
                       className="absolute left-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                      onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'left')}
                       onClick={(event) => handleManagerOverlayNavigationClick(event, 'left')}
                       aria-label="Move left"
                       title="Move left"
@@ -3550,6 +3575,7 @@ const SyncDeckManager: FC = () => {
                     <button
                       type="button"
                       className="absolute top-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                      onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'up')}
                       onClick={(event) => handleManagerOverlayNavigationClick(event, 'up')}
                       aria-label="Move up"
                       title="Move up"
@@ -3560,6 +3586,7 @@ const SyncDeckManager: FC = () => {
                     <button
                       type="button"
                       className="absolute right-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                      onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'right')}
                       onClick={(event) => handleManagerOverlayNavigationClick(event, 'right')}
                       aria-label="Move right"
                       title="Move right"
@@ -3570,6 +3597,7 @@ const SyncDeckManager: FC = () => {
                     <button
                       type="button"
                       className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                      onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'down')}
                       onClick={(event) => handleManagerOverlayNavigationClick(event, 'down')}
                       aria-label="Move down"
                       title="Move down"

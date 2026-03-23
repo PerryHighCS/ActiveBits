@@ -30,17 +30,17 @@ void test('resolveOptimisticEmbeddedOverlayIndices uses directional horizontal n
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 0, f: 0 }, 'right'),
-    { h: 3, v: 0, f: 0 },
+    { h: 3, v: 0, f: -1 },
   )
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 2, f: 0 }, 'left'),
-    { h: 1, v: 0, f: 0 },
+    { h: 1, v: 0, f: -1 },
   )
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 3, v: 0, f: 0 }, 'left'),
-    { h: 2, v: 0, f: 0 },
+    { h: 2, v: 0, f: -1 },
   )
 })
 
@@ -52,12 +52,12 @@ void test('resolveOptimisticEmbeddedOverlayIndices preserves vertical movement w
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 0, f: 0 }, 'down'),
-    { h: 2, v: 1, f: 0 },
+    { h: 2, v: 1, f: -1 },
   )
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 1, f: 0 }, 'up'),
-    { h: 2, v: 0, f: 0 },
+    { h: 2, v: 0, f: -1 },
   )
 })
 

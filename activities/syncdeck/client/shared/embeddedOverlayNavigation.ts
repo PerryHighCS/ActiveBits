@@ -1,5 +1,6 @@
 export type EmbeddedOverlayDirection = 'left' | 'right' | 'up' | 'down'
 export const EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS = 250
+const PRE_FRAGMENT_INDEX = -1
 
 export interface EmbeddedOverlayIndices {
   h: number
@@ -135,7 +136,7 @@ export function resolveOptimisticEmbeddedOverlayIndices(
 
   const anchors = listEmbeddedOverlayAnchors(instanceKeys)
   if (direction === 'up') {
-    return { h: currentIndices.h, v: Math.max(0, currentIndices.v - 1), f: 0 }
+    return { h: currentIndices.h, v: Math.max(0, currentIndices.v - 1), f: PRE_FRAGMENT_INDEX }
   }
 
   if (direction === 'down') {
@@ -144,27 +145,27 @@ export function resolveOptimisticEmbeddedOverlayIndices(
     })
 
     if (nextVerticalAnchor && nextVerticalAnchor.v === currentIndices.v + 1) {
-      return { h: nextVerticalAnchor.h, v: nextVerticalAnchor.v, f: 0 }
+      return { h: nextVerticalAnchor.h, v: nextVerticalAnchor.v, f: PRE_FRAGMENT_INDEX }
     }
 
-    return { h: currentIndices.h, v: currentIndices.v + 1, f: 0 }
+    return { h: currentIndices.h, v: currentIndices.v + 1, f: PRE_FRAGMENT_INDEX }
   }
 
   if (direction === 'left') {
     const targetH = Math.max(0, currentIndices.h - 1)
     const leftAnchor = findHorizontalAnchor(anchors, targetH)
     if (leftAnchor) {
-      return { h: leftAnchor.h, v: leftAnchor.v, f: 0 }
+      return { h: leftAnchor.h, v: leftAnchor.v, f: PRE_FRAGMENT_INDEX }
     }
 
-    return { h: targetH, v: 0, f: 0 }
+    return { h: targetH, v: 0, f: PRE_FRAGMENT_INDEX }
   }
 
   const targetH = currentIndices.h + 1
   const rightAnchor = findHorizontalAnchor(anchors, targetH)
   if (rightAnchor) {
-    return { h: rightAnchor.h, v: rightAnchor.v, f: 0 }
+    return { h: rightAnchor.h, v: rightAnchor.v, f: PRE_FRAGMENT_INDEX }
   }
 
-  return { h: targetH, v: 0, f: 0 }
+  return { h: targetH, v: 0, f: PRE_FRAGMENT_INDEX }
 }
