@@ -30,6 +30,7 @@ Before making changes, read these files when relevant:
 10. Plans should be iterative and include checklists of steps for the plan. Checklists must be updated as tasks are created and completed.
 11. When adding or changing SyncDeck-embedded activity launch formats, update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same branch so the shared skill docs stay aligned with the real payloads used by the repo.
 12. If a `skills/syncdeck/...` doc change is intended to be shared across repos, push the updated subtree back to `syncdeck-agent-skills` as part of the completion flow.
+13. Always perform `git subtree pull` and other subtree sync operations on a non-`main` branch. Keep local `main` aligned with `origin/main`, and branch first before pulling subtree updates.
  
 ## Preflight Checklist
 

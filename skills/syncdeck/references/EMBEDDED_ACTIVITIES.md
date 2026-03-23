@@ -132,6 +132,49 @@ If multiple activities need the same capability:
 - coupling shared slide utilities to one activity implementation
 - using raw query-string hacks instead of structured launch payloads
 
+## FRQ and MCQ Slides
+
+Whenever a slide presents a **free-response question (FRQ)** or a **multiple-choice question (MCQ)**, embed a `resonance` activity on the section rather than leaving the question as inert slide content.
+
+- FRQ → `type: "free-response"`
+- MCQ → `type: "multiple-choice"` with an `options` array (mark the correct option with `"isCorrect": true`)
+
+The slide still needs fallback content (the question rendered in HTML) for standalone/preview use — see the Fallback Slide Design section below.
+
+---
+
+## Fallback Slide Design for Activity Slides
+
+When a slide embeds an activity, it still needs visible fallback content for standalone/preview contexts (no parent host attached).
+
+Guidelines:
+
+- Include the question or prompt as readable HTML — do not leave the slide blank
+- Add a `slide-tag` span (or equivalent) to label the slide type, e.g. `<span class="slide-tag">FRQ</span>` or `<span class="slide-tag">MCQ</span>`
+- For MCQ fallbacks: show all options without highlighting the correct answer and without fragment animations — the activity owns answer reveal, not the slide
+- For FRQ fallbacks: show the question prompt in a styled box; do not add a text input field — response collection is the activity's job
+
+Example MCQ fallback structure:
+
+```html
+<section
+  data-activity-id="resonance"
+  data-activity-trigger="slide-enter"
+  data-activity-options='...'>
+
+  <div class="slide-inner">
+    <span class="slide-tag">MCQ</span>
+    <h2>Question title</h2>
+    <ul class="mcq-opts">
+      <li><span class="opt-key">A</span> Option text</li>
+      <li><span class="opt-key">B</span> Option text</li>
+    </ul>
+  </div>
+</section>
+```
+
+---
+
 ## Validation Checklist
 
 - activating the slide emits one well-formed request
