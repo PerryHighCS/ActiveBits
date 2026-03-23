@@ -34,6 +34,7 @@ const DISCONNECTED_STATUS_DELAY_MS = 250
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
 const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
+const SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_PATTERN = /^[a-f0-9]{48}$/
 interface SessionResponsePayload {
   session?: {
     data?: {
@@ -520,7 +521,12 @@ export function normalizeStoredInstructorPasscode(value: string | null): string 
 export function resolveSyncDeckManagerBootstrapToken(hash: string): string | null {
   const normalizedHash = hash.startsWith('#') ? hash.slice(1) : hash
   const token = new URLSearchParams(normalizedHash).get('bootstrap')
-  return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
+  if (typeof token !== 'string') {
+    return null
+  }
+
+  const trimmed = token.trim()
+  return SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_PATTERN.test(trimmed) ? trimmed : null
 }
 
 export function buildSyncDeckHashWithoutManagerBootstrap(hash: string): string {

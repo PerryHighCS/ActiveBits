@@ -3101,6 +3101,55 @@ void test('manager-bootstrap consume rejects malformed bootstrap tokens before h
   assert.equal(storedBootstrapsAfter?.length, 1)
 })
 
+void test('session normalization prunes malformed persisted manager bootstrap hashes', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const malformedHash = 'a'.repeat(63)
+  const oversizedHash = 'b'.repeat(640)
+  const validHash = 'c'.repeat(64)
+  const now = Date.now()
+  const baseSession = createSyncDeckSession('s1', 'teacher-pass')
+  const storeState = createSessionStore({
+    s1: {
+      ...baseSession,
+      data: {
+        ...baseSession.data,
+        presentationUrl: 'https://example.com/deck',
+        managerBootstraps: [
+          { tokenHash: malformedHash, createdAt: now, expiresAt: now + 60_000 },
+          { tokenHash: oversizedHash, createdAt: now, expiresAt: now + 60_000 },
+          { tokenHash: validHash, createdAt: now, expiresAt: now + 60_000 },
+        ],
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const consumeHandler = app.handlers.post['/api/syncdeck/:sessionId/consume-manager-bootstrap']
+  assert.equal(typeof consumeHandler, 'function')
+
+  const consumeRes = createResponse()
+  await consumeHandler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { bootstrapToken: 'invalid' },
+    ),
+    consumeRes,
+  )
+
+  assert.equal(consumeRes.statusCode, 400)
+  const normalizedBootstraps = (
+    storeState.store.s1?.data as { managerBootstraps?: Array<{ tokenHash?: string; createdAt?: number; expiresAt?: number }> }
+  ).managerBootstraps
+  assert.deepEqual(normalizedBootstraps, [
+    {
+      tokenHash: validHash,
+      createdAt: now,
+      expiresAt: now + 60_000,
+    },
+  ])
+})
+
 void test('configure route accepts urlHash when session has persistent mapping', async () => {
   initializePersistentStorage(null)
 

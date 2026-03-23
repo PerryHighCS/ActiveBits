@@ -175,12 +175,16 @@ void test('normalizeStoredInstructorPasscode trims and rejects empty cached valu
   assert.equal(normalizeStoredInstructorPasscode(null), null)
 })
 
-void test('resolveSyncDeckManagerBootstrapToken reads a non-empty bootstrap token from hash params', () => {
+void test('resolveSyncDeckManagerBootstrapToken accepts only a valid bootstrap token from hash params', () => {
   assert.equal(
-    resolveSyncDeckManagerBootstrapToken('#bootstrap=token-123'),
-    'token-123',
+    resolveSyncDeckManagerBootstrapToken('#bootstrap=abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef'),
+    'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef',
   )
   assert.equal(resolveSyncDeckManagerBootstrapToken('#bootstrap=   '), null)
+  assert.equal(resolveSyncDeckManagerBootstrapToken('#bootstrap=token-123'), null)
+  assert.equal(resolveSyncDeckManagerBootstrapToken(`#bootstrap=${'a'.repeat(47)}`), null)
+  assert.equal(resolveSyncDeckManagerBootstrapToken(`#bootstrap=${'A'.repeat(48)}`), null)
+  assert.equal(resolveSyncDeckManagerBootstrapToken(`#bootstrap=${'g'.repeat(48)}`), null)
   assert.equal(resolveSyncDeckManagerBootstrapToken(''), null)
 })
 

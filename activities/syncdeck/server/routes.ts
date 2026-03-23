@@ -163,6 +163,7 @@ const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const MAX_CHALKBOARD_DELTA_STROKES = 200
 const SYNCDECK_MANAGER_BOOTSTRAP_TTL_MS = 5 * 60 * 1000
 const SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_LENGTH = 48
+const SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_HASH_LENGTH = 64
 const MAX_SYNCDECK_MANAGER_BOOTSTRAPS = 10
 const SYNCDECK_EMBEDDED_OWNER = 'syncdeck-instructor'
 const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === '1'
@@ -427,7 +428,12 @@ function normalizeManagerBootstrapRecord(value: unknown): SyncDeckManagerBootstr
   const tokenHash = typeof value.tokenHash === 'string' ? value.tokenHash.trim() : ''
   const createdAt = normalizeNullableFiniteNumber(value.createdAt)
   const expiresAt = normalizeNullableFiniteNumber(value.expiresAt)
-  if (!tokenHash || createdAt == null || expiresAt == null) {
+  if (
+    tokenHash.length !== SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_HASH_LENGTH
+    || !/^[a-f0-9]{64}$/.test(tokenHash)
+    || createdAt == null
+    || expiresAt == null
+  ) {
     return null
   }
 
@@ -1060,7 +1066,7 @@ function hashSyncDeckManagerBootstrapToken(token: string): string {
 }
 
 function createSyncDeckManagerBootstrapToken(): string {
-  return randomBytes(24).toString('hex')
+  return randomBytes(SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_LENGTH / 2).toString('hex')
 }
 
 function normalizeSyncDeckManagerBootstrapToken(value: unknown): string | null {
@@ -1073,7 +1079,7 @@ function normalizeSyncDeckManagerBootstrapToken(value: unknown): string | null {
     return null
   }
 
-  return /^[a-f0-9]{48}$/.test(trimmed) ? trimmed : null
+  return new RegExp(`^[a-f0-9]{${SYNCDECK_MANAGER_BOOTSTRAP_TOKEN_LENGTH}}$`).test(trimmed) ? trimmed : null
 }
 
 function issueSyncDeckManagerBootstrap(sessionData: SyncDeckSessionData, now = Date.now()): string {
