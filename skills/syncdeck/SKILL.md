@@ -48,7 +48,7 @@ Required implications:
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Presentation Title</title>
-  <link rel="stylesheet" href="../vendor/SyncDeck-Reveal/dist/syncdeck-reveal.css">
+  <link rel="stylesheet" href="../../runtime/syncdeck-reveal/dist/syncdeck-reveal.css">
   <style>
     /* Add custom theme CSS here. See references/STYLE_PRESETS.md */
   </style>
@@ -69,7 +69,7 @@ Required implications:
     <div id="storyboard-track" class="storyboard-track"></div>
   </div>
 
-  <script src="../vendor/SyncDeck-Reveal/dist/syncdeck-reveal.js"></script>
+  <script src="../../runtime/syncdeck-reveal/dist/syncdeck-reveal.js"></script>
   <script>
     initSyncDeckReveal({
       deckId: 'my-deck-name',
@@ -94,7 +94,9 @@ Required implications:
 </html>
 ```
 
-Use `vendor/SyncDeck-Reveal/dist/...` for root-level decks and `../vendor/SyncDeck-Reveal/dist/...` for decks inside subdirectories.
+Use a relative path from the deck's published location. In this repo's common
+`/<course>/<unit>/deck.html` layout, that means
+`../../runtime/syncdeck-reveal/dist/...`.
 
 The bundle provides `Reveal`, `RevealNotes`, `RevealChalkboard`, `RevealIframeSync`, `initRevealStoryboard`, and `initSyncDeckReveal`. Do not add CDN links for Reveal.js or its plugins when authoring SyncDeck decks.
 
@@ -130,7 +132,7 @@ Storyboard expectations:
 When a parent host should control the deck, initialize with `initSyncDeckReveal(...)` and pass any sync-specific settings through `iframeSyncOverrides`:
 
 ```html
-<script src="../vendor/SyncDeck-Reveal/dist/syncdeck-reveal.js"></script>
+<script src="../../runtime/syncdeck-reveal/dist/syncdeck-reveal.js"></script>
 <script>
 initSyncDeckReveal({
   deckId: 'my-unique-deck-id',
