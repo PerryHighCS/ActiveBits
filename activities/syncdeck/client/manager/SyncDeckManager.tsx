@@ -2,6 +2,7 @@ import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
+import { buildSyncDeckPasscodeKey } from '../shared/authStorage.js'
 import {
   getStudentPresentationCompatibilityError,
 } from '../shared/presentationUrlCompatibility.js'
@@ -27,7 +28,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEv
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 
-const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
 const SYNCDECK_CHALKBOARD_OPEN_KEY_PREFIX = 'syncdeck_chalkboard_open_'
 const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
@@ -494,10 +494,6 @@ interface SyncDeckManagerNavigationCapabilities {
   canGoForward: boolean
   canGoUp: boolean
   canGoDown: boolean
-}
-
-function buildSyncDeckPasscodeKey(sessionId: string): string {
-  return `${SYNCDECK_PASSCODE_KEY_PREFIX}${sessionId}`
 }
 
 function buildSyncDeckChalkboardOpenKey(sessionId: string): string {

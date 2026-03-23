@@ -76,6 +76,7 @@ export interface ActivityUtility {
   path: string
   description?: string
   surfaces?: Array<'manage' | 'home'>
+  renderTarget?: 'student' | 'util'
   standaloneSessionId?: string
 }
 

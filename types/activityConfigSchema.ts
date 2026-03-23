@@ -306,6 +306,11 @@ function parseUtilities(raw: unknown, context: string): ActivityUtility[] | unde
       }
     }
 
+    const renderTarget = entry.renderTarget
+    if (renderTarget !== undefined && renderTarget !== 'student' && renderTarget !== 'util') {
+      throw new Error(`${context}.utilities[${index}]: "renderTarget" must be "student" or "util" when provided`)
+    }
+
     return {
       id: readRequiredString(entry, 'id', `${context}.utilities[${index}]`),
       label: readRequiredString(entry, 'label', `${context}.utilities[${index}]`),
@@ -318,6 +323,7 @@ function parseUtilities(raw: unknown, context: string): ActivityUtility[] | unde
         ? { standaloneSessionId: readOptionalString(entry, 'standaloneSessionId', `${context}.utilities[${index}]`) }
         : {}),
       ...(surfaces !== undefined ? { surfaces: surfaces as Array<'manage' | 'home'> } : {}),
+      ...(renderTarget !== undefined ? { renderTarget } : {}),
     }
   })
 }
@@ -510,6 +516,10 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const embeddedRuntime = parseEmbeddedRuntime(rawConfig.embeddedRuntime, context)
   const reportEndpoint = readOptionalString(rawConfig, 'reportEndpoint', context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)
+
+  if (utilities?.some((utility) => utility.renderTarget === 'util') && utilMode !== true) {
+    throw new Error(`${context}: utilities with "renderTarget: util" require "utilMode: true"`)
+  }
 
   assignOptionalField(parsed, 'title', title)
   assignOptionalField(parsed, 'clientEntry', clientEntry)
