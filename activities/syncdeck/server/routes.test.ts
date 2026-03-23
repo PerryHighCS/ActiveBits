@@ -184,6 +184,7 @@ function createSyncDeckSession(id: string, instructorPasscode = 'passcode-1'): S
         snapshot: null,
         delta: [],
       },
+      managerBootstraps: [],
       drawingToolMode: 'none',
       students: [],
       embeddedActivities: {},
@@ -2932,6 +2933,119 @@ void test('configure route can enable standalone mode for solo-launched sessions
   const updated = storeState.store.s1?.data as Record<string, unknown>
   assert.equal(updated.presentationUrl, 'https://example.com/deck')
   assert.equal(updated.standaloneMode, true)
+})
+
+void test('manager-bootstrap route issues one-time bootstrap token for configured instructor-owned sessions', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+  ;(storeState.store.s1?.data as Record<string, unknown>).presentationUrl = 'https://example.com/deck'
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const issueHandler = app.handlers.post['/api/syncdeck/:sessionId/manager-bootstrap']
+  const consumeHandler = app.handlers.post['/api/syncdeck/:sessionId/consume-manager-bootstrap']
+  assert.equal(typeof issueHandler, 'function')
+  assert.equal(typeof consumeHandler, 'function')
+
+  const issueRes = createResponse()
+  await issueHandler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: 'teacher-pass' },
+    ),
+    issueRes,
+  )
+
+  assert.equal(issueRes.statusCode, 200)
+  const issuedPayload = issueRes.body as {
+    sessionId?: string
+    bootstrapToken?: string
+    manageUrl?: string
+    expiresInMs?: number
+  }
+  assert.equal(issuedPayload.sessionId, 's1')
+  assert.equal(typeof issuedPayload.bootstrapToken, 'string')
+  assert.match(issuedPayload.bootstrapToken ?? '', /^[a-f0-9]{48}$/)
+  assert.equal(typeof issuedPayload.manageUrl, 'string')
+  assert.match(issuedPayload.manageUrl ?? '', /^\/manage\/syncdeck\/s1\?bootstrap=[a-f0-9]{48}$/)
+  assert.equal(issuedPayload.expiresInMs, 5 * 60 * 1000)
+
+  const storedBootstraps = (storeState.store.s1?.data as { managerBootstraps?: unknown[] }).managerBootstraps
+  assert.equal(Array.isArray(storedBootstraps), true)
+  assert.equal(storedBootstraps?.length, 1)
+  assert.notEqual((storedBootstraps?.[0] as { tokenHash?: string } | undefined)?.tokenHash, issuedPayload.bootstrapToken)
+
+  const consumeRes = createResponse()
+  await consumeHandler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { bootstrapToken: issuedPayload.bootstrapToken },
+    ),
+    consumeRes,
+  )
+
+  assert.equal(consumeRes.statusCode, 200)
+  assert.deepEqual(consumeRes.body, { instructorPasscode: 'teacher-pass' })
+  assert.deepEqual((storeState.store.s1?.data as { managerBootstraps?: unknown[] }).managerBootstraps, [])
+
+  const consumeAgainRes = createResponse()
+  await consumeHandler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { bootstrapToken: issuedPayload.bootstrapToken },
+    ),
+    consumeAgainRes,
+  )
+  assert.equal(consumeAgainRes.statusCode, 403)
+})
+
+void test('manager-bootstrap consume rejects expired bootstrap tokens', async () => {
+  const originalDateNow = Date.now
+  let nowMs = 1_000
+  Date.now = () => nowMs
+
+  try {
+    const app = createMockApp()
+    const ws = createMockWs()
+    const storeState = createSessionStore({
+      s1: createSyncDeckSession('s1', 'teacher-pass'),
+    })
+    ;(storeState.store.s1?.data as Record<string, unknown>).presentationUrl = 'https://example.com/deck'
+    setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+    const issueHandler = app.handlers.post['/api/syncdeck/:sessionId/manager-bootstrap']
+    const consumeHandler = app.handlers.post['/api/syncdeck/:sessionId/consume-manager-bootstrap']
+    assert.equal(typeof issueHandler, 'function')
+    assert.equal(typeof consumeHandler, 'function')
+
+    const issueRes = createResponse()
+    await issueHandler?.(
+      createRequest(
+        { sessionId: 's1' },
+        { instructorPasscode: 'teacher-pass' },
+      ),
+      issueRes,
+    )
+
+    const issuedPayload = issueRes.body as { bootstrapToken?: string }
+    nowMs += 5 * 60 * 1000 + 1
+
+    const consumeRes = createResponse()
+    await consumeHandler?.(
+      createRequest(
+        { sessionId: 's1' },
+        { bootstrapToken: issuedPayload.bootstrapToken },
+      ),
+      consumeRes,
+    )
+
+    assert.equal(consumeRes.statusCode, 403)
+    assert.deepEqual((storeState.store.s1?.data as { managerBootstraps?: unknown[] }).managerBootstraps, [])
+  } finally {
+    Date.now = originalDateNow
+  }
 })
 
 void test('configure route accepts urlHash when session has persistent mapping', async () => {

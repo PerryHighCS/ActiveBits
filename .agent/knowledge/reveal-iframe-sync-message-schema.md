@@ -258,6 +258,129 @@ Erase variant:
 - `board` — chalkboard page index (for mode 1 only; mode 0 ignores it)
 - Strokes for slides not currently visible are stored and replayed when the student navigates to that slide
 
+---
+
+## Cross-Origin Ad Hoc Hosting Note
+
+For a standalone presentation hosted on a different origin, "Host this deck in SyncDeck" should be modeled as an **ActiveBits session bootstrap handoff**, not as an in-iframe role flip.
+
+Why:
+- The iframe protocol's `setRole` command only changes runtime behavior inside the deck.
+- A real instructor-hosted SyncDeck session also requires a server-created `sessionId`, a configured `presentationUrl`, and instructor authentication for the SyncDeck manager websocket.
+- In the current ActiveBits ad hoc flow, `POST /api/syncdeck/create` returns both `sessionId` and `instructorPasscode`, and `POST /api/syncdeck/:sessionId/configure` requires that passcode.
+- A cross-origin standalone page cannot safely seed ActiveBits browser storage directly for the manager route.
+
+Recommended flow:
+1. The standalone deck calls the ActiveBits ad hoc create/configure endpoints.
+2. ActiveBits issues a short-lived, one-time bootstrap artifact tied to the created session and instructor authority.
+3. The deck redirects to the hosted SyncDeck manager route on the ActiveBits origin.
+4. The manager consumes that bootstrap artifact, persists the normal instructor bootstrap state on the ActiveBits origin, removes the artifact from the URL, and continues as a standard hosted SyncDeck session.
+
+Security constraints:
+- Do not place the raw `instructorPasscode` in the redirect URL.
+- Treat the bootstrap artifact as one-time and short-lived.
+- Keep the iframe sync protocol focused on deck/host coordination after the hosted manager page has assumed control.
+
+### ActiveBits Contract For The Presentation Team
+
+The presentation-side flow for cross-origin ad hoc hosting is:
+
+1. Determine the canonical presentation URL that ActiveBits should host.
+2. Create a SyncDeck session.
+3. Configure that session with the presentation URL.
+4. Request a redirect-safe manager bootstrap token.
+5. Redirect the browser to the returned hosted manager URL on the ActiveBits origin.
+
+#### Step 1: Create session
+
+`POST /api/syncdeck/create`
+
+Response:
+
+```json
+{
+  "id": "syncdeck-12345",
+  "instructorPasscode": "32-char-hex-passcode"
+}
+```
+
+Notes:
+- The presentation app must treat `instructorPasscode` as secret instructor auth material.
+- Do not place this passcode in query params, hash fragments, analytics logs, or postMessage payloads.
+
+#### Step 2: Configure session
+
+`POST /api/syncdeck/:sessionId/configure`
+
+Request body:
+
+```json
+{
+  "presentationUrl": "https://slides.example/deck",
+  "instructorPasscode": "32-char-hex-passcode",
+  "standaloneMode": false
+}
+```
+
+Notes:
+- Use `standaloneMode: false` when the goal is to transition into a hosted instructor-managed SyncDeck session.
+- `presentationUrl` must be a valid absolute `http(s)` URL.
+
+#### Step 3: Mint a redirect-safe manager bootstrap
+
+`POST /api/syncdeck/:sessionId/manager-bootstrap`
+
+Request body:
+
+```json
+{
+  "instructorPasscode": "32-char-hex-passcode"
+}
+```
+
+Response:
+
+```json
+{
+  "sessionId": "syncdeck-12345",
+  "bootstrapToken": "48-char-hex-token",
+  "manageUrl": "/manage/syncdeck/syncdeck-12345?bootstrap=48-char-hex-token",
+  "expiresInMs": 300000
+}
+```
+
+Notes:
+- `bootstrapToken` is a one-time short-lived redirect artifact, not a long-lived credential.
+- The presentation app should prefer redirecting to `manageUrl` exactly as returned.
+- The returned `manageUrl` is intentionally the only URL that should carry bootstrap material.
+
+#### Step 4: Redirect
+
+Presentation-side browser redirect target:
+
+```text
+https://<activebits-origin>/manage/syncdeck/:sessionId?bootstrap=...
+```
+
+What ActiveBits does after redirect:
+- The hosted manager page consumes the bootstrap token with `POST /api/syncdeck/:sessionId/consume-manager-bootstrap`.
+- ActiveBits persists the real instructor auth state on its own origin.
+- ActiveBits removes `bootstrap` from the URL after successful consumption.
+- The manager then continues with the normal hosted SyncDeck websocket/auth flow.
+
+#### Failure handling guidance
+
+- If `create` fails, stay in the standalone deck and show a recoverable error.
+- If `configure` fails, do not request a manager bootstrap token.
+- If `manager-bootstrap` fails, do not redirect.
+- If the redirect lands on ActiveBits but the bootstrap token is expired or already consumed, the hosted manager page will not be authenticated; the safest presentation-side response is to let the user retry from the standalone deck rather than trying to recover with URL-carried instructor secrets.
+
+#### Important non-goals
+
+- The presentation app should not try to switch the existing standalone iframe into full hosted instructor mode by sending `setRole: instructor` alone.
+- The presentation app should not attempt to emulate ActiveBits manager storage on the cross-origin page.
+- The presentation app should not cache bootstrap tokens for later reuse.
+
 #### `chalkboardState`
 
 Full state sync. Replace the target iframe's entire drawing storage with a snapshot and immediately redraw the current slide.

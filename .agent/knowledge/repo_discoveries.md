@@ -15,6 +15,14 @@ Use this log for durable findings that future contributors and agents should reu
 ## Discoveries
 
 - Date: 2026-03-23
+- Area: activities | syncdeck | cross-origin-bootstrap
+- Discovery: Cross-origin promotion from a standalone SyncDeck deck into a hosted manager session should store short-lived one-time bootstrap records on the SyncDeck session record itself (`session.data.managerBootstraps`) instead of in process-local memory or URL-carried instructor credentials.
+- Why it matters: Keeping bootstrap state on the canonical session record makes the handoff survive redirects, hot redeploys, and multi-instance routing while avoiding raw `instructorPasscode` leakage in redirect URLs.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/server/routes.test.ts`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
+- Follow-up action: Reuse this session-backed one-time bootstrap pattern for any future cross-origin manager-entry flows instead of inventing per-activity storage hacks.
+- Owner: Codex
+
+- Date: 2026-03-23
 - Area: client | activities | syncdeck
 - Discovery: SyncDeck manager and student should not treat every inbound `reveal-sync` envelope as an iframe-ready signal now that the protocol includes descriptive `metadata` messages.
 - Why it matters: A metadata-first emission order can otherwise flush queued commands and restore/replay state before the iframe has announced actual sync readiness, which risks brittle startup behavior while adding title metadata support.

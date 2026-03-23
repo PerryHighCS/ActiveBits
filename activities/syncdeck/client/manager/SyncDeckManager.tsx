@@ -50,6 +50,10 @@ interface InstructorPasscodeResponsePayload {
   persistentEntryPolicy?: unknown
 }
 
+interface ConsumeManagerBootstrapResponsePayload {
+  instructorPasscode?: unknown
+}
+
 interface SyncDeckStudentPresenceMessage {
   type?: unknown
   payload?: {
@@ -511,6 +515,18 @@ export function normalizeStoredInstructorPasscode(value: string | null): string 
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+export function resolveSyncDeckManagerBootstrapToken(search: string): string | null {
+  const token = new URLSearchParams(search).get('bootstrap')
+  return typeof token === 'string' && token.trim().length > 0 ? token.trim() : null
+}
+
+export function buildSyncDeckSearchWithoutManagerBootstrap(search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete('bootstrap')
+  const nextSearch = params.toString()
+  return nextSearch.length > 0 ? `?${nextSearch}` : ''
 }
 
 export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
@@ -1762,6 +1778,10 @@ const SyncDeckManager: FC = () => {
 
   const queryUrlHash = new URLSearchParams(location.search).get('urlHash')
   const queryEntryPolicy = new URLSearchParams(location.search).get('entryPolicy')
+  const managerBootstrapToken = useMemo(
+    () => resolveSyncDeckManagerBootstrapToken(location.search),
+    [location.search],
+  )
   const urlHash = resolvePersistentUrlHashForConfigure(queryUrlHash, persistentUrlHashFallback)
   const entryPolicy = resolvePersistentEntryPolicyForConfigure(
     queryUrlHash,
@@ -2076,11 +2096,55 @@ const SyncDeckManager: FC = () => {
       const cachedPasscode = normalizeStoredInstructorPasscode(
         window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId)),
       )
+      let recoveredPasscode = cachedPasscode
 
       if (!isCancelled) {
         setInstructorPasscode(cachedPasscode)
         setPersistentUrlHashFallback(null)
         setPersistentEntryPolicyFallback(null)
+      }
+
+      if (managerBootstrapToken) {
+        try {
+          const bootstrapResponse = await fetch(`/api/syncdeck/${sessionId}/consume-manager-bootstrap`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              bootstrapToken: managerBootstrapToken,
+            }),
+          })
+
+          if (bootstrapResponse.ok) {
+            const bootstrapPayload = (await bootstrapResponse.json()) as ConsumeManagerBootstrapResponsePayload
+            const bootstrapPasscode = normalizeStoredInstructorPasscode(
+              typeof bootstrapPayload.instructorPasscode === 'string' ? bootstrapPayload.instructorPasscode : null,
+            )
+
+            if (bootstrapPasscode) {
+              window.sessionStorage.setItem(buildSyncDeckPasscodeKey(sessionId), bootstrapPasscode)
+              recoveredPasscode = bootstrapPasscode
+
+              if (!isCancelled) {
+                setInstructorPasscode(bootstrapPasscode)
+              }
+            }
+
+            const nextSearch = buildSyncDeckSearchWithoutManagerBootstrap(location.search)
+            if (!isCancelled && nextSearch !== location.search) {
+              void navigate(
+                {
+                  pathname: location.pathname,
+                  search: nextSearch,
+                },
+                { replace: true },
+              )
+            }
+          }
+        } catch {
+          // Fall through to the existing recovery paths below.
+        }
       }
 
       try {
@@ -2089,7 +2153,7 @@ const SyncDeckManager: FC = () => {
         })
         if (!response.ok) {
           if (!isCancelled) {
-            if (!cachedPasscode) {
+            if (!recoveredPasscode) {
               setInstructorPasscode(null)
             }
             setPersistentUrlHashFallback(null)
@@ -2101,10 +2165,11 @@ const SyncDeckManager: FC = () => {
         const payload = (await response.json()) as InstructorPasscodeResponsePayload
         if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
           window.sessionStorage.setItem(buildSyncDeckPasscodeKey(sessionId), payload.instructorPasscode)
+          recoveredPasscode = payload.instructorPasscode
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
-        } else if (!isCancelled && !cachedPasscode) {
+        } else if (!isCancelled && !recoveredPasscode) {
           setInstructorPasscode(null)
         }
 
@@ -2130,7 +2195,7 @@ const SyncDeckManager: FC = () => {
         }
       } catch {
         if (!isCancelled) {
-          if (!cachedPasscode) {
+          if (!recoveredPasscode) {
             setInstructorPasscode(null)
           }
           setPersistentUrlHashFallback(null)
@@ -2149,7 +2214,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId, userAgent])
+  }, [hostProtocol, location.pathname, location.search, managerBootstrapToken, navigate, sessionId, userAgent])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {

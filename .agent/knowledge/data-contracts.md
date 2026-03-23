@@ -16,6 +16,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-03-23
+- Surface: REST | client bootstrap | activity interface
+- Contract: Cross-origin ad hoc SyncDeck hosting uses a one-time manager bootstrap handoff after the existing create/configure flow. `POST /api/syncdeck/create` still returns `{ id, instructorPasscode }`; `POST /api/syncdeck/:sessionId/configure` still accepts `{ presentationUrl, instructorPasscode, standaloneMode }`; `POST /api/syncdeck/:sessionId/manager-bootstrap` now accepts `{ instructorPasscode }` and returns `{ sessionId, bootstrapToken, manageUrl, expiresInMs }`; `POST /api/syncdeck/:sessionId/consume-manager-bootstrap` accepts `{ bootstrapToken }` and returns `{ instructorPasscode }` once. The hosted manager may start at `/manage/syncdeck/:sessionId?bootstrap=...`, redeem that token, persist the normal `syncdeck_instructor_${sessionId}` bootstrap state on the ActiveBits origin, and then strip `bootstrap` from the URL.
+- Compatibility constraints: This flow is for cross-origin redirects from standalone decks into hosted SyncDeck manager sessions. The raw `instructorPasscode` must never appear in the redirect URL. `bootstrapToken` is short-lived and one-time; reuse after a successful consume or after expiry must fail. Existing same-origin ad hoc and persistent-link recovery flows remain valid.
+- Validation rules: `manager-bootstrap` requires a valid configured SyncDeck session plus a valid instructor passcode. `consume-manager-bootstrap` requires a non-empty token string and succeeds only when the token hash matches an unexpired stored record on that session. Session normalizers must preserve only unexpired `session.data.managerBootstraps` records.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
+- Follow-up action: If another activity needs cross-origin manager promotion, reuse the same bootstrap-token pattern rather than moving raw manager credentials into query params or cross-origin storage shims.
+- Owner: Codex
+
+- Date: 2026-03-23
 - Surface: activity interface | internal module
 - Contract: SyncDeck's reveal iframe sync protocol now reserves an iframe-to-host `metadata` action with object payloads such as `{ title }`. Hosts must treat the payload as optional descriptive metadata, trim string values, ignore unknown keys, and avoid using `metadata` as the iframe-ready handshake.
 - Compatibility constraints: Existing `ready` and `state` bootstrap behavior remains authoritative for host restore/replay timing. Older decks that never emit `metadata` remain fully supported; title updates are best-effort only until iframe libraries adopt the new message.

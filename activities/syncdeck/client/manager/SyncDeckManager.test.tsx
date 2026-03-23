@@ -23,6 +23,8 @@ import { shouldReopenConfigurePanel } from './SyncDeckManager.js'
 import { shouldAutoActivatePresentationUrl } from './SyncDeckManager.js'
 import { resolveRecoveredPresentationUrl } from './SyncDeckManager.js'
 import { normalizeStoredInstructorPasscode } from './SyncDeckManager.js'
+import { resolveSyncDeckManagerBootstrapToken } from './SyncDeckManager.js'
+import { buildSyncDeckSearchWithoutManagerBootstrap } from './SyncDeckManager.js'
 import { resolvePersistentEntryPolicyForConfigure } from './SyncDeckManager.js'
 import { resolvePersistentUrlHashForConfigure } from './SyncDeckManager.js'
 import { normalizeSyncDeckEmbeddedActivities } from './SyncDeckManager.js'
@@ -171,6 +173,27 @@ void test('normalizeStoredInstructorPasscode trims and rejects empty cached valu
   assert.equal(normalizeStoredInstructorPasscode(' teacher-pass '), 'teacher-pass')
   assert.equal(normalizeStoredInstructorPasscode('   '), null)
   assert.equal(normalizeStoredInstructorPasscode(null), null)
+})
+
+void test('resolveSyncDeckManagerBootstrapToken reads a non-empty bootstrap token from search params', () => {
+  assert.equal(
+    resolveSyncDeckManagerBootstrapToken('?bootstrap=token-123&presentationUrl=https%3A%2F%2Fslides.example%2Fdeck'),
+    'token-123',
+  )
+  assert.equal(resolveSyncDeckManagerBootstrapToken('?bootstrap=   '), null)
+  assert.equal(resolveSyncDeckManagerBootstrapToken(''), null)
+})
+
+void test('buildSyncDeckSearchWithoutManagerBootstrap removes only the bootstrap query param', () => {
+  assert.equal(
+    buildSyncDeckSearchWithoutManagerBootstrap('?bootstrap=token-123&presentationUrl=https%3A%2F%2Fslides.example%2Fdeck'),
+    '?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+  )
+  assert.equal(
+    buildSyncDeckSearchWithoutManagerBootstrap('?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck&bootstrap=token-123'),
+    '?presentationUrl=https%3A%2F%2Fslides.example%2Fdeck',
+  )
+  assert.equal(buildSyncDeckSearchWithoutManagerBootstrap('?bootstrap=token-123'), '')
 })
 
 void test('resolvePersistentEntryPolicyForConfigure prefers recovered policy when query is absent', () => {

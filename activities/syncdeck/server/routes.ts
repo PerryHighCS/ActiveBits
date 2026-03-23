@@ -19,7 +19,7 @@ import {
   type SessionStore,
 } from 'activebits-server/core/sessions.js'
 import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntryParticipants.js'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
@@ -111,6 +111,12 @@ interface SyncDeckChalkboardBuffer {
   delta: Record<string, unknown>[]
 }
 
+interface SyncDeckManagerBootstrapRecord {
+  tokenHash: string
+  createdAt: number
+  expiresAt: number
+}
+
 type SyncDeckDrawingToolMode = 'none' | 'chalkboard' | 'pen'
 
 interface SyncDeckSessionData extends Record<string, unknown> {
@@ -121,6 +127,7 @@ interface SyncDeckSessionData extends Record<string, unknown> {
   lastInstructorPayload: unknown
   lastInstructorStatePayload: unknown
   chalkboard: SyncDeckChalkboardBuffer
+  managerBootstraps: SyncDeckManagerBootstrapRecord[]
   drawingToolMode: SyncDeckDrawingToolMode
   students: SyncDeckStudent[]
   embeddedActivities: SyncDeckEmbeddedActivitiesMap
@@ -154,6 +161,8 @@ const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
 const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const MAX_CHALKBOARD_DELTA_STROKES = 200
+const SYNCDECK_MANAGER_BOOTSTRAP_TTL_MS = 5 * 60 * 1000
+const MAX_SYNCDECK_MANAGER_BOOTSTRAPS = 10
 const SYNCDECK_EMBEDDED_OWNER = 'syncdeck-instructor'
 const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === '1'
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS = 5 * 60 * 1000
@@ -409,6 +418,47 @@ function normalizeDrawingToolMode(value: unknown): SyncDeckDrawingToolMode {
   return 'none'
 }
 
+function normalizeManagerBootstrapRecord(value: unknown): SyncDeckManagerBootstrapRecord | null {
+  if (!isPlainObject(value)) {
+    return null
+  }
+
+  const tokenHash = typeof value.tokenHash === 'string' ? value.tokenHash.trim() : ''
+  const createdAt = normalizeNullableFiniteNumber(value.createdAt)
+  const expiresAt = normalizeNullableFiniteNumber(value.expiresAt)
+  if (!tokenHash || createdAt == null || expiresAt == null) {
+    return null
+  }
+
+  return {
+    tokenHash,
+    createdAt,
+    expiresAt,
+  }
+}
+
+function normalizeManagerBootstraps(value: unknown, now = Date.now()): SyncDeckManagerBootstrapRecord[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const normalized: SyncDeckManagerBootstrapRecord[] = []
+  for (const entry of value) {
+    const record = normalizeManagerBootstrapRecord(entry)
+    if (!record || record.expiresAt <= now) {
+      continue
+    }
+
+    normalized.push(record)
+  }
+
+  if (normalized.length <= MAX_SYNCDECK_MANAGER_BOOTSTRAPS) {
+    return normalized
+  }
+
+  return normalized.slice(-MAX_SYNCDECK_MANAGER_BOOTSTRAPS)
+}
+
 function extractIndicesFromRevealStateObject(value: unknown): { h: number; v: number; f: number } | null {
   if (!isPlainObject(value)) {
     return null
@@ -475,6 +525,7 @@ function extractIndicesFromInstructorPayload(payload: unknown): { h: number; v: 
 
 function normalizeSessionData(data: unknown): SyncDeckSessionData {
   const source = isPlainObject(data) ? data : {}
+  const now = Date.now()
   const normalizedLastInstructorPayload = source.lastInstructorPayload ?? null
   const normalizedLastInstructorStatePayload =
     source.lastInstructorStatePayload != null && extractIndicesFromInstructorPayload(source.lastInstructorStatePayload)
@@ -502,6 +553,7 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
     lastInstructorPayload: normalizedLastInstructorPayload,
     lastInstructorStatePayload: normalizedLastInstructorStatePayload,
     chalkboard: normalizeChalkboardBuffer(source.chalkboard),
+    managerBootstraps: normalizeManagerBootstraps(source.managerBootstraps, now),
     drawingToolMode: normalizeDrawingToolMode(source.drawingToolMode),
     students: normalizeStudents(source.students),
     embeddedActivities: normalizeEmbeddedActivities(source.embeddedActivities),
@@ -1002,6 +1054,48 @@ function verifyInstructorPasscode(expected: string, candidate: string): boolean 
   }
 }
 
+function hashSyncDeckManagerBootstrapToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function createSyncDeckManagerBootstrapToken(): string {
+  return randomBytes(24).toString('hex')
+}
+
+function issueSyncDeckManagerBootstrap(sessionData: SyncDeckSessionData, now = Date.now()): string {
+  const bootstrapToken = createSyncDeckManagerBootstrapToken()
+  const bootstrapRecord: SyncDeckManagerBootstrapRecord = {
+    tokenHash: hashSyncDeckManagerBootstrapToken(bootstrapToken),
+    createdAt: now,
+    expiresAt: now + SYNCDECK_MANAGER_BOOTSTRAP_TTL_MS,
+  }
+
+  const retainedRecords = normalizeManagerBootstraps(sessionData.managerBootstraps, now)
+  retainedRecords.push(bootstrapRecord)
+  sessionData.managerBootstraps = retainedRecords.slice(-MAX_SYNCDECK_MANAGER_BOOTSTRAPS)
+  return bootstrapToken
+}
+
+function consumeSyncDeckManagerBootstrap(
+  sessionData: SyncDeckSessionData,
+  bootstrapToken: string,
+  now = Date.now(),
+): boolean {
+  const tokenHash = hashSyncDeckManagerBootstrapToken(bootstrapToken)
+  let matched = false
+
+  sessionData.managerBootstraps = normalizeManagerBootstraps(sessionData.managerBootstraps, now).filter((record) => {
+    if (!matched && record.tokenHash === tokenHash) {
+      matched = true
+      return false
+    }
+
+    return true
+  })
+
+  return matched
+}
+
 function normalizeInstanceKey(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null
@@ -1330,6 +1424,76 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const response = res as unknown as JsonResponse
     response.json({ id: session.id, instructorPasscode: session.data.instructorPasscode })
+  })
+
+  app.post('/api/syncdeck/:sessionId/manager-bootstrap', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    if (!session.data.presentationUrl || !validatePresentationUrl(session.data.presentationUrl)) {
+      res.status(400).json({ error: 'presentation not configured' })
+      return
+    }
+
+    const bootstrapToken = issueSyncDeckManagerBootstrap(session.data)
+    await sessions.set(session.id, session)
+
+    const params = new URLSearchParams({
+      bootstrap: bootstrapToken,
+    })
+
+    res.json({
+      sessionId: session.id,
+      bootstrapToken,
+      manageUrl: `/manage/syncdeck/${encodeURIComponent(session.id)}?${params.toString()}`,
+      expiresInMs: SYNCDECK_MANAGER_BOOTSTRAP_TTL_MS,
+    })
+  })
+
+  app.post('/api/syncdeck/:sessionId/consume-manager-bootstrap', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const bootstrapToken = readStringField(req.body, 'bootstrapToken')
+    if (!bootstrapToken) {
+      res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+
+    if (!consumeSyncDeckManagerBootstrap(session.data, bootstrapToken)) {
+      await sessions.set(session.id, session)
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    await sessions.set(session.id, session)
+    res.json({
+      instructorPasscode: session.data.instructorPasscode,
+    })
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-context', async (req, res) => {
