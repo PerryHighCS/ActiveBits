@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type MouseEvent } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
 import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
@@ -26,6 +26,8 @@ import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import {
+  EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS,
+  consumeEmbeddedOverlayNavigationEvent,
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
@@ -1836,6 +1838,7 @@ const SyncDeckStudent: FC = () => {
   const [statusMessage, setStatusMessage] = useState('Waiting for instructor sync…')
   const [connectionState, setConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [isStoryboardOpen, setIsStoryboardOpen] = useState(false)
+  const [isOverlayNavClickShieldActive, setIsOverlayNavClickShieldActive] = useState(false)
   const [isBacktrackOptOut, setIsBacktrackOptOut] = useState(false)
   const [registeredStudentName, setRegisteredStudentName] = useState('')
   const [registeredStudentId, setRegisteredStudentId] = useState('')
@@ -1848,6 +1851,7 @@ const SyncDeckStudent: FC = () => {
   const latestInstructorPayloadRef = useRef<unknown>(null)
   const activeDrawingToolModeRef = useRef<SyncDeckDrawingToolMode>('none')
   const pendingDrawingToolModeRef = useRef<SyncDeckDrawingToolMode | null>(null)
+  const overlayNavClickShieldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasSeenIframeReadySignalRef = useRef(false)
   const lastObservedIframeOriginRef = useRef<string | null>(null)
   const suppressFallbackToInstructorRef = useRef(false)
@@ -1880,6 +1884,22 @@ const SyncDeckStudent: FC = () => {
     })
   }, [])
 
+  const clearOverlayNavClickShieldTimeout = useCallback((): void => {
+    if (overlayNavClickShieldTimeoutRef.current != null) {
+      clearTimeout(overlayNavClickShieldTimeoutRef.current)
+      overlayNavClickShieldTimeoutRef.current = null
+    }
+  }, [])
+
+  const activateOverlayNavClickShield = useCallback((): void => {
+    setIsOverlayNavClickShieldActive(true)
+    clearOverlayNavClickShieldTimeout()
+    overlayNavClickShieldTimeoutRef.current = setTimeout(() => {
+      overlayNavClickShieldTimeoutRef.current = null
+      setIsOverlayNavClickShieldActive(false)
+    }, EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS)
+  }, [clearOverlayNavClickShieldTimeout])
+
   const sendSyncContextToEmbeddedIframe = useCallback((): void => {
     const target = embeddedActivityIframeRef.current?.contentWindow
     if (!target) {
@@ -1902,6 +1922,12 @@ const SyncDeckStudent: FC = () => {
       // ignore postMessage errors
     }
   }, [])
+
+  useEffect(() => {
+    return () => {
+      clearOverlayNavClickShieldTimeout()
+    }
+  }, [clearOverlayNavClickShieldTimeout])
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -3124,6 +3150,7 @@ const SyncDeckStudent: FC = () => {
     })
 
     if (optimisticIndices) {
+      activateOverlayNavClickShield()
       suppressFallbackToInstructorRef.current = true
       localStudentIndicesRef.current = optimisticIndices
       setStudentIndicesState(optimisticIndices)
@@ -3138,6 +3165,7 @@ const SyncDeckStudent: FC = () => {
       return
     }
   }, [
+    activateOverlayNavClickShield,
     activeEmbeddedInstanceKey,
     overlayNavigationKeys,
     overlayNavigationBaseIndices,
@@ -3173,6 +3201,26 @@ const SyncDeckStudent: FC = () => {
     }
     sendStudentOverlayNavigation('down')
   }, [canMoveDown, sendStudentOverlayNavigation])
+
+  const handleStudentOverlayNavigationClick = (
+    event: MouseEvent<HTMLButtonElement>,
+    direction: 'left' | 'right' | 'up' | 'down',
+  ): void => {
+    consumeEmbeddedOverlayNavigationEvent(event)
+    if (direction === 'left') {
+      handleStudentOverlayBack()
+      return
+    }
+    if (direction === 'right') {
+      handleStudentOverlayForward()
+      return
+    }
+    if (direction === 'up') {
+      handleStudentOverlayUp()
+      return
+    }
+    handleStudentOverlayDown()
+  }
 
   if (!sessionId) {
     return (
@@ -3279,6 +3327,10 @@ const SyncDeckStudent: FC = () => {
           onLoad={handleIframeLoad}
         />
 
+        {isOverlayNavClickShieldActive ? (
+          <div aria-hidden="true" className="absolute inset-0 z-[15] bg-transparent" />
+        ) : null}
+
         {activeEmbeddedActivity ? (
           <div className="absolute inset-0 z-10 bg-white p-14">
             <div className="w-full h-full rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
@@ -3344,7 +3396,7 @@ const SyncDeckStudent: FC = () => {
           <>
             <button
               type="button"
-              onClick={handleStudentOverlayBack}
+              onClick={(event) => handleStudentOverlayNavigationClick(event, 'left')}
               disabled={!canMoveBack}
               aria-disabled={!canMoveBack}
               aria-label="Previous slide"
@@ -3355,7 +3407,7 @@ const SyncDeckStudent: FC = () => {
             </button>
             <button
               type="button"
-              onClick={handleStudentOverlayUp}
+              onClick={(event) => handleStudentOverlayNavigationClick(event, 'up')}
               disabled={!canMoveUp}
               aria-disabled={!canMoveUp}
               aria-label="Move up"
@@ -3366,7 +3418,7 @@ const SyncDeckStudent: FC = () => {
             </button>
             <button
               type="button"
-              onClick={handleStudentOverlayForward}
+              onClick={(event) => handleStudentOverlayNavigationClick(event, 'right')}
               disabled={!canMoveForward}
               aria-disabled={!canMoveForward}
               aria-label="Next slide"
@@ -3377,7 +3429,7 @@ const SyncDeckStudent: FC = () => {
             </button>
             <button
               type="button"
-              onClick={handleStudentOverlayDown}
+              onClick={(event) => handleStudentOverlayNavigationClick(event, 'down')}
               disabled={!canMoveDown}
               aria-disabled={!canMoveDown}
               aria-label="Move down"

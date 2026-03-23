@@ -1,4 +1,5 @@
 export type EmbeddedOverlayDirection = 'left' | 'right' | 'up' | 'down'
+export const EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS = 250
 
 export interface EmbeddedOverlayIndices {
   h: number
@@ -9,6 +10,14 @@ export interface EmbeddedOverlayIndices {
 export interface EmbeddedOverlayVerticalNavigationCapabilities {
   canGoUp: boolean
   canGoDown: boolean
+}
+
+export function consumeEmbeddedOverlayNavigationEvent(event: {
+  preventDefault(): void
+  stopPropagation(): void
+}): void {
+  event.preventDefault()
+  event.stopPropagation()
 }
 
 export function resolveEmbeddedOverlayVerticalMoveAllowed(params: {

@@ -1,8 +1,24 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { consumeEmbeddedOverlayNavigationEvent } from './embeddedOverlayNavigation.js'
 import { resolveOptimisticEmbeddedOverlayIndices } from './embeddedOverlayNavigation.js'
 import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from './embeddedOverlayNavigation.js'
 import { resolveEmbeddedOverlayVerticalMoveAllowed } from './embeddedOverlayNavigation.js'
+
+void test('consumeEmbeddedOverlayNavigationEvent stops default click handling and propagation', () => {
+  const calls: string[] = []
+
+  consumeEmbeddedOverlayNavigationEvent({
+    preventDefault() {
+      calls.push('preventDefault')
+    },
+    stopPropagation() {
+      calls.push('stopPropagation')
+    },
+  })
+
+  assert.deepEqual(calls, ['preventDefault', 'stopPropagation'])
+})
 
 void test('resolveOptimisticEmbeddedOverlayIndices uses directional horizontal navigation across slide columns', () => {
   const instanceKeys = [

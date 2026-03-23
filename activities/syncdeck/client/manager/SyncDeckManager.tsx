@@ -8,6 +8,8 @@ import {
 import { isSyncDeckDebugEnabled } from '../shared/syncDebug.js'
 import { shouldRelayRevealSyncPayloadToSession } from '../shared/revealSyncRelayPolicy.js'
 import {
+  EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS,
+  consumeEmbeddedOverlayNavigationEvent,
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
@@ -16,7 +18,7 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type FormEvent, type MouseEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 
@@ -1574,6 +1576,7 @@ const SyncDeckManager: FC = () => {
   const [pendingEmbeddedEndConfirmInstanceKey, setPendingEmbeddedEndConfirmInstanceKey] = useState<string | null>(null)
   const [downloadingEmbeddedReportInstanceKey, setDownloadingEmbeddedReportInstanceKey] = useState<string | null>(null)
   const [isDownloadingSessionReport, setIsDownloadingSessionReport] = useState(false)
+  const [isOverlayNavClickShieldActive, setIsOverlayNavClickShieldActive] = useState(false)
   const [overlayNavigationCapabilities, setOverlayNavigationCapabilities] = useState<SyncDeckManagerNavigationCapabilities | null>(null)
   const [overlayNavigationCapabilityIndices, setOverlayNavigationCapabilityIndices] =
     useState<{ h: number; v: number; f: number } | null>(null)
@@ -1607,6 +1610,7 @@ const SyncDeckManager: FC = () => {
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const overlayNavClickShieldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
   useEffect(() => {
@@ -1630,6 +1634,22 @@ const SyncDeckManager: FC = () => {
       restoreSuppressionTimeoutRef.current = null
     }
   }, [])
+
+  const clearOverlayNavClickShieldTimeout = useCallback((): void => {
+    if (overlayNavClickShieldTimeoutRef.current != null) {
+      clearTimeout(overlayNavClickShieldTimeoutRef.current)
+      overlayNavClickShieldTimeoutRef.current = null
+    }
+  }, [])
+
+  const activateOverlayNavClickShield = useCallback((): void => {
+    setIsOverlayNavClickShieldActive(true)
+    clearOverlayNavClickShieldTimeout()
+    overlayNavClickShieldTimeoutRef.current = setTimeout(() => {
+      overlayNavClickShieldTimeoutRef.current = null
+      setIsOverlayNavClickShieldActive(false)
+    }, EMBEDDED_OVERLAY_NAVIGATION_CLICK_SHIELD_DURATION_MS)
+  }, [clearOverlayNavClickShieldTimeout])
 
   const releaseRestoreSuppression = useCallback((): void => {
     suppressOutboundStateUntilRestoreRef.current = false
@@ -2931,8 +2951,9 @@ const SyncDeckManager: FC = () => {
   useEffect(
     () => () => {
       clearRestoreSuppressionTimeout()
+      clearOverlayNavClickShieldTimeout()
     },
-    [clearRestoreSuppressionTimeout],
+    [clearOverlayNavClickShieldTimeout, clearRestoreSuppressionTimeout],
   )
 
   if (!sessionId) {
@@ -3009,6 +3030,7 @@ const SyncDeckManager: FC = () => {
       return
     }
 
+    activateOverlayNavClickShield()
     armRestoreSuppression(optimisticIndices)
     setInstructorIndicesState(optimisticIndices)
     const setStateCommand = buildManagerOverlaySetStateCommand(optimisticIndices)
@@ -3017,6 +3039,14 @@ const SyncDeckManager: FC = () => {
       presentationOrigin,
     )
     relayInstructorPayload(setStateCommand)
+  }
+
+  const handleManagerOverlayNavigationClick = (
+    event: MouseEvent<HTMLButtonElement>,
+    direction: 'left' | 'right' | 'up' | 'down',
+  ): void => {
+    consumeEmbeddedOverlayNavigationEvent(event)
+    sendEmbeddedOverlayNavigation(direction)
   }
 
   const endEmbeddedActivity = async (instanceKey: string): Promise<void> => {
@@ -3486,6 +3516,10 @@ const SyncDeckManager: FC = () => {
                   onLoad={handlePresentationIframeLoad}
                 />
 
+                {isOverlayNavClickShieldActive ? (
+                  <div aria-hidden="true" className="absolute inset-0 z-[25] bg-transparent" />
+                ) : null}
+
                 {activeEmbeddedActivity && (
                   <div className="absolute inset-0 z-20 bg-white overflow-hidden">
                     <div className="absolute left-4 top-4 z-30 max-w-[calc(100%-8rem)] rounded-md bg-white/92 px-3 py-2 shadow-sm ring-1 ring-black/5 backdrop-blur-sm">
@@ -3506,7 +3540,7 @@ const SyncDeckManager: FC = () => {
                     <button
                       type="button"
                       className="absolute left-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-                          onClick={() => sendEmbeddedOverlayNavigation('left')}
+                      onClick={(event) => handleManagerOverlayNavigationClick(event, 'left')}
                       aria-label="Move left"
                       title="Move left"
                       disabled={!canMoveBack}
@@ -3516,7 +3550,7 @@ const SyncDeckManager: FC = () => {
                     <button
                       type="button"
                       className="absolute top-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-                      onClick={() => sendEmbeddedOverlayNavigation('up')}
+                      onClick={(event) => handleManagerOverlayNavigationClick(event, 'up')}
                       aria-label="Move up"
                       title="Move up"
                       disabled={!canMoveUp}
@@ -3526,7 +3560,7 @@ const SyncDeckManager: FC = () => {
                     <button
                       type="button"
                       className="absolute right-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-                          onClick={() => sendEmbeddedOverlayNavigation('right')}
+                      onClick={(event) => handleManagerOverlayNavigationClick(event, 'right')}
                       aria-label="Move right"
                       title="Move right"
                       disabled={!canMoveForward}
@@ -3536,7 +3570,7 @@ const SyncDeckManager: FC = () => {
                     <button
                       type="button"
                       className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-                      onClick={() => sendEmbeddedOverlayNavigation('down')}
+                      onClick={(event) => handleManagerOverlayNavigationClick(event, 'down')}
                       aria-label="Move down"
                       title="Move down"
                       disabled={!canMoveDown}
