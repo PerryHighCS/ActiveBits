@@ -35,3 +35,6 @@ blob-report/
 !.claude/plans/**
 !.claude/knowledge/
 !.claude/knowledge/**
+
+# playwright files
+core

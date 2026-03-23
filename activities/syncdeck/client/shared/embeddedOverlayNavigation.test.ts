@@ -1,8 +1,59 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { consumeEmbeddedOverlayNavigationEvent } from './embeddedOverlayNavigation.js'
 import { resolveOptimisticEmbeddedOverlayIndices } from './embeddedOverlayNavigation.js'
 import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from './embeddedOverlayNavigation.js'
 import { resolveEmbeddedOverlayVerticalMoveAllowed } from './embeddedOverlayNavigation.js'
+import { reduceEmbeddedOverlayNavigationPointerDownState } from './embeddedOverlayNavigation.js'
+
+void test('consumeEmbeddedOverlayNavigationEvent stops default click handling and propagation', () => {
+  const calls: string[] = []
+
+  consumeEmbeddedOverlayNavigationEvent({
+    preventDefault() {
+      calls.push('preventDefault')
+    },
+    stopPropagation() {
+      calls.push('stopPropagation')
+    },
+  })
+
+  assert.deepEqual(calls, ['preventDefault', 'stopPropagation'])
+})
+
+void test('reduceEmbeddedOverlayNavigationPointerDownState clears handled pointer state after click and interrupted gestures', () => {
+  assert.deepEqual(
+    reduceEmbeddedOverlayNavigationPointerDownState(false, 'pointerdown'),
+    {
+      didHandlePointerDown: true,
+      shouldSkipClickNavigation: false,
+    },
+  )
+
+  assert.deepEqual(
+    reduceEmbeddedOverlayNavigationPointerDownState(true, 'click'),
+    {
+      didHandlePointerDown: false,
+      shouldSkipClickNavigation: true,
+    },
+  )
+
+  assert.deepEqual(
+    reduceEmbeddedOverlayNavigationPointerDownState(true, 'pointercancel'),
+    {
+      didHandlePointerDown: false,
+      shouldSkipClickNavigation: false,
+    },
+  )
+
+  assert.deepEqual(
+    reduceEmbeddedOverlayNavigationPointerDownState(true, 'timeout'),
+    {
+      didHandlePointerDown: false,
+      shouldSkipClickNavigation: false,
+    },
+  )
+})
 
 void test('resolveOptimisticEmbeddedOverlayIndices uses directional horizontal navigation across slide columns', () => {
   const instanceKeys = [
@@ -14,17 +65,17 @@ void test('resolveOptimisticEmbeddedOverlayIndices uses directional horizontal n
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 0, f: 0 }, 'right'),
-    { h: 3, v: 0, f: 0 },
+    { h: 3, v: 0, f: -1 },
   )
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 2, f: 0 }, 'left'),
-    { h: 1, v: 0, f: 0 },
+    { h: 1, v: 0, f: -1 },
   )
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 3, v: 0, f: 0 }, 'left'),
-    { h: 2, v: 0, f: 0 },
+    { h: 2, v: 0, f: -1 },
   )
 })
 
@@ -36,12 +87,12 @@ void test('resolveOptimisticEmbeddedOverlayIndices preserves vertical movement w
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 0, f: 0 }, 'down'),
-    { h: 2, v: 1, f: 0 },
+    { h: 2, v: 1, f: -1 },
   )
 
   assert.deepEqual(
     resolveOptimisticEmbeddedOverlayIndices(instanceKeys, { h: 2, v: 1, f: 0 }, 'up'),
-    { h: 2, v: 0, f: 0 },
+    { h: 2, v: 0, f: -1 },
   )
 })
 
