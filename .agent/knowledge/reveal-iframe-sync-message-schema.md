@@ -22,7 +22,10 @@ Fields:
 - `version` (string): protocol/plugin version (semantic version).
 - `action` (string): high-level message type (`command`, `state`, `ready`, `metadata`, etc.).
 - `deckId` (string | null): optional logical deck identifier.
-- `role` (string): sender role (`student` or `instructor`).
+- `role` (string): sender role (`standalone`, `student`, or `instructor`).
+  The runtime initializes in `standalone` mode until the host sends `setRole`, so
+  early upward messages such as `ready` and `metadata` may legitimately carry
+  `role: "standalone"`.
 - `source` (string): fixed sender marker (`reveal-iframe-sync`).
 - `ts` (number): unix timestamp in milliseconds.
 - `payload` (object): action-specific data.
