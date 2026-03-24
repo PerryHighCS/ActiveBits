@@ -397,6 +397,94 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
   await sessions.close()
 })
 
+void test('self-paced embedded resonance sessions still surface annotated reviewed responses when no live run is active', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+
+  await sessions.set('syncdeck-parent', {
+    id: 'syncdeck-parent',
+    type: 'syncdeck',
+    created: now,
+    lastActivity: now,
+    data: {
+      standaloneMode: true,
+    },
+  })
+
+  const session = createEmbeddedResonanceSession()
+  session.data.questions = [
+    {
+      id: 'q1',
+      type: 'free-response',
+      text: 'Explain your reasoning.',
+      order: 0,
+    },
+  ]
+  session.data.responses = [
+    {
+      id: 'r1',
+      questionId: 'q1',
+      studentId: 'student1',
+      submittedAt: now - 200,
+      answer: {
+        type: 'free-response',
+        text: 'My answer',
+      },
+    },
+  ]
+  session.data.students = {
+    student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+  }
+  session.data.annotations = {
+    r1: {
+      starred: false,
+      flagged: false,
+      emoji: '💡',
+    },
+  }
+  session.data.reveals = []
+  session.data.activeQuestionId = null
+  session.data.activeQuestionIds = []
+  session.data.activeQuestionDeadlineAt = null
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const response = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+    },
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  const body = response.body as {
+    selfPacedMode?: boolean
+    activeQuestionIds?: string[]
+    reviewedResponses?: Array<{
+      instructorEmoji?: string
+      answer?: { text?: string }
+      question?: { text?: string }
+    }>
+  }
+  assert.equal(body.selfPacedMode, true)
+  assert.deepEqual(body.activeQuestionIds, ['q1'])
+  assert.equal(body.reviewedResponses?.[0]?.instructorEmoji, '💡')
+  assert.equal(body.reviewedResponses?.[0]?.answer?.text, 'My answer')
+  assert.equal(body.reviewedResponses?.[0]?.question?.text, 'Explain your reasoning.')
+
+  await sessions.close()
+})
+
 void test('instructor-passcode route returns passcode for embedded child sessions when parent syncdeck teacher cookie matches', async () => {
   initializePersistentStorage(null)
 

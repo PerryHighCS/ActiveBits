@@ -590,7 +590,7 @@ function buildStudentSnapshotWithMode(
     : questions
       .filter((question) => activeQuestionIds.includes(question.id))
       .map(toStudentQuestion)
-  const activeQuestionIdSet = new Set(fallbackQuestionIds)
+  const liveActiveQuestionIdSet = new Set(activeQuestionIds)
   const activeQuestions = fallbackQuestions
   const activeQuestion = activeQuestions[0] ?? null
   const revealedQuestionIds = new Set(reveals.map((r) => r.questionId))
@@ -620,7 +620,7 @@ function buildStudentSnapshotWithMode(
           return emoji !== null &&
             question !== undefined &&
             !revealedQuestionIds.has(response.questionId) &&
-            !activeQuestionIdSet.has(response.questionId)
+            !liveActiveQuestionIdSet.has(response.questionId)
             ? {
                 question: toStudentQuestion(question),
                 answer: response.answer,
