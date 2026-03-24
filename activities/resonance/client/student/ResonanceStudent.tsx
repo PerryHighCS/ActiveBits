@@ -16,6 +16,11 @@ interface RegisterResponse {
   error?: string
 }
 
+interface SubmissionAnnouncement {
+  id: number
+  message: string
+}
+
 export function resolveNextSelfPacedQuestionId(params: {
   questionIds: string[]
   submittedQuestionIds: Set<string>
@@ -56,6 +61,17 @@ export function resolveSelfPacedSubmittedMessage(params: {
     : 'Answer submitted.'
 }
 
+export function resolveSubmissionAnnouncement(params: {
+  selfPacedMode: boolean
+  questionIds: string[]
+  submittedQuestionIds: Set<string>
+  currentQuestionId: string | null
+}): string {
+  return params.selfPacedMode
+    ? resolveSelfPacedSubmittedMessage(params)
+    : 'Answer submitted.'
+}
+
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
   if (deadlineAt === null) {
     return null
@@ -89,6 +105,7 @@ export default function ResonanceStudent() {
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
   const [submittedQuestionIds, setSubmittedQuestionIds] = useState<Set<string>>(new Set())
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, AnswerPayload>>({})
+  const [submissionAnnouncement, setSubmissionAnnouncement] = useState<SubmissionAnnouncement | null>(null)
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
 
   const mountedRef = useRef(true)
@@ -299,6 +316,11 @@ export default function ResonanceStudent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {submissionAnnouncement !== null && (
+        <p key={submissionAnnouncement.id} className="sr-only" role="status" aria-live="polite">
+          {submissionAnnouncement.message}
+        </p>
+      )}
       <div className="max-w-xl mx-auto px-4 py-6 space-y-6">
         {/* Header */}
         <header className="flex items-center justify-between">
@@ -363,6 +385,15 @@ export default function ResonanceStudent() {
                 setSubmittedQuestionIds((current) => {
                   const nextSubmittedQuestionIds = new Set(current)
                   nextSubmittedQuestionIds.add(questionId)
+                  setSubmissionAnnouncement((currentAnnouncement) => ({
+                    id: (currentAnnouncement?.id ?? 0) + 1,
+                    message: resolveSubmissionAnnouncement({
+                      selfPacedMode: snapshot.selfPacedMode,
+                      questionIds: activeQuestions.map((question) => question.id),
+                      submittedQuestionIds: nextSubmittedQuestionIds,
+                      currentQuestionId: questionId,
+                    }),
+                  }))
                   if (snapshot.selfPacedMode) {
                     setSelectedQuestionId((currentQuestionId) => resolveNextSelfPacedQuestionId({
                       questionIds: activeQuestions.map((question) => question.id),

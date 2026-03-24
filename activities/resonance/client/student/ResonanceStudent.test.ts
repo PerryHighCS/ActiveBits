@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { resolveNextSelfPacedQuestionId } from './ResonanceStudent.js'
+import { resolveSubmissionAnnouncement } from './ResonanceStudent.js'
 import { resolveSelfPacedSubmittedMessage } from './ResonanceStudent.js'
 
 void test('resolveNextSelfPacedQuestionId advances to the next unanswered question', () => {
@@ -66,5 +67,29 @@ void test('resolveSelfPacedSubmittedMessage announces completion when all questi
       currentQuestionId: 'q2',
     }),
     'All questions completed.',
+  )
+})
+
+void test('resolveSubmissionAnnouncement uses the self-paced message when self-paced mode is active', () => {
+  assert.equal(
+    resolveSubmissionAnnouncement({
+      selfPacedMode: true,
+      questionIds: ['q1', 'q2'],
+      submittedQuestionIds: new Set(['q1']),
+      currentQuestionId: 'q1',
+    }),
+    'Answer submitted. Moving to the next question.',
+  )
+})
+
+void test('resolveSubmissionAnnouncement keeps the generic confirmation outside self-paced mode', () => {
+  assert.equal(
+    resolveSubmissionAnnouncement({
+      selfPacedMode: false,
+      questionIds: ['q1', 'q2'],
+      submittedQuestionIds: new Set(['q1']),
+      currentQuestionId: 'q1',
+    }),
+    'Answer submitted.',
   )
 })
