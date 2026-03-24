@@ -175,6 +175,12 @@ function RevealSection({
       : null
 
   const shouldRenderMcqBreakdown = question?.type === 'multiple-choice'
+  const isViewerOnlyMcqReveal =
+    question?.type === 'multiple-choice' &&
+    !isPoll &&
+    sharedResponses.length === 0 &&
+    viewerResponse !== null &&
+    viewerResponse !== undefined
 
   return (
     <div className="space-y-2">
@@ -233,17 +239,35 @@ function RevealSection({
             return (
               <div
                 key={opt.id}
-                className={`grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-2 rounded-lg border px-3 py-2 text-sm ${rowClass}`}
+                className={`${
+                  isViewerOnlyMcqReveal
+                    ? 'flex items-center justify-between gap-3'
+                    : 'grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-2'
+                } rounded-lg border px-3 py-2 text-sm ${rowClass}`}
               >
                 <span className="text-gray-700 break-words">{opt.text}</span>
-                <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                  <div
-                    className={`h-2 rounded-full ${meterClass}`}
-                    style={{ width: `${pct}%` }}
-                    role="presentation"
-                  />
-                </div>
-                <span className="text-xs text-gray-500 w-8 text-right">{pct}%</span>
+                {isViewerOnlyMcqReveal ? (
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${
+                    isCorrectOption
+                      ? 'bg-green-100 text-green-800'
+                      : isViewerSelection
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {isCorrectOption ? 'Correct' : isViewerSelection ? 'Your choice' : 'Other option'}
+                  </span>
+                ) : (
+                  <>
+                    <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                      <div
+                        className={`h-2 rounded-full ${meterClass}`}
+                        style={{ width: `${pct}%` }}
+                        role="presentation"
+                      />
+                    </div>
+                    <span className="text-xs text-gray-500 w-8 text-right">{pct}%</span>
+                  </>
+                )}
               </div>
             )
           })}

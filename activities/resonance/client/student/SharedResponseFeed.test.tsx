@@ -160,6 +160,19 @@ const incorrectMcqReveal: QuestionReveal = {
   ],
 }
 
+const selfPacedMcqReveal: QuestionReveal = {
+  questionId: 'q2',
+  sharedAt: 6,
+  correctOptionIds: ['a'],
+  viewerResponse: {
+    answer: { type: 'multiple-choice', selectedOptionId: 'b' },
+    submittedAt: 6,
+    instructorEmoji: null,
+    isShared: false,
+  },
+  sharedResponses: [],
+}
+
 void test('SharedResponseFeed lets students react to shared free-response cards', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { fireEvent, render } = await import('@testing-library/react')
@@ -250,6 +263,29 @@ void test('SharedResponseFeed colors the student multiple-choice reveal green wh
     assert.equal(incorrectRendered.getAllByText('Option B').length, 2)
     assert.match(incorrectRendered.container.innerHTML, /border-red-300 bg-red-50/)
     assert.match(incorrectRendered.container.innerHTML, /border-red-200 bg-red-50\/70 ring-2 ring-blue-400 ring-offset-2 ring-offset-white/)
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
+void test('SharedResponseFeed shows viewer-only MCQ results without empty percentage bars', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { render } = await import('@testing-library/react')
+
+  try {
+    const rendered = render(
+      React.createElement(SharedResponseFeed, {
+        reveals: [selfPacedMcqReveal],
+        revealedQuestions: [multipleChoiceQuestion],
+      }),
+    )
+
+    assert.notEqual(rendered.getByText('Your response: Incorrect'), null)
+    assert.notEqual(rendered.getByText('Correct'), null)
+    assert.notEqual(rendered.getByText('Your choice'), null)
+    assert.equal(rendered.queryByText('0%'), null)
+    assert.match(rendered.container.innerHTML, /border-green-300 bg-green-50/)
+    assert.match(rendered.container.innerHTML, /border-red-200 bg-red-50\/70 ring-2 ring-blue-400 ring-offset-2 ring-offset-white/)
   } finally {
     restoreDomEnvironment()
   }
