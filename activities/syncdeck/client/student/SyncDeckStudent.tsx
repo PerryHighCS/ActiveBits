@@ -477,11 +477,22 @@ export function applyStudentSoloActivityRequest(
   request: SyncDeckSoloActivityRequest,
 ): SyncDeckSoloOverlaysMap {
   const slideKey = resolveSoloOverlaySlideKey(request.indices)
+  const existingOverlay = current[slideKey]
   const standaloneEntry = request.standaloneEntry
   const supportsDirectStandalone = standaloneEntry
     ? standaloneEntry.enabled && standaloneEntry.supportsDirectPath
     : true
   const supportsActivityOwnedStandaloneLaunch = standaloneEntry?.enabled === true && standaloneEntry.supportsPermalink === true
+  const selectedOptionsComparisonKey = getSelectedOptionsComparisonKey(request.selectedOptions)
+
+  if (
+    supportsActivityOwnedStandaloneLaunch
+    && existingOverlay?.src
+    && existingOverlay.activityId === request.activityId
+    && getSelectedOptionsComparisonKey(existingOverlay.selectedOptions) === selectedOptionsComparisonKey
+  ) {
+    return current
+  }
 
   const nextOverlay: SyncDeckSoloOverlayRecord = supportsDirectStandalone
     ? {
@@ -500,10 +511,10 @@ export function applyStudentSoloActivityRequest(
     }
 
   if (
-    current[slideKey]?.activityId === nextOverlay.activityId
-    && current[slideKey]?.src === nextOverlay.src
-    && current[slideKey]?.notice === nextOverlay.notice
-    && getSelectedOptionsComparisonKey(current[slideKey]?.selectedOptions) === getSelectedOptionsComparisonKey(nextOverlay.selectedOptions)
+    existingOverlay?.activityId === nextOverlay.activityId
+    && existingOverlay.src === nextOverlay.src
+    && existingOverlay.notice === nextOverlay.notice
+    && getSelectedOptionsComparisonKey(existingOverlay.selectedOptions) === getSelectedOptionsComparisonKey(nextOverlay.selectedOptions)
   ) {
     return current
   }

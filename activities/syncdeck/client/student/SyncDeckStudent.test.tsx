@@ -1996,6 +1996,46 @@ void test('applyStudentSoloActivityRequest keeps selectedOptions for permalink-c
   })
 })
 
+void test('applyStudentSoloActivityRequest preserves an existing launched child session for the same activity-owned standalone request', () => {
+  const current = {
+    '5:0': {
+      activityId: 'resonance',
+      src: '/CHILD:syncdeck-parent:solo:resonance',
+      selectedOptions: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'What is still unclear?',
+            order: 0,
+          },
+        ],
+      },
+    },
+  }
+
+  const next = applyStudentSoloActivityRequest(
+    current,
+    {
+      activityId: 'resonance',
+      indices: { h: 5, v: 0, f: 0 },
+      standaloneEntry: { enabled: true, supportsDirectPath: false, supportsPermalink: true },
+      selectedOptions: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'What is still unclear?',
+            order: 0,
+          },
+        ],
+      },
+    },
+  )
+
+  assert.equal(next, current)
+})
+
 void test('resolveStudentSoloActivityRequestInputs keeps non-string activity options for standalone activity-owned launches', () => {
   const requests = resolveStudentSoloActivityRequestInputs(
     {
