@@ -44,7 +44,7 @@ const syncdeckConfig: ActivityConfig = {
       label: 'Launch Presentation',
       action: 'go-to-url',
       path: '/util/syncdeck/launch-presentation',
-      description: 'Validate a public presentation URL and start a hosted SyncDeck manager session.',
+      description: 'Validate a public presentation URL and start a standalone SyncDeck session.',
       renderTarget: 'util',
     },
   ],
