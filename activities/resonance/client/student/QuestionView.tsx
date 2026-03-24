@@ -11,6 +11,7 @@ interface Props {
   disabled?: boolean
   isSubmitted?: boolean
   submittedMessage?: string
+  announceSubmittedMessage?: boolean
   onSubmitted?(questionId: string, answer: AnswerPayload): void
   sendMessage?(type: string, payload: unknown): boolean
 }
@@ -39,6 +40,7 @@ export default function QuestionView({
   disabled = false,
   isSubmitted = false,
   submittedMessage = 'Answer submitted.',
+  announceSubmittedMessage = true,
   onSubmitted,
   sendMessage,
 }: Props) {
@@ -143,6 +145,7 @@ export default function QuestionView({
           submitting={submitting || disabled}
           submitted={isSubmitted}
           submittedMessage={submittedMessage}
+          announceSubmittedMessage={announceSubmittedMessage}
         />
       ) : (
         <MCQInput
@@ -155,6 +158,7 @@ export default function QuestionView({
           submitting={submitting || disabled}
           submitted={isSubmitted}
           submittedMessage={submittedMessage}
+          announceSubmittedMessage={announceSubmittedMessage}
         />
       )}
 

@@ -8,6 +8,7 @@ interface Props {
   submitting?: boolean
   submitted?: boolean
   submittedMessage?: string
+  announceSubmittedMessage?: boolean
 }
 
 export default function FreeResponseInput({
@@ -17,6 +18,7 @@ export default function FreeResponseInput({
   submitting = false,
   submitted = false,
   submittedMessage = 'Answer submitted.',
+  announceSubmittedMessage = true,
 }: Props) {
   const [text, setText] = useState(value)
   const canSubmit = !submitting && !submitted && text.trim().length > 0
@@ -33,7 +35,10 @@ export default function FreeResponseInput({
 
   if (submitted) {
     return (
-      <p className="text-sm text-gray-500 italic" aria-live="polite">
+      <p
+        className="text-sm text-gray-500 italic"
+        {...(announceSubmittedMessage ? { 'aria-live': 'polite' as const } : {})}
+      >
         {submittedMessage}
       </p>
     )

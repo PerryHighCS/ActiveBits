@@ -377,6 +377,7 @@ export default function ResonanceStudent() {
               disabled={hasExpired}
               isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
               submittedMessage={submittedMessage}
+              announceSubmittedMessage={!snapshot.selfPacedMode}
               onSubmitted={(questionId, answer) => {
                 setSubmittedAnswers((current) => ({
                   ...current,

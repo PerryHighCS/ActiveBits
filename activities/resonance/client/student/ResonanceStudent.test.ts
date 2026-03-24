@@ -82,7 +82,7 @@ void test('resolveSubmissionAnnouncement uses the self-paced message when self-p
   )
 })
 
-void test('resolveSubmissionAnnouncement keeps the generic confirmation outside self-paced mode', () => {
+void test('resolveSubmissionAnnouncement returns null outside self-paced mode', () => {
   assert.equal(
     resolveSubmissionAnnouncement({
       selfPacedMode: false,
