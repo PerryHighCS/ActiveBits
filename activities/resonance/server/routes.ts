@@ -582,10 +582,11 @@ function buildStudentSnapshotWithMode(
   selfPacedMode: boolean,
 ) {
   const { activeQuestionId, activeQuestionIds, activeQuestionRunStartedAt, activeQuestionDeadlineAt, questions, reveals } = session.data
-  const fallbackQuestionIds = selfPacedMode && activeQuestionIds.length === 0
+  const effectiveSelfPacedMode = selfPacedMode && activeQuestionIds.length === 0
+  const fallbackQuestionIds = effectiveSelfPacedMode
     ? questions.map((question) => question.id)
     : activeQuestionIds
-  const fallbackQuestions = selfPacedMode && activeQuestionIds.length === 0
+  const fallbackQuestions = effectiveSelfPacedMode
     ? questions.map(toStudentQuestion)
     : questions
       .filter((question) => activeQuestionIds.includes(question.id))
@@ -594,7 +595,7 @@ function buildStudentSnapshotWithMode(
   const activeQuestions = fallbackQuestions
   const activeQuestion = activeQuestions[0] ?? null
   const revealedQuestionIds = new Set(reveals.map((r) => r.questionId))
-  const selfPacedReveals = selfPacedMode
+  const selfPacedReveals = effectiveSelfPacedMode
     ? buildSelfPacedMcqReveals(session, viewerStudentId, revealedQuestionIds)
     : []
   for (const reveal of selfPacedReveals) {
@@ -633,12 +634,12 @@ function buildStudentSnapshotWithMode(
         .sort((left, right) => right.submittedAt - left.submittedAt)
   return {
     sessionId: session.id,
-    selfPacedMode,
+    selfPacedMode: effectiveSelfPacedMode,
     activeQuestion: activeQuestionId !== null ? (activeQuestions.find((q) => q.id === activeQuestionId) ?? activeQuestion) : activeQuestion,
     activeQuestions,
     activeQuestionIds: fallbackQuestionIds,
-    activeQuestionRunStartedAt: selfPacedMode && activeQuestionIds.length === 0 ? null : activeQuestionRunStartedAt,
-    activeQuestionDeadlineAt: selfPacedMode && activeQuestionIds.length === 0 ? null : activeQuestionDeadlineAt,
+    activeQuestionRunStartedAt: effectiveSelfPacedMode ? null : activeQuestionRunStartedAt,
+    activeQuestionDeadlineAt: effectiveSelfPacedMode ? null : activeQuestionDeadlineAt,
     reveals: [
       ...reveals.map((reveal) => buildStudentReveal(reveal, session, viewerStudentId)),
       ...selfPacedReveals,
