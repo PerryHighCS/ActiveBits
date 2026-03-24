@@ -958,7 +958,7 @@ export default function setupResonanceRoutes(
       selfPacedMode,
     })
 
-    res.json({ id: session.id, instructorPasscode })
+    res.json(selfPacedMode ? { id: session.id } : { id: session.id, instructorPasscode })
   })
 
   // ---------------------------------------------------------------------------

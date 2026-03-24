@@ -736,8 +736,9 @@ void test('create supports explicit self-paced solo sessions from prepared quest
   )
 
   assert.equal(createRes.statusCode, 200)
-  const createdBody = createRes.body as { id?: string }
+  const createdBody = createRes.body as { id?: string; instructorPasscode?: string }
   assert.equal(typeof createdBody.id, 'string')
+  assert.equal(createdBody.instructorPasscode, undefined)
 
   const stored = createdBody.id ? await sessions.get(createdBody.id) : null
   const storedData = stored?.data as {
