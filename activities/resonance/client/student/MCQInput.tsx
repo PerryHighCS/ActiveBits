@@ -35,7 +35,7 @@ export default function MCQInput({
   if (submitted && selected !== null) {
     return (
       <p className="text-sm text-gray-500 italic" aria-live="polite">
-        Answer submitted — waiting for the instructor to continue.
+        Answer submitted.
       </p>
     )
   }
