@@ -20,8 +20,11 @@ export async function launchResonancePersistentSoloEntry(
   const encodedQuestions = typeof rawEncodedQuestions === 'string' ? rawEncodedQuestions.trim() : null
   const persistentHash = typeof rawPersistentHash === 'string' ? rawPersistentHash.trim() : null
   const rawQuestions = params.selectedOptions?.questions
-  const validatedQuestions = Array.isArray(rawQuestions)
-    ? validateQuestionSet(rawQuestions).questions
+  const validatedQuestionSet = Array.isArray(rawQuestions)
+    ? validateQuestionSet(rawQuestions)
+    : null
+  const validatedQuestions = validatedQuestionSet?.errors.length === 0
+    ? validatedQuestionSet.questions
     : []
 
   if ((!encodedQuestions || !persistentHash) && validatedQuestions.length === 0) {

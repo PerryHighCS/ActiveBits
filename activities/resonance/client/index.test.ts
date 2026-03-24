@@ -121,3 +121,30 @@ void test('launchResonancePersistentSoloEntry creates a self-paced solo session 
     globalThis.fetch = originalFetch
   }
 })
+
+void test('launchResonancePersistentSoloEntry rejects raw question options when any question is invalid', async () => {
+  await assert.rejects(
+    launchResonancePersistentSoloEntry({
+      hash: '',
+      search: '',
+      selectedOptions: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'Valid question',
+            order: 0,
+          },
+          {
+            id: 'q2',
+            type: 'multiple-choice',
+            text: 'Broken question',
+            order: 1,
+            options: [{ id: 'only', text: 'Only one option' }],
+          },
+        ],
+      },
+    }),
+    /valid question set/i,
+  )
+})
