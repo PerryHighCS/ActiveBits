@@ -786,7 +786,12 @@ async function resolveSelfPacedMode(
     return false
   }
 
-  return embeddedParentContext.activityName === 'syncdeck' && isSyncDeckStandaloneSession(parentSession.data)
+  const resolved = embeddedParentContext.activityName === 'syncdeck' && isSyncDeckStandaloneSession(parentSession.data)
+  if (resolved) {
+    session.data.selfPacedMode = true
+  }
+
+  return resolved
 }
 
 function resolveStudentAvailableQuestionIds(session: ResonanceSession, selfPacedMode: boolean): string[] {
@@ -820,7 +825,14 @@ export default function setupResonanceRoutes(
       return null
     }
 
+    const hadSelfPacedMode = session.data.selfPacedMode === true
+    const resolvedSelfPacedMode =
+      hadSelfPacedMode
+        ? true
+        : await resolveSelfPacedMode(session, sessions)
     if (expireActiveQuestionRunIfNeeded(session)) {
+      await sessions.set(sessionId, session)
+    } else if (!hadSelfPacedMode && resolvedSelfPacedMode && session.data.selfPacedMode === true) {
       await sessions.set(sessionId, session)
     }
 

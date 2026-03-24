@@ -292,6 +292,12 @@ void test('self-paced embedded resonance sessions expose all questions to studen
   assert.deepEqual(body.activeQuestionIds, ['q1', 'q2'])
   assert.deepEqual(body.activeQuestions?.map((question) => question.id), ['q1', 'q2'])
 
+  const storedChild = await sessions.get(childSession.id)
+  assert.equal(
+    (storedChild?.data as { selfPacedMode?: boolean } | undefined)?.selfPacedMode,
+    true,
+  )
+
   await sessions.close()
 })
 
