@@ -911,7 +911,8 @@ export default function setupResonanceRoutes(
   // ---------------------------------------------------------------------------
   // POST /api/resonance/create
   // Creates a new session. Optionally accepts encoded questions from a
-  // persistent link so they can be pre-loaded into the session.
+  // persistent link so they can be pre-loaded into the session. Raw question
+  // payloads are only honored for explicit self-paced standalone launches.
   // ---------------------------------------------------------------------------
   app.post('/api/resonance/create', async (req, res) => {
     const body = isPlainObject(req.body) ? req.body : {}
@@ -935,8 +936,15 @@ export default function setupResonanceRoutes(
       }
     }
 
-    if (selfPacedMode && (questions.length === 0 || persistentHash == null)) {
-      res.status(400).json({ error: 'self-paced Resonance launch requires a valid prepared question payload' })
+    if (selfPacedMode && questions.length === 0 && Array.isArray(body.questions)) {
+      const validatedQuestionSet = validateQuestionSet(body.questions)
+      if (validatedQuestionSet.errors.length === 0 && validatedQuestionSet.questions.length > 0) {
+        questions = validatedQuestionSet.questions
+      }
+    }
+
+    if (selfPacedMode && questions.length === 0) {
+      res.status(400).json({ error: 'self-paced Resonance launch requires a valid question payload' })
       return
     }
 

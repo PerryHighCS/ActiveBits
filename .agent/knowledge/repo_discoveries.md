@@ -1559,3 +1559,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Future standalone-capable embedded activities should either support direct `/solo/:activityId` paths or implement `launchPersistentSoloEntry`; selected-options-only activities like Resonance need the latter.
 - Owner: Codex
 - Date: 2026-03-24
+- Area: activities | syncdeck | resonance embedded solo payloads
+- Discovery: SyncDeck solo overlays must preserve opaque `activityOptions`, not just string-valued entries, because Resonance slide metadata currently embeds raw `questions` arrays in `data-activity-options`. The Resonance solo launcher and `POST /api/resonance/create` therefore need to accept either prepared `q/h` selectedOptions or a validated raw `questions` payload for self-paced standalone launches.
+- Why it matters: If SyncDeck trims non-string options, Resonance overlays get stuck forever at “Launching solo activity…” because the launcher never receives a usable question payload.
+- Evidence: `activities/syncdeck/dev-presentations/syncdeck-conversion-lab.html`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/resonance/client/index.tsx`; `activities/resonance/server/routes.ts`
+- Follow-up action: Keep the iframe message schema’s “activityOptions are opaque host input” rule true in the solo-launch path as well as the synchronized embedded path.
+- Owner: Codex
+- Date: 2026-03-24

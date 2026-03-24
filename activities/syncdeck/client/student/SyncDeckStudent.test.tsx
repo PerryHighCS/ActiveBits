@@ -1996,6 +1996,45 @@ void test('applyStudentSoloActivityRequest keeps selectedOptions for permalink-c
   })
 })
 
+void test('resolveStudentSoloActivityRequestInputs keeps non-string activity options for standalone activity-owned launches', () => {
+  const requests = resolveStudentSoloActivityRequestInputs(
+    {
+      activityId: 'resonance',
+      indices: { h: 2, v: 0, f: 0 },
+      standaloneEntry: { enabled: true, supportsDirectPath: false, supportsPermalink: true },
+      activityOptions: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'What is still unclear?',
+            order: 0,
+          },
+        ],
+      },
+    },
+    { h: 2, v: 0, f: 0 },
+  )
+
+  assert.deepEqual(requests, [
+    {
+      activityId: 'resonance',
+      indices: { h: 2, v: 0, f: 0 },
+      standaloneEntry: { enabled: true, supportsDirectPath: false, supportsPermalink: true },
+      selectedOptions: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'What is still unclear?',
+            order: 0,
+          },
+        ],
+      },
+    },
+  ])
+})
+
 void test('applyResolvedStandaloneEntryToSoloRequest fills missing slide metadata from activity registry config', () => {
   const resolved = applyResolvedStandaloneEntryToSoloRequest(
     {

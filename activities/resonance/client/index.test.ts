@@ -56,10 +56,95 @@ void test('launchResonancePersistentSoloEntry rejects launches without prepared 
       search: '',
       selectedOptions: {},
     }),
-    /prepared question set/i,
+    /valid question set/i,
   )
 })
 
 void test('resonance client module exports persistent solo launcher', () => {
   assert.equal(typeof resonanceClientModule.launchPersistentSoloEntry, 'function')
+})
+
+void test('launchResonancePersistentSoloEntry creates a self-paced solo session from raw question options', async () => {
+  const originalFetch = globalThis.fetch
+  const requests: Array<{ input: string; init?: RequestInit }> = []
+
+  globalThis.fetch = (async (input, init) => {
+    requests.push({ input: String(input), init })
+
+    if (String(input) === '/api/resonance/create') {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 'resonance-solo-raw-1',
+        }),
+      } as Response
+    }
+
+    throw new Error(`[TEST] Unexpected fetch: ${String(input)}`)
+  }) as typeof fetch
+
+  try {
+    const result = await launchResonancePersistentSoloEntry({
+      hash: '',
+      search: '',
+      selectedOptions: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'What is still unclear?',
+            order: 0,
+          },
+        ],
+      },
+    })
+
+    assert.deepEqual(result, {
+      sessionId: 'resonance-solo-raw-1',
+    })
+    assert.equal(requests.length, 1)
+    assert.deepEqual(
+      JSON.parse(String(requests[0]?.init?.body ?? '{}')),
+      {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'What is still unclear?',
+            order: 0,
+          },
+        ],
+        selfPacedMode: true,
+      },
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+void test('launchResonancePersistentSoloEntry rejects raw question options when any question is invalid', async () => {
+  await assert.rejects(
+    launchResonancePersistentSoloEntry({
+      hash: '',
+      search: '',
+      selectedOptions: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'Valid question',
+            order: 0,
+          },
+          {
+            id: 'q2',
+            type: 'multiple-choice',
+            text: 'Broken question',
+            order: 1,
+            options: [{ id: 'only', text: 'Only one option' }],
+          },
+        ],
+      },
+    }),
+    /valid question set/i,
+  )
 })

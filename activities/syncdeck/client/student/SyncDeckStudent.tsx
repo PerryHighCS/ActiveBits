@@ -160,7 +160,7 @@ interface SyncDeckSoloOverlayRecord {
   activityId: string
   src?: string
   notice?: string
-  selectedOptions?: Record<string, string>
+  selectedOptions?: Record<string, unknown>
 }
 
 type SyncDeckSoloOverlaysMap = Record<string, SyncDeckSoloOverlayRecord>
@@ -177,11 +177,12 @@ interface SyncDeckSoloActivityRequest {
     supportsDirectPath: boolean
     supportsPermalink: boolean
   }
-  selectedOptions?: Record<string, string>
+  selectedOptions?: Record<string, unknown>
 }
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const MAX_PENDING_IFRAME_PAYLOADS = 25
+const selectedOptionsComparisonKeyCache = new WeakMap<Record<string, unknown>, string>()
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
   if (a.h !== b.h) return a.h - b.h
@@ -297,21 +298,44 @@ function normalizeStandaloneEntryContract(value: unknown): {
   }
 }
 
-function normalizeSelectedOptions(value: unknown): Record<string, string> | undefined {
+function normalizeSelectedOptions(value: unknown): Record<string, unknown> | undefined {
   if (!isPlainObject(value)) {
     return undefined
   }
 
   const entries = Object.entries(value)
-    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-    .map(([key, optionValue]) => [key, optionValue.trim()] as const)
-    .filter(([, optionValue]) => optionValue.length > 0)
+    .filter(([, optionValue]) => optionValue != null)
+    .map(([key, optionValue]) => {
+      if (typeof optionValue === 'string') {
+        const trimmed = optionValue.trim()
+        return trimmed.length > 0 ? ([key, trimmed] as const) : null
+      }
+
+      return [key, optionValue] as const
+    })
+    .filter((entry): entry is readonly [string, unknown] => entry !== null)
 
   if (entries.length === 0) {
     return undefined
   }
 
   return Object.fromEntries(entries)
+}
+
+function getSelectedOptionsComparisonKey(value: Record<string, unknown> | null | undefined): string {
+  if (!value) {
+    return 'null'
+  }
+
+  const cached = selectedOptionsComparisonKeyCache.get(value)
+  if (cached) {
+    return cached
+  }
+
+  const preparedHash = typeof value.h === 'string' ? value.h.trim() : ''
+  const nextKey = preparedHash.length > 0 ? `h:${preparedHash}` : JSON.stringify(value)
+  selectedOptionsComparisonKeyCache.set(value, nextKey)
+  return nextKey
 }
 
 export function resolveStudentSoloActivityRequestInputs(
@@ -479,7 +503,7 @@ export function applyStudentSoloActivityRequest(
     current[slideKey]?.activityId === nextOverlay.activityId
     && current[slideKey]?.src === nextOverlay.src
     && current[slideKey]?.notice === nextOverlay.notice
-    && JSON.stringify(current[slideKey]?.selectedOptions ?? null) === JSON.stringify(nextOverlay.selectedOptions ?? null)
+    && getSelectedOptionsComparisonKey(current[slideKey]?.selectedOptions) === getSelectedOptionsComparisonKey(nextOverlay.selectedOptions)
   ) {
     return current
   }
@@ -3065,8 +3089,30 @@ const SyncDeckStudent: FC = () => {
             selectedOptions,
           })
 
-          if (isCancelled || !launchResult) {
+          if (isCancelled) {
             return
+          }
+
+          if (!launchResult) {
+            setSoloOverlays((current) => {
+              const existing = current[slideKey]
+              if (
+                !existing
+                || existing.activityId !== overlay.activityId
+                || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+              ) {
+                return current
+              }
+
+              return {
+                ...current,
+                [slideKey]: {
+                  activityId: overlay.activityId,
+                  notice: 'Unable to launch this solo activity.',
+                },
+              }
+            })
+            continue
           }
 
           const nextSrc = typeof launchResult.navigateTo === 'string' && launchResult.navigateTo.length > 0
@@ -3104,7 +3150,11 @@ const SyncDeckStudent: FC = () => {
 
           setSoloOverlays((current) => {
             const existing = current[slideKey]
-            if (!existing || existing.activityId !== overlay.activityId || existing.selectedOptions !== overlay.selectedOptions) {
+            if (
+              !existing
+              || existing.activityId !== overlay.activityId
+              || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+            ) {
               return current
             }
 
@@ -3133,7 +3183,11 @@ const SyncDeckStudent: FC = () => {
 
           setSoloOverlays((current) => {
             const existing = current[slideKey]
-            if (!existing || existing.activityId !== overlay.activityId || existing.selectedOptions !== overlay.selectedOptions) {
+            if (
+              !existing
+              || existing.activityId !== overlay.activityId
+              || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+            ) {
               return current
             }
 
