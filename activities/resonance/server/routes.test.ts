@@ -886,6 +886,79 @@ void test('create ignores raw question payloads when self-paced mode is not requ
   await sessions.close()
 })
 
+void test('self-paced sessions created from raw multi-question payloads expose the full question set to students', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const createHandler = app.handlers.post['/api/resonance/create']
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof createHandler, 'function')
+  assert.equal(typeof stateHandler, 'function')
+
+  const createRes = createResponse()
+  await createHandler?.(
+    {
+      params: {},
+      body: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'Question one',
+            order: 0,
+          },
+          {
+            id: 'q2',
+            type: 'multiple-choice',
+            text: 'Question two',
+            order: 1,
+            options: [
+              { id: 'a', text: 'A' },
+              { id: 'b', text: 'B' },
+            ],
+          },
+          {
+            id: 'q3',
+            type: 'free-response',
+            text: 'Question three',
+            order: 2,
+          },
+        ],
+        selfPacedMode: true,
+      },
+    },
+    createRes,
+  )
+
+  assert.equal(createRes.statusCode, 200)
+  const createdBody = createRes.body as { id?: string }
+  assert.equal(typeof createdBody.id, 'string')
+
+  const stateRes = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: createdBody.id },
+      query: { studentId: 'student1' },
+    },
+    stateRes,
+  )
+
+  assert.equal(stateRes.statusCode, 200)
+  const stateBody = stateRes.body as {
+    selfPacedMode?: boolean
+    activeQuestionIds?: string[]
+    activeQuestions?: Array<{ id: string }>
+  }
+  assert.equal(stateBody.selfPacedMode, true)
+  assert.deepEqual(stateBody.activeQuestionIds, ['q1', 'q2', 'q3'])
+  assert.deepEqual(stateBody.activeQuestions?.map((question) => question.id), ['q1', 'q2', 'q3'])
+
+  await sessions.close()
+})
+
 void test('responses route includes submitted, working, and idle progress entries for the instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()

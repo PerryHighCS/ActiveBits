@@ -9,6 +9,8 @@ interface Props {
   onDraftChange?(selectedOptionId: string | null): void
   submitting?: boolean
   submitted?: boolean
+  submittedMessage?: string
+  announceSubmittedMessage?: boolean
 }
 
 export default function MCQInput({
@@ -18,6 +20,8 @@ export default function MCQInput({
   onDraftChange,
   submitting = false,
   submitted = false,
+  submittedMessage = 'Answer submitted.',
+  announceSubmittedMessage = true,
 }: Props) {
   const [selected, setSelected] = useState<string | null>(value)
   const canSubmit = !submitting && !submitted && selected !== null
@@ -34,8 +38,11 @@ export default function MCQInput({
 
   if (submitted && selected !== null) {
     return (
-      <p className="text-sm text-gray-500 italic" aria-live="polite">
-        Answer submitted — waiting for the instructor to continue.
+      <p
+        className="text-sm text-gray-500 italic"
+        {...(announceSubmittedMessage ? { 'aria-live': 'polite' as const } : {})}
+      >
+        {submittedMessage}
       </p>
     )
   }

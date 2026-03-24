@@ -161,6 +161,7 @@ interface SyncDeckSoloOverlayRecord {
   src?: string
   notice?: string
   selectedOptions?: Record<string, unknown>
+  selectedOptionsComparisonKey?: string
 }
 
 type SyncDeckSoloOverlaysMap = Record<string, SyncDeckSoloOverlayRecord>
@@ -444,6 +445,18 @@ export function getStudentOverlayBackdropClass(): string {
   return 'bg-white'
 }
 
+function getSoloOverlaySelectedOptionsComparisonKey(overlay: SyncDeckSoloOverlayRecord | null | undefined): string {
+  if (!overlay) {
+    return ''
+  }
+
+  if (typeof overlay.selectedOptionsComparisonKey === 'string' && overlay.selectedOptionsComparisonKey.length > 0) {
+    return overlay.selectedOptionsComparisonKey
+  }
+
+  return getSelectedOptionsComparisonKey(overlay.selectedOptions)
+}
+
 export function buildStudentOverlayNavigationKeys(params: {
   embeddedActivities: SyncDeckEmbeddedActivitiesMap
   soloOverlays: SyncDeckSoloOverlaysMap
@@ -477,11 +490,22 @@ export function applyStudentSoloActivityRequest(
   request: SyncDeckSoloActivityRequest,
 ): SyncDeckSoloOverlaysMap {
   const slideKey = resolveSoloOverlaySlideKey(request.indices)
+  const existingOverlay = current[slideKey]
   const standaloneEntry = request.standaloneEntry
   const supportsDirectStandalone = standaloneEntry
     ? standaloneEntry.enabled && standaloneEntry.supportsDirectPath
     : true
   const supportsActivityOwnedStandaloneLaunch = standaloneEntry?.enabled === true && standaloneEntry.supportsPermalink === true
+  const selectedOptionsComparisonKey = getSelectedOptionsComparisonKey(request.selectedOptions)
+
+  if (
+    supportsActivityOwnedStandaloneLaunch
+    && existingOverlay?.src
+    && existingOverlay.activityId === request.activityId
+    && getSoloOverlaySelectedOptionsComparisonKey(existingOverlay) === selectedOptionsComparisonKey
+  ) {
+    return current
+  }
 
   const nextOverlay: SyncDeckSoloOverlayRecord = supportsDirectStandalone
     ? {
@@ -500,10 +524,12 @@ export function applyStudentSoloActivityRequest(
     }
 
   if (
-    current[slideKey]?.activityId === nextOverlay.activityId
-    && current[slideKey]?.src === nextOverlay.src
-    && current[slideKey]?.notice === nextOverlay.notice
-    && getSelectedOptionsComparisonKey(current[slideKey]?.selectedOptions) === getSelectedOptionsComparisonKey(nextOverlay.selectedOptions)
+    existingOverlay
+    && existingOverlay.activityId === nextOverlay.activityId
+    && existingOverlay.src === nextOverlay.src
+    && existingOverlay.notice === nextOverlay.notice
+    && getSoloOverlaySelectedOptionsComparisonKey(existingOverlay)
+      === getSoloOverlaySelectedOptionsComparisonKey(nextOverlay)
   ) {
     return current
   }
@@ -3099,7 +3125,7 @@ const SyncDeckStudent: FC = () => {
               if (
                 !existing
                 || existing.activityId !== overlay.activityId
-                || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+                || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
               ) {
                 return current
               }
@@ -3153,7 +3179,7 @@ const SyncDeckStudent: FC = () => {
             if (
               !existing
               || existing.activityId !== overlay.activityId
-              || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+              || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
             ) {
               return current
             }
@@ -3173,6 +3199,7 @@ const SyncDeckStudent: FC = () => {
               [slideKey]: {
                 activityId: overlay.activityId,
                 src: nextSrc,
+                selectedOptionsComparisonKey: getSelectedOptionsComparisonKey(overlay.selectedOptions),
               },
             }
           })
@@ -3186,7 +3213,7 @@ const SyncDeckStudent: FC = () => {
             if (
               !existing
               || existing.activityId !== overlay.activityId
-              || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+              || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
             ) {
               return current
             }
