@@ -7,17 +7,25 @@ import type {
 } from '../../../types/activity.js'
 import ResonanceManager from './manager/ResonanceManager.js'
 import ResonanceStudent from './student/ResonanceStudent.js'
+import type { Question } from '../shared/types.js'
+import { validateQuestionSet } from '../shared/validation.js'
 import ResonancePersistentLinkBuilder from './tools/ResonancePersistentLinkBuilder.js'
 import ResonanceToolShell from './tools/ResonanceToolShell.js'
 
 export async function launchResonancePersistentSoloEntry(
   params: ActivityPersistentSoloLaunchParams,
 ): Promise<ActivityPersistentSoloLaunchResult> {
-  const encodedQuestions = params.selectedOptions?.q?.trim()
-  const persistentHash = params.selectedOptions?.h?.trim()
+  const rawEncodedQuestions = params.selectedOptions?.q
+  const rawPersistentHash = params.selectedOptions?.h
+  const encodedQuestions = typeof rawEncodedQuestions === 'string' ? rawEncodedQuestions.trim() : null
+  const persistentHash = typeof rawPersistentHash === 'string' ? rawPersistentHash.trim() : null
+  const rawQuestions = params.selectedOptions?.questions
+  const validatedQuestions = Array.isArray(rawQuestions)
+    ? validateQuestionSet(rawQuestions).questions
+    : []
 
-  if (!encodedQuestions || !persistentHash) {
-    throw new Error('Resonance solo entry requires a prepared question set.')
+  if ((!encodedQuestions || !persistentHash) && validatedQuestions.length === 0) {
+    throw new Error('Resonance solo entry requires a valid question set.')
   }
 
   const createResponse = await fetch('/api/resonance/create', {
@@ -26,8 +34,8 @@ export async function launchResonancePersistentSoloEntry(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      encodedQuestions,
-      persistentHash,
+      ...(encodedQuestions && persistentHash ? { encodedQuestions, persistentHash } : {}),
+      ...(validatedQuestions.length > 0 ? { questions: validatedQuestions as Question[] } : {}),
       selfPacedMode: true,
     }),
   })

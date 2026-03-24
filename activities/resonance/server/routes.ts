@@ -935,8 +935,15 @@ export default function setupResonanceRoutes(
       }
     }
 
-    if (selfPacedMode && (questions.length === 0 || persistentHash == null)) {
-      res.status(400).json({ error: 'self-paced Resonance launch requires a valid prepared question payload' })
+    if (questions.length === 0 && Array.isArray(body.questions)) {
+      const validatedQuestionSet = validateQuestionSet(body.questions)
+      if (validatedQuestionSet.errors.length === 0 && validatedQuestionSet.questions.length > 0) {
+        questions = validatedQuestionSet.questions
+      }
+    }
+
+    if (selfPacedMode && questions.length === 0) {
+      res.status(400).json({ error: 'self-paced Resonance launch requires a valid question payload' })
       return
     }
 

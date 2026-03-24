@@ -160,7 +160,7 @@ interface SyncDeckSoloOverlayRecord {
   activityId: string
   src?: string
   notice?: string
-  selectedOptions?: Record<string, string>
+  selectedOptions?: Record<string, unknown>
 }
 
 type SyncDeckSoloOverlaysMap = Record<string, SyncDeckSoloOverlayRecord>
@@ -177,7 +177,7 @@ interface SyncDeckSoloActivityRequest {
     supportsDirectPath: boolean
     supportsPermalink: boolean
   }
-  selectedOptions?: Record<string, string>
+  selectedOptions?: Record<string, unknown>
 }
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
@@ -297,15 +297,22 @@ function normalizeStandaloneEntryContract(value: unknown): {
   }
 }
 
-function normalizeSelectedOptions(value: unknown): Record<string, string> | undefined {
+function normalizeSelectedOptions(value: unknown): Record<string, unknown> | undefined {
   if (!isPlainObject(value)) {
     return undefined
   }
 
   const entries = Object.entries(value)
-    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-    .map(([key, optionValue]) => [key, optionValue.trim()] as const)
-    .filter(([, optionValue]) => optionValue.length > 0)
+    .filter(([, optionValue]) => optionValue != null)
+    .map(([key, optionValue]) => {
+      if (typeof optionValue === 'string') {
+        const trimmed = optionValue.trim()
+        return trimmed.length > 0 ? ([key, trimmed] as const) : null
+      }
+
+      return [key, optionValue] as const
+    })
+    .filter((entry): entry is readonly [string, unknown] => entry !== null)
 
   if (entries.length === 0) {
     return undefined
@@ -3053,10 +3060,10 @@ const SyncDeckStudent: FC = () => {
           return
         }
 
-        const selectedOptions = overlay.selectedOptions
-        if (!selectedOptions) {
-          continue
-        }
+          const selectedOptions = overlay.selectedOptions
+          if (!selectedOptions) {
+            continue
+          }
 
         try {
           const launchResult = await launchActivityPersistentSoloEntry(overlay.activityId, {
@@ -3065,8 +3072,26 @@ const SyncDeckStudent: FC = () => {
             selectedOptions,
           })
 
-          if (isCancelled || !launchResult) {
+          if (isCancelled) {
             return
+          }
+
+          if (!launchResult) {
+            setSoloOverlays((current) => {
+              const existing = current[slideKey]
+              if (!existing || existing.activityId !== overlay.activityId || existing.selectedOptions !== overlay.selectedOptions) {
+                return current
+              }
+
+              return {
+                ...current,
+                [slideKey]: {
+                  activityId: overlay.activityId,
+                  notice: 'Unable to launch this solo activity.',
+                },
+              }
+            })
+            continue
           }
 
           const nextSrc = typeof launchResult.navigateTo === 'string' && launchResult.navigateTo.length > 0

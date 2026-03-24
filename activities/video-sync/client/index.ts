@@ -10,8 +10,10 @@ import VideoSyncStudent from './student/VideoSyncStudent.js'
 export async function launchVideoSyncPersistentSoloEntry(
   params: ActivityPersistentSoloLaunchParams,
 ): Promise<ActivityPersistentSoloLaunchResult> {
-  const sourceUrl = params.selectedOptions?.sourceUrl?.trim()
-  if (!sourceUrl) {
+  const sourceUrl = typeof params.selectedOptions?.sourceUrl === 'string'
+    ? params.selectedOptions.sourceUrl.trim()
+    : null
+  if (sourceUrl == null || sourceUrl.length === 0) {
     throw new Error('Video Sync solo entry requires a configured YouTube URL.')
   }
 
