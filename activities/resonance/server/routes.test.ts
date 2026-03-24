@@ -758,6 +758,8 @@ void test('create supports explicit self-paced solo sessions from prepared quest
 })
 
 void test('create rejects self-paced solo sessions when the prepared question payload is invalid', async () => {
+  initializePersistentStorage(null)
+
   const app = createMockApp()
   const ws = createMockWs()
   const sessions = createSessionStore(null)
