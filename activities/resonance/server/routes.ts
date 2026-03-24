@@ -935,6 +935,11 @@ export default function setupResonanceRoutes(
       }
     }
 
+    if (selfPacedMode && (questions.length === 0 || persistentHash == null)) {
+      res.status(400).json({ error: 'self-paced Resonance launch requires a valid prepared question payload' })
+      return
+    }
+
     const session = await createSession(sessions, {
       data: normalizeSessionData({
         instructorPasscode,

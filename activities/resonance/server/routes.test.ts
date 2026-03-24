@@ -756,6 +756,37 @@ void test('create supports explicit self-paced solo sessions from prepared quest
   await sessions.close()
 })
 
+void test('create rejects self-paced solo sessions when the prepared question payload is invalid', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const createHandler = app.handlers.post['/api/resonance/create']
+  assert.equal(typeof createHandler, 'function')
+
+  const res = createResponse()
+  await createHandler?.(
+    {
+      params: {},
+      body: {
+        encodedQuestions: 'tampered-payload',
+        persistentHash: 'bad-hash',
+        selfPacedMode: true,
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    error: 'self-paced Resonance launch requires a valid prepared question payload',
+  })
+
+  await sessions.close()
+})
+
 void test('responses route includes submitted, working, and idle progress entries for the instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()
