@@ -1299,7 +1299,7 @@ export default function setupResonanceRoutes(
 
     session.data.annotations[responseId] = updated
     await sessions.set(sessionId, session)
-    broadcastStudentSessionState(session, sessionId)
+    void broadcastStudentSessionState(session, sessionId)
 
     res.json({ ok: true, responseId, annotation: updated })
   })
@@ -1545,7 +1545,7 @@ export default function setupResonanceRoutes(
           },
           sessionId,
         )
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
       }
@@ -1602,7 +1602,7 @@ export default function setupResonanceRoutes(
             ? { ...q, options: q.options.map(({ id, text }) => ({ id, text })) }
             : q
         void broadcast('resonance:results-shared', { reveal, question: studentSafeQ }, sessionId)
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
       }
@@ -1616,7 +1616,7 @@ export default function setupResonanceRoutes(
           questionId: removedReveals[0]?.questionId ?? null,
         })
         void broadcast('resonance:sharing-stopped', {}, sessionId)
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
       }
@@ -1642,7 +1642,7 @@ export default function setupResonanceRoutes(
         }
         session.data.annotations[responseId] = updated
         await sessions.set(sessionId, session)
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         broadcastToRole(
           'resonance:annotation-updated',
           { responseId, annotation: updated },
@@ -1808,7 +1808,7 @@ export default function setupResonanceRoutes(
           { questionId, sharedResponseId, reactions: sharedResp.reactions },
           sessionId,
         )
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         break
       }
 
