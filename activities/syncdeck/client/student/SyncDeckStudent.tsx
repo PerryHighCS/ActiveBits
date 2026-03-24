@@ -3060,10 +3060,10 @@ const SyncDeckStudent: FC = () => {
           return
         }
 
-          const selectedOptions = overlay.selectedOptions
-          if (!selectedOptions) {
-            continue
-          }
+        const selectedOptions = overlay.selectedOptions
+        if (!selectedOptions) {
+          continue
+        }
 
         try {
           const launchResult = await launchActivityPersistentSoloEntry(overlay.activityId, {
