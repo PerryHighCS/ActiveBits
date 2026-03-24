@@ -680,6 +680,82 @@ void test('prepare-link-options returns encrypted resonance selectedOptions with
   await sessions.close()
 })
 
+void test('create supports explicit self-paced solo sessions from prepared question payloads', async () => {
+  initializePersistentStorage(null)
+
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const prepareHandler = app.handlers.post['/api/resonance/prepare-link-options']
+  const createHandler = app.handlers.post['/api/resonance/create']
+  assert.equal(typeof prepareHandler, 'function')
+  assert.equal(typeof createHandler, 'function')
+
+  const prepareRes = createResponse()
+  await prepareHandler?.(
+    {
+      params: {},
+      body: {
+        teacherCode: 'teacher-code',
+        questions: [
+          {
+            id: 'q1',
+            type: 'multiple-choice',
+            text: 'Pick one',
+            order: 0,
+            options: [
+              { id: 'a', text: 'A' },
+              { id: 'b', text: 'B' },
+            ],
+            correctOptionIds: ['a'],
+          },
+        ],
+      },
+    },
+    prepareRes,
+  )
+
+  const selectedOptions = (prepareRes.body as { selectedOptions?: { q?: string; h?: string } }).selectedOptions
+  assert.equal(typeof selectedOptions?.q, 'string')
+  assert.equal(typeof selectedOptions?.h, 'string')
+
+  const createRes = createResponse()
+  await createHandler?.(
+    {
+      params: {},
+      body: {
+        encodedQuestions: selectedOptions?.q,
+        persistentHash: selectedOptions?.h,
+        selfPacedMode: true,
+      },
+    },
+    createRes,
+  )
+
+  assert.equal(createRes.statusCode, 200)
+  const createdBody = createRes.body as { id?: string }
+  assert.equal(typeof createdBody.id, 'string')
+
+  const stored = createdBody.id ? await sessions.get(createdBody.id) : null
+  const storedData = stored?.data as {
+    selfPacedMode?: boolean
+    questions?: Array<{ id?: string }>
+    persistentHash?: string | null
+  } | undefined
+  assert.equal(stored?.type, 'resonance')
+  assert.equal(storedData?.selfPacedMode, true)
+  assert.equal(storedData?.persistentHash, selectedOptions?.h)
+  assert.deepEqual(
+    storedData?.questions?.map((question) => question.id),
+    ['q1'],
+  )
+
+  await sessions.close()
+})
+
 void test('responses route includes submitted, working, and idle progress entries for the instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()

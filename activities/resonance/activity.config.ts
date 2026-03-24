@@ -6,9 +6,9 @@ const resonanceConfig: ActivityConfig = {
   description: 'Collect, review, and share class responses in real time',
   color: 'rose',
   standaloneEntry: {
-    enabled: false,
+    enabled: true,
     supportsDirectPath: false,
-    supportsPermalink: false,
+    supportsPermalink: true,
     showOnHome: false,
   },
   deepLinkOptions: {

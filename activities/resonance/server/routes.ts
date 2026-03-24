@@ -916,6 +916,7 @@ export default function setupResonanceRoutes(
   app.post('/api/resonance/create', async (req, res) => {
     const body = isPlainObject(req.body) ? req.body : {}
     const instructorPasscode = generatePasscode()
+    const selfPacedMode = body.selfPacedMode === true
 
     let questions: Question[] = []
     let persistentHash: string | null = null
@@ -935,7 +936,12 @@ export default function setupResonanceRoutes(
     }
 
     const session = await createSession(sessions, {
-      data: normalizeSessionData({ instructorPasscode, questions, persistentHash }),
+      data: normalizeSessionData({
+        instructorPasscode,
+        questions,
+        persistentHash,
+        ...(selfPacedMode ? { selfPacedMode: true } : {}),
+      }),
     })
     session.type = 'resonance'
     await sessions.set(session.id, session)
@@ -944,6 +950,7 @@ export default function setupResonanceRoutes(
       sessionId: session.id,
       questionCount: questions.length,
       fromPersistentLink: persistentHash !== null,
+      selfPacedMode,
     })
 
     res.json({ id: session.id, instructorPasscode })
