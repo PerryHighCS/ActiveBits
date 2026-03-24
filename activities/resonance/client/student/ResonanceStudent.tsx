@@ -16,6 +16,25 @@ interface RegisterResponse {
   error?: string
 }
 
+export function resolveNextSelfPacedQuestionId(params: {
+  questionIds: string[]
+  submittedQuestionIds: Set<string>
+  currentQuestionId: string | null
+}): string | null {
+  const { questionIds, submittedQuestionIds, currentQuestionId } = params
+  if (questionIds.length === 0) {
+    return null
+  }
+
+  const currentIndex = currentQuestionId ? questionIds.indexOf(currentQuestionId) : -1
+  const orderedCandidates = currentIndex >= 0
+    ? [...questionIds.slice(currentIndex + 1), ...questionIds.slice(0, currentIndex + 1)]
+    : questionIds
+
+  const nextUnsubmitted = orderedCandidates.find((questionId) => !submittedQuestionIds.has(questionId))
+  return nextUnsubmitted ?? currentQuestionId ?? questionIds[0] ?? null
+}
+
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
   if (deadlineAt === null) {
     return null
@@ -308,15 +327,20 @@ export default function ResonanceStudent() {
               disabled={hasExpired}
               isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
               onSubmitted={(questionId, answer) => {
-                setSubmittedQuestionIds((current) => {
-                  const next = new Set(current)
-                  next.add(questionId)
-                  return next
-                })
+                const nextSubmittedQuestionIds = new Set(submittedQuestionIds)
+                nextSubmittedQuestionIds.add(questionId)
+                setSubmittedQuestionIds(nextSubmittedQuestionIds)
                 setSubmittedAnswers((current) => ({
                   ...current,
                   [questionId]: answer,
                 }))
+                if (snapshot.selfPacedMode) {
+                  setSelectedQuestionId((current) => resolveNextSelfPacedQuestionId({
+                    questionIds: activeQuestions.map((question) => question.id),
+                    submittedQuestionIds: nextSubmittedQuestionIds,
+                    currentQuestionId: current ?? questionId,
+                  }))
+                }
               }}
               sendMessage={sendMessage}
             />
