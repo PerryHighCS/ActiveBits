@@ -1552,3 +1552,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/resonance/server/routes.ts`; `activities/resonance/client/student/ResonanceStudent.tsx`; `activities/resonance/client/student/SharedResponseFeed.tsx`
 - Follow-up action: If other embedded activities need solo/self-paced behavior under SyncDeck, prefer a student-safe snapshot mode flag over client heuristics based on missing active items.
 - Owner: Codex
+- Area: activities | resonance | standalone embedded launch
+- Discovery: Resonance standalone embeds inside SyncDeck solo mode use the activity-owned persistent solo launcher path rather than `/solo/resonance`. `activities/resonance/activity.config.ts` must keep `standaloneEntry.enabled = true`, `supportsDirectPath = false`, and `supportsPermalink = true`, and the launcher in `activities/resonance/client/index.tsx` must translate prepared `selectedOptions.q/h` into `POST /api/resonance/create` with `selfPacedMode: true`.
+- Why it matters: If either the capability flags or the client launcher drift, SyncDeck falls back to the solo overlay notice “This activity requires a live session.” instead of creating an answerable self-paced Resonance child session.
+- Evidence: `activities/resonance/activity.config.ts`; `activities/resonance/client/index.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Future standalone-capable embedded activities should either support direct `/solo/:activityId` paths or implement `launchPersistentSoloEntry`; selected-options-only activities like Resonance need the latter.
+- Owner: Codex
+- Date: 2026-03-24

@@ -916,6 +916,7 @@ export default function setupResonanceRoutes(
   app.post('/api/resonance/create', async (req, res) => {
     const body = isPlainObject(req.body) ? req.body : {}
     const instructorPasscode = generatePasscode()
+    const selfPacedMode = body.selfPacedMode === true
 
     let questions: Question[] = []
     let persistentHash: string | null = null
@@ -934,8 +935,18 @@ export default function setupResonanceRoutes(
       }
     }
 
+    if (selfPacedMode && (questions.length === 0 || persistentHash == null)) {
+      res.status(400).json({ error: 'self-paced Resonance launch requires a valid prepared question payload' })
+      return
+    }
+
     const session = await createSession(sessions, {
-      data: normalizeSessionData({ instructorPasscode, questions, persistentHash }),
+      data: normalizeSessionData({
+        instructorPasscode,
+        questions,
+        persistentHash,
+        ...(selfPacedMode ? { selfPacedMode: true } : {}),
+      }),
     })
     session.type = 'resonance'
     await sessions.set(session.id, session)
@@ -944,9 +955,10 @@ export default function setupResonanceRoutes(
       sessionId: session.id,
       questionCount: questions.length,
       fromPersistentLink: persistentHash !== null,
+      selfPacedMode,
     })
 
-    res.json({ id: session.id, instructorPasscode })
+    res.json(selfPacedMode ? { id: session.id } : { id: session.id, instructorPasscode })
   })
 
   // ---------------------------------------------------------------------------
