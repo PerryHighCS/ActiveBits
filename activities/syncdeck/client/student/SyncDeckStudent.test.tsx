@@ -2001,16 +2001,7 @@ void test('applyStudentSoloActivityRequest preserves an existing launched child 
     '5:0': {
       activityId: 'resonance',
       src: '/CHILD:syncdeck-parent:solo:resonance',
-      selectedOptions: {
-        questions: [
-          {
-            id: 'q1',
-            type: 'free-response',
-            text: 'What is still unclear?',
-            order: 0,
-          },
-        ],
-      },
+      selectedOptionsComparisonKey: '{"questions":[{"id":"q1","type":"free-response","text":"What is still unclear?","order":0}]}',
     },
   }
 

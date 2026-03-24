@@ -10,6 +10,7 @@ interface Props {
   initialAnswer?: AnswerPayload | null
   disabled?: boolean
   isSubmitted?: boolean
+  submittedMessage?: string
   onSubmitted?(questionId: string, answer: AnswerPayload): void
   sendMessage?(type: string, payload: unknown): boolean
 }
@@ -37,6 +38,7 @@ export default function QuestionView({
   initialAnswer = null,
   disabled = false,
   isSubmitted = false,
+  submittedMessage = 'Answer submitted.',
   onSubmitted,
   sendMessage,
 }: Props) {
@@ -140,6 +142,7 @@ export default function QuestionView({
           onSubmit={(text) => submitAnswer({ type: 'free-response', text })}
           submitting={submitting || disabled}
           submitted={isSubmitted}
+          submittedMessage={submittedMessage}
         />
       ) : (
         <MCQInput
@@ -151,6 +154,7 @@ export default function QuestionView({
           onSubmit={(selectedOptionId) => submitAnswer({ type: 'multiple-choice', selectedOptionId })}
           submitting={submitting || disabled}
           submitted={isSubmitted}
+          submittedMessage={submittedMessage}
         />
       )}
 

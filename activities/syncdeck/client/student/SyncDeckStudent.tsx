@@ -161,6 +161,7 @@ interface SyncDeckSoloOverlayRecord {
   src?: string
   notice?: string
   selectedOptions?: Record<string, unknown>
+  selectedOptionsComparisonKey?: string
 }
 
 type SyncDeckSoloOverlaysMap = Record<string, SyncDeckSoloOverlayRecord>
@@ -444,6 +445,18 @@ export function getStudentOverlayBackdropClass(): string {
   return 'bg-white'
 }
 
+function getSoloOverlaySelectedOptionsComparisonKey(overlay: SyncDeckSoloOverlayRecord | null | undefined): string {
+  if (!overlay) {
+    return ''
+  }
+
+  if (typeof overlay.selectedOptionsComparisonKey === 'string' && overlay.selectedOptionsComparisonKey.length > 0) {
+    return overlay.selectedOptionsComparisonKey
+  }
+
+  return getSelectedOptionsComparisonKey(overlay.selectedOptions)
+}
+
 export function buildStudentOverlayNavigationKeys(params: {
   embeddedActivities: SyncDeckEmbeddedActivitiesMap
   soloOverlays: SyncDeckSoloOverlaysMap
@@ -489,7 +502,7 @@ export function applyStudentSoloActivityRequest(
     supportsActivityOwnedStandaloneLaunch
     && existingOverlay?.src
     && existingOverlay.activityId === request.activityId
-    && getSelectedOptionsComparisonKey(existingOverlay.selectedOptions) === selectedOptionsComparisonKey
+    && getSoloOverlaySelectedOptionsComparisonKey(existingOverlay) === selectedOptionsComparisonKey
   ) {
     return current
   }
@@ -514,7 +527,8 @@ export function applyStudentSoloActivityRequest(
     existingOverlay?.activityId === nextOverlay.activityId
     && existingOverlay.src === nextOverlay.src
     && existingOverlay.notice === nextOverlay.notice
-    && getSelectedOptionsComparisonKey(existingOverlay.selectedOptions) === getSelectedOptionsComparisonKey(nextOverlay.selectedOptions)
+    && getSoloOverlaySelectedOptionsComparisonKey(existingOverlay)
+      === getSoloOverlaySelectedOptionsComparisonKey(nextOverlay)
   ) {
     return current
   }
@@ -3110,7 +3124,7 @@ const SyncDeckStudent: FC = () => {
               if (
                 !existing
                 || existing.activityId !== overlay.activityId
-                || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+                || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
               ) {
                 return current
               }
@@ -3164,7 +3178,7 @@ const SyncDeckStudent: FC = () => {
             if (
               !existing
               || existing.activityId !== overlay.activityId
-              || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+              || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
             ) {
               return current
             }
@@ -3184,6 +3198,7 @@ const SyncDeckStudent: FC = () => {
               [slideKey]: {
                 activityId: overlay.activityId,
                 src: nextSrc,
+                selectedOptionsComparisonKey: getSelectedOptionsComparisonKey(overlay.selectedOptions),
               },
             }
           })
@@ -3197,7 +3212,7 @@ const SyncDeckStudent: FC = () => {
             if (
               !existing
               || existing.activityId !== overlay.activityId
-              || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+              || getSoloOverlaySelectedOptionsComparisonKey(existing) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
             ) {
               return current
             }

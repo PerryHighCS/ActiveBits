@@ -116,6 +116,46 @@ void test('MCQInput syncs its selected option when the provided value changes', 
   }
 })
 
+void test('submitted inputs render the provided submitted message consistently', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { render } = await import('@testing-library/react')
+
+  try {
+    const freeResponse = render(
+      React.createElement(FreeResponseInput, {
+        value: 'Done',
+        submitted: true,
+        submittedMessage: 'Answer submitted. Moving to the next question.',
+        onSubmit: async () => undefined,
+      }),
+    )
+    assert.equal(
+      freeResponse.getByText('Answer submitted. Moving to the next question.').textContent,
+      'Answer submitted. Moving to the next question.',
+    )
+    freeResponse.unmount()
+
+    const mcq = render(
+      React.createElement(MCQInput, {
+        options: [
+          { id: 'a', text: 'Option A' },
+          { id: 'b', text: 'Option B' },
+        ],
+        value: 'a',
+        submitted: true,
+        submittedMessage: 'Answer submitted.',
+        onSubmit: async () => undefined,
+      }),
+    )
+    assert.equal(
+      mcq.getByText('Answer submitted.').textContent,
+      'Answer submitted.',
+    )
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('QuestionView submits over websocket first when sendMessage is available', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const previousFetch = globalThis.fetch

@@ -268,6 +268,9 @@ export default function ResonanceStudent() {
   const activeDeadlineAt = snapshot?.activeQuestionDeadlineAt ?? null
   const hasExpired = activeDeadlineAt !== null && activeDeadlineAt <= countdownNow
   const liveCountdown = formatRemainingTime(activeDeadlineAt, countdownNow)
+  const submittedMessage = snapshot?.selfPacedMode
+    ? 'Answer submitted. Moving to the next question.'
+    : 'Answer submitted.'
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -326,6 +329,7 @@ export default function ResonanceStudent() {
               initialAnswer={snapshot.submittedAnswers[activeQuestion.id] ?? submittedAnswers[activeQuestion.id] ?? null}
               disabled={hasExpired}
               isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
+              submittedMessage={submittedMessage}
               onSubmitted={(questionId, answer) => {
                 const nextSubmittedQuestionIds = new Set(submittedQuestionIds)
                 nextSubmittedQuestionIds.add(questionId)
