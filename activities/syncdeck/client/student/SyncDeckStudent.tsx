@@ -524,7 +524,8 @@ export function applyStudentSoloActivityRequest(
     }
 
   if (
-    existingOverlay?.activityId === nextOverlay.activityId
+    existingOverlay
+    && existingOverlay.activityId === nextOverlay.activityId
     && existingOverlay.src === nextOverlay.src
     && existingOverlay.notice === nextOverlay.notice
     && getSoloOverlaySelectedOptionsComparisonKey(existingOverlay)

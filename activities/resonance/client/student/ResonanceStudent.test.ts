@@ -90,6 +90,6 @@ void test('resolveSubmissionAnnouncement keeps the generic confirmation outside 
       submittedQuestionIds: new Set(['q1']),
       currentQuestionId: 'q1',
     }),
-    'Answer submitted.',
+    null,
   )
 })

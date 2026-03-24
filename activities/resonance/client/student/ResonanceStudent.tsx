@@ -66,10 +66,10 @@ export function resolveSubmissionAnnouncement(params: {
   questionIds: string[]
   submittedQuestionIds: Set<string>
   currentQuestionId: string | null
-}): string {
+}): string | null {
   return params.selfPacedMode
     ? resolveSelfPacedSubmittedMessage(params)
-    : 'Answer submitted.'
+    : null
 }
 
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
@@ -385,15 +385,18 @@ export default function ResonanceStudent() {
                 setSubmittedQuestionIds((current) => {
                   const nextSubmittedQuestionIds = new Set(current)
                   nextSubmittedQuestionIds.add(questionId)
-                  setSubmissionAnnouncement((currentAnnouncement) => ({
-                    id: (currentAnnouncement?.id ?? 0) + 1,
-                    message: resolveSubmissionAnnouncement({
-                      selfPacedMode: snapshot.selfPacedMode,
-                      questionIds: activeQuestions.map((question) => question.id),
-                      submittedQuestionIds: nextSubmittedQuestionIds,
-                      currentQuestionId: questionId,
-                    }),
-                  }))
+                  const nextAnnouncement = resolveSubmissionAnnouncement({
+                    selfPacedMode: snapshot.selfPacedMode,
+                    questionIds: activeQuestions.map((question) => question.id),
+                    submittedQuestionIds: nextSubmittedQuestionIds,
+                    currentQuestionId: questionId,
+                  })
+                  if (nextAnnouncement) {
+                    setSubmissionAnnouncement((currentAnnouncement) => ({
+                      id: (currentAnnouncement?.id ?? 0) + 1,
+                      message: nextAnnouncement,
+                    }))
+                  }
                   if (snapshot.selfPacedMode) {
                     setSelectedQuestionId((currentQuestionId) => resolveNextSelfPacedQuestionId({
                       questionIds: activeQuestions.map((question) => question.id),
