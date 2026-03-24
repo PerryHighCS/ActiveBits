@@ -35,6 +35,23 @@ export function resolveNextSelfPacedQuestionId(params: {
   return nextUnsubmitted ?? currentQuestionId ?? questionIds[0] ?? null
 }
 
+export function resolveSelfPacedSubmittedMessage(params: {
+  questionIds: string[]
+  submittedQuestionIds: Set<string>
+  currentQuestionId: string | null
+}): string {
+  const nextQuestionId = resolveNextSelfPacedQuestionId(params)
+  const hasUnsubmittedQuestion = params.questionIds.some((questionId) => !params.submittedQuestionIds.has(questionId))
+
+  if (!hasUnsubmittedQuestion) {
+    return 'All questions completed.'
+  }
+
+  return nextQuestionId !== params.currentQuestionId
+    ? 'Answer submitted. Moving to the next question.'
+    : 'Answer submitted.'
+}
+
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
   if (deadlineAt === null) {
     return null
@@ -268,8 +285,12 @@ export default function ResonanceStudent() {
   const activeDeadlineAt = snapshot?.activeQuestionDeadlineAt ?? null
   const hasExpired = activeDeadlineAt !== null && activeDeadlineAt <= countdownNow
   const liveCountdown = formatRemainingTime(activeDeadlineAt, countdownNow)
-  const submittedMessage = snapshot?.selfPacedMode
-    ? 'Answer submitted. Moving to the next question.'
+  const submittedMessage = snapshot?.selfPacedMode && activeQuestion
+    ? resolveSelfPacedSubmittedMessage({
+      questionIds: activeQuestions.map((question) => question.id),
+      submittedQuestionIds,
+      currentQuestionId: activeQuestion.id,
+    })
     : 'Answer submitted.'
 
   return (
@@ -331,20 +352,22 @@ export default function ResonanceStudent() {
               isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
               submittedMessage={submittedMessage}
               onSubmitted={(questionId, answer) => {
-                const nextSubmittedQuestionIds = new Set(submittedQuestionIds)
-                nextSubmittedQuestionIds.add(questionId)
-                setSubmittedQuestionIds(nextSubmittedQuestionIds)
                 setSubmittedAnswers((current) => ({
                   ...current,
                   [questionId]: answer,
                 }))
-                if (snapshot.selfPacedMode) {
-                  setSelectedQuestionId((current) => resolveNextSelfPacedQuestionId({
-                    questionIds: activeQuestions.map((question) => question.id),
-                    submittedQuestionIds: nextSubmittedQuestionIds,
-                    currentQuestionId: current ?? questionId,
-                  }))
-                }
+                setSubmittedQuestionIds((current) => {
+                  const nextSubmittedQuestionIds = new Set(current)
+                  nextSubmittedQuestionIds.add(questionId)
+                  if (snapshot.selfPacedMode) {
+                    setSelectedQuestionId((currentQuestionId) => resolveNextSelfPacedQuestionId({
+                      questionIds: activeQuestions.map((question) => question.id),
+                      submittedQuestionIds: nextSubmittedQuestionIds,
+                      currentQuestionId: currentQuestionId ?? questionId,
+                    }))
+                  }
+                  return nextSubmittedQuestionIds
+                })
               }}
               sendMessage={sendMessage}
             />
