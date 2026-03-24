@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as React from 'react'
 import { JSDOM } from 'jsdom'
-import { buildSyncDeckPasscodeKey } from '../shared/authStorage.js'
 
 ;(globalThis as { React?: typeof React }).React = React
 
@@ -33,13 +32,12 @@ function installDomEnvironment(url = 'https://bits.mycode.run/util/syncdeck/laun
   }
 }
 
-void test('launchHostedSyncDeckPresentation validates, creates, configures, stores passcode, and redirects', async () => {
-  const { launchHostedSyncDeckPresentation } = await import('./SyncDeckLaunchPresentation.js')
+void test('launchStandaloneSyncDeckPresentation validates, creates, configures, and redirects into solo mode', async () => {
+  const { launchStandaloneSyncDeckPresentation } = await import('./SyncDeckLaunchPresentation.js')
   const requests: Array<{ input: string; init?: RequestInit }> = []
   const redirects: string[] = []
-  const sessionStorageWrites = new Map<string, string>()
 
-  const result = await launchHostedSyncDeckPresentation({
+  const result = await launchStandaloneSyncDeckPresentation({
     presentationUrl: 'https://slides.example/deck',
     hostProtocol: 'https:',
     userAgent: 'Mozilla/5.0 Chrome/123.0.0.0 Safari/537.36',
@@ -65,11 +63,6 @@ void test('launchHostedSyncDeckPresentation validates, creates, configures, stor
 
       throw new Error(`[TEST] unexpected fetch: ${String(input)}`)
     }) as typeof fetch,
-    sessionStorage: {
-      setItem(key, value) {
-        sessionStorageWrites.set(key, value)
-      },
-    },
     redirectTo(url) {
       redirects.push(url)
     },
@@ -84,18 +77,17 @@ void test('launchHostedSyncDeckPresentation validates, creates, configures, stor
     {
       presentationUrl: 'https://slides.example/deck',
       instructorPasscode: 'launch-passcode',
-      standaloneMode: false,
+      standaloneMode: true,
     },
   )
-  assert.equal(sessionStorageWrites.get(buildSyncDeckPasscodeKey('syncdeck-utility-1')), 'launch-passcode')
-  assert.deepEqual(redirects, ['/manage/syncdeck/syncdeck-utility-1'])
+  assert.deepEqual(redirects, ['/syncdeck-utility-1'])
 })
 
-void test('launchHostedSyncDeckPresentation rejects presentations that fail SyncDeck preflight', async () => {
-  const { launchHostedSyncDeckPresentation } = await import('./SyncDeckLaunchPresentation.js')
+void test('launchStandaloneSyncDeckPresentation rejects presentations that fail SyncDeck preflight', async () => {
+  const { launchStandaloneSyncDeckPresentation } = await import('./SyncDeckLaunchPresentation.js')
 
   await assert.rejects(
-    launchHostedSyncDeckPresentation({
+    launchStandaloneSyncDeckPresentation({
       presentationUrl: 'https://slides.example/not-syncdeck',
       hostProtocol: 'https:',
       userAgent: 'Mozilla/5.0 Chrome/123.0.0.0 Safari/537.36',
@@ -130,7 +122,7 @@ void test('SyncDeckLaunchPresentation shows a launch form when presentationUrl i
 
     await waitFor(() => {
       assert.notEqual(rendered.queryByLabelText(/presentation url/i), null)
-      assert.notEqual(rendered.queryByRole('button', { name: /launch in syncdeck/i }), null)
+      assert.notEqual(rendered.queryByRole('button', { name: /launch solo in syncdeck/i }), null)
     })
   } finally {
     restoreDomEnvironment()

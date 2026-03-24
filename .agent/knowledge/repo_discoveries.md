@@ -1538,3 +1538,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/activity.config.ts`; `client/src/components/common/SessionRouter.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
 - Follow-up action: If more activities need hidden utility routes that render `UtilComponent`, keep using `utilities[].renderTarget = 'util'` rather than adding one-off router branches.
 - Owner: Codex
+- Date: 2026-03-24
+- Area: activities | syncdeck | utility launch routing
+- Discovery: SyncDeck's hidden utility launch route should reuse the standalone-session path, not the manager bootstrap path. The utility now creates/configures `standaloneMode: true` sessions and redirects to `/:sessionId`, matching the existing `launchPersistentSoloEntry` behavior used elsewhere in the app.
+- Why it matters: This keeps static-hosted presentation launch aligned with SyncDeck's real solo student runtime and avoids leaking manager-only assumptions like instructor passcode bootstrap into a presentation-owned "launch in SyncDeck" entry point.
+- Evidence: `activities/syncdeck/client/util/SyncDeckLaunchPresentation.tsx`; `activities/syncdeck/client/index.tsx`; `client/src/components/common/WaitingRoom.tsx`
+- Follow-up action: Future utility-based static presentation launches should treat `launchPersistentSoloEntry` as the canonical redirect/auth model unless the product explicitly needs manager mode.
+- Owner: Codex

@@ -3,7 +3,6 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { runSyncDeckPresentationPreflight, type SyncDeckPreflightResult } from '../shared/presentationPreflight.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
 import { createConfiguredSyncDeckSession } from '../shared/sessionLaunch.js'
-import { buildSyncDeckPasscodeKey } from '../shared/authStorage.js'
 
 type LaunchState =
   | { phase: 'idle'; detail: string | null }
@@ -19,18 +18,17 @@ function normalizePreflightWarning(warning: string | null): string {
   return trimmed.replace(/\s*You can continue anyway\.?\s*$/i, '').trim()
 }
 
-export interface LaunchHostedSyncDeckPresentationParams {
+export interface LaunchStandaloneSyncDeckPresentationParams {
   presentationUrl: string
   hostProtocol?: string | null
   userAgent?: string | null
   preflightRunner?: (url: string) => Promise<SyncDeckPreflightResult>
   fetchFn?: typeof fetch
-  sessionStorage?: Pick<Storage, 'setItem'> | null
   redirectTo?: (url: string) => void
 }
 
-export async function launchHostedSyncDeckPresentation(
-  params: LaunchHostedSyncDeckPresentationParams,
+export async function launchStandaloneSyncDeckPresentation(
+  params: LaunchStandaloneSyncDeckPresentationParams,
 ): Promise<{ sessionId: string }> {
   const presentationUrl = params.presentationUrl.trim()
   if (presentationUrl.length === 0) {
@@ -52,14 +50,13 @@ export async function launchHostedSyncDeckPresentation(
     throw new Error(normalizePreflightWarning(preflightResult.warning))
   }
 
-  const { sessionId, instructorPasscode } = await createConfiguredSyncDeckSession({
+  const { sessionId } = await createConfiguredSyncDeckSession({
     presentationUrl,
-    standaloneMode: false,
+    standaloneMode: true,
     fetchFn: params.fetchFn,
   })
 
-  params.sessionStorage?.setItem(buildSyncDeckPasscodeKey(sessionId), instructorPasscode)
-  params.redirectTo?.(`/manage/syncdeck/${encodeURIComponent(sessionId)}`)
+  params.redirectTo?.(`/${encodeURIComponent(sessionId)}`)
 
   return { sessionId }
 }
@@ -94,16 +91,15 @@ export default function SyncDeckLaunchPresentation() {
 
     void (async () => {
       try {
-        await launchHostedSyncDeckPresentation({
+        await launchStandaloneSyncDeckPresentation({
           presentationUrl,
           hostProtocol: window.location.protocol,
           userAgent: window.navigator.userAgent,
-          sessionStorage: window.sessionStorage,
           redirectTo: (url) => {
             if (!cancelled) {
               setLaunchState({
                 phase: 'launching',
-                detail: 'Starting SyncDeck session...',
+                detail: 'Starting standalone SyncDeck session...',
               })
               window.location.assign(url)
             }
@@ -143,15 +139,14 @@ export default function SyncDeckLaunchPresentation() {
 
     void (async () => {
       try {
-        await launchHostedSyncDeckPresentation({
+        await launchStandaloneSyncDeckPresentation({
           presentationUrl,
           hostProtocol: window.location.protocol,
           userAgent: window.navigator.userAgent,
-          sessionStorage: window.sessionStorage,
           redirectTo: (url) => {
             setLaunchState({
               phase: 'launching',
-              detail: 'Starting SyncDeck session...',
+              detail: 'Starting standalone SyncDeck session...',
             })
             window.location.assign(url)
           },
@@ -176,8 +171,8 @@ export default function SyncDeckLaunchPresentation() {
           <p className="text-sm font-semibold uppercase tracking-[0.28em] text-cyan-300">SyncDeck Utility</p>
           <h1 className="text-4xl font-semibold tracking-tight">Launch Presentation</h1>
           <p className="max-w-2xl text-base leading-7 text-slate-300">
-            Launch a hosted SyncDeck manager session from a public presentation URL. ActiveBits validates the
-            presentation first, then creates and opens the session on this origin.
+            Launch a SyncDeck standalone session from a public presentation URL. ActiveBits validates the
+            presentation first, then creates and opens the solo student session on this origin.
           </p>
         </div>
 
@@ -188,7 +183,7 @@ export default function SyncDeckLaunchPresentation() {
           <p className="mt-3 text-sm leading-6 text-slate-300">
             {isLaunching
               ? launchState.detail
-              : 'Paste the public presentation URL you want ActiveBits to host in SyncDeck.'}
+              : 'Paste the public presentation URL you want ActiveBits to open in SyncDeck solo mode.'}
           </p>
           {showForm && (
             <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
@@ -219,7 +214,7 @@ export default function SyncDeckLaunchPresentation() {
                   className="rounded-full bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
                   disabled={presentationUrlInput.trim().length === 0}
                 >
-                  Launch in SyncDeck
+                  Launch Solo in SyncDeck
                 </button>
                 <Link
                   to="/manage"
