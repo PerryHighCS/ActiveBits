@@ -7,7 +7,6 @@ import type {
 } from '../../../types/activity.js'
 import ResonanceManager from './manager/ResonanceManager.js'
 import ResonanceStudent from './student/ResonanceStudent.js'
-import type { Question } from '../shared/types.js'
 import { validateQuestionSet } from '../shared/validation.js'
 import ResonancePersistentLinkBuilder from './tools/ResonancePersistentLinkBuilder.js'
 import ResonanceToolShell from './tools/ResonanceToolShell.js'
@@ -38,7 +37,7 @@ export async function launchResonancePersistentSoloEntry(
     },
     body: JSON.stringify({
       ...(encodedQuestions && persistentHash ? { encodedQuestions, persistentHash } : {}),
-      ...(validatedQuestions.length > 0 ? { questions: validatedQuestions as Question[] } : {}),
+      ...(validatedQuestions.length > 0 ? { questions: validatedQuestions } : {}),
       selfPacedMode: true,
     }),
   })
