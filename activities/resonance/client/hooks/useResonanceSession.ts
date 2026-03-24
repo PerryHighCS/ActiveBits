@@ -308,6 +308,7 @@ export function normalizeStudentSessionSnapshot(
 
   return {
     sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
+    selfPacedMode: data.selfPacedMode === true,
     activeQuestion: normalizedActiveQuestions[0] ?? null,
     activeQuestions: normalizedActiveQuestions,
     activeQuestionIds,

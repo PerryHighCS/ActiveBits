@@ -146,6 +146,27 @@ export default function ResonanceStudent() {
       ...current,
     }))
 
+    if (snapshot.selfPacedMode) {
+      setSubmittedQuestionIds((current) => {
+        const next = new Set(current)
+        for (const questionId of Object.keys(snapshot.submittedAnswers)) {
+          next.add(questionId)
+        }
+        return next
+      })
+      const availableIds = snapshot.activeQuestions.map((question) => question.id)
+      previousActiveQuestionIdsRef.current = availableIds
+      previousActiveQuestionRunStartedAtRef.current = snapshot.activeQuestionRunStartedAt
+
+      if (availableIds.length === 0) {
+        setSelectedQuestionId(null)
+        return
+      }
+
+      setSelectedQuestionId((current) => (current && availableIds.includes(current) ? current : availableIds[0] ?? null))
+      return
+    }
+
     const activeRunStartedAt = snapshot.activeQuestionRunStartedAt
     const activeIds = snapshot.activeQuestions.map((question) => question.id)
     const previousActiveIds = previousActiveQuestionIdsRef.current

@@ -1545,3 +1545,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/client/util/SyncDeckLaunchPresentation.tsx`; `activities/syncdeck/client/index.tsx`; `client/src/components/common/WaitingRoom.tsx`
 - Follow-up action: Future utility-based static presentation launches should treat `launchPersistentSoloEntry` as the canonical redirect/auth model unless the product explicitly needs manager mode.
 - Owner: Codex
+- Date: 2026-03-24
+- Area: activities | resonance | self-paced embedded sessions
+- Discovery: Resonance needs an explicit student-safe `selfPacedMode` snapshot signal when launched from a standalone SyncDeck parent, but that flag must reflect effective fallback behavior rather than sticky session origin. It should be `true` only while no live question run is active, so the student client can return to normal run-restart semantics once an instructor-activated set appears.
+- Why it matters: Without a self-paced flag, embedded solo Resonance sessions look like “no active question” dead-ends because the normal live-session model expects an instructor to activate questions and share results.
+- Evidence: `activities/resonance/server/routes.ts`; `activities/resonance/client/student/ResonanceStudent.tsx`; `activities/resonance/client/student/SharedResponseFeed.tsx`
+- Follow-up action: If other embedded activities need solo/self-paced behavior under SyncDeck, prefer a student-safe snapshot mode flag over client heuristics based on missing active items.
+- Owner: Codex

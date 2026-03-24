@@ -109,6 +109,7 @@ export interface Student {
 /** Session state snapshot safe to send to students */
 export interface StudentSessionSnapshot {
   sessionId: string
+  selfPacedMode: boolean
   activeQuestion: StudentQuestion | null
   activeQuestions: StudentQuestion[]
   activeQuestionIds: string[]

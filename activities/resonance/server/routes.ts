@@ -61,6 +61,7 @@ interface ResonanceSocket extends ActiveBitsWebSocket {
 
 interface ResonanceSessionData extends Record<string, unknown> {
   instructorPasscode: string
+  selfPacedMode?: boolean
   questions: Question[]
   activeQuestionId: string | null
   activeQuestionIds: string[]
@@ -229,6 +230,11 @@ function normalizeActiveQuestionDeadlineAt(value: unknown): number | null {
 
   const rounded = Math.round(value)
   return rounded > 0 ? rounded : null
+}
+
+function isSyncDeckStandaloneSession(value: unknown): boolean {
+  const record = ensurePlainObject(value)
+  return record.standaloneMode === true
 }
 
 function setActiveQuestions(
@@ -430,6 +436,7 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     // without going through /create, so ensure a stable instructor passcode exists
     // before the child manager bootstrap is generated.
     instructorPasscode: normalizeInstructorPasscode(source.instructorPasscode) ?? generatePasscode(),
+    ...(source.selfPacedMode === true ? { selfPacedMode: true } : {}),
     questions,
     activeQuestionId: activeQuestionIds[0] ?? null,
     activeQuestionIds,
@@ -516,14 +523,84 @@ function buildStudentReveal(
   }
 }
 
-function buildStudentSnapshot(session: ResonanceSession, viewerStudentId: string | null = null) {
+function buildSelfPacedMcqReveals(
+  session: ResonanceSession,
+  viewerStudentId: string | null,
+  existingRevealedQuestionIds: Set<string>,
+): QuestionReveal[] {
+  if (viewerStudentId === null) {
+    return []
+  }
+
+  const viewerResponses = session.data.responses.filter((response) => response.studentId === viewerStudentId)
+  if (viewerResponses.length < session.data.questions.length) {
+    return []
+  }
+
+  const responsesByQuestionId = new Map(
+    viewerResponses.map((response) => [response.questionId, response] satisfies [string, Response]),
+  )
+  if (session.data.questions.some((question) => !responsesByQuestionId.has(question.id))) {
+    return []
+  }
+
+  return session.data.questions.flatMap((question) => {
+    if (question.type !== 'multiple-choice' || existingRevealedQuestionIds.has(question.id)) {
+      return []
+    }
+
+    const correctOptionIds = question.options
+      .filter((option) => option.isCorrect === true)
+      .map((option) => option.id)
+    if (correctOptionIds.length === 0) {
+      return []
+    }
+
+    const viewerResponse = responsesByQuestionId.get(question.id)
+    if (!viewerResponse || viewerResponse.answer.type !== 'multiple-choice') {
+      return []
+    }
+
+    return [{
+      questionId: question.id,
+      sharedAt: viewerResponse.submittedAt,
+      correctOptionIds,
+      sharedResponses: [],
+      viewerResponse: {
+        answer: viewerResponse.answer,
+        submittedAt: viewerResponse.submittedAt,
+        instructorEmoji: session.data.annotations[viewerResponse.id]?.emoji ?? null,
+        isShared: false,
+      },
+    } satisfies QuestionReveal]
+  })
+}
+
+function buildStudentSnapshotWithMode(
+  session: ResonanceSession,
+  viewerStudentId: string | null,
+  selfPacedMode: boolean,
+) {
   const { activeQuestionId, activeQuestionIds, activeQuestionRunStartedAt, activeQuestionDeadlineAt, questions, reveals } = session.data
-  const activeQuestionIdSet = new Set(activeQuestionIds)
-  const activeQuestions = questions
-    .filter((question) => activeQuestionIds.includes(question.id))
-    .map(toStudentQuestion)
+  const effectiveSelfPacedMode = selfPacedMode && activeQuestionIds.length === 0
+  const fallbackQuestionIds = effectiveSelfPacedMode
+    ? questions.map((question) => question.id)
+    : activeQuestionIds
+  const fallbackQuestions = effectiveSelfPacedMode
+    ? questions.map(toStudentQuestion)
+    : questions
+      .filter((question) => activeQuestionIds.includes(question.id))
+      .map(toStudentQuestion)
+  const liveActiveQuestionIdSet = new Set(activeQuestionIds)
+  const activeQuestions = fallbackQuestions
   const activeQuestion = activeQuestions[0] ?? null
   const revealedQuestionIds = new Set(reveals.map((r) => r.questionId))
+  const selfPacedReveals = effectiveSelfPacedMode
+    ? buildSelfPacedMcqReveals(session, viewerStudentId, revealedQuestionIds)
+    : []
+  for (const reveal of selfPacedReveals) {
+    revealedQuestionIds.add(reveal.questionId)
+  }
   const revealedQuestions = questions.filter((q) => revealedQuestionIds.has(q.id)).map(toStudentQuestion)
   const submittedAnswers =
     viewerStudentId === null
@@ -544,7 +621,7 @@ function buildStudentSnapshot(session: ResonanceSession, viewerStudentId: string
           return emoji !== null &&
             question !== undefined &&
             !revealedQuestionIds.has(response.questionId) &&
-            !activeQuestionIdSet.has(response.questionId)
+            !liveActiveQuestionIdSet.has(response.questionId)
             ? {
                 question: toStudentQuestion(question),
                 answer: response.answer,
@@ -557,12 +634,16 @@ function buildStudentSnapshot(session: ResonanceSession, viewerStudentId: string
         .sort((left, right) => right.submittedAt - left.submittedAt)
   return {
     sessionId: session.id,
+    selfPacedMode: effectiveSelfPacedMode,
     activeQuestion: activeQuestionId !== null ? (activeQuestions.find((q) => q.id === activeQuestionId) ?? activeQuestion) : activeQuestion,
     activeQuestions,
-    activeQuestionIds,
-    activeQuestionRunStartedAt,
-    activeQuestionDeadlineAt,
-    reveals: reveals.map((reveal) => buildStudentReveal(reveal, session, viewerStudentId)),
+    activeQuestionIds: fallbackQuestionIds,
+    activeQuestionRunStartedAt: effectiveSelfPacedMode ? null : activeQuestionRunStartedAt,
+    activeQuestionDeadlineAt: effectiveSelfPacedMode ? null : activeQuestionDeadlineAt,
+    reveals: [
+      ...reveals.map((reveal) => buildStudentReveal(reveal, session, viewerStudentId)),
+      ...selfPacedReveals,
+    ],
     reviewedResponses,
     submittedAnswers,
     revealedQuestions,
@@ -688,6 +769,40 @@ function checkInstructorAuth(req: RouteRequest, session: ResonanceSession): bool
   return typeof header === 'string' && verifyInstructorPasscode(session.data.instructorPasscode, header)
 }
 
+async function resolveSelfPacedMode(
+  session: ResonanceSession,
+  sessions: Pick<SessionStore, 'get'>,
+): Promise<boolean> {
+  if (session.data.selfPacedMode === true) {
+    return true
+  }
+
+  const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
+  if (!embeddedParentContext) {
+    return false
+  }
+
+  const parentSession = await sessions.get(embeddedParentContext.parentSessionId)
+  if (!parentSession || parentSession.type !== embeddedParentContext.activityName) {
+    return false
+  }
+
+  const resolved = embeddedParentContext.activityName === 'syncdeck' && isSyncDeckStandaloneSession(parentSession.data)
+  if (resolved) {
+    session.data.selfPacedMode = true
+  }
+
+  return resolved
+}
+
+function resolveStudentAvailableQuestionIds(session: ResonanceSession, selfPacedMode: boolean): string[] {
+  if (selfPacedMode && session.data.activeQuestionIds.length === 0) {
+    return session.data.questions.map((question) => question.id)
+  }
+
+  return session.data.activeQuestionIds
+}
+
 // ---------------------------------------------------------------------------
 // Session normalizer registration
 // ---------------------------------------------------------------------------
@@ -711,7 +826,14 @@ export default function setupResonanceRoutes(
       return null
     }
 
+    const hadSelfPacedMode = session.data.selfPacedMode === true
+    const resolvedSelfPacedMode =
+      hadSelfPacedMode
+        ? true
+        : await resolveSelfPacedMode(session, sessions)
     if (expireActiveQuestionRunIfNeeded(session)) {
+      await sessions.set(sessionId, session)
+    } else if (!hadSelfPacedMode && resolvedSelfPacedMode && session.data.selfPacedMode === true) {
       await sessions.set(sessionId, session)
     }
 
@@ -763,16 +885,26 @@ export default function setupResonanceRoutes(
     }
   }
 
-  function broadcastStudentSessionState(session: ResonanceSession, sessionId: string): void {
-    const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
-    for (const socket of clients as Set<ResonanceSocket>) {
-      if (
-        socket.readyState === 1 &&
-        socket.sessionId === sessionId &&
-        socket.isInstructor !== true
-      ) {
-        sendToSocket(socket, 'resonance:session-state', buildStudentSnapshot(session, socket.studentId ?? null), sessionId)
+  async function broadcastStudentSessionState(session: ResonanceSession, sessionId: string): Promise<void> {
+    try {
+      const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+      const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
+      for (const socket of clients as Set<ResonanceSocket>) {
+        if (
+          socket.readyState === 1 &&
+          socket.sessionId === sessionId &&
+          socket.isInstructor !== true
+        ) {
+          sendToSocket(
+            socket,
+            'resonance:session-state',
+            buildStudentSnapshotWithMode(session, socket.studentId ?? null, selfPacedMode),
+            sessionId,
+          )
+        }
       }
+    } catch (error) {
+      console.error('[resonance] Failed to broadcast student session state', { sessionId, error })
     }
   }
 
@@ -949,16 +1081,17 @@ export default function setupResonanceRoutes(
       return
     }
 
+    const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+    const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
     const requestedQuestionId = typeof body.questionId === 'string' ? body.questionId : null
-    const activeQuestionIds = session.data.activeQuestionIds
     const questionId =
       requestedQuestionId !== null
         ? requestedQuestionId
-        : activeQuestionIds.length === 1
-          ? activeQuestionIds[0] ?? null
+        : availableQuestionIds.length === 1
+          ? availableQuestionIds[0] ?? null
           : session.data.activeQuestionId
 
-    if (!questionId || !activeQuestionIds.includes(questionId)) {
+    if (!questionId || !availableQuestionIds.includes(questionId)) {
       res.status(409).json({ error: 'no active question' })
       return
     }
@@ -978,7 +1111,7 @@ export default function setupResonanceRoutes(
     upsertResponse(session.data.responses, questionId, studentId, answer)
     delete session.data.responseDrafts[buildDraftKey(questionId, studentId)]
     await sessions.set(sessionId, session)
-    broadcastStudentSessionState(session, sessionId)
+    void broadcastStudentSessionState(session, sessionId)
     broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
 
     console.info('[resonance] Answer submitted', { sessionId, studentId, questionId })
@@ -1001,7 +1134,8 @@ export default function setupResonanceRoutes(
     }
 
     const requestedStudentId = typeof req.query?.studentId === 'string' ? req.query.studentId : null
-    res.json(buildStudentSnapshot(session, requestedStudentId))
+    const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+    res.json(buildStudentSnapshotWithMode(session, requestedStudentId, selfPacedMode))
   })
 
   // GET /api/resonance/:sessionId/responses
@@ -1182,7 +1316,7 @@ export default function setupResonanceRoutes(
 
     session.data.annotations[responseId] = updated
     await sessions.set(sessionId, session)
-    broadcastStudentSessionState(session, sessionId)
+    void broadcastStudentSessionState(session, sessionId)
 
     res.json({ ok: true, responseId, annotation: updated })
   })
@@ -1428,7 +1562,7 @@ export default function setupResonanceRoutes(
           },
           sessionId,
         )
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
       }
@@ -1485,7 +1619,7 @@ export default function setupResonanceRoutes(
             ? { ...q, options: q.options.map(({ id, text }) => ({ id, text })) }
             : q
         void broadcast('resonance:results-shared', { reveal, question: studentSafeQ }, sessionId)
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
       }
@@ -1499,7 +1633,7 @@ export default function setupResonanceRoutes(
           questionId: removedReveals[0]?.questionId ?? null,
         })
         void broadcast('resonance:sharing-stopped', {}, sessionId)
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
       }
@@ -1525,7 +1659,7 @@ export default function setupResonanceRoutes(
         }
         session.data.annotations[responseId] = updated
         await sessions.set(sessionId, session)
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         broadcastToRole(
           'resonance:annotation-updated',
           { responseId, annotation: updated },
@@ -1585,13 +1719,15 @@ export default function setupResonanceRoutes(
           typeof payload.studentId === 'string' ? payload.studentId : (clientStudentId ?? null)
         if (!studentId || !session.data.students[studentId]) return
         const requestedQuestionId = typeof payload.questionId === 'string' ? payload.questionId : null
+        const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+        const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
         const questionId =
           requestedQuestionId !== null
             ? requestedQuestionId
-            : session.data.activeQuestionIds.length === 1
-              ? (session.data.activeQuestionIds[0] ?? null)
+            : availableQuestionIds.length === 1
+              ? (availableQuestionIds[0] ?? null)
               : session.data.activeQuestionId
-        if (!questionId || !session.data.activeQuestionIds.includes(questionId)) return
+        if (!questionId || !availableQuestionIds.includes(questionId)) return
         const activeQuestion = session.data.questions.find((q) => q.id === questionId) ?? null
         if (!activeQuestion) return
         const answer = validateAnswerPayload(payload.answer, activeQuestion)
@@ -1608,6 +1744,7 @@ export default function setupResonanceRoutes(
         const responseWithName = { ...response, studentName: student?.name ?? 'Unknown' }
         broadcastToRole('resonance:response-received', { response: responseWithName }, sessionId, true)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        void broadcastStudentSessionState(session, sessionId)
         break
       }
 
@@ -1615,13 +1752,15 @@ export default function setupResonanceRoutes(
         const studentId =
           typeof payload.studentId === 'string' ? payload.studentId : (clientStudentId ?? null)
         if (!studentId || !session.data.students[studentId]) return
+        const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+        const availableQuestionIds = resolveStudentAvailableQuestionIds(session, selfPacedMode)
 
         const questionId = typeof payload.questionId === 'string'
           ? payload.questionId
-          : session.data.activeQuestionIds.length === 1
-            ? (session.data.activeQuestionIds[0] ?? null)
+          : availableQuestionIds.length === 1
+            ? (availableQuestionIds[0] ?? null)
             : session.data.activeQuestionId
-        if (!questionId || !session.data.activeQuestionIds.includes(questionId)) return
+        if (!questionId || !availableQuestionIds.includes(questionId)) return
 
         const question = session.data.questions.find((entry) => entry.id === questionId) ?? null
         if (!question) return
@@ -1686,7 +1825,7 @@ export default function setupResonanceRoutes(
           { questionId, sharedResponseId, reactions: sharedResp.reactions },
           sessionId,
         )
-        broadcastStudentSessionState(session, sessionId)
+        void broadcastStudentSessionState(session, sessionId)
         break
       }
 
@@ -1783,7 +1922,13 @@ export default function setupResonanceRoutes(
         client.isInstructor = true
         sendToSocket(client, 'resonance:instructor-state', buildInstructorSnapshot(session), sessionId)
       } else {
-        sendToSocket(client, 'resonance:session-state', buildStudentSnapshot(session, client.studentId ?? null), sessionId)
+        const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+        sendToSocket(
+          client,
+          'resonance:session-state',
+          buildStudentSnapshotWithMode(session, client.studentId ?? null, selfPacedMode),
+          sessionId,
+        )
       }
 
       console.info('[resonance] WebSocket connected', {

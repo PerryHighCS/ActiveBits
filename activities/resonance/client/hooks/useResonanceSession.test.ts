@@ -31,6 +31,17 @@ void test('normalizeStudentSessionSnapshot keeps object submittedAnswers payload
       text: 'answer',
     },
   })
+  assert.equal(result.selfPacedMode, false)
+})
+
+void test('normalizeStudentSessionSnapshot keeps selfPacedMode when provided', () => {
+  const result = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    selfPacedMode: true,
+  })
+
+  assert.ok(result)
+  assert.equal(result.selfPacedMode, true)
 })
 
 void test('normalizeStudentSessionSnapshot filters malformed activeQuestions and revealedQuestions entries', () => {
