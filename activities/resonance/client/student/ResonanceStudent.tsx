@@ -32,7 +32,11 @@ export function resolveNextSelfPacedQuestionId(params: {
     : questionIds
 
   const nextUnsubmitted = orderedCandidates.find((questionId) => !submittedQuestionIds.has(questionId))
-  return nextUnsubmitted ?? currentQuestionId ?? questionIds[0] ?? null
+  if (nextUnsubmitted) {
+    return nextUnsubmitted
+  }
+
+  return currentIndex >= 0 ? currentQuestionId : questionIds[0] ?? null
 }
 
 export function resolveSelfPacedSubmittedMessage(params: {

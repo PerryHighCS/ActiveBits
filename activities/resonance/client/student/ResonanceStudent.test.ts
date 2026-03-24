@@ -36,6 +36,17 @@ void test('resolveNextSelfPacedQuestionId keeps the current question when all ar
   )
 })
 
+void test('resolveNextSelfPacedQuestionId falls back to a valid question id when the current id is stale', () => {
+  assert.equal(
+    resolveNextSelfPacedQuestionId({
+      questionIds: ['q1', 'q2'],
+      submittedQuestionIds: new Set(['q1', 'q2']),
+      currentQuestionId: 'q9',
+    }),
+    'q1',
+  )
+})
+
 void test('resolveSelfPacedSubmittedMessage announces forward progression when another unanswered question remains', () => {
   assert.equal(
     resolveSelfPacedSubmittedMessage({
