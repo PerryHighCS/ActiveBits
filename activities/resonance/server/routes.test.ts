@@ -841,6 +841,51 @@ void test('create supports explicit self-paced solo sessions from raw question p
   await sessions.close()
 })
 
+void test('create ignores raw question payloads when self-paced mode is not requested', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const createHandler = app.handlers.post['/api/resonance/create']
+  assert.equal(typeof createHandler, 'function')
+
+  const res = createResponse()
+  await createHandler?.(
+    {
+      params: {},
+      body: {
+        questions: [
+          {
+            id: 'q1',
+            type: 'free-response',
+            text: 'Should be ignored without self-paced mode',
+            order: 0,
+          },
+        ],
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const createdBody = res.body as { id?: string; instructorPasscode?: string }
+  assert.equal(typeof createdBody.id, 'string')
+  assert.equal(typeof createdBody.instructorPasscode, 'string')
+
+  const stored = createdBody.id ? await sessions.get(createdBody.id) : null
+  const storedData = stored?.data as {
+    selfPacedMode?: boolean
+    questions?: Array<{ id?: string }>
+  } | undefined
+  assert.equal(stored?.type, 'resonance')
+  assert.equal(storedData?.selfPacedMode, undefined)
+  assert.deepEqual(storedData?.questions ?? [], [])
+
+  await sessions.close()
+})
+
 void test('responses route includes submitted, working, and idle progress entries for the instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()

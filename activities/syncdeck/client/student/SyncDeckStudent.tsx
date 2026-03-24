@@ -182,6 +182,7 @@ interface SyncDeckSoloActivityRequest {
 
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const MAX_PENDING_IFRAME_PAYLOADS = 25
+const selectedOptionsComparisonKeyCache = new WeakMap<Record<string, unknown>, string>()
 
 function compareIndices(a: { h: number; v: number; f: number }, b: { h: number; v: number; f: number }): number {
   if (a.h !== b.h) return a.h - b.h
@@ -319,6 +320,22 @@ function normalizeSelectedOptions(value: unknown): Record<string, unknown> | und
   }
 
   return Object.fromEntries(entries)
+}
+
+function getSelectedOptionsComparisonKey(value: Record<string, unknown> | null | undefined): string {
+  if (!value) {
+    return 'null'
+  }
+
+  const cached = selectedOptionsComparisonKeyCache.get(value)
+  if (cached) {
+    return cached
+  }
+
+  const preparedHash = typeof value.h === 'string' ? value.h.trim() : ''
+  const nextKey = preparedHash.length > 0 ? `h:${preparedHash}` : JSON.stringify(value)
+  selectedOptionsComparisonKeyCache.set(value, nextKey)
+  return nextKey
 }
 
 export function resolveStudentSoloActivityRequestInputs(
@@ -486,7 +503,7 @@ export function applyStudentSoloActivityRequest(
     current[slideKey]?.activityId === nextOverlay.activityId
     && current[slideKey]?.src === nextOverlay.src
     && current[slideKey]?.notice === nextOverlay.notice
-    && JSON.stringify(current[slideKey]?.selectedOptions ?? null) === JSON.stringify(nextOverlay.selectedOptions ?? null)
+    && getSelectedOptionsComparisonKey(current[slideKey]?.selectedOptions) === getSelectedOptionsComparisonKey(nextOverlay.selectedOptions)
   ) {
     return current
   }
@@ -3079,7 +3096,11 @@ const SyncDeckStudent: FC = () => {
           if (!launchResult) {
             setSoloOverlays((current) => {
               const existing = current[slideKey]
-              if (!existing || existing.activityId !== overlay.activityId || existing.selectedOptions !== overlay.selectedOptions) {
+              if (
+                !existing
+                || existing.activityId !== overlay.activityId
+                || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+              ) {
                 return current
               }
 
@@ -3129,7 +3150,11 @@ const SyncDeckStudent: FC = () => {
 
           setSoloOverlays((current) => {
             const existing = current[slideKey]
-            if (!existing || existing.activityId !== overlay.activityId || existing.selectedOptions !== overlay.selectedOptions) {
+            if (
+              !existing
+              || existing.activityId !== overlay.activityId
+              || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+            ) {
               return current
             }
 
@@ -3158,7 +3183,11 @@ const SyncDeckStudent: FC = () => {
 
           setSoloOverlays((current) => {
             const existing = current[slideKey]
-            if (!existing || existing.activityId !== overlay.activityId || existing.selectedOptions !== overlay.selectedOptions) {
+            if (
+              !existing
+              || existing.activityId !== overlay.activityId
+              || getSelectedOptionsComparisonKey(existing.selectedOptions) !== getSelectedOptionsComparisonKey(overlay.selectedOptions)
+            ) {
               return current
             }
 
