@@ -885,21 +885,25 @@ export default function setupResonanceRoutes(
   }
 
   async function broadcastStudentSessionState(session: ResonanceSession, sessionId: string): Promise<void> {
-    const selfPacedMode = await resolveSelfPacedMode(session, sessions)
-    const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
-    for (const socket of clients as Set<ResonanceSocket>) {
-      if (
-        socket.readyState === 1 &&
-        socket.sessionId === sessionId &&
-        socket.isInstructor !== true
-      ) {
-        sendToSocket(
-          socket,
-          'resonance:session-state',
-          buildStudentSnapshotWithMode(session, socket.studentId ?? null, selfPacedMode),
-          sessionId,
-        )
+    try {
+      const selfPacedMode = await resolveSelfPacedMode(session, sessions)
+      const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
+      for (const socket of clients as Set<ResonanceSocket>) {
+        if (
+          socket.readyState === 1 &&
+          socket.sessionId === sessionId &&
+          socket.isInstructor !== true
+        ) {
+          sendToSocket(
+            socket,
+            'resonance:session-state',
+            buildStudentSnapshotWithMode(session, socket.studentId ?? null, selfPacedMode),
+            sessionId,
+          )
+        }
       }
+    } catch (error) {
+      console.error('[resonance] Failed to broadcast student session state', { sessionId, error })
     }
   }
 

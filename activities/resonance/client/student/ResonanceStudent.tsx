@@ -147,7 +147,13 @@ export default function ResonanceStudent() {
     }))
 
     if (snapshot.selfPacedMode) {
-      setSubmittedQuestionIds(new Set(Object.keys(snapshot.submittedAnswers)))
+      setSubmittedQuestionIds((current) => {
+        const next = new Set(current)
+        for (const questionId of Object.keys(snapshot.submittedAnswers)) {
+          next.add(questionId)
+        }
+        return next
+      })
       const availableIds = snapshot.activeQuestions.map((question) => question.id)
       previousActiveQuestionIdsRef.current = availableIds
       previousActiveQuestionRunStartedAtRef.current = snapshot.activeQuestionRunStartedAt
