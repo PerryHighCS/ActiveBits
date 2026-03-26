@@ -107,6 +107,10 @@ export function normalizeActivationSelection(
   return availableQuestionIds
 }
 
+export function isAllQuestionsSelected(selectedQuestionIds: string[], availableQuestionIds: string[]): boolean {
+  return availableQuestionIds.length > 0 && availableQuestionIds.every((questionId) => selectedQuestionIds.includes(questionId))
+}
+
 export function shouldShowQuestionListActivationControls(questionCount: number): boolean {
   return questionCount > 0
 }
@@ -377,6 +381,7 @@ export default function ResonanceManager() {
   const hasLiveRun = activeQuestionDeadlineAt === null || activeQuestionDeadlineAt > countdownNow
   const activeQuestionIdSet = new Set(hasLiveRun ? activeQuestionIds : [])
   const activationSelectionSet = new Set(activationSelectionIds)
+  const allQuestionsSelected = isAllQuestionsSelected(activationSelectionIds, questions.map((question) => question.id))
   const expandedQuestionStemSet = new Set(expandedQuestionStemIds)
   const overflowingQuestionStemSet = new Set(overflowingQuestionStemIds)
   const liveCountdown = formatRemainingTime(activeQuestionDeadlineAt, countdownNow)
@@ -478,10 +483,12 @@ export default function ResonanceManager() {
                 {questions.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => setActivationSelectionIds(questions.map((question) => question.id))}
+                    onClick={() => setActivationSelectionIds(
+                      allQuestionsSelected ? [] : questions.map((question) => question.id),
+                    )}
                     className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
                   >
-                    Select all
+                    {allQuestionsSelected ? 'Select none' : 'Select all'}
                   </button>
                 )}
                 <button

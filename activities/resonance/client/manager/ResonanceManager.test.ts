@@ -3,6 +3,7 @@ import test from 'node:test'
 import { JSDOM } from 'jsdom'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import {
+  isAllQuestionsSelected,
   isQuestionStemVisuallyTruncated,
   normalizeActivationSelection,
   resolvePasscode,
@@ -50,6 +51,10 @@ void test('normalizeActivationSelection keeps valid selection and falls back to 
     ['q1', 'q3'],
   )
   assert.deepEqual(
+    normalizeActivationSelection(['missing'], ['q1', 'q2', 'q3'], []),
+    ['q1', 'q2', 'q3'],
+  )
+  assert.deepEqual(
     normalizeActivationSelection([], ['q1', 'q2', 'q3'], []),
     ['q1', 'q2', 'q3'],
   )
@@ -57,6 +62,13 @@ void test('normalizeActivationSelection keeps valid selection and falls back to 
     normalizeActivationSelection([], [], []),
     [],
   )
+})
+
+void test('isAllQuestionsSelected only returns true when every available question is selected', () => {
+  assert.equal(isAllQuestionsSelected([], []), false)
+  assert.equal(isAllQuestionsSelected(['q1'], ['q1', 'q2']), false)
+  assert.equal(isAllQuestionsSelected(['q1', 'q2'], ['q1', 'q2']), true)
+  assert.equal(isAllQuestionsSelected(['q1', 'q2', 'extra'], ['q1', 'q2']), true)
 })
 
 void test('shouldShowQuestionListActivationControls keeps activate and stop available for single-question sessions', () => {
