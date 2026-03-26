@@ -1643,6 +1643,7 @@ const SyncDeckManager: FC = () => {
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingEmbeddedPreloadDedupeRef = useRef<Set<string>>(new Set())
   const pendingEmbeddedPrestartRef = useRef<Set<string>>(new Set())
   const pendingEmbeddedWarmMountRef = useRef<Map<string, number>>(new Map())
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
@@ -2597,7 +2598,7 @@ const SyncDeckManager: FC = () => {
     void processManagerPreloadRequests({
       requests,
       existingInstanceKeys: new Set(Object.keys(embeddedActivities)),
-      pendingInstanceKeys: pendingEmbeddedPrestartRef.current,
+      pendingInstanceKeys: pendingEmbeddedPreloadDedupeRef.current,
       preloadBundles: preloadActivityBundles,
       startRequest: async (request) => {
         await launchEmbeddedActivityFromRequest(request, { background: true })
@@ -2879,7 +2880,6 @@ const SyncDeckManager: FC = () => {
         return
       }
 
-      const envelope = parseRevealSyncEnvelope(event.data)
       if (!presentationOrigin || event.origin !== presentationOrigin) {
         if (candidateAction === 'activityPreloadRequest' || candidateAction === 'activityBundlePreloadRequest') {
           if (isDevMode) {
@@ -2892,6 +2892,8 @@ const SyncDeckManager: FC = () => {
         }
         return
       }
+
+      const envelope = parseRevealSyncEnvelope(event.data)
       if (envelope?.type === 'reveal-sync') {
         const compatibility = assessRevealSyncProtocolCompatibility(envelope.version)
         if (!compatibility.compatible) {
