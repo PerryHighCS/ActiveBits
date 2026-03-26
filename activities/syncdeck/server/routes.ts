@@ -1094,7 +1094,10 @@ function markEmbeddedChildSessionForAutoActivateAllQuestions(
   const hasActiveQuestionRun =
     typeof childSession.data.activeQuestionRunStartedAt === 'number'
     && Number.isFinite(childSession.data.activeQuestionRunStartedAt)
-  if (activeQuestionIds.length > 0 || hasActiveQuestionRun) {
+  const hasEmbeddedAutoActivated =
+    typeof childSession.data.embeddedAutoActivatedAt === 'number'
+    && Number.isFinite(childSession.data.embeddedAutoActivatedAt)
+  if (activeQuestionIds.length > 0 || hasActiveQuestionRun || hasEmbeddedAutoActivated) {
     return false
   }
 

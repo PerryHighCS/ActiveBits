@@ -2983,6 +2983,87 @@ void test('embedded-activity auto-activate route is idempotent when resonance al
   assert.deepEqual(storeState.store[childSessionId], childSessionBeforeCall)
 })
 
+void test('embedded-activity auto-activate route is idempotent after embedded resonance already auto-activated once', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const childSessionId = 'CHILD:s1:auto01:resonance'
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: { h: 3, v: 1, f: 0 },
+          lastStudentStateAt: null,
+        }],
+        embeddedActivities: {
+          'resonance:3:1': {
+            childSessionId,
+            activityId: 'resonance',
+            startedAt: 123,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    [childSessionId]: {
+      id: childSessionId,
+      type: 'resonance',
+      created: 1,
+      lastActivity: 1,
+      data: {
+        embeddedParentSessionId: 's1',
+        embeddedInstanceKey: 'resonance:3:1',
+        activeQuestionIds: [],
+        activeQuestionRunStartedAt: null,
+        embeddedAutoActivatedAt: 12345,
+        embeddedLaunch: {
+          parentSessionId: 's1',
+          instanceKey: 'resonance:3:1',
+          selectedOptions: {
+            questions: [
+              { id: 'q1', type: 'free-response', text: 'Explain why.', order: 0 },
+            ],
+          },
+        },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
+  assert.equal(typeof handler, 'function')
+
+  const childSessionBeforeCall = JSON.parse(JSON.stringify(storeState.store[childSessionId]))
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instanceKey: 'resonance:3:1',
+        childSessionId,
+        studentId: 'student-1',
+        autoActivateAllQuestions: true,
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    ok: true,
+    instanceKey: 'resonance:3:1',
+    childSessionId,
+    studentId: 'student-1',
+    activated: false,
+  })
+  assert.deepEqual(storeState.store[childSessionId], childSessionBeforeCall)
+})
+
 void test('embedded-activity auto-activate route rejects students who are not on a released embedded slide', async () => {
   const app = createMockApp()
   const ws = createMockWs()

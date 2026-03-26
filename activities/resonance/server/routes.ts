@@ -67,6 +67,7 @@ interface ResonanceSessionData extends Record<string, unknown> {
   activeQuestionIds: string[]
   activeQuestionRunStartedAt: number | null
   activeQuestionDeadlineAt: number | null
+  embeddedAutoActivatedAt?: number | null
   students: Record<string, Student>
   responses: Response[]
   responseDrafts: Record<string, {
@@ -451,13 +452,23 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
       : null
   let activeQuestionDeadlineAt =
     activeQuestionIds.length > 0 ? normalizeActiveQuestionDeadlineAt(source.activeQuestionDeadlineAt) : null
+  let embeddedAutoActivatedAt =
+    typeof source.embeddedAutoActivatedAt === 'number' && Number.isFinite(source.embeddedAutoActivatedAt)
+      ? Math.round(source.embeddedAutoActivatedAt)
+      : null
 
-  if (shouldAutoActivateAllQuestions && activeQuestionIds.length === 0 && questions.length > 0) {
+  if (
+    shouldAutoActivateAllQuestions
+    && embeddedAutoActivatedAt === null
+    && activeQuestionIds.length === 0
+    && questions.length > 0
+  ) {
     const runStartedAt = Date.now()
     const run = buildActiveQuestionRun(questions, questions.map((question) => question.id), runStartedAt)
     activeQuestionIds = run.questionIds
     activeQuestionRunStartedAt = run.questionIds.length > 0 ? runStartedAt : null
     activeQuestionDeadlineAt = run.questionIds.length > 0 ? run.deadlineAt : null
+    embeddedAutoActivatedAt = run.questionIds.length > 0 ? runStartedAt : null
   }
 
   return {
@@ -473,6 +484,7 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     activeQuestionIds,
     activeQuestionRunStartedAt,
     activeQuestionDeadlineAt,
+    ...(embeddedAutoActivatedAt !== null ? { embeddedAutoActivatedAt } : {}),
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
     responses: Array.isArray(source.responses) ? (source.responses as Response[]) : [],
     responseDrafts: normalizeResponseDrafts(source.responseDrafts, questions),
