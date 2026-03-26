@@ -1801,6 +1801,38 @@ export function shouldShowInstructorPendingActivityNotice(params: {
   )
 }
 
+export function shouldAutoActivateReleasedResonanceQuestions(params: {
+  activeEmbeddedActivityId: string | null
+  activeEmbeddedInstanceKey: string | null
+  studentAnchoredInstanceKey: string | null
+  instructorAnchoredInstanceKey: string | null
+  syncState: SyncDeckStudentSyncState
+  isBacktrackOptOut: boolean
+}): boolean {
+  if (params.activeEmbeddedActivityId !== 'resonance' || !params.activeEmbeddedInstanceKey) {
+    return false
+  }
+
+  const activePosition = parseSyncDeckEmbeddedInstancePosition(params.activeEmbeddedInstanceKey)
+  if (!activePosition) {
+    return false
+  }
+
+  if (activePosition.v > 0) {
+    return params.studentAnchoredInstanceKey === params.activeEmbeddedInstanceKey
+  }
+
+  if (params.syncState === 'vertical' || params.syncState === 'solo' || params.isBacktrackOptOut) {
+    return false
+  }
+
+  if (params.studentAnchoredInstanceKey !== params.activeEmbeddedInstanceKey) {
+    return false
+  }
+
+  return params.instructorAnchoredInstanceKey !== params.activeEmbeddedInstanceKey
+}
+
 interface PendingSynchronizedActivityRequest {
   observedAt: number
   slideKey: string
@@ -1924,6 +1956,7 @@ const SyncDeckStudent: FC = () => {
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
   const expectedInstructorLocalTargetRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const recoveredEmbeddedEntryKeysRef = useRef<Set<string>>(new Set())
+  const autoActivatedReleasedResonanceKeysRef = useRef<Set<string>>(new Set())
   const attachSessionEndedHandler = useSessionEndedHandler()
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const [pendingSynchronizedActivityRequest, setPendingSynchronizedActivityRequest] =
@@ -2931,6 +2964,14 @@ const SyncDeckStudent: FC = () => {
     instructorIndices: lastInstructorIndicesRef.current,
     isBacktrackOptOut,
   })
+  const shouldAutoActivateReleasedResonance = shouldAutoActivateReleasedResonanceQuestions({
+    activeEmbeddedActivityId,
+    activeEmbeddedInstanceKey,
+    studentAnchoredInstanceKey,
+    instructorAnchoredInstanceKey,
+    syncState,
+    isBacktrackOptOut,
+  })
   const overlayNavigationBaseIndices = resolveStudentOverlayNavigationBaseIndices({
     studentIndices: studentIndicesState,
     studentAnchoredInstanceKey,
@@ -2967,6 +3008,62 @@ const SyncDeckStudent: FC = () => {
       derivedCapabilities: overlayVerticalNavigationCapabilities,
       fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false,
     })
+
+  useEffect(() => {
+    if (
+      !sessionId
+      || !activeEmbeddedInstanceKey
+      || !activeEmbeddedChildSessionId
+      || !registeredStudentId
+      || !shouldAutoActivateReleasedResonance
+    ) {
+      return
+    }
+
+    const activationKey = `${activeEmbeddedChildSessionId}:${registeredStudentId}`
+    if (autoActivatedReleasedResonanceKeysRef.current.has(activationKey)) {
+      return
+    }
+    autoActivatedReleasedResonanceKeysRef.current.add(activationKey)
+
+    const abortController = new AbortController()
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/auto-activate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            instanceKey: activeEmbeddedInstanceKey,
+            childSessionId: activeEmbeddedChildSessionId,
+            studentId: registeredStudentId,
+            autoActivateAllQuestions: true,
+          }),
+          signal: abortController.signal,
+        })
+
+        if (!response.ok && !abortController.signal.aborted) {
+          autoActivatedReleasedResonanceKeysRef.current.delete(activationKey)
+        }
+      } catch {
+        if (!abortController.signal.aborted) {
+          autoActivatedReleasedResonanceKeysRef.current.delete(activationKey)
+        }
+      }
+    })()
+
+    return () => {
+      abortController.abort()
+    }
+  }, [
+    activeEmbeddedChildSessionId,
+    activeEmbeddedInstanceKey,
+    registeredStudentId,
+    sessionId,
+    shouldAutoActivateReleasedResonance,
+  ])
 
   useEffect(() => {
     if (

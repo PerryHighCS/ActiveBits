@@ -404,11 +404,25 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
 
   let questions: Question[] = Array.isArray(source.questions) ? (source.questions as Question[]) : []
   let persistentHash: string | null = typeof source.persistentHash === 'string' ? source.persistentHash : null
+  let normalizedEmbeddedLaunch = isPlainObject(source.embeddedLaunch)
+    ? { ...(source.embeddedLaunch as Record<string, unknown>) }
+    : null
+  const embeddedLaunchSelectedOptions = normalizedEmbeddedLaunch && isPlainObject(normalizedEmbeddedLaunch.selectedOptions)
+    ? { ...(normalizedEmbeddedLaunch.selectedOptions as Record<string, unknown>) }
+    : null
+  const shouldAutoActivateAllQuestions = embeddedLaunchSelectedOptions?.autoActivateAllQuestions === true
+  if (embeddedLaunchSelectedOptions && 'autoActivateAllQuestions' in embeddedLaunchSelectedOptions) {
+    delete embeddedLaunchSelectedOptions.autoActivateAllQuestions
+    normalizedEmbeddedLaunch = {
+      ...normalizedEmbeddedLaunch,
+      selectedOptions: embeddedLaunchSelectedOptions,
+    }
+  }
 
   // When the platform WS creates a session from a persistent link, it stores
   // the encrypted question set and hash in embeddedLaunch.selectedOptions.
-  if (questions.length === 0 && isPlainObject(source.embeddedLaunch)) {
-    const embedded = ensurePlainObject((source.embeddedLaunch as Record<string, unknown>).selectedOptions)
+  if (questions.length === 0 && embeddedLaunchSelectedOptions) {
+    const embedded = ensurePlainObject(embeddedLaunchSelectedOptions)
     const encodedQ = typeof embedded.q === 'string' ? embedded.q : null
     const embeddedHash = typeof embedded.h === 'string' ? embedded.h : null
     if (encodedQ !== null && embeddedHash !== null) {
@@ -428,7 +442,23 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
   }
 
   const fallbackActiveQuestionId = typeof source.activeQuestionId === 'string' ? source.activeQuestionId : null
-  const activeQuestionIds = normalizeActiveQuestionIds(source.activeQuestionIds, fallbackActiveQuestionId)
+  let activeQuestionIds = normalizeActiveQuestionIds(source.activeQuestionIds, fallbackActiveQuestionId)
+  let activeQuestionRunStartedAt =
+    activeQuestionIds.length > 0 &&
+    typeof source.activeQuestionRunStartedAt === 'number' &&
+    Number.isFinite(source.activeQuestionRunStartedAt)
+      ? Math.round(source.activeQuestionRunStartedAt)
+      : null
+  let activeQuestionDeadlineAt =
+    activeQuestionIds.length > 0 ? normalizeActiveQuestionDeadlineAt(source.activeQuestionDeadlineAt) : null
+
+  if (shouldAutoActivateAllQuestions && activeQuestionIds.length === 0 && questions.length > 0) {
+    const runStartedAt = Date.now()
+    const run = buildActiveQuestionRun(questions, questions.map((question) => question.id), runStartedAt)
+    activeQuestionIds = run.questionIds
+    activeQuestionRunStartedAt = run.questionIds.length > 0 ? runStartedAt : null
+    activeQuestionDeadlineAt = run.questionIds.length > 0 ? run.deadlineAt : null
+  }
 
   return {
     ...source,
@@ -437,17 +467,12 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     // before the child manager bootstrap is generated.
     instructorPasscode: normalizeInstructorPasscode(source.instructorPasscode) ?? generatePasscode(),
     ...(source.selfPacedMode === true ? { selfPacedMode: true } : {}),
+    ...(normalizedEmbeddedLaunch ? { embeddedLaunch: normalizedEmbeddedLaunch } : {}),
     questions,
     activeQuestionId: activeQuestionIds[0] ?? null,
     activeQuestionIds,
-    activeQuestionRunStartedAt:
-      activeQuestionIds.length > 0 &&
-      typeof source.activeQuestionRunStartedAt === 'number' &&
-      Number.isFinite(source.activeQuestionRunStartedAt)
-        ? Math.round(source.activeQuestionRunStartedAt)
-        : null,
-    activeQuestionDeadlineAt:
-      activeQuestionIds.length > 0 ? normalizeActiveQuestionDeadlineAt(source.activeQuestionDeadlineAt) : null,
+    activeQuestionRunStartedAt,
+    activeQuestionDeadlineAt,
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
     responses: Array.isArray(source.responses) ? (source.responses as Response[]) : [],
     responseDrafts: normalizeResponseDrafts(source.responseDrafts, questions),

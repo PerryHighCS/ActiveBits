@@ -16,6 +16,7 @@ import type { ActiveBitsWebSocket, WsConnectionHandler, WsRouter } from '../../.
 import { initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
 import setupSyncDeckRoutes, { waitForInstructorAuthMessage } from './routes.js'
 import '../../gallery-walk/server/routes.js'
+import '../../resonance/server/routes.js'
 import '../../video-sync/server/routes.js'
 
 const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
@@ -2655,6 +2656,114 @@ void test('embedded-activity entry route issues a fresh token for a registered p
   assert.equal(typeof body.entryParticipantToken, 'string')
   assert.equal(body.values.participantId, 'student-1')
   assert.equal(body.values.displayName, 'Ada Lovelace')
+})
+
+void test('embedded-activity auto-activate route marks released resonance children to activate all questions', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const childSessionId = 'CHILD:s1:abc12:resonance'
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+        embeddedActivities: {
+          'resonance:3:1': {
+            childSessionId,
+            activityId: 'resonance',
+            startedAt: 123,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    [childSessionId]: {
+      id: childSessionId,
+      type: 'resonance',
+      created: 1,
+      lastActivity: 1,
+      data: {
+        embeddedParentSessionId: 's1',
+        embeddedInstanceKey: 'resonance:3:1',
+        embeddedLaunch: {
+          parentSessionId: 's1',
+          instanceKey: 'resonance:3:1',
+          selectedOptions: {
+            questions: [
+              { id: 'q1', type: 'free-response', text: 'Explain why.', order: 0 },
+              {
+                id: 'q2',
+                type: 'multiple-choice',
+                text: 'Pick one.',
+                order: 1,
+                options: [
+                  { id: 'a', text: 'A' },
+                  { id: 'b', text: 'B' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instanceKey: 'resonance:3:1',
+        childSessionId,
+        studentId: 'student-1',
+        autoActivateAllQuestions: true,
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    ok: true,
+    instanceKey: 'resonance:3:1',
+    childSessionId,
+    studentId: 'student-1',
+    activated: true,
+  })
+
+  const childSession = storeState.store[childSessionId] as SessionRecord & {
+    data: {
+      embeddedLaunch?: { selectedOptions?: Record<string, unknown> }
+    }
+  }
+  assert.deepEqual(childSession.data.embeddedLaunch?.selectedOptions, {
+    autoActivateAllQuestions: true,
+    questions: [
+      { id: 'q1', type: 'free-response', text: 'Explain why.', order: 0 },
+      {
+        id: 'q2',
+        type: 'multiple-choice',
+        text: 'Pick one.',
+        order: 1,
+        options: [
+          { id: 'a', text: 'A' },
+          { id: 'b', text: 'B' },
+        ],
+      },
+    ],
+  })
 })
 
 void test('embedded-activity start route supports concurrent instances under different keys', async () => {

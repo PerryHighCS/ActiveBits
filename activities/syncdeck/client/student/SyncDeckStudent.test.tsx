@@ -38,6 +38,7 @@ import { persistRecoveredEmbeddedEntryParticipantToken } from './SyncDeckStudent
 import { shouldPersistRecoveredEmbeddedEntryResponse } from './SyncDeckStudent.js'
 import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent.js'
 import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
+import { shouldAutoActivateReleasedResonanceQuestions } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
 import { shouldPreferInstructorOverlaySelection } from './SyncDeckStudent.js'
 import { buildStudentEmbeddedSyncContextMessage } from './SyncDeckStudent.js'
@@ -1727,6 +1728,56 @@ void test('shouldPreferInstructorOverlaySelection disables instructor preference
       syncState: 'vertical',
       isBacktrackOptOut: false,
       suppressFallbackToInstructor: false,
+    }),
+    false,
+  )
+})
+
+void test('shouldAutoActivateReleasedResonanceQuestions activates only for released resonance slides', () => {
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:1',
+      studentAnchoredInstanceKey: 'resonance:4:1',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      syncState: 'vertical',
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:0',
+      studentAnchoredInstanceKey: 'resonance:4:0',
+      instructorAnchoredInstanceKey: null,
+      syncState: 'behind',
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:0',
+      studentAnchoredInstanceKey: 'resonance:4:0',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      syncState: 'synchronized',
+      isBacktrackOptOut: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:0',
+      studentAnchoredInstanceKey: 'resonance:4:0',
+      instructorAnchoredInstanceKey: null,
+      syncState: 'behind',
+      isBacktrackOptOut: true,
     }),
     false,
   )
