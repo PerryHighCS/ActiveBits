@@ -1482,8 +1482,13 @@ function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmb
     return null
   }
 
-  const hSegment = segments.at(-2)
-  const vSegment = segments.at(-1)
+  const numericSegments = segments.filter((segment) => /^-?\d+$/.test(segment))
+  if (numericSegments.length < 2) {
+    return null
+  }
+
+  const hSegment = numericSegments.at(-2)
+  const vSegment = numericSegments.at(-1)
   if (typeof hSegment !== 'string' || typeof vSegment !== 'string') {
     return null
   }

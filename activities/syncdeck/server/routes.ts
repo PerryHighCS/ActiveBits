@@ -329,12 +329,17 @@ function parseEmbeddedInstancePosition(instanceKey: string | null): SyncDeckEmbe
   }
 
   const segments = instanceKey.split(':')
-  if (segments.length !== 3) {
+  if (segments.length < 3) {
     return null
   }
 
-  const h = Number.parseInt(segments[1] ?? '', 10)
-  const v = Number.parseInt(segments[2] ?? '', 10)
+  const numericSegments = segments.filter((segment) => /^-?\d+$/.test(segment))
+  if (numericSegments.length < 2) {
+    return null
+  }
+
+  const h = Number.parseInt(numericSegments.at(-2) ?? '', 10)
+  const v = Number.parseInt(numericSegments.at(-1) ?? '', 10)
   if (!Number.isFinite(h) || !Number.isFinite(v)) {
     return null
   }

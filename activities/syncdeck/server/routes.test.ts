@@ -2862,6 +2862,86 @@ void test('embedded-activity auto-activate route allows released horizontal reso
   })
 })
 
+void test('embedded-activity auto-activate route supports variant-suffixed resonance instance keys', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const childSessionId = 'CHILD:s1:variant1:resonance'
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        lastInstructorStatePayload: {
+          type: 'slidechanged',
+          payload: { h: 3, v: 0, f: 0 },
+        },
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+        embeddedActivities: {
+          'resonance:3:1:variantA': {
+            childSessionId,
+            activityId: 'resonance',
+            startedAt: 123,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    [childSessionId]: {
+      id: childSessionId,
+      type: 'resonance',
+      created: 1,
+      lastActivity: 1,
+      data: {
+        embeddedParentSessionId: 's1',
+        embeddedInstanceKey: 'resonance:3:1:variantA',
+        embeddedLaunch: {
+          parentSessionId: 's1',
+          instanceKey: 'resonance:3:1:variantA',
+          selectedOptions: {
+            questions: [
+              { id: 'q1', type: 'free-response', text: 'Explain why.', order: 0 },
+            ],
+          },
+        },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instanceKey: 'resonance:3:1:variantA',
+        childSessionId,
+        studentId: 'student-1',
+        autoActivateAllQuestions: true,
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    ok: true,
+    instanceKey: 'resonance:3:1:variantA',
+    childSessionId,
+    studentId: 'student-1',
+    activated: true,
+  })
+})
+
 void test('embedded-activity auto-activate route is idempotent after resonance activates questions', async () => {
   const app = createMockApp()
   const ws = createMockWs()

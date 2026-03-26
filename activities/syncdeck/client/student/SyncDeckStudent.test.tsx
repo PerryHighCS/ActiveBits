@@ -1783,6 +1783,18 @@ void test('shouldAutoActivateReleasedResonanceQuestions activates only for relea
     }),
     false,
   )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:1:variantA',
+      studentAnchoredInstanceKey: 'resonance:4:1:variantA',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      syncState: 'vertical',
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
 })
 
 void test('released resonance auto-activation cleanup re-allows retries after an interrupted request', () => {
