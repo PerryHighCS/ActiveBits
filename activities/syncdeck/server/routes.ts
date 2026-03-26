@@ -94,6 +94,11 @@ interface SyncDeckEmbeddedActivityRecord {
   owner: string
 }
 
+interface SyncDeckEmbeddedInstancePosition {
+  h: number
+  v: number
+}
+
 interface SyncDeckEmbeddedLaunchPayload {
   parentSessionId: string
   instanceKey: string
@@ -316,6 +321,25 @@ function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivi
         ? value.owner.trim()
         : SYNCDECK_EMBEDDED_OWNER,
   }
+}
+
+function parseEmbeddedInstancePosition(instanceKey: string | null): SyncDeckEmbeddedInstancePosition | null {
+  if (!instanceKey) {
+    return null
+  }
+
+  const segments = instanceKey.split(':')
+  if (segments.length !== 3) {
+    return null
+  }
+
+  const h = Number.parseInt(segments[1] ?? '', 10)
+  const v = Number.parseInt(segments[2] ?? '', 10)
+  if (!Number.isFinite(h) || !Number.isFinite(v)) {
+    return null
+  }
+
+  return { h, v }
 }
 
 function normalizeEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivitiesMap {
@@ -1064,6 +1088,16 @@ function markEmbeddedChildSessionForAutoActivateAllQuestions(
     return false
   }
 
+  const activeQuestionIds = Array.isArray(childSession.data.activeQuestionIds)
+    ? childSession.data.activeQuestionIds.filter((questionId): questionId is string => typeof questionId === 'string')
+    : []
+  const hasActiveQuestionRun =
+    typeof childSession.data.activeQuestionRunStartedAt === 'number'
+    && Number.isFinite(childSession.data.activeQuestionRunStartedAt)
+  if (activeQuestionIds.length > 0 || hasActiveQuestionRun) {
+    return false
+  }
+
   const embeddedLaunch = isPlainObject(childSession.data.embeddedLaunch) ? childSession.data.embeddedLaunch : null
   const selectedOptions = isPlainObject(embeddedLaunch?.selectedOptions) ? embeddedLaunch.selectedOptions : null
   if (!embeddedLaunch || !selectedOptions || selectedOptions.autoActivateAllQuestions === true) {
@@ -1076,6 +1110,33 @@ function markEmbeddedChildSessionForAutoActivateAllQuestions(
   }
   childSession.data.embeddedLaunch = embeddedLaunch
   return true
+}
+
+function canStudentAutoActivateEmbeddedInstance(params: {
+  instanceKey: string
+  student: SyncDeckStudent
+  session: SyncDeckSession
+}): boolean {
+  const instancePosition = parseEmbeddedInstancePosition(params.instanceKey)
+  const studentIndices = params.student.lastIndices
+  if (!instancePosition || !studentIndices) {
+    return false
+  }
+
+  if (studentIndices.h !== instancePosition.h || studentIndices.v !== instancePosition.v) {
+    return false
+  }
+
+  if (instancePosition.v > 0) {
+    return true
+  }
+
+  const instructorIndices = extractIndicesFromInstructorPayload(params.session.data.lastInstructorStatePayload)
+  if (!instructorIndices) {
+    return false
+  }
+
+  return studentIndices.h < instructorIndices.h
 }
 
 function buildEmbeddedActivityStartPayload(
@@ -1748,6 +1809,10 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const student = findSyncDeckStudentById(session.data.students, studentId)
     if (!student) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+    if (!canStudentAutoActivateEmbeddedInstance({ instanceKey, student, session })) {
       res.status(403).json({ error: 'forbidden' })
       return
     }
