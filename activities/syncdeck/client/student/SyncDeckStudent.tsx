@@ -1833,6 +1833,25 @@ export function shouldAutoActivateReleasedResonanceQuestions(params: {
   return params.instructorAnchoredInstanceKey !== params.activeEmbeddedInstanceKey
 }
 
+export function tryClaimReleasedResonanceAutoActivation(
+  activationKeys: Set<string>,
+  activationKey: string,
+): boolean {
+  if (activationKeys.has(activationKey)) {
+    return false
+  }
+
+  activationKeys.add(activationKey)
+  return true
+}
+
+export function releaseReleasedResonanceAutoActivation(
+  activationKeys: Set<string>,
+  activationKey: string,
+): void {
+  activationKeys.delete(activationKey)
+}
+
 interface PendingSynchronizedActivityRequest {
   observedAt: number
   slideKey: string
@@ -3021,10 +3040,9 @@ const SyncDeckStudent: FC = () => {
     }
 
     const activationKey = `${activeEmbeddedChildSessionId}:${registeredStudentId}`
-    if (autoActivatedReleasedResonanceKeysRef.current.has(activationKey)) {
+    if (!tryClaimReleasedResonanceAutoActivation(autoActivatedReleasedResonanceKeysRef.current, activationKey)) {
       return
     }
-    autoActivatedReleasedResonanceKeysRef.current.add(activationKey)
 
     const abortController = new AbortController()
 
@@ -3045,17 +3063,18 @@ const SyncDeckStudent: FC = () => {
         })
 
         if (!response.ok && !abortController.signal.aborted) {
-          autoActivatedReleasedResonanceKeysRef.current.delete(activationKey)
+          releaseReleasedResonanceAutoActivation(autoActivatedReleasedResonanceKeysRef.current, activationKey)
         }
       } catch {
         if (!abortController.signal.aborted) {
-          autoActivatedReleasedResonanceKeysRef.current.delete(activationKey)
+          releaseReleasedResonanceAutoActivation(autoActivatedReleasedResonanceKeysRef.current, activationKey)
         }
       }
     })()
 
     return () => {
       abortController.abort()
+      releaseReleasedResonanceAutoActivation(autoActivatedReleasedResonanceKeysRef.current, activationKey)
     }
   }, [
     activeEmbeddedChildSessionId,

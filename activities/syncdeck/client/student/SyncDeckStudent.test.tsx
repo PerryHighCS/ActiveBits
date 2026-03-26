@@ -39,6 +39,8 @@ import { shouldPersistRecoveredEmbeddedEntryResponse } from './SyncDeckStudent.j
 import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent.js'
 import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
 import { shouldAutoActivateReleasedResonanceQuestions } from './SyncDeckStudent.js'
+import { tryClaimReleasedResonanceAutoActivation } from './SyncDeckStudent.js'
+import { releaseReleasedResonanceAutoActivation } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
 import { shouldPreferInstructorOverlaySelection } from './SyncDeckStudent.js'
 import { buildStudentEmbeddedSyncContextMessage } from './SyncDeckStudent.js'
@@ -1781,6 +1783,18 @@ void test('shouldAutoActivateReleasedResonanceQuestions activates only for relea
     }),
     false,
   )
+})
+
+void test('released resonance auto-activation cleanup re-allows retries after an interrupted request', () => {
+  const activationKeys = new Set<string>()
+  const activationKey = 'child-session-1:student-1'
+
+  assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), true)
+  assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), false)
+
+  releaseReleasedResonanceAutoActivation(activationKeys, activationKey)
+
+  assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), true)
 })
 
 void test('shouldPreferInstructorOverlaySelection prefers instructor only while synchronized and following', () => {
