@@ -127,7 +127,10 @@ function getCachedClientModule(activityId: string, loader: ActivityClientLoader)
     return cached
   }
 
-  const pending = resolveClientModule(loader)
+  const pending = resolveClientModule(loader).catch((error) => {
+    clientModuleResolutionCache.delete(activityId)
+    throw error
+  })
   clientModuleResolutionCache.set(activityId, pending)
   return pending
 }

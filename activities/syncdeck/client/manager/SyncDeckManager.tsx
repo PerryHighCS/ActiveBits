@@ -1093,6 +1093,14 @@ function parseRevealSyncEnvelope(data: unknown): RevealSyncEnvelope | null {
   return data != null && typeof data === 'object' ? (data as RevealSyncEnvelope) : null
 }
 
+export function extractRevealSyncActionWithoutParsing(data: unknown): string | null {
+  if (!isPlainObject(data) || data.type !== 'reveal-sync' || typeof data.action !== 'string') {
+    return null
+  }
+
+  return data.action
+}
+
 export function resolveManagerActivityRequestStartInput(
   rawPayload: unknown,
   fallbackInstructorIndices: { h: number; v: number; f: number } | null,
@@ -1112,6 +1120,44 @@ export function resolveManagerPreloadRequestBatchInputs(
   fallbackInstructorIndices: { h: number; v: number; f: number } | null,
 ): SyncDeckActivityLaunchRequest[] {
   return resolveGroupedPreloadRequestBatchInputs(rawPayload, fallbackInstructorIndices)
+}
+
+export async function processManagerPreloadRequests(params: {
+  requests: readonly SyncDeckActivityLaunchRequest[]
+  existingInstanceKeys: ReadonlySet<string>
+  pendingInstanceKeys: Set<string>
+  preloadBundles: (requests: readonly SyncDeckGroupedActivityRequest[]) => Promise<void>
+  startRequest: (request: SyncDeckActivityLaunchRequest) => Promise<void>
+}): Promise<void> {
+  if (params.requests.length === 0) {
+    return
+  }
+
+  await params.preloadBundles(params.requests)
+
+  for (const request of params.requests) {
+    if (params.existingInstanceKeys.has(request.instanceKey) || params.pendingInstanceKeys.has(request.instanceKey)) {
+      continue
+    }
+
+    params.pendingInstanceKeys.add(request.instanceKey)
+    try {
+      await params.startRequest(request)
+    } finally {
+      params.pendingInstanceKeys.delete(request.instanceKey)
+    }
+  }
+}
+
+export async function processManagerBundlePreloadRequests(params: {
+  requests: readonly SyncDeckGroupedActivityRequest[]
+  preloadBundles: (requests: readonly SyncDeckGroupedActivityRequest[]) => Promise<void>
+}): Promise<void> {
+  if (params.requests.length === 0) {
+    return
+  }
+
+  await params.preloadBundles(params.requests)
 }
 
 export function resolveSyncDeckActivityPickerEntries(
@@ -1484,6 +1530,43 @@ function buildEmbeddedManagerIframeSrc(record: SyncDeckEmbeddedActivityRecord): 
   return `/manage/${encodeURIComponent(record.activityId)}/${encodeURIComponent(record.childSessionId)}`
 }
 
+const MAX_MOUNTED_EMBEDDED_MANAGER_IFRAMES = 2
+
+function areStringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+export function resolveMountedEmbeddedManagerInstanceKeys(params: {
+  current: readonly string[]
+  existingInstanceKeys: readonly string[]
+  activeInstanceKey: string | null
+  promotedInstanceKey?: string | null
+  limit?: number
+}): string[] {
+  const limit = Math.max(1, params.limit ?? MAX_MOUNTED_EMBEDDED_MANAGER_IFRAMES)
+  const existing = new Set(params.existingInstanceKeys)
+  const next: string[] = []
+
+  for (const candidate of [params.activeInstanceKey ?? null, params.promotedInstanceKey ?? null]) {
+    if (!candidate || !existing.has(candidate) || next.includes(candidate)) {
+      continue
+    }
+    next.push(candidate)
+  }
+
+  for (const candidate of params.current) {
+    if (!existing.has(candidate) || next.includes(candidate)) {
+      continue
+    }
+    next.push(candidate)
+    if (next.length >= limit) {
+      break
+    }
+  }
+
+  return next.slice(0, limit)
+}
+
 const SyncDeckManager: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
@@ -1531,6 +1614,7 @@ const SyncDeckManager: FC = () => {
   const [allowUnverifiedStartForUrl, setAllowUnverifiedStartForUrl] = useState<string | null>(null)
   const [confirmStartForUrl, setConfirmStartForUrl] = useState<string | null>(null)
   const [presentationTitle, setPresentationTitle] = useState<string | null>(null)
+  const [mountedEmbeddedManagerInstanceKeys, setMountedEmbeddedManagerInstanceKeys] = useState<string[]>([])
   const [loadedEmbeddedManagerInstanceKeys, setLoadedEmbeddedManagerInstanceKeys] = useState<Record<string, boolean>>({})
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
@@ -1560,6 +1644,7 @@ const SyncDeckManager: FC = () => {
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingEmbeddedPrestartRef = useRef<Set<string>>(new Set())
+  const pendingEmbeddedWarmMountRef = useRef<Map<string, number>>(new Map())
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
   useEffect(() => {
@@ -1642,6 +1727,15 @@ const SyncDeckManager: FC = () => {
   }, [isInstructorSyncEnabled])
 
   useEffect(() => {
+    setMountedEmbeddedManagerInstanceKeys((current) => {
+      const next = resolveMountedEmbeddedManagerInstanceKeys({
+        current,
+        existingInstanceKeys: Object.keys(embeddedActivities),
+        activeInstanceKey: resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState),
+      })
+      return areStringArraysEqual(current, next) ? current : next
+    })
+
     setLoadedEmbeddedManagerInstanceKeys((current) => {
       const activeKeys = new Set(Object.keys(embeddedActivities))
       const nextEntries = Object.entries(current).filter(([instanceKey]) => activeKeys.has(instanceKey))
@@ -1650,7 +1744,25 @@ const SyncDeckManager: FC = () => {
       }
       return Object.fromEntries(nextEntries)
     })
-  }, [embeddedActivities])
+  }, [embeddedActivities, instructorIndicesState])
+
+  useEffect(
+    () => () => {
+      if (typeof window === 'undefined') {
+        return
+      }
+
+      for (const handle of pendingEmbeddedWarmMountRef.current.values()) {
+        if (typeof window.cancelIdleCallback === 'function') {
+          window.cancelIdleCallback(handle)
+        } else {
+          window.clearTimeout(handle)
+        }
+      }
+      pendingEmbeddedWarmMountRef.current.clear()
+    },
+    [],
+  )
 
   const requestChalkboardStateFromInstructor = useCallback((): void => {
     const targetWindow = presentationIframeRef.current?.contentWindow
@@ -2397,6 +2509,28 @@ const SyncDeckManager: FC = () => {
         if (!background) {
           setStartError(null)
           setStartSuccess(`Launched ${request.activityId} (${request.instanceKey}).`)
+        } else if (typeof window !== 'undefined' && !pendingEmbeddedWarmMountRef.current.has(request.instanceKey)) {
+          const scheduleWarmMount = (): void => {
+            pendingEmbeddedWarmMountRef.current.delete(request.instanceKey)
+            setMountedEmbeddedManagerInstanceKeys((current) => {
+              const next = resolveMountedEmbeddedManagerInstanceKeys({
+                current,
+                existingInstanceKeys: [...Object.keys(embeddedActivities), request.instanceKey],
+                activeInstanceKey: resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState),
+                promotedInstanceKey: request.instanceKey,
+              })
+              return areStringArraysEqual(current, next) ? current : next
+            })
+          }
+
+          const handle = typeof window.requestIdleCallback === 'function'
+            ? window.requestIdleCallback(() => {
+              scheduleWarmMount()
+            })
+            : window.setTimeout(() => {
+              scheduleWarmMount()
+            }, 0)
+          pendingEmbeddedWarmMountRef.current.set(request.instanceKey, handle)
         }
         if (isDevMode) {
           console.info('[SyncDeck][ManagerPreloadStartOk]', {
@@ -2428,7 +2562,7 @@ const SyncDeckManager: FC = () => {
         pendingEmbeddedPrestartRef.current.delete(request.instanceKey)
       }
     },
-    [sessionId, instructorPasscode],
+    [sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
   )
 
   const preloadActivityBundles = useCallback(async (
@@ -2460,15 +2594,15 @@ const SyncDeckManager: FC = () => {
       return
     }
 
-    void preloadActivityBundles(requests)
-    void (async () => {
-      for (const request of requests) {
-        if (embeddedActivities[request.instanceKey]) {
-          continue
-        }
+    void processManagerPreloadRequests({
+      requests,
+      existingInstanceKeys: new Set(Object.keys(embeddedActivities)),
+      pendingInstanceKeys: pendingEmbeddedPrestartRef.current,
+      preloadBundles: preloadActivityBundles,
+      startRequest: async (request) => {
         await launchEmbeddedActivityFromRequest(request, { background: true })
-      }
-    })()
+      },
+    })
   }, [embeddedActivities, launchEmbeddedActivityFromRequest, preloadActivityBundles])
 
   const handleResolvedActivityRequests = useCallback((startRequests: SyncDeckActivityLaunchRequest[]): void => {
@@ -2730,8 +2864,7 @@ const SyncDeckManager: FC = () => {
     }
 
     const handleMessage = (event: MessageEvent) => {
-      const candidateEnvelope = parseRevealSyncEnvelope(event.data)
-      const candidateAction = typeof candidateEnvelope?.action === 'string' ? candidateEnvelope.action : null
+      const candidateAction = extractRevealSyncActionWithoutParsing(event.data)
       const iframeWindow = presentationIframeRef.current?.contentWindow
       if (!iframeWindow || event.source !== iframeWindow) {
         if (candidateAction === 'activityPreloadRequest' || candidateAction === 'activityBundlePreloadRequest') {
@@ -2746,6 +2879,7 @@ const SyncDeckManager: FC = () => {
         return
       }
 
+      const envelope = parseRevealSyncEnvelope(event.data)
       if (!presentationOrigin || event.origin !== presentationOrigin) {
         if (candidateAction === 'activityPreloadRequest' || candidateAction === 'activityBundlePreloadRequest') {
           if (isDevMode) {
@@ -2758,8 +2892,6 @@ const SyncDeckManager: FC = () => {
         }
         return
       }
-
-      const envelope = candidateEnvelope
       if (envelope?.type === 'reveal-sync') {
         const compatibility = assessRevealSyncProtocolCompatibility(envelope.version)
         if (!compatibility.compatible) {
@@ -2812,7 +2944,10 @@ const SyncDeckManager: FC = () => {
               resolvedPreloadRequests: preloadRequests,
             })
           }
-          void preloadActivityBundles(preloadRequests)
+          void processManagerBundlePreloadRequests({
+            requests: preloadRequests,
+            preloadBundles: preloadActivityBundles,
+          })
           return
         }
       }
@@ -3094,6 +3229,11 @@ const SyncDeckManager: FC = () => {
   const isActiveEmbeddedManagerLoaded = activeEmbeddedInstanceKey
     ? loadedEmbeddedManagerInstanceKeys[activeEmbeddedInstanceKey] === true
     : false
+  const renderedEmbeddedManagerInstanceKeys = resolveMountedEmbeddedManagerInstanceKeys({
+    current: mountedEmbeddedManagerInstanceKeys,
+    existingInstanceKeys: Object.keys(embeddedActivities),
+    activeInstanceKey: activeEmbeddedInstanceKey,
+  })
   const currentOverlayIndices = instructorIndicesState ?? lastInstructorIndicesRef.current
   const overlayNavigationBaseIndices = resolveManagerOverlayNavigationBaseIndices({
     currentIndices: currentOverlayIndices,
@@ -3662,7 +3802,11 @@ const SyncDeckManager: FC = () => {
                   className="absolute inset-0 z-[25] bg-transparent pointer-events-none"
                 />
 
-                {Object.entries(embeddedActivities).map(([instanceKey, record]) => {
+                {renderedEmbeddedManagerInstanceKeys.map((instanceKey) => {
+                  const record = embeddedActivities[instanceKey]
+                  if (!record) {
+                    return null
+                  }
                   const isActive = instanceKey === activeEmbeddedInstanceKey
 
                   return (

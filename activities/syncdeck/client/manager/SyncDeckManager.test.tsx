@@ -38,6 +38,10 @@ import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
 import { resolveManagerPreloadRequestBatchInputs } from './SyncDeckManager.js'
+import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
+import { processManagerPreloadRequests } from './SyncDeckManager.js'
+import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
+import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
 import { activitySupportsEmbeddedReport } from './SyncDeckManager.js'
@@ -617,6 +621,128 @@ void test('resolveManagerPreloadRequestBatchInputs ignores malformed grouped pre
       { activityId: 'video-sync', instanceKey: 'video-sync:1:0' },
     ],
   )
+})
+
+void test('extractRevealSyncActionWithoutParsing avoids string parsing and only trusts object envelopes', () => {
+  assert.equal(
+    extractRevealSyncActionWithoutParsing({
+      type: 'reveal-sync',
+      action: 'activityPreloadRequest',
+      payload: {},
+    }),
+    'activityPreloadRequest',
+  )
+  assert.equal(
+    extractRevealSyncActionWithoutParsing('{"type":"reveal-sync","action":"activityPreloadRequest"}'),
+    null,
+  )
+  assert.equal(
+    extractRevealSyncActionWithoutParsing({
+      type: 'not-reveal-sync',
+      action: 'activityPreloadRequest',
+    }),
+    null,
+  )
+})
+
+void test('processManagerPreloadRequests does not trigger duplicate starts for repeated preload messages', async () => {
+  const pendingInstanceKeys = new Set<string>()
+  const preloadCalls: string[][] = []
+  const startedRequests: string[] = []
+
+  let releaseFirstStart: () => void = () => {}
+  const firstStartGate = new Promise<void>((resolve) => {
+    releaseFirstStart = resolve
+  })
+
+  const firstRun = processManagerPreloadRequests({
+    requests: [
+      { activityId: 'resonance', instanceKey: 'resonance:1:0' },
+    ],
+    existingInstanceKeys: new Set(),
+    pendingInstanceKeys,
+    preloadBundles: async (requests) => {
+      preloadCalls.push(requests.map((request) => request.instanceKey))
+    },
+    startRequest: async (request) => {
+      startedRequests.push(request.instanceKey)
+      await firstStartGate
+    },
+  })
+
+  await Promise.resolve()
+
+  const secondRun = processManagerPreloadRequests({
+    requests: [
+      { activityId: 'resonance', instanceKey: 'resonance:1:0' },
+    ],
+    existingInstanceKeys: new Set(),
+    pendingInstanceKeys,
+    preloadBundles: async (requests) => {
+      preloadCalls.push(requests.map((request) => request.instanceKey))
+    },
+    startRequest: async (request) => {
+      startedRequests.push(`duplicate:${request.instanceKey}`)
+    },
+  })
+
+  releaseFirstStart()
+  await Promise.all([firstRun, secondRun])
+
+  assert.deepEqual(preloadCalls, [['resonance:1:0'], ['resonance:1:0']])
+  assert.deepEqual(startedRequests, ['resonance:1:0'])
+  assert.deepEqual([...pendingInstanceKeys], [])
+})
+
+void test('resolveMountedEmbeddedManagerInstanceKeys keeps the active iframe and caps warm cache size', () => {
+  assert.deepEqual(
+    resolveMountedEmbeddedManagerInstanceKeys({
+      current: ['resonance:0:1', 'gallery-walk:0:0', 'video-sync:0:2'],
+      existingInstanceKeys: ['resonance:0:1', 'gallery-walk:0:0', 'video-sync:0:2'],
+      activeInstanceKey: 'video-sync:0:2',
+      promotedInstanceKey: 'resonance:0:1',
+      limit: 2,
+    }),
+    ['video-sync:0:2', 'resonance:0:1'],
+  )
+})
+
+void test('resolveMountedEmbeddedManagerInstanceKeys drops stale warm entries', () => {
+  assert.deepEqual(
+    resolveMountedEmbeddedManagerInstanceKeys({
+      current: ['resonance:0:1', 'gallery-walk:0:0'],
+      existingInstanceKeys: ['gallery-walk:0:0'],
+      activeInstanceKey: null,
+      promotedInstanceKey: null,
+      limit: 2,
+    }),
+    ['gallery-walk:0:0'],
+  )
+})
+
+void test('bundle-only preload path does not trigger session creation side effects', async () => {
+  const preloadCalls: string[][] = []
+
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+
+  await processManagerBundlePreloadRequests({
+    requests,
+    preloadBundles: async (bundleRequests) => {
+      preloadCalls.push(bundleRequests.map((request) => request.instanceKey))
+    },
+  })
+
+  assert.deepEqual(preloadCalls, [['resonance:1:0']])
 })
 
 void test('resolveSyncDeckActivityPickerEntries excludes SyncDeck and sorts entries by label', () => {
