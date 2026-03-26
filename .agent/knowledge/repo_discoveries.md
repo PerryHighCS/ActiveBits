@@ -1538,6 +1538,13 @@ Use this log for durable findings that future contributors and agents should reu
 - Evidence: `activities/syncdeck/activity.config.ts`; `client/src/components/common/SessionRouter.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
 - Follow-up action: If more activities need hidden utility routes that render `UtilComponent`, keep using `utilities[].renderTarget = 'util'` rather than adding one-off router branches.
 - Owner: Codex
+- Date: 2026-03-26
+- Area: client | activities | vite | hmr
+- Discovery: The shared activity client-module resolution cache should not persist across Vite development/HMR updates. In dev, preflight/preload helpers can otherwise keep returning a previously resolved activity client export even after the underlying `activities/*/client/index.*` module hot-updates.
+- Why it matters: This cache sits below lazy component loading and is used by preflight, persistent solo launch, and preload helpers, so stale resolved exports can make development behavior diverge from the freshly reloaded client bundle.
+- Evidence: `client/src/activities/index.ts`; `client/src/activities/index.cache.test.ts`
+- Follow-up action: Keep resolved-module caching production-only unless a future dev-time strategy explicitly revalidates or clears cache entries on every relevant hot update.
+- Owner: Codex
 - Date: 2026-03-24
 - Area: activities | syncdeck | utility launch routing
 - Discovery: SyncDeck's hidden utility launch route should reuse the standalone-session path, not the manager bootstrap path. The utility now creates/configures `standaloneMode: true` sessions and redirects to `/:sessionId`, matching the existing `launchPersistentSoloEntry` behavior used elsewhere in the app.

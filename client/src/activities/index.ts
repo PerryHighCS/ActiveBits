@@ -30,6 +30,9 @@ interface ActivityClientModuleExports extends Record<string, unknown> {
 }
 
 type ActivityClientLoader = () => Promise<ActivityClientModuleExports>
+type HotModuleLike = {
+  dispose?: (callback: () => void) => void
+}
 const hasViteImportGlob = Boolean(import.meta.env?.DEV || import.meta.env?.PROD)
 const configModules: Record<string, ActivityConfigModule> = hasViteImportGlob
   ? import.meta.glob<ActivityConfigModule>('../../../activities/*/activity.config.{js,ts}', { eager: true })
@@ -43,7 +46,6 @@ const CLIENT_EXTENSION_PRIORITY = ['.tsx', '.ts', '.jsx', '.js'] as const
 
 const isDevelopment = import.meta.env?.MODE === 'development'
 const { parseActivityConfig } = activityConfigSchema
-const clientModuleResolutionCache = new Map<string, Promise<ActivityClientResolved>>()
 
 function getExtensionPriority(modulePath: string, priorityOrder: readonly string[]): number {
   const index = priorityOrder.findIndex((ext) => modulePath.endsWith(ext))
@@ -121,19 +123,67 @@ async function resolveClientModule(loader: ActivityClientLoader): Promise<Activi
   return (resolved != null && typeof resolved === 'object') ? (resolved as ActivityClientResolved) : {}
 }
 
-function getCachedClientModule(activityId: string, loader: ActivityClientLoader): Promise<ActivityClientResolved> {
-  const cached = clientModuleResolutionCache.get(activityId)
-  if (cached) {
-    return cached
+export function shouldUseClientModuleResolutionCache(options: {
+  isDevelopment: boolean
+  hasHotModuleReload: boolean
+}): boolean {
+  return !options.isDevelopment && !options.hasHotModuleReload
+}
+
+export function createClientModuleResolverCache(
+  options: {
+    useCache: boolean
+    hotModule?: HotModuleLike | undefined
+    resolveModule?: (loader: ActivityClientLoader) => Promise<ActivityClientResolved>
+  } = {
+    useCache: true,
+  },
+): {
+  clear: () => void
+  getCachedClientModule: (activityId: string, loader: ActivityClientLoader) => Promise<ActivityClientResolved>
+} {
+  const cache = new Map<string, Promise<ActivityClientResolved>>()
+  const resolveModule = options.resolveModule ?? resolveClientModule
+
+  const clear = (): void => {
+    cache.clear()
   }
 
-  const pending = resolveClientModule(loader).catch((error) => {
-    clientModuleResolutionCache.delete(activityId)
-    throw error
+  options.hotModule?.dispose?.(() => {
+    clear()
   })
-  clientModuleResolutionCache.set(activityId, pending)
-  return pending
+
+  const getCachedClientModule = (activityId: string, loader: ActivityClientLoader): Promise<ActivityClientResolved> => {
+    if (!options.useCache) {
+      return resolveModule(loader)
+    }
+
+    const cached = cache.get(activityId)
+    if (cached) {
+      return cached
+    }
+
+    const pending = resolveModule(loader).catch((error) => {
+      cache.delete(activityId)
+      throw error
+    })
+    cache.set(activityId, pending)
+    return pending
+  }
+
+  return {
+    clear,
+    getCachedClientModule,
+  }
 }
+
+const clientModuleResolverCache = createClientModuleResolverCache({
+  useCache: shouldUseClientModuleResolutionCache({
+    isDevelopment,
+    hasHotModuleReload: Boolean(import.meta.hot),
+  }),
+  hotModule: import.meta.hot,
+})
 
 function createLazyComponent(
   loader: ActivityClientLoader | null,
@@ -254,7 +304,7 @@ export async function runActivityDeepLinkPreflight(
     return { valid: false, warning: 'Validation is unavailable for this activity.' }
   }
 
-  const resolved = await getCachedClientModule(activityId, clientLoader)
+  const resolved = await clientModuleResolverCache.getCachedClientModule(activityId, clientLoader)
   if (typeof resolved.runDeepLinkPreflight !== 'function') {
     return { valid: false, warning: 'Validation is unavailable for this activity.' }
   }
@@ -271,7 +321,7 @@ export async function launchActivityPersistentSoloEntry(
     return null
   }
 
-  const resolved = await getCachedClientModule(activityId, clientLoader)
+  const resolved = await clientModuleResolverCache.getCachedClientModule(activityId, clientLoader)
   if (typeof resolved.launchPersistentSoloEntry !== 'function') {
     return null
   }
@@ -285,7 +335,7 @@ export async function preloadActivityClientBundle(activityId: string): Promise<b
     return false
   }
 
-  await getCachedClientModule(activityId, clientLoader)
+  await clientModuleResolverCache.getCachedClientModule(activityId, clientLoader)
   return true
 }
 
