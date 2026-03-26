@@ -117,7 +117,20 @@ export function reconcileActivationSelection(
   }
 
   const availableQuestionIdSet = new Set(availableQuestionIds)
-  return current.filter((questionId) => availableQuestionIdSet.has(questionId))
+  const next = current.filter((questionId) => availableQuestionIdSet.has(questionId))
+  if (next.length === current.length && next.every((questionId, index) => questionId === current[index])) {
+    return current
+  }
+
+  return next
+}
+
+export function resolveActivationSelectionForRender(
+  current: string[] | null,
+  availableQuestionIds: string[],
+  liveQuestionIds: string[],
+): string[] {
+  return current ?? normalizeActivationSelection([], availableQuestionIds, liveQuestionIds)
 }
 
 export function isAllQuestionsSelected(
@@ -397,7 +410,11 @@ export default function ResonanceManager() {
   const hasLiveRun = activeQuestionDeadlineAt === null || activeQuestionDeadlineAt > countdownNow
   const activeQuestionIdSet = new Set(hasLiveRun ? activeQuestionIds : [])
   const questionIds = questions.map((question) => question.id)
-  const resolvedActivationSelectionIds = activationSelectionIds ?? []
+  const resolvedActivationSelectionIds = resolveActivationSelectionForRender(
+    activationSelectionIds,
+    questionIds,
+    activeQuestionIds,
+  )
   const activationSelectionSet = new Set(resolvedActivationSelectionIds)
   const allQuestionsSelected = isAllQuestionsSelected(activationSelectionSet, questionIds)
   const expandedQuestionStemSet = new Set(expandedQuestionStemIds)

@@ -7,6 +7,7 @@ import {
   isQuestionStemVisuallyTruncated,
   normalizeActivationSelection,
   reconcileActivationSelection,
+  resolveActivationSelectionForRender,
   resolvePasscode,
   shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
@@ -81,6 +82,27 @@ void test('reconcileActivationSelection only applies defaults while selection is
   assert.deepEqual(
     reconcileActivationSelection(['missing', 'q2'], ['q1', 'q2', 'q3'], []),
     ['q2'],
+  )
+
+  const current = ['q1', 'q2']
+  assert.equal(
+    reconcileActivationSelection(current, ['q1', 'q2', 'q3'], []),
+    current,
+  )
+})
+
+void test('resolveActivationSelectionForRender applies the default selection before the snapshot effect runs', () => {
+  assert.deepEqual(
+    resolveActivationSelectionForRender(null, ['q1', 'q2', 'q3'], []),
+    ['q1', 'q2', 'q3'],
+  )
+  assert.deepEqual(
+    resolveActivationSelectionForRender(null, ['q1', 'q2', 'q3'], ['q2']),
+    ['q2'],
+  )
+  assert.deepEqual(
+    resolveActivationSelectionForRender([], ['q1', 'q2', 'q3'], ['q2']),
+    [],
   )
 })
 
