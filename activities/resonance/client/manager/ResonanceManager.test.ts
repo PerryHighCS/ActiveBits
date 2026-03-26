@@ -6,6 +6,7 @@ import {
   isAllQuestionsSelected,
   isQuestionStemVisuallyTruncated,
   normalizeActivationSelection,
+  reconcileActivationSelection,
   resolvePasscode,
   shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
@@ -64,11 +65,30 @@ void test('normalizeActivationSelection keeps valid selection and falls back to 
   )
 })
 
+void test('reconcileActivationSelection only applies defaults while selection is uninitialized', () => {
+  assert.deepEqual(
+    reconcileActivationSelection(null, ['q1', 'q2', 'q3'], []),
+    ['q1', 'q2', 'q3'],
+  )
+  assert.deepEqual(
+    reconcileActivationSelection(null, ['q1', 'q2', 'q3'], ['q2']),
+    ['q2'],
+  )
+  assert.deepEqual(
+    reconcileActivationSelection([], ['q1', 'q2', 'q3'], ['q2']),
+    [],
+  )
+  assert.deepEqual(
+    reconcileActivationSelection(['missing', 'q2'], ['q1', 'q2', 'q3'], []),
+    ['q2'],
+  )
+})
+
 void test('isAllQuestionsSelected only returns true when every available question is selected', () => {
-  assert.equal(isAllQuestionsSelected([], []), false)
-  assert.equal(isAllQuestionsSelected(['q1'], ['q1', 'q2']), false)
-  assert.equal(isAllQuestionsSelected(['q1', 'q2'], ['q1', 'q2']), true)
-  assert.equal(isAllQuestionsSelected(['q1', 'q2', 'extra'], ['q1', 'q2']), true)
+  assert.equal(isAllQuestionsSelected(new Set(), []), false)
+  assert.equal(isAllQuestionsSelected(new Set(['q1']), ['q1', 'q2']), false)
+  assert.equal(isAllQuestionsSelected(new Set(['q1', 'q2']), ['q1', 'q2']), true)
+  assert.equal(isAllQuestionsSelected(new Set(['q1', 'q2', 'extra']), ['q1', 'q2']), true)
 })
 
 void test('shouldShowQuestionListActivationControls keeps activate and stop available for single-question sessions', () => {
