@@ -741,4 +741,4 @@ session.chalkboard = {
 |---|---|
 | `chalkboardState` (on `setRole: instructor` or slide change) | Replace `snapshot` with `payload.storage`; clear `delta` |
 | `chalkboardStroke` | Append `payload` to `delta` |
-| `clearChalkboard` / `resetChalkboard` relayed upward* | Clear `delta`; optionally request a fresh snapshot via `requestChalkboardState` |
+| `clearChalkboard` / `resetChalkboard` relayed upward | Clear `delta`; optionally request a fresh snapshot via `requestChalkboardState` |
