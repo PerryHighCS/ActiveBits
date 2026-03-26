@@ -104,7 +104,52 @@ export function normalizeActivationSelection(
     return live
   }
 
-  return availableQuestionIds[0] ? [availableQuestionIds[0]] : []
+  return availableQuestionIds
+}
+
+export function reconcileActivationSelection(
+  current: string[] | null,
+  availableQuestionIds: string[],
+  liveQuestionIds: string[],
+): string[] {
+  if (current === null) {
+    return normalizeActivationSelection([], availableQuestionIds, liveQuestionIds)
+  }
+
+  const availableQuestionIdSet = new Set(availableQuestionIds)
+  const next = current.filter((questionId) => availableQuestionIdSet.has(questionId))
+  if (next.length === current.length && next.every((questionId, index) => questionId === current[index])) {
+    return current
+  }
+
+  return next
+}
+
+export function resolveActivationSelectionForRender(
+  current: string[] | null,
+  availableQuestionIds: string[],
+  liveQuestionIds: string[],
+): string[] {
+  return current ?? normalizeActivationSelection([], availableQuestionIds, liveQuestionIds)
+}
+
+export function resolveActivationSelectionAfterToggle(
+  current: string[] | null,
+  questionId: string,
+  availableQuestionIds: string[],
+  liveQuestionIds: string[],
+): string[] {
+  return toggleQuestionActivationSelection(
+    resolveActivationSelectionForRender(current, availableQuestionIds, liveQuestionIds),
+    questionId,
+  )
+}
+
+export function isAllQuestionsSelected(
+  selectedQuestionIds: ReadonlySet<string>,
+  availableQuestionIds: readonly string[],
+): boolean {
+  return availableQuestionIds.length > 0 && availableQuestionIds.every((questionId) => selectedQuestionIds.has(questionId))
 }
 
 export function shouldShowQuestionListActivationControls(questionCount: number): boolean {
@@ -131,7 +176,7 @@ export default function ResonanceManager() {
   const [passcode, setPasscode] = useState<string | null>(null)
   const [isResolvingPasscode, setIsResolvingPasscode] = useState(true)
   const [activeTab, setActiveTab] = useState<string | null>(null)
-  const [activationSelectionIds, setActivationSelectionIds] = useState<string[]>([])
+  const [activationSelectionIds, setActivationSelectionIds] = useState<string[] | null>(null)
   const [expandedQuestionStemIds, setExpandedQuestionStemIds] = useState<string[]>([])
   const [overflowingQuestionStemIds, setOverflowingQuestionStemIds] = useState<string[]>([])
   const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
@@ -223,7 +268,7 @@ export default function ResonanceManager() {
 
     const availableIds = snapshot.questions.map((question) => question.id)
     setActivationSelectionIds((current) => {
-      return normalizeActivationSelection(current, availableIds, snapshot.activeQuestionIds)
+      return reconcileActivationSelection(current, availableIds, snapshot.activeQuestionIds)
     })
     setExpandedQuestionStemIds((current) => current.filter((questionId) => availableIds.includes(questionId)))
     setOverflowingQuestionStemIds((current) => current.filter((questionId) => availableIds.includes(questionId)))
@@ -294,8 +339,12 @@ export default function ResonanceManager() {
   )
 
   const toggleActivationSelection = useCallback((questionId: string) => {
-    setActivationSelectionIds((current) => toggleQuestionActivationSelection(current, questionId))
-  }, [])
+    const availableQuestionIds = snapshot?.questions.map((question) => question.id) ?? []
+    const liveQuestionIds = snapshot?.activeQuestionIds ?? []
+    setActivationSelectionIds((current) => (
+      resolveActivationSelectionAfterToggle(current, questionId, availableQuestionIds, liveQuestionIds)
+    ))
+  }, [snapshot])
 
   const toggleQuestionStemExpansion = useCallback((questionId: string) => {
     setExpandedQuestionStemIds((current) => toggleExpandedQuestionStem(current, questionId))
@@ -376,7 +425,14 @@ export default function ResonanceManager() {
   } = snapshot
   const hasLiveRun = activeQuestionDeadlineAt === null || activeQuestionDeadlineAt > countdownNow
   const activeQuestionIdSet = new Set(hasLiveRun ? activeQuestionIds : [])
-  const activationSelectionSet = new Set(activationSelectionIds)
+  const questionIds = questions.map((question) => question.id)
+  const resolvedActivationSelectionIds = resolveActivationSelectionForRender(
+    activationSelectionIds,
+    questionIds,
+    activeQuestionIds,
+  )
+  const activationSelectionSet = new Set(resolvedActivationSelectionIds)
+  const allQuestionsSelected = isAllQuestionsSelected(activationSelectionSet, questionIds)
   const expandedQuestionStemSet = new Set(expandedQuestionStemIds)
   const overflowingQuestionStemSet = new Set(overflowingQuestionStemIds)
   const liveCountdown = formatRemainingTime(activeQuestionDeadlineAt, countdownNow)
@@ -478,16 +534,18 @@ export default function ResonanceManager() {
                 {questions.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => setActivationSelectionIds(questions.map((question) => question.id))}
+                    onClick={() => setActivationSelectionIds(
+                      allQuestionsSelected ? [] : questionIds,
+                    )}
                     className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
                   >
-                    Select all
+                    {allQuestionsSelected ? 'Select none' : 'Select all'}
                   </button>
                 )}
                 <button
                   type="button"
-                  onClick={() => activateQuestions(activationSelectionIds)}
-                  disabled={activationSelectionIds.length === 0}
+                  onClick={() => activateQuestions(resolvedActivationSelectionIds)}
+                  disabled={resolvedActivationSelectionIds.length === 0}
                   className="rounded bg-blue-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Activate

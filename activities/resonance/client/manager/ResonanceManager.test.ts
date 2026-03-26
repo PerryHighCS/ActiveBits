@@ -3,8 +3,12 @@ import test from 'node:test'
 import { JSDOM } from 'jsdom'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import {
+  isAllQuestionsSelected,
   isQuestionStemVisuallyTruncated,
   normalizeActivationSelection,
+  reconcileActivationSelection,
+  resolveActivationSelectionAfterToggle,
+  resolveActivationSelectionForRender,
   resolvePasscode,
   shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
@@ -40,7 +44,7 @@ void test('toggleExpandedQuestionStem adds and removes expanded question ids', (
   assert.deepEqual(toggleExpandedQuestionStem(['q1', 'q2'], 'q1'), ['q2'])
 })
 
-void test('normalizeActivationSelection keeps valid selection and falls back to live questions or first question', () => {
+void test('normalizeActivationSelection keeps valid selection and falls back to live questions or all available questions', () => {
   assert.deepEqual(
     normalizeActivationSelection(['q2'], ['q1', 'q2', 'q3'], ['q1', 'q3']),
     ['q2'],
@@ -50,13 +54,79 @@ void test('normalizeActivationSelection keeps valid selection and falls back to 
     ['q1', 'q3'],
   )
   assert.deepEqual(
+    normalizeActivationSelection(['missing'], ['q1', 'q2', 'q3'], []),
+    ['q1', 'q2', 'q3'],
+  )
+  assert.deepEqual(
     normalizeActivationSelection([], ['q1', 'q2', 'q3'], []),
-    ['q1'],
+    ['q1', 'q2', 'q3'],
   )
   assert.deepEqual(
     normalizeActivationSelection([], [], []),
     [],
   )
+})
+
+void test('reconcileActivationSelection only applies defaults while selection is uninitialized', () => {
+  assert.deepEqual(
+    reconcileActivationSelection(null, ['q1', 'q2', 'q3'], []),
+    ['q1', 'q2', 'q3'],
+  )
+  assert.deepEqual(
+    reconcileActivationSelection(null, ['q1', 'q2', 'q3'], ['q2']),
+    ['q2'],
+  )
+  assert.deepEqual(
+    reconcileActivationSelection([], ['q1', 'q2', 'q3'], ['q2']),
+    [],
+  )
+  assert.deepEqual(
+    reconcileActivationSelection(['missing', 'q2'], ['q1', 'q2', 'q3'], []),
+    ['q2'],
+  )
+
+  const current = ['q1', 'q2']
+  assert.equal(
+    reconcileActivationSelection(current, ['q1', 'q2', 'q3'], []),
+    current,
+  )
+})
+
+void test('resolveActivationSelectionForRender applies the default selection before the snapshot effect runs', () => {
+  assert.deepEqual(
+    resolveActivationSelectionForRender(null, ['q1', 'q2', 'q3'], []),
+    ['q1', 'q2', 'q3'],
+  )
+  assert.deepEqual(
+    resolveActivationSelectionForRender(null, ['q1', 'q2', 'q3'], ['q2']),
+    ['q2'],
+  )
+  assert.deepEqual(
+    resolveActivationSelectionForRender([], ['q1', 'q2', 'q3'], ['q2']),
+    [],
+  )
+})
+
+void test('resolveActivationSelectionAfterToggle uses the rendered default selection before first interaction', () => {
+  assert.deepEqual(
+    resolveActivationSelectionAfterToggle(null, 'q2', ['q1', 'q2', 'q3'], []),
+    ['q1', 'q3'],
+  )
+  assert.deepEqual(
+    resolveActivationSelectionAfterToggle(null, 'q2', ['q1', 'q2', 'q3'], ['q2']),
+    [],
+  )
+  assert.deepEqual(
+    resolveActivationSelectionAfterToggle([], 'q2', ['q1', 'q2', 'q3'], ['q2']),
+    ['q2'],
+  )
+})
+
+void test('isAllQuestionsSelected only returns true when every available question is selected', () => {
+  assert.equal(isAllQuestionsSelected(new Set(), []), false)
+  assert.equal(isAllQuestionsSelected(new Set(['q1']), ['q1', 'q2']), false)
+  assert.equal(isAllQuestionsSelected(new Set(['q1', 'q2']), ['q1', 'q2']), true)
+  assert.equal(isAllQuestionsSelected(new Set(['q1', 'q2', 'extra']), ['q1', 'q2']), true)
 })
 
 void test('shouldShowQuestionListActivationControls keeps activate and stop available for single-question sessions', () => {
