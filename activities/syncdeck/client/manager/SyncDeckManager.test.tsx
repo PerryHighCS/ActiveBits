@@ -43,6 +43,7 @@ import { processManagerPreloadRequests } from './SyncDeckManager.js'
 import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
+import { resolveEmbeddedManagerIframeAccessibilityProps } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
 import { activitySupportsEmbeddedReport } from './SyncDeckManager.js'
@@ -721,6 +722,15 @@ void test('resolveMountedEmbeddedManagerInstanceKeys drops stale warm entries', 
   )
 })
 
+void test('resolveEmbeddedManagerIframeAccessibilityProps hides inactive embedded managers from focus and assistive tech', () => {
+  assert.deepEqual(resolveEmbeddedManagerIframeAccessibilityProps(true), {})
+  assert.deepEqual(resolveEmbeddedManagerIframeAccessibilityProps(false), {
+    'aria-hidden': 'true',
+    tabIndex: -1,
+    inert: true,
+  })
+})
+
 void test('bundle-only preload path does not trigger session creation side effects', async () => {
   const preloadCalls: string[][] = []
 
@@ -821,6 +831,44 @@ void test('processManagerPreloadRequests swallows start request failures and cle
     })
   })
 
+  assert.deepEqual([...pendingInstanceKeys], [])
+})
+
+void test('processManagerPreloadRequests continues starting later requests after one start failure', async () => {
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+        {
+          activityId: 'gallery-walk',
+          indices: { h: 2, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+  const pendingInstanceKeys = new Set<string>()
+  const attemptedStarts: string[] = []
+
+  await assert.doesNotReject(async () => {
+    await processManagerPreloadRequests({
+      requests,
+      existingInstanceKeys: new Set(),
+      pendingInstanceKeys,
+      preloadBundles: async () => {},
+      startRequest: async (request) => {
+        attemptedStarts.push(request.instanceKey)
+        if (request.instanceKey === 'resonance:1:0') {
+          throw new Error('start failed')
+        }
+      },
+    })
+  })
+
+  assert.deepEqual(attemptedStarts, ['resonance:1:0', 'gallery-walk:2:0'])
   assert.deepEqual([...pendingInstanceKeys], [])
 })
 

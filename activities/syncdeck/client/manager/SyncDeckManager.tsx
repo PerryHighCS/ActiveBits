@@ -1135,25 +1135,33 @@ export async function processManagerPreloadRequests(params: {
 
   try {
     await params.preloadBundles(params.requests)
-
-    for (const request of params.requests) {
-      if (params.existingInstanceKeys.has(request.instanceKey) || params.pendingInstanceKeys.has(request.instanceKey)) {
-        continue
-      }
-
-      params.pendingInstanceKeys.add(request.instanceKey)
-      try {
-        await params.startRequest(request)
-      } finally {
-        params.pendingInstanceKeys.delete(request.instanceKey)
-      }
-    }
   } catch (error) {
     if (isDevMode) {
       console.info('[SyncDeck][ManagerPreloadRequestException]', {
         error,
         requestCount: params.requests.length,
       })
+    }
+    return
+  }
+
+  for (const request of params.requests) {
+    if (params.existingInstanceKeys.has(request.instanceKey) || params.pendingInstanceKeys.has(request.instanceKey)) {
+      continue
+    }
+
+    params.pendingInstanceKeys.add(request.instanceKey)
+    try {
+      await params.startRequest(request)
+    } catch (error) {
+      if (isDevMode) {
+        console.info('[SyncDeck][ManagerPreloadStartRequestException]', {
+          error,
+          request,
+        })
+      }
+    } finally {
+      params.pendingInstanceKeys.delete(request.instanceKey)
     }
   }
 }
@@ -1612,6 +1620,20 @@ export function resolveMountedEmbeddedManagerInstanceKeys(params: {
   }
 
   return next.slice(0, limit)
+}
+
+export function resolveEmbeddedManagerIframeAccessibilityProps(
+  isActive: boolean,
+): { 'aria-hidden'?: 'true'; tabIndex?: -1; inert?: true } {
+  if (isActive) {
+    return {}
+  }
+
+  return {
+    'aria-hidden': 'true',
+    tabIndex: -1,
+    inert: true,
+  }
 }
 
 const SyncDeckManager: FC = () => {
@@ -3855,6 +3877,7 @@ const SyncDeckManager: FC = () => {
                     return null
                   }
                   const isActive = instanceKey === activeEmbeddedInstanceKey
+                  const inactiveIframeAccessibilityProps = resolveEmbeddedManagerIframeAccessibilityProps(isActive)
 
                   return (
                     <div
@@ -3880,6 +3903,7 @@ const SyncDeckManager: FC = () => {
                             title={`Embedded ${record.activityId} manager`}
                             src={buildEmbeddedManagerIframeSrc(record)}
                             className="w-full h-full"
+                            {...inactiveIframeAccessibilityProps}
                             onLoad={() => {
                               setLoadedEmbeddedManagerInstanceKeys((current) => (
                                 current[instanceKey] ? current : { ...current, [instanceKey]: true }
