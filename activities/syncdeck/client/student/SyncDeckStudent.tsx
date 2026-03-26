@@ -1482,12 +1482,7 @@ function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmb
     return null
   }
 
-  const hSegment = segments[1]
-  const vSegment = segments[2]
-  if (typeof hSegment !== 'string' || typeof vSegment !== 'string') {
-    return null
-  }
-
+  const [, hSegment, vSegment] = segments as [string, string, string, ...string[]]
   const h = Number.parseInt(hSegment, 10)
   const v = Number.parseInt(vSegment, 10)
   if (!Number.isFinite(h) || !Number.isFinite(v)) {
@@ -3058,7 +3053,6 @@ const SyncDeckStudent: FC = () => {
     }
 
     const abortController = new AbortController()
-    let shouldReleaseClaim = true
 
     void (async () => {
       try {
@@ -3076,23 +3070,16 @@ const SyncDeckStudent: FC = () => {
           signal: abortController.signal,
         })
 
-        if (response.ok) {
-          shouldReleaseClaim = false
-        } else if (!abortController.signal.aborted) {
+        if (!response.ok) {
           releaseResonanceAutoActivationClaim(autoActivatedReleasedResonanceKeysRef.current, activationKey)
         }
       } catch {
-        if (!abortController.signal.aborted) {
-          releaseResonanceAutoActivationClaim(autoActivatedReleasedResonanceKeysRef.current, activationKey)
-        }
+        releaseResonanceAutoActivationClaim(autoActivatedReleasedResonanceKeysRef.current, activationKey)
       }
     })()
 
     return () => {
       abortController.abort()
-      if (shouldReleaseClaim) {
-        releaseResonanceAutoActivationClaim(autoActivatedReleasedResonanceKeysRef.current, activationKey)
-      }
     }
   }, [
     activeEmbeddedChildSessionId,
