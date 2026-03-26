@@ -7,6 +7,7 @@ import {
   isQuestionStemVisuallyTruncated,
   normalizeActivationSelection,
   reconcileActivationSelection,
+  resolveActivationSelectionAfterToggle,
   resolveActivationSelectionForRender,
   resolvePasscode,
   shouldShowQuestionListActivationControls,
@@ -103,6 +104,21 @@ void test('resolveActivationSelectionForRender applies the default selection bef
   assert.deepEqual(
     resolveActivationSelectionForRender([], ['q1', 'q2', 'q3'], ['q2']),
     [],
+  )
+})
+
+void test('resolveActivationSelectionAfterToggle uses the rendered default selection before first interaction', () => {
+  assert.deepEqual(
+    resolveActivationSelectionAfterToggle(null, 'q2', ['q1', 'q2', 'q3'], []),
+    ['q1', 'q3'],
+  )
+  assert.deepEqual(
+    resolveActivationSelectionAfterToggle(null, 'q2', ['q1', 'q2', 'q3'], ['q2']),
+    [],
+  )
+  assert.deepEqual(
+    resolveActivationSelectionAfterToggle([], 'q2', ['q1', 'q2', 'q3'], ['q2']),
+    ['q2'],
   )
 })
 

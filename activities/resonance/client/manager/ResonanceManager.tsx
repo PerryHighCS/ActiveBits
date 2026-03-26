@@ -133,6 +133,18 @@ export function resolveActivationSelectionForRender(
   return current ?? normalizeActivationSelection([], availableQuestionIds, liveQuestionIds)
 }
 
+export function resolveActivationSelectionAfterToggle(
+  current: string[] | null,
+  questionId: string,
+  availableQuestionIds: string[],
+  liveQuestionIds: string[],
+): string[] {
+  return toggleQuestionActivationSelection(
+    resolveActivationSelectionForRender(current, availableQuestionIds, liveQuestionIds),
+    questionId,
+  )
+}
+
 export function isAllQuestionsSelected(
   selectedQuestionIds: ReadonlySet<string>,
   availableQuestionIds: readonly string[],
@@ -327,8 +339,12 @@ export default function ResonanceManager() {
   )
 
   const toggleActivationSelection = useCallback((questionId: string) => {
-    setActivationSelectionIds((current) => toggleQuestionActivationSelection(current ?? [], questionId))
-  }, [])
+    const availableQuestionIds = snapshot?.questions.map((question) => question.id) ?? []
+    const liveQuestionIds = snapshot?.activeQuestionIds ?? []
+    setActivationSelectionIds((current) => (
+      resolveActivationSelectionAfterToggle(current, questionId, availableQuestionIds, liveQuestionIds)
+    ))
+  }, [snapshot])
 
   const toggleQuestionStemExpansion = useCallback((questionId: string) => {
     setExpandedQuestionStemIds((current) => toggleExpandedQuestionStem(current, questionId))
