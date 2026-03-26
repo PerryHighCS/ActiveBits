@@ -1117,16 +1117,10 @@ function markEmbeddedChildSessionForAutoActivateAllQuestions(
 
 function canStudentAutoActivateEmbeddedInstance(params: {
   instanceKey: string
-  student: SyncDeckStudent
   session: SyncDeckSession
 }): boolean {
   const instancePosition = parseEmbeddedInstancePosition(params.instanceKey)
-  const studentIndices = params.student.lastIndices
-  if (!instancePosition || !studentIndices) {
-    return false
-  }
-
-  if (studentIndices.h !== instancePosition.h || studentIndices.v !== instancePosition.v) {
+  if (!instancePosition) {
     return false
   }
 
@@ -1139,7 +1133,7 @@ function canStudentAutoActivateEmbeddedInstance(params: {
     return false
   }
 
-  return studentIndices.h < instructorIndices.h
+  return instancePosition.h < instructorIndices.h
 }
 
 function buildEmbeddedActivityStartPayload(
@@ -1815,7 +1809,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       res.status(403).json({ error: 'forbidden' })
       return
     }
-    if (!canStudentAutoActivateEmbeddedInstance({ instanceKey, student, session })) {
+    if (!canStudentAutoActivateEmbeddedInstance({ instanceKey, session })) {
       res.status(403).json({ error: 'forbidden' })
       return
     }
