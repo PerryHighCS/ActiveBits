@@ -1742,6 +1742,7 @@ void test('shouldAutoActivateReleasedResonanceQuestions activates only for relea
       activeEmbeddedInstanceKey: 'resonance:4:1',
       studentAnchoredInstanceKey: 'resonance:4:1',
       instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
       syncState: 'vertical',
       isBacktrackOptOut: false,
     }),
@@ -1754,6 +1755,7 @@ void test('shouldAutoActivateReleasedResonanceQuestions activates only for relea
       activeEmbeddedInstanceKey: 'resonance:4:0',
       studentAnchoredInstanceKey: 'resonance:4:0',
       instructorAnchoredInstanceKey: null,
+      instructorIndices: { h: 5, v: 0, f: 0 },
       syncState: 'behind',
       isBacktrackOptOut: false,
     }),
@@ -1766,6 +1768,7 @@ void test('shouldAutoActivateReleasedResonanceQuestions activates only for relea
       activeEmbeddedInstanceKey: 'resonance:4:0',
       studentAnchoredInstanceKey: 'resonance:4:0',
       instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
       syncState: 'synchronized',
       isBacktrackOptOut: false,
     }),
@@ -1778,6 +1781,7 @@ void test('shouldAutoActivateReleasedResonanceQuestions activates only for relea
       activeEmbeddedInstanceKey: 'resonance:4:0',
       studentAnchoredInstanceKey: 'resonance:4:0',
       instructorAnchoredInstanceKey: null,
+      instructorIndices: { h: 5, v: 0, f: 0 },
       syncState: 'behind',
       isBacktrackOptOut: true,
     }),
@@ -1790,10 +1794,24 @@ void test('shouldAutoActivateReleasedResonanceQuestions activates only for relea
       activeEmbeddedInstanceKey: 'resonance:4:1:variantA',
       studentAnchoredInstanceKey: 'resonance:4:1:variantA',
       instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
       syncState: 'vertical',
       isBacktrackOptOut: false,
     }),
     true,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:6:1',
+      studentAnchoredInstanceKey: 'resonance:6:1',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      syncState: 'vertical',
+      isBacktrackOptOut: false,
+    }),
+    false,
   )
 })
 

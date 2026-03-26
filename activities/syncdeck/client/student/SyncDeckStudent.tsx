@@ -1811,6 +1811,7 @@ export function shouldAutoActivateReleasedResonanceQuestions(params: {
   activeEmbeddedInstanceKey: string | null
   studentAnchoredInstanceKey: string | null
   instructorAnchoredInstanceKey: string | null
+  instructorIndices: { h: number; v: number; f: number } | null
   syncState: SyncDeckStudentSyncState
   isBacktrackOptOut: boolean
 }): boolean {
@@ -1824,7 +1825,11 @@ export function shouldAutoActivateReleasedResonanceQuestions(params: {
   }
 
   if (activePosition.v > 0) {
-    return params.studentAnchoredInstanceKey === params.activeEmbeddedInstanceKey
+    return (
+      params.studentAnchoredInstanceKey === params.activeEmbeddedInstanceKey
+      && params.instructorIndices !== null
+      && activePosition.h <= params.instructorIndices.h
+    )
   }
 
   if (params.syncState === 'vertical' || params.syncState === 'solo' || params.isBacktrackOptOut) {
@@ -2993,6 +2998,7 @@ const SyncDeckStudent: FC = () => {
     activeEmbeddedInstanceKey,
     studentAnchoredInstanceKey,
     instructorAnchoredInstanceKey,
+    instructorIndices: lastInstructorIndicesRef.current,
     syncState,
     isBacktrackOptOut,
   })
