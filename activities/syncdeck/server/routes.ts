@@ -1124,13 +1124,13 @@ function canStudentAutoActivateEmbeddedInstance(params: {
     return false
   }
 
-  if (instancePosition.v > 0) {
-    return true
-  }
-
   const instructorIndices = extractIndicesFromInstructorPayload(params.session.data.lastInstructorStatePayload)
   if (!instructorIndices) {
     return false
+  }
+
+  if (instancePosition.v > 0) {
+    return instancePosition.h <= instructorIndices.h
   }
 
   return instancePosition.h < instructorIndices.h
