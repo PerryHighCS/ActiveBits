@@ -1778,6 +1778,19 @@ void test('shouldAutoActivateReleasedResonanceQuestions activates only for relea
   assert.equal(
     shouldAutoActivateReleasedResonanceQuestions({
       activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:6:0',
+      studentAnchoredInstanceKey: 'resonance:6:0',
+      instructorAnchoredInstanceKey: null,
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      syncState: 'ahead',
+      isBacktrackOptOut: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
       activeEmbeddedInstanceKey: 'resonance:4:0',
       studentAnchoredInstanceKey: 'resonance:4:0',
       instructorAnchoredInstanceKey: null,
@@ -1793,6 +1806,19 @@ void test('shouldAutoActivateReleasedResonanceQuestions activates only for relea
       activeEmbeddedActivityId: 'resonance',
       activeEmbeddedInstanceKey: 'resonance:4:1:variantA',
       studentAnchoredInstanceKey: 'resonance:4:1:variantA',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      syncState: 'vertical',
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:1:variant1',
+      studentAnchoredInstanceKey: 'resonance:4:1:variant1',
       instructorAnchoredInstanceKey: 'resonance:4:0',
       instructorIndices: { h: 4, v: 0, f: 0 },
       syncState: 'vertical',

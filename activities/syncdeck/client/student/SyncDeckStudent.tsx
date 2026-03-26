@@ -1482,13 +1482,8 @@ function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmb
     return null
   }
 
-  const numericSegments = segments.filter((segment) => /^-?\d+$/.test(segment))
-  if (numericSegments.length < 2) {
-    return null
-  }
-
-  const hSegment = numericSegments.at(-2)
-  const vSegment = numericSegments.at(-1)
+  const hSegment = segments[1]
+  const vSegment = segments[2]
   if (typeof hSegment !== 'string' || typeof vSegment !== 'string') {
     return null
   }
@@ -1832,7 +1827,14 @@ export function shouldAutoActivateReleasedResonanceQuestions(params: {
     )
   }
 
-  if (params.syncState === 'vertical' || params.syncState === 'solo' || params.isBacktrackOptOut) {
+  if (
+    params.syncState === 'vertical'
+    || params.syncState === 'solo'
+    || params.syncState === 'ahead'
+    || params.isBacktrackOptOut
+    || params.instructorIndices === null
+    || activePosition.h >= params.instructorIndices.h
+  ) {
     return false
   }
 
