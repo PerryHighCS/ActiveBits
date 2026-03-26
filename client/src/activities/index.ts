@@ -43,6 +43,7 @@ const CLIENT_EXTENSION_PRIORITY = ['.tsx', '.ts', '.jsx', '.js'] as const
 
 const isDevelopment = import.meta.env?.MODE === 'development'
 const { parseActivityConfig } = activityConfigSchema
+const clientModuleResolutionCache = new Map<string, Promise<ActivityClientResolved>>()
 
 function getExtensionPriority(modulePath: string, priorityOrder: readonly string[]): number {
   const index = priorityOrder.findIndex((ext) => modulePath.endsWith(ext))
@@ -118,6 +119,17 @@ async function resolveClientModule(loader: ActivityClientLoader): Promise<Activi
   const mod = await loader()
   const resolved = mod.default ?? mod.activity ?? mod
   return (resolved != null && typeof resolved === 'object') ? (resolved as ActivityClientResolved) : {}
+}
+
+function getCachedClientModule(activityId: string, loader: ActivityClientLoader): Promise<ActivityClientResolved> {
+  const cached = clientModuleResolutionCache.get(activityId)
+  if (cached) {
+    return cached
+  }
+
+  const pending = resolveClientModule(loader)
+  clientModuleResolutionCache.set(activityId, pending)
+  return pending
 }
 
 function createLazyComponent(
@@ -239,7 +251,7 @@ export async function runActivityDeepLinkPreflight(
     return { valid: false, warning: 'Validation is unavailable for this activity.' }
   }
 
-  const resolved = await resolveClientModule(clientLoader)
+  const resolved = await getCachedClientModule(activityId, clientLoader)
   if (typeof resolved.runDeepLinkPreflight !== 'function') {
     return { valid: false, warning: 'Validation is unavailable for this activity.' }
   }
@@ -256,12 +268,22 @@ export async function launchActivityPersistentSoloEntry(
     return null
   }
 
-  const resolved = await resolveClientModule(clientLoader)
+  const resolved = await getCachedClientModule(activityId, clientLoader)
   if (typeof resolved.launchPersistentSoloEntry !== 'function') {
     return null
   }
 
   return await resolved.launchPersistentSoloEntry(params)
+}
+
+export async function preloadActivityClientBundle(activityId: string): Promise<boolean> {
+  const clientLoader = findClientLoader(activityId)
+  if (!clientLoader) {
+    return false
+  }
+
+  await getCachedClientModule(activityId, clientLoader)
+  return true
 }
 
 export async function loadActivityWaitingRoomFields(

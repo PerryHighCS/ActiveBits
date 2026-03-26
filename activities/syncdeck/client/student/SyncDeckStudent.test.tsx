@@ -47,6 +47,8 @@ import { hasPendingSynchronizedActivityRequestForCurrentSlide } from './SyncDeck
 import { resolveStudentSoloActivityRequestInputs } from './SyncDeckStudent.js'
 import { resolveStudentSoloActivityRequest } from './SyncDeckStudent.js'
 import { applyStudentSoloActivityRequest } from './SyncDeckStudent.js'
+import { resolveGroupedActivityIds } from '../shared/groupedActivityRequests.js'
+import { resolveGroupedPreloadRequestBatchInputs } from '../shared/groupedActivityRequests.js'
 import { MIXED_CONTENT_PRESENTATION_ERROR } from '../shared/presentationUrlCompatibility.js'
 import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from '../shared/embeddedOverlayNavigation.js'
 
@@ -87,6 +89,29 @@ void test('buildStudentWebSocketUrl returns null when student id is missing', ()
   })
 
   assert.equal(url, null)
+})
+
+void test('resolveGroupedPreloadRequestBatchInputs supports bundle-only preload grouping for student views', () => {
+  const grouped = resolveGroupedPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'video-sync',
+          indices: { h: 4, v: 0, f: -1 },
+          stackRequests: [
+            { activityId: 'raffle', indices: { h: 4, v: 1, f: -1 } },
+          ],
+        },
+      ],
+    },
+    { h: 0, v: 0, f: 0 },
+  )
+
+  assert.deepEqual(grouped, [
+    { activityId: 'video-sync', instanceKey: 'video-sync:4:0' },
+    { activityId: 'raffle', instanceKey: 'raffle:4:1' },
+  ])
+  assert.deepEqual(resolveGroupedActivityIds(grouped), ['video-sync', 'raffle'])
 })
 
 void test('resolveIframePostMessageTargetOrigin prefers iframe runtime origin and falls back to configured origin', () => {

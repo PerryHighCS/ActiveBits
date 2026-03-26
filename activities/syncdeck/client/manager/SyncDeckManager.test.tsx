@@ -37,6 +37,7 @@ import { resolveManagerCurrentSlideNavigationCapability } from './SyncDeckManage
 import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
+import { resolveManagerPreloadRequestBatchInputs } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
 import { activitySupportsEmbeddedReport } from './SyncDeckManager.js'
@@ -559,6 +560,61 @@ void test('resolveManagerActivityRequestBatchInputs keeps current slide primary 
       { activityId: 'embedded-test', instanceKey: 'embedded-test:2:0', activityOptions: { prompt: 'hello' } },
       { activityId: 'raffle', instanceKey: 'raffle:2:1', activityOptions: { title: 'raffle title' } },
       { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:2' },
+    ],
+  )
+})
+
+void test('resolveManagerPreloadRequestBatchInputs flattens grouped requests and deduplicates by instance key', () => {
+  assert.deepEqual(
+    resolveManagerPreloadRequestBatchInputs(
+      {
+        requests: [
+          {
+            activityId: 'video-sync',
+            indices: { h: 1, v: 0, f: -1 },
+            activityOptions: { mode: 'alpha' },
+            stackRequests: [
+              {
+                activityId: 'raffle',
+                indices: { h: 1, v: 1, f: -1 },
+              },
+            ],
+          },
+          {
+            activityId: 'video-sync',
+            indices: { h: 1, v: 0, f: 0 },
+            activityOptions: { mode: 'beta' },
+          },
+          {
+            activityId: 'algorithm-demo',
+            indices: { h: 2, v: 0, f: -1 },
+          },
+        ],
+      },
+      { h: 9, v: 0, f: 0 },
+    ),
+    [
+      { activityId: 'video-sync', instanceKey: 'video-sync:1:0', activityOptions: { mode: 'beta' } },
+      { activityId: 'raffle', instanceKey: 'raffle:1:1' },
+      { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:0' },
+    ],
+  )
+})
+
+void test('resolveManagerPreloadRequestBatchInputs ignores malformed grouped preload entries', () => {
+  assert.deepEqual(
+    resolveManagerPreloadRequestBatchInputs(
+      {
+        requests: [
+          null,
+          { activityId: '', indices: { h: 1, v: 0, f: 0 } },
+          { activityId: 'video-sync', indices: { h: 1, v: 0, f: 0 } },
+        ],
+      },
+      null,
+    ),
+    [
+      { activityId: 'video-sync', instanceKey: 'video-sync:1:0' },
     ],
   )
 })

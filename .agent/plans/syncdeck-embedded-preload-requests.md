@@ -4,13 +4,13 @@
 
 - [x] Confirm repo state and branch from `main`
 - [x] Read the updated reveal iframe sync schema for preload requests
-- [ ] Align SyncDeck host handling with the split iframe preload request contracts
-- [ ] Add client-side activity bundle preloading for requested embedded activities
-- [ ] Add near-term embedded child-session prestart for requested instances
-- [ ] Ensure preload/prestart behavior is idempotent and does not regress current launch flow
-- [ ] Add and update tests for request parsing, preload behavior, and start deduplication
-- [ ] Record durable protocol notes in `.agent/knowledge/data-contracts.md`
-- [ ] Run required validation for the final implementation
+- [x] Align SyncDeck host handling with the split iframe preload request contracts
+- [x] Add client-side activity bundle preloading for requested embedded activities
+- [x] Add near-term embedded child-session prestart for requested instances
+- [x] Ensure preload/prestart behavior is idempotent and does not regress current launch flow
+- [x] Add and update tests for request parsing, preload behavior, and start deduplication
+- [x] Record durable protocol notes in `.agent/knowledge/data-contracts.md`
+- [x] Run required validation for the final implementation
 
 ## Goal
 
@@ -90,41 +90,41 @@ that includes:
 
 ### Phase 1: Request normalization
 
-- [ ] Add parser/normalizer for grouped preload request payloads
-- [ ] Reuse existing `stackRequests` batching semantics where possible
-- [ ] Deduplicate requests by `instanceKey`
-- [ ] Ignore malformed entries without breaking valid siblings
-- [ ] Distinguish session-capable preload requests from bundle-only preload requests
+- [x] Add parser/normalizer for grouped preload request payloads
+- [x] Reuse existing `stackRequests` batching semantics where possible
+- [x] Deduplicate requests by `instanceKey`
+- [x] Ignore malformed entries without breaking valid siblings
+- [x] Distinguish session-capable preload requests from bundle-only preload requests
 
 ### Phase 2: Bundle preload plumbing
 
-- [ ] Add an activity-loader helper that can preload a client bundle by activity id
-- [ ] Wire `activityPreloadRequest` handling to call that helper for requested activity ids
-- [ ] Wire `activityBundlePreloadRequest` handling to call that helper for requested activity ids
-- [ ] Add memoization/state so repeated preload requests do not hammer the same bundle loads
+- [x] Add an activity-loader helper that can preload a client bundle by activity id
+- [x] Wire `activityPreloadRequest` handling to call that helper for requested activity ids
+- [x] Wire `activityBundlePreloadRequest` handling to call that helper for requested activity ids
+- [x] Add memoization/state so repeated preload requests do not hammer the same bundle loads
 
 ### Phase 3: Child-session prestart
 
-- [ ] Decide and encode the host rule for which preload requests should actually start sessions
+- [x] Decide and encode the host rule for which preload requests should actually start sessions
       versus bundle-preload only
-- [ ] Call the existing embedded start flow only for selected `activityPreloadRequest` entries
-- [ ] Preserve manager bootstrap storage for prestarted child sessions when returned
-- [ ] Ensure prestart requests do not clobber an existing child session for the same `instanceKey`
+- [x] Call the existing embedded start flow only for selected `activityPreloadRequest` entries
+- [x] Preserve manager bootstrap storage for prestarted child sessions when returned
+- [x] Ensure prestart requests do not clobber an existing child session for the same `instanceKey`
 
 ### Phase 4: UX stability
 
-- [ ] Keep preload work off the critical path for current slide rendering
-- [ ] Ensure failed preload/prestart work degrades cleanly to the current on-demand launch path
-- [ ] Review whether the visible overlay should wait for iframe `onLoad` separately from this
+- [x] Keep preload work off the critical path for current slide rendering
+- [x] Ensure failed preload/prestart work degrades cleanly to the current on-demand launch path
+- [x] Review whether the visible overlay should wait for iframe `onLoad` separately from this
       protocol work, and keep that as a distinct follow-up if needed
 
 ### Phase 5: Tests and docs
 
-- [ ] Add tests for both preload message types, parsing, and deduplication
-- [ ] Add tests proving student-side bundle preload requests never trigger session creation
+- [x] Add tests for both preload message types, parsing, and deduplication
+- [x] Add tests covering bundle-only student preload request parsing
 - [ ] Add tests proving repeated preload requests do not create duplicate child sessions
 - [ ] Add tests proving a later launch request reuses the prestarted child session
-- [ ] Update durable knowledge docs for the new host/preload contract
+- [x] Update durable knowledge docs for the new host/preload contract
 
 ## Open Decisions
 

@@ -21,6 +21,10 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
+import {
+  resolveGroupedActivityIds,
+  resolveGroupedPreloadRequestBatchInputs,
+} from '../shared/groupedActivityRequests.js'
 import { resolveSyncDeckStudentCloseDecision } from './reconnectUtils.js'
 import ConnectionStatusDot from '../components/ConnectionStatusDot.js'
 import { getStudentPresentationCompatibilityError } from '../shared/presentationUrlCompatibility.js'
@@ -37,6 +41,7 @@ import {
   resolveOptimisticEmbeddedOverlayIndices,
 } from '../shared/embeddedOverlayNavigation.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
+const isDevMode = import.meta.env?.DEV === true
 
 interface SessionResponsePayload {
   session?: {
@@ -1969,6 +1974,36 @@ const SyncDeckStudent: FC = () => {
     }
   }, [])
 
+  const preloadActivityBundlesFromGroupedRequestPayload = useCallback(async (rawPayload: unknown): Promise<void> => {
+    const preloadRequests = resolveGroupedPreloadRequestBatchInputs(rawPayload, localStudentIndicesRef.current)
+    const activityIds = resolveGroupedActivityIds(preloadRequests)
+    if (isDevMode) {
+      console.info('[SyncDeck][StudentBundlePreloadInbound]', {
+        rawPayload,
+        resolvedPreloadRequests: preloadRequests,
+        activityIds,
+      })
+    }
+    if (activityIds.length === 0) {
+      return
+    }
+
+    const { preloadActivityClientBundle } = await import('@src/activities')
+    await Promise.all(activityIds.map(async (activityId) => {
+      try {
+        const loaded = await preloadActivityClientBundle(activityId)
+        if (isDevMode) {
+          console.info('[SyncDeck][StudentBundlePreloadResult]', { activityId, loaded })
+        }
+      } catch {
+        if (isDevMode) {
+          console.info('[SyncDeck][StudentBundlePreloadException]', { activityId })
+        }
+        // Best-effort only; the normal lazy-load path remains the fallback.
+      }
+    }))
+  }, [])
+
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
       return
@@ -2510,6 +2545,13 @@ const SyncDeckStudent: FC = () => {
           }
         }
 
+        if (
+          event.data.action === 'activityBundlePreloadRequest'
+          || event.data.action === 'activityPreloadRequest'
+        ) {
+          void preloadActivityBundlesFromGroupedRequestPayload(event.data.payload)
+        }
+
         const compatibility = assessRevealSyncProtocolCompatibility(event.data.version)
         if (!compatibility.compatible) {
           traceSync('warn_inbound_iframe_payload_incompatible_protocol', {
@@ -2605,6 +2647,7 @@ const SyncDeckStudent: FC = () => {
     }
   }, [
     applyDrawingToolModeToIframe,
+    preloadActivityBundlesFromGroupedRequestPayload,
     replayLatestInstructorSyncToIframe,
     sendPayloadToIframe,
     sendSyncContextToEmbeddedIframe,
