@@ -104,7 +104,7 @@ export function normalizeActivationSelection(
     return live
   }
 
-  return availableQuestionIds[0] ? [availableQuestionIds[0]] : []
+  return availableQuestionIds
 }
 
 export function shouldShowQuestionListActivationControls(questionCount: number): boolean {

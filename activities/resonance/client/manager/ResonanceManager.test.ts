@@ -40,7 +40,7 @@ void test('toggleExpandedQuestionStem adds and removes expanded question ids', (
   assert.deepEqual(toggleExpandedQuestionStem(['q1', 'q2'], 'q1'), ['q2'])
 })
 
-void test('normalizeActivationSelection keeps valid selection and falls back to live questions or first question', () => {
+void test('normalizeActivationSelection keeps valid selection and falls back to live questions or all available questions', () => {
   assert.deepEqual(
     normalizeActivationSelection(['q2'], ['q1', 'q2', 'q3'], ['q1', 'q3']),
     ['q2'],
@@ -51,7 +51,7 @@ void test('normalizeActivationSelection keeps valid selection and falls back to 
   )
   assert.deepEqual(
     normalizeActivationSelection([], ['q1', 'q2', 'q3'], []),
-    ['q1'],
+    ['q1', 'q2', 'q3'],
   )
   assert.deepEqual(
     normalizeActivationSelection([], [], []),
