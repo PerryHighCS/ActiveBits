@@ -40,7 +40,7 @@ import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent
 import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
 import { shouldAutoActivateReleasedResonanceQuestions } from './SyncDeckStudent.js'
 import { tryClaimReleasedResonanceAutoActivation } from './SyncDeckStudent.js'
-import { releaseReleasedResonanceAutoActivation } from './SyncDeckStudent.js'
+import { releaseResonanceAutoActivationClaim } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
 import { shouldPreferInstructorOverlaySelection } from './SyncDeckStudent.js'
 import { buildStudentEmbeddedSyncContextMessage } from './SyncDeckStudent.js'
@@ -1792,7 +1792,10 @@ void test('released resonance auto-activation cleanup re-allows retries after an
   assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), true)
   assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), false)
 
-  releaseReleasedResonanceAutoActivation(activationKeys, activationKey)
+  // Successful requests retain the claim so revisits do not re-post unnecessarily.
+  assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), false)
+
+  releaseResonanceAutoActivationClaim(activationKeys, activationKey)
 
   assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), true)
 })

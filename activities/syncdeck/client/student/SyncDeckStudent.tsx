@@ -1845,7 +1845,7 @@ export function tryClaimReleasedResonanceAutoActivation(
   return true
 }
 
-export function releaseReleasedResonanceAutoActivation(
+export function releaseResonanceAutoActivationClaim(
   activationKeys: Set<string>,
   activationKey: string,
 ): void {
@@ -3045,6 +3045,7 @@ const SyncDeckStudent: FC = () => {
     }
 
     const abortController = new AbortController()
+    let shouldReleaseClaim = true
 
     void (async () => {
       try {
@@ -3062,19 +3063,23 @@ const SyncDeckStudent: FC = () => {
           signal: abortController.signal,
         })
 
-        if (!response.ok && !abortController.signal.aborted) {
-          releaseReleasedResonanceAutoActivation(autoActivatedReleasedResonanceKeysRef.current, activationKey)
+        if (response.ok) {
+          shouldReleaseClaim = false
+        } else if (!abortController.signal.aborted) {
+          releaseResonanceAutoActivationClaim(autoActivatedReleasedResonanceKeysRef.current, activationKey)
         }
       } catch {
         if (!abortController.signal.aborted) {
-          releaseReleasedResonanceAutoActivation(autoActivatedReleasedResonanceKeysRef.current, activationKey)
+          releaseResonanceAutoActivationClaim(autoActivatedReleasedResonanceKeysRef.current, activationKey)
         }
       }
     })()
 
     return () => {
       abortController.abort()
-      releaseReleasedResonanceAutoActivation(autoActivatedReleasedResonanceKeysRef.current, activationKey)
+      if (shouldReleaseClaim) {
+        releaseResonanceAutoActivationClaim(autoActivatedReleasedResonanceKeysRef.current, activationKey)
+      }
     }
   }, [
     activeEmbeddedChildSessionId,
