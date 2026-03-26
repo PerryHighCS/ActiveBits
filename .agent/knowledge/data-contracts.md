@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-03-26
+- Surface: activity interface | internal module
+- Contract: SyncDeck's reveal iframe embedded-preload protocol is split into two iframe-to-host actions. `activityPreloadRequest` is for non-student hosted roles that may prewarm both client bundles and embedded child sessions, while `activityBundlePreloadRequest` is a bundle-only hint that any hosted role, including students, may emit. Both payloads carry grouped `requests` entries that reuse the `activityRequest` shape, including nested `stackRequests`.
+- Compatibility constraints: Hosts must treat both actions as best-effort preload hints and continue to rely on the normal `activityRequest` flow as the authoritative launch path. Student-follow views must never interpret bundle-only preload hints as permission to create child sessions. Repeated preload emissions for the same anchored `instanceKey` are expected and should remain idempotent.
+- Validation rules: Each grouped request entry requires a non-empty `activityId`; `instanceKey` may be derived from `activityId` plus slide anchor when omitted; malformed grouped entries should be ignored without dropping valid siblings; bundle preloads may silently no-op for unknown activities.
+- Evidence (schema/tests/path): `.agent/knowledge/reveal-iframe-sync-message-schema.md`; `activities/syncdeck/client/shared/groupedActivityRequests.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `client/src/activities/index.ts`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: If hosted standalone mode later gains a session-prestart path distinct from the current solo-overlay flow, extend this contract deliberately instead of letting student-side bundle preload handling implicitly create sessions.
+- Owner: Codex
+
 - Date: 2026-03-23
 - Surface: activity interface | internal module
 - Contract: SyncDeck's reveal iframe sync protocol now reserves an iframe-to-host `metadata` action with object payloads such as `{ title }`. Hosts must treat the payload as optional descriptive metadata, trim string values, ignore unknown keys, and avoid using `metadata` as the iframe-ready handshake.

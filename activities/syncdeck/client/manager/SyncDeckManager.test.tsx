@@ -37,6 +37,13 @@ import { resolveManagerCurrentSlideNavigationCapability } from './SyncDeckManage
 import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
+import { resolveManagerPreloadRequestBatchInputs } from './SyncDeckManager.js'
+import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
+import { processManagerPreloadRequests } from './SyncDeckManager.js'
+import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
+import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
+import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
+import { resolveEmbeddedManagerIframeAccessibilityProps } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
 import { activitySupportsEmbeddedReport } from './SyncDeckManager.js'
@@ -561,6 +568,367 @@ void test('resolveManagerActivityRequestBatchInputs keeps current slide primary 
       { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:2' },
     ],
   )
+})
+
+void test('resolveManagerPreloadRequestBatchInputs flattens grouped requests and deduplicates by instance key', () => {
+  assert.deepEqual(
+    resolveManagerPreloadRequestBatchInputs(
+      {
+        requests: [
+          {
+            activityId: 'video-sync',
+            indices: { h: 1, v: 0, f: -1 },
+            activityOptions: { mode: 'alpha' },
+            stackRequests: [
+              {
+                activityId: 'raffle',
+                indices: { h: 1, v: 1, f: -1 },
+              },
+            ],
+          },
+          {
+            activityId: 'video-sync',
+            indices: { h: 1, v: 0, f: 0 },
+            activityOptions: { mode: 'beta' },
+          },
+          {
+            activityId: 'algorithm-demo',
+            indices: { h: 2, v: 0, f: -1 },
+          },
+        ],
+      },
+      { h: 9, v: 0, f: 0 },
+    ),
+    [
+      { activityId: 'video-sync', instanceKey: 'video-sync:1:0', activityOptions: { mode: 'beta' } },
+      { activityId: 'raffle', instanceKey: 'raffle:1:1' },
+      { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:0' },
+    ],
+  )
+})
+
+void test('resolveManagerPreloadRequestBatchInputs ignores malformed grouped preload entries', () => {
+  assert.deepEqual(
+    resolveManagerPreloadRequestBatchInputs(
+      {
+        requests: [
+          null,
+          { activityId: '', indices: { h: 1, v: 0, f: 0 } },
+          { activityId: 'video-sync', indices: { h: 1, v: 0, f: 0 } },
+        ],
+      },
+      null,
+    ),
+    [
+      { activityId: 'video-sync', instanceKey: 'video-sync:1:0' },
+    ],
+  )
+})
+
+void test('extractRevealSyncActionWithoutParsing avoids string parsing and only trusts object envelopes', () => {
+  assert.equal(
+    extractRevealSyncActionWithoutParsing({
+      type: 'reveal-sync',
+      action: 'activityPreloadRequest',
+      payload: {},
+    }),
+    'activityPreloadRequest',
+  )
+  assert.equal(
+    extractRevealSyncActionWithoutParsing('{"type":"reveal-sync","action":"activityPreloadRequest"}'),
+    null,
+  )
+  assert.equal(
+    extractRevealSyncActionWithoutParsing({
+      type: 'not-reveal-sync',
+      action: 'activityPreloadRequest',
+    }),
+    null,
+  )
+})
+
+void test('processManagerPreloadRequests does not trigger duplicate starts for repeated preload messages', async () => {
+  const pendingInstanceKeys = new Set<string>()
+  const preloadCalls: string[][] = []
+  const startedRequests: string[] = []
+
+  let releaseFirstStart: () => void = () => {}
+  const firstStartGate = new Promise<void>((resolve) => {
+    releaseFirstStart = resolve
+  })
+
+  const firstRun = processManagerPreloadRequests({
+    requests: [
+      { activityId: 'resonance', instanceKey: 'resonance:1:0' },
+    ],
+    existingInstanceKeys: new Set(),
+    pendingInstanceKeys,
+    preloadBundles: async (requests) => {
+      preloadCalls.push(requests.map((request) => request.instanceKey))
+    },
+    startRequest: async (request) => {
+      startedRequests.push(request.instanceKey)
+      await firstStartGate
+    },
+  })
+
+  await Promise.resolve()
+
+  const secondRun = processManagerPreloadRequests({
+    requests: [
+      { activityId: 'resonance', instanceKey: 'resonance:1:0' },
+    ],
+    existingInstanceKeys: new Set(),
+    pendingInstanceKeys,
+    preloadBundles: async (requests) => {
+      preloadCalls.push(requests.map((request) => request.instanceKey))
+    },
+    startRequest: async (request) => {
+      startedRequests.push(`duplicate:${request.instanceKey}`)
+    },
+  })
+
+  releaseFirstStart()
+  await Promise.all([firstRun, secondRun])
+
+  assert.deepEqual(preloadCalls, [['resonance:1:0'], ['resonance:1:0']])
+  assert.deepEqual(startedRequests, ['resonance:1:0'])
+  assert.deepEqual([...pendingInstanceKeys], [])
+})
+
+void test('resolveMountedEmbeddedManagerInstanceKeys keeps the active iframe and caps warm cache size', () => {
+  assert.deepEqual(
+    resolveMountedEmbeddedManagerInstanceKeys({
+      current: ['resonance:0:1', 'gallery-walk:0:0', 'video-sync:0:2'],
+      existingInstanceKeys: ['resonance:0:1', 'gallery-walk:0:0', 'video-sync:0:2'],
+      activeInstanceKey: 'video-sync:0:2',
+      promotedInstanceKey: 'resonance:0:1',
+      limit: 2,
+    }),
+    ['video-sync:0:2', 'resonance:0:1'],
+  )
+})
+
+void test('resolveMountedEmbeddedManagerInstanceKeys drops stale warm entries', () => {
+  assert.deepEqual(
+    resolveMountedEmbeddedManagerInstanceKeys({
+      current: ['resonance:0:1', 'gallery-walk:0:0'],
+      existingInstanceKeys: ['gallery-walk:0:0'],
+      activeInstanceKey: null,
+      promotedInstanceKey: null,
+      limit: 2,
+    }),
+    ['gallery-walk:0:0'],
+  )
+})
+
+void test('resolveEmbeddedManagerIframeAccessibilityProps hides inactive embedded managers from focus and assistive tech', () => {
+  assert.deepEqual(resolveEmbeddedManagerIframeAccessibilityProps(true), {})
+  assert.deepEqual(resolveEmbeddedManagerIframeAccessibilityProps(false), {
+    'aria-hidden': 'true',
+    tabIndex: -1,
+    inert: true,
+  })
+})
+
+void test('bundle-only preload path does not trigger session creation side effects', async () => {
+  const preloadCalls: string[][] = []
+
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+
+  await processManagerBundlePreloadRequests({
+    requests,
+    preloadBundles: async (bundleRequests) => {
+      preloadCalls.push(bundleRequests.map((request) => request.instanceKey))
+    },
+  })
+
+  assert.deepEqual(preloadCalls, [['resonance:1:0']])
+})
+
+void test('bundle-only preload path swallows best-effort preload failures', async () => {
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+
+  await assert.doesNotReject(async () => {
+    await processManagerBundlePreloadRequests({
+      requests,
+      preloadBundles: async () => {
+        throw new Error('preload failed')
+      },
+    })
+  })
+})
+
+void test('processManagerPreloadRequests swallows preload bundle failures', async () => {
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+
+  await assert.doesNotReject(async () => {
+    await processManagerPreloadRequests({
+      requests,
+      existingInstanceKeys: new Set(),
+      pendingInstanceKeys: new Set(),
+      preloadBundles: async () => {
+        throw new Error('preload failed')
+      },
+      startRequest: async () => {},
+    })
+  })
+})
+
+void test('processManagerPreloadRequests swallows start request failures and clears pending keys', async () => {
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+  const pendingInstanceKeys = new Set<string>()
+
+  await assert.doesNotReject(async () => {
+    await processManagerPreloadRequests({
+      requests,
+      existingInstanceKeys: new Set(),
+      pendingInstanceKeys,
+      preloadBundles: async () => {},
+      startRequest: async () => {
+        throw new Error('start failed')
+      },
+    })
+  })
+
+  assert.deepEqual([...pendingInstanceKeys], [])
+})
+
+void test('processManagerPreloadRequests continues starting later requests after one start failure', async () => {
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+        {
+          activityId: 'gallery-walk',
+          indices: { h: 2, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+  const pendingInstanceKeys = new Set<string>()
+  const attemptedStarts: string[] = []
+
+  await assert.doesNotReject(async () => {
+    await processManagerPreloadRequests({
+      requests,
+      existingInstanceKeys: new Set(),
+      pendingInstanceKeys,
+      preloadBundles: async () => {},
+      startRequest: async (request) => {
+        attemptedStarts.push(request.instanceKey)
+        if (request.instanceKey === 'resonance:1:0') {
+          throw new Error('start failed')
+        }
+      },
+    })
+  })
+
+  assert.deepEqual(attemptedStarts, ['resonance:1:0', 'gallery-walk:2:0'])
+  assert.deepEqual([...pendingInstanceKeys], [])
+})
+
+void test('runEmbeddedStartWithPendingRetry skips duplicate background starts while one is pending', async () => {
+  const pendingStarts = new Map<string, Promise<boolean>>()
+  let started = false
+  const pending = new Promise<boolean>(() => {})
+  pendingStarts.set('resonance:1:0', pending)
+
+  const result = await runEmbeddedStartWithPendingRetry({
+    instanceKey: 'resonance:1:0',
+    background: true,
+    pendingStarts,
+    start: async () => {
+      started = true
+      return true
+    },
+  })
+
+  assert.equal(result, false)
+  assert.equal(started, false)
+})
+
+void test('runEmbeddedStartWithPendingRetry returns existing successful foreground start result without retrying', async () => {
+  const pendingStarts = new Map<string, Promise<boolean>>()
+  let started = false
+  pendingStarts.set('resonance:1:0', Promise.resolve(true))
+
+  const result = await runEmbeddedStartWithPendingRetry({
+    instanceKey: 'resonance:1:0',
+    background: false,
+    pendingStarts,
+    start: async () => {
+      started = true
+      return true
+    },
+  })
+
+  assert.equal(result, true)
+  assert.equal(started, false)
+})
+
+void test('runEmbeddedStartWithPendingRetry retries foreground starts after a pending attempt fails', async () => {
+  const pendingStarts = new Map<string, Promise<boolean>>()
+  let started = 0
+  pendingStarts.set('resonance:1:0', Promise.resolve(false))
+
+  const result = await runEmbeddedStartWithPendingRetry({
+    instanceKey: 'resonance:1:0',
+    background: false,
+    pendingStarts,
+    start: async () => {
+      started += 1
+      return true
+    },
+  })
+
+  assert.equal(result, true)
+  assert.equal(started, 1)
+  assert.equal(pendingStarts.has('resonance:1:0'), false)
 })
 
 void test('resolveSyncDeckActivityPickerEntries excludes SyncDeck and sorts entries by label', () => {
