@@ -4,7 +4,7 @@ This document defines the `postMessage` protocol used by `reveal-iframe-sync.js`
 
 ## Presentation Team Handoff
 
-For statically hosted presentations, the recommended "Host in SyncDeck" flow is an
+For statically hosted presentations, the recommended "Activate SyncDeck" flow is an
 ActiveBits-owned launch route under `/util/syncdeck`.
 
 Target flow:
@@ -34,7 +34,7 @@ Presentation-team expectations:
 - Provide a stable absolute `http(s)` `presentationUrl`.
 - Redirect the browser to the ActiveBits
   `/util/syncdeck/launch-presentation` route when the user clicks the
-  "Host in SyncDeck" control.
+  "Activate SyncDeck" control.
 
 ActiveBits-side validation expectations:
 - The launch route should run the same Reveal/SyncDeck preflight checks already used to
@@ -408,6 +408,108 @@ Library implementation expectations:
 - Preserve slide metadata payloads as opaque host input; do not make activity-specific decisions in the library.
 - Hosts may de-duplicate by `instanceKey`, so repeated emissions for the same anchored slide are expected to be idempotent.
 
+### `activityPreloadRequest`
+
+Sent by an authoring iframe role (`instructor` or hosted `standalone`) to let the host
+prewarm upcoming embedded activity sessions before the viewer lands on the activity slide.
+
+The runtime scans forward by `iframeSync.activityPreloadLookaheadSlides` slide entries
+(default `2`), skipping fragment-only steps. Any future vertical-stack activity is grouped the
+same way as `activityRequest`, so hosts can preload the whole stack in one pass. Activities
+already covered by the current slide's launch request are excluded from the preload payload.
+
+```json
+{
+  "type": "reveal-sync",
+  "action": "activityPreloadRequest",
+  "payload": {
+    "indices": { "h": 0, "v": 0, "f": -1 },
+    "lookaheadSlides": 2,
+    "requests": [
+      {
+        "activityId": "video-sync",
+        "indices": { "h": 1, "v": 0, "f": -1 },
+        "instanceKey": "video-sync:1:0",
+        "activityOptions": {},
+        "trigger": "slide-enter",
+        "stackRequests": [
+          {
+            "activityId": "raffle",
+            "indices": { "h": 1, "v": 1, "f": -1 },
+            "instanceKey": "raffle:1:1",
+            "activityOptions": {},
+            "trigger": "slide-enter"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Payload fields:
+- `indices` (object): the sender's current Reveal indices when the preload message was emitted.
+- `lookaheadSlides` (number): how many future slide entries the runtime scanned.
+- `requests` (array): future activity request groups using the same payload shape as `activityRequest`.
+
+Library implementation expectations:
+- Emit `activityPreloadRequest` for non-student roles that can launch activities (`instructor` and hosted `standalone`).
+- Skip fragment-only navigation when computing the future lookahead window.
+- Reuse the same stack grouping rules as `activityRequest`.
+- Exclude any future request whose `instanceKey` is already included in the current slide's launch group.
+
+### `activityBundlePreloadRequest`
+
+Sent by any hosted iframe role (`instructor`, hosted `standalone`, or `student`) to let the
+host preload the static activity bundle assets for upcoming slides without implying session
+creation.
+
+This message uses the same lookahead scan and grouped request shape as
+`activityPreloadRequest`, but it is safe for student-follow views because it is only a
+bundle/assets preload hint. Hosts should treat it as a cue to preload JS, CSS, and similar
+activity resources, not to start or reserve an activity session.
+
+```json
+{
+  "type": "reveal-sync",
+  "action": "activityBundlePreloadRequest",
+  "payload": {
+    "indices": { "h": 0, "v": 0, "f": -1 },
+    "lookaheadSlides": 2,
+    "requests": [
+      {
+        "activityId": "video-sync",
+        "indices": { "h": 1, "v": 0, "f": -1 },
+        "instanceKey": "video-sync:1:0",
+        "activityOptions": {},
+        "trigger": "slide-enter",
+        "stackRequests": [
+          {
+            "activityId": "raffle",
+            "indices": { "h": 1, "v": 1, "f": -1 },
+            "instanceKey": "raffle:1:1",
+            "activityOptions": {},
+            "trigger": "slide-enter"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Payload fields:
+- `indices` (object): the sender's current Reveal indices when the bundle preload message was emitted.
+- `lookaheadSlides` (number): how many future slide entries the runtime scanned.
+- `requests` (array): future activity request groups using the same payload shape as `activityRequest`.
+
+Library implementation expectations:
+- Emit `activityBundlePreloadRequest` for any hosted role, including `student`.
+- Keep this signal session-agnostic: it requests asset preloading only.
+- Skip fragment-only navigation when computing the future lookahead window.
+- Reuse the same stack grouping rules as `activityRequest`.
+- Exclude any future request whose `instanceKey` is already included in the current slide's launch group.
+
 ### `ready`
 
 Sent on init (if `autoAnnounceReady`) and when role changes.
@@ -640,55 +742,3 @@ session.chalkboard = {
 | `chalkboardState` (on `setRole: instructor` or slide change) | Replace `snapshot` with `payload.storage`; clear `delta` |
 | `chalkboardStroke` | Append `payload` to `delta` |
 | `clearChalkboard` / `resetChalkboard` relayed upward* | Clear `delta`; optionally request a fresh snapshot via `requestChalkboardState` |
-
-\* These are not currently relayed upward by the iframe; the host clears its buffer when it sends these commands downward.
-
-**When to send state to a student** (on join, reload, or explicit request):
-
-```js
-// 1. Send the snapshot (restores all drawings up to last slide change)
-if (session.chalkboard.snapshot) {
-  student.postMessage({ ..., payload: { name: 'chalkboardState',
-    storage: session.chalkboard.snapshot } });
-}
-// 2. Replay the delta (applies strokes drawn since the last slide change)
-for (const stroke of session.chalkboard.delta) {
-  student.postMessage({ ..., payload: { name: 'chalkboardStroke', ...stroke } });
-}
-```
-
-**Why this works without gaps:**
-
-- On `setRole: instructor` the iframe auto-broadcasts a full `chalkboardState`. The host stores this as the initial snapshot and starts with an empty delta.
-- Each instructor stroke arrives as a `chalkboardStroke`. The host relays it to connected students immediately and appends it to the delta.
-- On every slide change the iframe sends a fresh `chalkboardState`. The host replaces the snapshot and clears the delta — the new snapshot already incorporates all strokes from the previous slide, so the delta is always short (only strokes on the *current* slide).
-- If the instructor reloads, the iframe starts with empty in-memory storage and auto-broadcasts an empty `chalkboardState` on `setRole`. The host should respond by immediately sending a `chalkboardState` command back to the instructor (with its cached snapshot) to restore the drawings, then relay the same snapshot to all students.
-
-### Compatibility policy (recommended)
-
-Use semantic-version compatibility on the host:
-
-- Reject messages when `version` is missing.
-- Reject messages when major versions differ.
-- Log (but allow) messages when major matches and minor/patch differ.
-
-Example host-side check:
-
-```js
-function isCompatibleProtocol(hostVersion, messageVersion) {
-  if (!hostVersion || !messageVersion) return false;
-
-  const [hostMajor] = String(hostVersion).split('.').map(Number);
-  const [msgMajor] = String(messageVersion).split('.').map(Number);
-
-  if (!Number.isFinite(hostMajor) || !Number.isFinite(msgMajor)) return false;
-  return hostMajor === msgMajor;
-}
-
-// Usage in message handler
-const HOST_SYNC_PROTOCOL = '2.1.0';
-if (!isCompatibleProtocol(HOST_SYNC_PROTOCOL, data.version)) {
-  // Ignore message or request iframe reload/update
-  return;
-}
-```
