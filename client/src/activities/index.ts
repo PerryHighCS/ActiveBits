@@ -329,14 +329,25 @@ export async function launchActivityPersistentSoloEntry(
   return await resolved.launchPersistentSoloEntry(params)
 }
 
-export async function preloadActivityClientBundle(activityId: string): Promise<boolean> {
-  const clientLoader = findClientLoader(activityId)
-  if (!clientLoader) {
+export async function tryPreloadActivityClientModule(
+  activityId: string,
+  loader: ActivityClientLoader | null,
+): Promise<boolean> {
+  if (!loader) {
     return false
   }
 
-  await clientModuleResolverCache.getCachedClientModule(activityId, clientLoader)
-  return true
+  try {
+    await clientModuleResolverCache.getCachedClientModule(activityId, loader)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function preloadActivityClientBundle(activityId: string): Promise<boolean> {
+  const clientLoader = findClientLoader(activityId)
+  return await tryPreloadActivityClientModule(activityId, clientLoader)
 }
 
 export async function loadActivityWaitingRoomFields(

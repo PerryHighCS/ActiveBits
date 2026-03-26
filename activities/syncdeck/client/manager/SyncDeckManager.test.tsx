@@ -40,6 +40,7 @@ import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
 import { resolveManagerPreloadRequestBatchInputs } from './SyncDeckManager.js'
 import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
 import { processManagerPreloadRequests } from './SyncDeckManager.js'
+import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
 import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDeckManager.js'
@@ -743,6 +744,143 @@ void test('bundle-only preload path does not trigger session creation side effec
   })
 
   assert.deepEqual(preloadCalls, [['resonance:1:0']])
+})
+
+void test('bundle-only preload path swallows best-effort preload failures', async () => {
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+
+  await assert.doesNotReject(async () => {
+    await processManagerBundlePreloadRequests({
+      requests,
+      preloadBundles: async () => {
+        throw new Error('preload failed')
+      },
+    })
+  })
+})
+
+void test('processManagerPreloadRequests swallows preload bundle failures', async () => {
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+
+  await assert.doesNotReject(async () => {
+    await processManagerPreloadRequests({
+      requests,
+      existingInstanceKeys: new Set(),
+      pendingInstanceKeys: new Set(),
+      preloadBundles: async () => {
+        throw new Error('preload failed')
+      },
+      startRequest: async () => {},
+    })
+  })
+})
+
+void test('processManagerPreloadRequests swallows start request failures and clears pending keys', async () => {
+  const requests = resolveManagerPreloadRequestBatchInputs(
+    {
+      requests: [
+        {
+          activityId: 'resonance',
+          indices: { h: 1, v: 0, f: -1 },
+        },
+      ],
+    },
+    null,
+  )
+  const pendingInstanceKeys = new Set<string>()
+
+  await assert.doesNotReject(async () => {
+    await processManagerPreloadRequests({
+      requests,
+      existingInstanceKeys: new Set(),
+      pendingInstanceKeys,
+      preloadBundles: async () => {},
+      startRequest: async () => {
+        throw new Error('start failed')
+      },
+    })
+  })
+
+  assert.deepEqual([...pendingInstanceKeys], [])
+})
+
+void test('runEmbeddedStartWithPendingRetry skips duplicate background starts while one is pending', async () => {
+  const pendingStarts = new Map<string, Promise<boolean>>()
+  let started = false
+  const pending = new Promise<boolean>(() => {})
+  pendingStarts.set('resonance:1:0', pending)
+
+  const result = await runEmbeddedStartWithPendingRetry({
+    instanceKey: 'resonance:1:0',
+    background: true,
+    pendingStarts,
+    start: async () => {
+      started = true
+      return true
+    },
+  })
+
+  assert.equal(result, false)
+  assert.equal(started, false)
+})
+
+void test('runEmbeddedStartWithPendingRetry returns existing successful foreground start result without retrying', async () => {
+  const pendingStarts = new Map<string, Promise<boolean>>()
+  let started = false
+  pendingStarts.set('resonance:1:0', Promise.resolve(true))
+
+  const result = await runEmbeddedStartWithPendingRetry({
+    instanceKey: 'resonance:1:0',
+    background: false,
+    pendingStarts,
+    start: async () => {
+      started = true
+      return true
+    },
+  })
+
+  assert.equal(result, true)
+  assert.equal(started, false)
+})
+
+void test('runEmbeddedStartWithPendingRetry retries foreground starts after a pending attempt fails', async () => {
+  const pendingStarts = new Map<string, Promise<boolean>>()
+  let started = 0
+  pendingStarts.set('resonance:1:0', Promise.resolve(false))
+
+  const result = await runEmbeddedStartWithPendingRetry({
+    instanceKey: 'resonance:1:0',
+    background: false,
+    pendingStarts,
+    start: async () => {
+      started += 1
+      return true
+    },
+  })
+
+  assert.equal(result, true)
+  assert.equal(started, 1)
+  assert.equal(pendingStarts.has('resonance:1:0'), false)
 })
 
 void test('resolveSyncDeckActivityPickerEntries excludes SyncDeck and sorts entries by label', () => {

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createClientModuleResolverCache, shouldUseClientModuleResolutionCache } from './index'
+import {
+  createClientModuleResolverCache,
+  shouldUseClientModuleResolutionCache,
+  tryPreloadActivityClientModule,
+} from './index'
 
 void test('shouldUseClientModuleResolutionCache disables caching in development and HMR runtimes', () => {
   assert.equal(
@@ -74,4 +78,16 @@ void test('createClientModuleResolverCache clears cached modules on HMR dispose'
 
   assert.equal(resolveCount, 2)
   assert.notEqual(first, second)
+})
+
+void test('tryPreloadActivityClientModule returns false when the loader is unavailable', async () => {
+  assert.equal(await tryPreloadActivityClientModule('syncdeck', null), false)
+})
+
+void test('tryPreloadActivityClientModule returns false when client module loading fails', async () => {
+  const result = await tryPreloadActivityClientModule('syncdeck', async () => {
+    throw new Error('boom')
+  })
+
+  assert.equal(result, false)
 })

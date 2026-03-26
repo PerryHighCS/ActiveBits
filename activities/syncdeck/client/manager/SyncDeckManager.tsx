@@ -1133,18 +1133,27 @@ export async function processManagerPreloadRequests(params: {
     return
   }
 
-  await params.preloadBundles(params.requests)
+  try {
+    await params.preloadBundles(params.requests)
 
-  for (const request of params.requests) {
-    if (params.existingInstanceKeys.has(request.instanceKey) || params.pendingInstanceKeys.has(request.instanceKey)) {
-      continue
+    for (const request of params.requests) {
+      if (params.existingInstanceKeys.has(request.instanceKey) || params.pendingInstanceKeys.has(request.instanceKey)) {
+        continue
+      }
+
+      params.pendingInstanceKeys.add(request.instanceKey)
+      try {
+        await params.startRequest(request)
+      } finally {
+        params.pendingInstanceKeys.delete(request.instanceKey)
+      }
     }
-
-    params.pendingInstanceKeys.add(request.instanceKey)
-    try {
-      await params.startRequest(request)
-    } finally {
-      params.pendingInstanceKeys.delete(request.instanceKey)
+  } catch (error) {
+    if (isDevMode) {
+      console.info('[SyncDeck][ManagerPreloadRequestException]', {
+        error,
+        requestCount: params.requests.length,
+      })
     }
   }
 }
@@ -1157,7 +1166,45 @@ export async function processManagerBundlePreloadRequests(params: {
     return
   }
 
-  await params.preloadBundles(params.requests)
+  try {
+    await params.preloadBundles(params.requests)
+  } catch (error) {
+    if (isDevMode) {
+      console.info('[SyncDeck][ManagerBundlePreloadRequestException]', {
+        error,
+        requestCount: params.requests.length,
+      })
+    }
+  }
+}
+
+export async function runEmbeddedStartWithPendingRetry(params: {
+  instanceKey: string
+  background: boolean
+  pendingStarts: Map<string, Promise<boolean>>
+  start: () => Promise<boolean>
+}): Promise<boolean> {
+  const pending = params.pendingStarts.get(params.instanceKey)
+  if (pending) {
+    if (params.background) {
+      return false
+    }
+
+    const pendingResult = await pending.catch(() => false)
+    if (pendingResult) {
+      return true
+    }
+  }
+
+  const current = params.start()
+  params.pendingStarts.set(params.instanceKey, current)
+  try {
+    return await current
+  } finally {
+    if (params.pendingStarts.get(params.instanceKey) === current) {
+      params.pendingStarts.delete(params.instanceKey)
+    }
+  }
 }
 
 export function resolveSyncDeckActivityPickerEntries(
@@ -1644,7 +1691,7 @@ const SyncDeckManager: FC = () => {
   const isInstructorSyncEnabledRef = useRef(true)
   const restoreSuppressionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingEmbeddedPreloadDedupeRef = useRef<Set<string>>(new Set())
-  const pendingEmbeddedPrestartRef = useRef<Set<string>>(new Set())
+  const pendingEmbeddedPrestartRef = useRef<Map<string, Promise<boolean>>>(new Map())
   const pendingEmbeddedWarmMountRef = useRef<Map<string, number>>(new Map())
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
@@ -2448,120 +2495,118 @@ const SyncDeckManager: FC = () => {
         return false
       }
 
-      if (pendingEmbeddedPrestartRef.current.has(request.instanceKey)) {
-        if (isDevMode) {
-          console.info('[SyncDeck][ManagerPreloadSkipPending]', { request, background })
-        }
-        return false
-      }
-
-      pendingEmbeddedPrestartRef.current.add(request.instanceKey)
-      if (isDevMode) {
-        console.info('[SyncDeck][ManagerPreloadStartRequest]', { request, background })
-      }
-      try {
-        const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/start`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            instructorPasscode,
-            activityId: request.activityId,
-            instanceKey: request.instanceKey,
-            ...(request.activityOptions ? { activityOptions: request.activityOptions } : {}),
-          }),
-        })
-
-        if (!response.ok) {
-          let message = 'Unable to launch embedded activity.'
-          try {
-            const payload = (await response.json()) as { error?: string }
-            if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
-              message = payload.error
-            }
-          } catch {
-            // keep default message
-          }
-          if (!background) {
-            setStartError(message)
-            setStartSuccess(null)
-          } else {
-            console.warn('[SyncDeck][ManagerActivityPrestartFailed]', {
-              request,
-              message,
-            })
-          }
+      return await runEmbeddedStartWithPendingRetry({
+        instanceKey: request.instanceKey,
+        background,
+        pendingStarts: pendingEmbeddedPrestartRef.current,
+        start: async () => {
           if (isDevMode) {
-            console.info('[SyncDeck][ManagerPreloadStartError]', {
-              request,
-              background,
-              message,
-              status: response.status,
-            })
+            console.info('[SyncDeck][ManagerPreloadStartRequest]', { request, background })
           }
-          return false
-        }
 
-        const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
-        const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
-        if (childSessionId && isPlainObject(payload.managerBootstrap)) {
-          storeCreateSessionBootstrapPayload(request.activityId, childSessionId, payload.managerBootstrap)
-        }
+          try {
+            const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/start`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                instructorPasscode,
+                activityId: request.activityId,
+                instanceKey: request.instanceKey,
+                ...(request.activityOptions ? { activityOptions: request.activityOptions } : {}),
+              }),
+            })
 
-        if (!background) {
-          setStartError(null)
-          setStartSuccess(`Launched ${request.activityId} (${request.instanceKey}).`)
-        } else if (typeof window !== 'undefined' && !pendingEmbeddedWarmMountRef.current.has(request.instanceKey)) {
-          const scheduleWarmMount = (): void => {
-            pendingEmbeddedWarmMountRef.current.delete(request.instanceKey)
-            setMountedEmbeddedManagerInstanceKeys((current) => {
-              const next = resolveMountedEmbeddedManagerInstanceKeys({
-                current,
-                existingInstanceKeys: [...Object.keys(embeddedActivities), request.instanceKey],
-                activeInstanceKey: resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState),
-                promotedInstanceKey: request.instanceKey,
+            if (!response.ok) {
+              let message = 'Unable to launch embedded activity.'
+              try {
+                const payload = (await response.json()) as { error?: string }
+                if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
+                  message = payload.error
+                }
+              } catch {
+                // keep default message
+              }
+              if (!background) {
+                setStartError(message)
+                setStartSuccess(null)
+              } else {
+                console.warn('[SyncDeck][ManagerActivityPrestartFailed]', {
+                  request,
+                  message,
+                })
+              }
+              if (isDevMode) {
+                console.info('[SyncDeck][ManagerPreloadStartError]', {
+                  request,
+                  background,
+                  message,
+                  status: response.status,
+                })
+              }
+              return false
+            }
+
+            const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+            const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
+            if (childSessionId && isPlainObject(payload.managerBootstrap)) {
+              storeCreateSessionBootstrapPayload(request.activityId, childSessionId, payload.managerBootstrap)
+            }
+
+            if (!background) {
+              setStartError(null)
+              setStartSuccess(`Launched ${request.activityId} (${request.instanceKey}).`)
+            } else if (typeof window !== 'undefined' && !pendingEmbeddedWarmMountRef.current.has(request.instanceKey)) {
+              const scheduleWarmMount = (): void => {
+                pendingEmbeddedWarmMountRef.current.delete(request.instanceKey)
+                setMountedEmbeddedManagerInstanceKeys((current) => {
+                  const next = resolveMountedEmbeddedManagerInstanceKeys({
+                    current,
+                    existingInstanceKeys: [...Object.keys(embeddedActivities), request.instanceKey],
+                    activeInstanceKey: resolveManagerActiveEmbeddedInstanceKey(embeddedActivities, instructorIndicesState),
+                    promotedInstanceKey: request.instanceKey,
+                  })
+                  return areStringArraysEqual(current, next) ? current : next
+                })
+              }
+
+              const handle = typeof window.requestIdleCallback === 'function'
+                ? window.requestIdleCallback(() => {
+                  scheduleWarmMount()
+                })
+                : window.setTimeout(() => {
+                  scheduleWarmMount()
+                }, 0)
+              pendingEmbeddedWarmMountRef.current.set(request.instanceKey, handle)
+            }
+            if (isDevMode) {
+              console.info('[SyncDeck][ManagerPreloadStartOk]', {
+                request,
+                background,
+                childSessionId,
+                hasManagerBootstrap: isPlainObject(payload.managerBootstrap),
               })
-              return areStringArraysEqual(current, next) ? current : next
-            })
+            }
+            return true
+          } catch {
+            if (!background) {
+              setStartError('Unable to launch embedded activity.')
+              setStartSuccess(null)
+            } else {
+              console.warn('[SyncDeck][ManagerActivityPrestartFailed]', {
+                request,
+                message: 'Unable to launch embedded activity.',
+              })
+            }
+            if (isDevMode) {
+              console.info('[SyncDeck][ManagerPreloadStartException]', {
+                request,
+                background,
+              })
+            }
+            return false
           }
-
-          const handle = typeof window.requestIdleCallback === 'function'
-            ? window.requestIdleCallback(() => {
-              scheduleWarmMount()
-            })
-            : window.setTimeout(() => {
-              scheduleWarmMount()
-            }, 0)
-          pendingEmbeddedWarmMountRef.current.set(request.instanceKey, handle)
-        }
-        if (isDevMode) {
-          console.info('[SyncDeck][ManagerPreloadStartOk]', {
-            request,
-            background,
-            childSessionId,
-            hasManagerBootstrap: isPlainObject(payload.managerBootstrap),
-          })
-        }
-        return true
-      } catch {
-        if (!background) {
-          setStartError('Unable to launch embedded activity.')
-          setStartSuccess(null)
-        } else {
-          console.warn('[SyncDeck][ManagerActivityPrestartFailed]', {
-            request,
-            message: 'Unable to launch embedded activity.',
-          })
-        }
-        if (isDevMode) {
-          console.info('[SyncDeck][ManagerPreloadStartException]', {
-            request,
-            background,
-          })
-        }
-        return false
-      } finally {
-        pendingEmbeddedPrestartRef.current.delete(request.instanceKey)
-      }
+        },
+      })
     },
     [sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
   )
