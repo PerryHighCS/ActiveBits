@@ -46,7 +46,7 @@ export default function HomeTeacherJoinControls({
       >
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           <p className="text-sm text-gray-600">
-            Join an active live session with the session ID and teacher code.
+            Join an active live session with the Join Code and teacher code.
           </p>
 
           <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
