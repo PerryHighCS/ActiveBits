@@ -29,7 +29,7 @@ const MANAGE_ACTIVITY_HEADINGS = [
 test('home route shows the expected standalone and utility activity cards', async ({ page }) => {
   await page.goto('/', { waitUntil: 'networkidle' })
 
-  await expect(page.getByLabel('Join Session ID:')).toBeVisible()
+  await expect(page.getByLabel('Join Code:')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Join Session' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Standalone Activities' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Utility Tools' })).toBeVisible()
