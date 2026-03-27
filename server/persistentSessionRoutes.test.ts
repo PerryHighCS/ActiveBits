@@ -1101,6 +1101,28 @@ void test('session id reverse lookup backfills missing reverse index entries for
   assert.equal(await findHashBySessionId('legacy-session'), hash)
 })
 
+void test('session id reverse lookup ignores stale reverse index entries and repairs them', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+
+  const activityName = 'syncdeck'
+  const { hash: correctHash, hashedTeacherCode: correctTeacherCode } = generatePersistentHash(activityName, 'correct-code')
+  const { hash: staleHash, hashedTeacherCode: staleTeacherCode } = generatePersistentHash(activityName, 'stale-code')
+  t.after(async () => cleanupPersistentSession(correctHash))
+  t.after(async () => cleanupPersistentSession(staleHash))
+
+  await getOrCreateActivePersistentSession(activityName, correctHash, correctTeacherCode, 'solo-allowed')
+  await startPersistentSession(correctHash, 'shared-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  await getOrCreateActivePersistentSession(activityName, staleHash, staleTeacherCode, 'solo-allowed')
+  await startPersistentSession(staleHash, 'other-session', { id: 'teacher-ws-2', readyState: 1, send() {} })
+
+  await valkeyClient.set('persistent-session-by-session:shared-session', staleHash)
+
+  assert.equal(await findHashBySessionId('shared-session'), correctHash)
+  assert.equal(await valkeyClient.get('persistent-session-by-session:shared-session'), correctHash)
+})
+
 void test('authenticate persists selectedOptions from request body when cookie entry is missing', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

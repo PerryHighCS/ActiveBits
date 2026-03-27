@@ -513,7 +513,16 @@ export async function resetPersistentSession(hash: string): Promise<void> {
 export async function findHashBySessionId(sessionId: string): Promise<string | null> {
   const indexedHash = await persistentStore.getHashBySessionId(sessionId)
   if (indexedHash) {
-    return indexedHash
+    const indexedSession = await persistentStore.get(indexedHash)
+    if (indexedSession?.sessionId === sessionId) {
+      return indexedHash
+    }
+
+    try {
+      await persistentStore.deleteHashBySessionId(sessionId)
+    } catch (error) {
+      console.error(`Failed to clear stale persistent session hash for session ${sessionId}:`, error)
+    }
   }
 
   const hashes = await persistentStore.getAllHashes()
