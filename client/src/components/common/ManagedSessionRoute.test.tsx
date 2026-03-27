@@ -43,9 +43,11 @@ void test('ManagedSessionRoute redirects to session-ended when the managed sessi
   const restoreDom = installDomEnvironment('https://bits.example/manage/syncdeck/session-1')
   const previousFetch = globalThis.fetch
   let fetchCallCount = 0
+  let lastFetchInit: RequestInit | undefined
 
-  globalThis.fetch = (async () => {
+  globalThis.fetch = (async (_input, init) => {
     fetchCallCount += 1
+    lastFetchInit = init
     return new Response(null, { status: 404 })
   }) as typeof fetch
 
@@ -77,6 +79,7 @@ void test('ManagedSessionRoute redirects to session-ended when the managed sessi
       assert.equal(rendered.getByText('Session ended route').textContent, 'Session ended route')
     })
     assert.equal(fetchCallCount >= 1, true)
+    assert.equal(lastFetchInit?.cache, 'no-store')
   } finally {
     cleanup()
     restoreDom()

@@ -24,7 +24,9 @@ export default function ManagedSessionRoute({ children }: ManagedSessionRoutePro
 
     const checkSession = async () => {
       try {
-        const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`)
+        const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`, {
+          cache: 'no-store',
+        })
         if (!response.ok && isMissingSessionStatus(response.status) && !isCancelled) {
           void navigate('/session-ended', { replace: true })
         }
