@@ -626,7 +626,7 @@ const SessionRouter = () => {
                 setShowTeacherJoinModal(false)
               }}
               onSessionIdChange={(value) => {
-                setTeacherJoinSessionId(value.toLowerCase())
+                setTeacherJoinSessionId(normalizeTeacherJoinSessionId(value))
                 setTeacherJoinError(null)
               }}
               onTeacherCodeChange={(value) => {

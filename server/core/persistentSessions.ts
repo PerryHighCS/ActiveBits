@@ -65,7 +65,21 @@ export class PersistentSessionEntryParticipantStoreError extends Error {
 
 function createInMemoryPersistentStore(): PersistentSessionStore {
   const memoryStore = new Map<string, unknown>()
+  const rateLimitTimeouts = new Map<string, NodeJS.Timeout>()
   const getReverseIndexKey = (sessionId: string): string => `sid:${sessionId}`
+  const scheduleRateLimitExpiry = (bucket: string): void => {
+    const existingTimeout = rateLimitTimeouts.get(bucket)
+    if (existingTimeout) {
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      memoryStore.delete(bucket)
+      rateLimitTimeouts.delete(bucket)
+    }, 60_000)
+    timeout.unref?.()
+    rateLimitTimeouts.set(bucket, timeout)
+  }
 
   return {
     async get(hash: string): Promise<PersistentSession | null> {
@@ -94,10 +108,7 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
       const current = (memoryStore.get(bucket) as number) ?? 0
       const next = current + 1
       memoryStore.set(bucket, next)
-      const timeout = setTimeout(() => {
-        memoryStore.delete(bucket)
-      }, 60_000)
-      timeout.unref?.()
+      scheduleRateLimitExpiry(bucket)
       return next
     },
     async getAttempts(key: string): Promise<number> {
