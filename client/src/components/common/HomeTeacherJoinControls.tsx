@@ -50,13 +50,13 @@ export default function HomeTeacherJoinControls({
           </p>
 
           <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
-            Session ID
+            Join Code
             <input
               type="text"
               value={sessionId}
               onChange={(event) => onSessionIdChange(event.target.value)}
               className="border-2 border-gray-300 rounded px-4 py-2 font-mono focus:outline-none focus:border-blue-500"
-              placeholder="Enter session ID"
+              placeholder="Enter join code"
               autoComplete="off"
               disabled={isSubmitting}
             />

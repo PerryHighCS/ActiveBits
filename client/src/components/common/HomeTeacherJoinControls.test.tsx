@@ -47,7 +47,7 @@ void test('HomeTeacherJoinControls renders modal fields and error when open', ()
   )
 
   assert.match(html, /Teacher Join/)
-  assert.match(html, /Session ID/)
+  assert.match(html, /Join Code/)
   assert.match(html, /Teacher code/)
   assert.match(html, /Join as Teacher/)
   assert.match(html, /Invalid teacher code/)

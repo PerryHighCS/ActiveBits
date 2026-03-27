@@ -5,7 +5,7 @@ import Button from '@src/components/ui/Button'
 import HomeTeacherJoinControls from './HomeTeacherJoinControls'
 import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
-import { getTeacherJoinInitialSessionId } from './homeTeacherJoinUtils'
+import { getTeacherJoinClosedState, getTeacherJoinInitialSessionId } from './homeTeacherJoinUtils'
 import { getActivity, activities } from '@src/activities'
 import {
   activitySupportsDirectStandalonePath,
@@ -579,23 +579,27 @@ const SessionRouter = () => {
 
     return (
       <div className="flex flex-col items-center gap-8 max-w-6xl mx-auto p-6">
-        <div className="w-full flex flex-wrap items-end justify-center gap-4">
-          <form onSubmit={handleSubmit} className="flex flex-col items-center w-max">
-            <label className="block mb-4">
-              Join Session ID:
-              <input
-                className="border border-grey-700 rounded mx-2 p-2"
-                size={5}
-                type="text"
-                id="sessionId"
-                value={sessionIdInput}
-                onChange={handleInputChange}
-              />
-            </label>
-            <Button type="submit">Join Session</Button>
+        <div className="w-full grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto_1fr] md:items-end">
+          <div className="hidden md:block" />
+
+          <form onSubmit={handleSubmit} className="justify-self-center">
+            <div className="flex flex-wrap items-end justify-center gap-3">
+              <label className="flex items-center gap-2 text-center md:text-left">
+                <span>Join Code:</span>
+                <input
+                  className="border border-grey-700 rounded px-3 py-2"
+                  size={5}
+                  type="text"
+                  id="sessionId"
+                  value={sessionIdInput}
+                  onChange={handleInputChange}
+                />
+              </label>
+              <Button type="submit">Join Session</Button>
+            </div>
           </form>
 
-          <div className="pb-[2px]">
+          <div className="justify-self-center md:justify-self-end">
             <HomeTeacherJoinControls
               open={showTeacherJoinModal}
               sessionId={teacherJoinSessionId}
@@ -603,12 +607,17 @@ const SessionRouter = () => {
               error={teacherJoinError}
               isSubmitting={isTeacherJoining}
               onOpen={() => {
-                setTeacherJoinSessionId(getTeacherJoinInitialSessionId(sessionIdInput))
+                const nextSessionId = getTeacherJoinInitialSessionId(sessionIdInput)
+                setTeacherJoinSessionId(nextSessionId)
+                setTeacherJoinCode('')
                 setTeacherJoinError(null)
                 setShowTeacherJoinModal(true)
               }}
               onClose={() => {
-                setTeacherJoinError(null)
+                const closedState = getTeacherJoinClosedState()
+                setTeacherJoinSessionId(closedState.sessionId)
+                setTeacherJoinCode(closedState.teacherCode)
+                setTeacherJoinError(closedState.error)
                 setShowTeacherJoinModal(false)
               }}
               onSessionIdChange={(value) => {

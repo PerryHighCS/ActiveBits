@@ -38,3 +38,5 @@ blob-report/
 
 # playwright files
 core
+!server/core/
+!server/core/**
