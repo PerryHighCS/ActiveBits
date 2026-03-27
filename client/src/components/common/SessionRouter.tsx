@@ -5,6 +5,7 @@ import Button from '@src/components/ui/Button'
 import HomeTeacherJoinControls from './HomeTeacherJoinControls'
 import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
+import { getTeacherJoinInitialSessionId } from './homeTeacherJoinUtils'
 import { getActivity, activities } from '@src/activities'
 import {
   activitySupportsDirectStandalonePath,
@@ -578,47 +579,50 @@ const SessionRouter = () => {
 
     return (
       <div className="flex flex-col items-center gap-8 max-w-6xl mx-auto p-6">
-        <div className="w-full flex justify-end">
-          <HomeTeacherJoinControls
-            open={showTeacherJoinModal}
-            sessionId={teacherJoinSessionId}
-            teacherCode={teacherJoinCode}
-            error={teacherJoinError}
-            isSubmitting={isTeacherJoining}
-            onOpen={() => {
-              setTeacherJoinError(null)
-              setShowTeacherJoinModal(true)
-            }}
-            onClose={() => {
-              setTeacherJoinError(null)
-              setShowTeacherJoinModal(false)
-            }}
-            onSessionIdChange={(value) => {
-              setTeacherJoinSessionId(value.toLowerCase())
-              setTeacherJoinError(null)
-            }}
-            onTeacherCodeChange={(value) => {
-              setTeacherJoinCode(value)
-              setTeacherJoinError(null)
-            }}
-            onSubmit={handleTeacherJoinSubmit}
-          />
-        </div>
+        <div className="w-full flex flex-wrap items-end justify-center gap-4">
+          <form onSubmit={handleSubmit} className="flex flex-col items-center w-max">
+            <label className="block mb-4">
+              Join Session ID:
+              <input
+                className="border border-grey-700 rounded mx-2 p-2"
+                size={5}
+                type="text"
+                id="sessionId"
+                value={sessionIdInput}
+                onChange={handleInputChange}
+              />
+            </label>
+            <Button type="submit">Join Session</Button>
+          </form>
 
-        <form onSubmit={handleSubmit} className="flex flex-col items-center w-max mx-auto">
-          <label className="block mb-4">
-            Join Session ID:
-            <input
-              className="border border-grey-700 rounded mx-2 p-2"
-              size={5}
-              type="text"
-              id="sessionId"
-              value={sessionIdInput}
-              onChange={handleInputChange}
+          <div className="pb-[2px]">
+            <HomeTeacherJoinControls
+              open={showTeacherJoinModal}
+              sessionId={teacherJoinSessionId}
+              teacherCode={teacherJoinCode}
+              error={teacherJoinError}
+              isSubmitting={isTeacherJoining}
+              onOpen={() => {
+                setTeacherJoinSessionId(getTeacherJoinInitialSessionId(sessionIdInput))
+                setTeacherJoinError(null)
+                setShowTeacherJoinModal(true)
+              }}
+              onClose={() => {
+                setTeacherJoinError(null)
+                setShowTeacherJoinModal(false)
+              }}
+              onSessionIdChange={(value) => {
+                setTeacherJoinSessionId(value.toLowerCase())
+                setTeacherJoinError(null)
+              }}
+              onTeacherCodeChange={(value) => {
+                setTeacherJoinCode(value)
+                setTeacherJoinError(null)
+              }}
+              onSubmit={handleTeacherJoinSubmit}
             />
-          </label>
-          <Button type="submit">Join Session</Button>
-        </form>
+          </div>
+        </div>
 
         {standaloneActivities.length > 0 && (
           <div className="w-full border-t-2 border-gray-300 pt-8">
