@@ -1748,7 +1748,7 @@ const SyncDeckManager: FC = () => {
   const [mountedEmbeddedManagerInstanceKeys, setMountedEmbeddedManagerInstanceKeys] = useState<string[]>([])
   const [loadedEmbeddedManagerInstanceKeys, setLoadedEmbeddedManagerInstanceKeys] = useState<Record<string, boolean>>({})
   const [embeddedManagerRenderNonceByChildSessionId, setEmbeddedManagerRenderNonceByChildSessionId] = useState<Record<string, number>>({})
-  const [, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
+  const [embeddedBootstrapBackfillRetryNonce, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2480,7 +2480,7 @@ const SyncDeckManager: FC = () => {
         pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
       }
     }
-  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, instructorPasscode, sessionId])
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, embeddedBootstrapBackfillRetryNonce, instructorPasscode, sessionId])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
