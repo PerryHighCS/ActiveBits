@@ -2410,14 +2410,15 @@ const SyncDeckManager: FC = () => {
       } catch {
         // Best-effort only. Embedded managers with their own recovery endpoints can still self-heal.
       } finally {
-        if (!isCancelled) {
-          pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
-        }
+        pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
       }
     }))
 
     return () => {
       isCancelled = true
+      for (const request of requests) {
+        pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
+      }
     }
   }, [embeddedActivities, instructorPasscode, sessionId])
 
