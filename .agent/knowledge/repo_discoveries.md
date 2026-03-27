@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-27
+- Area: client | activities | syncdeck
+- Discovery: Recovered secondary instructors need a child-manager bootstrap backfill for already-running SyncDeck embedded activities because their local tab never initiated those child sessions and therefore never received the original `managerBootstrap` payload.
+- Why it matters: Without that backfill, embedded manager iframes such as Resonance can mount with no instructor passcode in local bootstrap storage, which makes multi-instructor activity handoff look unsynced even though the parent SyncDeck session was recovered successfully.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/resonance/client/manager/ResonanceManager.tsx`
+- Follow-up action: Reuse the same backfill pattern for future embedded manager flows that depend on same-tab bootstrap payloads instead of durable per-session recovery.
+- Owner: Codex
+
 - Date: 2026-03-23
 - Area: client | activities | syncdeck
 - Discovery: SyncDeck manager and student should not treat every inbound `reveal-sync` envelope as an iframe-ready signal now that the protocol includes descriptive `metadata` messages.

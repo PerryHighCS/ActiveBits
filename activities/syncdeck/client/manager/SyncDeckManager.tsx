@@ -113,6 +113,12 @@ interface SyncDeckEmbeddedActivityStartResponse {
   managerBootstrap?: unknown
 }
 
+interface SyncDeckEmbeddedBootstrapBackfillRequest {
+  activityId: string
+  childSessionId: string
+  instanceKey: string
+}
+
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
 interface RelayCommandPayloadEnvelope {
   name?: unknown
@@ -743,6 +749,31 @@ export function applySyncDeckEmbeddedLifecyclePayload(
       owner: 'syncdeck-instructor',
     },
   }
+}
+
+export function resolveEmbeddedBootstrapBackfillRequests(params: {
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap
+  completedChildSessionIds: ReadonlySet<string>
+  pendingChildSessionIds: ReadonlySet<string>
+}): SyncDeckEmbeddedBootstrapBackfillRequest[] {
+  const requests: SyncDeckEmbeddedBootstrapBackfillRequest[] = []
+
+  for (const [instanceKey, record] of Object.entries(params.embeddedActivities)) {
+    if (
+      params.completedChildSessionIds.has(record.childSessionId)
+      || params.pendingChildSessionIds.has(record.childSessionId)
+    ) {
+      continue
+    }
+
+    requests.push({
+      activityId: record.activityId,
+      childSessionId: record.childSessionId,
+      instanceKey,
+    })
+  }
+
+  return requests
 }
 
 export function resolveManagerActiveEmbeddedInstanceKey(
@@ -1685,6 +1716,7 @@ const SyncDeckManager: FC = () => {
   const [presentationTitle, setPresentationTitle] = useState<string | null>(null)
   const [mountedEmbeddedManagerInstanceKeys, setMountedEmbeddedManagerInstanceKeys] = useState<string[]>([])
   const [loadedEmbeddedManagerInstanceKeys, setLoadedEmbeddedManagerInstanceKeys] = useState<Record<string, boolean>>({})
+  const [embeddedManagerRenderNonceByChildSessionId, setEmbeddedManagerRenderNonceByChildSessionId] = useState<Record<string, number>>({})
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1715,6 +1747,8 @@ const SyncDeckManager: FC = () => {
   const pendingEmbeddedPreloadDedupeRef = useRef<Set<string>>(new Set())
   const pendingEmbeddedPrestartRef = useRef<Map<string, Promise<boolean>>>(new Map())
   const pendingEmbeddedWarmMountRef = useRef<Map<string, number>>(new Map())
+  const completedEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
+  const pendingEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
   useEffect(() => {
@@ -2174,6 +2208,12 @@ const SyncDeckManager: FC = () => {
   }, [hostProtocol, sessionId, userAgent])
 
   useEffect(() => {
+    completedEmbeddedBootstrapChildSessionIdsRef.current.clear()
+    pendingEmbeddedBootstrapChildSessionIdsRef.current.clear()
+    setEmbeddedManagerRenderNonceByChildSessionId({})
+  }, [sessionId])
+
+  useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
       setIsChalkboardOpen(false)
       return
@@ -2280,6 +2320,73 @@ const SyncDeckManager: FC = () => {
       isCancelled = true
     }
   }, [hostProtocol, sessionId, userAgent])
+
+  useEffect(() => {
+    if (!sessionId || !instructorPasscode) {
+      return
+    }
+
+    const requests = resolveEmbeddedBootstrapBackfillRequests({
+      embeddedActivities,
+      completedChildSessionIds: completedEmbeddedBootstrapChildSessionIdsRef.current,
+      pendingChildSessionIds: pendingEmbeddedBootstrapChildSessionIdsRef.current,
+    })
+    if (requests.length === 0) {
+      return
+    }
+
+    for (const request of requests) {
+      pendingEmbeddedBootstrapChildSessionIdsRef.current.add(request.childSessionId)
+    }
+
+    void Promise.all(requests.map(async (request) => {
+      try {
+        const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instructorPasscode,
+            activityId: request.activityId,
+            instanceKey: request.instanceKey,
+          }),
+        })
+
+        if (!response.ok) {
+          return
+        }
+
+        const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+        const resolvedChildSessionId =
+          typeof payload.childSessionId === 'string' && payload.childSessionId.trim().length > 0
+            ? payload.childSessionId.trim()
+            : request.childSessionId
+
+        if (!isPlainObject(payload.managerBootstrap)) {
+          return
+        }
+
+        storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, payload.managerBootstrap)
+        completedEmbeddedBootstrapChildSessionIdsRef.current.add(resolvedChildSessionId)
+        setEmbeddedManagerRenderNonceByChildSessionId((current) => ({
+          ...current,
+          [resolvedChildSessionId]: (current[resolvedChildSessionId] ?? 0) + 1,
+        }))
+        setLoadedEmbeddedManagerInstanceKeys((current) => {
+          if (!current[request.instanceKey]) {
+            return current
+          }
+
+          const next = { ...current }
+          delete next[request.instanceKey]
+          return next
+        })
+      } catch {
+        // Best-effort only. Embedded managers with their own recovery endpoints can still self-heal.
+      } finally {
+        pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
+      }
+    }))
+  }, [embeddedActivities, instructorPasscode, sessionId])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
@@ -3881,7 +3988,7 @@ const SyncDeckManager: FC = () => {
 
                   return (
                     <div
-                      key={instanceKey}
+                      key={`${instanceKey}:${embeddedManagerRenderNonceByChildSessionId[record.childSessionId] ?? 0}`}
                       className={
                         isActive
                           ? 'absolute inset-0 z-20 bg-white overflow-hidden'
