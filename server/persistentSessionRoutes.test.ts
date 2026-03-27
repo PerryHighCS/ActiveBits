@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { initializeActivityRegistry } from './activities/activityRegistry.js'
 import { registerPersistentSessionRoutes } from './routes/persistentSessionRoutes.js'
 import {
-  clearHashBySessionIdIndex,
   findHashBySessionId,
   initializePersistentStorage,
   generatePersistentHash,
@@ -15,6 +14,54 @@ import {
   updatePersistentSessionUrlState,
 } from './core/persistentSessions.js'
 import { buildPersistentLinkUrlQuery } from './core/persistentLinkUrlState.js'
+
+function createFakePersistentValkeyClient(): {
+  store: Map<string, string>
+  on: () => void
+  subscribe: () => Promise<number>
+  publish: () => Promise<number>
+  get: (key: string) => Promise<string | null>
+  set: (key: string, value: string) => Promise<string>
+  del: (key: string) => Promise<number>
+  eval: () => Promise<number>
+  scan: (cursor: string, ...args: Array<string | number>) => Promise<[string, string[]]>
+  quit: () => Promise<string>
+  ping: () => Promise<string>
+  dbsize: () => Promise<number>
+  pttl: () => Promise<number>
+  call: () => Promise<string>
+} {
+  const store = new Map<string, string>()
+
+  return {
+    store,
+    on() {},
+    subscribe: async () => 1,
+    publish: async () => 0,
+    get: async (key: string) => store.get(key) ?? null,
+    set: async (key: string, value: string) => {
+      store.set(key, value)
+      return 'OK'
+    },
+    del: async (key: string) => {
+      const existed = store.delete(key)
+      return existed ? 1 : 0
+    },
+    eval: async () => 0,
+    scan: async (_cursor: string, ...args: Array<string | number>) => {
+      const matchIndex = args.findIndex((arg) => arg === 'MATCH')
+      const pattern = matchIndex >= 0 ? String(args[matchIndex + 1] ?? '*') : '*'
+      const prefix = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern
+      const keys = Array.from(store.keys()).filter((key) => key.startsWith(prefix))
+      return ['0', keys]
+    },
+    quit: async () => 'OK',
+    ping: async () => 'PONG',
+    dbsize: async () => store.size,
+    pttl: async () => -1,
+    call: async () => 'OK',
+  }
+}
 
 interface MockRequest {
   params: Record<string, string>
@@ -1038,7 +1085,8 @@ void test('session id reverse lookup survives started-session metadata updates',
 })
 
 void test('session id reverse lookup backfills missing reverse index entries for existing started sessions', async (t) => {
-  initializePersistentStorage(null)
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
 
   const activityName = 'syncdeck'
   const teacherCode = 'backfill-reverse-index'
@@ -1047,7 +1095,7 @@ void test('session id reverse lookup backfills missing reverse index entries for
 
   await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
   await startPersistentSession(hash, 'legacy-session', { id: 'teacher-ws', readyState: 1, send() {} })
-  await clearHashBySessionIdIndex('legacy-session')
+  await valkeyClient.del('persistent-session-by-session:legacy-session')
 
   assert.equal(await findHashBySessionId('legacy-session'), hash)
   assert.equal(await findHashBySessionId('legacy-session'), hash)

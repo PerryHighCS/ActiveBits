@@ -307,7 +307,6 @@ export class ValkeyPersistentStore {
       await this.client.set(`persistent-session-by-session:${sessionId}`, hash, 'PX', this.ttlMs)
     } catch (err) {
       console.error(`Failed to set persistent session hash for session ${sessionId}:`, err)
-      throw err
     }
   }
 

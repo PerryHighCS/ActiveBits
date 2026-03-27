@@ -520,16 +520,16 @@ export async function findHashBySessionId(sessionId: string): Promise<string | n
   for (const hash of hashes) {
     const session = await persistentStore.get(hash)
     if (session?.sessionId === sessionId) {
-      await persistentStore.setHashBySessionId(sessionId, hash)
+      try {
+        await persistentStore.setHashBySessionId(sessionId, hash)
+      } catch (error) {
+        console.error(`Failed to backfill persistent session hash for session ${sessionId}:`, error)
+      }
       return hash
     }
   }
 
   return null
-}
-
-export async function clearHashBySessionIdIndex(sessionId: string): Promise<void> {
-  await persistentStore.deleteHashBySessionId(sessionId)
 }
 
 export async function cleanupPersistentSession(hash: string): Promise<void> {
