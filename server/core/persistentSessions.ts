@@ -500,7 +500,25 @@ export async function resetPersistentSession(hash: string): Promise<void> {
 }
 
 export async function findHashBySessionId(sessionId: string): Promise<string | null> {
-  return await persistentStore.getHashBySessionId(sessionId)
+  const indexedHash = await persistentStore.getHashBySessionId(sessionId)
+  if (indexedHash) {
+    return indexedHash
+  }
+
+  const hashes = await persistentStore.getAllHashes()
+  for (const hash of hashes) {
+    const session = await persistentStore.get(hash)
+    if (session?.sessionId === sessionId) {
+      await persistentStore.setHashBySessionId(sessionId, hash)
+      return hash
+    }
+  }
+
+  return null
+}
+
+export async function clearHashBySessionIdIndex(sessionId: string): Promise<void> {
+  await persistentStore.deleteHashBySessionId(sessionId)
 }
 
 export async function cleanupPersistentSession(hash: string): Promise<void> {

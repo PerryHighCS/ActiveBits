@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { initializeActivityRegistry } from './activities/activityRegistry.js'
 import { registerPersistentSessionRoutes } from './routes/persistentSessionRoutes.js'
 import {
+  clearHashBySessionIdIndex,
   findHashBySessionId,
   initializePersistentStorage,
   generatePersistentHash,
@@ -1034,6 +1035,22 @@ void test('session id reverse lookup survives started-session metadata updates',
   })
 
   assert.equal(await findHashBySessionId('live-session'), hash)
+})
+
+void test('session id reverse lookup backfills missing reverse index entries for existing started sessions', async (t) => {
+  initializePersistentStorage(null)
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'backfill-reverse-index'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'legacy-session', { id: 'teacher-ws', readyState: 1, send() {} })
+  await clearHashBySessionIdIndex('legacy-session')
+
+  assert.equal(await findHashBySessionId('legacy-session'), hash)
+  assert.equal(await findHashBySessionId('legacy-session'), hash)
 })
 
 void test('authenticate persists selectedOptions from request body when cookie entry is missing', async (t) => {
