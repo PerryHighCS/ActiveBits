@@ -2372,6 +2372,10 @@ const SyncDeckManager: FC = () => {
         }
 
         const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+        if (isCancelled) {
+          return
+        }
+
         const resolvedChildSessionId =
           typeof payload.childSessionId === 'string' && payload.childSessionId.trim().length > 0
             ? payload.childSessionId.trim()
@@ -2385,7 +2389,7 @@ const SyncDeckManager: FC = () => {
           completedEmbeddedBootstrapChildSessionIdsRef.current.add(completedChildSessionId)
         }
 
-        if (isCancelled || !isPlainObject(payload.managerBootstrap)) {
+        if (!isPlainObject(payload.managerBootstrap)) {
           return
         }
 
@@ -2406,7 +2410,9 @@ const SyncDeckManager: FC = () => {
       } catch {
         // Best-effort only. Embedded managers with their own recovery endpoints can still self-heal.
       } finally {
-        pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
+        if (!isCancelled) {
+          pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
+        }
       }
     }))
 
