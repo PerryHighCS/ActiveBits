@@ -4,6 +4,7 @@ import type { ComponentType } from 'react'
 import * as React from 'react'
 import { JSDOM } from 'jsdom'
 import { MemoryRouter } from 'react-router-dom'
+import type * as TestingLibrary from '@testing-library/react'
 import type { ActivityPersistentLinkBuilderProps, ActivityRegistryEntry } from '../../../../types/activity.js'
 import {
   isPersistentLinkPreflightVerified,
@@ -94,6 +95,7 @@ const testActivityRegistryHooks = {
 }
 
 type DashboardActivityLike = Parameters<typeof resolveCustomPersistentLinkBuilder>[0]
+type TestingLibraryAct = typeof TestingLibrary.act
 
 function installDomEnvironment() {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -132,7 +134,7 @@ interface RenderedScreenLike {
 }
 
 async function settleRenderedDashboard(params: {
-  act: ((callback: () => void | Promise<void>) => Promise<void>) | null
+  act: TestingLibraryAct | null
   cleanup: (() => void) | null
   unmount: (() => void) | null
 }): Promise<void> {
@@ -275,7 +277,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
   let unmount: (() => void) | null = null
   let cleanup: (() => void) | null = null
-  let act: ((callback: () => void | Promise<void>) => Promise<void>) | null = null
+  let act: TestingLibraryAct | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: false,
@@ -347,7 +349,7 @@ void test('ManageDashboard custom builders must signal readiness before submit p
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
   let unmount: (() => void) | null = null
   let cleanup: (() => void) | null = null
-  let act: ((callback: () => void | Promise<void>) => Promise<void>) | null = null
+  let act: TestingLibraryAct | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: true,
