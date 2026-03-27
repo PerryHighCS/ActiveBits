@@ -102,7 +102,7 @@ void test('ManagedSessionRoute renders normally without a session id route param
 
   const { render, cleanup } = await import('@testing-library/react')
   const { MemoryRouter, Route, Routes } = await import('react-router-dom')
-  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute')
+  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute.js')
   try {
     const rendered = render(
       <MemoryRouter initialEntries={['/manage/syncdeck']}>
@@ -143,7 +143,7 @@ void test('ManagedSessionRoute stays on the manager page for transient server er
 
   const { render, waitFor, cleanup } = await import('@testing-library/react')
   const { MemoryRouter, Route, Routes } = await import('react-router-dom')
-  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute')
+  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute.js')
   try {
     const rendered = render(
       <MemoryRouter initialEntries={['/manage/syncdeck/session-1']}>
@@ -188,7 +188,7 @@ void test('ManagedSessionRoute stays on the manager page for network failures', 
 
   const { render, waitFor, cleanup } = await import('@testing-library/react')
   const { MemoryRouter, Route, Routes } = await import('react-router-dom')
-  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute')
+  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute.js')
   try {
     const rendered = render(
       <MemoryRouter initialEntries={['/manage/syncdeck/session-1']}>
