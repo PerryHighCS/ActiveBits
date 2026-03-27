@@ -41,6 +41,7 @@ import { resolveManagerPreloadRequestBatchInputs } from './SyncDeckManager.js'
 import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
 import { processManagerPreloadRequests } from './SyncDeckManager.js'
 import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
+import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
@@ -520,6 +521,23 @@ void test('resolveEmbeddedBootstrapBackfillRequests only returns child sessions 
         instanceKey: 'resonance:1:0',
       },
     ],
+  )
+})
+
+void test('resolveCompletedEmbeddedBootstrapChildSessionIds marks both stale local and resolved child session ids', () => {
+  assert.deepEqual(
+    resolveCompletedEmbeddedBootstrapChildSessionIds({
+      requestChildSessionId: 'stale-child-id',
+      resolvedChildSessionId: 'resolved-child-id',
+    }),
+    ['stale-child-id', 'resolved-child-id'],
+  )
+  assert.deepEqual(
+    resolveCompletedEmbeddedBootstrapChildSessionIds({
+      requestChildSessionId: 'same-child-id',
+      resolvedChildSessionId: 'same-child-id',
+    }),
+    ['same-child-id'],
   )
 })
 

@@ -776,6 +776,20 @@ export function resolveEmbeddedBootstrapBackfillRequests(params: {
   return requests
 }
 
+export function resolveCompletedEmbeddedBootstrapChildSessionIds(params: {
+  requestChildSessionId: string
+  resolvedChildSessionId: string
+}): string[] {
+  const completedIds = new Set<string>()
+  if (params.requestChildSessionId.trim().length > 0) {
+    completedIds.add(params.requestChildSessionId)
+  }
+  if (params.resolvedChildSessionId.trim().length > 0) {
+    completedIds.add(params.resolvedChildSessionId)
+  }
+  return [...completedIds]
+}
+
 export function resolveManagerActiveEmbeddedInstanceKey(
   embeddedActivities: SyncDeckEmbeddedActivitiesMap,
   instructorIndices: { h: number; v: number; f: number } | null,
@@ -2326,6 +2340,8 @@ const SyncDeckManager: FC = () => {
       return
     }
 
+    let isCancelled = false
+
     const requests = resolveEmbeddedBootstrapBackfillRequests({
       embeddedActivities,
       completedChildSessionIds: completedEmbeddedBootstrapChildSessionIdsRef.current,
@@ -2360,13 +2376,20 @@ const SyncDeckManager: FC = () => {
           typeof payload.childSessionId === 'string' && payload.childSessionId.trim().length > 0
             ? payload.childSessionId.trim()
             : request.childSessionId
+        const completedChildSessionIds = resolveCompletedEmbeddedBootstrapChildSessionIds({
+          requestChildSessionId: request.childSessionId,
+          resolvedChildSessionId,
+        })
 
-        if (!isPlainObject(payload.managerBootstrap)) {
+        for (const completedChildSessionId of completedChildSessionIds) {
+          completedEmbeddedBootstrapChildSessionIdsRef.current.add(completedChildSessionId)
+        }
+
+        if (isCancelled || !isPlainObject(payload.managerBootstrap)) {
           return
         }
 
         storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, payload.managerBootstrap)
-        completedEmbeddedBootstrapChildSessionIdsRef.current.add(resolvedChildSessionId)
         setEmbeddedManagerRenderNonceByChildSessionId((current) => ({
           ...current,
           [resolvedChildSessionId]: (current[resolvedChildSessionId] ?? 0) + 1,
@@ -2386,6 +2409,10 @@ const SyncDeckManager: FC = () => {
         pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
       }
     }))
+
+    return () => {
+      isCancelled = true
+    }
   }, [embeddedActivities, instructorPasscode, sessionId])
 
   const copyValue = async (value: string): Promise<void> => {
