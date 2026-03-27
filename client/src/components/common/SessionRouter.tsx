@@ -410,7 +410,7 @@ const SessionRouter = () => {
     const normalizedTeacherCode = teacherJoinCode.trim()
 
     if (!isJoinSessionId(normalizedSessionId)) {
-      setTeacherJoinError('Enter a valid session ID.')
+      setTeacherJoinError('Enter a valid Join Code.')
       return
     }
 
