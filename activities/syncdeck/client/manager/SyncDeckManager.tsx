@@ -803,6 +803,10 @@ export function resolveEmbeddedBootstrapBackfillRetryDelayMs(attemptCount: numbe
   )
 }
 
+export function shouldRetryEmbeddedBootstrapBackfill(status: number): boolean {
+  return status >= 500
+}
+
 export function resolveManagerActiveEmbeddedInstanceKey(
   embeddedActivities: SyncDeckEmbeddedActivitiesMap,
   instructorIndices: { h: number; v: number; f: number } | null,
@@ -2403,7 +2407,7 @@ const SyncDeckManager: FC = () => {
         })
 
         if (!response.ok) {
-          return true
+          return shouldRetryEmbeddedBootstrapBackfill(response.status)
         }
 
         const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse

@@ -44,6 +44,7 @@ import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
 import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
+import { shouldRetryEmbeddedBootstrapBackfill } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
 import { resolveEmbeddedManagerIframeAccessibilityProps } from './SyncDeckManager.js'
@@ -548,6 +549,14 @@ void test('resolveEmbeddedBootstrapBackfillRetryDelayMs applies capped exponenti
   assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(2), 4000)
   assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(4), 10000)
   assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(Number.NaN), 1000)
+})
+
+void test('shouldRetryEmbeddedBootstrapBackfill only retries transient server failures', () => {
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(400), false)
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(403), false)
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(404), false)
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(500), true)
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(503), true)
 })
 
 void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for four directions and slide', () => {
