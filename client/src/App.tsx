@@ -5,6 +5,7 @@ import SessionEnded from './components/common/SessionEnded'
 import ManageDashboard from './components/common/ManageDashboard'
 import StatusDashboard from './components/common/StatusDashboard'
 import LoadingFallback from './components/common/LoadingFallback'
+import ManagedSessionRoute from './components/common/ManagedSessionRoute'
 import { activities } from './activities'
 import { findFooterActivity } from './appUtils'
 
@@ -73,9 +74,11 @@ function AppShell() {
                   key="manage-session"
                   path={`/manage/${activity.id}/:sessionId`}
                   element={
-                    <Suspense fallback={<LoadingFallback />}>
-                      <TypedManagerComponent />
-                    </Suspense>
+                    <ManagedSessionRoute>
+                      <Suspense fallback={<LoadingFallback />}>
+                        <TypedManagerComponent />
+                      </Suspense>
+                    </ManagedSessionRoute>
                   }
                 />,
               )
