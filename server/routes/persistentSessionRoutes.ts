@@ -5,7 +5,9 @@ import {
   isValidActivity,
 } from '../activities/activityRegistry.js'
 import {
+  canAttemptTeacherCode,
   cleanupPersistentSession,
+  recordTeacherCodeAttempt,
   consumePersistentSessionEntryParticipant,
   findHashBySessionId,
   generatePersistentHash,
@@ -112,6 +114,29 @@ function getQueryString(value: unknown): string | null {
 function getBodyString(body: Record<string, unknown>, key: string): string | null {
   const value = body[key]
   return typeof value === 'string' ? value : null
+}
+
+function getRequestClientIp(req: RequestLike): string {
+  const forwardedFor = req.get('x-forwarded-for')
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    const forwardedIp = forwardedFor
+      .split(',')
+      .map((part) => part.trim())
+      .find(Boolean)
+    if (forwardedIp) {
+      return forwardedIp
+    }
+  }
+
+  const forwarded = req.get('forwarded')
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    const match = forwarded.match(/for=([^;]+)/i)
+    if (match?.[1]) {
+      return match[1].replace(/^\[|\]$/g, '').replace(/"/g, '')
+    }
+  }
+
+  return 'unknown'
 }
 
 function toSelectedOptions(value: unknown): Record<string, unknown> {
@@ -677,6 +702,23 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       res.status(404).json({ error: 'Teacher join is unavailable for this session' })
       return
     }
+
+    const activeSessionType = isPlainObject(activeSession) && typeof activeSession.type === 'string'
+      ? activeSession.type
+      : null
+    if (activeSessionType !== activityName) {
+      res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+      return
+    }
+
+    const clientIp = getRequestClientIp(req)
+    const rateLimitKey = `${clientIp}:${hash}`
+    const canAttempt = await canAttemptTeacherCode(rateLimitKey)
+    if (!canAttempt) {
+      res.status(429).json({ error: 'Too many attempts. Please wait a minute.' })
+      return
+    }
+    await recordTeacherCodeAttempt(rateLimitKey)
 
     const validation = verifyTeacherCodeWithHash(activityName, hash, teacherCode)
     if (!validation.valid) {
