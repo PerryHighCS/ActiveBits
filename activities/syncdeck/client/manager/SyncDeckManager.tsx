@@ -40,6 +40,8 @@ const WS_OPEN_READY_STATE = 1
 const DISCONNECTED_STATUS_DELAY_MS = 250
 const CANONICAL_BOUNDARY_FRAGMENT_INDEX = -1
 const RESTORE_SUPPRESSION_TIMEOUT_MS = 2500
+const EMBEDDED_BOOTSTRAP_BACKFILL_BASE_RETRY_DELAY_MS = 1000
+const EMBEDDED_BOOTSTRAP_BACKFILL_MAX_RETRY_DELAY_MS = 10000
 const PRESENTATION_URL_ERROR_ID = 'syncdeck-presentation-url-error'
 const isDevMode = import.meta.env?.DEV === true
 interface SessionResponsePayload {
@@ -111,6 +113,12 @@ interface SyncDeckEmbeddedActivityStartResponse {
   childSessionId?: unknown
   instanceKey?: unknown
   managerBootstrap?: unknown
+}
+
+interface SyncDeckEmbeddedBootstrapBackfillRequest {
+  activityId: string
+  childSessionId: string
+  instanceKey: string
 }
 
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
@@ -743,6 +751,60 @@ export function applySyncDeckEmbeddedLifecyclePayload(
       owner: 'syncdeck-instructor',
     },
   }
+}
+
+export function resolveEmbeddedBootstrapBackfillRequests(params: {
+  embeddedActivities: SyncDeckEmbeddedActivitiesMap
+  completedChildSessionIds: ReadonlySet<string>
+  pendingChildSessionIds: ReadonlySet<string>
+}): SyncDeckEmbeddedBootstrapBackfillRequest[] {
+  const requests: SyncDeckEmbeddedBootstrapBackfillRequest[] = []
+
+  for (const [instanceKey, record] of Object.entries(params.embeddedActivities)) {
+    if (
+      params.completedChildSessionIds.has(record.childSessionId)
+      || params.pendingChildSessionIds.has(record.childSessionId)
+    ) {
+      continue
+    }
+
+    requests.push({
+      activityId: record.activityId,
+      childSessionId: record.childSessionId,
+      instanceKey,
+    })
+  }
+
+  return requests
+}
+
+export function resolveCompletedEmbeddedBootstrapChildSessionIds(params: {
+  requestChildSessionId: string
+  resolvedChildSessionId: string
+}): string[] {
+  const completedIds = new Set<string>()
+  if (params.requestChildSessionId.trim().length > 0) {
+    completedIds.add(params.requestChildSessionId)
+  }
+  if (params.resolvedChildSessionId.trim().length > 0) {
+    completedIds.add(params.resolvedChildSessionId)
+  }
+  return [...completedIds]
+}
+
+export function resolveEmbeddedBootstrapBackfillRetryDelayMs(attemptCount: number): number {
+  const normalizedAttemptCount = Number.isFinite(attemptCount) && attemptCount > 0
+    ? Math.floor(attemptCount)
+    : 0
+
+  return Math.min(
+    EMBEDDED_BOOTSTRAP_BACKFILL_BASE_RETRY_DELAY_MS * (2 ** normalizedAttemptCount),
+    EMBEDDED_BOOTSTRAP_BACKFILL_MAX_RETRY_DELAY_MS,
+  )
+}
+
+export function shouldRetryEmbeddedBootstrapBackfill(status: number): boolean {
+  return status >= 500
 }
 
 export function resolveManagerActiveEmbeddedInstanceKey(
@@ -1685,6 +1747,8 @@ const SyncDeckManager: FC = () => {
   const [presentationTitle, setPresentationTitle] = useState<string | null>(null)
   const [mountedEmbeddedManagerInstanceKeys, setMountedEmbeddedManagerInstanceKeys] = useState<string[]>([])
   const [loadedEmbeddedManagerInstanceKeys, setLoadedEmbeddedManagerInstanceKeys] = useState<Record<string, boolean>>({})
+  const [embeddedManagerRenderNonceByChildSessionId, setEmbeddedManagerRenderNonceByChildSessionId] = useState<Record<string, number>>({})
+  const [embeddedBootstrapBackfillRetryNonce, setEmbeddedBootstrapBackfillRetryNonce] = useState(0)
   const presentationIframeRef = useRef<HTMLIFrameElement | null>(null)
   const restoreDocumentTitleRef = useRef<string | null>(null)
   const disconnectStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1715,6 +1779,10 @@ const SyncDeckManager: FC = () => {
   const pendingEmbeddedPreloadDedupeRef = useRef<Set<string>>(new Set())
   const pendingEmbeddedPrestartRef = useRef<Map<string, Promise<boolean>>>(new Map())
   const pendingEmbeddedWarmMountRef = useRef<Map<string, number>>(new Map())
+  const completedEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
+  const pendingEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
+  const embeddedBootstrapBackfillRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const embeddedBootstrapBackfillRetryAttemptRef = useRef(0)
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
 
   useEffect(() => {
@@ -1736,6 +1804,13 @@ const SyncDeckManager: FC = () => {
     if (restoreSuppressionTimeoutRef.current != null) {
       clearTimeout(restoreSuppressionTimeoutRef.current)
       restoreSuppressionTimeoutRef.current = null
+    }
+  }, [])
+
+  const clearEmbeddedBootstrapBackfillRetryTimeout = useCallback((): void => {
+    if (embeddedBootstrapBackfillRetryTimeoutRef.current != null) {
+      clearTimeout(embeddedBootstrapBackfillRetryTimeoutRef.current)
+      embeddedBootstrapBackfillRetryTimeoutRef.current = null
     }
   }, [])
 
@@ -2174,6 +2249,20 @@ const SyncDeckManager: FC = () => {
   }, [hostProtocol, sessionId, userAgent])
 
   useEffect(() => {
+    completedEmbeddedBootstrapChildSessionIdsRef.current.clear()
+    pendingEmbeddedBootstrapChildSessionIdsRef.current.clear()
+    embeddedBootstrapBackfillRetryAttemptRef.current = 0
+    clearEmbeddedBootstrapBackfillRetryTimeout()
+    setEmbeddedManagerRenderNonceByChildSessionId({})
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout, sessionId])
+
+  useEffect(() => {
+    return () => {
+      clearEmbeddedBootstrapBackfillRetryTimeout()
+    }
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout])
+
+  useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
       setIsChalkboardOpen(false)
       return
@@ -2280,6 +2369,118 @@ const SyncDeckManager: FC = () => {
       isCancelled = true
     }
   }, [hostProtocol, sessionId, userAgent])
+
+  useEffect(() => {
+    if (!sessionId || !instructorPasscode) {
+      return
+    }
+
+    let isCancelled = false
+
+    const requests = resolveEmbeddedBootstrapBackfillRequests({
+      embeddedActivities,
+      completedChildSessionIds: completedEmbeddedBootstrapChildSessionIdsRef.current,
+      pendingChildSessionIds: pendingEmbeddedBootstrapChildSessionIdsRef.current,
+    })
+    if (requests.length === 0) {
+      embeddedBootstrapBackfillRetryAttemptRef.current = 0
+      clearEmbeddedBootstrapBackfillRetryTimeout()
+      return
+    }
+
+    clearEmbeddedBootstrapBackfillRetryTimeout()
+
+    for (const request of requests) {
+      pendingEmbeddedBootstrapChildSessionIdsRef.current.add(request.childSessionId)
+    }
+
+    void Promise.all(requests.map(async (request): Promise<boolean> => {
+      try {
+        const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instructorPasscode,
+            activityId: request.activityId,
+            instanceKey: request.instanceKey,
+          }),
+        })
+
+        if (!response.ok) {
+          return shouldRetryEmbeddedBootstrapBackfill(response.status)
+        }
+
+        const payload = (await response.json()) as SyncDeckEmbeddedActivityStartResponse
+        if (isCancelled) {
+          return false
+        }
+
+        const resolvedChildSessionId =
+          typeof payload.childSessionId === 'string' && payload.childSessionId.trim().length > 0
+            ? payload.childSessionId.trim()
+            : request.childSessionId
+        const completedChildSessionIds = resolveCompletedEmbeddedBootstrapChildSessionIds({
+          requestChildSessionId: request.childSessionId,
+          resolvedChildSessionId,
+        })
+
+        for (const completedChildSessionId of completedChildSessionIds) {
+          completedEmbeddedBootstrapChildSessionIdsRef.current.add(completedChildSessionId)
+        }
+
+        if (!isPlainObject(payload.managerBootstrap)) {
+          return false
+        }
+
+        storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, payload.managerBootstrap)
+        setEmbeddedManagerRenderNonceByChildSessionId((current) => ({
+          ...current,
+          [resolvedChildSessionId]: (current[resolvedChildSessionId] ?? 0) + 1,
+        }))
+        setLoadedEmbeddedManagerInstanceKeys((current) => {
+          if (!current[request.instanceKey]) {
+            return current
+          }
+
+          const next = { ...current }
+          delete next[request.instanceKey]
+          return next
+        })
+        return false
+      } catch {
+        // Best-effort only. Embedded managers with their own recovery endpoints can still self-heal.
+        return true
+      } finally {
+        pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
+      }
+    })).then((results) => {
+      if (isCancelled) {
+        return
+      }
+
+      if (results.some(Boolean)) {
+        const retryDelayMs = resolveEmbeddedBootstrapBackfillRetryDelayMs(
+          embeddedBootstrapBackfillRetryAttemptRef.current,
+        )
+        embeddedBootstrapBackfillRetryAttemptRef.current += 1
+        embeddedBootstrapBackfillRetryTimeoutRef.current = setTimeout(() => {
+          embeddedBootstrapBackfillRetryTimeoutRef.current = null
+          setEmbeddedBootstrapBackfillRetryNonce((current) => current + 1)
+        }, retryDelayMs)
+        return
+      }
+
+      embeddedBootstrapBackfillRetryAttemptRef.current = 0
+    })
+
+    return () => {
+      isCancelled = true
+      clearEmbeddedBootstrapBackfillRetryTimeout()
+      for (const request of requests) {
+        pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
+      }
+    }
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, embeddedBootstrapBackfillRetryNonce, instructorPasscode, sessionId])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
@@ -3881,7 +4082,7 @@ const SyncDeckManager: FC = () => {
 
                   return (
                     <div
-                      key={instanceKey}
+                      key={`${instanceKey}:${embeddedManagerRenderNonceByChildSessionId[record.childSessionId] ?? 0}`}
                       className={
                         isActive
                           ? 'absolute inset-0 z-20 bg-white overflow-hidden'

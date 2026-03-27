@@ -109,6 +109,12 @@ interface SyncDeckEmbeddedManagerBootstrapPayload {
   instructorPasscode?: string
 }
 
+interface EmbeddedActivityStartResponsePayload {
+  childSessionId: string
+  instanceKey: string
+  managerBootstrap?: SyncDeckEmbeddedManagerBootstrapPayload
+}
+
 type SyncDeckEmbeddedActivitiesMap = Record<string, SyncDeckEmbeddedActivityRecord>
 
 interface SyncDeckChalkboardBuffer {
@@ -870,6 +876,10 @@ function buildEmbeddedActivityReportPath(reportEndpoint: string, childSessionId:
   return reportEndpoint.replaceAll(':sessionId', encodeURIComponent(childSessionId))
 }
 
+function buildEmbeddedActivityStartLockKey(sessionId: string, instanceKey: string): string {
+  return `${sessionId}:${instanceKey}`
+}
+
 function mergeReportStudents(sections: Array<{ students?: ActivityReportStudentRef[] }>): ActivityReportStudentRef[] {
   const byStudentId = new Map<string, ActivityReportStudentRef>()
   for (const section of sections) {
@@ -1164,6 +1174,29 @@ registerSessionNormalizer('syncdeck', (session) => {
 })
 
 export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
+  const embeddedActivityStartLocks = new Map<string, Promise<void>>()
+
+  const withEmbeddedActivityStartLock = async <T,>(lockKey: string, work: () => Promise<T>): Promise<T> => {
+    const previous = embeddedActivityStartLocks.get(lockKey) ?? Promise.resolve()
+    let releaseCurrent!: () => void
+    const current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve
+    })
+    const queued = previous.then(() => current, () => current)
+    embeddedActivityStartLocks.set(lockKey, queued)
+
+    await previous
+
+    try {
+      return await work()
+    } finally {
+      releaseCurrent()
+      if (embeddedActivityStartLocks.get(lockKey) === queued) {
+        embeddedActivityStartLocks.delete(lockKey)
+      }
+    }
+  }
+
   const broadcastStudentsToInstructors = async (sessionId: string): Promise<void> => {
     const session = asSyncDeckSession(await sessions.get(sessionId))
     if (!session) {
@@ -1487,48 +1520,69 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const existing = session.data.embeddedActivities[instanceKey]
-    if (existing) {
-      if (existing.activityId !== activityId) {
-        res.status(409).json({
-          error: 'embedded activity instance key already belongs to a different activity',
-        })
-        return
-      }
+    const responsePayload = await withEmbeddedActivityStartLock(
+      buildEmbeddedActivityStartLockKey(sessionId, instanceKey),
+      async (): Promise<{ statusCode: number; body: { error: string } | EmbeddedActivityStartResponsePayload }> => {
+        const lockedSession = asSyncDeckSession(await sessions.get(sessionId))
+        if (!lockedSession) {
+          return { statusCode: 404, body: { error: 'invalid session' } }
+        }
 
-      const existingChildSession = await sessions.get(existing.childSessionId)
-      if (existingChildSession) {
-        const managerBootstrap = buildEmbeddedManagerBootstrapPayload(existingChildSession)
-        res.json({
-          childSessionId: existing.childSessionId,
-          instanceKey,
-          ...(managerBootstrap ? { managerBootstrap } : {}),
-        })
-        return
-      }
+        if (!verifyInstructorPasscode(lockedSession.data.instructorPasscode, instructorPasscode)) {
+          return { statusCode: 403, body: { error: 'forbidden' } }
+        }
 
-      delete session.data.embeddedActivities[instanceKey]
-    }
+        const existing = lockedSession.data.embeddedActivities[instanceKey]
+        if (existing) {
+          if (existing.activityId !== activityId) {
+            return {
+              statusCode: 409,
+              body: { error: 'embedded activity instance key already belongs to a different activity' },
+            }
+          }
 
-    const childSession = await createEmbeddedChildSession(sessions, session.id, activityId, instanceKey, activityOptions)
-    session.data.embeddedActivities[instanceKey] = {
-      childSessionId: childSession.id,
-      activityId,
-      startedAt: Date.now(),
-      owner: SYNCDECK_EMBEDDED_OWNER,
-    }
-    await sessions.set(session.id, session)
-    await broadcastEmbeddedActivityStart(session, instanceKey, activityId, childSession.id)
+          const existingChildSession = await sessions.get(existing.childSessionId)
+          if (existingChildSession) {
+            const managerBootstrap = buildEmbeddedManagerBootstrapPayload(existingChildSession)
+            return {
+              statusCode: 200,
+              body: {
+                childSessionId: existing.childSessionId,
+                instanceKey,
+                ...(managerBootstrap ? { managerBootstrap } : {}),
+              },
+            }
+          }
 
-    const normalizedChildSession = await sessions.get(childSession.id)
-    const managerBootstrap = normalizedChildSession
-      ? buildEmbeddedManagerBootstrapPayload(normalizedChildSession)
-      : null
-    res.json({
-      childSessionId: childSession.id,
-      instanceKey,
-      ...(managerBootstrap ? { managerBootstrap } : {}),
-    })
+          delete lockedSession.data.embeddedActivities[instanceKey]
+        }
+
+        const childSession = await createEmbeddedChildSession(sessions, lockedSession.id, activityId, instanceKey, activityOptions)
+        lockedSession.data.embeddedActivities[instanceKey] = {
+          childSessionId: childSession.id,
+          activityId,
+          startedAt: Date.now(),
+          owner: SYNCDECK_EMBEDDED_OWNER,
+        }
+        await sessions.set(lockedSession.id, lockedSession)
+        await broadcastEmbeddedActivityStart(lockedSession, instanceKey, activityId, childSession.id)
+
+        const normalizedChildSession = await sessions.get(childSession.id)
+        const managerBootstrap = normalizedChildSession
+          ? buildEmbeddedManagerBootstrapPayload(normalizedChildSession)
+          : null
+        return {
+          statusCode: 200,
+          body: {
+            childSessionId: childSession.id,
+            instanceKey,
+            ...(managerBootstrap ? { managerBootstrap } : {}),
+          },
+        }
+      },
+    )
+
+    res.status(responsePayload.statusCode).json(responsePayload.body)
   })
 
   app.post('/api/syncdeck/:sessionId/embedded-activity/end', async (req, res) => {
