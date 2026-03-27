@@ -94,6 +94,11 @@ interface SyncDeckEmbeddedActivityRecord {
   owner: string
 }
 
+interface SyncDeckEmbeddedInstancePosition {
+  h: number
+  v: number
+}
+
 interface SyncDeckEmbeddedLaunchPayload {
   parentSessionId: string
   instanceKey: string
@@ -316,6 +321,25 @@ function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivi
         ? value.owner.trim()
         : SYNCDECK_EMBEDDED_OWNER,
   }
+}
+
+function parseEmbeddedInstancePosition(instanceKey: string | null): SyncDeckEmbeddedInstancePosition | null {
+  if (!instanceKey) {
+    return null
+  }
+
+  const segments = instanceKey.split(':')
+  if (segments.length < 3) {
+    return null
+  }
+
+  const h = Number.parseInt(segments[1] ?? '', 10)
+  const v = Number.parseInt(segments[2] ?? '', 10)
+  if (!Number.isFinite(h) || !Number.isFinite(v)) {
+    return null
+  }
+
+  return { h, v }
 }
 
 function normalizeEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivitiesMap {
@@ -1057,6 +1081,61 @@ async function createEmbeddedChildSession(
   return session
 }
 
+function markEmbeddedChildSessionForAutoActivateAllQuestions(
+  childSession: SessionRecord,
+): boolean {
+  if (childSession.type !== 'resonance' || !isPlainObject(childSession.data)) {
+    return false
+  }
+
+  const activeQuestionIds = Array.isArray(childSession.data.activeQuestionIds)
+    ? childSession.data.activeQuestionIds.filter((questionId): questionId is string => typeof questionId === 'string')
+    : []
+  const hasActiveQuestionRun =
+    typeof childSession.data.activeQuestionRunStartedAt === 'number'
+    && Number.isFinite(childSession.data.activeQuestionRunStartedAt)
+  const hasEmbeddedAutoActivated =
+    typeof childSession.data.embeddedAutoActivatedAt === 'number'
+    && Number.isFinite(childSession.data.embeddedAutoActivatedAt)
+  if (activeQuestionIds.length > 0 || hasActiveQuestionRun || hasEmbeddedAutoActivated) {
+    return false
+  }
+
+  const embeddedLaunch = isPlainObject(childSession.data.embeddedLaunch) ? childSession.data.embeddedLaunch : null
+  const selectedOptions = isPlainObject(embeddedLaunch?.selectedOptions) ? embeddedLaunch.selectedOptions : null
+  if (!embeddedLaunch || !selectedOptions || selectedOptions.autoActivateAllQuestions === true) {
+    return false
+  }
+
+  embeddedLaunch.selectedOptions = {
+    ...selectedOptions,
+    autoActivateAllQuestions: true,
+  }
+  childSession.data.embeddedLaunch = embeddedLaunch
+  return true
+}
+
+function canStudentAutoActivateEmbeddedInstance(params: {
+  instanceKey: string
+  session: SyncDeckSession
+}): boolean {
+  const instancePosition = parseEmbeddedInstancePosition(params.instanceKey)
+  if (!instancePosition) {
+    return false
+  }
+
+  const instructorIndices = extractIndicesFromInstructorPayload(params.session.data.lastInstructorStatePayload)
+  if (!instructorIndices) {
+    return false
+  }
+
+  if (instancePosition.v > 0) {
+    return instancePosition.h <= instructorIndices.h
+  }
+
+  return instancePosition.h < instructorIndices.h
+}
+
 function buildEmbeddedActivityStartPayload(
   instanceKey: string,
   activityId: string,
@@ -1690,6 +1769,68 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       childSessionId: childSession.id,
       entryParticipantToken: stored.token,
       values: stored.values,
+    })
+  })
+
+  app.post('/api/syncdeck/:sessionId/embedded-activity/auto-activate', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = asSyncDeckSession(await sessions.get(sessionId))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
+    const requestedChildSessionId = normalizeInstanceKey(readStringField(req.body, 'childSessionId'))
+    const studentId = normalizeStudentId(readStringField(req.body, 'studentId'))
+    const autoActivateAllQuestions = readBooleanField(req.body, 'autoActivateAllQuestions') === true
+    if (!instanceKey || !studentId || !autoActivateAllQuestions) {
+      res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+
+    const embeddedActivity = session.data.embeddedActivities[instanceKey]
+    if (!embeddedActivity) {
+      res.status(404).json({ error: 'embedded activity not found' })
+      return
+    }
+    if (requestedChildSessionId && requestedChildSessionId !== embeddedActivity.childSessionId) {
+      res.status(404).json({ error: 'embedded activity not found' })
+      return
+    }
+
+    const student = findSyncDeckStudentById(session.data.students, studentId)
+    if (!student) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+    if (!canStudentAutoActivateEmbeddedInstance({ instanceKey, session })) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const childSession = await sessions.get(embeddedActivity.childSessionId)
+    if (!childSession) {
+      res.status(404).json({ error: 'invalid child session' })
+      return
+    }
+
+    const activated = markEmbeddedChildSessionForAutoActivateAllQuestions(childSession)
+    if (activated) {
+      await sessions.set(childSession.id, childSession)
+    }
+
+    res.json({
+      ok: true,
+      instanceKey,
+      childSessionId: childSession.id,
+      studentId: student.studentId,
+      activated,
     })
   })
 

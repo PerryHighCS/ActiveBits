@@ -1482,12 +1482,7 @@ function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmb
     return null
   }
 
-  const hSegment = segments.at(-2)
-  const vSegment = segments.at(-1)
-  if (typeof hSegment !== 'string' || typeof vSegment !== 'string') {
-    return null
-  }
-
+  const [, hSegment, vSegment] = segments as [string, string, string, ...string[]]
   const h = Number.parseInt(hSegment, 10)
   const v = Number.parseInt(vSegment, 10)
   if (!Number.isFinite(h) || !Number.isFinite(v)) {
@@ -1801,6 +1796,69 @@ export function shouldShowInstructorPendingActivityNotice(params: {
   )
 }
 
+export function shouldAutoActivateReleasedResonanceQuestions(params: {
+  activeEmbeddedActivityId: string | null
+  activeEmbeddedInstanceKey: string | null
+  studentAnchoredInstanceKey: string | null
+  instructorAnchoredInstanceKey: string | null
+  instructorIndices: { h: number; v: number; f: number } | null
+  syncState: SyncDeckStudentSyncState
+  isBacktrackOptOut: boolean
+}): boolean {
+  if (params.activeEmbeddedActivityId !== 'resonance' || !params.activeEmbeddedInstanceKey) {
+    return false
+  }
+
+  const activePosition = parseSyncDeckEmbeddedInstancePosition(params.activeEmbeddedInstanceKey)
+  if (!activePosition) {
+    return false
+  }
+
+  if (activePosition.v > 0) {
+    return (
+      params.studentAnchoredInstanceKey === params.activeEmbeddedInstanceKey
+      && params.instructorIndices !== null
+      && activePosition.h <= params.instructorIndices.h
+    )
+  }
+
+  if (
+    params.syncState === 'vertical'
+    || params.syncState === 'solo'
+    || params.syncState === 'ahead'
+    || params.isBacktrackOptOut
+    || params.instructorIndices === null
+    || activePosition.h >= params.instructorIndices.h
+  ) {
+    return false
+  }
+
+  if (params.studentAnchoredInstanceKey !== params.activeEmbeddedInstanceKey) {
+    return false
+  }
+
+  return params.instructorAnchoredInstanceKey !== params.activeEmbeddedInstanceKey
+}
+
+export function tryClaimReleasedResonanceAutoActivation(
+  activationKeys: Set<string>,
+  activationKey: string,
+): boolean {
+  if (activationKeys.has(activationKey)) {
+    return false
+  }
+
+  activationKeys.add(activationKey)
+  return true
+}
+
+export function releaseResonanceAutoActivationClaim(
+  activationKeys: Set<string>,
+  activationKey: string,
+): void {
+  activationKeys.delete(activationKey)
+}
+
 interface PendingSynchronizedActivityRequest {
   observedAt: number
   slideKey: string
@@ -1924,6 +1982,7 @@ const SyncDeckStudent: FC = () => {
   const syncDebugEnabledRef = useRef(isSyncDeckDebugEnabled())
   const expectedInstructorLocalTargetRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const recoveredEmbeddedEntryKeysRef = useRef<Set<string>>(new Set())
+  const autoActivatedReleasedResonanceKeysRef = useRef<Set<string>>(new Set())
   const attachSessionEndedHandler = useSessionEndedHandler()
   const [embeddedActivities, setEmbeddedActivities] = useState<SyncDeckEmbeddedActivitiesMap>({})
   const [pendingSynchronizedActivityRequest, setPendingSynchronizedActivityRequest] =
@@ -2931,6 +2990,15 @@ const SyncDeckStudent: FC = () => {
     instructorIndices: lastInstructorIndicesRef.current,
     isBacktrackOptOut,
   })
+  const shouldAutoActivateReleasedResonance = shouldAutoActivateReleasedResonanceQuestions({
+    activeEmbeddedActivityId,
+    activeEmbeddedInstanceKey,
+    studentAnchoredInstanceKey,
+    instructorAnchoredInstanceKey,
+    instructorIndices: lastInstructorIndicesRef.current,
+    syncState,
+    isBacktrackOptOut,
+  })
   const overlayNavigationBaseIndices = resolveStudentOverlayNavigationBaseIndices({
     studentIndices: studentIndicesState,
     studentAnchoredInstanceKey,
@@ -2967,6 +3035,59 @@ const SyncDeckStudent: FC = () => {
       derivedCapabilities: overlayVerticalNavigationCapabilities,
       fallbackAllowed: overlayNavigationBaseIndices ? overlayNavigationBaseIndices.v === 0 : false,
     })
+
+  useEffect(() => {
+    if (
+      !sessionId
+      || !activeEmbeddedInstanceKey
+      || !activeEmbeddedChildSessionId
+      || !registeredStudentId
+      || !shouldAutoActivateReleasedResonance
+    ) {
+      return
+    }
+
+    const activationKey = `${activeEmbeddedChildSessionId}:${registeredStudentId}`
+    if (!tryClaimReleasedResonanceAutoActivation(autoActivatedReleasedResonanceKeysRef.current, activationKey)) {
+      return
+    }
+
+    const abortController = new AbortController()
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/embedded-activity/auto-activate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            instanceKey: activeEmbeddedInstanceKey,
+            childSessionId: activeEmbeddedChildSessionId,
+            studentId: registeredStudentId,
+            autoActivateAllQuestions: true,
+          }),
+          signal: abortController.signal,
+        })
+
+        if (!response.ok) {
+          releaseResonanceAutoActivationClaim(autoActivatedReleasedResonanceKeysRef.current, activationKey)
+        }
+      } catch {
+        releaseResonanceAutoActivationClaim(autoActivatedReleasedResonanceKeysRef.current, activationKey)
+      }
+    })()
+
+    return () => {
+      abortController.abort()
+    }
+  }, [
+    activeEmbeddedChildSessionId,
+    activeEmbeddedInstanceKey,
+    registeredStudentId,
+    sessionId,
+    shouldAutoActivateReleasedResonance,
+  ])
 
   useEffect(() => {
     if (

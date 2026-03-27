@@ -38,6 +38,9 @@ import { persistRecoveredEmbeddedEntryParticipantToken } from './SyncDeckStudent
 import { shouldPersistRecoveredEmbeddedEntryResponse } from './SyncDeckStudent.js'
 import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent.js'
 import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
+import { shouldAutoActivateReleasedResonanceQuestions } from './SyncDeckStudent.js'
+import { tryClaimReleasedResonanceAutoActivation } from './SyncDeckStudent.js'
+import { releaseResonanceAutoActivationClaim } from './SyncDeckStudent.js'
 import { buildStudentLocalNavigationPayloads } from './SyncDeckStudent.js'
 import { shouldPreferInstructorOverlaySelection } from './SyncDeckStudent.js'
 import { buildStudentEmbeddedSyncContextMessage } from './SyncDeckStudent.js'
@@ -1730,6 +1733,127 @@ void test('shouldPreferInstructorOverlaySelection disables instructor preference
     }),
     false,
   )
+})
+
+void test('shouldAutoActivateReleasedResonanceQuestions activates only for released resonance slides', () => {
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:1',
+      studentAnchoredInstanceKey: 'resonance:4:1',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      syncState: 'vertical',
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:0',
+      studentAnchoredInstanceKey: 'resonance:4:0',
+      instructorAnchoredInstanceKey: null,
+      instructorIndices: { h: 5, v: 0, f: 0 },
+      syncState: 'behind',
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:0',
+      studentAnchoredInstanceKey: 'resonance:4:0',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      syncState: 'synchronized',
+      isBacktrackOptOut: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:6:0',
+      studentAnchoredInstanceKey: 'resonance:6:0',
+      instructorAnchoredInstanceKey: null,
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      syncState: 'ahead',
+      isBacktrackOptOut: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:0',
+      studentAnchoredInstanceKey: 'resonance:4:0',
+      instructorAnchoredInstanceKey: null,
+      instructorIndices: { h: 5, v: 0, f: 0 },
+      syncState: 'behind',
+      isBacktrackOptOut: true,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:1:variantA',
+      studentAnchoredInstanceKey: 'resonance:4:1:variantA',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      syncState: 'vertical',
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:4:1:variant1',
+      studentAnchoredInstanceKey: 'resonance:4:1:variant1',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      syncState: 'vertical',
+      isBacktrackOptOut: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldAutoActivateReleasedResonanceQuestions({
+      activeEmbeddedActivityId: 'resonance',
+      activeEmbeddedInstanceKey: 'resonance:6:1',
+      studentAnchoredInstanceKey: 'resonance:6:1',
+      instructorAnchoredInstanceKey: 'resonance:4:0',
+      instructorIndices: { h: 4, v: 0, f: 0 },
+      syncState: 'vertical',
+      isBacktrackOptOut: false,
+    }),
+    false,
+  )
+})
+
+void test('released resonance auto-activation cleanup re-allows retries after an interrupted request', () => {
+  const activationKeys = new Set<string>()
+  const activationKey = 'child-session-1:student-1'
+
+  assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), true)
+  assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), false)
+
+  // Successful requests retain the claim so revisits do not re-post unnecessarily.
+  assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), false)
+
+  releaseResonanceAutoActivationClaim(activationKeys, activationKey)
+
+  assert.equal(tryClaimReleasedResonanceAutoActivation(activationKeys, activationKey), true)
 })
 
 void test('shouldPreferInstructorOverlaySelection prefers instructor only while synchronized and following', () => {

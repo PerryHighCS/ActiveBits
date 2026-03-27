@@ -225,6 +225,178 @@ void test('embedded resonance sessions receive a stable instructor passcode duri
   await sessions.close()
 })
 
+void test('embedded resonance sessions auto-activate all questions when embedded launch requests it', async () => {
+  const sessions = createSessionStore(null)
+  const session = createEmbeddedResonanceSession()
+  session.data.embeddedLaunch = {
+    parentSessionId: 'syncdeck-parent',
+    instanceKey: 'resonance:2:0',
+    selectedOptions: {
+      autoActivateAllQuestions: true,
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'What is one thing you are still uncertain about?',
+          order: 0,
+        },
+        {
+          id: 'q2',
+          type: 'multiple-choice',
+          text: 'Which answer is correct?',
+          order: 1,
+          options: [
+            { id: 'a', text: 'A' },
+            { id: 'b', text: 'B' },
+          ],
+        },
+      ],
+    },
+  }
+
+  await sessions.set(session.id, session)
+
+  const stored = await sessions.get(session.id)
+  const storedData = stored?.data as {
+    activeQuestionIds?: string[]
+    embeddedAutoActivatedAt?: number | null
+    embeddedLaunch?: { selectedOptions?: Record<string, unknown> }
+  } | undefined
+
+  assert.deepEqual(storedData?.activeQuestionIds, ['q1', 'q2'])
+  assert.equal(typeof storedData?.embeddedAutoActivatedAt, 'number')
+  assert.deepEqual(storedData?.embeddedLaunch?.selectedOptions, {
+    questions: [
+      {
+        id: 'q1',
+        type: 'free-response',
+        text: 'What is one thing you are still uncertain about?',
+        order: 0,
+      },
+      {
+        id: 'q2',
+        type: 'multiple-choice',
+        text: 'Which answer is correct?',
+        order: 1,
+        options: [
+          { id: 'a', text: 'A' },
+          { id: 'b', text: 'B' },
+        ],
+      },
+    ],
+  })
+
+  await sessions.close()
+})
+
+void test('embedded resonance sessions do not re-auto-activate after instructors clear questions', async () => {
+  const sessions = createSessionStore(null)
+  const session = createEmbeddedResonanceSession()
+  session.data.embeddedLaunch = {
+    parentSessionId: 'syncdeck-parent',
+    instanceKey: 'resonance:2:0',
+    selectedOptions: {
+      autoActivateAllQuestions: true,
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'What is one thing you are still uncertain about?',
+          order: 0,
+        },
+        {
+          id: 'q2',
+          type: 'multiple-choice',
+          text: 'Which answer is correct?',
+          order: 1,
+          options: [
+            { id: 'a', text: 'A' },
+            { id: 'b', text: 'B' },
+          ],
+        },
+      ],
+    },
+  }
+
+  await sessions.set(session.id, session)
+
+  const initiallyStored = await sessions.get(session.id)
+  const initiallyStoredData = initiallyStored?.data as {
+    embeddedAutoActivatedAt?: number | null
+  } | undefined
+  assert.equal(typeof initiallyStoredData?.embeddedAutoActivatedAt, 'number')
+
+  const clearedSession = await sessions.get(session.id)
+  assert.ok(clearedSession)
+  const clearedSessionData = clearedSession.data as Record<string, unknown>
+  clearedSessionData.activeQuestionId = null
+  clearedSessionData.activeQuestionIds = []
+  clearedSessionData.activeQuestionRunStartedAt = null
+  clearedSessionData.activeQuestionDeadlineAt = null
+  clearedSessionData.embeddedLaunch = {
+    parentSessionId: 'syncdeck-parent',
+    instanceKey: 'resonance:2:0',
+    selectedOptions: {
+      autoActivateAllQuestions: true,
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'What is one thing you are still uncertain about?',
+          order: 0,
+        },
+        {
+          id: 'q2',
+          type: 'multiple-choice',
+          text: 'Which answer is correct?',
+          order: 1,
+          options: [
+            { id: 'a', text: 'A' },
+            { id: 'b', text: 'B' },
+          ],
+        },
+      ],
+    },
+  }
+  await sessions.set(clearedSession.id, clearedSession)
+
+  const afterClearStored = await sessions.get(session.id)
+  const afterClearStoredData = afterClearStored?.data as {
+    activeQuestionIds?: string[]
+    activeQuestionRunStartedAt?: number | null
+    activeQuestionDeadlineAt?: number | null
+    embeddedAutoActivatedAt?: number | null
+    embeddedLaunch?: { selectedOptions?: Record<string, unknown> }
+  } | undefined
+
+  assert.deepEqual(afterClearStoredData?.activeQuestionIds, [])
+  assert.equal(afterClearStoredData?.activeQuestionRunStartedAt, null)
+  assert.equal(afterClearStoredData?.activeQuestionDeadlineAt, null)
+  assert.equal(typeof afterClearStoredData?.embeddedAutoActivatedAt, 'number')
+  assert.deepEqual(afterClearStoredData?.embeddedLaunch?.selectedOptions, {
+    questions: [
+      {
+        id: 'q1',
+        type: 'free-response',
+        text: 'What is one thing you are still uncertain about?',
+        order: 0,
+      },
+      {
+        id: 'q2',
+        type: 'multiple-choice',
+        text: 'Which answer is correct?',
+        order: 1,
+        options: [
+          { id: 'a', text: 'A' },
+          { id: 'b', text: 'B' },
+        ],
+      },
+    ],
+  })
+
+  await sessions.close()
+})
+
 void test('self-paced embedded resonance sessions expose all questions to students when the parent SyncDeck session is standalone', async () => {
   const app = createMockApp()
   const ws = createMockWs()
