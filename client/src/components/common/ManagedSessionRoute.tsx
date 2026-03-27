@@ -7,6 +7,10 @@ interface ManagedSessionRouteProps {
 
 const SESSION_STATUS_POLL_INTERVAL_MS = 5000
 
+function isMissingSessionStatus(status: number): boolean {
+  return status === 404 || status === 410
+}
+
 export default function ManagedSessionRoute({ children }: ManagedSessionRouteProps) {
   const navigate = useNavigate()
   const { sessionId } = useParams()
@@ -21,13 +25,11 @@ export default function ManagedSessionRoute({ children }: ManagedSessionRoutePro
     const checkSession = async () => {
       try {
         const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`)
-        if (!response.ok && !isCancelled) {
+        if (!response.ok && isMissingSessionStatus(response.status) && !isCancelled) {
           void navigate('/session-ended', { replace: true })
         }
       } catch {
-        if (!isCancelled) {
-          void navigate('/session-ended', { replace: true })
-        }
+        return
       }
     }
 

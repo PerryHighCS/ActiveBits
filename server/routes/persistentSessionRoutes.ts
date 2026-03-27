@@ -5,7 +5,6 @@ import {
   isValidActivity,
 } from '../activities/activityRegistry.js'
 import {
-  canAttemptTeacherCode,
   cleanupPersistentSession,
   recordTeacherCodeAttempt,
   consumePersistentSessionEntryParticipant,
@@ -706,12 +705,11 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
 
     const clientIp = getRequestClientIp(req)
     const rateLimitKey = `${clientIp}:${hash}`
-    const canAttempt = await canAttemptTeacherCode(rateLimitKey)
-    if (!canAttempt) {
+    const attemptResult = await recordTeacherCodeAttempt(rateLimitKey)
+    if (!attemptResult.allowed) {
       res.status(429).json({ error: 'Too many attempts. Please wait a minute.' })
       return
     }
-    await recordTeacherCodeAttempt(rateLimitKey)
 
     const validation = verifyTeacherCodeWithHash(activityName, hash, teacherCode)
     if (!validation.valid) {

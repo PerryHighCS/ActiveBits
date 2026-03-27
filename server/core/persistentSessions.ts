@@ -438,13 +438,12 @@ function broadcastToWaiters(hash: string, payload: Record<string, unknown>): voi
   }
 }
 
-export async function canAttemptTeacherCode(rateLimitKey: string): Promise<boolean> {
-  const attempts = await persistentStore.getAttempts(rateLimitKey)
-  return attempts < MAX_ATTEMPTS
-}
-
-export async function recordTeacherCodeAttempt(rateLimitKey: string): Promise<void> {
-  await persistentStore.incrementAttempts(rateLimitKey)
+export async function recordTeacherCodeAttempt(rateLimitKey: string): Promise<{ allowed: boolean; attempts: number }> {
+  const attempts = await persistentStore.incrementAttempts(rateLimitKey)
+  return {
+    allowed: attempts <= MAX_ATTEMPTS,
+    attempts,
+  }
 }
 
 export async function startPersistentSession(

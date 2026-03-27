@@ -123,3 +123,93 @@ void test('ManagedSessionRoute renders normally without a session id route param
     restoreDom()
   }
 })
+
+void test('ManagedSessionRoute stays on the manager page for transient server errors', async (t) => {
+  const restoreDom = installDomEnvironment('https://bits.example/manage/syncdeck/session-1')
+  const previousFetch = globalThis.fetch
+  let fetchCallCount = 0
+
+  globalThis.fetch = (async () => {
+    fetchCallCount += 1
+    return new Response(null, { status: 500 })
+  }) as typeof fetch
+
+  t.after(() => {
+    globalThis.fetch = previousFetch
+  })
+
+  const { render, waitFor, cleanup } = await import('@testing-library/react')
+  const { MemoryRouter, Route, Routes } = await import('react-router-dom')
+  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute')
+  try {
+    const rendered = render(
+      <MemoryRouter initialEntries={['/manage/syncdeck/session-1']}>
+        <Routes>
+          <Route
+            path="/manage/:activityId/:sessionId"
+            element={(
+              <ManagedSessionRoute>
+                <div>Manager view</div>
+              </ManagedSessionRoute>
+            )}
+          />
+          <Route path="/session-ended" element={<div>Session ended route</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      assert.equal(fetchCallCount >= 1, true)
+    })
+    assert.equal(rendered.getByText('Manager view').textContent, 'Manager view')
+    assert.equal(rendered.queryByText('Session ended route'), null)
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})
+
+void test('ManagedSessionRoute stays on the manager page for network failures', async (t) => {
+  const restoreDom = installDomEnvironment('https://bits.example/manage/syncdeck/session-1')
+  const previousFetch = globalThis.fetch
+  let fetchCallCount = 0
+
+  globalThis.fetch = (async () => {
+    fetchCallCount += 1
+    throw new Error('network down')
+  }) as typeof fetch
+
+  t.after(() => {
+    globalThis.fetch = previousFetch
+  })
+
+  const { render, waitFor, cleanup } = await import('@testing-library/react')
+  const { MemoryRouter, Route, Routes } = await import('react-router-dom')
+  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute')
+  try {
+    const rendered = render(
+      <MemoryRouter initialEntries={['/manage/syncdeck/session-1']}>
+        <Routes>
+          <Route
+            path="/manage/:activityId/:sessionId"
+            element={(
+              <ManagedSessionRoute>
+                <div>Manager view</div>
+              </ManagedSessionRoute>
+            )}
+          />
+          <Route path="/session-ended" element={<div>Session ended route</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      assert.equal(fetchCallCount >= 1, true)
+    })
+    assert.equal(rendered.getByText('Manager view').textContent, 'Manager view')
+    assert.equal(rendered.queryByText('Session ended route'), null)
+  } finally {
+    cleanup()
+    restoreDom()
+  }
+})
