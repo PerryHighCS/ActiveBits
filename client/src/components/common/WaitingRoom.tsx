@@ -38,6 +38,7 @@ import { resolveWaitingRoomPrimaryAction } from './waitingRoomActionUtils'
 import { persistWaitingRoomServerBackedHandoff } from './waitingRoomHandoffUtils'
 import { resolveWaitingRoomTeacherSubmitResult } from './waitingRoomTeacherSubmitUtils'
 import { attachWaitingRoomSocketHandlers } from './waitingRoomSocketUtils'
+import { shouldResetTeacherEntryMode } from './waitingRoomTeacherEntryUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -97,6 +98,7 @@ export default function WaitingRoom({
   const effectiveEntryOutcome: PersistentSessionEntryOutcome = (
     currentEntryOutcome === 'join-live' && !currentStartedSessionId
   ) ? 'continue-solo' : currentEntryOutcome
+  const shouldShowTeacherEntryToggle = !hasTeacherCookie && effectiveEntryOutcome === 'join-live'
   const isWaitingForTeacher = currentEntryOutcome === 'wait'
   const shouldListenForSessionUpdates = entryPolicy === 'solo-allowed'
     && (currentEntryOutcome === 'continue-solo' || currentEntryOutcome === 'join-live')
@@ -108,10 +110,14 @@ export default function WaitingRoom({
   }, [entryOutcome])
 
   useEffect(() => {
-    if (hasTeacherCookie || entryOutcome !== 'join-live') {
+    if (shouldResetTeacherEntryMode({
+      hasTeacherCookie,
+      effectiveEntryOutcome,
+      shouldShowTeacherEntryToggle,
+    })) {
       setIsTeacherEntryActive(false)
     }
-  }, [entryOutcome, hasTeacherCookie])
+  }, [currentEntryOutcome, currentStartedSessionId, effectiveEntryOutcome, hasTeacherCookie, shouldShowTeacherEntryToggle])
 
   useEffect(() => {
     setCurrentStartedSessionId(startedSessionId)
@@ -237,8 +243,6 @@ export default function WaitingRoom({
   }, [activityName, hash, navigate, shouldKeepWaitingRoomSocketOpen])
 
   const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
-  const shouldShowTeacherEntryToggle = !hasTeacherCookie && effectiveEntryOutcome === 'join-live'
-
   const handleTeacherCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)

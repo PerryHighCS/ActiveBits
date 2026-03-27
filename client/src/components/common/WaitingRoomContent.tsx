@@ -81,7 +81,9 @@ export default function WaitingRoomContent({
 }: WaitingRoomContentProps) {
   const viewModel = getWaitingRoomViewModel(entryOutcome)
   const isSoloOnlyMode = entryPolicy === 'solo-only'
-  const showTeacherToggle = showTeacherEntryToggle && !hasTeacherCookie && !isSoloOnlyMode
+  const hasTeacherToggleCallbacks = typeof onTeacherEntryModeSelect === 'function'
+    && typeof onStudentEntryModeSelect === 'function'
+  const showTeacherToggle = showTeacherEntryToggle && hasTeacherToggleCallbacks && !hasTeacherCookie && !isSoloOnlyMode
   const shouldShowStudentEntryUi = !isTeacherEntryActive
   const shouldShowWaitingRoomFields = shouldShowStudentEntryUi && waitingRoomFields.length > 0
   const shouldShowPrimaryAction = shouldShowStudentEntryUi && viewModel.primaryActionLabel != null
@@ -269,7 +271,7 @@ export default function WaitingRoomContent({
                 autoComplete="off"
               />
 
-              {error && !viewModel.primaryActionLabel && <p className="text-red-600 text-sm">{error}</p>}
+              {error && (!viewModel.primaryActionLabel || isTeacherEntryActive) && <p className="text-red-600 text-sm">{error}</p>}
 
               <Button
                 type="submit"

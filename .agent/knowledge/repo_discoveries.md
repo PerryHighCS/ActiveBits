@@ -1573,3 +1573,9 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Keep the iframe message schema’s “activityOptions are opaque host input” rule true in the solo-launch path as well as the synchronized embedded path.
 - Owner: Codex
 - Date: 2026-03-24
+
+- Date: 2026-03-27
+- Area: `client/src/components/common/WaitingRoom.tsx`
+- Discovery: Teacher-entry mode must reset from the live derived waiting-room state (`currentEntryOutcome` plus `currentStartedSessionId` / `effectiveEntryOutcome`), not only from the initial `entryOutcome` prop, because websocket transitions can flip `join-live` back to `continue-solo` without a prop change.
+- Why it matters: If the UI keeps stale teacher-entry mode active after a `session-ended` transition, the toggle disappears and the student join UI stays hidden.
+- Owner: Codex
