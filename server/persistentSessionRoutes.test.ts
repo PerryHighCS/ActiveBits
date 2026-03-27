@@ -10,6 +10,7 @@ import {
   startPersistentSession,
   resetPersistentSession,
   cleanupPersistentSession,
+  updatePersistentSessionUrlState,
 } from './core/persistentSessions.js'
 import { buildPersistentLinkUrlQuery } from './core/persistentLinkUrlState.js'
 
@@ -1745,5 +1746,89 @@ void test('authenticate rejects teacher auth for solo-only permalinks without mu
     code: 'entry-policy-rejected',
     entryPolicy: 'solo-only',
   })
+  assert.equal(res.cookies.has('persistent_sessions'), false)
+})
+
+void test('session teacher authenticate restores teacher cookie from active session id', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await updatePersistentSessionUrlState(hash, {
+    entryPolicy: 'solo-allowed',
+    selectedOptions: { presentationUrl: 'https://slides.example/deck' },
+  })
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const req = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode },
+  })
+  const res = createMockRes()
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.jsonBody))
+  assert.deepEqual(res.jsonBody, {
+    success: true,
+    activityName,
+    sessionId: 'live-session',
+  })
+  assert.equal(res.headers['cache-control'], 'no-store')
+
+  const cookie = res.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+  const parsed = JSON.parse(cookie?.value ?? '[]') as Array<Record<string, unknown>>
+  const teacherJoinEntry = parsed.find((entry) => entry.key === `${activityName}:${hash}`)
+  assert.deepEqual(teacherJoinEntry, {
+    key: `${activityName}:${hash}`,
+    teacherCode,
+    selectedOptions: { presentationUrl: 'https://slides.example/deck' },
+    entryPolicy: 'solo-allowed',
+    urlHash: buildPersistentLinkUrlQuery({
+      hash,
+      entryPolicy: 'solo-allowed',
+      selectedOptions: { presentationUrl: 'https://slides.example/deck' },
+    }).get('urlHash'),
+  })
+})
+
+void test('session teacher authenticate rejects invalid teacher code', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'instructor-required')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const req = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode: 'wrong-code' },
+  })
+  const res = createMockRes()
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 401)
+  assert.deepEqual(res.jsonBody, { error: 'Invalid teacher code' })
   assert.equal(res.cookies.has('persistent_sessions'), false)
 })

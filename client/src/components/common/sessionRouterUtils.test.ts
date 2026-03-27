@@ -8,6 +8,7 @@ import {
   buildPersistentTeacherManagePath,
   buildPersistentSessionApiUrl,
   buildSessionEntryApiUrl,
+  buildSessionTeacherAuthenticateApiUrl,
   cleanExpiredSessions,
   findUtilityRouteMatch,
   getHomeUtilityActivities,
@@ -128,6 +129,13 @@ void test('buildSessionEntryApiUrl encodes raw session identifiers for the join 
   assert.equal(
     buildSessionEntryApiUrl('session/1?x y'),
     '/api/session/session%2F1%3Fx%20y/entry',
+  )
+})
+
+void test('buildSessionTeacherAuthenticateApiUrl encodes raw session identifiers for teacher auth', () => {
+  assert.equal(
+    buildSessionTeacherAuthenticateApiUrl('session/1?x y'),
+    '/api/session/session%2F1%3Fx%20y/teacher-authenticate',
   )
 })
 

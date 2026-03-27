@@ -2,6 +2,7 @@ import { Suspense, useCallback, useEffect, useState, type ChangeEvent, type Comp
 import type { PersistentSessionEntryStatus, SessionEntryStatus } from '../../../../types/waitingRoom.js'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
+import HomeTeacherJoinControls from './HomeTeacherJoinControls'
 import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
 import { getActivity, activities } from '@src/activities'
@@ -10,6 +11,7 @@ import {
   buildTeacherManagePathFromSession,
   buildPersistentSessionEntryApiUrl,
   buildSessionEntryApiUrl,
+  buildSessionTeacherAuthenticateApiUrl,
   buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
@@ -98,6 +100,11 @@ const SessionRouter = () => {
   const [completedJoinPreflightSessionId, setCompletedJoinPreflightSessionId] = useState<string | null>(null)
   const [persistentSessionEntryStatus, setPersistentSessionEntryStatus] = useState<PersistentSessionEntryStatus | null>(null)
   const [isLoadingPersistent, setIsLoadingPersistent] = useState(false)
+  const [showTeacherJoinModal, setShowTeacherJoinModal] = useState(false)
+  const [teacherJoinSessionId, setTeacherJoinSessionId] = useState('')
+  const [teacherJoinCode, setTeacherJoinCode] = useState('')
+  const [teacherJoinError, setTeacherJoinError] = useState<string | null>(null)
+  const [isTeacherJoining, setIsTeacherJoining] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
@@ -395,6 +402,68 @@ const SessionRouter = () => {
     }
   }
 
+  const handleTeacherJoinSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    const normalizedSessionId = teacherJoinSessionId.trim().toLowerCase()
+    const normalizedTeacherCode = teacherJoinCode.trim()
+
+    if (!isJoinSessionId(normalizedSessionId)) {
+      setTeacherJoinError('Enter a valid session ID.')
+      return
+    }
+
+    if (!normalizedTeacherCode) {
+      setTeacherJoinError('Enter the teacher code.')
+      return
+    }
+
+    setTeacherJoinError(null)
+    setIsTeacherJoining(true)
+
+    try {
+      const response = await fetch(buildSessionTeacherAuthenticateApiUrl(normalizedSessionId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          teacherCode: normalizedTeacherCode,
+        }),
+      })
+
+      const payload = await response.json().catch(() => ({})) as {
+        error?: string
+        activityName?: string
+        sessionId?: string
+      }
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to join as teacher right now.')
+      }
+
+      if (typeof payload.activityName !== 'string' || payload.activityName.length === 0) {
+        throw new Error('Teacher join response did not include an activity name.')
+      }
+
+      const nextSessionId = typeof payload.sessionId === 'string' && payload.sessionId.length > 0
+        ? payload.sessionId
+        : normalizedSessionId
+      const path = await resolveTeacherManagePath(payload.activityName, nextSessionId, '')
+
+      setShowTeacherJoinModal(false)
+      setTeacherJoinSessionId('')
+      setTeacherJoinCode('')
+      setTeacherJoinError(null)
+      void navigate(path)
+    } catch (joinError) {
+      setTeacherJoinError(joinError instanceof Error ? joinError.message : 'Unable to join as teacher right now.')
+    } finally {
+      setIsTeacherJoining(false)
+    }
+  }
+
   if (error || soloRouteError || utilityRouteError) {
     return <div className="text-red-500 text-center">{error || soloRouteError || utilityRouteError}</div>
   }
@@ -509,6 +578,33 @@ const SessionRouter = () => {
 
     return (
       <div className="flex flex-col items-center gap-8 max-w-6xl mx-auto p-6">
+        <div className="w-full flex justify-end">
+          <HomeTeacherJoinControls
+            open={showTeacherJoinModal}
+            sessionId={teacherJoinSessionId}
+            teacherCode={teacherJoinCode}
+            error={teacherJoinError}
+            isSubmitting={isTeacherJoining}
+            onOpen={() => {
+              setTeacherJoinError(null)
+              setShowTeacherJoinModal(true)
+            }}
+            onClose={() => {
+              setTeacherJoinError(null)
+              setShowTeacherJoinModal(false)
+            }}
+            onSessionIdChange={(value) => {
+              setTeacherJoinSessionId(value.toLowerCase())
+              setTeacherJoinError(null)
+            }}
+            onTeacherCodeChange={(value) => {
+              setTeacherJoinCode(value)
+              setTeacherJoinError(null)
+            }}
+            onSubmit={handleTeacherJoinSubmit}
+          />
+        </div>
+
         <form onSubmit={handleSubmit} className="flex flex-col items-center w-max mx-auto">
           <label className="block mb-4">
             Join Session ID:
