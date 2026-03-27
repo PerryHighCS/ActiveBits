@@ -38,7 +38,7 @@ import { resolveWaitingRoomPrimaryAction } from './waitingRoomActionUtils'
 import { persistWaitingRoomServerBackedHandoff } from './waitingRoomHandoffUtils'
 import { resolveWaitingRoomTeacherSubmitResult } from './waitingRoomTeacherSubmitUtils'
 import { attachWaitingRoomSocketHandlers } from './waitingRoomSocketUtils'
-import { shouldResetTeacherEntryMode } from './waitingRoomTeacherEntryUtils'
+import { shouldResetTeacherEntryMode, shouldShowTeacherEntryToggle } from './waitingRoomTeacherEntryUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -98,7 +98,12 @@ export default function WaitingRoom({
   const effectiveEntryOutcome: PersistentSessionEntryOutcome = (
     currentEntryOutcome === 'join-live' && !currentStartedSessionId
   ) ? 'continue-solo' : currentEntryOutcome
-  const shouldShowTeacherEntryToggle = !hasTeacherCookie && effectiveEntryOutcome === 'join-live'
+  const showTeacherEntryToggle = shouldShowTeacherEntryToggle({
+    allowTeacherSection,
+    hasTeacherCookie,
+    effectiveEntryOutcome,
+    entryPolicy,
+  })
   const isWaitingForTeacher = currentEntryOutcome === 'wait'
   const shouldListenForSessionUpdates = entryPolicy === 'solo-allowed'
     && (currentEntryOutcome === 'continue-solo' || currentEntryOutcome === 'join-live')
@@ -113,11 +118,11 @@ export default function WaitingRoom({
     if (shouldResetTeacherEntryMode({
       hasTeacherCookie,
       effectiveEntryOutcome,
-      shouldShowTeacherEntryToggle,
+      shouldShowTeacherEntryToggle: showTeacherEntryToggle,
     })) {
       setIsTeacherEntryActive(false)
     }
-  }, [currentEntryOutcome, currentStartedSessionId, effectiveEntryOutcome, hasTeacherCookie, shouldShowTeacherEntryToggle])
+  }, [currentEntryOutcome, currentStartedSessionId, effectiveEntryOutcome, hasTeacherCookie, showTeacherEntryToggle])
 
   useEffect(() => {
     setCurrentStartedSessionId(startedSessionId)
@@ -485,7 +490,7 @@ export default function WaitingRoom({
       hasTeacherCookie={hasTeacherCookie}
       teacherCode={teacherCode}
       shareUrl={shareUrl}
-      showTeacherEntryToggle={shouldShowTeacherEntryToggle}
+      showTeacherEntryToggle={showTeacherEntryToggle}
       isTeacherEntryActive={isTeacherEntryActive}
       onTeacherEntryModeSelect={() => {
         setError(null)

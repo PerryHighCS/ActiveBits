@@ -83,8 +83,14 @@ export default function WaitingRoomContent({
   const isSoloOnlyMode = entryPolicy === 'solo-only'
   const hasTeacherToggleCallbacks = typeof onTeacherEntryModeSelect === 'function'
     && typeof onStudentEntryModeSelect === 'function'
-  const showTeacherToggle = showTeacherEntryToggle && hasTeacherToggleCallbacks && !hasTeacherCookie && !isSoloOnlyMode
-  const shouldShowStudentEntryUi = !isTeacherEntryActive
+  const teacherEntryAvailable = allowTeacherSection
+    && showTeacherEntryToggle
+    && hasTeacherToggleCallbacks
+    && !hasTeacherCookie
+    && !isSoloOnlyMode
+  const effectiveIsTeacherEntryActive = isTeacherEntryActive && teacherEntryAvailable
+  const showTeacherToggle = teacherEntryAvailable
+  const shouldShowStudentEntryUi = !effectiveIsTeacherEntryActive
   const shouldShowWaitingRoomFields = shouldShowStudentEntryUi && waitingRoomFields.length > 0
   const shouldShowPrimaryAction = shouldShowStudentEntryUi && viewModel.primaryActionLabel != null
 
@@ -107,12 +113,12 @@ export default function WaitingRoomContent({
         {showTeacherToggle && (
           <div className="border-t-2 border-gray-200 pt-6 mt-6 flex flex-col items-center gap-3">
             <p className="text-sm text-gray-600 text-center">
-              {isTeacherEntryActive
+              {effectiveIsTeacherEntryActive
                 ? 'Enter the teacher code to open the manage dashboard on this device.'
                 : 'Opening this link on a second device? Use the teacher code instead of joining as a student.'}
             </p>
             <div className="flex flex-wrap justify-center gap-3">
-              {isTeacherEntryActive ? (
+              {effectiveIsTeacherEntryActive ? (
                 <Button type="button" onClick={onStudentEntryModeSelect}>
                   Join as Student Instead
                 </Button>
@@ -251,7 +257,7 @@ export default function WaitingRoomContent({
         {viewModel.showTeacherSection && allowTeacherSection && !isSoloOnlyMode && (
           <div className="border-t-2 border-gray-200 pt-6 mt-6">
             <p className="text-center text-gray-700 mb-4 font-semibold">
-              {isTeacherEntryActive
+              {effectiveIsTeacherEntryActive
                 ? 'Teacher access'
                 : entryOutcome === 'continue-solo'
                   ? 'Teachers: Want to start a live session instead?'
@@ -271,7 +277,7 @@ export default function WaitingRoomContent({
                 autoComplete="off"
               />
 
-              {error && (!viewModel.primaryActionLabel || isTeacherEntryActive) && <p className="text-red-600 text-sm">{error}</p>}
+              {error && (!viewModel.primaryActionLabel || effectiveIsTeacherEntryActive) && <p className="text-red-600 text-sm">{error}</p>}
 
               <Button
                 type="submit"
