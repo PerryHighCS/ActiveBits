@@ -42,6 +42,7 @@ import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
 import { processManagerPreloadRequests } from './SyncDeckManager.js'
 import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
 import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckManager.js'
+import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
@@ -539,6 +540,14 @@ void test('resolveCompletedEmbeddedBootstrapChildSessionIds marks both stale loc
     }),
     ['same-child-id'],
   )
+})
+
+void test('resolveEmbeddedBootstrapBackfillRetryDelayMs applies capped exponential backoff', () => {
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(0), 1000)
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(1), 2000)
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(2), 4000)
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(4), 10000)
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(Number.NaN), 1000)
 })
 
 void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for four directions and slide', () => {
