@@ -16,6 +16,16 @@ Record performance findings, bottlenecks, and optimization decisions.
 
 ## Notes
 
+- Date: 2026-03-27
+- Area: persistent session teacher recovery
+- Observation: `findHashBySessionId(sessionId)` originally scanned every persistent hash and loaded each record to recover the backing permalink for `/api/session/:sessionId/teacher-authenticate`.
+- Baseline metric: Teacher recovery lookup cost scaled with total persisted session count, not just the target active session.
+- Change applied: Added a persistent reverse index from `sessionId -> hash`, maintained on `startPersistentSession`, `resetPersistentSession`, and `cleanupPersistentSession`, and switched `findHashBySessionId(...)` to direct lookup.
+- Result metric: Teacher recovery now uses O(1) store lookup in both in-memory and Valkey-backed persistent metadata paths.
+- Tradeoffs: The persistent session lifecycle now has to keep the reverse index in sync whenever a started session is replaced or cleared.
+- Evidence (profile/log/path): `server/core/persistentSessions.ts`; `server/core/valkeyStore.ts`; `server/persistentSessionRoutes.test.ts`.
+- Owner: Codex
+
 - Date: 2026-03-04
 - Area: video-sync local websocket fanout
 - Observation: `video-sync` already tracks per-session websocket subscribers, so falling back to `ws.wss.clients` for local heartbeat/state broadcasts turns each send into an avoidable `O(totalClients)` scan.

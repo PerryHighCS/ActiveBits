@@ -25,6 +25,9 @@ interface PersistentSessionStore {
   set(hash: string, data: PersistentSession): Promise<void>
   delete(hash: string): Promise<void>
   getAllHashes(): Promise<string[]>
+  getHashBySessionId(sessionId: string): Promise<string | null>
+  setHashBySessionId(sessionId: string, hash: string): Promise<void>
+  deleteHashBySessionId(sessionId: string): Promise<void>
   incrementAttempts(key: string): Promise<number>
   getAttempts(key: string): Promise<number>
 }
@@ -62,6 +65,21 @@ export class PersistentSessionEntryParticipantStoreError extends Error {
 
 function createInMemoryPersistentStore(): PersistentSessionStore {
   const memoryStore = new Map<string, unknown>()
+  const rateLimitTimeouts = new Map<string, NodeJS.Timeout>()
+  const getReverseIndexKey = (sessionId: string): string => `sid:${sessionId}`
+  const scheduleRateLimitExpiry = (bucket: string): void => {
+    const existingTimeout = rateLimitTimeouts.get(bucket)
+    if (existingTimeout) {
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      memoryStore.delete(bucket)
+      rateLimitTimeouts.delete(bucket)
+    }, 60_000)
+    timeout.unref?.()
+    rateLimitTimeouts.set(bucket, timeout)
+  }
 
   return {
     async get(hash: string): Promise<PersistentSession | null> {
@@ -74,17 +92,23 @@ function createInMemoryPersistentStore(): PersistentSessionStore {
       memoryStore.delete(hash)
     },
     async getAllHashes(): Promise<string[]> {
-      return Array.from(memoryStore.keys()).filter((key) => !key.startsWith('rl:'))
+      return Array.from(memoryStore.keys()).filter((key) => !key.startsWith('rl:') && !key.startsWith('sid:'))
+    },
+    async getHashBySessionId(sessionId: string): Promise<string | null> {
+      return (memoryStore.get(getReverseIndexKey(sessionId)) as string) ?? null
+    },
+    async setHashBySessionId(sessionId: string, hash: string): Promise<void> {
+      memoryStore.set(getReverseIndexKey(sessionId), hash)
+    },
+    async deleteHashBySessionId(sessionId: string): Promise<void> {
+      memoryStore.delete(getReverseIndexKey(sessionId))
     },
     async incrementAttempts(key: string): Promise<number> {
       const bucket = `rl:${key}`
       const current = (memoryStore.get(bucket) as number) ?? 0
       const next = current + 1
       memoryStore.set(bucket, next)
-      const timeout = setTimeout(() => {
-        memoryStore.delete(bucket)
-      }, 60_000)
-      timeout.unref?.()
+      scheduleRateLimitExpiry(bucket)
       return next
     },
     async getAttempts(key: string): Promise<number> {
@@ -112,6 +136,15 @@ export function initializePersistentStorage(valkeyClient: ValkeyStoreClient | nu
       },
       async getAllHashes(): Promise<string[]> {
         return await valkeyStore.getAllHashes()
+      },
+      async getHashBySessionId(sessionId: string): Promise<string | null> {
+        return await valkeyStore.getHashBySessionId(sessionId)
+      },
+      async setHashBySessionId(sessionId: string, hash: string): Promise<void> {
+        await valkeyStore.setHashBySessionId(sessionId, hash)
+      },
+      async deleteHashBySessionId(sessionId: string): Promise<void> {
+        await valkeyStore.deleteHashBySessionId(sessionId)
       },
       async incrementAttempts(key: string): Promise<number> {
         return await valkeyStore.incrementAttempts(key)
@@ -292,7 +325,7 @@ export async function getOrCreateActivePersistentSession(
   }
 
   if (shouldPersist) {
-    await persistentStore.set(hash, session)
+    await persistPersistentSession(hash, session)
   }
 
   return session
@@ -362,7 +395,7 @@ export async function updatePersistentSessionUrlState(
   }
 
   if (shouldPersist) {
-    await persistentStore.set(hash, session)
+    await persistPersistentSession(hash, session)
   }
 }
 
@@ -416,13 +449,19 @@ function broadcastToWaiters(hash: string, payload: Record<string, unknown>): voi
   }
 }
 
-export async function canAttemptTeacherCode(rateLimitKey: string): Promise<boolean> {
-  const attempts = await persistentStore.getAttempts(rateLimitKey)
-  return attempts < MAX_ATTEMPTS
+async function persistPersistentSession(hash: string, session: PersistentSession): Promise<void> {
+  await persistentStore.set(hash, session)
+  if (session.sessionId) {
+    await persistentStore.setHashBySessionId(session.sessionId, hash)
+  }
 }
 
-export async function recordTeacherCodeAttempt(rateLimitKey: string): Promise<void> {
-  await persistentStore.incrementAttempts(rateLimitKey)
+export async function recordTeacherCodeAttempt(rateLimitKey: string): Promise<{ allowed: boolean; attempts: number }> {
+  const attempts = await persistentStore.incrementAttempts(rateLimitKey)
+  return {
+    allowed: attempts <= MAX_ATTEMPTS,
+    attempts,
+  }
 }
 
 export async function startPersistentSession(
@@ -433,9 +472,14 @@ export async function startPersistentSession(
   const session = await persistentStore.get(hash)
   if (!session) return []
 
+  const previousSessionId = session.sessionId
+  if (previousSessionId && previousSessionId !== sessionId) {
+    await persistentStore.deleteHashBySessionId(previousSessionId)
+  }
+
   session.sessionId = sessionId
   session.teacherSocketId = teacherWs.id || null
-  await persistentStore.set(hash, session)
+  await persistPersistentSession(hash, session)
 
   const waiters = waitersByHash.get(hash) ?? []
   return [...waiters]
@@ -454,26 +498,54 @@ export async function getSessionId(hash: string): Promise<string | null> {
 export async function resetPersistentSession(hash: string): Promise<void> {
   const session = await persistentStore.get(hash)
   if (session != null) {
+    const previousSessionId = session.sessionId
+    if (previousSessionId) {
+      await persistentStore.deleteHashBySessionId(previousSessionId)
+    }
     session.sessionId = null
     session.teacherSocketId = null
-    await persistentStore.set(hash, session)
+    await persistPersistentSession(hash, session)
   }
 
   broadcastToWaiters(hash, { type: 'session-ended' })
 }
 
 export async function findHashBySessionId(sessionId: string): Promise<string | null> {
+  const indexedHash = await persistentStore.getHashBySessionId(sessionId)
+  if (indexedHash) {
+    const indexedSession = await persistentStore.get(indexedHash)
+    if (indexedSession?.sessionId === sessionId) {
+      return indexedHash
+    }
+
+    try {
+      await persistentStore.deleteHashBySessionId(sessionId)
+    } catch (error) {
+      console.error(`Failed to clear stale persistent session hash for session ${sessionId}:`, error)
+    }
+  }
+
   const hashes = await persistentStore.getAllHashes()
   for (const hash of hashes) {
     const session = await persistentStore.get(hash)
     if (session?.sessionId === sessionId) {
+      try {
+        await persistentStore.setHashBySessionId(sessionId, hash)
+      } catch (error) {
+        console.error(`Failed to backfill persistent session hash for session ${sessionId}:`, error)
+      }
       return hash
     }
   }
+
   return null
 }
 
 export async function cleanupPersistentSession(hash: string): Promise<void> {
+  const session = await persistentStore.get(hash)
+  if (session?.sessionId) {
+    await persistentStore.deleteHashBySessionId(session.sessionId)
+  }
   await persistentStore.delete(hash)
   waitersByHash.delete(hash)
 
@@ -506,7 +578,7 @@ export async function storePersistentSessionEntryParticipant(
     }
   }
 
-  await persistentStore.set(hash, session)
+  await persistPersistentSession(hash, session)
 
   return storedEntryParticipant
 }
@@ -525,7 +597,7 @@ export async function consumePersistentSessionEntryParticipant(
     return null
   }
 
-  await persistentStore.set(hash, session)
+  await persistPersistentSession(hash, session)
   return values
 }
 

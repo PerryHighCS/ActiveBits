@@ -171,6 +171,7 @@ When scaling to multiple instances:
 9. **Canonical persistent-link recovery**: Persistent manager recovery routes that return bootstrap data (for example Video Sync `persistentSourceUrl`) should source that data from canonical remembered permalink `selectedOptions` rather than from raw query params on redirected manage routes.
 10. **Activity live-run compatibility fields**: When activity session schemas gain new runtime fields, preserve them across redeploys and normalizer passes. Resonance now relies on `activeQuestionIds` and `activeQuestionDeadlineAt` for multi-question live runs, while older consumers may still read the compatibility field `activeQuestionId`.
 11. **SyncDeck static-presentation launch utility**: `/util/syncdeck/launch-presentation` is a same-origin browser utility flow, not a cross-origin API integration. It depends on the client being able to iframe-load and preflight the requested `presentationUrl` from the ActiveBits origin before creating the session. If deployment policy blocks that iframe load or the URL fails Reveal sync preflight, the utility must stop before creating the standalone session.
+12. **Teacher Join recovery**: The home-page `Teacher Join` flow authenticates a live `sessionId` by resolving it back to shared persistent-session metadata. In multi-instance deployments, that active-session-to-persistent lookup must remain available anywhere the live session can be resumed.
 
 **To scale horizontally**:
 1. Go to **Settings** → **Scaling**

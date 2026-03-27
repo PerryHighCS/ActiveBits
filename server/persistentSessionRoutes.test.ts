@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { initializeActivityRegistry } from './activities/activityRegistry.js'
 import { registerPersistentSessionRoutes } from './routes/persistentSessionRoutes.js'
 import {
+  findHashBySessionId,
   initializePersistentStorage,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
@@ -10,14 +11,67 @@ import {
   startPersistentSession,
   resetPersistentSession,
   cleanupPersistentSession,
+  updatePersistentSessionUrlState,
 } from './core/persistentSessions.js'
 import { buildPersistentLinkUrlQuery } from './core/persistentLinkUrlState.js'
+
+function createFakePersistentValkeyClient(): {
+  store: Map<string, string>
+  on: () => void
+  subscribe: () => Promise<number>
+  publish: () => Promise<number>
+  get: (key: string) => Promise<string | null>
+  set: (key: string, value: string) => Promise<string>
+  del: (key: string) => Promise<number>
+  eval: () => Promise<number>
+  scan: (cursor: string, ...args: Array<string | number>) => Promise<[string, string[]]>
+  quit: () => Promise<string>
+  ping: () => Promise<string>
+  dbsize: () => Promise<number>
+  pttl: () => Promise<number>
+  call: () => Promise<string>
+} {
+  const store = new Map<string, string>()
+
+  return {
+    store,
+    on() {},
+    subscribe: async () => 1,
+    publish: async () => 0,
+    get: async (key: string) => store.get(key) ?? null,
+    set: async (key: string, value: string) => {
+      store.set(key, value)
+      return 'OK'
+    },
+    del: async (key: string) => {
+      const existed = store.delete(key)
+      return existed ? 1 : 0
+    },
+    eval: async () => 0,
+    scan: async (_cursor: string, ...args: Array<string | number>) => {
+      const matchIndex = args.findIndex((arg) => arg === 'MATCH')
+      const pattern = matchIndex >= 0 ? String(args[matchIndex + 1] ?? '*') : '*'
+      const prefix = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern
+      const keys = Array.from(store.keys()).filter((key) => key.startsWith(prefix))
+      return ['0', keys]
+    },
+    quit: async () => 'OK',
+    ping: async () => 'PONG',
+    dbsize: async () => store.size,
+    pttl: async () => -1,
+    call: async () => 'OK',
+  }
+}
 
 interface MockRequest {
   params: Record<string, string>
   query: Record<string, unknown>
   cookies: Record<string, string>
   body: Record<string, unknown>
+  ip?: string
+  socket?: {
+    remoteAddress?: string
+  }
   protocol: string
   get(name: string): string | undefined
 }
@@ -60,6 +114,8 @@ function createMockReq({
   cookies = {},
   body = {},
   headers = {},
+  ip,
+  remoteAddress,
   protocol = 'http',
 }: {
   params?: Record<string, string>
@@ -67,6 +123,8 @@ function createMockReq({
   cookies?: Record<string, string>
   body?: Record<string, unknown>
   headers?: Record<string, string>
+  ip?: string
+  remoteAddress?: string
   protocol?: string
 } = {}): MockRequest {
   return {
@@ -74,6 +132,8 @@ function createMockReq({
     query,
     cookies,
     body,
+    ip,
+    socket: remoteAddress ? { remoteAddress } : undefined,
     protocol,
     get(name: string) {
       const key = name.toLowerCase()
@@ -982,6 +1042,87 @@ void test('teacher lifecycle clears session on explicit end', async (t) => {
   assert.equal(res.jsonBody?.isStarted, false)
 })
 
+void test('session id reverse lookup tracks start, reset, and restart lifecycle', async (t) => {
+  initializePersistentStorage(null)
+
+  const activityName = 'gallery-walk'
+  const teacherCode = 'reverse-lookup'
+  const { hash } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash)
+
+  assert.equal(await findHashBySessionId('first-session'), null)
+
+  await startPersistentSession(hash, 'first-session', { id: 'teacher-ws', readyState: 1, send() {} })
+  assert.equal(await findHashBySessionId('first-session'), hash)
+
+  await resetPersistentSession(hash)
+  assert.equal(await findHashBySessionId('first-session'), null)
+
+  await startPersistentSession(hash, 'second-session', { id: 'teacher-ws-2', readyState: 1, send() {} })
+  assert.equal(await findHashBySessionId('second-session'), hash)
+  assert.equal(await findHashBySessionId('first-session'), null)
+})
+
+void test('session id reverse lookup survives started-session metadata updates', async (t) => {
+  initializePersistentStorage(null)
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'metadata-refresh'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  await updatePersistentSessionUrlState(hash, {
+    entryPolicy: 'solo-allowed',
+    selectedOptions: { presentationUrl: 'https://slides.example/deck' },
+  })
+
+  assert.equal(await findHashBySessionId('live-session'), hash)
+})
+
+void test('session id reverse lookup backfills missing reverse index entries for existing started sessions', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'backfill-reverse-index'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'legacy-session', { id: 'teacher-ws', readyState: 1, send() {} })
+  await valkeyClient.del('persistent-session-by-session:legacy-session')
+
+  assert.equal(await findHashBySessionId('legacy-session'), hash)
+  assert.equal(await findHashBySessionId('legacy-session'), hash)
+})
+
+void test('session id reverse lookup ignores stale reverse index entries and repairs them', async (t) => {
+  const valkeyClient = createFakePersistentValkeyClient()
+  initializePersistentStorage(valkeyClient as never)
+
+  const activityName = 'syncdeck'
+  const { hash: correctHash, hashedTeacherCode: correctTeacherCode } = generatePersistentHash(activityName, 'correct-code')
+  const { hash: staleHash, hashedTeacherCode: staleTeacherCode } = generatePersistentHash(activityName, 'stale-code')
+  t.after(async () => cleanupPersistentSession(correctHash))
+  t.after(async () => cleanupPersistentSession(staleHash))
+
+  await getOrCreateActivePersistentSession(activityName, correctHash, correctTeacherCode, 'solo-allowed')
+  await startPersistentSession(correctHash, 'shared-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  await getOrCreateActivePersistentSession(activityName, staleHash, staleTeacherCode, 'solo-allowed')
+  await startPersistentSession(staleHash, 'other-session', { id: 'teacher-ws-2', readyState: 1, send() {} })
+
+  await valkeyClient.set('persistent-session-by-session:shared-session', staleHash)
+
+  assert.equal(await findHashBySessionId('shared-session'), correctHash)
+  assert.equal(await valkeyClient.get('persistent-session-by-session:shared-session'), correctHash)
+})
+
 void test('authenticate persists selectedOptions from request body when cookie entry is missing', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()
@@ -1746,4 +1887,246 @@ void test('authenticate rejects teacher auth for solo-only permalinks without mu
     entryPolicy: 'solo-only',
   })
   assert.equal(res.cookies.has('persistent_sessions'), false)
+})
+
+void test('session teacher authenticate restores teacher cookie from active session id', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await updatePersistentSessionUrlState(hash, {
+    entryPolicy: 'solo-allowed',
+    selectedOptions: { presentationUrl: 'https://slides.example/deck' },
+  })
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const req = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode },
+  })
+  const res = createMockRes()
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.jsonBody))
+  assert.deepEqual(res.jsonBody, {
+    success: true,
+    activityName,
+    sessionId: 'live-session',
+  })
+  assert.equal(res.headers['cache-control'], 'no-store')
+
+  const cookie = res.cookies.get('persistent_sessions')
+  assert.ok(cookie)
+  const parsed = JSON.parse(cookie?.value ?? '[]') as Array<Record<string, unknown>>
+  const teacherJoinEntry = parsed.find((entry) => entry.key === `${activityName}:${hash}`)
+  assert.deepEqual(teacherJoinEntry, {
+    key: `${activityName}:${hash}`,
+    teacherCode,
+    selectedOptions: { presentationUrl: 'https://slides.example/deck' },
+    entryPolicy: 'solo-allowed',
+    urlHash: buildPersistentLinkUrlQuery({
+      hash,
+      entryPolicy: 'solo-allowed',
+      selectedOptions: { presentationUrl: 'https://slides.example/deck' },
+    }).get('urlHash'),
+  })
+})
+
+void test('session teacher authenticate rejects invalid teacher code', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'instructor-required')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const req = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode: 'wrong-code' },
+  })
+  const res = createMockRes()
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 401)
+  assert.deepEqual(res.jsonBody, { error: 'Invalid teacher code' })
+  assert.equal(res.cookies.has('persistent_sessions'), false)
+})
+
+void test('session teacher authenticate rejects active session activity mismatch', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: 'gallery-walk' })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  const req = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode },
+  })
+  const res = createMockRes()
+  await handler(req, res)
+
+  assert.equal(res.statusCode, 404)
+  assert.deepEqual(res.jsonBody, { error: 'Teacher join is unavailable for this session' })
+  assert.equal(res.cookies.has('persistent_sessions'), false)
+})
+
+void test('session teacher authenticate rate limits repeated invalid attempts per client and session', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const req = createMockReq({
+      params: { sessionId: 'live-session' },
+      body: { teacherCode: 'wrong-code' },
+      ip: '203.0.113.9',
+    })
+    const res = createMockRes()
+    await handler(req, res)
+
+    assert.equal(res.statusCode, 401)
+    assert.deepEqual(res.jsonBody, { error: 'Invalid teacher code' })
+  }
+
+  const blockedReq = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode: 'wrong-code' },
+    ip: '203.0.113.9',
+  })
+  const blockedRes = createMockRes()
+  await handler(blockedReq, blockedRes)
+
+  assert.equal(blockedRes.statusCode, 429)
+  assert.deepEqual(blockedRes.jsonBody, { error: 'Too many attempts. Please wait a minute.' })
+  assert.equal(blockedRes.cookies.has('persistent_sessions'), false)
+})
+
+void test('session teacher authenticate rate limiting ignores spoofed forwarded headers when req.ip is present', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const req = createMockReq({
+      params: { sessionId: 'live-session' },
+      body: { teacherCode: 'wrong-code' },
+      ip: '203.0.113.9',
+      headers: { 'x-forwarded-for': `198.51.100.${attempt}` },
+    })
+    const res = createMockRes()
+    await handler(req, res)
+    assert.equal(res.statusCode, 401)
+  }
+
+  const blockedReq = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode: 'wrong-code' },
+    ip: '203.0.113.9',
+    headers: { 'x-forwarded-for': '198.51.100.200' },
+  })
+  const blockedRes = createMockRes()
+  await handler(blockedReq, blockedRes)
+
+  assert.equal(blockedRes.statusCode, 429)
+  assert.deepEqual(blockedRes.jsonBody, { error: 'Too many attempts. Please wait a minute.' })
+})
+
+void test('session teacher authenticate rate limits by socket remote address when req.ip is unavailable', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const req = createMockReq({
+      params: { sessionId: 'live-session' },
+      body: { teacherCode: 'wrong-code' },
+      remoteAddress: '203.0.113.10',
+    })
+    const res = createMockRes()
+    await handler(req, res)
+    assert.equal(res.statusCode, 401)
+  }
+
+  const blockedReq = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode: 'wrong-code' },
+    remoteAddress: '203.0.113.10',
+  })
+  const blockedRes = createMockRes()
+  await handler(blockedReq, blockedRes)
+
+  assert.equal(blockedRes.statusCode, 429)
+  assert.deepEqual(blockedRes.jsonBody, { error: 'Too many attempts. Please wait a minute.' })
 })

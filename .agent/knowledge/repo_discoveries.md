@@ -1579,3 +1579,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: Teacher-entry mode must reset from the live derived waiting-room state (`currentEntryOutcome` plus `currentStartedSessionId` / `effectiveEntryOutcome`), not only from the initial `entryOutcome` prop, because websocket transitions can flip `join-live` back to `continue-solo` without a prop change.
 - Why it matters: If the UI keeps stale teacher-entry mode active after a `session-ended` transition, the toggle disappears and the student join UI stays hidden.
 - Owner: Codex
+- Date: 2026-03-27
+- Area: home-page teacher recovery
+- Discovery: Rejoining an active instructor session from `/` should reuse the persistent-session teacher auth model by looking up `sessionId -> persistent hash`, rather than inventing a separate live-session credential path.
+- Why it matters: Second instructors often only have the live join code after class starts; without the persistent lookup, they cannot recover manage access unless they still have the original permalink.
+- Owner: Codex
+- Date: 2026-03-27
+- Area: client routing | manager session teardown
+- Discovery: Manager routes need a shared session-existence guard on `/manage/:activityId/:sessionId`, because student views already handle `session-ended` but instructor views are activity-specific and do not consistently attach that redirect logic.
+- Why it matters: Without the shared guard, a second instructor can stay stranded on a stale manager screen after another instructor ends the session.
+- Evidence: `client/src/App.tsx`; `client/src/components/common/ManagedSessionRoute.tsx`
+- Owner: Codex

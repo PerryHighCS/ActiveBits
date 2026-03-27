@@ -255,13 +255,16 @@ void test('ManageDashboard generic preflight option requires verify before submi
   const fetchStub = installFetchStub()
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
   let unmount: (() => void) | null = null
+  let cleanup: (() => void) | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: false,
   }
 
   try {
-    const { fireEvent, render, waitFor } = await import('@testing-library/react')
+    const testingLibrary = await import('@testing-library/react')
+    const { fireEvent, render, waitFor } = testingLibrary
+    cleanup = testingLibrary.cleanup
     const { default: ManageDashboard } = await import('./ManageDashboard.js')
     const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
     const rendered = render(
@@ -308,6 +311,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
     })
   } finally {
     unmount?.()
+    cleanup?.()
     testActivity.manageDashboard = {
       ...testActivity.manageDashboard,
       ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),
@@ -322,13 +326,16 @@ void test('ManageDashboard custom builders must signal readiness before submit p
   const fetchStub = installFetchStub()
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
   let unmount: (() => void) | null = null
+  let cleanup: (() => void) | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: true,
   }
 
   try {
-    const { fireEvent, render, waitFor } = await import('@testing-library/react')
+    const testingLibrary = await import('@testing-library/react')
+    const { fireEvent, render, waitFor } = testingLibrary
+    cleanup = testingLibrary.cleanup
     const { default: ManageDashboard } = await import('./ManageDashboard.js')
     const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
     const rendered = render(
@@ -379,6 +386,7 @@ void test('ManageDashboard custom builders must signal readiness before submit p
     })
   } finally {
     unmount?.()
+    cleanup?.()
     testActivity.manageDashboard = {
       ...testActivity.manageDashboard,
       ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),

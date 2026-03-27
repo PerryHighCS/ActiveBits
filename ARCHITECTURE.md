@@ -49,6 +49,7 @@ ActiveBits/
 3. System creates session and redirects to `/manage/{activity-id}/{session-id}`
 4. Teacher shares the session ID with students
 5. Teacher manages the activity from the manager view
+6. Additional instructors can use `Teacher Join` on `/` with the session ID plus teacher code to recover the live manage view
 
 ### Teacher Flow - Persistent Sessions
 1. Navigate to `/manage`
@@ -60,6 +61,7 @@ ActiveBits/
 7. Auto-authentication using teacher code cookie
 8. Download CSV backup of all permanent links
 9. For `solo-allowed` links with no active live session, the waiting room remains visible so students can choose solo mode and instructors without a remembered cookie can still enter the teacher code to start a new live session
+10. Once a live session is active, instructors without the original permalink can still rejoin from `/` because `Teacher Join` resolves the live session ID back to the persistent-session teacher auth for that activity
 
 ### Student Flow
 1. Receive session ID or permanent link from teacher
