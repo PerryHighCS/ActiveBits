@@ -243,6 +243,85 @@ void test('WaitingRoomContent hides teacher-entry toggle when callbacks are miss
   assert.doesNotMatch(html, /Use the teacher code instead of joining as a student/i)
 })
 
+void test('WaitingRoomContent hides teacher-entry toggle when teacher section is disabled and keeps student join UI visible', () => {
+  const html = renderToStaticMarkup(
+    <WaitingRoomContent
+      activityDisplayName="SyncDeck"
+      waiterCount={0}
+      error={null}
+      isSubmitting={false}
+      waitingRoomFields={sampleFields}
+      waitingRoomValues={{ displayName: '', team: '' }}
+      touchedFields={{}}
+      waitingRoomErrors={{}}
+      customFieldComponents={{}}
+      customFieldLoadError={null}
+      entryOutcome="join-live"
+      allowTeacherSection={false}
+      showShareUrl={false}
+      hasTeacherCookie={false}
+      teacherCode=""
+      shareUrl=""
+      showTeacherEntryToggle
+      isTeacherEntryActive={false}
+      onTeacherEntryModeSelect={() => {}}
+      onStudentEntryModeSelect={() => {}}
+      onTeacherCodeChange={() => {}}
+      onTeacherCodeSubmit={(event) => {
+        event.preventDefault()
+      }}
+      onPrimaryAction={() => {}}
+      onFieldChange={() => {}}
+      onFieldBlur={() => {}}
+    />,
+  )
+
+  assert.doesNotMatch(html, /I&#x27;m the Teacher/)
+  assert.doesNotMatch(html, /Use the teacher code instead of joining as a student/i)
+  assert.match(html, /Join Session/)
+  assert.match(html, /Display name/)
+})
+
+void test('WaitingRoomContent treats teacher-entry mode as inactive when teacher entry is unavailable', () => {
+  const html = renderToStaticMarkup(
+    <WaitingRoomContent
+      activityDisplayName="SyncDeck"
+      waiterCount={0}
+      error={null}
+      isSubmitting={false}
+      waitingRoomFields={sampleFields}
+      waitingRoomValues={{ displayName: '', team: '' }}
+      touchedFields={{}}
+      waitingRoomErrors={{}}
+      customFieldComponents={{}}
+      customFieldLoadError={null}
+      entryOutcome="join-live"
+      allowTeacherSection={false}
+      showShareUrl={false}
+      hasTeacherCookie={false}
+      teacherCode=""
+      shareUrl=""
+      showTeacherEntryToggle
+      isTeacherEntryActive
+      onTeacherEntryModeSelect={() => {}}
+      onStudentEntryModeSelect={() => {}}
+      onTeacherCodeChange={() => {}}
+      onTeacherCodeSubmit={(event) => {
+        event.preventDefault()
+      }}
+      onPrimaryAction={() => {}}
+      onFieldChange={() => {}}
+      onFieldBlur={() => {}}
+    />,
+  )
+
+  assert.doesNotMatch(html, /Teacher access/)
+  assert.doesNotMatch(html, /Join as Student Instead/)
+  assert.doesNotMatch(html, /Enter teacher code/)
+  assert.match(html, /Join Session/)
+  assert.match(html, /Display name/)
+})
+
 void test('WaitingRoomContent focuses on teacher auth when teacher entry mode is active', () => {
   const html = renderToStaticMarkup(
     <WaitingRoomContent
