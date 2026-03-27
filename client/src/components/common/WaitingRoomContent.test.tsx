@@ -202,10 +202,14 @@ void test('WaitingRoomContent surfaces an explicit teacher-entry path for fresh 
     />,
   )
 
+  const joinSessionIndex = html.indexOf('Join Session')
+  const teacherEntryIndex = html.indexOf('I&#x27;m the Teacher')
+
   assert.match(html, /I&#x27;m the Teacher/)
-  assert.match(html, /Use the teacher code instead of joining as a student/i)
   assert.match(html, /Join Session/)
   assert.match(html, /Display name/)
+  assert.ok(joinSessionIndex >= 0)
+  assert.ok(teacherEntryIndex > joinSessionIndex)
 })
 
 void test('WaitingRoomContent hides teacher-entry toggle when callbacks are missing', () => {
@@ -240,7 +244,6 @@ void test('WaitingRoomContent hides teacher-entry toggle when callbacks are miss
   )
 
   assert.doesNotMatch(html, /I&#x27;m the Teacher/)
-  assert.doesNotMatch(html, /Use the teacher code instead of joining as a student/i)
 })
 
 void test('WaitingRoomContent hides teacher-entry toggle when teacher section is disabled and keeps student join UI visible', () => {
@@ -277,7 +280,6 @@ void test('WaitingRoomContent hides teacher-entry toggle when teacher section is
   )
 
   assert.doesNotMatch(html, /I&#x27;m the Teacher/)
-  assert.doesNotMatch(html, /Use the teacher code instead of joining as a student/i)
   assert.match(html, /Join Session/)
   assert.match(html, /Display name/)
 })

@@ -25,7 +25,7 @@ import {
   buildSessionEntryParticipantStorageKey,
   hasValidEntryParticipantHandoffStorageValue,
 } from './entryParticipantStorage'
-import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
+import { shouldAutoRedirectPersistentTeacherToManage, shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
 import { readSessionParticipantContext } from './sessionParticipantContext'
 
 interface RouteParams {
@@ -212,13 +212,21 @@ const SessionRouter = () => {
 
   useEffect(() => {
     if (!activityName) return
-    if (!persistentSessionEntryStatus?.isStarted || !persistentSessionEntryStatus.sessionId) return
-    if (persistentSessionEntryStatus.resolvedRole !== 'teacher' || persistentSessionEntryStatus.entryOutcome !== 'join-live') {
+    if (!shouldAutoRedirectPersistentTeacherToManage({
+      isStarted: persistentSessionEntryStatus?.isStarted,
+      sessionId: persistentSessionEntryStatus?.sessionId,
+      resolvedRole: persistentSessionEntryStatus?.resolvedRole,
+      entryOutcome: persistentSessionEntryStatus?.entryOutcome,
+      presentationMode: persistentSessionEntryStatus?.presentationMode,
+    })) {
       return
     }
 
     let isCancelled = false
-    const startedSessionId = persistentSessionEntryStatus.sessionId
+    const startedSessionId = persistentSessionEntryStatus?.sessionId
+    if (!startedSessionId) {
+      return
+    }
     const queryString = getWindowSearch()
 
     void (async () => {
@@ -235,6 +243,7 @@ const SessionRouter = () => {
     activityName,
     persistentSessionEntryStatus?.entryOutcome,
     persistentSessionEntryStatus?.isStarted,
+    persistentSessionEntryStatus?.presentationMode,
     persistentSessionEntryStatus?.resolvedRole,
     persistentSessionEntryStatus?.sessionId,
     navigate,

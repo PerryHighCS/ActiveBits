@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
+import { shouldAutoRedirectPersistentTeacherToManage, shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
 
 void test('shouldRenderSessionJoinPreflight returns false when sessionId is missing', () => {
   assert.equal(
@@ -89,5 +89,29 @@ void test('shouldRenderSessionJoinPreflight can still render when stored partici
       allowStoredParticipantContext: true,
     }),
     true,
+  )
+})
+
+void test('shouldAutoRedirectPersistentTeacherToManage only redirects pass-through teacher entries', () => {
+  assert.equal(
+    shouldAutoRedirectPersistentTeacherToManage({
+      isStarted: true,
+      sessionId: 'session-1',
+      resolvedRole: 'teacher',
+      entryOutcome: 'join-live',
+      presentationMode: 'pass-through',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldAutoRedirectPersistentTeacherToManage({
+      isStarted: true,
+      sessionId: 'session-1',
+      resolvedRole: 'teacher',
+      entryOutcome: 'join-live',
+      presentationMode: 'render-ui',
+    }),
+    false,
   )
 })

@@ -110,27 +110,6 @@ export default function WaitingRoomContent({
           ) : null}
         </div>
 
-        {showTeacherToggle && (
-          <div className="border-t-2 border-gray-200 pt-6 mt-6 flex flex-col items-center gap-3">
-            <p className="text-sm text-gray-600 text-center">
-              {effectiveIsTeacherEntryActive
-                ? 'Enter the teacher code to open the manage dashboard on this device.'
-                : 'Opening this link on a second device? Use the teacher code instead of joining as a student.'}
-            </p>
-            <div className="flex flex-wrap justify-center gap-3">
-              {effectiveIsTeacherEntryActive ? (
-                <Button type="button" onClick={onStudentEntryModeSelect}>
-                  Join as Student Instead
-                </Button>
-              ) : (
-                <Button type="button" onClick={onTeacherEntryModeSelect}>
-                  I&apos;m the Teacher
-                </Button>
-              )}
-            </div>
-          </div>
-        )}
-
         {shouldShowWaitingRoomFields && (
           <section aria-labelledby="waiting-room-fields-heading" className="border-t-2 border-gray-200 pt-6 mt-6">
             {viewModel.fieldHeading ? (
@@ -251,6 +230,22 @@ export default function WaitingRoomContent({
             <Button type="button" onClick={onPrimaryAction}>
               {viewModel.primaryActionLabel}
             </Button>
+          </div>
+        )}
+
+        {showTeacherToggle && (
+          <div className="border-t-2 border-gray-200 pt-6 mt-6 flex flex-col items-center gap-3">
+            <div className="flex flex-wrap justify-center gap-3">
+              {effectiveIsTeacherEntryActive ? (
+                <Button type="button" onClick={onStudentEntryModeSelect}>
+                  Join as Student Instead
+                </Button>
+              ) : (
+                <Button type="button" onClick={onTeacherEntryModeSelect}>
+                  I&apos;m the Teacher
+                </Button>
+              )}
+            </div>
           </div>
         )}
 
