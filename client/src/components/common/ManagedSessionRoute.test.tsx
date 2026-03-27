@@ -57,7 +57,7 @@ void test('ManagedSessionRoute redirects to session-ended when the managed sessi
 
   const { render, waitFor, cleanup } = await import('@testing-library/react')
   const { MemoryRouter, Route, Routes } = await import('react-router-dom')
-  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute')
+  const { default: ManagedSessionRoute } = await import('./ManagedSessionRoute.js')
   try {
     const rendered = render(
       <MemoryRouter initialEntries={['/manage/syncdeck/session-1']}>
