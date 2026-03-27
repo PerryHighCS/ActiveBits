@@ -71,6 +71,10 @@ interface RequestLike {
   query: Record<string, unknown>
   cookies?: Record<string, unknown>
   body?: unknown
+  ip?: string
+  socket?: {
+    remoteAddress?: string
+  }
   protocol: string
   get(name: string): string | undefined
 }
@@ -117,23 +121,12 @@ function getBodyString(body: Record<string, unknown>, key: string): string | nul
 }
 
 function getRequestClientIp(req: RequestLike): string {
-  const forwardedFor = req.get('x-forwarded-for')
-  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
-    const forwardedIp = forwardedFor
-      .split(',')
-      .map((part) => part.trim())
-      .find(Boolean)
-    if (forwardedIp) {
-      return forwardedIp
-    }
+  if (typeof req.ip === 'string' && req.ip.trim()) {
+    return req.ip.trim()
   }
 
-  const forwarded = req.get('forwarded')
-  if (typeof forwarded === 'string' && forwarded.trim()) {
-    const match = forwarded.match(/for=([^;]+)/i)
-    if (match?.[1]) {
-      return match[1].replace(/^\[|\]$/g, '').replace(/"/g, '')
-    }
+  if (typeof req.socket?.remoteAddress === 'string' && req.socket.remoteAddress.trim()) {
+    return req.socket.remoteAddress.trim()
   }
 
   return 'unknown'

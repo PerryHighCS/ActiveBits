@@ -20,6 +20,10 @@ interface MockRequest {
   query: Record<string, unknown>
   cookies: Record<string, string>
   body: Record<string, unknown>
+  ip?: string
+  socket?: {
+    remoteAddress?: string
+  }
   protocol: string
   get(name: string): string | undefined
 }
@@ -62,6 +66,8 @@ function createMockReq({
   cookies = {},
   body = {},
   headers = {},
+  ip,
+  remoteAddress,
   protocol = 'http',
 }: {
   params?: Record<string, string>
@@ -69,6 +75,8 @@ function createMockReq({
   cookies?: Record<string, string>
   body?: Record<string, unknown>
   headers?: Record<string, string>
+  ip?: string
+  remoteAddress?: string
   protocol?: string
 } = {}): MockRequest {
   return {
@@ -76,6 +84,8 @@ function createMockReq({
     query,
     cookies,
     body,
+    ip,
+    socket: remoteAddress ? { remoteAddress } : undefined,
     protocol,
     get(name: string) {
       const key = name.toLowerCase()
@@ -1909,7 +1919,7 @@ void test('session teacher authenticate rate limits repeated invalid attempts pe
     const req = createMockReq({
       params: { sessionId: 'live-session' },
       body: { teacherCode: 'wrong-code' },
-      headers: { 'x-forwarded-for': '203.0.113.9' },
+      ip: '203.0.113.9',
     })
     const res = createMockRes()
     await handler(req, res)
@@ -1921,7 +1931,7 @@ void test('session teacher authenticate rate limits repeated invalid attempts pe
   const blockedReq = createMockReq({
     params: { sessionId: 'live-session' },
     body: { teacherCode: 'wrong-code' },
-    headers: { 'x-forwarded-for': '203.0.113.9' },
+    ip: '203.0.113.9',
   })
   const blockedRes = createMockRes()
   await handler(blockedReq, blockedRes)
@@ -1929,4 +1939,88 @@ void test('session teacher authenticate rate limits repeated invalid attempts pe
   assert.equal(blockedRes.statusCode, 429)
   assert.deepEqual(blockedRes.jsonBody, { error: 'Too many attempts. Please wait a minute.' })
   assert.equal(blockedRes.cookies.has('persistent_sessions'), false)
+})
+
+void test('session teacher authenticate rate limiting ignores spoofed forwarded headers when req.ip is present', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const req = createMockReq({
+      params: { sessionId: 'live-session' },
+      body: { teacherCode: 'wrong-code' },
+      ip: '203.0.113.9',
+      headers: { 'x-forwarded-for': `198.51.100.${attempt}` },
+    })
+    const res = createMockRes()
+    await handler(req, res)
+    assert.equal(res.statusCode, 401)
+  }
+
+  const blockedReq = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode: 'wrong-code' },
+    ip: '203.0.113.9',
+    headers: { 'x-forwarded-for': '198.51.100.200' },
+  })
+  const blockedRes = createMockRes()
+  await handler(blockedReq, blockedRes)
+
+  assert.equal(blockedRes.statusCode, 429)
+  assert.deepEqual(blockedRes.jsonBody, { error: 'Too many attempts. Please wait a minute.' })
+})
+
+void test('session teacher authenticate rate limits by socket remote address when req.ip is unavailable', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+  const sessionMap = new Map<string, unknown>()
+  const sessions = { get: async (id: string) => sessionMap.get(id) ?? null }
+  const app = createMockApp()
+  registerPersistentSessionRoutes({ app, sessions })
+  const handler = getRoute(app, 'POST', '/api/session/:sessionId/teacher-authenticate')
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'teacher-secret'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const req = createMockReq({
+      params: { sessionId: 'live-session' },
+      body: { teacherCode: 'wrong-code' },
+      remoteAddress: '203.0.113.10',
+    })
+    const res = createMockRes()
+    await handler(req, res)
+    assert.equal(res.statusCode, 401)
+  }
+
+  const blockedReq = createMockReq({
+    params: { sessionId: 'live-session' },
+    body: { teacherCode: 'wrong-code' },
+    remoteAddress: '203.0.113.10',
+  })
+  const blockedRes = createMockRes()
+  await handler(blockedReq, blockedRes)
+
+  assert.equal(blockedRes.statusCode, 429)
+  assert.deepEqual(blockedRes.jsonBody, { error: 'Too many attempts. Please wait a minute.' })
 })
