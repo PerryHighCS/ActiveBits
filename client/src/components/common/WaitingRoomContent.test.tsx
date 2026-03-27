@@ -169,6 +169,156 @@ void test('WaitingRoomContent labels the solo-to-live teacher prompt explicitly'
   assert.match(html, /Continue in Solo Mode/)
 })
 
+void test('WaitingRoomContent surfaces an explicit teacher-entry path for fresh live-session devices', () => {
+  const html = renderToStaticMarkup(
+    <WaitingRoomContent
+      activityDisplayName="SyncDeck"
+      waiterCount={0}
+      error={null}
+      isSubmitting={false}
+      waitingRoomFields={sampleFields}
+      waitingRoomValues={{ displayName: '', team: '' }}
+      touchedFields={{}}
+      waitingRoomErrors={{}}
+      customFieldComponents={{}}
+      customFieldLoadError={null}
+      entryOutcome="join-live"
+      allowTeacherSection
+      showShareUrl={false}
+      hasTeacherCookie={false}
+      teacherCode=""
+      shareUrl=""
+      showTeacherEntryToggle
+      isTeacherEntryActive={false}
+      onTeacherEntryModeSelect={() => {}}
+      onStudentEntryModeSelect={() => {}}
+      onTeacherCodeChange={() => {}}
+      onTeacherCodeSubmit={(event) => {
+        event.preventDefault()
+      }}
+      onPrimaryAction={() => {}}
+      onFieldChange={() => {}}
+      onFieldBlur={() => {}}
+    />,
+  )
+
+  assert.match(html, /I&#x27;m the Teacher/)
+  assert.match(html, /Use the teacher code instead of joining as a student/i)
+  assert.match(html, /Join Session/)
+  assert.match(html, /Display name/)
+})
+
+void test('WaitingRoomContent hides teacher-entry toggle when callbacks are missing', () => {
+  const html = renderToStaticMarkup(
+    <WaitingRoomContent
+      activityDisplayName="SyncDeck"
+      waiterCount={0}
+      error={null}
+      isSubmitting={false}
+      waitingRoomFields={sampleFields}
+      waitingRoomValues={{ displayName: '', team: '' }}
+      touchedFields={{}}
+      waitingRoomErrors={{}}
+      customFieldComponents={{}}
+      customFieldLoadError={null}
+      entryOutcome="join-live"
+      allowTeacherSection
+      showShareUrl={false}
+      hasTeacherCookie={false}
+      teacherCode=""
+      shareUrl=""
+      showTeacherEntryToggle
+      isTeacherEntryActive={false}
+      onTeacherCodeChange={() => {}}
+      onTeacherCodeSubmit={(event) => {
+        event.preventDefault()
+      }}
+      onPrimaryAction={() => {}}
+      onFieldChange={() => {}}
+      onFieldBlur={() => {}}
+    />,
+  )
+
+  assert.doesNotMatch(html, /I&#x27;m the Teacher/)
+  assert.doesNotMatch(html, /Use the teacher code instead of joining as a student/i)
+})
+
+void test('WaitingRoomContent focuses on teacher auth when teacher entry mode is active', () => {
+  const html = renderToStaticMarkup(
+    <WaitingRoomContent
+      activityDisplayName="SyncDeck"
+      waiterCount={0}
+      error={null}
+      isSubmitting={false}
+      waitingRoomFields={sampleFields}
+      waitingRoomValues={{ displayName: '', team: '' }}
+      touchedFields={{}}
+      waitingRoomErrors={{}}
+      customFieldComponents={{}}
+      customFieldLoadError={null}
+      entryOutcome="join-live"
+      allowTeacherSection
+      showShareUrl={false}
+      hasTeacherCookie={false}
+      teacherCode=""
+      shareUrl=""
+      showTeacherEntryToggle
+      isTeacherEntryActive
+      onTeacherEntryModeSelect={() => {}}
+      onStudentEntryModeSelect={() => {}}
+      onTeacherCodeChange={() => {}}
+      onTeacherCodeSubmit={(event) => {
+        event.preventDefault()
+      }}
+      onPrimaryAction={() => {}}
+      onFieldChange={() => {}}
+      onFieldBlur={() => {}}
+    />,
+  )
+
+  assert.match(html, /Teacher access/)
+  assert.match(html, /Join as Student Instead/)
+  assert.match(html, /Enter teacher code/)
+  assert.doesNotMatch(html, /Join Session/)
+  assert.doesNotMatch(html, /Display name/)
+})
+
+void test('WaitingRoomContent shows teacher auth errors while teacher entry mode is active', () => {
+  const html = renderToStaticMarkup(
+    <WaitingRoomContent
+      activityDisplayName="SyncDeck"
+      waiterCount={0}
+      error="Teacher code is invalid."
+      isSubmitting={false}
+      waitingRoomFields={sampleFields}
+      waitingRoomValues={{ displayName: '', team: '' }}
+      touchedFields={{}}
+      waitingRoomErrors={{}}
+      customFieldComponents={{}}
+      customFieldLoadError={null}
+      entryOutcome="join-live"
+      allowTeacherSection
+      showShareUrl={false}
+      hasTeacherCookie={false}
+      teacherCode="wrong-code"
+      shareUrl=""
+      showTeacherEntryToggle
+      isTeacherEntryActive
+      onTeacherEntryModeSelect={() => {}}
+      onStudentEntryModeSelect={() => {}}
+      onTeacherCodeChange={() => {}}
+      onTeacherCodeSubmit={(event) => {
+        event.preventDefault()
+      }}
+      onPrimaryAction={() => {}}
+      onFieldChange={() => {}}
+      onFieldBlur={() => {}}
+    />,
+  )
+
+  assert.match(html, /Teacher code is invalid\./)
+})
+
 void test('WaitingRoomContent hides share footer for students and shows it for remembered teachers', () => {
   const studentHtml = renderToStaticMarkup(
     <WaitingRoomContent

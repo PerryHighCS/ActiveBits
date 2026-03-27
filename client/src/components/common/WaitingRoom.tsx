@@ -38,6 +38,7 @@ import { resolveWaitingRoomPrimaryAction } from './waitingRoomActionUtils'
 import { persistWaitingRoomServerBackedHandoff } from './waitingRoomHandoffUtils'
 import { resolveWaitingRoomTeacherSubmitResult } from './waitingRoomTeacherSubmitUtils'
 import { attachWaitingRoomSocketHandlers } from './waitingRoomSocketUtils'
+import { shouldResetTeacherEntryMode } from './waitingRoomTeacherEntryUtils'
 
 interface WaitingRoomProps {
   activityName: string
@@ -86,6 +87,7 @@ export default function WaitingRoom({
   const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({})
   const [customFieldComponents, setCustomFieldComponents] = useState<Record<string, ComponentType<WaitingRoomFieldComponentProps>>>(EMPTY_CUSTOM_FIELD_COMPONENTS)
   const [customFieldLoadError, setCustomFieldLoadError] = useState<string | null>(null)
+  const [isTeacherEntryActive, setIsTeacherEntryActive] = useState(false)
   const shouldAutoAuthRef = useRef(hasTeacherCookie)
   const currentEntryOutcomeRef = useRef<PersistentSessionEntryOutcome>(entryOutcome)
   const currentEntryPolicyRef = useRef<PersistentSessionEntryPolicy | undefined>(entryPolicy)
@@ -96,6 +98,7 @@ export default function WaitingRoom({
   const effectiveEntryOutcome: PersistentSessionEntryOutcome = (
     currentEntryOutcome === 'join-live' && !currentStartedSessionId
   ) ? 'continue-solo' : currentEntryOutcome
+  const shouldShowTeacherEntryToggle = !hasTeacherCookie && effectiveEntryOutcome === 'join-live'
   const isWaitingForTeacher = currentEntryOutcome === 'wait'
   const shouldListenForSessionUpdates = entryPolicy === 'solo-allowed'
     && (currentEntryOutcome === 'continue-solo' || currentEntryOutcome === 'join-live')
@@ -105,6 +108,16 @@ export default function WaitingRoom({
     setCurrentEntryOutcome(entryOutcome)
     currentEntryOutcomeRef.current = entryOutcome
   }, [entryOutcome])
+
+  useEffect(() => {
+    if (shouldResetTeacherEntryMode({
+      hasTeacherCookie,
+      effectiveEntryOutcome,
+      shouldShowTeacherEntryToggle,
+    })) {
+      setIsTeacherEntryActive(false)
+    }
+  }, [currentEntryOutcome, currentStartedSessionId, effectiveEntryOutcome, hasTeacherCookie, shouldShowTeacherEntryToggle])
 
   useEffect(() => {
     setCurrentStartedSessionId(startedSessionId)
@@ -230,7 +243,6 @@ export default function WaitingRoom({
   }, [activityName, hash, navigate, shouldKeepWaitingRoomSocketOpen])
 
   const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
-
   const handleTeacherCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)
@@ -473,6 +485,16 @@ export default function WaitingRoom({
       hasTeacherCookie={hasTeacherCookie}
       teacherCode={teacherCode}
       shareUrl={shareUrl}
+      showTeacherEntryToggle={shouldShowTeacherEntryToggle}
+      isTeacherEntryActive={isTeacherEntryActive}
+      onTeacherEntryModeSelect={() => {
+        setError(null)
+        setIsTeacherEntryActive(true)
+      }}
+      onStudentEntryModeSelect={() => {
+        setError(null)
+        setIsTeacherEntryActive(false)
+      }}
       onTeacherCodeChange={setTeacherCode}
       onTeacherCodeSubmit={handleTeacherCodeSubmit}
       onPrimaryAction={effectiveEntryOutcome === 'join-live' ? handleJoinLive : handleContinueSolo}

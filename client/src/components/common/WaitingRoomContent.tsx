@@ -32,6 +32,10 @@ interface WaitingRoomContentProps {
   hasTeacherCookie: boolean
   teacherCode: string
   shareUrl: string
+  showTeacherEntryToggle?: boolean
+  isTeacherEntryActive?: boolean
+  onTeacherEntryModeSelect?: () => void
+  onStudentEntryModeSelect?: () => void
   onTeacherCodeChange: (value: string) => void
   onTeacherCodeSubmit: (event: FormEvent<HTMLFormElement>) => void
   onPrimaryAction: () => void
@@ -65,6 +69,10 @@ export default function WaitingRoomContent({
   hasTeacherCookie,
   teacherCode,
   shareUrl,
+  showTeacherEntryToggle = false,
+  isTeacherEntryActive = false,
+  onTeacherEntryModeSelect,
+  onStudentEntryModeSelect,
   onTeacherCodeChange,
   onTeacherCodeSubmit,
   onPrimaryAction,
@@ -73,6 +81,12 @@ export default function WaitingRoomContent({
 }: WaitingRoomContentProps) {
   const viewModel = getWaitingRoomViewModel(entryOutcome)
   const isSoloOnlyMode = entryPolicy === 'solo-only'
+  const hasTeacherToggleCallbacks = typeof onTeacherEntryModeSelect === 'function'
+    && typeof onStudentEntryModeSelect === 'function'
+  const showTeacherToggle = showTeacherEntryToggle && hasTeacherToggleCallbacks && !hasTeacherCookie && !isSoloOnlyMode
+  const shouldShowStudentEntryUi = !isTeacherEntryActive
+  const shouldShowWaitingRoomFields = shouldShowStudentEntryUi && waitingRoomFields.length > 0
+  const shouldShowPrimaryAction = shouldShowStudentEntryUi && viewModel.primaryActionLabel != null
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] max-w-2xl mx-auto p-6">
@@ -90,7 +104,28 @@ export default function WaitingRoomContent({
           ) : null}
         </div>
 
-        {waitingRoomFields.length > 0 && (
+        {showTeacherToggle && (
+          <div className="border-t-2 border-gray-200 pt-6 mt-6 flex flex-col items-center gap-3">
+            <p className="text-sm text-gray-600 text-center">
+              {isTeacherEntryActive
+                ? 'Enter the teacher code to open the manage dashboard on this device.'
+                : 'Opening this link on a second device? Use the teacher code instead of joining as a student.'}
+            </p>
+            <div className="flex flex-wrap justify-center gap-3">
+              {isTeacherEntryActive ? (
+                <Button type="button" onClick={onStudentEntryModeSelect}>
+                  Join as Student Instead
+                </Button>
+              ) : (
+                <Button type="button" onClick={onTeacherEntryModeSelect}>
+                  I&apos;m the Teacher
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {shouldShowWaitingRoomFields && (
           <section aria-labelledby="waiting-room-fields-heading" className="border-t-2 border-gray-200 pt-6 mt-6">
             {viewModel.fieldHeading ? (
               <h2 id="waiting-room-fields-heading" className="text-center text-gray-800 mb-2 font-semibold">{viewModel.fieldHeading}</h2>
@@ -204,7 +239,7 @@ export default function WaitingRoomContent({
           </section>
         )}
 
-        {viewModel.primaryActionLabel && (
+        {shouldShowPrimaryAction && (
           <div className="border-t-2 border-gray-200 pt-6 mt-6 flex flex-col items-center gap-3">
             {error && <p className="text-red-600 text-sm">{error}</p>}
             <Button type="button" onClick={onPrimaryAction}>
@@ -216,7 +251,11 @@ export default function WaitingRoomContent({
         {viewModel.showTeacherSection && allowTeacherSection && !isSoloOnlyMode && (
           <div className="border-t-2 border-gray-200 pt-6 mt-6">
             <p className="text-center text-gray-700 mb-4 font-semibold">
-              {entryOutcome === 'continue-solo' ? 'Teachers: Want to start a live session instead?' : 'Are you the teacher?'}
+              {isTeacherEntryActive
+                ? 'Teacher access'
+                : entryOutcome === 'continue-solo'
+                  ? 'Teachers: Want to start a live session instead?'
+                  : 'Are you the teacher?'}
             </p>
 
             <form onSubmit={onTeacherCodeSubmit} className="flex flex-col items-center gap-4">
@@ -232,7 +271,7 @@ export default function WaitingRoomContent({
                 autoComplete="off"
               />
 
-              {error && !viewModel.primaryActionLabel && <p className="text-red-600 text-sm">{error}</p>}
+              {error && (!viewModel.primaryActionLabel || isTeacherEntryActive) && <p className="text-red-600 text-sm">{error}</p>}
 
               <Button
                 type="submit"
