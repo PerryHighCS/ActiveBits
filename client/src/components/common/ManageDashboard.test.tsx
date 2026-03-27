@@ -131,6 +131,25 @@ interface RenderedScreenLike {
   queryByText: (text: string | RegExp) => HTMLElement | null
 }
 
+async function settleRenderedDashboard(params: {
+  act: ((callback: () => void | Promise<void>) => Promise<void>) | null
+  cleanup: (() => void) | null
+  unmount: (() => void) | null
+}): Promise<void> {
+  if (params.act) {
+    await params.act(async () => {
+      params.unmount?.()
+      params.cleanup?.()
+      await Promise.resolve()
+    })
+    return
+  }
+
+  params.unmount?.()
+  params.cleanup?.()
+  await Promise.resolve()
+}
+
 interface ManageDashboardTestProps {
   activityRegistry: ActivityRegistryEntry[]
   runDeepLinkPreflight: typeof testActivityRegistryHooks.runDeepLinkPreflight
@@ -256,6 +275,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
   let unmount: (() => void) | null = null
   let cleanup: (() => void) | null = null
+  let act: ((callback: () => void | Promise<void>) => Promise<void>) | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: false,
@@ -265,6 +285,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
     const testingLibrary = await import('@testing-library/react')
     const { fireEvent, render, waitFor } = testingLibrary
     cleanup = testingLibrary.cleanup
+    act = testingLibrary.act
     const { default: ManageDashboard } = await import('./ManageDashboard.js')
     const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
     const rendered = render(
@@ -310,8 +331,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
       assert.notEqual(rendered.queryByText('Verify this value before creating the link.'), null)
     })
   } finally {
-    unmount?.()
-    cleanup?.()
+    await settleRenderedDashboard({ act, cleanup, unmount })
     testActivity.manageDashboard = {
       ...testActivity.manageDashboard,
       ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),
@@ -327,6 +347,7 @@ void test('ManageDashboard custom builders must signal readiness before submit p
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
   let unmount: (() => void) | null = null
   let cleanup: (() => void) | null = null
+  let act: ((callback: () => void | Promise<void>) => Promise<void>) | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: true,
@@ -336,6 +357,7 @@ void test('ManageDashboard custom builders must signal readiness before submit p
     const testingLibrary = await import('@testing-library/react')
     const { fireEvent, render, waitFor } = testingLibrary
     cleanup = testingLibrary.cleanup
+    act = testingLibrary.act
     const { default: ManageDashboard } = await import('./ManageDashboard.js')
     const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
     const rendered = render(
@@ -384,9 +406,12 @@ void test('ManageDashboard custom builders must signal readiness before submit p
         '/api/persistent-session/list',
       ])
     })
+
+    await waitFor(() => {
+      assert.notEqual(rendered.queryByText(/Permanent link created successfully!/i), null)
+    })
   } finally {
-    unmount?.()
-    cleanup?.()
+    await settleRenderedDashboard({ act, cleanup, unmount })
     testActivity.manageDashboard = {
       ...testActivity.manageDashboard,
       ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),
