@@ -4,7 +4,6 @@ import type { ComponentType } from 'react'
 import * as React from 'react'
 import { JSDOM } from 'jsdom'
 import { MemoryRouter } from 'react-router-dom'
-import type * as TestingLibrary from '@testing-library/react'
 import type { ActivityPersistentLinkBuilderProps, ActivityRegistryEntry } from '../../../../types/activity.js'
 import {
   isPersistentLinkPreflightVerified,
@@ -95,7 +94,7 @@ const testActivityRegistryHooks = {
 }
 
 type DashboardActivityLike = Parameters<typeof resolveCustomPersistentLinkBuilder>[0]
-type TestingLibraryAct = typeof TestingLibrary.act
+type TestingLibraryAct = (callback: () => void | Promise<void>) => void | Promise<void>
 
 function installDomEnvironment() {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
