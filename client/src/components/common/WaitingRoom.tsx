@@ -86,6 +86,7 @@ export default function WaitingRoom({
   const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({})
   const [customFieldComponents, setCustomFieldComponents] = useState<Record<string, ComponentType<WaitingRoomFieldComponentProps>>>(EMPTY_CUSTOM_FIELD_COMPONENTS)
   const [customFieldLoadError, setCustomFieldLoadError] = useState<string | null>(null)
+  const [isTeacherEntryActive, setIsTeacherEntryActive] = useState(false)
   const shouldAutoAuthRef = useRef(hasTeacherCookie)
   const currentEntryOutcomeRef = useRef<PersistentSessionEntryOutcome>(entryOutcome)
   const currentEntryPolicyRef = useRef<PersistentSessionEntryPolicy | undefined>(entryPolicy)
@@ -105,6 +106,12 @@ export default function WaitingRoom({
     setCurrentEntryOutcome(entryOutcome)
     currentEntryOutcomeRef.current = entryOutcome
   }, [entryOutcome])
+
+  useEffect(() => {
+    if (hasTeacherCookie || entryOutcome !== 'join-live') {
+      setIsTeacherEntryActive(false)
+    }
+  }, [entryOutcome, hasTeacherCookie])
 
   useEffect(() => {
     setCurrentStartedSessionId(startedSessionId)
@@ -230,6 +237,7 @@ export default function WaitingRoom({
   }, [activityName, hash, navigate, shouldKeepWaitingRoomSocketOpen])
 
   const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
+  const shouldShowTeacherEntryToggle = !hasTeacherCookie && effectiveEntryOutcome === 'join-live'
 
   const handleTeacherCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -473,6 +481,16 @@ export default function WaitingRoom({
       hasTeacherCookie={hasTeacherCookie}
       teacherCode={teacherCode}
       shareUrl={shareUrl}
+      showTeacherEntryToggle={shouldShowTeacherEntryToggle}
+      isTeacherEntryActive={isTeacherEntryActive}
+      onTeacherEntryModeSelect={() => {
+        setError(null)
+        setIsTeacherEntryActive(true)
+      }}
+      onStudentEntryModeSelect={() => {
+        setError(null)
+        setIsTeacherEntryActive(false)
+      }}
       onTeacherCodeChange={setTeacherCode}
       onTeacherCodeSubmit={handleTeacherCodeSubmit}
       onPrimaryAction={effectiveEntryOutcome === 'join-live' ? handleJoinLive : handleContinueSolo}
