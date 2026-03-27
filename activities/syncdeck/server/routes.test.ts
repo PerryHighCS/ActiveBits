@@ -126,6 +126,7 @@ function createRequest(
 
 function createSessionStore(initial: Record<string, SessionRecord>) {
   const store = { ...initial }
+  const touchCalls: string[] = []
   const sessions: SessionStore = {
     async get(id: string) {
       return store[id] ?? null
@@ -139,6 +140,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
       return existed
     },
     async touch(id: string) {
+      touchCalls.push(id)
       const existing = store[id]
       if (!existing) return false
       existing.lastActivity = Date.now()
@@ -158,6 +160,7 @@ function createSessionStore(initial: Record<string, SessionRecord>) {
   return {
     store,
     sessions,
+    touchCalls,
   }
 }
 
@@ -3244,7 +3247,12 @@ void test('embedded-activity auto-activate route is idempotent when resonance al
     studentId: 'student-1',
     activated: false,
   })
-  assert.deepEqual(storeState.store[childSessionId], childSessionBeforeCall)
+  const childSessionAfterCall = storeState.store[childSessionId] as SessionRecord
+  assert.ok((childSessionAfterCall.lastActivity ?? 0) > (childSessionBeforeCall.lastActivity ?? 0))
+  assert.deepEqual(
+    { ...childSessionAfterCall, lastActivity: childSessionBeforeCall.lastActivity },
+    childSessionBeforeCall,
+  )
 })
 
 void test('embedded-activity auto-activate route is idempotent after embedded resonance already auto-activated once', async () => {
@@ -3329,7 +3337,12 @@ void test('embedded-activity auto-activate route is idempotent after embedded re
     studentId: 'student-1',
     activated: false,
   })
-  assert.deepEqual(storeState.store[childSessionId], childSessionBeforeCall)
+  const childSessionAfterCall = storeState.store[childSessionId] as SessionRecord
+  assert.ok((childSessionAfterCall.lastActivity ?? 0) > (childSessionBeforeCall.lastActivity ?? 0))
+  assert.deepEqual(
+    { ...childSessionAfterCall, lastActivity: childSessionBeforeCall.lastActivity },
+    childSessionBeforeCall,
+  )
 })
 
 void test('embedded-activity auto-activate route rejects students who are not on a released embedded slide', async () => {
@@ -3601,6 +3614,54 @@ void test('embedded-activity start is idempotent per key even when a concurrent 
   }
   assert.equal(parentSession.data.embeddedActivities['video-sync:3:0']?.childSessionId, 'CHILD:s1:abc12:video-sync')
   assert.equal(parentSession.data.embeddedActivities['video-sync:7:0']?.childSessionId, newBody.childSessionId)
+})
+
+void test('syncdeck parent routes keep embedded child sessions alive while the parent session stays active', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const childSessionId = 'CHILD:s1:abc12:video-sync'
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'video-sync:3:0': {
+            childSessionId,
+            activityId: 'video-sync',
+            startedAt: 100,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    [childSessionId]: {
+      id: childSessionId,
+      type: 'video-sync',
+      created: Date.now(),
+      lastActivity: 1,
+      data: {},
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      { instructorPasscode: 'teacher-passcode-1', activityId: 'video-sync', instanceKey: 'video-sync:3:0' },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    childSessionId,
+    instanceKey: 'video-sync:3:0',
+  })
+  assert.deepEqual(storeState.touchCalls, [childSessionId])
+  assert.ok((storeState.store[childSessionId]?.lastActivity ?? 0) > 1)
 })
 
 void test('delete-session route cascades deletion of all child sessions', async () => {
