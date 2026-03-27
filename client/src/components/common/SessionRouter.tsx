@@ -5,7 +5,12 @@ import Button from '@src/components/ui/Button'
 import HomeTeacherJoinControls from './HomeTeacherJoinControls'
 import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
-import { getTeacherJoinClosedState, getTeacherJoinInitialSessionId } from './homeTeacherJoinUtils'
+import {
+  getTeacherJoinClosedState,
+  getTeacherJoinInitialSessionId,
+  normalizeTeacherJoinCode,
+  normalizeTeacherJoinSessionId,
+} from './homeTeacherJoinUtils'
 import { getActivity, activities } from '@src/activities'
 import {
   activitySupportsDirectStandalonePath,
@@ -406,8 +411,8 @@ const SessionRouter = () => {
   const handleTeacherJoinSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    const normalizedSessionId = teacherJoinSessionId.trim().toLowerCase()
-    const normalizedTeacherCode = teacherJoinCode.trim()
+    const normalizedSessionId = normalizeTeacherJoinSessionId(teacherJoinSessionId)
+    const normalizedTeacherCode = normalizeTeacherJoinCode(teacherJoinCode)
 
     if (!isJoinSessionId(normalizedSessionId)) {
       setTeacherJoinError('Enter a valid Join Code.')
