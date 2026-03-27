@@ -22,6 +22,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Reuse the same backfill pattern for future embedded manager flows that depend on same-tab bootstrap payloads instead of durable per-session recovery.
 - Owner: Codex
 
+- Date: 2026-03-27
+- Area: server | activities | syncdeck
+- Discovery: SyncDeck embedded activity starts need a server-side per-`sessionId:instanceKey` lock because client-side preload dedupe is only local to one instructor tab, and two instructors can otherwise race to create the same child session before the parent session record is updated.
+- Why it matters: The route is only naturally idempotent after `session.data.embeddedActivities[instanceKey]` has been written. Serializing the create path inside a process keeps multi-instructor prewarm from spawning duplicate child sessions for the same slide anchor.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: If SyncDeck embedded starts ever need stronger cross-instance guarantees than sticky routing provides, move this lock to a shared Valkey-backed compare-and-set or lock primitive.
+- Owner: Codex
+
 - Date: 2026-03-23
 - Area: client | activities | syncdeck
 - Discovery: SyncDeck manager and student should not treat every inbound `reveal-sync` envelope as an iframe-ready signal now that the protocol includes descriptive `metadata` messages.
