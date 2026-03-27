@@ -2,7 +2,7 @@
 
 ActiveBits is a classroom-focused platform for interactive computer science activities.  
 Teachers can launch live sessions, share join links, and guide students through hands-on exercises in real time.
-Instructors can also rejoin an active live session from the home page with the `Teacher Join` flow using a session ID and teacher code.
+Instructors can also rejoin an active live session from the home page with the `Teacher Join` flow using a Join Code and teacher code.
 
 Current activity areas include:
 - Raffle-based search and problem-solving activities

@@ -1017,6 +1017,25 @@ void test('session id reverse lookup tracks start, reset, and restart lifecycle'
   assert.equal(await findHashBySessionId('first-session'), null)
 })
 
+void test('session id reverse lookup survives started-session metadata updates', async (t) => {
+  initializePersistentStorage(null)
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'metadata-refresh'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
+  await startPersistentSession(hash, 'live-session', { id: 'teacher-ws', readyState: 1, send() {} })
+
+  await updatePersistentSessionUrlState(hash, {
+    entryPolicy: 'solo-allowed',
+    selectedOptions: { presentationUrl: 'https://slides.example/deck' },
+  })
+
+  assert.equal(await findHashBySessionId('live-session'), hash)
+})
+
 void test('authenticate persists selectedOptions from request body when cookie entry is missing', async (t) => {
   initializePersistentStorage(null)
   await initializeActivityRegistry()

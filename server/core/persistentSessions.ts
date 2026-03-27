@@ -314,7 +314,7 @@ export async function getOrCreateActivePersistentSession(
   }
 
   if (shouldPersist) {
-    await persistentStore.set(hash, session)
+    await persistPersistentSession(hash, session)
   }
 
   return session
@@ -384,7 +384,7 @@ export async function updatePersistentSessionUrlState(
   }
 
   if (shouldPersist) {
-    await persistentStore.set(hash, session)
+    await persistPersistentSession(hash, session)
   }
 }
 
@@ -438,6 +438,13 @@ function broadcastToWaiters(hash: string, payload: Record<string, unknown>): voi
   }
 }
 
+async function persistPersistentSession(hash: string, session: PersistentSession): Promise<void> {
+  await persistentStore.set(hash, session)
+  if (session.sessionId) {
+    await persistentStore.setHashBySessionId(session.sessionId, hash)
+  }
+}
+
 export async function recordTeacherCodeAttempt(rateLimitKey: string): Promise<{ allowed: boolean; attempts: number }> {
   const attempts = await persistentStore.incrementAttempts(rateLimitKey)
   return {
@@ -461,8 +468,7 @@ export async function startPersistentSession(
 
   session.sessionId = sessionId
   session.teacherSocketId = teacherWs.id || null
-  await persistentStore.set(hash, session)
-  await persistentStore.setHashBySessionId(sessionId, hash)
+  await persistPersistentSession(hash, session)
 
   const waiters = waitersByHash.get(hash) ?? []
   return [...waiters]
@@ -487,7 +493,7 @@ export async function resetPersistentSession(hash: string): Promise<void> {
     }
     session.sessionId = null
     session.teacherSocketId = null
-    await persistentStore.set(hash, session)
+    await persistPersistentSession(hash, session)
   }
 
   broadcastToWaiters(hash, { type: 'session-ended' })
@@ -534,7 +540,7 @@ export async function storePersistentSessionEntryParticipant(
     }
   }
 
-  await persistentStore.set(hash, session)
+  await persistPersistentSession(hash, session)
 
   return storedEntryParticipant
 }
@@ -553,7 +559,7 @@ export async function consumePersistentSessionEntryParticipant(
     return null
   }
 
-  await persistentStore.set(hash, session)
+  await persistPersistentSession(hash, session)
   return values
 }
 
