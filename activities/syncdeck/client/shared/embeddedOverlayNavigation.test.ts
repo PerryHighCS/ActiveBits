@@ -5,6 +5,7 @@ import { resolveOptimisticEmbeddedOverlayIndices } from './embeddedOverlayNaviga
 import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from './embeddedOverlayNavigation.js'
 import { resolveEmbeddedOverlayVerticalMoveAllowed } from './embeddedOverlayNavigation.js'
 import { reduceEmbeddedOverlayNavigationPointerDownState } from './embeddedOverlayNavigation.js'
+import { shouldHandleEmbeddedOverlayNavigationPointerDown } from './embeddedOverlayNavigation.js'
 
 void test('consumeEmbeddedOverlayNavigationEvent stops default click handling and propagation', () => {
   const calls: string[] = []
@@ -52,6 +53,40 @@ void test('reduceEmbeddedOverlayNavigationPointerDownState clears handled pointe
       didHandlePointerDown: false,
       shouldSkipClickNavigation: false,
     },
+  )
+})
+
+void test('shouldHandleEmbeddedOverlayNavigationPointerDown accepts primary mouse and mobile safari touch presses', () => {
+  assert.equal(
+    shouldHandleEmbeddedOverlayNavigationPointerDown({
+      button: 0,
+      pointerType: 'mouse',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldHandleEmbeddedOverlayNavigationPointerDown({
+      button: -1,
+      pointerType: 'touch',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldHandleEmbeddedOverlayNavigationPointerDown({
+      button: 0,
+      pointerType: 'touch',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldHandleEmbeddedOverlayNavigationPointerDown({
+      button: 1,
+      pointerType: 'mouse',
+    }),
+    false,
   )
 })
 

@@ -18,6 +18,7 @@ import {
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
+  shouldHandleEmbeddedOverlayNavigationPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
 import {
@@ -3591,7 +3592,7 @@ const SyncDeckManager: FC = () => {
     event: PointerEvent<HTMLButtonElement>,
     direction: 'left' | 'right' | 'up' | 'down',
   ): void => {
-    if (event.button !== 0) {
+    if (!shouldHandleEmbeddedOverlayNavigationPointerDown(event)) {
       return
     }
     consumeEmbeddedOverlayNavigationEvent(event)
