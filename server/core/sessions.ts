@@ -179,6 +179,11 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
     return normalizedSession
   }
 
+  const loadSessionRecord = async (id: string): Promise<SessionRecord | null> => {
+    const loaded = await valkeyStore.get(id)
+    return loaded ? normalizeSessionData(toSessionRecord(loaded)) : null
+  }
+
   const set = async (id: string, session: SessionRecord, ttl: number | null = null): Promise<void> => {
     const normalized = normalizeSessionData(session)
     await valkeyStore.set(id, normalized, ttl)
@@ -196,7 +201,14 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       return true
     }
 
-    return await valkeyStore.touch(id)
+    const session = await loadSessionRecord(id)
+    if (!session) {
+      return false
+    }
+
+    cache.set(id, session, false)
+    cache.touch(id)
+    return true
   }
 
   const getAll = async (): Promise<SessionRecord[]> => {

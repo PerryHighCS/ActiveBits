@@ -170,8 +170,12 @@ const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === 
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS = 5 * 60 * 1000
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_MAX_KEYS = 500
 const EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MS = 5_000
+const EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MAX_KEYS = 500
 const loggedProtocolWarningKeys = new Map<string, number>()
-const embeddedKeepaliveTouchTimestampsByStore = new WeakMap<object, Map<string, number>>()
+const embeddedKeepaliveTouchStateByStore = new WeakMap<object, {
+  timestamps: Map<string, number>
+  lastPrunedAt: number
+}>()
 
 type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'
 
@@ -287,24 +291,41 @@ function shouldRefreshEmbeddedChildKeepalive(
   sessionId: string,
   now = Date.now(),
 ): boolean {
-  let timestamps = embeddedKeepaliveTouchTimestampsByStore.get(sessions)
-  if (!timestamps) {
-    timestamps = new Map<string, number>()
-    embeddedKeepaliveTouchTimestampsByStore.set(sessions, timestamps)
+  let state = embeddedKeepaliveTouchStateByStore.get(sessions)
+  if (!state) {
+    state = {
+      timestamps: new Map<string, number>(),
+      lastPrunedAt: 0,
+    }
+    embeddedKeepaliveTouchStateByStore.set(sessions, state)
   }
 
-  for (const [trackedSessionId, timestamp] of timestamps) {
-    if (now - timestamp > EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MS) {
-      timestamps.delete(trackedSessionId)
+  if (
+    now - state.lastPrunedAt >= EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MS
+    || state.timestamps.size >= EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MAX_KEYS
+  ) {
+    for (const [trackedSessionId, timestamp] of state.timestamps) {
+      if (now - timestamp > EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MS) {
+        state.timestamps.delete(trackedSessionId)
+      }
+    }
+    state.lastPrunedAt = now
+
+    while (state.timestamps.size >= EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MAX_KEYS) {
+      const oldestKey = state.timestamps.keys().next().value as string | undefined
+      if (!oldestKey) {
+        break
+      }
+      state.timestamps.delete(oldestKey)
     }
   }
 
-  const existingTimestamp = timestamps.get(sessionId)
+  const existingTimestamp = state.timestamps.get(sessionId)
   if (typeof existingTimestamp === 'number' && now - existingTimestamp < EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MS) {
     return false
   }
 
-  timestamps.set(sessionId, now)
+  state.timestamps.set(sessionId, now)
   return true
 }
 
