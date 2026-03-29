@@ -169,7 +169,13 @@ const SYNCDECK_EMBEDDED_OWNER = 'syncdeck-instructor'
 const SYNCDECK_PROTOCOL_DEBUG_ENABLED = process.env.SYNCDECK_DEBUG_PROTOCOL === '1'
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_TTL_MS = 5 * 60 * 1000
 const SYNCDECK_PROTOCOL_WARNING_DEDUPE_MAX_KEYS = 500
+const EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MS = 5_000
+const EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MAX_KEYS = 500
 const loggedProtocolWarningKeys = new Map<string, number>()
+const embeddedKeepaliveTouchStateByStore = new WeakMap<object, {
+  timestamps: Map<string, number>
+  lastPrunedAt: number
+}>()
 
 type ChalkboardCommandName = 'chalkboardStroke' | 'chalkboardState' | 'clearChalkboard' | 'resetChalkboard'
 
@@ -278,6 +284,50 @@ function normalizeStudentEntry(value: unknown): SyncDeckStudent | null {
     lastIndices: normalizeSlideIndices(value.lastIndices),
     lastStudentStateAt: normalizeNullableFiniteNumber(value.lastStudentStateAt),
   }
+}
+
+function shouldRefreshEmbeddedChildKeepalive(
+  sessions: Pick<SessionStore, 'get' | 'touch'>,
+  sessionId: string,
+  now = Date.now(),
+): boolean {
+  let state = embeddedKeepaliveTouchStateByStore.get(sessions)
+  if (!state) {
+    state = {
+      timestamps: new Map<string, number>(),
+      lastPrunedAt: 0,
+    }
+    embeddedKeepaliveTouchStateByStore.set(sessions, state)
+  }
+
+  if (
+    now - state.lastPrunedAt >= EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MS
+    || state.timestamps.size >= EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MAX_KEYS
+  ) {
+    for (const [trackedSessionId, timestamp] of state.timestamps) {
+      if (now - timestamp > EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MS) {
+        state.timestamps.delete(trackedSessionId)
+      }
+    }
+    state.lastPrunedAt = now
+
+    while (state.timestamps.size >= EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MAX_KEYS) {
+      const oldestKey = state.timestamps.keys().next().value as string | undefined
+      if (!oldestKey) {
+        break
+      }
+      state.timestamps.delete(oldestKey)
+    }
+  }
+
+  const existingTimestamp = state.timestamps.get(sessionId)
+  if (typeof existingTimestamp === 'number' && now - existingTimestamp < EMBEDDED_KEEPALIVE_TOUCH_DEDUPE_MS) {
+    return false
+  }
+
+  state.timestamps.delete(sessionId)
+  state.timestamps.set(sessionId, now)
+  return true
 }
 
 function findSyncDeckStudentById(
@@ -1091,6 +1141,33 @@ async function createEmbeddedChildSession(
   return session
 }
 
+async function getSyncDeckSessionWithEmbeddedKeepalive(
+  sessions: Pick<SessionStore, 'get' | 'touch'>,
+  sessionId: string,
+): Promise<SyncDeckSession | null> {
+  const session = asSyncDeckSession(await sessions.get(sessionId))
+  if (!session) {
+    return null
+  }
+
+  const childSessionIds = new Set<string>()
+  for (const embeddedActivity of Object.values(session.data.embeddedActivities)) {
+    if (typeof embeddedActivity.childSessionId === 'string' && embeddedActivity.childSessionId.length > 0) {
+      childSessionIds.add(embeddedActivity.childSessionId)
+    }
+  }
+
+  if (childSessionIds.size === 0 || !shouldRefreshEmbeddedChildKeepalive(sessions, sessionId)) {
+    return session
+  }
+
+  await Promise.allSettled([...childSessionIds].map(async (childSessionId) => {
+    await sessions.touch(childSessionId)
+  }))
+
+  return session
+}
+
 function markEmbeddedChildSessionForAutoActivateAllQuestions(
   childSession: SessionRecord,
 ): boolean {
@@ -1198,7 +1275,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
   }
 
   const broadcastStudentsToInstructors = async (sessionId: string): Promise<void> => {
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       return
     }
@@ -1311,7 +1388,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
       return
@@ -1452,7 +1529,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       const response = res as unknown as JsonResponse
       response.status(404).json({ error: 'invalid session' })
@@ -1491,7 +1568,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
       return
@@ -1592,7 +1669,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
       return
@@ -1630,7 +1707,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
       return
@@ -1678,7 +1755,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
       return
@@ -1701,7 +1778,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
       return
@@ -1733,7 +1810,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
       return
@@ -1775,7 +1852,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
       return
@@ -1833,7 +1910,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       res.status(404).json({ error: 'invalid session' })
       return
@@ -1896,7 +1973,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    const session = asSyncDeckSession(await sessions.get(sessionId))
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
     if (!session) {
       const response = res as unknown as JsonResponse
       response.status(404).json({ error: 'invalid session' })
@@ -1971,7 +2048,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       : null
 
     ;(async () => {
-      const session = asSyncDeckSession(await sessions.get(sessionId))
+      const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
       if (!session) {
         socket.close(1008, 'invalid session')
         return
@@ -2074,7 +2151,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           }
         }
 
-        const session = asSyncDeckSession(await sessions.get(client.sessionId))
+        const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, client.sessionId)
         if (!session) {
           logSyncDeckProtocolEvent('info', 'ignore_instructor_ws_message_missing_session', {
             sessionId: client.sessionId,

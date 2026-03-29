@@ -27,6 +27,14 @@ function ensurePlainObject(value: unknown): Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
+function getEmbeddedParentSessionId(session: SessionRecord | SessionLike | null | undefined): string | null {
+  const data = ensurePlainObject(session?.data)
+  const parentSessionId = typeof data.embeddedParentSessionId === 'string'
+    ? data.embeddedParentSessionId.trim()
+    : ''
+  return parentSessionId.length > 0 ? parentSessionId : null
+}
+
 function toSessionRecord(session: SessionLike): SessionRecord {
   return {
     ...session,
@@ -89,6 +97,10 @@ class InMemorySessionStore implements SessionStore {
 
     normalizeSessionData(session)
     session.lastActivity = Date.now()
+    const embeddedParentSessionId = getEmbeddedParentSessionId(session)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await this.touch(embeddedParentSessionId)
+    }
     return session
   }
 
@@ -159,7 +171,17 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       const loaded = await valkeyStore.get(sessionId)
       return loaded ? toSessionRecord(loaded) : null
     })
-    return normalizeSessionData(session)
+    const normalizedSession = normalizeSessionData(session)
+    const embeddedParentSessionId = getEmbeddedParentSessionId(normalizedSession)
+    if (embeddedParentSessionId && embeddedParentSessionId !== id) {
+      await touch(embeddedParentSessionId)
+    }
+    return normalizedSession
+  }
+
+  const loadSessionRecord = async (id: string): Promise<SessionRecord | null> => {
+    const loaded = await valkeyStore.get(id)
+    return loaded ? normalizeSessionData(toSessionRecord(loaded)) : null
   }
 
   const set = async (id: string, session: SessionRecord, ttl: number | null = null): Promise<void> => {
@@ -174,16 +196,19 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }
 
   const touch = async (id: string): Promise<boolean> => {
-    const wasCached = cache.has(id)
-    const cached = await get(id)
-    if (!cached) {
+    if (cache.getFresh(id)) {
+      cache.touch(id)
+      return true
+    }
+
+    const touched = await valkeyStore.touch(id)
+    if (!touched) {
       return false
     }
 
-    cache.touch(id)
-
-    if (!wasCached) {
-      await valkeyStore.touch(id)
+    const session = await loadSessionRecord(id)
+    if (session) {
+      cache.set(id, session, false)
     }
 
     return true

@@ -106,6 +106,25 @@ export class SessionCache<TSession extends MutableSession = MutableSession> {
   }
 
   /**
+   * Return a cached session only if its entry is still within the cache TTL.
+   */
+  getFresh(id: string): TSession | null {
+    const cached = this.cache.get(id)
+    if (!cached) {
+      return null
+    }
+
+    if (Date.now() - cached.timestamp >= this.ttlMs) {
+      this.cache.delete(id)
+      this.touchQueue.delete(id)
+      return null
+    }
+
+    this.markRecentlyUsed(id, cached)
+    return cached.session
+  }
+
+  /**
    * Invalidate a session in cache.
    */
   invalidate(id: string): void {

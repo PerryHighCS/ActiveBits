@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-27
+- Area: server | activities | syncdeck
+- Discovery: SyncDeck embedded child sessions must refresh lifetime in both directions: active parent SyncDeck traffic should touch launched child sessions, and any embedded child session read should also refresh the parent session via `embeddedParentSessionId`.
+- Why it matters: Long-running SyncDeck classes can spend extended time on either the parent deck or a launched child activity. If only one side of that relationship refreshes TTL, the other session can be pruned and later re-entry fails with `invalid session` even though the lesson is still active.
+- Evidence: `server/core/sessions.ts`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `server/sessionStore.test.ts`
+- Follow-up action: Preserve this coupling for future embedded activity work, and treat child-session `lastActivity` updates during parent keepalive as expected behavior in tests.
+- Owner: Codex
+
 - Date: 2026-03-29
 - Area: client | activities | resonance
 - Discovery: The Resonance student released-answer feed should preserve authored question order from `revealedQuestions` instead of re-sorting reveals by `sharedAt`.

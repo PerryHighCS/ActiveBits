@@ -222,6 +222,10 @@ through activity-specific props.
 - Child managers should read that payload through shared bootstrap helpers in the same spirit
   as `createSessionBootstrap` or permalink `selectedOptions`, so reloads and redeploys keep
   the launch intent intact.
+- Embedded child lifetime should stay coupled to the parent activity session while the launch
+  remains active. In practice, parent-session traffic should refresh launched child-session TTLs,
+  and child-session reads should also refresh the recorded parent session so long-running embedded
+  work does not get pruned on one side of the relationship.
 - Activity-owned session normalizers should also stabilize any runtime session state that the
   embedded manager or student depends on after reload, such as manager auth credentials or
   authoritative “live run” fields. For example, Resonance now normalizes multi-question runs

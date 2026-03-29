@@ -2,8 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert'
 import http from 'node:http'
 import { WebSocket } from 'ws'
-import { createSessionStore, createSession } from './core/sessions.js'
+import { createSessionStore, createSession, type SessionRecord } from './core/sessions.js'
 import { createWsRouter } from './core/wsRouter.js'
+import { EMBEDDED_CHILD_SESSION_PREFIX } from '../types/session.js'
 import { registerSessionNormalizer, resetSessionNormalizersForTests } from './core/sessionNormalization.js'
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -85,4 +86,33 @@ void test('registered session normalizers populate activity defaults', async (t)
   const loadedItems = (loaded.data as { items?: unknown }).items
   assert.ok(Array.isArray(loadedItems))
   assert.equal(loadedItems.length, 0)
+})
+
+void test('embedded child session reads refresh the parent session activity timestamp', async (t) => {
+  const sessions = createSessionStore(null, 1_000)
+  t.after(async () => {
+    await sessions.close()
+  })
+
+  const parentSession = await createSession(sessions)
+  parentSession.type = 'syncdeck'
+  parentSession.data = { embeddedActivities: {} }
+  parentSession.lastActivity = 1
+  await sessions.set(parentSession.id, parentSession)
+
+  const childSession: SessionRecord = {
+    id: `${EMBEDDED_CHILD_SESSION_PREFIX}${parentSession.id}:abc12:embedded-test`,
+    type: 'embedded-test',
+    created: 1,
+    lastActivity: 1,
+    data: {
+      embeddedParentSessionId: parentSession.id,
+    },
+  }
+  await sessions.set(childSession.id, childSession)
+
+  const originalLastActivity = parentSession.lastActivity ?? 0
+  const loadedChild = await sessions.get(childSession.id)
+  assert.ok(loadedChild)
+  assert.ok((parentSession.lastActivity ?? 0) > originalLastActivity)
 })
