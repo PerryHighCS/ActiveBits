@@ -201,13 +201,16 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
       return true
     }
 
-    const session = await loadSessionRecord(id)
-    if (!session) {
+    const touched = await valkeyStore.touch(id)
+    if (!touched) {
       return false
     }
 
-    cache.set(id, session, false)
-    cache.touch(id)
+    const session = await loadSessionRecord(id)
+    if (session) {
+      cache.set(id, session, false)
+    }
+
     return true
   }
 

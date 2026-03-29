@@ -325,6 +325,7 @@ function shouldRefreshEmbeddedChildKeepalive(
     return false
   }
 
+  state.timestamps.delete(sessionId)
   state.timestamps.set(sessionId, now)
   return true
 }

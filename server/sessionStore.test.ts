@@ -111,10 +111,8 @@ void test('embedded child session reads refresh the parent session activity time
   }
   await sessions.set(childSession.id, childSession)
 
+  const originalLastActivity = parentSession.lastActivity ?? 0
   const loadedChild = await sessions.get(childSession.id)
   assert.ok(loadedChild)
-
-  const loadedParent = await sessions.get(parentSession.id)
-  assert.ok(loadedParent)
-  assert.ok((loadedParent.lastActivity ?? 0) > 1)
+  assert.ok((parentSession.lastActivity ?? 0) > originalLastActivity)
 })
