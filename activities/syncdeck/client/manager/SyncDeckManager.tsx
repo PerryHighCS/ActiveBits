@@ -3596,10 +3596,10 @@ const SyncDeckManager: FC = () => {
     if (!shouldHandleEmbeddedOverlayNavigationPointerDown(event)) {
       return
     }
-    consumeEmbeddedOverlayNavigationEvent(event)
     if (!shouldNavigateEmbeddedOverlayOnPointerDown(event)) {
       return
     }
+    consumeEmbeddedOverlayNavigationEvent(event)
     beginOverlayNavPointerDownHandling()
     sendEmbeddedOverlayNavigation(direction)
   }

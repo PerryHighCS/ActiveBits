@@ -3504,10 +3504,10 @@ const SyncDeckStudent: FC = () => {
     if (!shouldHandleEmbeddedOverlayNavigationPointerDown(event)) {
       return
     }
-    consumeEmbeddedOverlayNavigationEvent(event)
     if (!shouldNavigateEmbeddedOverlayOnPointerDown(event)) {
       return
     }
+    consumeEmbeddedOverlayNavigationEvent(event)
     beginOverlayNavPointerDownHandling()
     if (direction === 'left') {
       handleStudentOverlayBack()
