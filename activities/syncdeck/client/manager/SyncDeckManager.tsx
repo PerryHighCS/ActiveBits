@@ -4123,9 +4123,21 @@ const SyncDeckManager: FC = () => {
                       </div>
                       {isActive ? (
                         <>
+                          <div
+                            aria-hidden="true"
+                            className="absolute left-0 top-0 bottom-0 z-[26] w-14"
+                            onPointerDown={consumeEmbeddedOverlayNavigationEvent}
+                            onClick={consumeEmbeddedOverlayNavigationEvent}
+                          />
+                          <div
+                            aria-hidden="true"
+                            className="absolute right-0 top-0 bottom-0 z-[26] w-14"
+                            onPointerDown={consumeEmbeddedOverlayNavigationEvent}
+                            onClick={consumeEmbeddedOverlayNavigationEvent}
+                          />
                           <button
                             type="button"
-                            className="absolute left-3 top-3 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                            className="absolute left-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                             onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'left')}
                             onPointerCancel={handleOverlayNavPointerCancel}
                             onClick={(event) => handleManagerOverlayNavigationClick(event, 'left')}
@@ -4149,7 +4161,7 @@ const SyncDeckManager: FC = () => {
                           </button>
                           <button
                             type="button"
-                            className="absolute right-3 top-3 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                             onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'right')}
                             onPointerCancel={handleOverlayNavPointerCancel}
                             onClick={(event) => handleManagerOverlayNavigationClick(event, 'right')}
