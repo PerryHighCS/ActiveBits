@@ -6,6 +6,7 @@ import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from './embeddedO
 import { resolveEmbeddedOverlayVerticalMoveAllowed } from './embeddedOverlayNavigation.js'
 import { reduceEmbeddedOverlayNavigationPointerDownState } from './embeddedOverlayNavigation.js'
 import { shouldHandleEmbeddedOverlayNavigationPointerDown } from './embeddedOverlayNavigation.js'
+import { shouldNavigateEmbeddedOverlayOnPointerDown } from './embeddedOverlayNavigation.js'
 
 void test('consumeEmbeddedOverlayNavigationEvent stops default click handling and propagation', () => {
   const calls: string[] = []
@@ -85,6 +86,29 @@ void test('shouldHandleEmbeddedOverlayNavigationPointerDown accepts primary mous
     shouldHandleEmbeddedOverlayNavigationPointerDown({
       button: 1,
       pointerType: 'mouse',
+    }),
+    false,
+  )
+})
+
+void test('shouldNavigateEmbeddedOverlayOnPointerDown defers touch navigation until click', () => {
+  assert.equal(
+    shouldNavigateEmbeddedOverlayOnPointerDown({
+      pointerType: 'mouse',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldNavigateEmbeddedOverlayOnPointerDown({
+      pointerType: 'pen',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldNavigateEmbeddedOverlayOnPointerDown({
+      pointerType: 'touch',
     }),
     false,
   )
