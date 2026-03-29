@@ -22,7 +22,7 @@ void test('consumeEmbeddedOverlayNavigationEvent stops default click handling an
   assert.deepEqual(calls, ['preventDefault', 'stopPropagation'])
 })
 
-void test('reduceEmbeddedOverlayNavigationPointerDownState clears handled pointer state after click and interrupted gestures', () => {
+void test('reduceEmbeddedOverlayNavigationPointerDownState preserves click suppression through pointercancel and clears on click or timeout', () => {
   assert.deepEqual(
     reduceEmbeddedOverlayNavigationPointerDownState(false, 'pointerdown'),
     {
@@ -42,7 +42,7 @@ void test('reduceEmbeddedOverlayNavigationPointerDownState clears handled pointe
   assert.deepEqual(
     reduceEmbeddedOverlayNavigationPointerDownState(true, 'pointercancel'),
     {
-      didHandlePointerDown: false,
+      didHandlePointerDown: true,
       shouldSkipClickNavigation: false,
     },
   )

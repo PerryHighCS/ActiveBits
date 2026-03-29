@@ -38,8 +38,7 @@ export function useEmbeddedOverlayNavigationInteraction(): EmbeddedOverlayNaviga
       didHandleOverlayNavPointerDownRef.current,
       'pointercancel',
     ).didHandlePointerDown
-    clearOverlayNavPointerDownResetTimeout()
-  }, [clearOverlayNavPointerDownResetTimeout])
+  }, [])
 
   const scheduleOverlayNavPointerDownReset = useCallback((): void => {
     clearOverlayNavPointerDownResetTimeout()
