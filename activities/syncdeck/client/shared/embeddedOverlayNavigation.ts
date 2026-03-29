@@ -60,6 +60,13 @@ export function reduceEmbeddedOverlayNavigationPointerDownState(
     }
   }
 
+  if (transition === 'pointercancel') {
+    return {
+      didHandlePointerDown,
+      shouldSkipClickNavigation: false,
+    }
+  }
+
   return {
     didHandlePointerDown: false,
     shouldSkipClickNavigation: false,

@@ -10,7 +10,7 @@ interface EmbeddedOverlayNavigationInteraction {
   activateOverlayNavClickShield(): void
   beginOverlayNavPointerDownHandling(): void
   consumeOverlayNavClick(): boolean
-  resetOverlayNavPointerDownHandling(): void
+  handleOverlayNavPointerCancel(): void
 }
 
 export function useEmbeddedOverlayNavigationInteraction(): EmbeddedOverlayNavigationInteraction {
@@ -33,13 +33,12 @@ export function useEmbeddedOverlayNavigationInteraction(): EmbeddedOverlayNaviga
     }
   }, [])
 
-  const resetOverlayNavPointerDownHandling = useCallback((): void => {
+  const handleOverlayNavPointerCancel = useCallback((): void => {
     didHandleOverlayNavPointerDownRef.current = reduceEmbeddedOverlayNavigationPointerDownState(
       didHandleOverlayNavPointerDownRef.current,
       'pointercancel',
     ).didHandlePointerDown
-    clearOverlayNavPointerDownResetTimeout()
-  }, [clearOverlayNavPointerDownResetTimeout])
+  }, [])
 
   const scheduleOverlayNavPointerDownReset = useCallback((): void => {
     clearOverlayNavPointerDownResetTimeout()
@@ -95,6 +94,6 @@ export function useEmbeddedOverlayNavigationInteraction(): EmbeddedOverlayNaviga
     activateOverlayNavClickShield,
     beginOverlayNavPointerDownHandling,
     consumeOverlayNavClick,
-    resetOverlayNavPointerDownHandling,
+    handleOverlayNavPointerCancel,
   }
 }
