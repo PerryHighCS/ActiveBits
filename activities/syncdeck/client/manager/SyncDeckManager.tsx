@@ -19,6 +19,7 @@ import {
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
   shouldHandleEmbeddedOverlayNavigationPointerDown,
+  shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
 import {
@@ -3596,6 +3597,9 @@ const SyncDeckManager: FC = () => {
       return
     }
     consumeEmbeddedOverlayNavigationEvent(event)
+    if (!shouldNavigateEmbeddedOverlayOnPointerDown(event)) {
+      return
+    }
     beginOverlayNavPointerDownHandling()
     sendEmbeddedOverlayNavigation(direction)
   }

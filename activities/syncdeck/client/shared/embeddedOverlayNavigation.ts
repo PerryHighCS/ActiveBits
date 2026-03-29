@@ -33,6 +33,12 @@ export function shouldHandleEmbeddedOverlayNavigationPointerDown(event: {
   return event.button === 0
 }
 
+export function shouldNavigateEmbeddedOverlayOnPointerDown(event: {
+  pointerType?: string
+}): boolean {
+  return event.pointerType !== 'touch'
+}
+
 export type EmbeddedOverlayNavigationPointerTransition =
   | 'pointerdown'
   | 'click'

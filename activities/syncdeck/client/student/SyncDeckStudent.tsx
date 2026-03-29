@@ -40,6 +40,7 @@ import {
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
   shouldHandleEmbeddedOverlayNavigationPointerDown,
+  shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
 const isDevMode = import.meta.env?.DEV === true
@@ -3504,6 +3505,9 @@ const SyncDeckStudent: FC = () => {
       return
     }
     consumeEmbeddedOverlayNavigationEvent(event)
+    if (!shouldNavigateEmbeddedOverlayOnPointerDown(event)) {
+      return
+    }
     beginOverlayNavPointerDownHandling()
     if (direction === 'left') {
       handleStudentOverlayBack()
