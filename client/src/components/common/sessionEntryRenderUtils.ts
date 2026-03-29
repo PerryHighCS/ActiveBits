@@ -1,4 +1,5 @@
 import type { WaitingRoomPresentationMode } from '../../../../types/waitingRoom.js'
+import type { PersistentSessionEntryOutcome, PersistentSessionResolvedRole } from './persistentSessionEntryPolicyUtils'
 
 export interface ResolveSessionJoinPreflightParams {
   sessionId?: string
@@ -34,4 +35,25 @@ export function shouldRenderSessionJoinPreflight({
   }
 
   return completedJoinPreflightSessionId !== sessionId
+}
+
+export function shouldAutoRedirectPersistentTeacherToManage({
+  isStarted,
+  sessionId,
+  resolvedRole,
+  entryOutcome,
+  presentationMode,
+}: {
+  isStarted?: boolean
+  sessionId?: string | null
+  resolvedRole?: PersistentSessionResolvedRole
+  entryOutcome?: PersistentSessionEntryOutcome
+  presentationMode?: WaitingRoomPresentationMode
+}): boolean {
+  return isStarted === true
+    && typeof sessionId === 'string'
+    && sessionId.length > 0
+    && resolvedRole === 'teacher'
+    && entryOutcome === 'join-live'
+    && presentationMode === 'pass-through'
 }

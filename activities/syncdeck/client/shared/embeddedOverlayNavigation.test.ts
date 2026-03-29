@@ -5,6 +5,8 @@ import { resolveOptimisticEmbeddedOverlayIndices } from './embeddedOverlayNaviga
 import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from './embeddedOverlayNavigation.js'
 import { resolveEmbeddedOverlayVerticalMoveAllowed } from './embeddedOverlayNavigation.js'
 import { reduceEmbeddedOverlayNavigationPointerDownState } from './embeddedOverlayNavigation.js'
+import { shouldHandleEmbeddedOverlayNavigationPointerDown } from './embeddedOverlayNavigation.js'
+import { shouldNavigateEmbeddedOverlayOnPointerDown } from './embeddedOverlayNavigation.js'
 
 void test('consumeEmbeddedOverlayNavigationEvent stops default click handling and propagation', () => {
   const calls: string[] = []
@@ -21,7 +23,7 @@ void test('consumeEmbeddedOverlayNavigationEvent stops default click handling an
   assert.deepEqual(calls, ['preventDefault', 'stopPropagation'])
 })
 
-void test('reduceEmbeddedOverlayNavigationPointerDownState clears handled pointer state after click and interrupted gestures', () => {
+void test('reduceEmbeddedOverlayNavigationPointerDownState preserves click suppression through pointercancel and clears on click or timeout', () => {
   assert.deepEqual(
     reduceEmbeddedOverlayNavigationPointerDownState(false, 'pointerdown'),
     {
@@ -41,7 +43,7 @@ void test('reduceEmbeddedOverlayNavigationPointerDownState clears handled pointe
   assert.deepEqual(
     reduceEmbeddedOverlayNavigationPointerDownState(true, 'pointercancel'),
     {
-      didHandlePointerDown: false,
+      didHandlePointerDown: true,
       shouldSkipClickNavigation: false,
     },
   )
@@ -52,6 +54,63 @@ void test('reduceEmbeddedOverlayNavigationPointerDownState clears handled pointe
       didHandlePointerDown: false,
       shouldSkipClickNavigation: false,
     },
+  )
+})
+
+void test('shouldHandleEmbeddedOverlayNavigationPointerDown accepts primary mouse and mobile safari touch presses', () => {
+  assert.equal(
+    shouldHandleEmbeddedOverlayNavigationPointerDown({
+      button: 0,
+      pointerType: 'mouse',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldHandleEmbeddedOverlayNavigationPointerDown({
+      button: -1,
+      pointerType: 'touch',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldHandleEmbeddedOverlayNavigationPointerDown({
+      button: 0,
+      pointerType: 'touch',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldHandleEmbeddedOverlayNavigationPointerDown({
+      button: 1,
+      pointerType: 'mouse',
+    }),
+    false,
+  )
+})
+
+void test('shouldNavigateEmbeddedOverlayOnPointerDown defers touch navigation until click', () => {
+  assert.equal(
+    shouldNavigateEmbeddedOverlayOnPointerDown({
+      pointerType: 'mouse',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldNavigateEmbeddedOverlayOnPointerDown({
+      pointerType: 'pen',
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldNavigateEmbeddedOverlayOnPointerDown({
+      pointerType: 'touch',
+    }),
+    false,
   )
 })
 

@@ -22,6 +22,23 @@ export function consumeEmbeddedOverlayNavigationEvent(event: {
   event.stopPropagation()
 }
 
+export function shouldHandleEmbeddedOverlayNavigationPointerDown(event: {
+  button: number
+  pointerType?: string
+}): boolean {
+  if (event.pointerType === 'touch') {
+    return event.button === 0 || event.button === -1
+  }
+
+  return event.button === 0
+}
+
+export function shouldNavigateEmbeddedOverlayOnPointerDown(event: {
+  pointerType?: string
+}): boolean {
+  return event.pointerType !== 'touch'
+}
+
 export type EmbeddedOverlayNavigationPointerTransition =
   | 'pointerdown'
   | 'click'
@@ -46,6 +63,13 @@ export function reduceEmbeddedOverlayNavigationPointerDownState(
     return {
       didHandlePointerDown: false,
       shouldSkipClickNavigation: didHandlePointerDown,
+    }
+  }
+
+  if (transition === 'pointercancel') {
+    return {
+      didHandlePointerDown,
+      shouldSkipClickNavigation: false,
     }
   }
 

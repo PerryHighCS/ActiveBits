@@ -2,14 +2,22 @@ import { Suspense, useCallback, useEffect, useState, type ChangeEvent, type Comp
 import type { PersistentSessionEntryStatus, SessionEntryStatus } from '../../../../types/waitingRoom.js'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import Button from '@src/components/ui/Button'
+import HomeTeacherJoinControls from './HomeTeacherJoinControls'
 import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
+import {
+  getTeacherJoinClosedState,
+  getTeacherJoinInitialSessionId,
+  normalizeTeacherJoinCode,
+  normalizeTeacherJoinSessionId,
+} from './homeTeacherJoinUtils'
 import { getActivity, activities } from '@src/activities'
 import {
   activitySupportsDirectStandalonePath,
   buildTeacherManagePathFromSession,
   buildPersistentSessionEntryApiUrl,
   buildSessionEntryApiUrl,
+  buildSessionTeacherAuthenticateApiUrl,
   buildPersistentTeacherManagePath,
   CACHE_TTL,
   cleanExpiredSessions,
@@ -25,7 +33,7 @@ import {
   buildSessionEntryParticipantStorageKey,
   hasValidEntryParticipantHandoffStorageValue,
 } from './entryParticipantStorage'
-import { shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
+import { shouldAutoRedirectPersistentTeacherToManage, shouldRenderSessionJoinPreflight } from './sessionEntryRenderUtils'
 import { readSessionParticipantContext } from './sessionParticipantContext'
 
 interface RouteParams {
@@ -98,6 +106,11 @@ const SessionRouter = () => {
   const [completedJoinPreflightSessionId, setCompletedJoinPreflightSessionId] = useState<string | null>(null)
   const [persistentSessionEntryStatus, setPersistentSessionEntryStatus] = useState<PersistentSessionEntryStatus | null>(null)
   const [isLoadingPersistent, setIsLoadingPersistent] = useState(false)
+  const [showTeacherJoinModal, setShowTeacherJoinModal] = useState(false)
+  const [teacherJoinSessionId, setTeacherJoinSessionId] = useState('')
+  const [teacherJoinCode, setTeacherJoinCode] = useState('')
+  const [teacherJoinError, setTeacherJoinError] = useState<string | null>(null)
+  const [isTeacherJoining, setIsTeacherJoining] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
@@ -212,13 +225,21 @@ const SessionRouter = () => {
 
   useEffect(() => {
     if (!activityName) return
-    if (!persistentSessionEntryStatus?.isStarted || !persistentSessionEntryStatus.sessionId) return
-    if (persistentSessionEntryStatus.resolvedRole !== 'teacher' || persistentSessionEntryStatus.entryOutcome !== 'join-live') {
+    if (!shouldAutoRedirectPersistentTeacherToManage({
+      isStarted: persistentSessionEntryStatus?.isStarted,
+      sessionId: persistentSessionEntryStatus?.sessionId,
+      resolvedRole: persistentSessionEntryStatus?.resolvedRole,
+      entryOutcome: persistentSessionEntryStatus?.entryOutcome,
+      presentationMode: persistentSessionEntryStatus?.presentationMode,
+    })) {
       return
     }
 
     let isCancelled = false
-    const startedSessionId = persistentSessionEntryStatus.sessionId
+    const startedSessionId = persistentSessionEntryStatus?.sessionId
+    if (!startedSessionId) {
+      return
+    }
     const queryString = getWindowSearch()
 
     void (async () => {
@@ -235,6 +256,7 @@ const SessionRouter = () => {
     activityName,
     persistentSessionEntryStatus?.entryOutcome,
     persistentSessionEntryStatus?.isStarted,
+    persistentSessionEntryStatus?.presentationMode,
     persistentSessionEntryStatus?.resolvedRole,
     persistentSessionEntryStatus?.sessionId,
     navigate,
@@ -386,6 +408,68 @@ const SessionRouter = () => {
     }
   }
 
+  const handleTeacherJoinSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    const normalizedSessionId = normalizeTeacherJoinSessionId(teacherJoinSessionId)
+    const normalizedTeacherCode = normalizeTeacherJoinCode(teacherJoinCode)
+
+    if (!isJoinSessionId(normalizedSessionId)) {
+      setTeacherJoinError('Enter a valid Join Code.')
+      return
+    }
+
+    if (!normalizedTeacherCode) {
+      setTeacherJoinError('Enter the teacher code.')
+      return
+    }
+
+    setTeacherJoinError(null)
+    setIsTeacherJoining(true)
+
+    try {
+      const response = await fetch(buildSessionTeacherAuthenticateApiUrl(normalizedSessionId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          teacherCode: normalizedTeacherCode,
+        }),
+      })
+
+      const payload = await response.json().catch(() => ({})) as {
+        error?: string
+        activityName?: string
+        sessionId?: string
+      }
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to join as teacher right now.')
+      }
+
+      if (typeof payload.activityName !== 'string' || payload.activityName.length === 0) {
+        throw new Error('Teacher join response did not include an activity name.')
+      }
+
+      const nextSessionId = typeof payload.sessionId === 'string' && payload.sessionId.length > 0
+        ? payload.sessionId
+        : normalizedSessionId
+      const path = await resolveTeacherManagePath(payload.activityName, nextSessionId, '')
+
+      setShowTeacherJoinModal(false)
+      setTeacherJoinSessionId('')
+      setTeacherJoinCode('')
+      setTeacherJoinError(null)
+      void navigate(path)
+    } catch (joinError) {
+      setTeacherJoinError(joinError instanceof Error ? joinError.message : 'Unable to join as teacher right now.')
+    } finally {
+      setIsTeacherJoining(false)
+    }
+  }
+
   if (error || soloRouteError || utilityRouteError) {
     return <div className="text-red-500 text-center">{error || soloRouteError || utilityRouteError}</div>
   }
@@ -500,20 +584,59 @@ const SessionRouter = () => {
 
     return (
       <div className="flex flex-col items-center gap-8 max-w-6xl mx-auto p-6">
-        <form onSubmit={handleSubmit} className="flex flex-col items-center w-max mx-auto">
-          <label className="block mb-4">
-            Join Session ID:
-            <input
-              className="border border-grey-700 rounded mx-2 p-2"
-              size={5}
-              type="text"
-              id="sessionId"
-              value={sessionIdInput}
-              onChange={handleInputChange}
+        <div className="w-full grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto_1fr] md:items-end">
+          <div className="hidden md:block" />
+
+          <form onSubmit={handleSubmit} className="justify-self-center">
+            <div className="flex flex-wrap items-end justify-center gap-3">
+              <label className="flex items-center gap-2 text-center md:text-left">
+                <span>Join Code:</span>
+                <input
+                  className="border border-grey-700 rounded px-3 py-2"
+                  size={5}
+                  type="text"
+                  id="sessionId"
+                  value={sessionIdInput}
+                  onChange={handleInputChange}
+                />
+              </label>
+              <Button type="submit">Join Session</Button>
+            </div>
+          </form>
+
+          <div className="justify-self-center md:justify-self-end">
+            <HomeTeacherJoinControls
+              open={showTeacherJoinModal}
+              sessionId={teacherJoinSessionId}
+              teacherCode={teacherJoinCode}
+              error={teacherJoinError}
+              isSubmitting={isTeacherJoining}
+              onOpen={() => {
+                const nextSessionId = getTeacherJoinInitialSessionId(sessionIdInput)
+                setTeacherJoinSessionId(nextSessionId)
+                setTeacherJoinCode('')
+                setTeacherJoinError(null)
+                setShowTeacherJoinModal(true)
+              }}
+              onClose={() => {
+                const closedState = getTeacherJoinClosedState()
+                setTeacherJoinSessionId(closedState.sessionId)
+                setTeacherJoinCode(closedState.teacherCode)
+                setTeacherJoinError(closedState.error)
+                setShowTeacherJoinModal(false)
+              }}
+              onSessionIdChange={(value) => {
+                setTeacherJoinSessionId(normalizeTeacherJoinSessionId(value))
+                setTeacherJoinError(null)
+              }}
+              onTeacherCodeChange={(value) => {
+                setTeacherJoinCode(value)
+                setTeacherJoinError(null)
+              }}
+              onSubmit={handleTeacherJoinSubmit}
             />
-          </label>
-          <Button type="submit">Join Session</Button>
-        </form>
+          </div>
+        </div>
 
         {standaloneActivities.length > 0 && (
           <div className="w-full border-t-2 border-gray-300 pt-8">

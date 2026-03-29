@@ -41,6 +41,10 @@ import { resolveManagerPreloadRequestBatchInputs } from './SyncDeckManager.js'
 import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
 import { processManagerPreloadRequests } from './SyncDeckManager.js'
 import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
+import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckManager.js'
+import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
+import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
+import { shouldRetryEmbeddedBootstrapBackfill } from './SyncDeckManager.js'
 import { extractRevealSyncActionWithoutParsing } from './SyncDeckManager.js'
 import { resolveMountedEmbeddedManagerInstanceKeys } from './SyncDeckManager.js'
 import { resolveEmbeddedManagerIframeAccessibilityProps } from './SyncDeckManager.js'
@@ -484,6 +488,75 @@ void test('resolveManagerEmbeddedInstanceStatus marks only selected instance as 
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'video-sync:3:0'), 'active')
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', 'embedded-test:3:0'), 'idle')
   assert.equal(resolveManagerEmbeddedInstanceStatus('video-sync:3:0', null), 'idle')
+})
+
+void test('resolveEmbeddedBootstrapBackfillRequests only returns child sessions that still need bootstrap hydration', () => {
+  assert.deepEqual(
+    resolveEmbeddedBootstrapBackfillRequests({
+      embeddedActivities: {
+        'resonance:1:0': {
+          activityId: 'resonance',
+          childSessionId: 'child-resonance',
+          startedAt: 1,
+          owner: 'syncdeck-instructor',
+        },
+        'video-sync:2:0': {
+          activityId: 'video-sync',
+          childSessionId: 'child-video',
+          startedAt: 2,
+          owner: 'syncdeck-instructor',
+        },
+        'raffle:3:0': {
+          activityId: 'raffle',
+          childSessionId: 'child-raffle',
+          startedAt: 3,
+          owner: 'syncdeck-instructor',
+        },
+      },
+      completedChildSessionIds: new Set(['child-video']),
+      pendingChildSessionIds: new Set(['child-raffle']),
+    }),
+    [
+      {
+        activityId: 'resonance',
+        childSessionId: 'child-resonance',
+        instanceKey: 'resonance:1:0',
+      },
+    ],
+  )
+})
+
+void test('resolveCompletedEmbeddedBootstrapChildSessionIds marks both stale local and resolved child session ids', () => {
+  assert.deepEqual(
+    resolveCompletedEmbeddedBootstrapChildSessionIds({
+      requestChildSessionId: 'stale-child-id',
+      resolvedChildSessionId: 'resolved-child-id',
+    }),
+    ['stale-child-id', 'resolved-child-id'],
+  )
+  assert.deepEqual(
+    resolveCompletedEmbeddedBootstrapChildSessionIds({
+      requestChildSessionId: 'same-child-id',
+      resolvedChildSessionId: 'same-child-id',
+    }),
+    ['same-child-id'],
+  )
+})
+
+void test('resolveEmbeddedBootstrapBackfillRetryDelayMs applies capped exponential backoff', () => {
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(0), 1000)
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(1), 2000)
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(2), 4000)
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(4), 10000)
+  assert.equal(resolveEmbeddedBootstrapBackfillRetryDelayMs(Number.NaN), 1000)
+})
+
+void test('shouldRetryEmbeddedBootstrapBackfill only retries transient server failures', () => {
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(400), false)
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(403), false)
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(404), false)
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(500), true)
+  assert.equal(shouldRetryEmbeddedBootstrapBackfill(503), true)
 })
 
 void test('buildManagerOverlayNavigationCommand builds reveal command envelopes for four directions and slide', () => {

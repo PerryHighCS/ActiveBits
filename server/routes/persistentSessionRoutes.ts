@@ -6,7 +6,9 @@ import {
 } from '../activities/activityRegistry.js'
 import {
   cleanupPersistentSession,
+  recordTeacherCodeAttempt,
   consumePersistentSessionEntryParticipant,
+  findHashBySessionId,
   generatePersistentHash,
   getOrCreateActivePersistentSession,
   getPersistentSession,
@@ -68,6 +70,10 @@ interface RequestLike {
   query: Record<string, unknown>
   cookies?: Record<string, unknown>
   body?: unknown
+  ip?: string
+  socket?: {
+    remoteAddress?: string
+  }
   protocol: string
   get(name: string): string | undefined
 }
@@ -111,6 +117,18 @@ function getQueryString(value: unknown): string | null {
 function getBodyString(body: Record<string, unknown>, key: string): string | null {
   const value = body[key]
   return typeof value === 'string' ? value : null
+}
+
+function getRequestClientIp(req: RequestLike): string {
+  if (typeof req.ip === 'string' && req.ip.trim()) {
+    return req.ip.trim()
+  }
+
+  if (typeof req.socket?.remoteAddress === 'string' && req.socket.remoteAddress.trim()) {
+    return req.socket.remoteAddress.trim()
+  }
+
+  return 'unknown'
 }
 
 function toSelectedOptions(value: unknown): Record<string, unknown> {
@@ -631,6 +649,112 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
       success: true,
       isStarted: Boolean(persistentSession?.sessionId),
       sessionId: persistentSession?.sessionId || null,
+    })
+  })
+
+  app.post('/api/session/:sessionId/teacher-authenticate', async (req, res) => {
+    setNoStore(res)
+    const sessionId = req.params.sessionId
+    const body = isPlainObject(req.body) ? req.body : {}
+    const teacherCode = getBodyString(body, 'teacherCode')
+
+    if (!sessionId || !teacherCode) {
+      res.status(400).json({ error: 'Missing sessionId or teacherCode' })
+      return
+    }
+    if (teacherCode.length < 6) {
+      res.status(400).json({ error: 'Teacher code must be at least 6 characters' })
+      return
+    }
+    if (teacherCode.length > MAX_TEACHER_CODE_LENGTH) {
+      res.status(400).json({ error: `Teacher code must be at most ${MAX_TEACHER_CODE_LENGTH} characters` })
+      return
+    }
+
+    const activeSession = await sessions.get(sessionId)
+    if (activeSession == null) {
+      res.status(404).json({ error: 'Active session not found' })
+      return
+    }
+
+    const hash = await findHashBySessionId(sessionId)
+    if (!hash) {
+      res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+      return
+    }
+
+    const persistentSession = await getPersistentSession(hash)
+    if (!persistentSession || persistentSession.sessionId !== sessionId) {
+      res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+      return
+    }
+
+    const activityName = typeof persistentSession.activityName === 'string' ? persistentSession.activityName : null
+    if (!activityName || !isValidActivity(activityName)) {
+      res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+      return
+    }
+
+    const activeSessionType = isPlainObject(activeSession) && typeof activeSession.type === 'string'
+      ? activeSession.type
+      : null
+    if (activeSessionType !== activityName) {
+      res.status(404).json({ error: 'Teacher join is unavailable for this session' })
+      return
+    }
+
+    const clientIp = getRequestClientIp(req)
+    const rateLimitKey = `${clientIp}:${hash}`
+    const attemptResult = await recordTeacherCodeAttempt(rateLimitKey)
+    if (!attemptResult.allowed) {
+      res.status(429).json({ error: 'Too many attempts. Please wait a minute.' })
+      return
+    }
+
+    const validation = verifyTeacherCodeWithHash(activityName, hash, teacherCode)
+    if (!validation.valid) {
+      res.status(401).json({ error: validation.error || 'Invalid teacher code' })
+      return
+    }
+
+    const finalEntryPolicy = resolvePersistentSessionEntryPolicy(persistentSession.entryPolicy)
+    if (finalEntryPolicy === 'solo-only') {
+      res.status(409).json(buildSoloOnlyPolicyRejection() satisfies PersistentSessionPolicyRejectionPayload)
+      return
+    }
+
+    const finalSelectedOptions = getCanonicalPersistentLinkSelectedOptions(activityName, persistentSession.selectedOptions)
+    const finalUrlState = {
+      entryPolicy: finalEntryPolicy,
+      selectedOptions: finalSelectedOptions,
+    } satisfies PersistentLinkUrlState
+    const finalUrlHash = computePersistentLinkUrlHash(hash, finalUrlState)
+
+    const cookieName = 'persistent_sessions'
+    let { sessions: sessionEntries } = parsePersistentSessionsCookie(
+      req.cookies?.[cookieName],
+      'persistent_sessions (/api/session/:sessionId/teacher-authenticate)',
+    )
+    const cookieKey = `${activityName}:${hash}`
+    sessionEntries = sessionEntries.filter((entry) => entry.key !== cookieKey)
+    sessionEntries.push({
+      key: cookieKey,
+      teacherCode,
+      selectedOptions: finalSelectedOptions,
+      entryPolicy: finalEntryPolicy,
+      urlHash: finalUrlHash,
+    })
+    if (sessionEntries.length > MAX_SESSIONS_PER_COOKIE) {
+      sessionEntries = sessionEntries.slice(-MAX_SESSIONS_PER_COOKIE)
+    }
+
+    writePersistentSessionsCookie(res, sessionEntries)
+    await updatePersistentSessionUrlState(hash, finalUrlState)
+
+    res.json({
+      success: true,
+      activityName,
+      sessionId,
     })
   })
 

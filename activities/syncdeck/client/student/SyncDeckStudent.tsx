@@ -39,6 +39,8 @@ import {
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
+  shouldHandleEmbeddedOverlayNavigationPointerDown,
+  shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
 const isDevMode = import.meta.env?.DEV === true
@@ -1966,7 +1968,7 @@ const SyncDeckStudent: FC = () => {
     activateOverlayNavClickShield,
     beginOverlayNavPointerDownHandling,
     consumeOverlayNavClick,
-    resetOverlayNavPointerDownHandling,
+    handleOverlayNavPointerCancel,
   } = useEmbeddedOverlayNavigationInteraction()
   const pendingPayloadQueueRef = useRef<unknown[]>([])
   const localStudentIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
@@ -3499,7 +3501,10 @@ const SyncDeckStudent: FC = () => {
     event: PointerEvent<HTMLButtonElement>,
     direction: 'left' | 'right' | 'up' | 'down',
   ): void => {
-    if (event.button !== 0) {
+    if (!shouldHandleEmbeddedOverlayNavigationPointerDown(event)) {
+      return
+    }
+    if (!shouldNavigateEmbeddedOverlayOnPointerDown(event)) {
       return
     }
     consumeEmbeddedOverlayNavigationEvent(event)
@@ -3517,6 +3522,16 @@ const SyncDeckStudent: FC = () => {
       return
     }
     handleStudentOverlayDown()
+  }
+
+  const handleStudentOverlayNavigationGutterPointerDown = (
+    event: PointerEvent<HTMLDivElement>,
+  ): void => {
+    if (!shouldHandleEmbeddedOverlayNavigationPointerDown(event)) {
+      return
+    }
+
+    consumeEmbeddedOverlayNavigationEvent(event)
   }
 
   if (!sessionId) {
@@ -3693,10 +3708,22 @@ const SyncDeckStudent: FC = () => {
           activeSoloOverlay,
         }) ? (
           <>
+            <div
+              aria-hidden="true"
+              className="absolute left-0 top-0 bottom-0 z-[16] w-14"
+              onPointerDown={handleStudentOverlayNavigationGutterPointerDown}
+              onClick={consumeEmbeddedOverlayNavigationEvent}
+            />
+            <div
+              aria-hidden="true"
+              className="absolute right-0 top-0 bottom-0 z-[16] w-14"
+              onPointerDown={handleStudentOverlayNavigationGutterPointerDown}
+              onClick={consumeEmbeddedOverlayNavigationEvent}
+            />
             <button
               type="button"
               onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'left')}
-              onPointerCancel={resetOverlayNavPointerDownHandling}
+              onPointerCancel={handleOverlayNavPointerCancel}
               onClick={(event) => handleStudentOverlayNavigationClick(event, 'left')}
               disabled={!canMoveBack}
               aria-disabled={!canMoveBack}
@@ -3709,7 +3736,7 @@ const SyncDeckStudent: FC = () => {
             <button
               type="button"
               onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'up')}
-              onPointerCancel={resetOverlayNavPointerDownHandling}
+              onPointerCancel={handleOverlayNavPointerCancel}
               onClick={(event) => handleStudentOverlayNavigationClick(event, 'up')}
               disabled={!canMoveUp}
               aria-disabled={!canMoveUp}
@@ -3722,7 +3749,7 @@ const SyncDeckStudent: FC = () => {
             <button
               type="button"
               onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'right')}
-              onPointerCancel={resetOverlayNavPointerDownHandling}
+              onPointerCancel={handleOverlayNavPointerCancel}
               onClick={(event) => handleStudentOverlayNavigationClick(event, 'right')}
               disabled={!canMoveForward}
               aria-disabled={!canMoveForward}
@@ -3735,7 +3762,7 @@ const SyncDeckStudent: FC = () => {
             <button
               type="button"
               onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'down')}
-              onPointerCancel={resetOverlayNavPointerDownHandling}
+              onPointerCancel={handleOverlayNavPointerCancel}
               onClick={(event) => handleStudentOverlayNavigationClick(event, 'down')}
               disabled={!canMoveDown}
               aria-disabled={!canMoveDown}

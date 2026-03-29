@@ -293,6 +293,31 @@ export class ValkeyPersistentStore {
     }
   }
 
+  async getHashBySessionId(sessionId: string): Promise<string | null> {
+    try {
+      return await this.client.get(`persistent-session-by-session:${sessionId}`)
+    } catch (err) {
+      console.error(`Failed to get persistent session hash for session ${sessionId}:`, err)
+      return null
+    }
+  }
+
+  async setHashBySessionId(sessionId: string, hash: string): Promise<void> {
+    try {
+      await this.client.set(`persistent-session-by-session:${sessionId}`, hash, 'PX', this.ttlMs)
+    } catch (err) {
+      console.error(`Failed to set persistent session hash for session ${sessionId}:`, err)
+    }
+  }
+
+  async deleteHashBySessionId(sessionId: string): Promise<void> {
+    try {
+      await this.client.del(`persistent-session-by-session:${sessionId}`)
+    } catch (err) {
+      console.error(`Failed to delete persistent session hash for session ${sessionId}:`, err)
+    }
+  }
+
   async getAllHashes(): Promise<string[]> {
     try {
       const keys = await this.scanKeys('persistent:*')

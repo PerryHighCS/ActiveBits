@@ -36,5 +36,10 @@ blob-report/
 !.claude/knowledge/
 !.claude/knowledge/**
 
+# local agent/session artifacts
+.codex
+
 # playwright files
 core
+!server/core/
+!server/core/**

@@ -94,6 +94,7 @@ const testActivityRegistryHooks = {
 }
 
 type DashboardActivityLike = Parameters<typeof resolveCustomPersistentLinkBuilder>[0]
+type TestingLibraryAct = (callback: () => void | Promise<void>) => void | Promise<void>
 
 function installDomEnvironment() {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -129,6 +130,25 @@ interface RenderedScreenLike {
   getByRole: (role: string, options?: { name?: string | RegExp }) => HTMLElement
   getByLabelText: (text: string | RegExp) => HTMLElement
   queryByText: (text: string | RegExp) => HTMLElement | null
+}
+
+async function settleRenderedDashboard(params: {
+  act: TestingLibraryAct | null
+  cleanup: (() => void) | null
+  unmount: (() => void) | null
+}): Promise<void> {
+  if (params.act) {
+    await params.act(async () => {
+      params.unmount?.()
+      params.cleanup?.()
+      await Promise.resolve()
+    })
+    return
+  }
+
+  params.unmount?.()
+  params.cleanup?.()
+  await Promise.resolve()
 }
 
 interface ManageDashboardTestProps {
@@ -255,13 +275,18 @@ void test('ManageDashboard generic preflight option requires verify before submi
   const fetchStub = installFetchStub()
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
   let unmount: (() => void) | null = null
+  let cleanup: (() => void) | null = null
+  let act: TestingLibraryAct | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: false,
   }
 
   try {
-    const { fireEvent, render, waitFor } = await import('@testing-library/react')
+    const testingLibrary = await import('@testing-library/react')
+    const { fireEvent, render, waitFor } = testingLibrary
+    cleanup = testingLibrary.cleanup
+    act = testingLibrary.act
     const { default: ManageDashboard } = await import('./ManageDashboard.js')
     const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
     const rendered = render(
@@ -307,7 +332,7 @@ void test('ManageDashboard generic preflight option requires verify before submi
       assert.notEqual(rendered.queryByText('Verify this value before creating the link.'), null)
     })
   } finally {
-    unmount?.()
+    await settleRenderedDashboard({ act, cleanup, unmount })
     testActivity.manageDashboard = {
       ...testActivity.manageDashboard,
       ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),
@@ -322,13 +347,18 @@ void test('ManageDashboard custom builders must signal readiness before submit p
   const fetchStub = installFetchStub()
   const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
   let unmount: (() => void) | null = null
+  let cleanup: (() => void) | null = null
+  let act: TestingLibraryAct | null = null
   testActivity.manageDashboard = {
     ...testActivity.manageDashboard,
     customPersistentLinkBuilder: true,
   }
 
   try {
-    const { fireEvent, render, waitFor } = await import('@testing-library/react')
+    const testingLibrary = await import('@testing-library/react')
+    const { fireEvent, render, waitFor } = testingLibrary
+    cleanup = testingLibrary.cleanup
+    act = testingLibrary.act
     const { default: ManageDashboard } = await import('./ManageDashboard.js')
     const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
     const rendered = render(
@@ -377,8 +407,12 @@ void test('ManageDashboard custom builders must signal readiness before submit p
         '/api/persistent-session/list',
       ])
     })
+
+    await waitFor(() => {
+      assert.notEqual(rendered.queryByText(/Permanent link created successfully!/i), null)
+    })
   } finally {
-    unmount?.()
+    await settleRenderedDashboard({ act, cleanup, unmount })
     testActivity.manageDashboard = {
       ...testActivity.manageDashboard,
       ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),

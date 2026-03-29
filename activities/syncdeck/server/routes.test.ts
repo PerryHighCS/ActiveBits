@@ -2133,6 +2133,84 @@ void test('embedded-activity start route is idempotent per instance key', async 
   })
 })
 
+void test('embedded-activity start route serializes concurrent creation for the same instance key', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+
+  const originalSet = storeState.sessions.set.bind(storeState.sessions)
+  let shouldBlockParentSet = true
+  let releaseParentSet: (() => void) | null = null
+  let resolveParentSetStarted: (() => void) | null = null
+  const parentSetStarted = new Promise<void>((resolve) => {
+    resolveParentSetStarted = resolve
+  })
+
+  storeState.sessions.set = async (id, session, ttl) => {
+    if (
+      id === 's1'
+      && shouldBlockParentSet
+      && asRecord(session.data)?.embeddedActivities != null
+      && Object.prototype.hasOwnProperty.call(asRecord(session.data)?.embeddedActivities ?? {}, 'video-sync:3:0')
+    ) {
+      shouldBlockParentSet = false
+      resolveParentSetStarted?.()
+      await new Promise<void>((resolve) => {
+        releaseParentSet = resolve
+      })
+    }
+
+    await originalSet(id, session, ttl)
+  }
+
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+  assert.equal(typeof handler, 'function')
+
+  const request = createRequest(
+    { sessionId: 's1' },
+    {
+      instructorPasscode: 'teacher-passcode-1',
+      activityId: 'video-sync',
+      instanceKey: 'video-sync:3:0',
+    },
+  )
+
+  const firstResponse = createResponse()
+  const secondResponse = createResponse()
+  const firstStart = handler?.(request, firstResponse)
+  await parentSetStarted
+  const secondStart = handler?.(request, secondResponse)
+  if (releaseParentSet == null) {
+    throw new Error('Expected blocked parent-session set release function')
+  }
+  const releaseBlockedParentSet: () => void = releaseParentSet
+  releaseBlockedParentSet()
+
+  await Promise.all([firstStart, secondStart])
+
+  assert.equal(firstResponse.statusCode, 200)
+  assert.equal(secondResponse.statusCode, 200)
+
+  const firstBody = firstResponse.body as { childSessionId: string; instanceKey: string }
+  const secondBody = secondResponse.body as { childSessionId: string; instanceKey: string }
+  assert.equal(firstBody.instanceKey, 'video-sync:3:0')
+  assert.equal(secondBody.instanceKey, 'video-sync:3:0')
+  assert.equal(firstBody.childSessionId, secondBody.childSessionId)
+
+  const parentSession = storeState.store.s1 as SessionRecord & {
+    data: { embeddedActivities: Record<string, { childSessionId: string; activityId: string }> }
+  }
+  assert.equal(parentSession.data.embeddedActivities['video-sync:3:0']?.childSessionId, firstBody.childSessionId)
+  assert.equal(
+    Object.keys(storeState.store).filter((candidateSessionId) => candidateSessionId.startsWith('CHILD:s1:')).length,
+    1,
+  )
+})
+
 void test('embedded-activity start route recreates a stale child session when the stored child session is missing', async () => {
   const app = createMockApp()
   const ws = createMockWs()

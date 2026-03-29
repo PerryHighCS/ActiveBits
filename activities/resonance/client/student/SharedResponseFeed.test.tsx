@@ -232,6 +232,40 @@ void test('SharedResponseFeed highlights the student-selected option in the shar
   }
 })
 
+void test('SharedResponseFeed keeps released questions in authored question order instead of reverse reveal time', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { render } = await import('@testing-library/react')
+
+  try {
+    const laterFreeResponseReveal: QuestionReveal = {
+      ...freeResponseReveal,
+      sharedAt: 20,
+    }
+    const earlierMcqReveal: QuestionReveal = {
+      ...mcqReveal,
+      sharedAt: 10,
+    }
+
+    const rendered = render(
+      React.createElement(SharedResponseFeed, {
+        reveals: [laterFreeResponseReveal, earlierMcqReveal],
+        revealedQuestions: [freeResponseQuestion, multipleChoiceQuestion],
+      }),
+    )
+
+    const questionHeadings = Array.from(
+      rendered.container.querySelectorAll('section[aria-label="Shared responses"] > div > p'),
+    ).map((element) => element.textContent)
+
+    assert.deepEqual(questionHeadings, [
+      'What surprised you most?',
+      'Choose one',
+    ])
+  } finally {
+    restoreDomEnvironment()
+  }
+})
+
 void test('SharedResponseFeed colors the student multiple-choice reveal green when correct and red when incorrect', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { render } = await import('@testing-library/react')

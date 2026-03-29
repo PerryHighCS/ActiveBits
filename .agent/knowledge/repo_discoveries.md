@@ -22,6 +22,38 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Preserve this coupling for future embedded activity work, and treat child-session `lastActivity` updates during parent keepalive as expected behavior in tests.
 - Owner: Codex
 
+- Date: 2026-03-29
+- Area: client | activities | resonance
+- Discovery: The Resonance student released-answer feed should preserve authored question order from `revealedQuestions` instead of re-sorting reveals by `sharedAt`.
+- Why it matters: Standalone/self-paced released answers can accumulate multiple reveal cards, and timestamp sorting shows later-submitted questions first, which makes the review flow appear reversed relative to the activity's question sequence.
+- Evidence: `activities/resonance/client/student/SharedResponseFeed.tsx`; `activities/resonance/client/student/SharedResponseFeed.test.tsx`
+- Follow-up action: When adding future multi-question reveal or review surfaces in Resonance, treat the question list order as the canonical display sequence unless the UI intentionally exposes a chronological activity log.
+- Owner: Codex
+
+- Date: 2026-03-28
+- Area: client | activities | syncdeck
+- Discovery: SyncDeck embedded overlay nav buttons should treat iOS Safari touch `pointerdown` events as primary presses even when `PointerEvent.button` arrives as `-1`, otherwise the pointer path is skipped and the later synthetic click can double-advance the deck.
+- Why it matters: The overlay intentionally navigates on press and then suppresses the follow-up click. If touch presses are filtered out as non-primary, mobile Safari can fall back to click-only behavior while the underlying presentation also reacts, producing the reported two-step move on embedded slides.
+- Evidence: `activities/syncdeck/client/shared/embeddedOverlayNavigation.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Reuse the shared pointer-primary helper for future SyncDeck overlay controls instead of open-coding `event.button === 0` checks on touch-capable UI.
+- Owner: Codex
+
+- Date: 2026-03-27
+- Area: client | activities | syncdeck
+- Discovery: Recovered secondary instructors need a child-manager bootstrap backfill for already-running SyncDeck embedded activities because their local tab never initiated those child sessions and therefore never received the original `managerBootstrap` payload.
+- Why it matters: Without that backfill, embedded manager iframes such as Resonance can mount with no instructor passcode in local bootstrap storage, which makes multi-instructor activity handoff look unsynced even though the parent SyncDeck session was recovered successfully.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/resonance/client/manager/ResonanceManager.tsx`
+- Follow-up action: Reuse the same backfill pattern for future embedded manager flows that depend on same-tab bootstrap payloads instead of durable per-session recovery.
+- Owner: Codex
+
+- Date: 2026-03-27
+- Area: server | activities | syncdeck
+- Discovery: SyncDeck embedded activity starts need a server-side per-`sessionId:instanceKey` lock because client-side preload dedupe is only local to one instructor tab, and two instructors can otherwise race to create the same child session before the parent session record is updated.
+- Why it matters: The route is only naturally idempotent after `session.data.embeddedActivities[instanceKey]` has been written. Serializing the create path inside a process keeps multi-instructor prewarm from spawning duplicate child sessions for the same slide anchor.
+- Evidence: `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: If SyncDeck embedded starts ever need stronger cross-instance guarantees than sticky routing provides, move this lock to a shared Valkey-backed compare-and-set or lock primitive.
+- Owner: Codex
+
 - Date: 2026-03-23
 - Area: client | activities | syncdeck
 - Discovery: SyncDeck manager and student should not treat every inbound `reveal-sync` envelope as an iframe-ready signal now that the protocol includes descriptive `metadata` messages.
@@ -1586,4 +1618,15 @@ Use this log for durable findings that future contributors and agents should reu
 - Area: `client/src/components/common/WaitingRoom.tsx`
 - Discovery: Teacher-entry mode must reset from the live derived waiting-room state (`currentEntryOutcome` plus `currentStartedSessionId` / `effectiveEntryOutcome`), not only from the initial `entryOutcome` prop, because websocket transitions can flip `join-live` back to `continue-solo` without a prop change.
 - Why it matters: If the UI keeps stale teacher-entry mode active after a `session-ended` transition, the toggle disappears and the student join UI stays hidden.
+- Owner: Codex
+- Date: 2026-03-27
+- Area: home-page teacher recovery
+- Discovery: Rejoining an active instructor session from `/` should reuse the persistent-session teacher auth model by looking up `sessionId -> persistent hash`, rather than inventing a separate live-session credential path.
+- Why it matters: Second instructors often only have the live join code after class starts; without the persistent lookup, they cannot recover manage access unless they still have the original permalink.
+- Owner: Codex
+- Date: 2026-03-27
+- Area: client routing | manager session teardown
+- Discovery: Manager routes need a shared session-existence guard on `/manage/:activityId/:sessionId`, because student views already handle `session-ended` but instructor views are activity-specific and do not consistently attach that redirect logic.
+- Why it matters: Without the shared guard, a second instructor can stay stranded on a stale manager screen after another instructor ends the session.
+- Evidence: `client/src/App.tsx`; `client/src/components/common/ManagedSessionRoute.tsx`
 - Owner: Codex

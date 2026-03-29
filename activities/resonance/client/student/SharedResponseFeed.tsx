@@ -9,6 +9,24 @@ interface Props {
   onReactToSharedResponse?: (questionId: string, sharedResponseId: string, emoji: string) => void
 }
 
+function orderRevealsByQuestionSequence(
+  reveals: QuestionReveal[],
+  revealedQuestions: StudentQuestion[],
+): QuestionReveal[] {
+  const questionOrder = new Map(
+    revealedQuestions.map((question, index) => [question.id, index] satisfies [string, number]),
+  )
+
+  return reveals
+    .map((reveal, index) => ({
+      reveal,
+      index,
+      order: questionOrder.get(reveal.questionId) ?? Number.MAX_SAFE_INTEGER,
+    }))
+    .sort((left, right) => left.order - right.order || left.index - right.index)
+    .map((entry) => entry.reveal)
+}
+
 function getOptionText(question: StudentQuestion | undefined, optionId: string): string {
   if (question?.type !== 'multiple-choice') return optionId
   return question.options.find((o) => o.id === optionId)?.text ?? optionId
@@ -334,15 +352,14 @@ export default function SharedResponseFeed({
 }: Props) {
   if (reveals.length === 0 && reviewedResponses.length === 0) return null
 
-  // Show the most recent reveal first.
-  const sorted = [...reveals].sort((a, b) => b.sharedAt - a.sharedAt)
+  const orderedReveals = orderRevealsByQuestionSequence(reveals, revealedQuestions)
 
   return (
     <div className="space-y-6">
       <ReviewedResponseSection reviewedResponses={reviewedResponses} />
-      {sorted.length > 0 && (
+      {orderedReveals.length > 0 && (
         <section aria-label="Shared responses" className="space-y-4">
-          {sorted.map((reveal) => {
+          {orderedReveals.map((reveal) => {
             const question = revealedQuestions.find((q) => q.id === reveal.questionId)
             return (
               <div key={reveal.questionId} className="space-y-2">

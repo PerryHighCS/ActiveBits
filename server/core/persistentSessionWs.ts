@@ -5,7 +5,6 @@ import {
   removeWaiter,
   getWaiterCount,
   getWaiters,
-  canAttemptTeacherCode,
   recordTeacherCodeAttempt,
   verifyTeacherCodeWithHash,
   startPersistentSession,
@@ -139,8 +138,8 @@ async function handleTeacherCodeVerification(
   const clientIp = socket.clientIp ?? 'unknown'
   const rateLimitKey = `${clientIp}:${hash}`
 
-  const canAttempt = await canAttemptTeacherCode(rateLimitKey)
-  if (!canAttempt) {
+  const attemptResult = await recordTeacherCodeAttempt(rateLimitKey)
+  if (!attemptResult.allowed) {
     socket.send(
       JSON.stringify({
         type: 'teacher-code-error',
@@ -149,8 +148,6 @@ async function handleTeacherCodeVerification(
     )
     return
   }
-
-  await recordTeacherCodeAttempt(rateLimitKey)
 
   const persistentSession = await getPersistentSession(hash)
   if (!persistentSession) {
