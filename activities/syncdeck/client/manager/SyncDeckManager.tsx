@@ -1770,7 +1770,7 @@ const SyncDeckManager: FC = () => {
     activateOverlayNavClickShield,
     beginOverlayNavPointerDownHandling,
     consumeOverlayNavClick,
-    resetOverlayNavPointerDownHandling,
+    handleOverlayNavPointerCancel,
   } = useEmbeddedOverlayNavigationInteraction()
   const hasSeenInstructorIframeReadySignalRef = useRef(false)
   const suppressOutboundStateUntilRestoreRef = useRef(false)
@@ -4127,7 +4127,7 @@ const SyncDeckManager: FC = () => {
                             type="button"
                             className="absolute left-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                             onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'left')}
-                            onPointerCancel={resetOverlayNavPointerDownHandling}
+                            onPointerCancel={handleOverlayNavPointerCancel}
                             onClick={(event) => handleManagerOverlayNavigationClick(event, 'left')}
                             aria-label="Move left"
                             title="Move left"
@@ -4139,7 +4139,7 @@ const SyncDeckManager: FC = () => {
                             type="button"
                             className="absolute top-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                             onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'up')}
-                            onPointerCancel={resetOverlayNavPointerDownHandling}
+                            onPointerCancel={handleOverlayNavPointerCancel}
                             onClick={(event) => handleManagerOverlayNavigationClick(event, 'up')}
                             aria-label="Move up"
                             title="Move up"
@@ -4151,7 +4151,7 @@ const SyncDeckManager: FC = () => {
                             type="button"
                             className="absolute right-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                             onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'right')}
-                            onPointerCancel={resetOverlayNavPointerDownHandling}
+                            onPointerCancel={handleOverlayNavPointerCancel}
                             onClick={(event) => handleManagerOverlayNavigationClick(event, 'right')}
                             aria-label="Move right"
                             title="Move right"
@@ -4163,7 +4163,7 @@ const SyncDeckManager: FC = () => {
                             type="button"
                             className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
                             onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'down')}
-                            onPointerCancel={resetOverlayNavPointerDownHandling}
+                            onPointerCancel={handleOverlayNavPointerCancel}
                             onClick={(event) => handleManagerOverlayNavigationClick(event, 'down')}
                             aria-label="Move down"
                             title="Move down"
