@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-28
+- Area: client | activities | syncdeck
+- Discovery: SyncDeck embedded overlay nav buttons should treat iOS Safari touch `pointerdown` events as primary presses even when `PointerEvent.button` arrives as `-1`, otherwise the pointer path is skipped and the later synthetic click can double-advance the deck.
+- Why it matters: The overlay intentionally navigates on press and then suppresses the follow-up click. If touch presses are filtered out as non-primary, mobile Safari can fall back to click-only behavior while the underlying presentation also reacts, producing the reported two-step move on embedded slides.
+- Evidence: `activities/syncdeck/client/shared/embeddedOverlayNavigation.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Reuse the shared pointer-primary helper for future SyncDeck overlay controls instead of open-coding `event.button === 0` checks on touch-capable UI.
+- Owner: Codex
+
 - Date: 2026-03-27
 - Area: client | activities | syncdeck
 - Discovery: Recovered secondary instructors need a child-manager bootstrap backfill for already-running SyncDeck embedded activities because their local tab never initiated those child sessions and therefore never received the original `managerBootstrap` payload.
