@@ -3703,7 +3703,7 @@ const SyncDeckStudent: FC = () => {
               aria-disabled={!canMoveBack}
               aria-label="Previous slide"
               title="Previous slide"
-              className="absolute left-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+              className="absolute left-3 top-3 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
               ◀
             </button>
@@ -3729,7 +3729,7 @@ const SyncDeckStudent: FC = () => {
               aria-disabled={!canMoveForward}
               aria-label="Next slide"
               title="Next slide"
-              className="absolute right-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
+              className="absolute right-3 top-3 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
               ▶
             </button>
