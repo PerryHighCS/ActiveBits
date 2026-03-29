@@ -3520,6 +3520,16 @@ const SyncDeckStudent: FC = () => {
     handleStudentOverlayDown()
   }
 
+  const handleStudentOverlayNavigationGutterPointerDown = (
+    event: PointerEvent<HTMLDivElement>,
+  ): void => {
+    if (!shouldHandleEmbeddedOverlayNavigationPointerDown(event)) {
+      return
+    }
+
+    consumeEmbeddedOverlayNavigationEvent(event)
+  }
+
   if (!sessionId) {
     return (
       <div className="p-6 max-w-3xl mx-auto space-y-3">
@@ -3697,13 +3707,13 @@ const SyncDeckStudent: FC = () => {
             <div
               aria-hidden="true"
               className="absolute left-0 top-0 bottom-0 z-[16] w-14"
-              onPointerDown={consumeEmbeddedOverlayNavigationEvent}
+              onPointerDown={handleStudentOverlayNavigationGutterPointerDown}
               onClick={consumeEmbeddedOverlayNavigationEvent}
             />
             <div
               aria-hidden="true"
               className="absolute right-0 top-0 bottom-0 z-[16] w-14"
-              onPointerDown={consumeEmbeddedOverlayNavigationEvent}
+              onPointerDown={handleStudentOverlayNavigationGutterPointerDown}
               onClick={consumeEmbeddedOverlayNavigationEvent}
             />
             <button

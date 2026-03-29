@@ -3600,6 +3600,16 @@ const SyncDeckManager: FC = () => {
     sendEmbeddedOverlayNavigation(direction)
   }
 
+  const handleManagerOverlayNavigationGutterPointerDown = (
+    event: PointerEvent<HTMLDivElement>,
+  ): void => {
+    if (!shouldHandleEmbeddedOverlayNavigationPointerDown(event)) {
+      return
+    }
+
+    consumeEmbeddedOverlayNavigationEvent(event)
+  }
+
   const endEmbeddedActivity = async (instanceKey: string): Promise<void> => {
     if (!sessionId || !instructorPasscode) {
       return
@@ -4126,13 +4136,13 @@ const SyncDeckManager: FC = () => {
                           <div
                             aria-hidden="true"
                             className="absolute left-0 top-0 bottom-0 z-[26] w-14"
-                            onPointerDown={consumeEmbeddedOverlayNavigationEvent}
+                            onPointerDown={handleManagerOverlayNavigationGutterPointerDown}
                             onClick={consumeEmbeddedOverlayNavigationEvent}
                           />
                           <div
                             aria-hidden="true"
                             className="absolute right-0 top-0 bottom-0 z-[26] w-14"
-                            onPointerDown={consumeEmbeddedOverlayNavigationEvent}
+                            onPointerDown={handleManagerOverlayNavigationGutterPointerDown}
                             onClick={consumeEmbeddedOverlayNavigationEvent}
                           />
                           <button
