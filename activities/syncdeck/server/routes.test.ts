@@ -3742,7 +3742,9 @@ void test('syncdeck parent routes keep embedded child sessions alive while the p
   assert.ok((storeState.store[childSessionId]?.lastActivity ?? 0) > 1)
 })
 
-void test('syncdeck parent keepalive fan-out is deduped for repeated reads within the throttle window', async () => {
+void test('syncdeck parent keepalive fan-out is deduped for repeated reads within the throttle window', {
+  concurrency: false,
+}, async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const childSessionId = 'CHILD:s1:abc12:video-sync'

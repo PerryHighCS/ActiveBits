@@ -196,7 +196,7 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }
 
   const touch = async (id: string): Promise<boolean> => {
-    if (cache.has(id)) {
+    if (cache.getFresh(id)) {
       cache.touch(id)
       return true
     }
