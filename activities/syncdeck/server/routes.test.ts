@@ -3742,6 +3742,82 @@ void test('syncdeck parent routes keep embedded child sessions alive while the p
   assert.ok((storeState.store[childSessionId]?.lastActivity ?? 0) > 1)
 })
 
+void test('syncdeck parent keepalive fan-out is deduped for repeated reads within the throttle window', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const childSessionId = 'CHILD:s1:abc12:video-sync'
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        embeddedActivities: {
+          'video-sync:3:0': {
+            childSessionId,
+            activityId: 'video-sync',
+            startedAt: 100,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    [childSessionId]: {
+      id: childSessionId,
+      type: 'video-sync',
+      created: Date.now(),
+      lastActivity: 1,
+      data: {},
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+  assert.equal(typeof handler, 'function')
+
+  const originalDateNow = Date.now
+  try {
+    let now = 10_000
+    Date.now = () => now
+
+    const firstRes = createResponse()
+    await handler?.(
+      createRequest(
+        { sessionId: 's1' },
+        { instructorPasscode: 'teacher-passcode-1', activityId: 'video-sync', instanceKey: 'video-sync:3:0' },
+      ),
+      firstRes,
+    )
+
+    now += 1_000
+    const secondRes = createResponse()
+    await handler?.(
+      createRequest(
+        { sessionId: 's1' },
+        { instructorPasscode: 'teacher-passcode-1', activityId: 'video-sync', instanceKey: 'video-sync:3:0' },
+      ),
+      secondRes,
+    )
+
+    now += 5_000
+    const thirdRes = createResponse()
+    await handler?.(
+      createRequest(
+        { sessionId: 's1' },
+        { instructorPasscode: 'teacher-passcode-1', activityId: 'video-sync', instanceKey: 'video-sync:3:0' },
+      ),
+      thirdRes,
+    )
+
+    assert.equal(firstRes.statusCode, 200)
+    assert.equal(secondRes.statusCode, 200)
+    assert.equal(thirdRes.statusCode, 200)
+  } finally {
+    Date.now = originalDateNow
+  }
+
+  assert.deepEqual(storeState.touchCalls, [childSessionId, childSessionId])
+})
+
 void test('delete-session route cascades deletion of all child sessions', async () => {
   const app = createMockApp()
   const ws = createMockWs()

@@ -191,19 +191,12 @@ export function createSessionStore(valkeyUrl: string | null = null, ttlMs = 60 *
   }
 
   const touch = async (id: string): Promise<boolean> => {
-    const wasCached = cache.has(id)
-    const cached = await get(id)
-    if (!cached) {
-      return false
+    if (cache.has(id)) {
+      cache.touch(id)
+      return true
     }
 
-    cache.touch(id)
-
-    if (!wasCached) {
-      await valkeyStore.touch(id)
-    }
-
-    return true
+    return await valkeyStore.touch(id)
   }
 
   const getAll = async (): Promise<SessionRecord[]> => {

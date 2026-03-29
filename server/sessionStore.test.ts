@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert'
 import http from 'node:http'
 import { WebSocket } from 'ws'
-import { createSessionStore, createSession } from './core/sessions.js'
+import { createSessionStore, createSession, type SessionRecord } from './core/sessions.js'
 import { createWsRouter } from './core/wsRouter.js'
 import { EMBEDDED_CHILD_SESSION_PREFIX } from '../types/session.js'
 import { registerSessionNormalizer, resetSessionNormalizersForTests } from './core/sessionNormalization.js'
@@ -100,13 +100,15 @@ void test('embedded child session reads refresh the parent session activity time
   parentSession.lastActivity = 1
   await sessions.set(parentSession.id, parentSession)
 
-  const childSession = await createSession(sessions)
-  childSession.id = `${EMBEDDED_CHILD_SESSION_PREFIX}${parentSession.id}:abc12:embedded-test`
-  childSession.type = 'embedded-test'
-  childSession.data = {
-    embeddedParentSessionId: parentSession.id,
+  const childSession: SessionRecord = {
+    id: `${EMBEDDED_CHILD_SESSION_PREFIX}${parentSession.id}:abc12:embedded-test`,
+    type: 'embedded-test',
+    created: 1,
+    lastActivity: 1,
+    data: {
+      embeddedParentSessionId: parentSession.id,
+    },
   }
-  childSession.lastActivity = 1
   await sessions.set(childSession.id, childSession)
 
   const loadedChild = await sessions.get(childSession.id)
