@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-03-29
+- Area: client | activities | resonance
+- Discovery: The Resonance student released-answer feed should preserve authored question order from `revealedQuestions` instead of re-sorting reveals by `sharedAt`.
+- Why it matters: Standalone/self-paced released answers can accumulate multiple reveal cards, and timestamp sorting shows later-submitted questions first, which makes the review flow appear reversed relative to the activity's question sequence.
+- Evidence: `activities/resonance/client/student/SharedResponseFeed.tsx`; `activities/resonance/client/student/SharedResponseFeed.test.tsx`
+- Follow-up action: When adding future multi-question reveal or review surfaces in Resonance, treat the question list order as the canonical display sequence unless the UI intentionally exposes a chronological activity log.
+- Owner: Codex
+
 - Date: 2026-03-28
 - Area: client | activities | syncdeck
 - Discovery: SyncDeck embedded overlay nav buttons should treat iOS Safari touch `pointerdown` events as primary presses even when `PointerEvent.button` arrives as `-1`, otherwise the pointer path is skipped and the later synthetic click can double-advance the deck.
