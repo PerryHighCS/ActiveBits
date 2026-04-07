@@ -114,6 +114,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 - Follow-up action: When working outside the sandbox, rerun full `npm test`; inside the sandbox, keep adding focused tests for modified server files so behavior changes are still covered.
 - Owner: Codex
 
+- Date: 2026-04-07
+- Scope: integration
+- Pattern: For alias-heavy `activities` tests, prefer the workspace scripts that already inject `tsx` plus `scripts/jsx-loader-register.mjs`, especially the single-file helper `npm run test:activities:file -- <path>`, instead of ad hoc root-level `node --import tsx --test ...` commands.
+- Why it helps: Direct Node invocations can miss the `activities` workspace loader/alias setup and fail on imports like `@src/*`, even when the underlying test is fine.
+- Example (file/path): `activities/package.json` (`test:file`, `test:scope`, `test:activity`, `test`); repo-root `package.json` (`test:activities:file`)
+- Failure signal: Tests that import activity UI modules fail with `ERR_MODULE_NOT_FOUND` for aliases such as `@src/components` when run manually from the repo root, but pass through the workspace script.
+- Follow-up action: Add root passthrough scripts for any other repeated alias-sensitive test shapes rather than documenting more one-off Node commands.
+- Owner: Codex
+
 - Date: 2026-03-05
 - Scope: unit
 - Pattern: Prefer behavior-driven assertions over source-text matching (for example, avoid `readFileSync` + regex checks against component source strings).
