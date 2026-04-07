@@ -112,17 +112,39 @@ function normalizeAnswerPayload(value: unknown): AnswerPayload | null {
   }
 
   if (value.type === 'multiple-choice') {
-    const selectedOptionIds = Array.isArray(value.selectedOptionIds)
+    const rawSelectedOptionIds = Array.isArray(value.selectedOptionIds)
       ? value.selectedOptionIds
       : typeof value.selectedOptionId === 'string'
         ? [value.selectedOptionId]
         : null
 
     if (
-      !selectedOptionIds ||
-      selectedOptionIds.length === 0 ||
-      selectedOptionIds.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)
+      !rawSelectedOptionIds ||
+      rawSelectedOptionIds.length === 0
     ) {
+      return null
+    }
+
+    const selectedOptionIds: string[] = []
+    const seenOptionIds = new Set<string>()
+
+    for (const entry of rawSelectedOptionIds) {
+      if (typeof entry !== 'string') {
+        return null
+      }
+
+      const normalizedEntry = entry.trim()
+      if (normalizedEntry.length === 0) {
+        return null
+      }
+
+      if (!seenOptionIds.has(normalizedEntry)) {
+        seenOptionIds.add(normalizedEntry)
+        selectedOptionIds.push(normalizedEntry)
+      }
+    }
+
+    if (selectedOptionIds.length === 0) {
       return null
     }
 

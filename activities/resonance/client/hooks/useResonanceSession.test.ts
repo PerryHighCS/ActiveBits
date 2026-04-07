@@ -154,6 +154,35 @@ void test('normalizeStudentSessionSnapshot keeps valid reveal viewerResponse pay
   })
 })
 
+void test('normalizeStudentSessionSnapshot trims and deduplicates multiple-choice answer option ids', () => {
+  const result = normalizeStudentSessionSnapshot(({
+    sessionId: 'session-1',
+    reveals: [
+      {
+        questionId: 'q1',
+        sharedAt: 100,
+        correctOptionIds: ['a'],
+        sharedResponses: [
+          {
+            id: 'shared-1',
+            questionId: 'q1',
+            answer: { type: 'multiple-choice', selectedOptionIds: [' a ', 'a', 'b '] },
+            sharedAt: 100,
+            instructorEmoji: null,
+            reactions: {},
+          },
+        ],
+      },
+    ],
+  }) as unknown as Partial<StudentSessionSnapshot>)
+
+  assert.ok(result)
+  assert.deepEqual(result.reveals[0]?.sharedResponses[0]?.answer, {
+    type: 'multiple-choice',
+    selectedOptionIds: ['a', 'b'],
+  })
+})
+
 void test('normalizeStudentSessionSnapshot sanitizes shared response reactions', () => {
   const result = normalizeStudentSessionSnapshot(({
     sessionId: 'session-1',

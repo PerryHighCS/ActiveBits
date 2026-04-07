@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AnswerPayload, StudentQuestion } from '../../shared/types.js'
+import { areMcqSelectionsEqual } from '../../shared/mcq.js'
 import FreeResponseInput from './FreeResponseInput.js'
 import MCQInput from './MCQInput.js'
 
@@ -30,8 +31,7 @@ function isSameAnswer(left: AnswerPayload | null, right: AnswerPayload | null): 
   return left.type === 'free-response'
     ? right.type === 'free-response' && left.text === right.text
     : right.type === 'multiple-choice' &&
-        left.selectedOptionIds.length === right.selectedOptionIds.length &&
-        left.selectedOptionIds.every((optionId, index) => optionId === right.selectedOptionIds[index])
+        areMcqSelectionsEqual(left.selectedOptionIds, right.selectedOptionIds)
 }
 
 export default function QuestionView({

@@ -14,6 +14,24 @@ interface Props {
   announceSubmittedMessage?: boolean
 }
 
+export function getMcqInputControlType(selectionMode: MCQSelectionMode): 'checkbox' | 'radio' {
+  return selectionMode === 'multiple' ? 'checkbox' : 'radio'
+}
+
+export function toggleMcqSelection(
+  selectionMode: MCQSelectionMode,
+  selectedOptionIds: readonly string[],
+  optionId: string,
+): string[] {
+  if (selectionMode !== 'multiple') {
+    return [optionId]
+  }
+
+  return selectedOptionIds.includes(optionId)
+    ? selectedOptionIds.filter((selectedId) => selectedId !== optionId)
+    : [...selectedOptionIds, optionId]
+}
+
 export default function MCQInput({
   options,
   selectionMode,
@@ -71,19 +89,12 @@ export default function MCQInput({
                 } ${submitting || submitted ? 'pointer-events-none opacity-60' : ''}`}
               >
                 <input
-                  type={selectionMode === 'multiple' ? 'checkbox' : 'radio'}
+                  type={getMcqInputControlType(selectionMode)}
                   name="resonance-mcq"
                   value={option.id}
                   checked={isSelected}
                   onChange={() => {
-                    const nextSelected =
-                      selectionMode === 'multiple'
-                        ? (
-                            isSelected
-                              ? selected.filter((selectedId) => selectedId !== option.id)
-                              : [...selected, option.id]
-                          )
-                        : [option.id]
+                    const nextSelected = toggleMcqSelection(selectionMode, selected, option.id)
                     setSelected(nextSelected)
                     onDraftChange?.(nextSelected)
                   }}
