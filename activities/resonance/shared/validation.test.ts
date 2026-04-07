@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseGimkitCSV, parseGimkitCSVWithRandom, validateQuestion, validateQuestionSet } from './validation.js'
+import { parseGimkitCSV, parseGimkitCSVWithRandom, validateAnswerPayload, validateQuestion, validateQuestionSet } from './validation.js'
 
 const preserveOrderRandom = () => 0.999999
 
@@ -189,6 +189,86 @@ void test('parseGimkitCSV can randomize Gimkit answer order so the correct answe
     { id: 'q1_o3', text: 'Right', isCorrect: true },
   ])
   assert.ok(firstQuestion.options.every((option) => !option.id.includes('_c')))
+})
+
+void test('validateQuestionSet accepts multiple correct options for multiple-choice questions', () => {
+  const result = validateQuestionSet([
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Select all that apply',
+      order: 0,
+      options: [
+        { id: 'a', text: 'A', isCorrect: true },
+        { id: 'b', text: 'B', isCorrect: true },
+        { id: 'c', text: 'C' },
+      ],
+    },
+  ])
+
+  assert.deepEqual(result.errors, [])
+  assert.deepEqual(result.questions, [
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Select all that apply',
+      order: 0,
+      options: [
+        { id: 'a', text: 'A', isCorrect: true },
+        { id: 'b', text: 'B', isCorrect: true },
+        { id: 'c', text: 'C' },
+      ],
+    },
+  ])
+})
+
+void test('validateAnswerPayload accepts multi-select answers for multi-correct questions', () => {
+  const question = {
+    id: 'q1',
+    type: 'multiple-choice' as const,
+    text: 'Select all that apply',
+    order: 0,
+    options: [
+      { id: 'a', text: 'A', isCorrect: true },
+      { id: 'b', text: 'B', isCorrect: true },
+      { id: 'c', text: 'C' },
+    ],
+  }
+
+  assert.deepEqual(
+    validateAnswerPayload({ selectedOptionIds: ['a', 'b'] }, question),
+    { type: 'multiple-choice', selectedOptionIds: ['a', 'b'] },
+  )
+  assert.deepEqual(
+    validateAnswerPayload({ selectedOptionIds: ['a'] }, question),
+    { type: 'multiple-choice', selectedOptionIds: ['a'] },
+  )
+  assert.equal(
+    validateAnswerPayload({ selectedOptionIds: ['a', 'a'] }, question),
+    null,
+  )
+})
+
+void test('validateAnswerPayload keeps single-select questions limited to one answer', () => {
+  const question = {
+    id: 'q1',
+    type: 'multiple-choice' as const,
+    text: 'Pick one',
+    order: 0,
+    options: [
+      { id: 'a', text: 'A', isCorrect: true },
+      { id: 'b', text: 'B' },
+    ],
+  }
+
+  assert.deepEqual(
+    validateAnswerPayload({ selectedOptionId: 'a' }, question),
+    { type: 'multiple-choice', selectedOptionIds: ['a'] },
+  )
+  assert.equal(
+    validateAnswerPayload({ selectedOptionIds: ['a', 'b'] }, question),
+    null,
+  )
 })
 
 void test('parseGimkitCSVWithRandom rejects invalid random sources', () => {

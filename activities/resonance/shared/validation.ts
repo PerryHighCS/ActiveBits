@@ -1,3 +1,4 @@
+import { getMcqSelectionMode } from './mcq.js'
 import type { AnswerPayload, MCQOption, MCQQuestion, Question, QuestionType } from './types.js'
 
 // ---------------------------------------------------------------------------
@@ -85,12 +86,6 @@ function validateMCQQuestion(raw: Record<string, unknown>, id: string, text: str
   const ids = options.map((o) => o.id)
   if (new Set(ids).size !== ids.length) {
     errors.push(`question "${id}": option ids must be unique`)
-    return null
-  }
-
-  const correctCount = options.filter((o) => o.isCorrect).length
-  if (correctCount > 1) {
-    errors.push(`question "${id}": at most one option may be marked correct`)
     return null
   }
 
@@ -406,11 +401,39 @@ export function validateAnswerPayload(body: unknown, question: Question): Answer
   }
 
   if (question.type === 'multiple-choice') {
-    const selectedOptionId = normalizeId(body.selectedOptionId)
-    if (!selectedOptionId) return null
     const validOptionIds = question.options.map((o) => o.id)
-    if (!validOptionIds.includes(selectedOptionId)) return null
-    return { type: 'multiple-choice', selectedOptionId }
+    const rawSelectedOptionIds = Array.isArray(body.selectedOptionIds)
+      ? body.selectedOptionIds
+      : typeof body.selectedOptionId === 'string'
+        ? [body.selectedOptionId]
+        : null
+
+    if (!rawSelectedOptionIds || rawSelectedOptionIds.length === 0) {
+      return null
+    }
+
+    const normalizedSelectedOptionIds = rawSelectedOptionIds
+      .map((optionId) => normalizeId(optionId))
+      .filter((optionId): optionId is string => optionId !== null)
+
+    if (normalizedSelectedOptionIds.length !== rawSelectedOptionIds.length) {
+      return null
+    }
+
+    const uniqueSelectedOptionIds = Array.from(new Set(normalizedSelectedOptionIds))
+    if (uniqueSelectedOptionIds.length !== normalizedSelectedOptionIds.length) {
+      return null
+    }
+
+    if (uniqueSelectedOptionIds.some((optionId) => !validOptionIds.includes(optionId))) {
+      return null
+    }
+
+    if (getMcqSelectionMode(question) === 'single' && uniqueSelectedOptionIds.length !== 1) {
+      return null
+    }
+
+    return { type: 'multiple-choice', selectedOptionIds: uniqueSelectedOptionIds }
   }
 
   return null

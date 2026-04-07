@@ -1,8 +1,30 @@
 import { useRef, useState } from 'react'
+import { isMcqAnswerCorrect } from '../../shared/mcq.js'
 import type { ResonanceReport } from '../../shared/reportTypes.js'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v != null && typeof v === 'object' && !Array.isArray(v)
+}
+
+function normalizeReportMcqAnswer(answer: Record<string, unknown>): { type: 'multiple-choice'; selectedOptionIds: string[] } | null {
+  const selectedOptionIds = Array.isArray(answer.selectedOptionIds)
+    ? answer.selectedOptionIds
+    : typeof answer.selectedOptionId === 'string'
+      ? [answer.selectedOptionId]
+      : null
+
+  if (
+    !selectedOptionIds ||
+    selectedOptionIds.length === 0 ||
+    selectedOptionIds.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)
+  ) {
+    return null
+  }
+
+  return {
+    type: 'multiple-choice',
+    selectedOptionIds,
+  }
 }
 
 function isValidReportAnswer(answer: unknown): boolean {
@@ -11,7 +33,7 @@ function isValidReportAnswer(answer: unknown): boolean {
     return typeof answer.text === 'string'
   }
   if (answer.type === 'multiple-choice') {
-    return typeof answer.selectedOptionId === 'string'
+    return normalizeReportMcqAnswer(answer) !== null
   }
   return false
 }
@@ -41,6 +63,14 @@ function isValidReportReveal(reveal: unknown): boolean {
   if (reveal.correctOptionIds !== null && !isValidStringArray(reveal.correctOptionIds)) return false
   if (!Array.isArray(reveal.sharedResponses)) return false
   return true
+}
+
+function normalizeReportAnswer(answer: unknown): unknown {
+  if (!isRecord(answer)) return answer
+  if (answer.type === 'multiple-choice') {
+    return normalizeReportMcqAnswer(answer)
+  }
+  return answer
 }
 
 /**
@@ -78,6 +108,11 @@ export function parseResonanceReport(raw: unknown): ResonanceReport | null {
 
     normalizedQuestions.push({
       ...entry,
+      responses: entry.responses.map((response) =>
+        isRecord(response)
+          ? { ...response, answer: normalizeReportAnswer(response.answer) }
+          : response,
+      ),
       reveal,
     } as ResonanceReport['questions'][number])
   }
@@ -115,8 +150,9 @@ function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
   if (question.type === 'multiple-choice') {
     for (const r of responses) {
       if (r.answer.type === 'multiple-choice') {
-        const id = r.answer.selectedOptionId
-        optionCounts.set(id, (optionCounts.get(id) ?? 0) + 1)
+        for (const optionId of r.answer.selectedOptionIds) {
+          optionCounts.set(optionId, (optionCounts.get(optionId) ?? 0) + 1)
+        }
       }
     }
   }
@@ -164,6 +200,20 @@ function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
             )
           })}
         </div>
+      )}
+
+      {question.type === 'multiple-choice' && !isPoll && responses.length > 0 && (
+        <p className="text-xs text-gray-500">
+          {(() => {
+            const correctResponseCount = responses.filter((response) =>
+            response.answer.type === 'multiple-choice' &&
+            reveal?.correctOptionIds !== null &&
+            reveal?.correctOptionIds !== undefined &&
+            isMcqAnswerCorrect(response.answer.selectedOptionIds, reveal.correctOptionIds),
+            ).length
+            return `${correctResponseCount} correct response${correctResponseCount !== 1 ? 's' : ''}`
+          })()}
+        </p>
       )}
 
       {/* Free-response answers */}

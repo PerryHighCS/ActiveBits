@@ -96,7 +96,7 @@ void test('isIncorrectMcqSelection marks undefined-isCorrect distractors as inco
   ]
 
   assert.equal(
-    isIncorrectMcqSelection({ selectedOptionId: 'b', options }),
+    isIncorrectMcqSelection({ selectedOptionIds: ['b'], options }),
     true,
   )
 })
@@ -108,7 +108,24 @@ void test('isIncorrectMcqSelection does not mark poll selections as incorrect', 
   ]
 
   assert.equal(
-    isIncorrectMcqSelection({ selectedOptionId: 'b', options }),
+    isIncorrectMcqSelection({ selectedOptionIds: ['b'], options }),
+    false,
+  )
+})
+
+void test('isIncorrectMcqSelection requires the full correct set for multi-select questions', () => {
+  const options = [
+    { id: 'a', text: 'Correct A', isCorrect: true },
+    { id: 'b', text: 'Correct B', isCorrect: true },
+    { id: 'c', text: 'Distractor' },
+  ]
+
+  assert.equal(
+    isIncorrectMcqSelection({ selectedOptionIds: ['a'], options }),
+    true,
+  )
+  assert.equal(
+    isIncorrectMcqSelection({ selectedOptionIds: ['a', 'b'], options }),
     false,
   )
 })

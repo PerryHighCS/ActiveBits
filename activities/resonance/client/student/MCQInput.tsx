@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { SubmitEvent } from 'react'
-import type { StudentMCQOption } from '../../shared/types.js'
+import type { MCQSelectionMode, StudentMCQOption } from '../../shared/types.js'
 
 interface Props {
   options: StudentMCQOption[]
-  value?: string | null
-  onSubmit(selectedOptionId: string): void | Promise<void>
-  onDraftChange?(selectedOptionId: string | null): void
+  selectionMode: MCQSelectionMode
+  value?: string[]
+  onSubmit(selectedOptionIds: string[]): void | Promise<void>
+  onDraftChange?(selectedOptionIds: string[]): void
   submitting?: boolean
   submitted?: boolean
   submittedMessage?: string
@@ -15,7 +16,8 @@ interface Props {
 
 export default function MCQInput({
   options,
-  value = null,
+  selectionMode,
+  value = [],
   onSubmit,
   onDraftChange,
   submitting = false,
@@ -23,8 +25,8 @@ export default function MCQInput({
   submittedMessage = 'Answer submitted.',
   announceSubmittedMessage = true,
 }: Props) {
-  const [selected, setSelected] = useState<string | null>(value)
-  const canSubmit = !submitting && !submitted && selected !== null
+  const [selected, setSelected] = useState<string[]>(value)
+  const canSubmit = !submitting && !submitted && selected.length > 0
 
   useEffect(() => {
     setSelected(value)
@@ -32,11 +34,11 @@ export default function MCQInput({
 
   async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (!canSubmit || selected === null) return
+    if (!canSubmit) return
     await onSubmit(selected)
   }
 
-  if (submitted && selected !== null) {
+  if (submitted && selected.length > 0) {
     return (
       <p
         className="text-sm text-gray-500 italic"
@@ -55,10 +57,12 @@ export default function MCQInput({
       className="space-y-3"
     >
       <fieldset>
-        <legend className="sr-only">Choose an answer</legend>
+        <legend className="sr-only">
+          {selectionMode === 'multiple' ? 'Choose one or more answers' : 'Choose an answer'}
+        </legend>
         <div className="space-y-2">
           {options.map((option) => {
-            const isSelected = selected === option.id
+            const isSelected = selected.includes(option.id)
             return (
               <label
                 key={option.id}
@@ -67,13 +71,21 @@ export default function MCQInput({
                 } ${submitting || submitted ? 'pointer-events-none opacity-60' : ''}`}
               >
                 <input
-                  type="radio"
+                  type={selectionMode === 'multiple' ? 'checkbox' : 'radio'}
                   name="resonance-mcq"
                   value={option.id}
                   checked={isSelected}
                   onChange={() => {
-                    setSelected(option.id)
-                    onDraftChange?.(option.id)
+                    const nextSelected =
+                      selectionMode === 'multiple'
+                        ? (
+                            isSelected
+                              ? selected.filter((selectedId) => selectedId !== option.id)
+                              : [...selected, option.id]
+                          )
+                        : [option.id]
+                    setSelected(nextSelected)
+                    onDraftChange?.(nextSelected)
                   }}
                   disabled={submitting || submitted}
                   className="mt-0.5 accent-blue-600"
@@ -93,7 +105,7 @@ export default function MCQInput({
         aria-disabled={!canSubmit}
         className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {submitting ? 'Submitting…' : 'Submit answer'}
+        {submitting ? 'Submitting…' : selectionMode === 'multiple' ? 'Submit answers' : 'Submit answer'}
       </button>
     </form>
   )

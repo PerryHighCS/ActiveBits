@@ -68,12 +68,14 @@ void test('FreeResponseInput syncs its text when the provided value changes', as
     await waitFor(() => {
       assert.equal(textarea.value, 'Updated answer')
     })
+
+    rendered.unmount()
   } finally {
     restoreDomEnvironment()
   }
 })
 
-void test('MCQInput syncs its selected option when the provided value changes', async () => {
+void test('MCQInput syncs its selected options when the provided value changes', async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const { render, waitFor } = await import('@testing-library/react')
 
@@ -86,7 +88,8 @@ void test('MCQInput syncs its selected option when the provided value changes', 
     const rendered = render(
       React.createElement(MCQInput, {
         options,
-        value: 'a',
+        selectionMode: 'single',
+        value: ['a'],
         onSubmit: async () => undefined,
       }),
     )
@@ -102,7 +105,8 @@ void test('MCQInput syncs its selected option when the provided value changes', 
     rendered.rerender(
       React.createElement(MCQInput, {
         options,
-        value: 'b',
+        selectionMode: 'single',
+        value: ['b'],
         onSubmit: async () => undefined,
       }),
     )
@@ -111,6 +115,8 @@ void test('MCQInput syncs its selected option when the provided value changes', 
       assert.equal(optionA.checked, false)
       assert.equal(optionB.checked, true)
     })
+
+    rendered.unmount()
   } finally {
     restoreDomEnvironment()
   }
@@ -141,7 +147,8 @@ void test('submitted inputs render the provided submitted message consistently',
           { id: 'a', text: 'Option A' },
           { id: 'b', text: 'Option B' },
         ],
-        value: 'a',
+        selectionMode: 'single',
+        value: ['a'],
         submitted: true,
         submittedMessage: 'Answer submitted.',
         onSubmit: async () => undefined,
@@ -151,6 +158,7 @@ void test('submitted inputs render the provided submitted message consistently',
       mcq.getByText('Answer submitted.').textContent,
       'Answer submitted.',
     )
+    mcq.unmount()
   } finally {
     restoreDomEnvironment()
   }
@@ -220,6 +228,8 @@ void test('QuestionView submits over websocket first when sendMessage is availab
         },
       },
     ])
+
+    rendered.unmount()
   } finally {
     ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     restoreDomEnvironment()

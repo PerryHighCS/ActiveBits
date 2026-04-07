@@ -148,16 +148,11 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
 
   function setCorrect(id: string) {
     if (draft.type !== 'multiple-choice') return
-    // Toggle: if already correct → clear (poll mode), else set this one as correct.
     setDraft((d) => {
       if (d.type !== 'multiple-choice') return d
-      const alreadyCorrect = d.options.find((o) => o.id === id)?.isCorrect ?? false
       return {
         ...d,
-        options: d.options.map((o) => ({
-          ...o,
-          isCorrect: alreadyCorrect ? false : o.id === id,
-        })),
+        options: d.options.map((o) => (o.id === id ? { ...o, isCorrect: !o.isCorrect } : o)),
       }
     })
   }
@@ -217,7 +212,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
           <p className="text-xs font-medium text-gray-600 mb-1">
             Options{' '}
             <span className="text-gray-400 font-normal">
-              — click ✓ to mark correct answer, or leave all blank for poll mode
+              — click ✓ to toggle any correct answers, or leave all blank for poll mode
             </span>
           </p>
           <div className="space-y-1.5">

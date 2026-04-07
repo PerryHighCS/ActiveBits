@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { getCorrectOptionIds, getAnswerSelectedOptionIds, isMcqAnswerCorrect } from '../../shared/mcq.js'
 import type {
   InstructorAnnotation,
   MCQQuestion,
@@ -102,23 +103,22 @@ export function getMcqSelectionTone({
 }
 
 export function isIncorrectMcqSelection({
-  selectedOptionId,
+  selectedOptionIds,
   options,
 }: {
-  selectedOptionId: string | null
+  selectedOptionIds: string[]
   options: MCQQuestion['options']
 }): boolean {
-  if (selectedOptionId === null) {
+  if (selectedOptionIds.length === 0) {
     return false
   }
 
-  const hasCorrectOption = options.some((option) => option.isCorrect === true)
-  if (!hasCorrectOption) {
+  const correctOptionIds = getCorrectOptionIds(options)
+  if (correctOptionIds.length === 0) {
     return false
   }
 
-  const selectedOption = options.find((option) => option.id === selectedOptionId)
-  return selectedOption?.isCorrect !== true
+  return !isMcqAnswerCorrect(selectedOptionIds, correctOptionIds)
 }
 
 interface Props {
@@ -148,7 +148,8 @@ function MCQTable({
   annotations: Record<string, InstructorAnnotation>
 }) {
   const options = question.options
-  const isPoll = !options.some((option) => option.isCorrect)
+  const correctOptionIds = getCorrectOptionIds(options)
+  const isPoll = correctOptionIds.length === 0
 
   return (
     <div className="overflow-x-auto">
@@ -170,14 +171,14 @@ function MCQTable({
         <tbody>
           {progress.map((entry) => {
             const responseId = entry.responseId
-            const selectedOptionId =
-              entry.answer?.type === 'multiple-choice' ? entry.answer.selectedOptionId : null
+            const selectedOptionIds =
+              entry.answer?.type === 'multiple-choice' ? getAnswerSelectedOptionIds(entry.answer) : []
             const annotation = responseId
               ? (annotations[responseId] ?? { starred: false, flagged: false, emoji: null })
               : { starred: false, flagged: false, emoji: null }
-            const selectedOption = options.find((o) => o.id === selectedOptionId)
-            const isCorrect = selectedOption?.isCorrect === true
-            const isIncorrect = isIncorrectMcqSelection({ selectedOptionId, options })
+            const isCorrect =
+              correctOptionIds.length > 0 && isMcqAnswerCorrect(selectedOptionIds, correctOptionIds)
+            const isIncorrect = isIncorrectMcqSelection({ selectedOptionIds, options })
 
             return (
               <tr
@@ -199,7 +200,7 @@ function MCQTable({
                   {annotation.flagged && <span className="ml-1 text-red-500">🚩</span>}
                 </td>
                 {options.map((opt) => {
-                  const chosen = opt.id === selectedOptionId
+                  const chosen = selectedOptionIds.includes(opt.id)
                   const selectionTone = getMcqSelectionTone({
                     isPoll,
                     isCorrect,

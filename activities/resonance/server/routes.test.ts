@@ -529,7 +529,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
       submittedAt: now - 50,
       answer: {
         type: 'multiple-choice',
-        selectedOptionId: 'q2_b',
+        selectedOptionIds: ['q2_b'],
       },
     },
   ]
@@ -555,7 +555,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
       questionId?: string
       correctOptionIds?: string[] | null
       viewerResponse?: {
-        answer?: { type?: string; selectedOptionId?: string }
+        answer?: { type?: string; selectedOptionIds?: string[] }
       } | null
     }>
   }
@@ -563,7 +563,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
   assert.deepEqual(body.reveals?.[0]?.correctOptionIds, ['q2_a'])
   assert.deepEqual(body.reveals?.[0]?.viewerResponse?.answer, {
     type: 'multiple-choice',
-    selectedOptionId: 'q2_b',
+    selectedOptionIds: ['q2_b'],
   })
 
   await sessions.close()
@@ -1131,6 +1131,66 @@ void test('self-paced sessions created from raw multi-question payloads expose t
   await sessions.close()
 })
 
+void test('student state exposes multiple-choice selectionMode based on the authored correct options', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.questions = [
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Pick one',
+      order: 0,
+      options: [
+        { id: 'a', text: 'A', isCorrect: true },
+        { id: 'b', text: 'B' },
+      ],
+    },
+    {
+      id: 'q2',
+      type: 'multiple-choice',
+      text: 'Pick all that apply',
+      order: 1,
+      options: [
+        { id: 'c', text: 'C', isCorrect: true },
+        { id: 'd', text: 'D', isCorrect: true },
+        { id: 'e', text: 'E' },
+      ],
+    },
+  ]
+  session.data.activeQuestionIds = ['q1', 'q2']
+  session.data.activeQuestionId = 'q1'
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const response = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+    },
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  const body = response.body as {
+    activeQuestions?: Array<{ id: string; selectionMode?: string }>
+  }
+  assert.deepEqual(body.activeQuestions?.map((question) => ({
+    id: question.id,
+    selectionMode: question.selectionMode,
+  })), [
+    { id: 'q1', selectionMode: 'single' },
+    { id: 'q2', selectionMode: 'multiple' },
+  ])
+
+  await sessions.close()
+})
+
 void test('responses route includes submitted, working, and idle progress entries for the instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -1241,7 +1301,7 @@ void test('activate-question route can activate all questions with a shared coun
         questionId: 'q2',
         answer: {
           type: 'multiple-choice',
-          selectedOptionId: 'q2_b',
+          selectedOptionIds: ['q2_b'],
         },
       },
     },

@@ -90,7 +90,7 @@ void test('buildResonanceReportHtml renders shared MCQ responses using option te
             {
               id: 'r1',
               questionId: 'q1',
-              answer: { type: 'multiple-choice', selectedOptionId: 'opt_mars' },
+              answer: { type: 'multiple-choice', selectedOptionIds: ['opt_mars'] },
               sharedAt: Date.now(),
               instructorEmoji: null,
               reactions: {},

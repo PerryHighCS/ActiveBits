@@ -29,7 +29,9 @@ function isSameAnswer(left: AnswerPayload | null, right: AnswerPayload | null): 
   if (left.type !== right.type) return false
   return left.type === 'free-response'
     ? right.type === 'free-response' && left.text === right.text
-    : right.type === 'multiple-choice' && left.selectedOptionId === right.selectedOptionId
+    : right.type === 'multiple-choice' &&
+        left.selectedOptionIds.length === right.selectedOptionIds.length &&
+        left.selectedOptionIds.every((optionId, index) => optionId === right.selectedOptionIds[index])
 }
 
 export default function QuestionView({
@@ -83,7 +85,7 @@ export default function QuestionView({
     }
   }, [draftAnswer, isSubmitted, question.id, sendMessage, studentId])
 
-  async function submitAnswer(answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionId: string }) {
+  async function submitAnswer(answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] }) {
     if (disabled || isSubmitted) {
       return
     }
@@ -150,11 +152,12 @@ export default function QuestionView({
       ) : (
         <MCQInput
           options={question.options}
-          value={draftAnswer?.type === 'multiple-choice' ? draftAnswer.selectedOptionId : null}
-          onDraftChange={(selectedOptionId) => {
-            setDraftAnswer(selectedOptionId ? { type: 'multiple-choice', selectedOptionId } : null)
+          selectionMode={question.selectionMode}
+          value={draftAnswer?.type === 'multiple-choice' ? draftAnswer.selectedOptionIds : []}
+          onDraftChange={(selectedOptionIds) => {
+            setDraftAnswer(selectedOptionIds.length > 0 ? { type: 'multiple-choice', selectedOptionIds } : null)
           }}
-          onSubmit={(selectedOptionId) => submitAnswer({ type: 'multiple-choice', selectedOptionId })}
+          onSubmit={(selectedOptionIds) => submitAnswer({ type: 'multiple-choice', selectedOptionIds })}
           submitting={submitting || disabled}
           submitted={isSubmitted}
           submittedMessage={submittedMessage}

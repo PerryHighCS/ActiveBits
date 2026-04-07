@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { STUDENT_REACTION_EMOJIS } from '../../shared/emojiSet.js'
+import { getAnswerSelectedOptionIds, isMcqAnswerCorrect } from '../../shared/mcq.js'
 import type { QuestionReveal, ReviewedResponse, SharedResponse, StudentQuestion } from '../../shared/types.js'
 
 interface Props {
@@ -30,6 +31,10 @@ function orderRevealsByQuestionSequence(
 function getOptionText(question: StudentQuestion | undefined, optionId: string): string {
   if (question?.type !== 'multiple-choice') return optionId
   return question.options.find((o) => o.id === optionId)?.text ?? optionId
+}
+
+function getOptionTextList(question: StudentQuestion | undefined, optionIds: string[]): string {
+  return optionIds.map((optionId) => getOptionText(question, optionId)).join(', ')
 }
 
 function ReactionSummary({
@@ -125,7 +130,7 @@ function ResponseCard({
   const answerText =
     answer.type === 'free-response'
       ? answer.text
-      : getOptionText(question, answer.selectedOptionId)
+      : getOptionTextList(question, answer.selectedOptionIds)
 
   const canReact = question?.type === 'free-response' && onReactToSharedResponse !== undefined
   const viewerReaction = response.viewerReaction ?? null
@@ -178,8 +183,9 @@ function RevealSection({
   if (question?.type === 'multiple-choice') {
     for (const resp of sharedResponses) {
       if (resp.answer.type === 'multiple-choice') {
-        const id = resp.answer.selectedOptionId
-        mcqCounts.set(id, (mcqCounts.get(id) ?? 0) + 1)
+        for (const optionId of resp.answer.selectedOptionIds) {
+          mcqCounts.set(optionId, (mcqCounts.get(optionId) ?? 0) + 1)
+        }
       }
     }
   }
@@ -189,7 +195,7 @@ function RevealSection({
     !isPoll &&
     viewerResponse?.answer.type === 'multiple-choice' &&
     correctOptionIds !== null
-      ? correctOptionIds.includes(viewerResponse.answer.selectedOptionId)
+      ? isMcqAnswerCorrect(getAnswerSelectedOptionIds(viewerResponse.answer), correctOptionIds)
       : null
 
   const shouldRenderMcqBreakdown = question?.type === 'multiple-choice'
@@ -227,7 +233,7 @@ function RevealSection({
             )}
             {viewerResponse.answer.type === 'free-response'
               ? viewerResponse.answer.text
-              : getOptionText(question, viewerResponse.answer.selectedOptionId)}
+              : getOptionTextList(question, viewerResponse.answer.selectedOptionIds)}
           </p>
           {viewerResponse.isShared && question?.type === 'free-response' && (
             <p className="text-xs text-sky-700">This is the response currently being shared.</p>
@@ -243,7 +249,7 @@ function RevealSection({
             const pct = total > 0 ? Math.round((count / total) * 100) : 0
             const isViewerSelection =
               viewerResponse?.answer.type === 'multiple-choice' &&
-              viewerResponse.answer.selectedOptionId === opt.id
+              viewerResponse.answer.selectedOptionIds.includes(opt.id)
             const isCorrectOption = correctOptionIds?.includes(opt.id) ?? false
             const baseRowClass = isPoll
               ? isViewerSelection
@@ -330,7 +336,7 @@ function ReviewedResponseSection({ reviewedResponses }: { reviewedResponses: Rev
               </span>
               {response.answer.type === 'free-response'
                 ? response.answer.text
-                : getOptionText(response.question, response.answer.selectedOptionId)}
+                : getOptionTextList(response.question, response.answer.selectedOptionIds)}
             </p>
           </div>
         ))}

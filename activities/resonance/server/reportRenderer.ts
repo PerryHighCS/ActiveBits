@@ -1,3 +1,4 @@
+import { isMcqAnswerCorrect } from '../shared/mcq.js'
 import type { InstructorAnnotation, Question, QuestionReveal, Response, Student } from '../shared/types.js'
 import type { ResonanceReport, ResonanceReportQuestion } from '../shared/reportTypes.js'
 
@@ -95,8 +96,9 @@ function renderQuestionSection(sec: ResonanceReportQuestion): string {
     const optionCounts = new Map<string, number>()
     for (const r of responses) {
       if (r.answer.type === 'multiple-choice') {
-        const id = r.answer.selectedOptionId
-        optionCounts.set(id, (optionCounts.get(id) ?? 0) + 1)
+        for (const optionId of r.answer.selectedOptionIds) {
+          optionCounts.set(optionId, (optionCounts.get(optionId) ?? 0) + 1)
+        }
       }
     }
     const correctIds = new Set(reveal?.correctOptionIds ?? [])
@@ -139,15 +141,25 @@ function renderQuestionSection(sec: ResonanceReportQuestion): string {
       if (sr.answer.type === 'free-response') {
         text = sr.answer.text
       } else {
-        const { selectedOptionId } = sr.answer
-        text = question.type === 'multiple-choice'
-          ? (question.options.find((opt) => opt.id === selectedOptionId)?.text ?? selectedOptionId)
-          : selectedOptionId
+        const textParts = sr.answer.selectedOptionIds.map((selectedOptionId) =>
+          question.type === 'multiple-choice'
+            ? (question.options.find((opt) => opt.id === selectedOptionId)?.text ?? selectedOptionId)
+            : selectedOptionId,
+        )
+        text = textParts.join(', ')
       }
       const emoji = sr.instructorEmoji !== null ? esc(sr.instructorEmoji) + ' ' : ''
       body += `<li>${emoji}${esc(text)}</li>`
     }
     body += '</ul>'
+  }
+
+  if (question.type === 'multiple-choice' && reveal?.correctOptionIds && reveal.correctOptionIds.length > 0) {
+    const correctResponseCount = responses.filter((response) =>
+      response.answer.type === 'multiple-choice' &&
+      isMcqAnswerCorrect(response.answer.selectedOptionIds, reveal.correctOptionIds ?? []),
+    ).length
+    body += `<p class="mcq-meta">${correctResponseCount} correct response${correctResponseCount !== 1 ? 's' : ''}</p>`
   }
 
   const sharedTag = reveal !== null ? ' · <span class="shared-tag">Results shared</span>' : ''
@@ -186,6 +198,7 @@ const CSS = `
   .ann { color: #f59e0b; }
   .empty { color: #9ca3af; font-style: italic; font-size: 13px; }
   .shared-label { font-size: 12px; color: #6b7280; margin-top: 14px; margin-bottom: 6px; font-weight: 500; }
+  .mcq-meta { font-size: 12px; color: #6b7280; margin-top: 12px; }
   ul.shared { padding-left: 18px; }
   ul.shared li { font-size: 13px; padding: 2px 0; }
 `

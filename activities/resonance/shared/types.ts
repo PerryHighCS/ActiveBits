@@ -1,4 +1,5 @@
 export type QuestionType = 'free-response' | 'multiple-choice'
+export type MCQSelectionMode = 'single' | 'multiple'
 
 export interface MCQOption {
   id: string
@@ -28,14 +29,20 @@ export type Question = FreeResponseQuestion | MCQQuestion
 /** MCQ option shape sent to students — no isCorrect field exposed before reveal */
 export type StudentMCQOption = Omit<MCQOption, 'isCorrect'>
 
+export interface StudentMCQQuestion extends Omit<MCQQuestion, 'options'> {
+  type: 'multiple-choice'
+  options: StudentMCQOption[]
+  selectionMode: MCQSelectionMode
+}
+
 /** Question shape sent to students — strips isCorrect from MCQ options */
 export type StudentQuestion =
   | FreeResponseQuestion
-  | (Omit<MCQQuestion, 'options'> & { options: StudentMCQOption[] })
+  | StudentMCQQuestion
 
 export type AnswerPayload =
   | { type: 'free-response'; text: string }
-  | { type: 'multiple-choice'; selectedOptionId: string }
+  | { type: 'multiple-choice'; selectedOptionIds: string[] }
 
 export interface Response {
   id: string
