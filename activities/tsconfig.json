@@ -6,7 +6,6 @@
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
     "types": ["node", "vite/client"],
-    "baseUrl": ".",
     "paths": {
       "activebits-server/*": ["../server/*"],
       "@src/*": ["../client/src/*"]
