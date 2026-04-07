@@ -54,6 +54,7 @@ const multipleChoiceQuestion: StudentQuestion = {
   text: 'Choose one',
   order: 1,
   responseTimeLimitMs: 30_000,
+  selectionMode: 'single',
   options: [
     { id: 'a', text: 'Option A' },
     { id: 'b', text: 'Option B' },
@@ -82,7 +83,7 @@ const mcqReveal: QuestionReveal = {
   sharedAt: 2,
   correctOptionIds: [],
   viewerResponse: {
-    answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+    answer: { type: 'multiple-choice', selectedOptionIds: ['a'] },
     submittedAt: 2,
     instructorEmoji: null,
     isShared: true,
@@ -91,7 +92,7 @@ const mcqReveal: QuestionReveal = {
     {
       id: 'r2',
       questionId: 'q2',
-      answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+      answer: { type: 'multiple-choice', selectedOptionIds: ['a'] },
       sharedAt: 2,
       instructorEmoji: null,
       reactions: {},
@@ -99,7 +100,7 @@ const mcqReveal: QuestionReveal = {
     {
       id: 'r3',
       questionId: 'q2',
-      answer: { type: 'multiple-choice', selectedOptionId: 'b' },
+      answer: { type: 'multiple-choice', selectedOptionIds: ['b'] },
       sharedAt: 2,
       instructorEmoji: null,
       reactions: {},
@@ -121,7 +122,7 @@ const correctMcqReveal: QuestionReveal = {
   sharedAt: 4,
   correctOptionIds: ['a'],
   viewerResponse: {
-    answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+    answer: { type: 'multiple-choice', selectedOptionIds: ['a'] },
     submittedAt: 4,
     instructorEmoji: null,
     isShared: true,
@@ -130,7 +131,7 @@ const correctMcqReveal: QuestionReveal = {
     {
       id: 'r4',
       questionId: 'q2',
-      answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+      answer: { type: 'multiple-choice', selectedOptionIds: ['a'] },
       sharedAt: 4,
       instructorEmoji: null,
       reactions: {},
@@ -143,7 +144,7 @@ const incorrectMcqReveal: QuestionReveal = {
   sharedAt: 5,
   correctOptionIds: ['a'],
   viewerResponse: {
-    answer: { type: 'multiple-choice', selectedOptionId: 'b' },
+    answer: { type: 'multiple-choice', selectedOptionIds: ['b'] },
     submittedAt: 5,
     instructorEmoji: null,
     isShared: true,
@@ -152,7 +153,7 @@ const incorrectMcqReveal: QuestionReveal = {
     {
       id: 'r5',
       questionId: 'q2',
-      answer: { type: 'multiple-choice', selectedOptionId: 'b' },
+      answer: { type: 'multiple-choice', selectedOptionIds: ['b'] },
       sharedAt: 5,
       instructorEmoji: null,
       reactions: {},
@@ -165,7 +166,7 @@ const selfPacedMcqReveal: QuestionReveal = {
   sharedAt: 6,
   correctOptionIds: ['a'],
   viewerResponse: {
-    answer: { type: 'multiple-choice', selectedOptionId: 'b' },
+    answer: { type: 'multiple-choice', selectedOptionIds: ['b'] },
     submittedAt: 6,
     instructorEmoji: null,
     isShared: false,

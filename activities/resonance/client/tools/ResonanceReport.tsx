@@ -1,8 +1,33 @@
+import * as React from 'react'
 import { useRef, useState } from 'react'
+import { isMcqAnswerCorrect } from '../../shared/mcq.js'
 import type { ResonanceReport } from '../../shared/reportTypes.js'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v != null && typeof v === 'object' && !Array.isArray(v)
+}
+
+function normalizeReportMcqAnswer(answer: Record<string, unknown>): { type: 'multiple-choice'; selectedOptionIds: string[] } | null {
+  const rawSelectedOptionIds = Array.isArray(answer.selectedOptionIds)
+    ? answer.selectedOptionIds
+    : typeof answer.selectedOptionId === 'string'
+      ? [answer.selectedOptionId]
+      : null
+
+  if (
+    !rawSelectedOptionIds ||
+    rawSelectedOptionIds.length === 0 ||
+    rawSelectedOptionIds.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)
+  ) {
+    return null
+  }
+
+  const selectedOptionIds = Array.from(new Set(rawSelectedOptionIds.map((entry) => entry.trim())))
+
+  return {
+    type: 'multiple-choice',
+    selectedOptionIds,
+  }
 }
 
 function isValidReportAnswer(answer: unknown): boolean {
@@ -11,7 +36,7 @@ function isValidReportAnswer(answer: unknown): boolean {
     return typeof answer.text === 'string'
   }
   if (answer.type === 'multiple-choice') {
-    return typeof answer.selectedOptionId === 'string'
+    return normalizeReportMcqAnswer(answer) !== null
   }
   return false
 }
@@ -41,6 +66,14 @@ function isValidReportReveal(reveal: unknown): boolean {
   if (reveal.correctOptionIds !== null && !isValidStringArray(reveal.correctOptionIds)) return false
   if (!Array.isArray(reveal.sharedResponses)) return false
   return true
+}
+
+function normalizeReportAnswer(answer: unknown): unknown {
+  if (!isRecord(answer)) return answer
+  if (answer.type === 'multiple-choice') {
+    return normalizeReportMcqAnswer(answer)
+  }
+  return answer
 }
 
 /**
@@ -78,6 +111,11 @@ export function parseResonanceReport(raw: unknown): ResonanceReport | null {
 
     normalizedQuestions.push({
       ...entry,
+      responses: entry.responses.map((response) =>
+        isRecord(response)
+          ? { ...response, answer: normalizeReportAnswer(response.answer) }
+          : response,
+      ),
       reveal,
     } as ResonanceReport['questions'][number])
   }
@@ -115,8 +153,9 @@ function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
   if (question.type === 'multiple-choice') {
     for (const r of responses) {
       if (r.answer.type === 'multiple-choice') {
-        const id = r.answer.selectedOptionId
-        optionCounts.set(id, (optionCounts.get(id) ?? 0) + 1)
+        for (const optionId of r.answer.selectedOptionIds) {
+          optionCounts.set(optionId, (optionCounts.get(optionId) ?? 0) + 1)
+        }
       }
     }
   }
@@ -166,6 +205,25 @@ function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
         </div>
       )}
 
+      {(() => {
+        const revealedCorrectOptionIds = reveal?.correctOptionIds
+        return question.type === 'multiple-choice' &&
+          !isPoll &&
+          responses.length > 0 &&
+          revealedCorrectOptionIds &&
+          revealedCorrectOptionIds.length > 0 ? (
+        <p className="text-xs text-gray-500">
+          {(() => {
+            const correctResponseCount = responses.filter((response) =>
+              response.answer.type === 'multiple-choice' &&
+              isMcqAnswerCorrect(response.answer.selectedOptionIds, revealedCorrectOptionIds),
+            ).length
+            return `${correctResponseCount} correct response${correctResponseCount !== 1 ? 's' : ''}`
+          })()}
+        </p>
+        ) : null
+      })()}
+
       {/* Free-response answers */}
       {question.type === 'free-response' && (
         <ol className="space-y-1.5 list-decimal list-inside">
@@ -188,23 +246,25 @@ function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
  */
 export function ResonanceReportView({ report }: Props) {
   return (
-    <div className="space-y-4">
-      <header className="flex items-center justify-between">
-        <div>
-          <p className="text-xs text-gray-400">Session {report.sessionId}</p>
-          <p className="text-xs text-gray-400">
-            Exported {new Date(report.exportedAt).toLocaleString()}
+    <React.Fragment>
+      <div className="space-y-4">
+        <header className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-400">Session {report.sessionId}</p>
+            <p className="text-xs text-gray-400">
+              Exported {new Date(report.exportedAt).toLocaleString()}
+            </p>
+          </div>
+          <p className="text-sm text-gray-500">
+            {report.students.length} student{report.students.length !== 1 ? 's' : ''} ·{' '}
+            {report.questions.length} question{report.questions.length !== 1 ? 's' : ''}
           </p>
-        </div>
-        <p className="text-sm text-gray-500">
-          {report.students.length} student{report.students.length !== 1 ? 's' : ''} ·{' '}
-          {report.questions.length} question{report.questions.length !== 1 ? 's' : ''}
-        </p>
-      </header>
-      {report.questions.map((q) => (
-        <QuestionSection key={q.question.id} q={q} />
-      ))}
-    </div>
+        </header>
+        {report.questions.map((q) => (
+          <QuestionSection key={q.question.id} q={q} />
+        ))}
+      </div>
+    </React.Fragment>
   )
 }
 

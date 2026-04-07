@@ -63,6 +63,8 @@ void test('normalizeStudentSessionSnapshot filters malformed activeQuestions and
   assert.equal(result.activeQuestion?.id, 'q1')
   assert.deepEqual(result.activeQuestionIds, ['q1'])
   assert.deepEqual(result.revealedQuestions.map((question) => question.id), ['q2'])
+  assert.equal(result.revealedQuestions[0]?.type, 'multiple-choice')
+  assert.equal(result.revealedQuestions[0]?.type === 'multiple-choice' ? result.revealedQuestions[0].selectionMode : null, 'single')
 })
 
 void test('normalizeStudentSessionSnapshot ignores malformed fallback activeQuestion payloads', () => {
@@ -89,7 +91,7 @@ void test('normalizeStudentSessionSnapshot filters malformed reveals and reviewe
           {
             id: 'shared-1',
             questionId: 'q1',
-            answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+            answer: { type: 'multiple-choice', selectedOptionIds: ['a'] },
             sharedAt: 100,
             instructorEmoji: null,
             reactions: {},
@@ -134,7 +136,7 @@ void test('normalizeStudentSessionSnapshot keeps valid reveal viewerResponse pay
         correctOptionIds: ['a'],
         sharedResponses: [],
         viewerResponse: {
-          answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+          answer: { type: 'multiple-choice', selectedOptionIds: ['a'] },
           submittedAt: 90,
           instructorEmoji: '🔥',
           isShared: true,
@@ -145,10 +147,39 @@ void test('normalizeStudentSessionSnapshot keeps valid reveal viewerResponse pay
 
   assert.ok(result)
   assert.deepEqual(result.reveals[0]?.viewerResponse, {
-    answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+    answer: { type: 'multiple-choice', selectedOptionIds: ['a'] },
     submittedAt: 90,
     instructorEmoji: '🔥',
     isShared: true,
+  })
+})
+
+void test('normalizeStudentSessionSnapshot trims and deduplicates multiple-choice answer option ids', () => {
+  const result = normalizeStudentSessionSnapshot(({
+    sessionId: 'session-1',
+    reveals: [
+      {
+        questionId: 'q1',
+        sharedAt: 100,
+        correctOptionIds: ['a'],
+        sharedResponses: [
+          {
+            id: 'shared-1',
+            questionId: 'q1',
+            answer: { type: 'multiple-choice', selectedOptionIds: [' a ', 'a', 'b '] },
+            sharedAt: 100,
+            instructorEmoji: null,
+            reactions: {},
+          },
+        ],
+      },
+    ],
+  }) as unknown as Partial<StudentSessionSnapshot>)
+
+  assert.ok(result)
+  assert.deepEqual(result.reveals[0]?.sharedResponses[0]?.answer, {
+    type: 'multiple-choice',
+    selectedOptionIds: ['a', 'b'],
   })
 })
 
@@ -198,7 +229,7 @@ void test('normalizeStudentSessionSnapshot drops malformed reveal viewerResponse
         correctOptionIds: ['a'],
         sharedResponses: [],
         viewerResponse: {
-          answer: { type: 'multiple-choice', selectedOptionId: 'a' },
+          answer: { type: 'multiple-choice', selectedOptionIds: ['a'] },
           submittedAt: '90',
           instructorEmoji: '🔥',
           isShared: true,

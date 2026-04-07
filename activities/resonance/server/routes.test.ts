@@ -529,7 +529,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
       submittedAt: now - 50,
       answer: {
         type: 'multiple-choice',
-        selectedOptionId: 'q2_b',
+        selectedOptionIds: ['q2_b'],
       },
     },
   ]
@@ -555,7 +555,7 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
       questionId?: string
       correctOptionIds?: string[] | null
       viewerResponse?: {
-        answer?: { type?: string; selectedOptionId?: string }
+        answer?: { type?: string; selectedOptionIds?: string[] }
       } | null
     }>
   }
@@ -563,7 +563,186 @@ void test('self-paced embedded resonance sessions reveal MCQ correctness after t
   assert.deepEqual(body.reveals?.[0]?.correctOptionIds, ['q2_a'])
   assert.deepEqual(body.reveals?.[0]?.viewerResponse?.answer, {
     type: 'multiple-choice',
-    selectedOptionId: 'q2_b',
+    selectedOptionIds: ['q2_b'],
+  })
+
+  await sessions.close()
+})
+
+void test('student state normalizes legacy reveal answers that still use selectedOptionId', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session = createInstructorResonanceSession()
+
+  session.data.questions = [
+    {
+      id: 'q2',
+      type: 'multiple-choice',
+      text: 'Which option best fits?',
+      order: 1,
+      options: [
+        { id: 'q2_a', text: 'Option A', isCorrect: true },
+        { id: 'q2_b', text: 'Option B' },
+      ],
+    },
+  ]
+  session.data.responses = [
+    {
+      id: 'r2',
+      questionId: 'q2',
+      studentId: 'student1',
+      submittedAt: now - 50,
+      answer: {
+        type: 'multiple-choice',
+        selectedOptionIds: ['q2_b'],
+      },
+    },
+  ]
+  session.data.reveals = [
+    {
+      questionId: 'q2',
+      sharedAt: now,
+      correctOptionIds: ['q2_a'],
+      sharedResponses: [
+        {
+          id: 'r2',
+          questionId: 'q2',
+          answer: {
+            type: 'multiple-choice',
+            selectedOptionId: 'q2_b',
+          } as unknown as { type: 'multiple-choice'; selectedOptionIds: string[] },
+          sharedAt: now,
+          instructorEmoji: null,
+          reactions: {},
+        },
+      ],
+      viewerResponse: {
+        answer: {
+          type: 'multiple-choice',
+          selectedOptionId: 'q2_b',
+        } as unknown as { type: 'multiple-choice'; selectedOptionIds: string[] },
+        submittedAt: now - 50,
+        instructorEmoji: null,
+        isShared: true,
+      },
+    },
+  ]
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const response = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: { studentId: 'student1' },
+    },
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  const body = response.body as {
+    reveals?: Array<{
+      sharedResponses?: Array<{ answer?: { type?: string; selectedOptionIds?: string[] } }>
+      viewerResponse?: { answer?: { type?: string; selectedOptionIds?: string[] } } | null
+    }>
+  }
+  assert.deepEqual(body.reveals?.[0]?.sharedResponses?.[0]?.answer, {
+    type: 'multiple-choice',
+    selectedOptionIds: ['q2_b'],
+  })
+  assert.deepEqual(body.reveals?.[0]?.viewerResponse?.answer, {
+    type: 'multiple-choice',
+    selectedOptionIds: ['q2_b'],
+  })
+
+  await sessions.close()
+})
+
+void test('report route tolerates legacy reveal answers that still use selectedOptionId', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session = createInstructorResonanceSession()
+
+  session.data.questions = [
+    {
+      id: 'q2',
+      type: 'multiple-choice',
+      text: 'Which option best fits?',
+      order: 1,
+      options: [
+        { id: 'q2_a', text: 'Option A', isCorrect: true },
+        { id: 'q2_b', text: 'Option B' },
+      ],
+    },
+  ]
+  session.data.responses = [
+    {
+      id: 'r2',
+      questionId: 'q2',
+      studentId: 'student1',
+      submittedAt: now - 50,
+      answer: {
+        type: 'multiple-choice',
+        selectedOptionIds: ['q2_b'],
+      },
+    },
+  ]
+  session.data.reveals = [
+    {
+      questionId: 'q2',
+      sharedAt: now,
+      correctOptionIds: ['q2_a'],
+      sharedResponses: [
+        {
+          id: 'r2',
+          questionId: 'q2',
+          answer: {
+            type: 'multiple-choice',
+            selectedOptionId: 'q2_b',
+          } as unknown as { type: 'multiple-choice'; selectedOptionIds: string[] },
+          sharedAt: now,
+          instructorEmoji: null,
+          reactions: {},
+        },
+      ],
+    },
+  ]
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const reportHandler = app.handlers.get['/api/resonance/:sessionId/report']
+  assert.equal(typeof reportHandler, 'function')
+
+  const response = createResponse()
+  await reportHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: { 'x-instructor-passcode': 'TEACH123' },
+      query: { format: 'json' },
+    },
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  const body = response.body as {
+    questions?: Array<{
+      reveal?: {
+        sharedResponses?: Array<{ answer?: { type?: string; selectedOptionIds?: string[] } }>
+      } | null
+    }>
+  }
+  assert.deepEqual(body.questions?.[0]?.reveal?.sharedResponses?.[0]?.answer, {
+    type: 'multiple-choice',
+    selectedOptionIds: ['q2_b'],
   })
 
   await sessions.close()
@@ -1131,6 +1310,66 @@ void test('self-paced sessions created from raw multi-question payloads expose t
   await sessions.close()
 })
 
+void test('student state exposes multiple-choice selectionMode based on the authored correct options', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.questions = [
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Pick one',
+      order: 0,
+      options: [
+        { id: 'a', text: 'A', isCorrect: true },
+        { id: 'b', text: 'B' },
+      ],
+    },
+    {
+      id: 'q2',
+      type: 'multiple-choice',
+      text: 'Pick all that apply',
+      order: 1,
+      options: [
+        { id: 'c', text: 'C', isCorrect: true },
+        { id: 'd', text: 'D', isCorrect: true },
+        { id: 'e', text: 'E' },
+      ],
+    },
+  ]
+  session.data.activeQuestionIds = ['q1', 'q2']
+  session.data.activeQuestionId = 'q1'
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const response = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+    },
+    response,
+  )
+
+  assert.equal(response.statusCode, 200)
+  const body = response.body as {
+    activeQuestions?: Array<{ id: string; selectionMode?: string }>
+  }
+  assert.deepEqual(body.activeQuestions?.map((question) => ({
+    id: question.id,
+    selectionMode: question.selectionMode,
+  })), [
+    { id: 'q1', selectionMode: 'single' },
+    { id: 'q2', selectionMode: 'multiple' },
+  ])
+
+  await sessions.close()
+})
+
 void test('responses route includes submitted, working, and idle progress entries for the instructor', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -1241,7 +1480,7 @@ void test('activate-question route can activate all questions with a shared coun
         questionId: 'q2',
         answer: {
           type: 'multiple-choice',
-          selectedOptionId: 'q2_b',
+          selectedOptionIds: ['q2_b'],
         },
       },
     },
@@ -1910,6 +2149,107 @@ void test('annotate-response route updates the student viewer response emoji for
   }
   assert.equal(body.reveals?.[0]?.viewerResponse?.instructorEmoji, '💡')
   assert.equal(body.reveals?.[0]?.viewerResponse?.answer?.text, 'My answer')
+
+  await sessions.close()
+})
+
+void test('student state sanitizes malformed stored reveal reactions', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-sanitize-reactions',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: null,
+      activeQuestionIds: [],
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [
+        {
+          id: 'r1',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          answer: {
+            type: 'free-response',
+            text: 'My answer',
+          },
+        },
+      ],
+      responseDrafts: {},
+      annotations: {},
+      reveals: [
+        {
+          questionId: 'q1',
+          sharedAt: now - 100,
+          correctOptionIds: null,
+          sharedResponses: [
+            {
+              id: 'r1',
+              questionId: 'q1',
+              answer: {
+                type: 'free-response',
+                text: 'My answer',
+              },
+              sharedAt: now - 100,
+              instructorEmoji: null,
+              reactions: {
+                '🔥': 2,
+                '👏': -1,
+                bad: 3,
+                '💡': Number.NaN,
+              },
+            },
+          ],
+        },
+      ],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    reveals?: Array<{
+      sharedResponses?: Array<{ reactions?: Record<string, number> }>
+    }>
+  }
+  assert.deepEqual(body.reveals?.[0]?.sharedResponses?.[0]?.reactions, {
+    '🔥': 2,
+  })
 
   await sessions.close()
 })

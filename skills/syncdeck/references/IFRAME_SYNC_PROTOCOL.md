@@ -47,6 +47,14 @@ The most important commands to support are:
 - the host should promote the iframe to `instructor` or `student`
 - do not rely on static config alone for runtime role changes
 
+### Standalone Launch
+
+The standalone "Activate SyncDeck" CTA is outside the iframe command protocol.
+
+- opt in with `standaloneHosting.activeBitsOrigin`
+- the runtime redirects to ActiveBits under `/util/syncdeck/launch-presentation`
+- pass a canonical absolute deck URL as `presentationUrl` when needed
+
 ### Boundary Control
 
 Student forward navigation may be constrained by an explicit boundary.

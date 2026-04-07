@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isValidStudentReactionEmoji } from '../../shared/emojiSet.js'
+import { getMcqSelectionMode } from '../../shared/mcq.js'
 import type {
   AnswerPayload,
   QuestionReveal,
@@ -89,6 +90,7 @@ function normalizeStudentQuestion(value: unknown): StudentQuestion | null {
     text: value.text,
     order,
     options,
+    selectionMode: value.selectionMode === 'multiple' ? 'multiple' : getMcqSelectionMode({ options }),
     ...(responseTimeLimitMs !== undefined ? { responseTimeLimitMs } : {}),
   }
 }
@@ -110,13 +112,45 @@ function normalizeAnswerPayload(value: unknown): AnswerPayload | null {
   }
 
   if (value.type === 'multiple-choice') {
-    if (typeof value.selectedOptionId !== 'string' || value.selectedOptionId.trim().length === 0) {
+    const rawSelectedOptionIds = Array.isArray(value.selectedOptionIds)
+      ? value.selectedOptionIds
+      : typeof value.selectedOptionId === 'string'
+        ? [value.selectedOptionId]
+        : null
+
+    if (
+      !rawSelectedOptionIds ||
+      rawSelectedOptionIds.length === 0
+    ) {
+      return null
+    }
+
+    const selectedOptionIds: string[] = []
+    const seenOptionIds = new Set<string>()
+
+    for (const entry of rawSelectedOptionIds) {
+      if (typeof entry !== 'string') {
+        return null
+      }
+
+      const normalizedEntry = entry.trim()
+      if (normalizedEntry.length === 0) {
+        return null
+      }
+
+      if (!seenOptionIds.has(normalizedEntry)) {
+        seenOptionIds.add(normalizedEntry)
+        selectedOptionIds.push(normalizedEntry)
+      }
+    }
+
+    if (selectedOptionIds.length === 0) {
       return null
     }
 
     return {
       type: 'multiple-choice',
-      selectedOptionId: value.selectedOptionId,
+      selectedOptionIds,
     }
   }
 

@@ -16,6 +16,7 @@ import type {
   Student,
 } from '../shared/types.js'
 import { isValidStudentReactionEmoji } from '../shared/emojiSet.js'
+import { getCorrectOptionIds, getMcqSelectionMode } from '../shared/mcq.js'
 import { validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 import {
@@ -362,6 +363,47 @@ function normalizeDraftAnswerPayload(
   return validateAnswerPayload(value, question)
 }
 
+function normalizeStoredResponses(
+  value: unknown,
+  questions: Question[],
+): Response[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const questionsById = new Map(questions.map((question) => [question.id, question] satisfies [string, Question]))
+  const responses: Response[] = []
+
+  for (const rawResponse of value) {
+    if (!isPlainObject(rawResponse)) {
+      continue
+    }
+
+    const id = typeof rawResponse.id === 'string' ? rawResponse.id : ''
+    const questionId = typeof rawResponse.questionId === 'string' ? rawResponse.questionId : ''
+    const studentId = typeof rawResponse.studentId === 'string' ? rawResponse.studentId : ''
+    const submittedAt =
+      typeof rawResponse.submittedAt === 'number' && Number.isFinite(rawResponse.submittedAt)
+        ? Math.round(rawResponse.submittedAt)
+        : 0
+    const answer = normalizeDraftAnswerPayload(rawResponse.answer, questionsById, questionId)
+
+    if (!id || !questionId || !studentId || submittedAt <= 0 || answer === null) {
+      continue
+    }
+
+    responses.push({
+      id,
+      questionId,
+      studentId,
+      submittedAt,
+      answer,
+    })
+  }
+
+  return responses
+}
+
 function normalizeResponseDrafts(
   value: unknown,
   questions: Question[],
@@ -398,6 +440,127 @@ function normalizeResponseDrafts(
   }
 
   return drafts
+}
+
+function normalizeSharedResponseReactions(value: unknown): Record<string, number> {
+  if (!isPlainObject(value)) {
+    return {}
+  }
+
+  const reactions: Record<string, number> = {}
+  for (const [emoji, count] of Object.entries(value)) {
+    if (!isValidStudentReactionEmoji(emoji)) {
+      continue
+    }
+
+    if (typeof count !== 'number' || !Number.isFinite(count) || count < 0) {
+      continue
+    }
+
+    reactions[emoji] = count
+  }
+
+  return reactions
+}
+
+function normalizeStoredReveals(
+  value: unknown,
+  questions: Question[],
+): QuestionReveal[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const questionsById = new Map(questions.map((question) => [question.id, question] satisfies [string, Question]))
+  const reveals: QuestionReveal[] = []
+
+  for (const rawReveal of value) {
+    if (!isPlainObject(rawReveal)) {
+      continue
+    }
+
+    const questionId = typeof rawReveal.questionId === 'string' ? rawReveal.questionId : ''
+    const sharedAt =
+      typeof rawReveal.sharedAt === 'number' && Number.isFinite(rawReveal.sharedAt)
+        ? Math.round(rawReveal.sharedAt)
+        : 0
+    const question = questionsById.get(questionId)
+
+    if (!questionId || sharedAt <= 0 || !question) {
+      continue
+    }
+
+    const correctOptionIds =
+      rawReveal.correctOptionIds === null
+        ? null
+        : Array.isArray(rawReveal.correctOptionIds) &&
+            rawReveal.correctOptionIds.every((entry) => typeof entry === 'string')
+          ? rawReveal.correctOptionIds
+          : null
+
+    const sharedResponses = Array.isArray(rawReveal.sharedResponses)
+      ? rawReveal.sharedResponses.flatMap((rawSharedResponse) => {
+          if (!isPlainObject(rawSharedResponse)) {
+            return []
+          }
+
+          const id = typeof rawSharedResponse.id === 'string' ? rawSharedResponse.id : ''
+          const sharedQuestionId = typeof rawSharedResponse.questionId === 'string' ? rawSharedResponse.questionId : ''
+          const sharedResponseAt =
+            typeof rawSharedResponse.sharedAt === 'number' && Number.isFinite(rawSharedResponse.sharedAt)
+              ? Math.round(rawSharedResponse.sharedAt)
+              : 0
+          const answer = normalizeDraftAnswerPayload(rawSharedResponse.answer, questionsById, questionId)
+
+          if (!id || sharedQuestionId !== questionId || sharedResponseAt <= 0 || answer === null) {
+            return []
+          }
+
+          return [{
+            id,
+            questionId: sharedQuestionId,
+            answer,
+            sharedAt: sharedResponseAt,
+            instructorEmoji: typeof rawSharedResponse.instructorEmoji === 'string' ? rawSharedResponse.instructorEmoji : null,
+            reactions: normalizeSharedResponseReactions(rawSharedResponse.reactions),
+          }]
+        })
+      : []
+
+    const viewerResponse = isPlainObject(rawReveal.viewerResponse)
+      ? (() => {
+          const submittedAt =
+            typeof rawReveal.viewerResponse.submittedAt === 'number' && Number.isFinite(rawReveal.viewerResponse.submittedAt)
+              ? Math.round(rawReveal.viewerResponse.submittedAt)
+              : 0
+          const answer = normalizeDraftAnswerPayload(rawReveal.viewerResponse.answer, questionsById, questionId)
+
+          if (submittedAt <= 0 || answer === null) {
+            return null
+          }
+
+          return {
+            answer,
+            submittedAt,
+            instructorEmoji:
+              typeof rawReveal.viewerResponse.instructorEmoji === 'string'
+                ? rawReveal.viewerResponse.instructorEmoji
+                : null,
+            isShared: rawReveal.viewerResponse.isShared === true,
+          }
+        })()
+      : null
+
+    reveals.push({
+      questionId,
+      sharedAt,
+      correctOptionIds,
+      sharedResponses,
+      ...(viewerResponse !== null ? { viewerResponse } : {}),
+    })
+  }
+
+  return reveals
 }
 
 function normalizeSessionData(data: unknown): ResonanceSessionData {
@@ -486,12 +649,12 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     activeQuestionDeadlineAt,
     ...(embeddedAutoActivatedAt !== null ? { embeddedAutoActivatedAt } : {}),
     students: isPlainObject(source.students) ? (source.students as Record<string, Student>) : {},
-    responses: Array.isArray(source.responses) ? (source.responses as Response[]) : [],
+    responses: normalizeStoredResponses(source.responses, questions),
     responseDrafts: normalizeResponseDrafts(source.responseDrafts, questions),
     annotations: isPlainObject(source.annotations)
       ? (source.annotations as Record<string, InstructorAnnotation>)
       : {},
-    reveals: Array.isArray(source.reveals) ? (source.reveals as QuestionReveal[]) : [],
+    reveals: normalizeStoredReveals(source.reveals, questions),
     sharedResponseReactions: isPlainObject(source.sharedResponseReactions)
       ? (source.sharedResponseReactions as Record<string, Record<string, string>>)
       : {},
@@ -514,7 +677,11 @@ function asResonanceSession(session: SessionRecord | null): ResonanceSession | n
 
 function toStudentQuestion(q: Question) {
   if (q.type === 'free-response') return q
-  return { ...q, options: q.options.map(({ id, text }) => ({ id, text })) }
+  return {
+    ...q,
+    options: q.options.map(({ id, text }) => ({ id, text })),
+    selectionMode: getMcqSelectionMode(q),
+  }
 }
 
 function buildStudentReveal(
@@ -586,9 +753,7 @@ function buildSelfPacedMcqReveals(
       return []
     }
 
-    const correctOptionIds = question.options
-      .filter((option) => option.isCorrect === true)
-      .map((option) => option.id)
+    const correctOptionIds = getCorrectOptionIds(question.options)
     if (correctOptionIds.length === 0) {
       return []
     }

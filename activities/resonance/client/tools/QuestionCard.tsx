@@ -36,7 +36,9 @@ export default function QuestionCard({ question, index, onRemove, onEdit, onMove
           <span className="text-xs text-gray-400">{TYPE_LABEL[question.type]}</span>
           {isPoll && <span className="text-xs text-blue-500">poll</span>}
           {correctOptions.length > 0 && (
-            <span className="text-xs text-green-600">✓ {correctOptions[0]?.text}</span>
+            <span className="text-xs text-green-600">
+              ✓ {correctOptions.map((option) => option.text).join(', ')}
+            </span>
           )}
           {question.responseTimeLimitMs !== undefined && question.responseTimeLimitMs !== null && (
             <span className="text-xs text-amber-600">⏱ {question.responseTimeLimitMs / 1000}s</span>

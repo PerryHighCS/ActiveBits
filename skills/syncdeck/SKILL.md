@@ -82,6 +82,17 @@ Required implications:
       chalkboardOverrides: {
         // Optional chalkboard overrides. Do not set storage.
       },
+      standaloneHosting: {
+        // Standalone CTA that opens the deck in ActiveBits SyncDeck.
+        activeBitsOrigin: 'https://bits.example',
+        // Optional override. Defaults to /util/syncdeck/launch-presentation
+        // launchPath: '/util/syncdeck/launch-presentation',
+        // Optional override. Defaults to the current page URL.
+        // presentationUrl: 'https://slides.example/my-deck.html',
+        // Optional CTA label / timeout tuning.
+        // ctaLabel: 'Activate SyncDeck',
+        // ctaTimeoutMs: 9000,
+      },
       storyboard: {
         // Optional: storyboardId / trackId / toggleKey
       },
@@ -100,6 +111,11 @@ on your deployment's directory structure — check the local repo's skill overri
 or deployment docs for the concrete path used in your environment.
 
 The bundle provides `Reveal`, `RevealNotes`, `RevealChalkboard`, `RevealIframeSync`, `initRevealStoryboard`, and `initSyncDeckReveal`. Do not add CDN links for Reveal.js or its plugins when authoring SyncDeck decks.
+
+The bundle also exposes `buildSyncDeckLaunchUrl(...)` and
+`launchPresentationInSyncDeck(...)`, but deck authors should usually enable the
+behavior through `initSyncDeckReveal({ standaloneHosting: ... })` so the
+runtime can show the short-lived standalone CTA automatically.
 
 ## Required Layout Conventions
 
@@ -163,6 +179,13 @@ Role lifecycle:
 - decks always initialize in `standalone` mode
 - the host must send `setRole` to promote to `instructor` or `student`
 - do not rely on a `role` config field to set the initial role
+
+Standalone hosting launch:
+
+- the standalone CTA is opt-in and only appears when `standaloneHosting.activeBitsOrigin` is provided
+- the deck should provide a canonical absolute `http(s)` presentation URL; if omitted, the runtime uses the current page URL without the hash
+- the runtime opens ActiveBits at `/util/syncdeck/launch-presentation`
+- this launch flow is separate from normal hosted iframe sync behavior
 
 Overview routing:
 
