@@ -8,19 +8,21 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 function normalizeReportMcqAnswer(answer: Record<string, unknown>): { type: 'multiple-choice'; selectedOptionIds: string[] } | null {
-  const selectedOptionIds = Array.isArray(answer.selectedOptionIds)
+  const rawSelectedOptionIds = Array.isArray(answer.selectedOptionIds)
     ? answer.selectedOptionIds
     : typeof answer.selectedOptionId === 'string'
       ? [answer.selectedOptionId]
       : null
 
   if (
-    !selectedOptionIds ||
-    selectedOptionIds.length === 0 ||
-    selectedOptionIds.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)
+    !rawSelectedOptionIds ||
+    rawSelectedOptionIds.length === 0 ||
+    rawSelectedOptionIds.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)
   ) {
     return null
   }
+
+  const selectedOptionIds = Array.from(new Set(rawSelectedOptionIds.map((entry) => entry.trim())))
 
   return {
     type: 'multiple-choice',

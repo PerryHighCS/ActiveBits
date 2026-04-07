@@ -16,6 +16,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-04-07
+- Surface: internal module | activity interface
+- Contract: Uploaded Resonance report JSON is normalized before rendering. Multiple-choice report answers trim each `selectedOptionIds` entry and deduplicate repeated ids so imported reports cannot double-count option selections or inflate correct-response totals.
+- Compatibility constraints: Legacy uploaded report payloads that still use singular `selectedOptionId` remain accepted and are normalized into `selectedOptionIds`. Deduplication preserves first-seen order rather than rejecting the whole report so older or hand-edited exports still load.
+- Validation rules: Uploaded MCQ answers must contain at least one non-empty string option id after trimming. Duplicate ids collapse to one normalized entry.
+- Evidence (schema/tests/path): `activities/resonance/client/tools/ResonanceReport.tsx`; `activities/resonance/client/tools/ResonanceReport.test.ts`
+- Follow-up action: If report exports become versioned separately from live session payloads, keep this normalization behavior documented in the report schema so imports stay stable across tools.
+- Owner: Codex
+
+- Date: 2026-04-07
 - Surface: REST | websocket | internal module | activity interface
 - Contract: Resonance multiple-choice answers now persist as `{ type: 'multiple-choice', selectedOptionIds: string[] }`. Student-safe question payloads also include `selectionMode: 'single' | 'multiple'`, derived from the authored option set: zero or one correct options yields `single`, while two or more correct options yields `multiple`.
 - Compatibility constraints: Existing stored/session/report payloads that still use legacy `selectedOptionId` should be normalized forward to `selectedOptionIds` where those payloads are parsed. Poll-style MCQs remain single-select even though they have no correct answers.

@@ -186,6 +186,42 @@ void test('parseResonanceReport rejects a reveal with non-array sharedResponses'
   assert.equal(parseResonanceReport({ ...(MINIMAL_VALID as object), questions: [bad] }), null)
 })
 
+void test('parseResonanceReport normalizes uploaded MCQ answers by trimming and deduplicating selected option ids', () => {
+  const report = {
+    ...(MINIMAL_VALID as object),
+    questions: [
+      {
+        question: {
+          id: 'q2',
+          type: 'multiple-choice',
+          text: 'Pick one',
+          order: 1,
+          options: [{ id: 'a', text: 'A', isCorrect: true }, { id: 'b', text: 'B' }],
+        },
+        responses: [
+          {
+            id: 'r1',
+            questionId: 'q2',
+            studentId: 'student-1',
+            studentName: 'Ada',
+            submittedAt: 123456,
+            answer: { type: 'multiple-choice', selectedOptionIds: [' a ', 'a', 'b '] },
+          },
+        ],
+        reveal: null,
+        annotations: {},
+      },
+    ],
+  }
+
+  const parsed = parseResonanceReport(report)
+  assert.ok(parsed !== null)
+  assert.deepEqual(parsed.questions[0]?.responses[0]?.answer, {
+    type: 'multiple-choice',
+    selectedOptionIds: ['a', 'b'],
+  })
+})
+
 void test('parseResonanceReport rejects a reveal with non-number sharedAt', () => {
   const bad = {
     ...((MCQ_QUESTION as Record<string, unknown>)),
@@ -355,4 +391,54 @@ void test('ResonanceReportView does not show correct-response counts before resu
   const html = renderToStaticMarkup(React.createElement(ResonanceReportView, { report }))
 
   assert.doesNotMatch(html, /correct response/)
+})
+
+void test('ResonanceReportView does not double-count duplicate uploaded MCQ option ids', () => {
+  const parsed = parseResonanceReport({
+    version: 1,
+    sessionId: 'session-4',
+    exportedAt: Date.now(),
+    students: [],
+    questions: [
+      {
+        question: {
+          id: 'q1',
+          type: 'multiple-choice',
+          text: 'Choose',
+          order: 0,
+          options: [
+            { id: 'a', text: 'A', isCorrect: true },
+            { id: 'b', text: 'B' },
+          ],
+        },
+        responses: [
+          {
+            id: 'r1',
+            questionId: 'q1',
+            studentId: 'student-1',
+            studentName: 'Ada',
+            submittedAt: Date.now(),
+            answer: {
+              type: 'multiple-choice',
+              selectedOptionIds: [' a ', 'a'],
+            },
+          },
+        ],
+        reveal: {
+          questionId: 'q1',
+          sharedAt: Date.now(),
+          correctOptionIds: ['a'],
+          sharedResponses: [],
+        },
+        annotations: {},
+      },
+    ],
+  })
+
+  assert.ok(parsed !== null)
+
+  const html = renderToStaticMarkup(React.createElement(ResonanceReportView, { report: parsed }))
+
+  assert.match(html, /A <span class="text-gray-400">\(1\)<\/span>/)
+  assert.match(html, /1 correct response/)
 })
