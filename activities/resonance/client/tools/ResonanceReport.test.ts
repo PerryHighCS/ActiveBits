@@ -314,3 +314,45 @@ void test('ResonanceReportView only shows results shared indicator when reveal e
 
   assert.equal((html.match(/Results shared/g) ?? []).length, 1)
 })
+
+void test('ResonanceReportView does not show correct-response counts before results are revealed', () => {
+  const report: ResonanceReport = {
+    version: 1,
+    sessionId: 'session-3',
+    exportedAt: Date.now(),
+    students: [],
+    questions: [
+      {
+        question: {
+          id: 'q1',
+          type: 'multiple-choice',
+          text: 'Unrevealed graded question',
+          order: 0,
+          options: [
+            { id: 'a', text: 'A', isCorrect: true },
+            { id: 'b', text: 'B' },
+          ],
+        },
+        responses: [
+          {
+            id: 'r1',
+            questionId: 'q1',
+            studentId: 'student-1',
+            studentName: 'Ada',
+            submittedAt: Date.now(),
+            answer: {
+              type: 'multiple-choice',
+              selectedOptionIds: ['a'],
+            },
+          },
+        ],
+        reveal: null,
+        annotations: {},
+      },
+    ],
+  }
+
+  const html = renderToStaticMarkup(React.createElement(ResonanceReportView, { report }))
+
+  assert.doesNotMatch(html, /correct response/)
+})

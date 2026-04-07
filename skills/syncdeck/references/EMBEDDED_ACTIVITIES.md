@@ -138,7 +138,8 @@ Whenever a slide presents a **free-response question (FRQ)** or a **multiple-cho
 
 - FRQ → `type: "free-response"`
 - MCQ → `type: "multiple-choice"` with an `options` array
-  Questions with exactly one `"isCorrect": true` option behave as single-select.
+  Questions with zero `"isCorrect": true` options are treated as polls and behave as single-select.
+  Questions with exactly one `"isCorrect": true` option also behave as single-select.
   Questions with multiple `"isCorrect": true` options behave as multi-select and require the learner to choose the full correct set.
 
 The slide still needs fallback content (the question rendered in HTML) for standalone/preview use — see the Fallback Slide Design section below.

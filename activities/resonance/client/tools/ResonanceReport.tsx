@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { useRef, useState } from 'react'
 import { isMcqAnswerCorrect } from '../../shared/mcq.js'
 import type { ResonanceReport } from '../../shared/reportTypes.js'
@@ -202,19 +203,24 @@ function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
         </div>
       )}
 
-      {question.type === 'multiple-choice' && !isPoll && responses.length > 0 && (
+      {(() => {
+        const revealedCorrectOptionIds = reveal?.correctOptionIds
+        return question.type === 'multiple-choice' &&
+          !isPoll &&
+          responses.length > 0 &&
+          revealedCorrectOptionIds &&
+          revealedCorrectOptionIds.length > 0 ? (
         <p className="text-xs text-gray-500">
           {(() => {
             const correctResponseCount = responses.filter((response) =>
-            response.answer.type === 'multiple-choice' &&
-            reveal?.correctOptionIds !== null &&
-            reveal?.correctOptionIds !== undefined &&
-            isMcqAnswerCorrect(response.answer.selectedOptionIds, reveal.correctOptionIds),
+              response.answer.type === 'multiple-choice' &&
+              isMcqAnswerCorrect(response.answer.selectedOptionIds, revealedCorrectOptionIds),
             ).length
             return `${correctResponseCount} correct response${correctResponseCount !== 1 ? 's' : ''}`
           })()}
         </p>
-      )}
+        ) : null
+      })()}
 
       {/* Free-response answers */}
       {question.type === 'free-response' && (
@@ -238,23 +244,25 @@ function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
  */
 export function ResonanceReportView({ report }: Props) {
   return (
-    <div className="space-y-4">
-      <header className="flex items-center justify-between">
-        <div>
-          <p className="text-xs text-gray-400">Session {report.sessionId}</p>
-          <p className="text-xs text-gray-400">
-            Exported {new Date(report.exportedAt).toLocaleString()}
+    <React.Fragment>
+      <div className="space-y-4">
+        <header className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-400">Session {report.sessionId}</p>
+            <p className="text-xs text-gray-400">
+              Exported {new Date(report.exportedAt).toLocaleString()}
+            </p>
+          </div>
+          <p className="text-sm text-gray-500">
+            {report.students.length} student{report.students.length !== 1 ? 's' : ''} ·{' '}
+            {report.questions.length} question{report.questions.length !== 1 ? 's' : ''}
           </p>
-        </div>
-        <p className="text-sm text-gray-500">
-          {report.students.length} student{report.students.length !== 1 ? 's' : ''} ·{' '}
-          {report.questions.length} question{report.questions.length !== 1 ? 's' : ''}
-        </p>
-      </header>
-      {report.questions.map((q) => (
-        <QuestionSection key={q.question.id} q={q} />
-      ))}
-    </div>
+        </header>
+        {report.questions.map((q) => (
+          <QuestionSection key={q.question.id} q={q} />
+        ))}
+      </div>
+    </React.Fragment>
   )
 }
 
