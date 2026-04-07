@@ -84,7 +84,7 @@ Required implications:
       },
       standaloneHosting: {
         // Standalone CTA that opens the deck in ActiveBits SyncDeck.
-        activeBitsOrigin: 'https://bits.mycode.run',
+        activeBitsOrigin: 'https://bits.example',
         // Optional override. Defaults to /util/syncdeck/launch-presentation
         // launchPath: '/util/syncdeck/launch-presentation',
         // Optional override. Defaults to the current page URL.
