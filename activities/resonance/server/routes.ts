@@ -442,6 +442,108 @@ function normalizeResponseDrafts(
   return drafts
 }
 
+function normalizeStoredReveals(
+  value: unknown,
+  questions: Question[],
+): QuestionReveal[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const questionsById = new Map(questions.map((question) => [question.id, question] satisfies [string, Question]))
+  const reveals: QuestionReveal[] = []
+
+  for (const rawReveal of value) {
+    if (!isPlainObject(rawReveal)) {
+      continue
+    }
+
+    const questionId = typeof rawReveal.questionId === 'string' ? rawReveal.questionId : ''
+    const sharedAt =
+      typeof rawReveal.sharedAt === 'number' && Number.isFinite(rawReveal.sharedAt)
+        ? Math.round(rawReveal.sharedAt)
+        : 0
+    const question = questionsById.get(questionId)
+
+    if (!questionId || sharedAt <= 0 || !question) {
+      continue
+    }
+
+    const correctOptionIds =
+      rawReveal.correctOptionIds === null
+        ? null
+        : Array.isArray(rawReveal.correctOptionIds) &&
+            rawReveal.correctOptionIds.every((entry) => typeof entry === 'string')
+          ? rawReveal.correctOptionIds
+          : null
+
+    const sharedResponses = Array.isArray(rawReveal.sharedResponses)
+      ? rawReveal.sharedResponses.flatMap((rawSharedResponse) => {
+          if (!isPlainObject(rawSharedResponse)) {
+            return []
+          }
+
+          const id = typeof rawSharedResponse.id === 'string' ? rawSharedResponse.id : ''
+          const sharedQuestionId = typeof rawSharedResponse.questionId === 'string' ? rawSharedResponse.questionId : ''
+          const sharedResponseAt =
+            typeof rawSharedResponse.sharedAt === 'number' && Number.isFinite(rawSharedResponse.sharedAt)
+              ? Math.round(rawSharedResponse.sharedAt)
+              : 0
+          const answer = normalizeDraftAnswerPayload(rawSharedResponse.answer, questionsById, questionId)
+
+          if (!id || sharedQuestionId !== questionId || sharedResponseAt <= 0 || answer === null) {
+            return []
+          }
+
+          return [{
+            id,
+            questionId: sharedQuestionId,
+            answer,
+            sharedAt: sharedResponseAt,
+            instructorEmoji: typeof rawSharedResponse.instructorEmoji === 'string' ? rawSharedResponse.instructorEmoji : null,
+            reactions: isPlainObject(rawSharedResponse.reactions)
+              ? (rawSharedResponse.reactions as Record<string, number>)
+              : {},
+          }]
+        })
+      : []
+
+    const viewerResponse = isPlainObject(rawReveal.viewerResponse)
+      ? (() => {
+          const submittedAt =
+            typeof rawReveal.viewerResponse.submittedAt === 'number' && Number.isFinite(rawReveal.viewerResponse.submittedAt)
+              ? Math.round(rawReveal.viewerResponse.submittedAt)
+              : 0
+          const answer = normalizeDraftAnswerPayload(rawReveal.viewerResponse.answer, questionsById, questionId)
+
+          if (submittedAt <= 0 || answer === null) {
+            return null
+          }
+
+          return {
+            answer,
+            submittedAt,
+            instructorEmoji:
+              typeof rawReveal.viewerResponse.instructorEmoji === 'string'
+                ? rawReveal.viewerResponse.instructorEmoji
+                : null,
+            isShared: rawReveal.viewerResponse.isShared === true,
+          }
+        })()
+      : null
+
+    reveals.push({
+      questionId,
+      sharedAt,
+      correctOptionIds,
+      sharedResponses,
+      ...(viewerResponse !== null ? { viewerResponse } : {}),
+    })
+  }
+
+  return reveals
+}
+
 function normalizeSessionData(data: unknown): ResonanceSessionData {
   const source = ensurePlainObject(data)
 
@@ -533,7 +635,7 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     annotations: isPlainObject(source.annotations)
       ? (source.annotations as Record<string, InstructorAnnotation>)
       : {},
-    reveals: Array.isArray(source.reveals) ? (source.reveals as QuestionReveal[]) : [],
+    reveals: normalizeStoredReveals(source.reveals, questions),
     sharedResponseReactions: isPlainObject(source.sharedResponseReactions)
       ? (source.sharedResponseReactions as Record<string, Record<string, string>>)
       : {},
