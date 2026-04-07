@@ -26,8 +26,8 @@ export async function launchResonancePersistentSoloEntry(
   const rawPersistentHash = params.selectedOptions?.h
   const encodedQuestions = typeof rawEncodedQuestions === 'string' ? rawEncodedQuestions.trim() : null
   const persistentHash = typeof rawPersistentHash === 'string' ? rawPersistentHash.trim() : null
-  const rawQuestions = Array.isArray(params.selectedOptions?.questions) ? params.selectedOptions.questions : null
-  const validatedQuestionSet = Array.isArray(rawQuestions)
+  const rawQuestions = params.selectedOptions?.questions
+  const validatedQuestionSet = rawQuestions !== undefined
     ? validateQuestionSet(rawQuestions)
     : null
   const validatedQuestions = validatedQuestionSet?.errors.length === 0
@@ -39,7 +39,7 @@ export async function launchResonancePersistentSoloEntry(
     if (validationErrors.length > 0) {
       console.error('[Resonance][SoloLaunchInvalidQuestions]', {
         errors: validationErrors,
-        questionCount: rawQuestions?.length ?? 0,
+        questionCount: Array.isArray(rawQuestions) ? rawQuestions.length : 0,
       })
     }
 

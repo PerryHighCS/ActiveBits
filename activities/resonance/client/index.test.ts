@@ -166,3 +166,34 @@ void test('launchResonancePersistentSoloEntry rejects raw question options when 
     console.error = originalConsoleError
   }
 })
+
+void test('launchResonancePersistentSoloEntry explains wrong-type raw question payloads', async () => {
+  const originalConsoleError = console.error
+  const consoleErrors: unknown[][] = []
+  console.error = (...args: unknown[]) => {
+    consoleErrors.push(args)
+  }
+
+  try {
+    await assert.rejects(
+      launchResonancePersistentSoloEntry({
+        hash: '',
+        search: '',
+        selectedOptions: {
+          questions: 'not-an-array' as unknown as unknown[],
+        },
+      }),
+      /question set must be an array/i,
+    )
+
+    assert.deepEqual(consoleErrors, [[
+      '[Resonance][SoloLaunchInvalidQuestions]',
+      {
+        errors: ['question set must be an array'],
+        questionCount: 0,
+      },
+    ]])
+  } finally {
+    console.error = originalConsoleError
+  }
+})

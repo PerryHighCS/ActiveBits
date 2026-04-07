@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import type { MCQOption, Question } from '../../shared/types.js'
 
+export const MAX_MCQ_OPTIONS = 10
+
 type QuestionDraft =
   | { type: 'free-response'; text: string; timeLimitMs: number | null }
   | { type: 'multiple-choice'; text: string; timeLimitMs: number | null; options: OptionDraft[] }
@@ -252,7 +254,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
               </div>
             ))}
           </div>
-          {draft.options.length < 6 && (
+          {draft.options.length < MAX_MCQ_OPTIONS && (
             <button
               type="button"
               onClick={addOption}
