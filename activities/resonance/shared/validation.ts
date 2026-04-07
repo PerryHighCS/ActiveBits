@@ -68,8 +68,8 @@ function validateMCQQuestion(raw: Record<string, unknown>, id: string, text: str
     errors.push(`question "${id}": multiple-choice must have at least 2 options`)
     return null
   }
-  if (raw.options.length > 6) {
-    errors.push(`question "${id}": multiple-choice may have at most 6 options`)
+  if (raw.options.length > 10) {
+    errors.push(`question "${id}": multiple-choice may have at most 10 options`)
     return null
   }
 

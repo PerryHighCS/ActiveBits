@@ -11,6 +11,14 @@ import { validateQuestionSet } from '../shared/validation.js'
 import ResonancePersistentLinkBuilder from './tools/ResonancePersistentLinkBuilder.js'
 import ResonanceToolShell from './tools/ResonanceToolShell.js'
 
+function formatSoloQuestionSetErrorMessage(errors: readonly string[]): string {
+  if (errors.length === 0) {
+    return 'Resonance solo entry requires a valid question set.'
+  }
+
+  return `Resonance solo entry requires a valid question set: ${errors.join('; ')}`
+}
+
 export async function launchResonancePersistentSoloEntry(
   params: ActivityPersistentSoloLaunchParams,
 ): Promise<ActivityPersistentSoloLaunchResult> {
@@ -18,7 +26,7 @@ export async function launchResonancePersistentSoloEntry(
   const rawPersistentHash = params.selectedOptions?.h
   const encodedQuestions = typeof rawEncodedQuestions === 'string' ? rawEncodedQuestions.trim() : null
   const persistentHash = typeof rawPersistentHash === 'string' ? rawPersistentHash.trim() : null
-  const rawQuestions = params.selectedOptions?.questions
+  const rawQuestions = Array.isArray(params.selectedOptions?.questions) ? params.selectedOptions.questions : null
   const validatedQuestionSet = Array.isArray(rawQuestions)
     ? validateQuestionSet(rawQuestions)
     : null
@@ -27,7 +35,15 @@ export async function launchResonancePersistentSoloEntry(
     : []
 
   if ((!encodedQuestions || !persistentHash) && validatedQuestions.length === 0) {
-    throw new Error('Resonance solo entry requires a valid question set.')
+    const validationErrors = validatedQuestionSet?.errors ?? []
+    if (validationErrors.length > 0) {
+      console.error('[Resonance][SoloLaunchInvalidQuestions]', {
+        errors: validationErrors,
+        questionCount: rawQuestions?.length ?? 0,
+      })
+    }
+
+    throw new Error(formatSoloQuestionSetErrorMessage(validationErrors))
   }
 
   const createResponse = await fetch('/api/resonance/create', {

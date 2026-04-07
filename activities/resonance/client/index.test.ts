@@ -123,28 +123,46 @@ void test('launchResonancePersistentSoloEntry creates a self-paced solo session 
 })
 
 void test('launchResonancePersistentSoloEntry rejects raw question options when any question is invalid', async () => {
-  await assert.rejects(
-    launchResonancePersistentSoloEntry({
-      hash: '',
-      search: '',
-      selectedOptions: {
-        questions: [
-          {
-            id: 'q1',
-            type: 'free-response',
-            text: 'Valid question',
-            order: 0,
-          },
-          {
-            id: 'q2',
-            type: 'multiple-choice',
-            text: 'Broken question',
-            order: 1,
-            options: [{ id: 'only', text: 'Only one option' }],
-          },
-        ],
+  const originalConsoleError = console.error
+  const consoleErrors: unknown[][] = []
+  console.error = (...args: unknown[]) => {
+    consoleErrors.push(args)
+  }
+
+  try {
+    await assert.rejects(
+      launchResonancePersistentSoloEntry({
+        hash: '',
+        search: '',
+        selectedOptions: {
+          questions: [
+            {
+              id: 'q1',
+              type: 'free-response',
+              text: 'Valid question',
+              order: 0,
+            },
+            {
+              id: 'q2',
+              type: 'multiple-choice',
+              text: 'Broken question',
+              order: 1,
+              options: [{ id: 'only', text: 'Only one option' }],
+            },
+          ],
+        },
+      }),
+      /question "q2": multiple-choice must have at least 2 options/i,
+    )
+
+    assert.deepEqual(consoleErrors, [[
+      '[Resonance][SoloLaunchInvalidQuestions]',
+      {
+        errors: ['question "q2": multiple-choice must have at least 2 options'],
+        questionCount: 2,
       },
-    }),
-    /valid question set/i,
-  )
+    ]])
+  } finally {
+    console.error = originalConsoleError
+  }
 })
