@@ -9,4 +9,5 @@ void test('areMcqSelectionsEqual treats reordered multi-select answers as equal'
 void test('areMcqSelectionsEqual rejects duplicate or mismatched selections', () => {
   assert.equal(areMcqSelectionsEqual(['a', 'a'], ['a']), false)
   assert.equal(areMcqSelectionsEqual(['a', 'b'], ['a']), false)
+  assert.equal(areMcqSelectionsEqual(['a', 'b'], ['a', 'a']), false)
 })

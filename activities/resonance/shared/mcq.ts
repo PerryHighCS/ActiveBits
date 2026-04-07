@@ -25,11 +25,16 @@ export function areMcqSelectionsEqual(
   }
 
   const leftSet = new Set(leftSelectedOptionIds)
-  if (leftSet.size !== leftSelectedOptionIds.length || leftSet.size !== rightSelectedOptionIds.length) {
+  const rightSet = new Set(rightSelectedOptionIds)
+  if (
+    leftSet.size !== leftSelectedOptionIds.length ||
+    rightSet.size !== rightSelectedOptionIds.length ||
+    leftSet.size !== rightSet.size
+  ) {
     return false
   }
 
-  return rightSelectedOptionIds.every((optionId) => leftSet.has(optionId))
+  return [...rightSet].every((optionId) => leftSet.has(optionId))
 }
 
 export function isMcqAnswerCorrect(

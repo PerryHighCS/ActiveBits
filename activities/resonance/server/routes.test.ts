@@ -2153,6 +2153,107 @@ void test('annotate-response route updates the student viewer response emoji for
   await sessions.close()
 })
 
+void test('student state sanitizes malformed stored reveal reactions', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const now = Date.now()
+  const session: SessionRecord = {
+    id: 'resonance-session-sanitize-reactions',
+    type: 'resonance',
+    created: now,
+    lastActivity: now,
+    data: {
+      instructorPasscode: 'TEACH123',
+      questions: [
+        {
+          id: 'q1',
+          type: 'free-response',
+          text: 'Explain your reasoning.',
+          order: 0,
+        },
+      ],
+      activeQuestionId: null,
+      activeQuestionIds: [],
+      activeQuestionDeadlineAt: null,
+      students: {
+        student1: { studentId: 'student1', name: 'Ada Lovelace', joinedAt: now - 1_000 },
+      },
+      responses: [
+        {
+          id: 'r1',
+          questionId: 'q1',
+          studentId: 'student1',
+          submittedAt: now - 500,
+          answer: {
+            type: 'free-response',
+            text: 'My answer',
+          },
+        },
+      ],
+      responseDrafts: {},
+      annotations: {},
+      reveals: [
+        {
+          questionId: 'q1',
+          sharedAt: now - 100,
+          correctOptionIds: null,
+          sharedResponses: [
+            {
+              id: 'r1',
+              questionId: 'q1',
+              answer: {
+                type: 'free-response',
+                text: 'My answer',
+              },
+              sharedAt: now - 100,
+              instructorEmoji: null,
+              reactions: {
+                '🔥': 2,
+                '👏': -1,
+                bad: 3,
+                '💡': Number.NaN,
+              },
+            },
+          ],
+        },
+      ],
+      sharedResponseReactions: {},
+      responseOrderOverrides: {},
+      persistentHash: null,
+    },
+  }
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  assert.equal(typeof stateHandler, 'function')
+
+  const res = createResponse()
+  await stateHandler?.(
+    {
+      params: { sessionId: session.id },
+      query: {
+        studentId: 'student1',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    reveals?: Array<{
+      sharedResponses?: Array<{ reactions?: Record<string, number> }>
+    }>
+  }
+  assert.deepEqual(body.reveals?.[0]?.sharedResponses?.[0]?.reactions, {
+    '🔥': 2,
+  })
+
+  await sessions.close()
+})
+
 void test('student state includes reviewed responses for annotated answers that were not shared publicly', async () => {
   const app = createMockApp()
   const ws = createMockWs()

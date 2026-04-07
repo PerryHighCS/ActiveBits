@@ -442,6 +442,27 @@ function normalizeResponseDrafts(
   return drafts
 }
 
+function normalizeSharedResponseReactions(value: unknown): Record<string, number> {
+  if (!isPlainObject(value)) {
+    return {}
+  }
+
+  const reactions: Record<string, number> = {}
+  for (const [emoji, count] of Object.entries(value)) {
+    if (!isValidStudentReactionEmoji(emoji)) {
+      continue
+    }
+
+    if (typeof count !== 'number' || !Number.isFinite(count) || count < 0) {
+      continue
+    }
+
+    reactions[emoji] = count
+  }
+
+  return reactions
+}
+
 function normalizeStoredReveals(
   value: unknown,
   questions: Question[],
@@ -501,9 +522,7 @@ function normalizeStoredReveals(
             answer,
             sharedAt: sharedResponseAt,
             instructorEmoji: typeof rawSharedResponse.instructorEmoji === 'string' ? rawSharedResponse.instructorEmoji : null,
-            reactions: isPlainObject(rawSharedResponse.reactions)
-              ? (rawSharedResponse.reactions as Record<string, number>)
-              : {},
+            reactions: normalizeSharedResponseReactions(rawSharedResponse.reactions),
           }]
         })
       : []
