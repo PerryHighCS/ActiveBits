@@ -40,6 +40,6 @@
     "eslint-plugin-jsdoc": "^62.9.0",
     "globals": "^17.3.0",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.2"
   }
 }

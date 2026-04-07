@@ -22,7 +22,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@testing-library/react": "^16.3.2",
-    "@types/jsdom": "^27.0.0",
+    "@types/jsdom": "^28.0.1",
     "@types/node": "^25.5.2",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
@@ -31,7 +31,7 @@
     "eslint": "^10.2.0",
     "eslint-plugin-jsdoc": "^62.9.0",
     "globals": "^17.3.0",
-    "jsdom": "^27.4.0",
-    "typescript": "^5.9.3"
+    "jsdom": "^29.0.2",
+    "typescript": "^6.0.2"
   }
 }
