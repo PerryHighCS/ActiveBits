@@ -49,7 +49,7 @@ The most important commands to support are:
 
 ### Standalone Launch
 
-The standalone "Host in SyncDeck" CTA is outside the iframe command protocol.
+The standalone "Activate SyncDeck" CTA is outside the iframe command protocol.
 
 - opt in with `standaloneHosting.activeBitsOrigin`
 - the runtime redirects to ActiveBits under `/util/syncdeck/launch-presentation`
