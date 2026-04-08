@@ -11,12 +11,27 @@ import { validateQuestionSet } from '../shared/validation.js'
 import ResonancePersistentLinkBuilder from './tools/ResonancePersistentLinkBuilder.js'
 import ResonanceToolShell from './tools/ResonanceToolShell.js'
 
+const SOLO_LAUNCH_LOGGED_ERROR_LIMIT = 10
+const SOLO_LAUNCH_MESSAGE_ERROR_LIMIT = 10
+const SOLO_LAUNCH_MAX_MESSAGE_LENGTH = 1000
+
 function formatSoloQuestionSetErrorMessage(errors: readonly string[]): string {
+  const baseMessage = 'Resonance solo entry requires a valid question set.'
   if (errors.length === 0) {
-    return 'Resonance solo entry requires a valid question set.'
+    return baseMessage
   }
 
-  return `Resonance solo entry requires a valid question set: ${errors.join('; ')}`
+  const includedErrors = errors.slice(0, SOLO_LAUNCH_MESSAGE_ERROR_LIMIT)
+  const remainingErrorCount = errors.length - includedErrors.length
+  const details = includedErrors.join('; ')
+  const suffix = remainingErrorCount > 0 ? `; ...and ${remainingErrorCount} more error(s)` : ''
+  const fullMessage = `${baseMessage.slice(0, -1)}: ${details}${suffix}`
+
+  if (fullMessage.length <= SOLO_LAUNCH_MAX_MESSAGE_LENGTH) {
+    return fullMessage
+  }
+
+  return `${fullMessage.slice(0, SOLO_LAUNCH_MAX_MESSAGE_LENGTH - 3)}...`
 }
 
 export async function launchResonancePersistentSoloEntry(
@@ -38,7 +53,8 @@ export async function launchResonancePersistentSoloEntry(
     const validationErrors = validatedQuestionSet?.errors ?? []
     if (validationErrors.length > 0) {
       console.error('[Resonance][SoloLaunchInvalidQuestions]', {
-        errors: validationErrors,
+        errorCount: validationErrors.length,
+        errors: validationErrors.slice(0, SOLO_LAUNCH_LOGGED_ERROR_LIMIT),
         questionCount: Array.isArray(rawQuestions) ? rawQuestions.length : 0,
       })
     }

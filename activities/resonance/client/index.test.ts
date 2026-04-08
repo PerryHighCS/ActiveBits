@@ -153,12 +153,13 @@ void test('launchResonancePersistentSoloEntry rejects raw question options when 
     /question "q2": multiple-choice must have at least 2 options/i,
   )
 
-  assert.deepEqual(consoleErrors, [[
-    '[Resonance][SoloLaunchInvalidQuestions]',
-    {
-      errors: ['question "q2": multiple-choice must have at least 2 options'],
-      questionCount: 2,
-    },
+    assert.deepEqual(consoleErrors, [[
+      '[Resonance][SoloLaunchInvalidQuestions]',
+      {
+        errorCount: 1,
+        errors: ['question "q2": multiple-choice must have at least 2 options'],
+        questionCount: 2,
+      },
   ]])
 })
 
@@ -179,11 +180,12 @@ void test('launchResonancePersistentSoloEntry explains wrong-type raw question p
     /question set must be an array/i,
   )
 
-  assert.deepEqual(consoleErrors, [[
-    '[Resonance][SoloLaunchInvalidQuestions]',
-    {
-      errors: ['question set must be an array'],
-      questionCount: 0,
-    },
-  ]])
-})
+    assert.deepEqual(consoleErrors, [[
+      '[Resonance][SoloLaunchInvalidQuestions]',
+      {
+        errorCount: 1,
+        errors: ['question set must be an array'],
+        questionCount: 0,
+      },
+    ]])
+  })

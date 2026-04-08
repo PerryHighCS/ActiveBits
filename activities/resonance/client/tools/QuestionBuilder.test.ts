@@ -3,7 +3,7 @@ import test from 'node:test'
 import { MAX_MCQ_OPTIONS } from '../../shared/types.js'
 import { newOptionId, newQuestionId } from './QuestionBuilder.js'
 
-void test('QuestionBuilder allows up to 10 multiple-choice options', () => {
+void test('MAX_MCQ_OPTIONS is set to 10', () => {
   assert.equal(MAX_MCQ_OPTIONS, 10)
 })
 
