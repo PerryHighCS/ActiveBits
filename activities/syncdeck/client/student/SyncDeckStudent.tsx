@@ -43,6 +43,7 @@ import {
   shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
+import EmbeddedOverlayNavigationIcon from '../shared/EmbeddedOverlayNavigationIcon.js'
 const isDevMode = import.meta.env?.DEV === true
 
 interface SessionResponsePayload {
@@ -3731,7 +3732,7 @@ const SyncDeckStudent: FC = () => {
               title="Previous slide"
               className="absolute left-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
-              ◀
+              <EmbeddedOverlayNavigationIcon direction="left" />
             </button>
             <button
               type="button"
@@ -3744,7 +3745,7 @@ const SyncDeckStudent: FC = () => {
               title="Move up"
               className="absolute top-3 left-1/2 -translate-x-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
-              ▲
+              <EmbeddedOverlayNavigationIcon direction="up" />
             </button>
             <button
               type="button"
@@ -3757,7 +3758,7 @@ const SyncDeckStudent: FC = () => {
               title="Next slide"
               className="absolute right-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
-              ▶
+              <EmbeddedOverlayNavigationIcon direction="right" />
             </button>
             <button
               type="button"
@@ -3770,7 +3771,7 @@ const SyncDeckStudent: FC = () => {
               title="Move down"
               className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
-              ▼
+              <EmbeddedOverlayNavigationIcon direction="down" />
             </button>
           </>
         ) : null}

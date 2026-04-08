@@ -22,6 +22,7 @@ import {
   shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
+import EmbeddedOverlayNavigationIcon from '../shared/EmbeddedOverlayNavigationIcon.js'
 import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
@@ -4159,7 +4160,7 @@ const SyncDeckManager: FC = () => {
                             title="Move left"
                             disabled={!canMoveBack}
                           >
-                            ◀
+                            <EmbeddedOverlayNavigationIcon direction="left" />
                           </button>
                           <button
                             type="button"
@@ -4171,7 +4172,7 @@ const SyncDeckManager: FC = () => {
                             title="Move up"
                             disabled={!canMoveUp}
                           >
-                            ▲
+                            <EmbeddedOverlayNavigationIcon direction="up" />
                           </button>
                           <button
                             type="button"
@@ -4183,7 +4184,7 @@ const SyncDeckManager: FC = () => {
                             title="Move right"
                             disabled={!canMoveForward}
                           >
-                            ▶
+                            <EmbeddedOverlayNavigationIcon direction="right" />
                           </button>
                           <button
                             type="button"
@@ -4195,7 +4196,7 @@ const SyncDeckManager: FC = () => {
                             title="Move down"
                             disabled={!canMoveDown}
                           >
-                            ▼
+                            <EmbeddedOverlayNavigationIcon direction="down" />
                           </button>
                         </>
                       ) : null}

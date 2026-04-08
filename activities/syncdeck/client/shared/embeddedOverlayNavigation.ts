@@ -14,6 +14,21 @@ export interface EmbeddedOverlayVerticalNavigationCapabilities {
   canGoDown: boolean
 }
 
+export function resolveEmbeddedOverlayNavigationIconPath(direction: EmbeddedOverlayDirection): string {
+  switch (direction) {
+    case 'left':
+      return 'M14.5 7 8.5 12l6 5'
+    case 'right':
+      return 'M9.5 7 15.5 12l-6 5'
+    case 'up':
+      return 'M7 14.5 12 8.5l5 6'
+    case 'down':
+      return 'M7 9.5 12 15.5l5-6'
+  }
+
+  throw new Error(`Unhandled embedded overlay navigation direction: ${direction satisfies never}`)
+}
+
 export function consumeEmbeddedOverlayNavigationEvent(event: {
   preventDefault(): void
   stopPropagation(): void

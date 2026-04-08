@@ -4,6 +4,7 @@ import { consumeEmbeddedOverlayNavigationEvent } from './embeddedOverlayNavigati
 import { resolveOptimisticEmbeddedOverlayIndices } from './embeddedOverlayNavigation.js'
 import { deriveEmbeddedOverlayVerticalNavigationCapabilities } from './embeddedOverlayNavigation.js'
 import { resolveEmbeddedOverlayVerticalMoveAllowed } from './embeddedOverlayNavigation.js'
+import { resolveEmbeddedOverlayNavigationIconPath } from './embeddedOverlayNavigation.js'
 import { reduceEmbeddedOverlayNavigationPointerDownState } from './embeddedOverlayNavigation.js'
 import { shouldHandleEmbeddedOverlayNavigationPointerDown } from './embeddedOverlayNavigation.js'
 import { shouldNavigateEmbeddedOverlayOnPointerDown } from './embeddedOverlayNavigation.js'
@@ -227,4 +228,11 @@ void test('resolveEmbeddedOverlayVerticalMoveAllowed falls back to derived bound
     }),
     true,
   )
+})
+
+void test('resolveEmbeddedOverlayNavigationIconPath returns deterministic SVG paths for all directions', () => {
+  assert.equal(resolveEmbeddedOverlayNavigationIconPath('left'), 'M14.5 7 8.5 12l6 5')
+  assert.equal(resolveEmbeddedOverlayNavigationIconPath('right'), 'M9.5 7 15.5 12l-6 5')
+  assert.equal(resolveEmbeddedOverlayNavigationIconPath('up'), 'M7 14.5 12 8.5l5 6')
+  assert.equal(resolveEmbeddedOverlayNavigationIconPath('down'), 'M7 9.5 12 15.5l5-6')
 })

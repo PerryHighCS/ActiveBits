@@ -1630,3 +1630,10 @@ Use this log for durable findings that future contributors and agents should reu
 - Why it matters: Without the shared guard, a second instructor can stay stranded on a stale manager screen after another instructor ends the session.
 - Evidence: `client/src/App.tsx`; `client/src/components/common/ManagedSessionRoute.tsx`
 - Owner: Codex
+- Date: 2026-04-08
+- Area: activities | syncdeck | embedded overlay navigation
+- Discovery: Embedded activity navigation controls should use app-drawn SVG arrows instead of Unicode triangle glyphs inside circular buttons.
+- Why it matters: Windows font fallback can render those glyphs as emoji-style symbols with colored square backgrounds, which breaks the intended neutral overlay control styling.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/shared/embeddedOverlayNavigation.ts`
+- Follow-up action: For any cross-platform icon-only control in shared overlays, prefer inline SVG or CSS-drawn shapes over text glyphs unless platform rendering is explicitly desired.
+- Owner: Codex
