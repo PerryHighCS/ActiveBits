@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { MAX_MCQ_OPTIONS } from './types.js'
 import { parseGimkitCSV, parseGimkitCSVWithRandom, validateAnswerPayload, validateQuestion, validateQuestionSet } from './validation.js'
 
 const preserveOrderRandom = () => 0.999999
@@ -220,6 +221,45 @@ void test('validateQuestionSet accepts multiple correct options for multiple-cho
       ],
     },
   ])
+})
+
+void test('validateQuestionSet accepts multiple-choice questions with up to 10 options', () => {
+  const result = validateQuestionSet([
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Select all that apply',
+      order: 0,
+      options: Array.from({ length: MAX_MCQ_OPTIONS }, (_, index) => ({
+        id: `o${index + 1}`,
+        text: `Option ${index + 1}`,
+        ...(index === 0 ? { isCorrect: true } : {}),
+      })),
+    },
+  ])
+
+  assert.deepEqual(result.errors, [])
+  assert.equal(result.questions[0]?.type, 'multiple-choice')
+  assert.equal(result.questions[0]?.options.length, MAX_MCQ_OPTIONS)
+})
+
+void test('validateQuestionSet rejects multiple-choice questions with more than 10 options', () => {
+  const result = validateQuestionSet([
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Select all that apply',
+      order: 0,
+      options: Array.from({ length: MAX_MCQ_OPTIONS + 1 }, (_, index) => ({
+        id: `o${index + 1}`,
+        text: `Option ${index + 1}`,
+        ...(index === 0 ? { isCorrect: true } : {}),
+      })),
+    },
+  ])
+
+  assert.deepEqual(result.questions, [])
+  assert.deepEqual(result.errors, [`question "q1": multiple-choice may have at most ${MAX_MCQ_OPTIONS} options`])
 })
 
 void test('validateAnswerPayload accepts multi-select answers for multi-correct questions', () => {

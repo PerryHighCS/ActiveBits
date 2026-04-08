@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { type TestContext } from 'node:test'
 import resonanceClientModule, { launchResonancePersistentSoloEntry } from './index.js'
 
 void test('launchResonancePersistentSoloEntry creates a self-paced solo session from prepared selectedOptions', async () => {
@@ -122,7 +122,12 @@ void test('launchResonancePersistentSoloEntry creates a self-paced solo session 
   }
 })
 
-void test('launchResonancePersistentSoloEntry rejects raw question options when any question is invalid', async () => {
+void test('launchResonancePersistentSoloEntry rejects raw question options when any question is invalid', async (t: TestContext) => {
+  const consoleErrors: unknown[][] = []
+  t.mock.method(console, 'error', (...args: unknown[]) => {
+    consoleErrors.push(args)
+  })
+
   await assert.rejects(
     launchResonancePersistentSoloEntry({
       hash: '',
@@ -145,6 +150,42 @@ void test('launchResonancePersistentSoloEntry rejects raw question options when 
         ],
       },
     }),
-    /valid question set/i,
+    /question "q2": multiple-choice must have at least 2 options/i,
   )
+
+    assert.deepEqual(consoleErrors, [[
+      '[Resonance][SoloLaunchInvalidQuestions]',
+      {
+        errorCount: 1,
+        errors: ['question "q2": multiple-choice must have at least 2 options'],
+        questionCount: 2,
+      },
+  ]])
 })
+
+void test('launchResonancePersistentSoloEntry explains wrong-type raw question payloads', async (t: TestContext) => {
+  const consoleErrors: unknown[][] = []
+  t.mock.method(console, 'error', (...args: unknown[]) => {
+    consoleErrors.push(args)
+  })
+
+  await assert.rejects(
+    launchResonancePersistentSoloEntry({
+      hash: '',
+      search: '',
+      selectedOptions: {
+        questions: 'not-an-array' as unknown as unknown[],
+      },
+    }),
+    /question set must be an array/i,
+  )
+
+    assert.deepEqual(consoleErrors, [[
+      '[Resonance][SoloLaunchInvalidQuestions]',
+      {
+        errorCount: 1,
+        errors: ['question set must be an array'],
+        questionCount: 0,
+      },
+    ]])
+  })
