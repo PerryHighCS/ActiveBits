@@ -136,6 +136,7 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
     if (draft.type !== 'multiple-choice') return
     setDraft((d) => {
       if (d.type !== 'multiple-choice') return d
+      if (d.options.length >= MAX_MCQ_OPTIONS) return d
       return { ...d, options: [...d.options, { id: newOptionId(), text: '', isCorrect: false }] }
     })
   }
