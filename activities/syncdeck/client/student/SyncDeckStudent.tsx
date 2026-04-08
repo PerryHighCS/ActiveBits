@@ -37,6 +37,7 @@ import {
 import {
   consumeEmbeddedOverlayNavigationEvent,
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
+  resolveEmbeddedOverlayNavigationIconPath,
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
   shouldHandleEmbeddedOverlayNavigationPointerDown,
@@ -248,6 +249,23 @@ function resolveEffectiveBoundary(
   }
 
   return hasExceededReleasedBoundary(instructorIndices, setBoundary) ? instructorIndices : setBoundary
+}
+
+function EmbeddedOverlayNavigationIcon({ direction }: { direction: 'left' | 'right' | 'up' | 'down' }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d={resolveEmbeddedOverlayNavigationIconPath(direction)} />
+    </svg>
+  )
 }
 
 interface RevealCommandMessage {
@@ -3731,7 +3749,7 @@ const SyncDeckStudent: FC = () => {
               title="Previous slide"
               className="absolute left-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
-              ◀
+              <EmbeddedOverlayNavigationIcon direction="left" />
             </button>
             <button
               type="button"
@@ -3744,7 +3762,7 @@ const SyncDeckStudent: FC = () => {
               title="Move up"
               className="absolute top-3 left-1/2 -translate-x-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
-              ▲
+              <EmbeddedOverlayNavigationIcon direction="up" />
             </button>
             <button
               type="button"
@@ -3757,7 +3775,7 @@ const SyncDeckStudent: FC = () => {
               title="Next slide"
               className="absolute right-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
-              ▶
+              <EmbeddedOverlayNavigationIcon direction="right" />
             </button>
             <button
               type="button"
@@ -3770,7 +3788,7 @@ const SyncDeckStudent: FC = () => {
               title="Move down"
               className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
             >
-              ▼
+              <EmbeddedOverlayNavigationIcon direction="down" />
             </button>
           </>
         ) : null}
