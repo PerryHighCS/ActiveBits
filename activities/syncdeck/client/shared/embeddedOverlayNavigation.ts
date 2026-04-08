@@ -25,6 +25,8 @@ export function resolveEmbeddedOverlayNavigationIconPath(direction: EmbeddedOver
     case 'down':
       return 'M7 9.5 12 15.5l5-6'
   }
+
+  throw new Error(`Unhandled embedded overlay navigation direction: ${direction satisfies never}`)
 }
 
 export function consumeEmbeddedOverlayNavigationEvent(event: {

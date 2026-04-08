@@ -37,13 +37,13 @@ import {
 import {
   consumeEmbeddedOverlayNavigationEvent,
   deriveEmbeddedOverlayVerticalNavigationCapabilities,
-  resolveEmbeddedOverlayNavigationIconPath,
   resolveEmbeddedOverlayVerticalMoveAllowed,
   resolveOptimisticEmbeddedOverlayIndices,
   shouldHandleEmbeddedOverlayNavigationPointerDown,
   shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
+import EmbeddedOverlayNavigationIcon from '../shared/EmbeddedOverlayNavigationIcon.js'
 const isDevMode = import.meta.env?.DEV === true
 
 interface SessionResponsePayload {
@@ -249,23 +249,6 @@ function resolveEffectiveBoundary(
   }
 
   return hasExceededReleasedBoundary(instructorIndices, setBoundary) ? instructorIndices : setBoundary
-}
-
-function EmbeddedOverlayNavigationIcon({ direction }: { direction: 'left' | 'right' | 'up' | 'down' }) {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d={resolveEmbeddedOverlayNavigationIconPath(direction)} />
-    </svg>
-  )
 }
 
 interface RevealCommandMessage {
