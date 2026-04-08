@@ -1,5 +1,5 @@
 import { getMcqSelectionMode } from './mcq.js'
-import type { AnswerPayload, MCQOption, MCQQuestion, Question, QuestionType } from './types.js'
+import { MAX_MCQ_OPTIONS, type AnswerPayload, type MCQOption, type MCQQuestion, type Question, type QuestionType } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -68,8 +68,8 @@ function validateMCQQuestion(raw: Record<string, unknown>, id: string, text: str
     errors.push(`question "${id}": multiple-choice must have at least 2 options`)
     return null
   }
-  if (raw.options.length > 10) {
-    errors.push(`question "${id}": multiple-choice may have at most 10 options`)
+  if (raw.options.length > MAX_MCQ_OPTIONS) {
+    errors.push(`question "${id}": multiple-choice may have at most ${MAX_MCQ_OPTIONS} options`)
     return null
   }
 

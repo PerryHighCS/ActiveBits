@@ -1,7 +1,5 @@
 import { useState } from 'react'
-import type { MCQOption, Question } from '../../shared/types.js'
-
-export const MAX_MCQ_OPTIONS = 10
+import { MAX_MCQ_OPTIONS, type MCQOption, type Question } from '../../shared/types.js'
 
 type QuestionDraft =
   | { type: 'free-response'; text: string; timeLimitMs: number | null }

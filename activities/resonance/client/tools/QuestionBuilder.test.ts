@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { MAX_MCQ_OPTIONS, newOptionId, newQuestionId } from './QuestionBuilder.js'
+import { MAX_MCQ_OPTIONS } from '../../shared/types.js'
+import { newOptionId, newQuestionId } from './QuestionBuilder.js'
 
 void test('QuestionBuilder allows up to 10 multiple-choice options', () => {
   assert.equal(MAX_MCQ_OPTIONS, 10)

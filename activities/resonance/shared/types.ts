@@ -1,5 +1,6 @@
 export type QuestionType = 'free-response' | 'multiple-choice'
 export type MCQSelectionMode = 'single' | 'multiple'
+export const MAX_MCQ_OPTIONS = 10
 
 export interface MCQOption {
   id: string
