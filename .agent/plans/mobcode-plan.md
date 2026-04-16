@@ -39,6 +39,57 @@ Using a `groups` map from the start means Phase 4 (breakout groups) only needs t
 
 Flat path map within each group is simpler than nested trees for serialization and diffing. The file tree UI derives folder hierarchy from paths at render time.
 
+### Phase 3 Data Model Extension (Planned)
+
+Additive state to support student-driven collaboration modes without replacing the Phase 1 baseline:
+
+```ts
+session.data = {
+  groups: {
+    default: {
+      files: { /* instructor/shared files */ },
+      activeFile: 'Main.java',
+    },
+  },
+  collaboration: {
+    mode: 'instructor' | 'driver' | 'personal-copies',
+    // global default policy selected from toolbar
+    globalPolicy: {
+      allowDriveShared: boolean,
+      allowEditPersonalCopy: boolean,
+    },
+    // driver mode: selected student edits the shared files and everyone follows
+    driverStudentId: string | null,
+    // personal-copies mode: selected student's personal copy is broadcast to viewers
+    broadcastStudentId: string | null,
+    // preserve selected student work when switching back to instructor mode
+    takeoverPolicy: 'preserve' | 'discard',
+    takeoverSourceStudentId: string | null,
+    studentPermissions: {
+      [studentId: string]: {
+        canDriveSharedOverride: boolean | null,
+        canEditPersonalCopyOverride: boolean | null,
+      },
+    },
+    personalCopies: {
+      [studentId: string]: {
+        files: Record<string, string>,
+        activeFile: string,
+        updatedAt: number,
+      },
+    },
+  },
+}
+```
+
+Notes:
+
+- `instructor`: existing Phase 1 behavior.
+- `driver`: one authorized student can edit shared files; all viewers follow those edits.
+- `personal-copies`: authorized students edit personal copies; instructor can select one student's copy to broadcast for everyone to view.
+- Global policy comes from toolbar mode; per-student overrides in roster can tighten or relax permissions for individuals.
+- Recommended default when instructor retakes control: `takeoverPolicy = 'preserve'` (student edits stay in personal copy snapshots, shared files revert to instructor-owned state unless instructor explicitly applies a student copy).
+
 ## Theme Settings
 
 - **Settings button** (sprocket icon) in the toolbar opens a dropdown/popover with a theme chooser
@@ -92,6 +143,14 @@ The manager POSTs to `/api/mobcode/:sessionId/state`. The server persists to the
 
 **Why two paths**: Typing at 500ms intervals would generate excessive HTTP requests. WS relay is fire-and-forget with no persistence overhead. But WS relay is local-instance only (no Valkey pub/sub), so durable state changes must go through HTTP. If a student reconnects or joins late, they fetch full state from the server via GET.
 
+## Multi-Instance Sync Guarantees
+
+- **Same-instance clients**: receive low-latency typing updates via WS relay (`file-content-update`, `active-file-changed`).
+- **Cross-instance clients**: converge through durable HTTP persistence + `broadcast()` pub/sub fanout.
+- **Expected staleness window across instances**: up to the content persistence debounce window (currently 5 seconds) unless a file switch/tree change/zip upload triggers immediate persist.
+- **Product behavior note**: "real-time" typing is guaranteed within the same instance; cross-instance behavior is near-real-time convergence bounded by persistence triggers.
+- **Future optimization path**: if strict cross-instance low-latency typing is required, add server-side relay of granular edits through Valkey pub/sub (or equivalent shared transport) with rate limits.
+
 ## WebSocket Message Types
 
 | Message Type | Transport | Trigger | Payload |
@@ -124,6 +183,7 @@ Upload and download both happen in the browser using `jszip` — no server-side 
 | Max zip file size | 10 MB | Reject before extraction with user-facing error |
 | Max extracted file count | 200 files | Stop extraction, warn user |
 | Max per-file size | 1 MB | Skip file, log warning in console |
+| Max total extracted size | 25 MB | Stop extraction and reject archive to avoid zip-bomb expansion |
 | Path traversal (`../`) | Reject | Normalize paths, strip leading `../` and `/`, reject any remaining `..` segments |
 | OS artifacts | Skip | Filter `__MACOSX/`, `.DS_Store`, `Thumbs.db`, `.git/` |
 | Binary/non-UTF-8 files | Skip | Attempt UTF-8 decode; if it fails or file extension is known-binary (`.class`, `.jar`, `.png`, `.jpg`, etc.), skip with a note in the file tree or a toast |
@@ -138,6 +198,21 @@ Upload and download both happen in the browser using `jszip` — no server-side 
 | `POST` | `/api/mobcode/:sessionId/state` | Full state update (persist + broadcast `state-sync`) |
 
 See "Sync Transport" section above for how each message type is routed. The `/state` endpoint handles durable persistence and cross-instance broadcast via Valkey pub/sub. Granular typing updates use WS-relay for low latency.
+
+## Security and Authorization
+
+- **Manager-only mutations**: all state mutation routes and WS mutation messages must require manager/instructor authorization for the session.
+- **Student role restrictions**: student clients may only subscribe/read; any incoming student mutation attempt should be rejected and logged.
+- **Endpoint protections**:
+  - `POST /api/mobcode/create`: require teacher/manager context.
+  - `POST /api/mobcode/:sessionId/state`: require manager authorization scoped to `:sessionId`.
+  - `GET /api/mobcode/:sessionId/session`: allow authorized participants for that session; deny unrelated sessions.
+- **WS protections**:
+  - Validate socket role and session membership before accepting `file-content-update` and `active-file-changed`.
+  - Drop and log unauthorized or malformed messages using structured logging.
+- **Validation and limits**:
+  - Enforce max payload size on WS and HTTP state updates.
+  - Validate file path/content schema server-side even if already validated client-side.
 
 ## Dependencies to Install
 
@@ -241,10 +316,21 @@ All isolated to the `activity-mobcode-*.js` chunk via Vite's existing `manualChu
 Add unit tests in `activities/mobcode/client/utils/` and `activities/mobcode/server/`:
 - **fileUtils.test.ts**: `buildTree()` with nested paths, empty map, single file; `isValidFileName()` rejects `../`, `/`, empty, null bytes, too-long names; path normalization strips leading `../` and `/`
 - **themeUtils.test.ts**: `getThemeFromCookie()` returns default when no cookie; `setThemeCookie()` writes expected cookie string; round-trip read/write
-- **zip safety tests** (in a `zipUtils.test.ts` or inline in component test): rejects zip > 10MB; skips `__MACOSX/` and `.DS_Store`; rejects paths with `../` traversal; skips binary files; respects max file count (200) and max per-file size (1MB)
 - **session normalizer test** (in `server/routes.test.ts`): normalizer creates `groups.default` when missing; normalizer preserves valid data; normalizer resets invalid `files` to `{}`
+- **zip safety tests** (in a `zipUtils.test.ts` or inline in component test): rejects zip > 10MB; enforces max total extracted size (25MB); skips `__MACOSX/` and `.DS_Store`; rejects paths with `../` traversal; skips binary files; respects max file count (200) and max per-file size (1MB)
+- **authorization tests** (server route + WS handler): manager can mutate; student mutation attempts are rejected; unauthorized session access returns denied response
 
 Run `npm test` to verify all pass.
+
+## Accessibility Acceptance Criteria
+
+- Toolbar controls use native `<button>` elements with accessible names.
+- Settings/menu toggles expose `aria-expanded` and `aria-controls` when applicable.
+- File tree supports keyboard navigation (arrow keys to move, Enter/Space to activate).
+- Active file is communicated via visual state plus semantic state (`aria-current` or equivalent tree semantics).
+- Icon-only controls include `aria-label`.
+- Modal flows (create/rename) provide focus trap, Escape close, and restore focus to the invoking control.
+- Student read-only editor still exposes readable cursor/selection contrast and text scaling for mobile users.
 
 ### Step 11: Manual Integration Testing
 - Create session → upload zip → verify student sees files live
@@ -278,10 +364,247 @@ The right column can be split vertically in Phase 2 to add a runner output panel
 | Phase | Feature | Data Model Impact |
 |---|---|---|
 | Phase 2 | Code runners (Brython, CheerpJ) | Add `output` field per group; split editor layout for console panel |
-| Phase 3 | Student editing | Add permissions/turn system; WS messages include editor identity |
+| Phase 3 | Student editing + roster controls | Add collaboration modes, per-student permissions, personal copy state, and broadcast source selection |
 | Phase 4 | Breakout groups | Instructor creates named groups, copies `default` files into each; students assigned to groups; each group has independent files/activeFile |
 
 The `groups` map in the data model supports all phases without migration.
+
+## Phase 2 Runner Modernization Plan
+
+The existing CheerpJ console implementation from `mrbdahlem/learn` should be treated as a **reference implementation**, not copied directly into MobCode.
+
+Legacy reference characteristics:
+
+- separate popup window for terminal/graphics display
+- `xterm` terminal surface with manual stdin/stdout bridging
+- global CheerpJ loader usage
+- large hard-coded preload resource lists
+- custom Java runner classes and compile-unit orchestration
+
+### Phase 2 Goals
+
+- Embed the runner inside the MobCode layout instead of opening a popup.
+- Upgrade to a current CheerpJ version/API supported by the modern loader/runtime.
+- Preserve the useful terminal/graphics concepts from the old console page.
+- Avoid hard-coded preload lists unless they are still strictly required by the current CheerpJ runtime.
+- Define a runner abstraction that allows CheerpJ and Brython to plug into the same MobCode host contract.
+- Keep the host shell runtime-agnostic: same toolbar actions, same terminal/output panel, same lifecycle, different adapters underneath.
+
+### Recommended Architecture
+
+- Add a shared runner panel in the lower editor region planned for Phase 2.
+- Separate the system into:
+  - `RunnerHost`: MobCode-owned UI shell, lifecycle management, toolbar integration, terminal/output tabs, run status, stop/restart actions.
+  - `RunnerAdapter`: runtime-specific implementation for CheerpJ, Brython, or future engines.
+  - `RunnerCompileUnit`: normalized input model derived from the MobCode file map.
+  - `RunnerEventStream`: normalized output/events emitted back to the host.
+- Define a generic runner interface such as:
+
+```ts
+interface RunnerFile {
+  path: string
+  content: string
+}
+
+interface RunnerCompileUnit {
+  runtime: 'java-cheerpj' | 'python-brython'
+  files: RunnerFile[]
+  entryFile?: string
+  entrySymbol?: string
+  args?: string[]
+  stdinEnabled?: boolean
+  graphicsEnabled?: boolean
+}
+
+type RunnerEvent =
+  | { type: 'status'; value: 'idle' | 'initializing' | 'compiling' | 'running' | 'stopped' | 'error' }
+  | { type: 'stdout'; data: string }
+  | { type: 'stderr'; data: string }
+  | { type: 'diagnostic'; level: 'info' | 'warning' | 'error'; message: string; path?: string; line?: number; column?: number }
+  | { type: 'graphics-ready' }
+  | { type: 'exit'; code: number }
+
+interface MobCodeRunnerAdapter {
+  initialize(): Promise<void>
+  getCapabilities(): {
+    supportsCompileStep: boolean
+    supportsInteractiveStdin: boolean
+    supportsGraphics: boolean
+    supportsMultiFile: boolean
+  }
+  compileAndRun(input: RunnerCompileUnit): Promise<void>
+  sendInput(data: string): void
+  stop(): Promise<void>
+  dispose(): Promise<void>
+  onEvent(listener: (event: RunnerEvent) => void): () => void
+}
+```
+
+- Implement `CheerpJRunnerAdapter` and `BrythonRunnerAdapter` against that same interface.
+- Keep terminal rendering (`xterm`) and runner lifecycle separate so runtime-specific code does not leak into the editor shell.
+
+### Abstraction Rules
+
+- The host must not know CheerpJ-specific or Brython-specific API details.
+- Runtime adapters receive the same normalized file map and return the same normalized event stream.
+- Runtime-specific filesystem setup, preload behavior, and entrypoint logic stay inside the adapter.
+- The host decides what UI to show from adapter capabilities rather than hard-coding runtime names.
+
+Examples:
+
+- CheerpJ may use `supportsCompileStep = true`, `supportsGraphics = true`, `supportsMultiFile = true`.
+- Brython may use `supportsCompileStep = false`, `supportsGraphics = false`, `supportsMultiFile = limited/true` depending on implementation strategy.
+
+### Why This Matters
+
+- MobCode gets one runner panel UX instead of one-off Java and Python flows.
+- Brython and CheerpJ can share the same run/stop/input/output wiring.
+- New runtimes can be added later without rewriting the host shell.
+- Testing becomes simpler because the host can be exercised against a fake adapter.
+
+### CheerpJ Migration Strategy
+
+1. **Inventory current legacy behavior**
+- map the current `javaConsole.html` flow: init, preload, file injection, compile task, run task, stdin/stdout bridging, optional graphics display.
+- identify which custom Java runner classes are still needed and whether they run unchanged on the newer runtime.
+
+2. **Upgrade runtime first**
+- validate the current CheerpJ loader/API and update integration calls accordingly.
+- verify whether `cheerpjInit`, filesystem injection, display creation, and main-class execution APIs changed.
+
+3. **Replace popup with embedded panel**
+- move terminal/graphics tabs into the MobCode runner panel.
+- keep graphics display optional and only show it when the selected runtime/program requires it.
+
+4. **Reduce preload brittleness**
+- avoid carrying forward large static preload arrays unless required.
+- if preload tuning is still needed, isolate preload configuration in one runtime-specific module with comments explaining why each list exists.
+
+5. **Validate custom runner jars**
+- test whether the existing `CheerpJRunner.jar` and compile task pipeline still work on the updated runtime.
+- if they do not, replace them with a simpler compile/run orchestration aligned to the newer API.
+
+### Phase 2 UX Expectations
+
+- Instructor runs code from the toolbar or runner panel.
+- Output appears inline in the split runner panel, not a new browser window.
+- Terminal input is interactive when the program requests stdin.
+- If graphics mode is supported, terminal and graphics can be switched via tabs in the panel.
+- Student visibility policy should be configurable later, but initial Phase 2 assumption can remain instructor-centric execution.
+
+### Phase 2 Risks
+
+- newer CheerpJ versions may require API changes beyond a script URL swap.
+- old preload/resource assumptions may be obsolete or incompatible.
+- custom runner jars may depend on legacy classpath or runtime behavior.
+- embedding graphics in-panel may behave differently than popup-window hosting.
+
+### Phase 2 Validation Checklist
+
+- compile and run a simple single-file Java program in the embedded panel.
+- compile and run a multi-file Java program from the MobCode file map.
+- verify stdin round-trip from `xterm` to running program.
+- verify stdout/stderr separation or equivalent visible handling.
+- verify graphics program behavior if GUI support is retained.
+- verify runner teardown/restart between executions without stale state leakage.
+
+## Phase 3 Collaboration Control Plan
+
+Use the shared student roster control (from the common student presence component plan) as the management surface for per-student collaboration actions.
+
+### Shared Roster Control Integration
+
+- Host control surface: common student roster panel with per-student custom action container.
+- Global controls exposed in toolbar:
+  - `Mode: Instructor Only` (default)
+  - `Mode: One Student Drives Shared Editor`
+  - `Mode: Students Edit Personal Copies`
+  - `Allow Everyone Personal Edit` toggle
+  - `Reset Overrides` action
+- Per-student controls exposed from the parent manager:
+  - `Allow Shared Driver`: enables a student to become the shared editor.
+  - `Set as Active Driver`: makes that student the current shared editor and switches mode to `driver`.
+  - `Allow Personal Editing (Override)`: allows or blocks personal editing for a specific student regardless of global toggle.
+  - `Display This Student's Code`: sets `broadcastStudentId` so all viewers see that student's copy.
+- Per-student badges and row styling indicate status:
+  - badges: `Driver`, `Personal Edit Enabled`, `Override`, `Broadcast Source`
+  - style hooks: warning/attention states for disconnected or out-of-date copies
+
+### Instructor Takeover Behavior
+
+When instructor switches mode back to `instructor`:
+
+- Shared editor authority immediately returns to instructor.
+- Student typing is blocked in real-time until permissions are re-enabled.
+- Student personal copies are preserved by default (`takeoverPolicy = 'preserve'`).
+- If a student was the broadcast source, `broadcastStudentId` is cleared.
+- Instructor gets an explicit action to apply a preserved student copy into shared files:
+  - `Apply Student Copy to Shared`
+  - `Discard Student Copy`
+
+Rationale:
+
+- Preserving avoids accidental student work loss.
+- Explicit apply/discard avoids silent overwrite of instructor/shared state.
+- Clearing broadcast source prevents stale "following student" view after takeover.
+
+### Divergence and Sync Policy (No Merge)
+
+- This phase intentionally avoids Git-style or line-based merge complexity.
+- Student personal copies and shared instructor files are treated as separate branches of state.
+- When shared code changes after student copies diverge, personal copies are **not** auto-merged.
+- Allowed reconciliation actions are explicit and simple:
+  - `Replace Student Copy from Shared` (student copy becomes latest shared snapshot)
+  - `Apply Student Copy to Shared` (shared files are replaced by selected student copy)
+  - `Keep Diverged Copy` (no change)
+  - `Discard Student Copy` (delete student personal copy state)
+- Permission model:
+  - `Apply Student Copy to Shared` is **instructor only**.
+  - `Replace`, `Keep`, and `Discard` can be exposed as student self-actions.
+  - Instructor can also apply `Replace`/`Discard` as per-student actions and as global actions for all students.
+- Scope model for `Replace`/`Keep`/`Discard`:
+  - support both `all-files` and `single-file` scope.
+  - single-file scope targets one file path in the student's copy.
+- Student view toggle model:
+  - students always have a visible toggle to switch between `Instructor Copy` and `My Copy` views.
+  - if the student has no personal copy (never edited, replaced, or discarded), `My Copy` resolves to instructor copy content.
+  - toggling view does not itself mutate stored files; it changes the source-of-truth view in the editor UI.
+  - in `Instructor Copy` view, student editing is disabled unless collaboration mode/permissions explicitly allow shared driving.
+  - in `My Copy` view, editing follows personal-copy permission rules.
+- UI should mark diverged copies with a badge and never perform silent merge or conflict resolution.
+
+### Collaboration Message Types (Phase 3)
+
+- `collaboration-mode-changed`: `{ mode, driverStudentId, broadcastStudentId }`
+- `collaboration-global-policy-changed`: `{ allowDriveShared, allowEditPersonalCopy }`
+- `student-permission-changed`: `{ studentId, canDriveSharedOverride, canEditPersonalCopyOverride }`
+- `student-personal-update`: `{ studentId, path, content, activeFile }`
+- `broadcast-student-selected`: `{ broadcastStudentId }`
+- `instructor-took-over`: `{ takeoverPolicy, takeoverSourceStudentId }`
+- `apply-student-copy-to-shared`: `{ studentId }`
+- `replace-student-copy-from-shared`: `{ actorRole, studentId, scope: 'all-files' | 'single-file', path?: string }`
+- `keep-diverged-copy`: `{ actorRole, studentId, scope: 'all-files' | 'single-file', path?: string }`
+- `discard-student-copy`: `{ actorRole, studentId, scope: 'all-files' | 'single-file', path?: string }`
+- `student-view-source-changed`: `{ studentId, viewSource: 'instructor' | 'personal' }`
+
+Transport policy remains aligned with Phase 1 principles:
+
+- granular edits: low-latency relay path
+- mode/permission/source changes: durable persisted path with cross-instance broadcast
+
+### Phase 3 Acceptance Criteria
+
+- Instructor can select global collaboration mode and global edit policy from the toolbar.
+- Instructor can manage per-student overrides from the shared roster control.
+- Instructor can select one student to drive shared edits and all participants follow those edits.
+- Instructor can enable personal-copy editing for multiple students simultaneously.
+- Instructor can choose any authorized student's personal copy as the broadcast source for all viewers.
+- Instructor takeover preserves student personal edits by default and requires explicit apply/discard to affect shared files.
+- Diverged student copies are handled with explicit replace/apply/discard actions and no automatic merge behavior.
+- Promotion (`Apply Student Copy to Shared`) is instructor-only.
+- `Replace`/`Keep`/`Discard` support both student self-actions and instructor-managed per-student/global workflows, with all-files or per-file scope.
+- Students can always switch between `Instructor Copy` and `My Copy`; when no personal copy exists, `My Copy` transparently falls back to instructor content.
+- Roster badges/styling accurately reflect live collaboration state.
 
 ## Key Reference Files
 - [algorithm-demo/server/routes.ts](activities/algorithm-demo/server/routes.ts) - server route pattern
