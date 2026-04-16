@@ -111,8 +111,6 @@ activities/mobcode/
 │   │   └── MobCodeStudent.tsx
 │   ├── components/
 │   │   ├── CodeEditor.tsx          # CodeMirror wrapper with theme support
-│   │   ├── FileTree.tsx            # Sidebar file browser
-│   │   ├── FileTreeItem.tsx        # Single tree node
 │   │   ├── EditorToolbar.tsx       # Zip upload/download, new file/folder, settings
 │   │   ├── SettingsMenu.tsx        # Theme chooser dropdown
 │   │   └── FileNameModal.tsx       # Create/rename file dialog
@@ -123,9 +121,74 @@ activities/mobcode/
 │       └── themeUtils.ts           # Cookie read/write for theme preference
 └── server/
     └── routes.ts
+
+client/src/components/common/
+├── VirtualFileExplorer.tsx         # Reusable tree/file explorer host
+├── VirtualFileExplorerItem.tsx     # Shared tree node renderer
+├── virtualFileExplorerTypes.ts     # Shared tree/item/action contracts
+└── virtualFileExplorerUtils.ts     # Flat map → tree helpers, sorting, path utilities
 ```
 
 Note: This plan targets the post-migration TypeScript layout used across activities.
+
+## Reusable Virtual File Explorer
+
+The file explorer used for code files should be implemented as a **shared reusable component**, not as a MobCode-only widget.
+
+MobCode is the first adopter, but the explorer should be generic enough to support:
+
+- code/file based activities
+- hidden/support files
+- read-only or editable tree views
+- future runner/runtime file views
+- future import/export or asset-manager workflows
+
+### Shared Component Contract
+
+Recommended host model:
+
+```ts
+interface VirtualFileEntry {
+  path: string
+  kind: 'file' | 'folder'
+  displayName: string
+  parentPath?: string
+  badges?: Array<{ id: string; label: string; tone?: 'neutral' | 'info' | 'warning' | 'danger' | 'success' }>
+  className?: string
+}
+
+interface VirtualFileExplorerProps {
+  files: Record<string, string>
+  activePath?: string
+  readOnly?: boolean
+  allowCreate?: boolean
+  allowRename?: boolean
+  allowDelete?: boolean
+  onSelect?: (path: string) => void
+  onCreateFile?: (parentPath?: string) => void
+  onCreateFolder?: (parentPath?: string) => void
+  onRename?: (path: string) => void
+  onDelete?: (path: string) => void
+  renderItemActions?: (entry: VirtualFileEntry) => ReactNode
+  getItemBadges?: (entry: VirtualFileEntry) => ReactNode
+  getItemClassName?: (entry: VirtualFileEntry) => string | undefined
+}
+```
+
+Design rules:
+
+- The shared component owns rendering, expansion/collapse state, keyboard navigation, and tree semantics.
+- The parent owns file data, active selection, and all mutations.
+- Extension points allow activity-specific badges, context actions, and per-item styling.
+- The explorer must support both editable and read-only use cases without forking the component.
+
+MobCode-specific behavior should stay outside the shared component:
+
+- file content map state
+- create/rename/delete mutation logic
+- active file state
+- zip import/export workflows
+- collaboration/runtime badges specific to MobCode
 
 ## Sync Transport
 
@@ -270,10 +333,12 @@ All isolated to the `activity-mobcode-*.js` chunk via Vite's existing `manualChu
 - Read-only mode via `EditorState.readOnly.of(true)` + `EditorView.editable.of(false)`
 
 ### Step 5: FileTree Component
-- `FileTreeItem.tsx` - renders file/folder node with indent, expand/collapse, active highlight
-- `FileTree.tsx` - takes flat `files` map, calls `buildTree()`, renders recursively
-- Click to select file; right-click or icon buttons for rename/delete (gated by `readOnly` prop)
+- Implement shared `VirtualFileExplorer` and `VirtualFileExplorerItem` under `client/src/components/common/`
+- Shared explorer takes flat `files` map, builds tree via shared utils, and renders recursively
+- MobCode consumes the shared component rather than owning a custom `FileTree`
+- Click to select file; optional item action container supports rename/delete/create entry points (gated by `readOnly` and capability props)
 - Folders sorted before files, alphabetical within groups
+- Accessibility requirements apply at the shared component level so future activities inherit them automatically
 
 ### Step 6: EditorToolbar + SettingsMenu + FileNameModal
 - `EditorToolbar.tsx` - zip upload button, zip download button, new file button, new folder button, settings sprocket
@@ -294,7 +359,7 @@ All isolated to the `activity-mobcode-*.js` chunk via Vite's existing `manualChu
 - Broadcast helper following [algorithm-demo routes.ts](activities/algorithm-demo/server/routes.ts) pattern
 
 ### Step 8: MobCodeManager (Instructor View)
-- Layout: `SessionHeader` + toolbar (with settings sprocket) + sidebar (`FileTree` ~250px) + main (`CodeEditor`)
+- Layout: `SessionHeader` + toolbar (with settings sprocket) + sidebar (`VirtualFileExplorer` ~250px) + main (`CodeEditor`)
 - State: `files`, `activeFile` in React state (read from `session.data.groups.default`)
 - Theme state: loaded from cookie on mount, passed to `CodeEditor`
 - WebSocket via `useResilientWebSocket` following [DemoManager.tsx](activities/algorithm-demo/client/manager/DemoManager.tsx) pattern
@@ -304,7 +369,7 @@ All isolated to the `activity-mobcode-*.js` chunk via Vite's existing `manualChu
 - File tree operations: create/rename/delete update local state then POST to server
 
 ### Step 9: MobCodeStudent (Student View)
-- Same layout but `CodeEditor` in read-only mode, `FileTree` click-to-view only
+- Same layout but `CodeEditor` in read-only mode, `VirtualFileExplorer` click-to-view only
 - Own theme preference from cookie (independent of instructor's choice)
 - Settings sprocket available for theme selection
 - WebSocket with `useSessionEndedHandler` following [DemoStudent.tsx](activities/algorithm-demo/client/student/DemoStudent.tsx) pattern
