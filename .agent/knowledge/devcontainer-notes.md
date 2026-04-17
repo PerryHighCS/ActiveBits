@@ -13,6 +13,13 @@ Track durable local-development and devcontainer behavior that future contributo
 
 ## Entries
 
+- Date: 2026-04-17
+- Change: GitHub CLI setup in `.devcontainer/setup-dev.sh` downloads the APT keyring to a temporary file first, then installs it with `install -m 0644` instead of using `curl | tee`.
+- Risk: The install path is slightly more verbose, but failed key downloads are now reported at the download step instead of being masked by a successful `tee` process.
+- Evidence: `.devcontainer/setup-dev.sh`; `bash -n .devcontainer/setup-dev.sh`; stubbed dry-runs of successful `gh` setup and failed keyring download paths.
+- Follow-up action: Prefer temp-file plus privileged `install` for future devcontainer setup writes that need accurate command-failure handling without relying on global `pipefail`.
+- Owner: Codex
+
 - Date: 2026-03-21
 - Change: Hardened privileged bootstrap sudo behavior: `.devcontainer/post-start-bootstrap.sh` now grants `(ALL) NOPASSWD: ALL` only when explicitly enabled via `ACTIVEBITS_ENABLE_BROAD_SUDO=1` or marker file `.devcontainer/privileged/enable-broad-sudo.local`. Without opt-in, no broad sudo rule is created, and any stale broad rule is removed. When enabling, the script now writes to a root-owned `0440` temporary drop-in under `/etc/sudoers.d`, validates with `visudo -cf`, and only then moves it into place.
 - Risk: Nested sandbox tooling that genuinely requires arbitrary-user launches may fail until opt-in is set; this is an intentional secure default.
