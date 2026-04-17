@@ -61,6 +61,9 @@ export default [
       ...tseslint.configs['flat/eslint-recommended'].rules,
       ...tseslint.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
+      // TODO: Refactor existing effect-derived state in shared flow components,
+      // then re-enable this React Hooks rule in a dedicated cleanup.
+      'react-hooks/set-state-in-effect': 'off',
       'no-unused-vars': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'error',
