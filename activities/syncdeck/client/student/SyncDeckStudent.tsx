@@ -841,11 +841,15 @@ export function extractIndicesFromRevealStateMessage(rawPayload: unknown): { h: 
     return null
   }
 
-  const payload = message.payload as RevealStateIndicesPayload
+  const payload = message.payload as RevealStateIndicesPayload & {
+    revealState?: unknown
+  }
   return normalizeIndices(payload.indices)
     ?? (isPlainObject(payload.navigation)
       ? normalizeIndices((payload.navigation as { current?: unknown }).current)
       : null)
+    ?? extractIndicesFromRevealStateObject(payload.revealState)
+    ?? extractIndicesFromRevealStateObject(payload)
 }
 
 function computeBoundaryDetails(

@@ -1202,6 +1202,56 @@ function markEmbeddedChildSessionForAutoActivateAllQuestions(
   return true
 }
 
+function notifyResonanceAutoActivatedQuestions(
+  ws: WsRouter,
+  childSession: SessionRecord,
+): void {
+  if (childSession.type !== 'resonance' || !isPlainObject(childSession.data)) {
+    return
+  }
+
+  const activeQuestionIds = Array.isArray(childSession.data.activeQuestionIds)
+    ? childSession.data.activeQuestionIds.filter((questionId): questionId is string => typeof questionId === 'string')
+    : []
+  if (activeQuestionIds.length === 0) {
+    return
+  }
+
+  const deadlineAt =
+    typeof childSession.data.activeQuestionDeadlineAt === 'number'
+    && Number.isFinite(childSession.data.activeQuestionDeadlineAt)
+      ? childSession.data.activeQuestionDeadlineAt
+      : null
+  const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
+  for (const socket of clients as Set<ActiveBitsWebSocket>) {
+    if (socket.readyState !== 1 || socket.sessionId !== childSession.id) {
+      continue
+    }
+
+    try {
+      socket.send(
+        JSON.stringify({
+          version: '1',
+          activity: 'resonance',
+          sessionId: childSession.id,
+          type: 'resonance:question-activated',
+          timestamp: Date.now(),
+          payload: {
+            questionId: activeQuestionIds[0] ?? null,
+            questionIds: activeQuestionIds,
+            deadlineAt,
+          },
+        }),
+      )
+    } catch (error) {
+      console.error('[syncdeck] Failed to notify embedded Resonance auto-activation', {
+        childSessionId: childSession.id,
+        error,
+      })
+    }
+  }
+}
+
 function canStudentAutoActivateEmbeddedInstance(params: {
   instanceKey: string
   session: SyncDeckSession
@@ -1953,7 +2003,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
 
     const activated = markEmbeddedChildSessionForAutoActivateAllQuestions(childSession)
     if (activated) {
-      await sessions.set(childSession.id, childSession)
+      const normalizedChildSession = normalizeSessionRecord(childSession)
+      await sessions.set(normalizedChildSession.id, normalizedChildSession)
+      notifyResonanceAutoActivatedQuestions(ws, normalizedChildSession)
     }
 
     res.json({

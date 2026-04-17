@@ -2813,6 +2813,9 @@ void test('embedded-activity auto-activate route marks released resonance childr
     },
   })
   setupSyncDeckRoutes(app, storeState.sessions, ws)
+  const resonanceSocket = new MockSocket()
+  resonanceSocket.sessionId = childSessionId
+  ws.wss.clients.add(resonanceSocket)
 
   const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/auto-activate']
   assert.equal(typeof handler, 'function')
@@ -2843,10 +2846,12 @@ void test('embedded-activity auto-activate route marks released resonance childr
   const childSession = storeState.store[childSessionId] as SessionRecord & {
     data: {
       embeddedLaunch?: { selectedOptions?: Record<string, unknown> }
+      activeQuestionIds?: string[]
+      activeQuestionId?: string | null
+      embeddedAutoActivatedAt?: number
     }
   }
   assert.deepEqual(childSession.data.embeddedLaunch?.selectedOptions, {
-    autoActivateAllQuestions: true,
     questions: [
       { id: 'q1', type: 'free-response', text: 'Explain why.', order: 0 },
       {
@@ -2860,6 +2865,29 @@ void test('embedded-activity auto-activate route marks released resonance childr
         ],
       },
     ],
+  })
+  assert.deepEqual(childSession.data.activeQuestionIds, ['q1', 'q2'])
+  assert.equal(childSession.data.activeQuestionId, 'q1')
+  assert.equal(typeof childSession.data.embeddedAutoActivatedAt, 'number')
+
+  const delivered = resonanceSocket.sent.map((entry) => JSON.parse(entry) as {
+    version?: string
+    activity?: string
+    type?: string
+    sessionId?: string
+    timestamp?: unknown
+    payload?: { questionId?: string | null; questionIds?: string[]; deadlineAt?: number | null }
+  })
+  assert.equal(delivered.length, 1)
+  assert.equal(delivered[0]?.version, '1')
+  assert.equal(delivered[0]?.activity, 'resonance')
+  assert.equal(delivered[0]?.sessionId, childSessionId)
+  assert.equal(delivered[0]?.type, 'resonance:question-activated')
+  assert.equal(typeof delivered[0]?.timestamp, 'number')
+  assert.deepEqual(delivered[0]?.payload, {
+    questionId: 'q1',
+    questionIds: ['q1', 'q2'],
+    deadlineAt: null,
   })
 })
 

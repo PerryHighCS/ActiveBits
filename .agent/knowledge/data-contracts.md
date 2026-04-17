@@ -15,6 +15,24 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-04-17
+- Surface: activity interface | websocket | internal module
+- Contract: SyncDeck student-side instructor sync suppression must derive incoming slide indices from all Reveal state shapes that can drive a `setState`, including `payload.indices`, `payload.navigation.current`, `payload.revealState`, and top-level state fields. Same-horizontal vertical instructor moves must remain suppressible even when the deck emits `revealState` without a separate `indices` object.
+- Compatibility constraints: `toRevealCommandMessage(...)` may still convert `revealState`-only state envelopes into `setState` commands for normal instructor follow behavior, but the suppression decision must read the same position source first so released vertical stacks stay student-independent.
+- Validation rules: A `revealState` payload with `indexh/indexv/indexf` is equivalent to `indices.h/v/f` for sync suppression and released-slide state tracking.
+- Evidence (schema/tests/path): `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep future Reveal state-envelope parsers aligned so command conversion and suppression decisions do not drift.
+- Owner: Codex
+
+- Date: 2026-04-17
+- Surface: REST | websocket | activity interface
+- Contract: SyncDeck's embedded Resonance auto-activation endpoint must both persist the child-session activation and notify already-connected Resonance clients with a `resonance:question-activated` websocket event. Persisting `embeddedLaunch.selectedOptions.autoActivateAllQuestions` alone is not enough once the embedded Resonance iframe has already completed its initial REST fetch and websocket connection.
+- Compatibility constraints: SyncDeck only sends this activity-specific wake-up after it has confirmed the child session is Resonance and normalization produced active question ids. Resonance clients continue to own the full state refresh after receiving the event.
+- Validation rules: The notification payload uses the existing Resonance activation event shape: `{ questionId, questionIds, deadlineAt }`.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/resonance/client/hooks/useResonanceSession.ts`
+- Follow-up action: If more embedded activities need parent-triggered child runtime changes, extract a generic child notification contract instead of adding unrelated activity-specific messages to SyncDeck.
+- Owner: Codex
+
 - Date: 2026-04-07
 - Surface: internal module | activity interface
 - Contract: Uploaded Resonance report JSON is normalized before rendering. Multiple-choice report answers trim each `selectedOptionIds` entry and deduplicate repeated ids so imported reports cannot double-count option selections or inflate correct-response totals.
