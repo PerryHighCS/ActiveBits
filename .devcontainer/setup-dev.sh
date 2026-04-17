@@ -94,6 +94,38 @@ if ! command -v rg >/dev/null 2>&1; then
   fi
 fi
 
+# GitHub CLI is used by agents and contributors to inspect PR checks/comments.
+if ! command -v gh >/dev/null 2>&1; then
+  echo "⏳ GitHub CLI (gh) not found; installing..."
+  if ! run_with_available_privilege mkdir -p /etc/apt/keyrings; then
+    echo "⚠️ Unable to prepare apt keyring directory for GitHub CLI."
+  elif ! run_with_available_privilege apt-get update; then
+    echo "⚠️ Unable to install GitHub CLI automatically (apt update failed)."
+  elif ! run_with_available_privilege apt-get install -y curl ca-certificates; then
+    echo "⚠️ Unable to install GitHub CLI prerequisites automatically."
+  elif ! curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | run_with_available_privilege tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null; then
+    echo "⚠️ Unable to install GitHub CLI apt keyring."
+  else
+    if run_with_available_privilege chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; then
+      :
+    else
+      echo "⚠️ Unable to adjust GitHub CLI apt keyring permissions."
+    fi
+
+    architecture="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
+    github_cli_source="deb [arch=${architecture} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+    if ! printf '%s\n' "$github_cli_source" | run_with_available_privilege tee /etc/apt/sources.list.d/github-cli.list >/dev/null; then
+      echo "⚠️ Unable to write GitHub CLI apt source."
+    elif ! run_with_available_privilege apt-get update; then
+      echo "⚠️ Unable to refresh apt metadata for GitHub CLI."
+    elif run_with_available_privilege apt-get install -y gh; then
+      echo "✅ GitHub CLI installed."
+    else
+      echo "⚠️ Unable to install GitHub CLI automatically."
+    fi
+  fi
+fi
+
 # If redis-cli is available, optionally wait for Valkey readiness.
 if command -v redis-cli >/dev/null 2>&1; then
   if [ "$skip_valkey_wait" = true ]; then
