@@ -110,8 +110,16 @@ export default function WaitingRoom({
   const shouldKeepWaitingRoomSocketOpen = isWaitingForTeacher || shouldListenForSessionUpdates
 
   useEffect(() => {
-    setCurrentEntryOutcome(entryOutcome)
     currentEntryOutcomeRef.current = entryOutcome
+    let isCurrent = true
+    queueMicrotask(() => {
+      if (isCurrent) {
+        setCurrentEntryOutcome(entryOutcome)
+      }
+    })
+    return () => {
+      isCurrent = false
+    }
   }, [entryOutcome])
 
   useEffect(() => {
@@ -120,12 +128,30 @@ export default function WaitingRoom({
       effectiveEntryOutcome,
       shouldShowTeacherEntryToggle: showTeacherEntryToggle,
     })) {
-      setIsTeacherEntryActive(false)
+      let isCurrent = true
+      queueMicrotask(() => {
+        if (isCurrent) {
+          setIsTeacherEntryActive(false)
+        }
+      })
+      return () => {
+        isCurrent = false
+      }
     }
+
+    return undefined
   }, [currentEntryOutcome, currentStartedSessionId, effectiveEntryOutcome, hasTeacherCookie, showTeacherEntryToggle])
 
   useEffect(() => {
-    setCurrentStartedSessionId(startedSessionId)
+    let isCurrent = true
+    queueMicrotask(() => {
+      if (isCurrent) {
+        setCurrentStartedSessionId(startedSessionId)
+      }
+    })
+    return () => {
+      isCurrent = false
+    }
   }, [startedSessionId])
 
   useEffect(() => {
@@ -159,8 +185,16 @@ export default function WaitingRoom({
       ? readWaitingRoomValues(window.sessionStorage, storageKey, waitingRoomFields)
       : null
 
-    setWaitingRoomValues(getWaitingRoomInitialValues(waitingRoomFields, storedValues))
-    setTouchedFields({})
+    let isCurrent = true
+    queueMicrotask(() => {
+      if (isCurrent) {
+        setWaitingRoomValues(getWaitingRoomInitialValues(waitingRoomFields, storedValues))
+        setTouchedFields({})
+      }
+    })
+    return () => {
+      isCurrent = false
+    }
   }, [activityName, hash, waitingRoomFields])
 
   useEffect(() => {
@@ -179,14 +213,25 @@ export default function WaitingRoom({
 
   useEffect(() => {
     const hasCustomFields = waitingRoomFields.some((field) => field.type === 'custom')
+    let isCancelled = false
+
     if (!hasCustomFields) {
-      setCustomFieldComponents(EMPTY_CUSTOM_FIELD_COMPONENTS)
-      setCustomFieldLoadError(null)
-      return
+      queueMicrotask(() => {
+        if (!isCancelled) {
+          setCustomFieldComponents(EMPTY_CUSTOM_FIELD_COMPONENTS)
+          setCustomFieldLoadError(null)
+        }
+      })
+      return () => {
+        isCancelled = true
+      }
     }
 
-    let isCancelled = false
-    setCustomFieldLoadError(null)
+    queueMicrotask(() => {
+      if (!isCancelled) {
+        setCustomFieldLoadError(null)
+      }
+    })
 
     void loadActivityWaitingRoomFields(activityName)
       .then((loadedFields) => {
@@ -208,17 +253,26 @@ export default function WaitingRoom({
   }, [activityName, waitingRoomFields])
 
   useEffect(() => {
-    setError(null)
+    let isCurrent = true
+    queueMicrotask(() => {
+      if (isCurrent) {
+        setError(null)
+      }
+    })
     teacherAuthRequestedRef.current = false
 
     if (!shouldKeepWaitingRoomSocketOpen) {
       closeSocketQuietly(wsRef.current)
       wsRef.current = null
-      return undefined
+      return () => {
+        isCurrent = false
+      }
     }
 
     if (typeof window === 'undefined') {
-      return undefined
+      return () => {
+        isCurrent = false
+      }
     }
 
     const wsUrl = buildPersistentSessionWsUrl(window.location, hash, activityName)
@@ -243,6 +297,7 @@ export default function WaitingRoom({
     })
 
     return () => {
+      isCurrent = false
       closeSocketQuietly(ws)
     }
   }, [activityName, hash, navigate, shouldKeepWaitingRoomSocketOpen])
