@@ -1869,7 +1869,7 @@ const SyncDeckManager: FC = () => {
     completedVerticalStackPrestartKeysRef.current.clear()
     deckActivityRequestsCacheRef.current = null
     pendingDeckActivityRequestsRef.current = null
-  }, [presentationUrl])
+  }, [presentationUrl, sessionId])
 
   const traceSync = useCallback((event: string, details: Record<string, unknown>): void => {
     if (!syncDebugEnabledRef.current) {

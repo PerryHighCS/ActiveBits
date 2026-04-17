@@ -1224,7 +1224,7 @@ function notifyResonanceAutoActivatedQuestions(
       : null
   const clients = ws.wss.clients ?? new Set<ActiveBitsWebSocket>()
   for (const socket of clients as Set<ActiveBitsWebSocket>) {
-    if (socket.readyState !== 1 || socket.sessionId !== childSession.id) {
+    if (socket.readyState !== WS_OPEN_READY_STATE || socket.sessionId !== childSession.id) {
       continue
     }
 
