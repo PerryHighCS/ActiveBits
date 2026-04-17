@@ -14,10 +14,10 @@ Track durable local-development and devcontainer behavior that future contributo
 ## Entries
 
 - Date: 2026-04-17
-- Change: GitHub CLI setup in `.devcontainer/setup-dev.sh` downloads the APT keyring to a temporary file first, then installs it with `install -m 0644` instead of using `curl | tee`.
-- Risk: The install path is slightly more verbose, but failed key downloads are now reported at the download step instead of being masked by a successful `tee` process.
-- Evidence: `.devcontainer/setup-dev.sh`; `bash -n .devcontainer/setup-dev.sh`; stubbed dry-runs of successful `gh` setup and failed keyring download paths.
-- Follow-up action: Prefer temp-file plus privileged `install` for future devcontainer setup writes that need accurate command-failure handling without relying on global `pipefail`.
+- Change: GitHub CLI setup in `.devcontainer/setup-dev.sh` downloads the APT keyring to a temporary file first, then installs it with `install -m 0644` instead of using `curl | tee`; temp-file creation failures are handled explicitly so `set -e` does not abort the rest of setup.
+- Risk: The install path is slightly more verbose, but failed key downloads and failed temp-file creation are now reported at the relevant step instead of being masked or aborting unrelated setup work.
+- Evidence: `.devcontainer/setup-dev.sh`; `bash -n .devcontainer/setup-dev.sh`; stubbed dry-runs of successful `gh` setup, failed keyring download, and failed `mktemp` paths.
+- Follow-up action: Prefer temp-file plus privileged `install` for future devcontainer setup writes that need accurate command-failure handling without relying on global `pipefail`; handle temp-file creation explicitly under `set -e`.
 - Owner: Codex
 
 - Date: 2026-03-21
