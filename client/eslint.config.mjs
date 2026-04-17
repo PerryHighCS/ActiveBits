@@ -61,9 +61,6 @@ export default [
       ...tseslint.configs['flat/eslint-recommended'].rules,
       ...tseslint.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
-      // TODO: Refactor existing effect-derived state in shared flow components,
-      // then re-enable this React Hooks rule in a dedicated cleanup.
-      'react-hooks/set-state-in-effect': 'off',
       'no-unused-vars': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'error',
@@ -93,6 +90,17 @@ export default [
       'jsdoc/require-jsdoc': 'off',
       'jsdoc/check-access': 'warn',
       'jsdoc/require-param-description': 'off',
+    },
+  },
+  {
+    files: [
+      'src/components/common/ManageDashboard.tsx',
+      'src/components/common/WaitingRoom.tsx',
+    ],
+    rules: {
+      // TODO: Refactor existing effect-derived state in these shared flow components,
+      // then remove this file-scoped override so the React Hooks rule applies everywhere.
+      'react-hooks/set-state-in-effect': 'off',
     },
   },
 ]
