@@ -261,6 +261,39 @@ void test('toRevealCommandMessage accepts revealState indexh/indexv/indexf witho
   })
 })
 
+void test('extractIndicesFromRevealStateMessage reads revealState when state omits payload indices', () => {
+  const result = extractIndicesFromRevealStateMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    payload: {
+      revealState: { indexh: 2, indexv: 1, indexf: 0 },
+    },
+  })
+
+  assert.deepEqual(result, { h: 2, v: 1, f: 0 })
+})
+
+void test('shouldSuppressInstructorRevealCommandForwarding suppresses revealState-only vertical setState', () => {
+  const incomingInstructorIndices = extractIndicesFromRevealStateMessage({
+    type: 'reveal-sync',
+    version: '1.0.0',
+    action: 'state',
+    payload: {
+      revealState: { indexh: 2, indexv: 1, indexf: 0 },
+    },
+  })
+  const result = shouldSuppressInstructorRevealCommandForwarding({
+    semanticInstructorCommandName: 'setState',
+    studentHasBacktrackOptOut: false,
+    localStudentPosition: { h: 2, v: 0, f: 0 },
+    incomingInstructorIndices,
+  })
+
+  assert.equal(result.suppressForwardSync, true)
+  assert.equal(result.suppressForwardSyncByVerticalIndependence, true)
+})
+
 void test('toRevealCommandMessage accepts top-level indexh/indexv/indexf without payload.indices', () => {
   const result = toRevealCommandMessage({
     type: 'reveal-sync',

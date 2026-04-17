@@ -15,6 +15,33 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-04-17
+- Surface: activity interface | websocket | internal module
+- Contract: SyncDeck student-side instructor sync suppression must derive incoming slide indices from all Reveal state shapes that can drive a `setState`, including `payload.indices`, `payload.navigation.current`, `payload.revealState`, and top-level state fields. Same-horizontal vertical instructor moves must remain suppressible even when the deck emits `revealState` without a separate `indices` object.
+- Compatibility constraints: `toRevealCommandMessage(...)` may still convert `revealState`-only state envelopes into `setState` commands for normal instructor follow behavior, but the suppression decision must read the same position source first so released vertical stacks stay student-independent.
+- Validation rules: A `revealState` payload with `indexh/indexv/indexf` is equivalent to `indices.h/v/f` for sync suppression and released-slide state tracking.
+- Evidence (schema/tests/path): `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`
+- Follow-up action: Keep future Reveal state-envelope parsers aligned so command conversion and suppression decisions do not drift.
+- Owner: Codex
+
+- Date: 2026-04-17
+- Surface: REST | websocket | activity interface
+- Contract: SyncDeck's embedded Resonance auto-activation endpoint must both persist the child-session activation and notify already-connected Resonance clients with a `resonance:question-activated` websocket event. Persisting `embeddedLaunch.selectedOptions.autoActivateAllQuestions` alone is not enough once the embedded Resonance iframe has already completed its initial REST fetch and websocket connection.
+- Compatibility constraints: SyncDeck only sends this activity-specific wake-up after it has confirmed the child session is Resonance and normalization produced active question ids. Resonance clients continue to own the full state refresh after receiving the event.
+- Validation rules: The notification payload uses the existing Resonance activation event shape: `{ questionId, questionIds, deadlineAt }`.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`; `activities/resonance/client/hooks/useResonanceSession.ts`
+- Follow-up action: If more embedded activities need parent-triggered child runtime changes, extract a generic child notification contract instead of adding unrelated activity-specific messages to SyncDeck.
+- Owner: Codex
+
+- Date: 2026-04-17
+- Surface: activity interface | client bootstrap
+- Contract: When a SyncDeck instructor lands on the top slide of a vertical stack, the manager should prestart embedded activities declared on child slides in that stack. For embedded Resonance stack children, SyncDeck adds the one-shot `selectedOptions.autoActivateAllQuestions` launch flag so students who independently navigate down can answer immediately without requiring the instructor to visit the child slide.
+- Compatibility constraints: This manager-side deck scan is a fallback for decks/runtimes that do not emit a primary `activityRequest` or `activityPreloadRequest` from the stack parent when only a child slide contains `data-activity-id`. It depends on the presentation URL being fetchable with browser CORS; decks that already emit explicit stack requests continue through the normal preload path.
+- Validation rules: Vertical child anchors derive the instance key from the current deck structure as `activityId:h:v`, ignoring stale `data-activity-instance-key` values so moved slides remain aligned with runtime-generated requests and student overlay lookup. Malformed `data-activity-options` is ignored rather than blocking other stack children.
+- Evidence (schema/tests/path): `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Keep deck runtime stack preload emission and manager-side fallback behavior aligned; if runtime stack requests become universal, this fallback can remain as a defensive compatibility path.
+- Owner: Codex
+
 - Date: 2026-04-07
 - Surface: internal module | activity interface
 - Contract: Uploaded Resonance report JSON is normalized before rendering. Multiple-choice report answers trim each `selectedOptionIds` entry and deduplicate repeated ids so imported reports cannot double-count option selections or inflate correct-response totals.
