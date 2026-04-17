@@ -1237,11 +1237,10 @@ export function resolveVerticalStackActivityRequestsFromDeckDocument(
           return null
         }
 
-        const explicitInstanceKey = slide.getAttribute('data-activity-instance-key')?.trim() ?? ''
         const activityOptions = parseDeckActivityOptions(slide.getAttribute('data-activity-options'))
         return withReleasedVerticalStackActivityOptions({
           activityId,
-          instanceKey: explicitInstanceKey.length > 0 ? explicitInstanceKey : `${activityId}:${h}:${v}`,
+          instanceKey: `${activityId}:${h}:${v}`,
           ...(activityOptions ? { activityOptions } : {}),
         })
       })

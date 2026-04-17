@@ -645,7 +645,7 @@ void test('resolveManagerActivityRequestBatchInputs keeps current slide primary 
   )
 })
 
-void test('resolveVerticalStackActivityRequestsFromDeckDocument finds released stack resonance slides', () => {
+void test('resolveVerticalStackActivityRequestsFromDeckDocument derives released stack keys from slide position', () => {
   const dom = new JSDOM(`
     <div class="reveal">
       <div class="slides">
@@ -668,7 +668,7 @@ void test('resolveVerticalStackActivityRequestsFromDeckDocument finds released s
   assert.deepEqual(requestsByH.get(1), [
     {
       activityId: 'resonance',
-      instanceKey: 'resonance:7:0',
+      instanceKey: 'resonance:1:1',
       activityOptions: {
         autoActivateAllQuestions: true,
         questions: [
