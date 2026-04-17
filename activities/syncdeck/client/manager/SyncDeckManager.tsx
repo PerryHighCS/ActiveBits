@@ -3060,6 +3060,10 @@ const SyncDeckManager: FC = () => {
 
       const stackRequests = requestsByH.get(instructorIndicesState.h) ?? []
       for (const request of stackRequests) {
+        if (cancelled) {
+          break
+        }
+
         if (
           embeddedActivities[request.instanceKey] ||
           completedVerticalStackPrestartKeysRef.current.has(request.instanceKey)
@@ -3069,6 +3073,10 @@ const SyncDeckManager: FC = () => {
 
         completedVerticalStackPrestartKeysRef.current.add(request.instanceKey)
         const started = await launchEmbeddedActivityFromRequest(request, { background: true })
+        if (cancelled) {
+          break
+        }
+
         if (!started) {
           completedVerticalStackPrestartKeysRef.current.delete(request.instanceKey)
         }
