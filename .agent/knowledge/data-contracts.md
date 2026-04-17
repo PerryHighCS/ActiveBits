@@ -33,6 +33,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Follow-up action: If more embedded activities need parent-triggered child runtime changes, extract a generic child notification contract instead of adding unrelated activity-specific messages to SyncDeck.
 - Owner: Codex
 
+- Date: 2026-04-17
+- Surface: activity interface | client bootstrap
+- Contract: When a SyncDeck instructor lands on the top slide of a vertical stack, the manager should prestart embedded activities declared on child slides in that stack. For embedded Resonance stack children, SyncDeck adds the one-shot `selectedOptions.autoActivateAllQuestions` launch flag so students who independently navigate down can answer immediately without requiring the instructor to visit the child slide.
+- Compatibility constraints: This manager-side deck scan is a fallback for decks/runtimes that do not emit a primary `activityRequest` or `activityPreloadRequest` from the stack parent when only a child slide contains `data-activity-id`. It depends on the presentation URL being fetchable with browser CORS; decks that already emit explicit stack requests continue through the normal preload path.
+- Validation rules: Vertical child anchors honor `data-activity-instance-key` when present, otherwise the instance key is derived from `activityId:h:v`. Malformed `data-activity-options` is ignored rather than blocking other stack children.
+- Evidence (schema/tests/path): `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Keep deck runtime stack preload emission and manager-side fallback behavior aligned; if runtime stack requests become universal, this fallback can remain as a defensive compatibility path.
+- Owner: Codex
+
 - Date: 2026-04-07
 - Surface: internal module | activity interface
 - Contract: Uploaded Resonance report JSON is normalized before rendering. Multiple-choice report answers trim each `selectedOptionIds` entry and deduplicate repeated ids so imported reports cannot double-count option selections or inflate correct-response totals.

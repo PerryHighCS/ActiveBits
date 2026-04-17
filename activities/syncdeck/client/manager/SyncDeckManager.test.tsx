@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { JSDOM } from 'jsdom'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import SyncDeckManager from './SyncDeckManager.js'
@@ -52,6 +53,7 @@ import { extractManagerNavigationCapabilitiesFromRevealMessage } from './SyncDec
 import { resolveSyncDeckActivityPickerEntries } from './SyncDeckManager.js'
 import { activitySupportsEmbeddedReport } from './SyncDeckManager.js'
 import { parseDownloadFilenameFromContentDisposition } from './SyncDeckManager.js'
+import { resolveVerticalStackActivityRequestsFromDeckDocument } from './SyncDeckManager.js'
 
 void test('SyncDeckManager renders setup copy without a session id', () => {
   const html = renderToStaticMarkup(
@@ -641,6 +643,48 @@ void test('resolveManagerActivityRequestBatchInputs keeps current slide primary 
       { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:2' },
     ],
   )
+})
+
+void test('resolveVerticalStackActivityRequestsFromDeckDocument finds released stack resonance slides', () => {
+  const dom = new JSDOM(`
+    <div class="reveal">
+      <div class="slides">
+        <section><p>Intro</p></section>
+        <section>
+          <section><p>Study the examples</p></section>
+          <section
+            data-activity-id="resonance"
+            data-activity-instance-key="resonance:7:0"
+            data-activity-options='{"questions":[{"id":"q1","type":"multiple-choice","text":"Which one works?","order":0,"options":[{"id":"a","text":"A","isCorrect":true}]}]}'>
+            <p>Question</p>
+          </section>
+        </section>
+      </div>
+    </div>
+  `)
+
+  const requestsByH = resolveVerticalStackActivityRequestsFromDeckDocument(dom.window.document)
+
+  assert.deepEqual(requestsByH.get(1), [
+    {
+      activityId: 'resonance',
+      instanceKey: 'resonance:7:0',
+      activityOptions: {
+        autoActivateAllQuestions: true,
+        questions: [
+          {
+            id: 'q1',
+            type: 'multiple-choice',
+            text: 'Which one works?',
+            order: 0,
+            options: [
+              { id: 'a', text: 'A', isCorrect: true },
+            ],
+          },
+        ],
+      },
+    },
+  ])
 })
 
 void test('resolveManagerPreloadRequestBatchInputs flattens grouped requests and deduplicates by instance key', () => {

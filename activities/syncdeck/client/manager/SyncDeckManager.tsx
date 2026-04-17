@@ -485,6 +485,8 @@ interface SyncDeckActivityLaunchRequest {
   activityOptions?: Record<string, unknown>
 }
 
+type SyncDeckDeckActivityRequestsByHorizontalIndex = Map<number, SyncDeckActivityLaunchRequest[]>
+
 interface SyncDeckActivityConfigModule {
   default?: {
     id?: string
@@ -1187,6 +1189,72 @@ export function resolveManagerPreloadRequestBatchInputs(
   return resolveGroupedPreloadRequestBatchInputs(rawPayload, fallbackInstructorIndices)
 }
 
+function parseDeckActivityOptions(rawValue: string | null): Record<string, unknown> | undefined {
+  if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
+    return undefined
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown
+    return isPlainObject(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function withReleasedVerticalStackActivityOptions(
+  request: SyncDeckActivityLaunchRequest,
+): SyncDeckActivityLaunchRequest {
+  if (request.activityId !== 'resonance') {
+    return request
+  }
+
+  return {
+    ...request,
+    activityOptions: {
+      ...(request.activityOptions ?? {}),
+      autoActivateAllQuestions: true,
+    },
+  }
+}
+
+export function resolveVerticalStackActivityRequestsFromDeckDocument(
+  document: Document,
+): SyncDeckDeckActivityRequestsByHorizontalIndex {
+  const requestsByH: SyncDeckDeckActivityRequestsByHorizontalIndex = new Map()
+  const topLevelSlides = Array.from(document.querySelectorAll('.reveal .slides > section'))
+
+  topLevelSlides.forEach((topLevelSlide, h) => {
+    const childSlides = Array.from(topLevelSlide.querySelectorAll(':scope > section'))
+    if (childSlides.length === 0) {
+      return
+    }
+
+    const stackRequests = childSlides
+      .map((slide, v): SyncDeckActivityLaunchRequest | null => {
+        const activityId = slide.getAttribute('data-activity-id')?.trim() ?? ''
+        if (activityId.length === 0) {
+          return null
+        }
+
+        const explicitInstanceKey = slide.getAttribute('data-activity-instance-key')?.trim() ?? ''
+        const activityOptions = parseDeckActivityOptions(slide.getAttribute('data-activity-options'))
+        return withReleasedVerticalStackActivityOptions({
+          activityId,
+          instanceKey: explicitInstanceKey.length > 0 ? explicitInstanceKey : `${activityId}:${h}:${v}`,
+          ...(activityOptions ? { activityOptions } : {}),
+        })
+      })
+      .filter((request): request is SyncDeckActivityLaunchRequest => request !== null)
+
+    if (stackRequests.length > 0) {
+      requestsByH.set(h, stackRequests)
+    }
+  })
+
+  return requestsByH
+}
+
 export async function processManagerPreloadRequests(params: {
   requests: readonly SyncDeckActivityLaunchRequest[]
   existingInstanceKeys: ReadonlySet<string>
@@ -1782,6 +1850,12 @@ const SyncDeckManager: FC = () => {
   const pendingEmbeddedPreloadDedupeRef = useRef<Set<string>>(new Set())
   const pendingEmbeddedPrestartRef = useRef<Map<string, Promise<boolean>>>(new Map())
   const pendingEmbeddedWarmMountRef = useRef<Map<string, number>>(new Map())
+  const completedVerticalStackPrestartKeysRef = useRef<Set<string>>(new Set())
+  const deckActivityRequestsCacheRef = useRef<{
+    presentationUrl: string
+    requestsByH: SyncDeckDeckActivityRequestsByHorizontalIndex
+  } | null>(null)
+  const pendingDeckActivityRequestsRef = useRef<Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> | null>(null)
   const completedEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const pendingEmbeddedBootstrapChildSessionIdsRef = useRef<Set<string>>(new Set())
   const embeddedBootstrapBackfillRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1791,6 +1865,12 @@ const SyncDeckManager: FC = () => {
   useEffect(() => {
     syncDebugEnabledRef.current = isSyncDeckDebugEnabled()
   }, [location.search])
+
+  useEffect(() => {
+    completedVerticalStackPrestartKeysRef.current.clear()
+    deckActivityRequestsCacheRef.current = null
+    pendingDeckActivityRequestsRef.current = null
+  }, [presentationUrl])
 
   const traceSync = useCallback((event: string, details: Record<string, unknown>): void => {
     if (!syncDebugEnabledRef.current) {
@@ -2837,6 +2917,49 @@ const SyncDeckManager: FC = () => {
     [sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
   )
 
+  const loadDeckActivityRequests = useCallback(async (): Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> => {
+    const normalizedPresentationUrl = presentationUrl.trim()
+    if (normalizedPresentationUrl.length === 0 || typeof DOMParser === 'undefined') {
+      return new Map()
+    }
+
+    const cached = deckActivityRequestsCacheRef.current
+    if (cached?.presentationUrl === normalizedPresentationUrl) {
+      return cached.requestsByH
+    }
+
+    if (pendingDeckActivityRequestsRef.current) {
+      return pendingDeckActivityRequestsRef.current
+    }
+
+    const pending = (async (): Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> => {
+      try {
+        const response = await fetch(normalizedPresentationUrl, {
+          credentials: 'omit',
+        })
+        if (!response.ok) {
+          return new Map()
+        }
+
+        const html = await response.text()
+        const parsedDocument = new DOMParser().parseFromString(html, 'text/html')
+        const requestsByH = resolveVerticalStackActivityRequestsFromDeckDocument(parsedDocument)
+        deckActivityRequestsCacheRef.current = {
+          presentationUrl: normalizedPresentationUrl,
+          requestsByH,
+        }
+        return requestsByH
+      } catch {
+        return new Map()
+      } finally {
+        pendingDeckActivityRequestsRef.current = null
+      }
+    })()
+
+    pendingDeckActivityRequestsRef.current = pending
+    return pending
+  }, [presentationUrl])
+
   const preloadActivityBundles = useCallback(async (
     requests: readonly SyncDeckGroupedActivityRequest[],
   ): Promise<void> => {
@@ -2923,6 +3046,46 @@ const SyncDeckManager: FC = () => {
     setIsActivityPickerOpen(false)
     handleResolvedActivityRequests(startRequests)
   }, [handleResolvedActivityRequests])
+
+  useEffect(() => {
+    if (isConfigurePanelOpen || !instructorIndicesState || instructorIndicesState.v !== 0) {
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      const requestsByH = await loadDeckActivityRequests()
+      if (cancelled) {
+        return
+      }
+
+      const stackRequests = requestsByH.get(instructorIndicesState.h) ?? []
+      for (const request of stackRequests) {
+        if (
+          embeddedActivities[request.instanceKey] ||
+          completedVerticalStackPrestartKeysRef.current.has(request.instanceKey)
+        ) {
+          continue
+        }
+
+        completedVerticalStackPrestartKeysRef.current.add(request.instanceKey)
+        const started = await launchEmbeddedActivityFromRequest(request, { background: true })
+        if (!started) {
+          completedVerticalStackPrestartKeysRef.current.delete(request.instanceKey)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    embeddedActivities,
+    instructorIndicesState,
+    isConfigurePanelOpen,
+    launchEmbeddedActivityFromRequest,
+    loadDeckActivityRequests,
+  ])
 
   const startSession = useCallback(async (options?: { automatic?: boolean }): Promise<void> => {
     const automaticStart = options?.automatic === true
