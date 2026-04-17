@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentType, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type {
   WaitingRoomFieldConfig,
@@ -81,7 +81,7 @@ export default function WaitingRoom({
   const [teacherCode, setTeacherCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [currentEntryOutcome, setCurrentEntryOutcome] = useState<PersistentSessionEntryOutcome>(entryOutcome)
+  const [currentEntryOutcome, setCurrentEntryOutcomeState] = useState<PersistentSessionEntryOutcome>(entryOutcome)
   const [currentStartedSessionId, setCurrentStartedSessionId] = useState<string | undefined>(startedSessionId)
   const [waitingRoomValues, setWaitingRoomValues] = useState<WaitingRoomFieldValueMap>({})
   const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({})
@@ -94,6 +94,10 @@ export default function WaitingRoom({
   const hasNavigatedRef = useRef(false)
   const teacherAuthRequestedRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
+  const setCurrentEntryOutcome = useCallback((nextEntryOutcome: PersistentSessionEntryOutcome) => {
+    currentEntryOutcomeRef.current = nextEntryOutcome
+    setCurrentEntryOutcomeState(nextEntryOutcome)
+  }, [])
   const navigate = useNavigate()
   const effectiveEntryOutcome: PersistentSessionEntryOutcome = (
     currentEntryOutcome === 'join-live' && !currentStartedSessionId
@@ -120,7 +124,7 @@ export default function WaitingRoom({
     return () => {
       isCurrent = false
     }
-  }, [entryOutcome])
+  }, [entryOutcome, setCurrentEntryOutcome])
 
   useEffect(() => {
     if (shouldResetTeacherEntryMode({
@@ -153,10 +157,6 @@ export default function WaitingRoom({
       isCurrent = false
     }
   }, [startedSessionId])
-
-  useEffect(() => {
-    currentEntryOutcomeRef.current = currentEntryOutcome
-  }, [currentEntryOutcome])
 
   useEffect(() => {
     currentEntryPolicyRef.current = entryPolicy
@@ -300,7 +300,7 @@ export default function WaitingRoom({
       isCurrent = false
       closeSocketQuietly(ws)
     }
-  }, [activityName, hash, navigate, shouldKeepWaitingRoomSocketOpen])
+  }, [activityName, hash, navigate, setCurrentEntryOutcome, shouldKeepWaitingRoomSocketOpen])
 
   const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
   const handleTeacherCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
