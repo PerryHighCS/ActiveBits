@@ -252,7 +252,15 @@ export default function ManageDashboard({
   }, [])
 
   useEffect(() => {
-    void refreshPersistentSessions()
+    let isCurrent = true
+    queueMicrotask(() => {
+      if (isCurrent) {
+        void refreshPersistentSessions()
+      }
+    })
+    return () => {
+      isCurrent = false
+    }
   }, [refreshPersistentSessions])
 
   const createSession = async (activityId: string): Promise<void> => {

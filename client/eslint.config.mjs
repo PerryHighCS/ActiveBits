@@ -92,15 +92,4 @@ export default [
       'jsdoc/require-param-description': 'off',
     },
   },
-  {
-    files: [
-      'src/components/common/ManageDashboard.tsx',
-      'src/components/common/WaitingRoom.tsx',
-    ],
-    rules: {
-      // TODO: Refactor existing effect-derived state in these shared flow components,
-      // then remove this file-scoped override so the React Hooks rule applies everywhere.
-      'react-hooks/set-state-in-effect': 'off',
-    },
-  },
 ]
