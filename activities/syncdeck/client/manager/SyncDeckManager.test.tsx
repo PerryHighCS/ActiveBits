@@ -655,7 +655,8 @@ void test('resolveVerticalStackActivityRequestsFromDeckDocument derives released
           <section
             data-activity-id="resonance"
             data-activity-instance-key="resonance:7:0"
-            data-activity-options='{"questions":[{"id":"q1","type":"multiple-choice","text":"Which one works?","order":0,"options":[{"id":"a","text":"A","isCorrect":true}]}]}'>
+            data-activity-options='{"questions":[{"id":"q1","type":"multiple-choice","text":"Which one works?","order":0,"options":[{"id":"a","text":"A","isCorrect":true}]}]}'
+          >
             <p>Question</p>
           </section>
         </section>
