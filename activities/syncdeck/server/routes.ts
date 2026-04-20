@@ -1396,6 +1396,40 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
   }
 
+  const replayEmbeddedActivityStartsToSocket = async (
+    socket: SyncDeckSocket,
+    session: SyncDeckSession,
+    student: SyncDeckStudent | null,
+  ): Promise<void> => {
+    for (const [instanceKey, embeddedActivity] of Object.entries(session.data.embeddedActivities)) {
+      const childSession = await sessions.get(embeddedActivity.childSessionId)
+      if (!childSession || socket.readyState !== WS_OPEN_READY_STATE) {
+        continue
+      }
+
+      let entryParticipantToken: string | null = null
+      if (student) {
+        const stored = storeSessionEntryParticipant(childSession, {
+          participantId: student.studentId,
+          displayName: student.name,
+        })
+        entryParticipantToken = stored.token
+        await sessions.set(childSession.id, childSession)
+      }
+
+      sendSyncDeckState(
+        socket,
+        buildEmbeddedActivityStartPayload(
+          instanceKey,
+          embeddedActivity.activityId,
+          embeddedActivity.childSessionId,
+          entryParticipantToken,
+          embeddedActivity.location,
+        ),
+      )
+    }
+  }
+
   app.get('/api/syncdeck/:sessionId/instructor-passcode', async (req, res) => {
     const sessionId = req.params.sessionId
     if (!sessionId) {
@@ -2086,6 +2120,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           return
         }
         client.isInstructor = true
+        await replayEmbeddedActivityStartsToSocket(client, session, null)
         if (session.data.lastInstructorStatePayload != null) {
           if (!parseChalkboardCommand(session.data.lastInstructorStatePayload)) {
             sendSyncDeckState(socket, session.data.lastInstructorStatePayload)
@@ -2122,6 +2157,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       client.studentId = connectedStudent.participantId
       await sessions.set(session.id, session)
       closeDuplicateParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, client)
+
+      await replayEmbeddedActivityStartsToSocket(client, session, connectedStudent.student)
 
       if (session.data.lastInstructorPayload != null) {
         if (session.data.lastInstructorStatePayload != null && !parseChalkboardCommand(session.data.lastInstructorStatePayload)) {

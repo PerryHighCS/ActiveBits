@@ -463,3 +463,12 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `activities/syncdeck/shared/embeddedActivityIdentity.ts`; `activities/syncdeck/client/shared/groupedActivityRequests.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/server/routes.test.ts`
 - Follow-up action: Keep future SyncDeck embedded activation logic keyed by explicit location first, with instance-key parsing only for legacy records.
 - Owner: Codex
+
+- Date: 2026-04-20
+- Surface: SyncDeck websocket | embedded activities
+- Contract: `/ws/syncdeck` replays existing `session.data.embeddedActivities` as `syncdeck-state` payloads with `type: "embedded-activity-start"` when an instructor or student connection is accepted. Student replays include a freshly stored child-session `entryParticipantToken`; instructor replays use `entryParticipantToken: null`.
+- Compatibility constraints: This supplements the live broadcast from `POST /api/syncdeck/:sessionId/embedded-activity/start` so clients that load or reconnect after a background prestart can still activate the embedded overlay once they receive the instructor slide state. Stale embedded records whose child session is missing are skipped rather than recreated on websocket bootstrap.
+- Validation rules: Server websocket tests assert replay ordering before slide-state snapshots and token persistence for students.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: Keep embedded activity state replayed from parent session state whenever adding new SyncDeck client activation paths, so activation does not depend on clients being online during the original start broadcast.
+- Owner: Codex

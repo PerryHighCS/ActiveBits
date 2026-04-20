@@ -347,6 +347,78 @@ void test('syncdeck websocket sends latest state snapshot to student on connect'
   )
 })
 
+void test('syncdeck websocket replays existing embedded activity starts to student on connect', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const childSession: SessionRecord = {
+    id: 'child-video-1',
+    type: 'video-sync',
+    created: Date.now(),
+    lastActivity: Date.now(),
+    data: {},
+  }
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        students: [{
+          studentId: 'student-1',
+          name: 'Ada Lovelace',
+          joinedAt: 100,
+          lastSeenAt: 110,
+          lastIndices: null,
+          lastStudentStateAt: null,
+        }],
+        embeddedActivities: {
+          'video-sync:2:0': {
+            childSessionId: 'child-video-1',
+            activityId: 'video-sync',
+            startedAt: 120,
+            owner: 'syncdeck-instructor',
+            location: { h: 2, v: 0 },
+          },
+        },
+        lastInstructorPayload: { type: 'slidechanged', payload: { h: 2, v: 0, f: 0 } },
+      },
+    },
+    'child-video-1': childSession,
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const studentSocket = new MockSocket()
+  ws.wss.clients.add(studentSocket)
+
+  handler?.(
+    studentSocket,
+    new URLSearchParams({ sessionId: 's1', studentId: 'student-1', studentName: 'Ada Lovelace' }),
+    ws.wss,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const delivered = studentSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: Record<string, unknown> })
+  const embeddedStartIndex = delivered.findIndex((entry) => entry.payload?.type === 'embedded-activity-start')
+  const slideStateIndex = delivered.findIndex((entry) => entry.payload?.type === 'slidechanged')
+  assert.notEqual(embeddedStartIndex, -1)
+  assert.notEqual(slideStateIndex, -1)
+  assert.ok(embeddedStartIndex < slideStateIndex)
+
+  const embeddedStart = delivered[embeddedStartIndex]?.payload
+  assert.equal(embeddedStart?.instanceKey, 'video-sync:2:0')
+  assert.equal(embeddedStart?.activityId, 'video-sync')
+  assert.equal(embeddedStart?.childSessionId, 'child-video-1')
+  assert.deepEqual(embeddedStart?.location, { h: 2, v: 0 })
+  assert.equal(typeof embeddedStart?.entryParticipantToken, 'string')
+
+  const updatedChildSession = state.store['child-video-1'] as SessionRecord
+  const entryParticipants = asRecord(updatedChildSession.data)?.entryParticipants
+  const entryParticipantToken = embeddedStart?.entryParticipantToken as string
+  assert.notEqual(asRecord(entryParticipants)?.[entryParticipantToken], undefined)
+})
+
 void test('syncdeck websocket closes duplicate student sockets for the same session participant', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -548,6 +620,69 @@ void test('syncdeck websocket sends latest state snapshot to instructor on conne
         JSON.stringify(asRecord(entry.payload)?.payload) === JSON.stringify({ h: 5, v: 1, f: 0 }),
     ),
   )
+})
+
+void test('syncdeck websocket replays existing embedded activity starts to instructor on connect', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const childSession: SessionRecord = {
+    id: 'child-raffle-1',
+    type: 'raffle',
+    created: Date.now(),
+    lastActivity: Date.now(),
+    data: {},
+  }
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        embeddedActivities: {
+          'raffle:3:1': {
+            childSessionId: 'child-raffle-1',
+            activityId: 'raffle',
+            startedAt: 120,
+            owner: 'syncdeck-instructor',
+            location: { h: 3, v: 1 },
+          },
+        },
+        lastInstructorPayload: { type: 'slidechanged', payload: { h: 3, v: 1, f: 0 } },
+      },
+    },
+    'child-raffle-1': childSession,
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const instructorSocket = new MockSocket()
+  ws.wss.clients.add(instructorSocket)
+
+  handler?.(
+    instructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+    }),
+    ws.wss,
+  )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const delivered = instructorSocket.sent.map((entry) => JSON.parse(entry) as { type?: string; payload?: Record<string, unknown> })
+  const embeddedStartIndex = delivered.findIndex((entry) => entry.payload?.type === 'embedded-activity-start')
+  const slideStateIndex = delivered.findIndex((entry) => entry.payload?.type === 'slidechanged')
+  assert.notEqual(embeddedStartIndex, -1)
+  assert.notEqual(slideStateIndex, -1)
+  assert.ok(embeddedStartIndex < slideStateIndex)
+
+  const embeddedStart = delivered[embeddedStartIndex]?.payload
+  assert.equal(embeddedStart?.instanceKey, 'raffle:3:1')
+  assert.equal(embeddedStart?.activityId, 'raffle')
+  assert.equal(embeddedStart?.childSessionId, 'child-raffle-1')
+  assert.deepEqual(embeddedStart?.location, { h: 3, v: 1 })
+  assert.equal(embeddedStart?.entryParticipantToken, null)
 })
 
 void test('waitForInstructorAuthMessage closes when auth does not arrive in time', async () => {
