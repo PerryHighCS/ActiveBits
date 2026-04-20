@@ -75,6 +75,14 @@ void test('parseWaitingRoomMessage parses valid JSON and returns null for malfor
 void test('isWaitingRoomMessage validates supported message shapes', () => {
   assert.equal(isWaitingRoomMessage({ type: 'waiter-count', count: 3 }), true)
   assert.equal(isWaitingRoomMessage({ type: 'teacher-authenticated', sessionId: 's1' }), true)
+  assert.equal(
+    isWaitingRoomMessage({
+      type: 'teacher-authenticated',
+      sessionId: 's1',
+      createSessionPayload: { instructorPasscode: 'pass-1' },
+    }),
+    true,
+  )
   assert.equal(isWaitingRoomMessage({ type: 'teacher-code-error', error: 'bad code' }), true)
   assert.equal(
     isWaitingRoomMessage({
@@ -86,6 +94,14 @@ void test('isWaitingRoomMessage validates supported message shapes', () => {
     true,
   )
   assert.equal(isWaitingRoomMessage({ type: 'waiter-count', count: '3' }), false)
+  assert.equal(
+    isWaitingRoomMessage({
+      type: 'teacher-authenticated',
+      sessionId: 's1',
+      createSessionPayload: ['not-valid'],
+    }),
+    false,
+  )
   assert.equal(isWaitingRoomMessage({ type: 'teacher-code-error', error: 'bad code', code: 'wrong' }), false)
   assert.equal(isWaitingRoomMessage({ type: 'unknown', anything: true }), false)
 })

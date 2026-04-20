@@ -9,7 +9,7 @@ export type WaitingRoomMessage =
   | { type: 'waiter-count'; count: number }
   | { type: 'session-started'; sessionId: string }
   | { type: 'session-ended' }
-  | { type: 'teacher-authenticated'; sessionId: string }
+  | { type: 'teacher-authenticated'; sessionId: string; createSessionPayload?: Record<string, unknown> }
   | {
       type: 'teacher-code-error'
       error: string
@@ -72,7 +72,14 @@ export function isWaitingRoomMessage(message: WaitingRoomRawMessage): message is
     return true
   }
   if (message.type === 'teacher-authenticated') {
-    return typeof message.sessionId === 'string'
+    return typeof message.sessionId === 'string' && (
+      message.createSessionPayload === undefined ||
+      (
+        message.createSessionPayload != null &&
+        typeof message.createSessionPayload === 'object' &&
+        !Array.isArray(message.createSessionPayload)
+      )
+    )
   }
   if (message.type === 'teacher-code-error') {
     const hasValidError = typeof message.error === 'string'

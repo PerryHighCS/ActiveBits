@@ -123,6 +123,56 @@ void test('attachWaitingRoomSocketHandlers routes through navigateOnce and close
   assert.equal(ws.readyState, 3)
 })
 
+void test('attachWaitingRoomSocketHandlers exposes teacher-authenticated bootstrap payload before navigation', () => {
+  const ws = createSocket(1)
+  const navigations: string[] = []
+  const bootstrapPayloads: Array<{ sessionId: string; payload?: Record<string, unknown> }> = []
+
+  attachWaitingRoomSocketHandlers({
+    ws,
+    shouldAutoAuth: false,
+    hash: 'hash-1',
+    activityName: 'syncdeck',
+    queryString: '',
+    currentEntryOutcomeRef: { current: 'wait' },
+    currentEntryPolicyRef: { current: 'instructor-required' },
+    hasNavigatedRef: { current: false },
+    teacherAuthRequestedRef: { current: true },
+    setWaiterCount() {},
+    setError() {},
+    setIsSubmitting() {},
+    setEntryOutcome() {},
+    setStartedSessionId() {},
+    navigate(path) {
+      navigations.push(path)
+    },
+    onTeacherAuthenticated(message) {
+      bootstrapPayloads.push({
+        sessionId: message.sessionId,
+        payload: message.createSessionPayload,
+      })
+    },
+  })
+
+  ws.onmessage?.(new MessageEvent('message', {
+    data: JSON.stringify({
+      type: 'teacher-authenticated',
+      sessionId: 'session-1',
+      createSessionPayload: {
+        instructorPasscode: 'pass-1',
+      },
+    }),
+  }))
+
+  assert.deepEqual(bootstrapPayloads, [{
+    sessionId: 'session-1',
+    payload: {
+      instructorPasscode: 'pass-1',
+    },
+  }])
+  assert.deepEqual(navigations, ['/manage/syncdeck/session-1'])
+})
+
 void test('attachWaitingRoomSocketHandlers reports parse errors for malformed messages', () => {
   const ws = createSocket()
   const parseErrors: unknown[] = []

@@ -30,6 +30,7 @@ export interface AttachWaitingRoomSocketHandlersParams {
   setEntryOutcome: (entryOutcome: PersistentSessionEntryOutcome) => void
   setStartedSessionId: (sessionId: string | undefined) => void
   navigate: (path: string) => void | Promise<void>
+  onTeacherAuthenticated?: (message: Extract<WaitingRoomMessage, { type: 'teacher-authenticated' }>) => void
   onParseError?: (message: string, payload: unknown) => void
   attemptAutoTeacherAuth?: (params: AttemptWaitingRoomAutoTeacherAuthParams) => Promise<void>
 }
@@ -50,6 +51,7 @@ export function attachWaitingRoomSocketHandlers({
   setEntryOutcome,
   setStartedSessionId,
   navigate,
+  onTeacherAuthenticated,
   onParseError = (message, payload) => console.error(message, payload),
   attemptAutoTeacherAuth = attemptWaitingRoomAutoTeacherAuth,
 }: AttachWaitingRoomSocketHandlersParams): void {
@@ -99,6 +101,7 @@ export function attachWaitingRoomSocketHandlers({
       setEntryOutcome,
       setStartedSessionId,
       navigateOnce,
+      onTeacherAuthenticated,
     })
   }
 
@@ -126,6 +129,7 @@ interface ApplyWaitingRoomSocketMessageParams {
   setEntryOutcome: (entryOutcome: PersistentSessionEntryOutcome) => void
   setStartedSessionId: (sessionId: string | undefined) => void
   navigateOnce: (path: string) => void
+  onTeacherAuthenticated?: (message: Extract<WaitingRoomMessage, { type: 'teacher-authenticated' }>) => void
 }
 
 function applyWaitingRoomSocketMessage({
@@ -141,6 +145,7 @@ function applyWaitingRoomSocketMessage({
   setEntryOutcome,
   setStartedSessionId,
   navigateOnce,
+  onTeacherAuthenticated,
 }: ApplyWaitingRoomSocketMessageParams): void {
   const resolution = resolveWaitingRoomMessageTransition({
     message,
@@ -175,6 +180,10 @@ function applyWaitingRoomSocketMessage({
 
   if (resolution.clearTeacherAuthRequested) {
     teacherAuthRequestedRef.current = false
+  }
+
+  if (message.type === 'teacher-authenticated') {
+    onTeacherAuthenticated?.(message)
   }
 
   if (typeof resolution.navigateTo === 'string') {
