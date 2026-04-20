@@ -1403,8 +1403,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     student: SyncDeckStudent | null,
   ): Promise<void> => {
     for (const [instanceKey, embeddedActivity] of Object.entries(session.data.embeddedActivities)) {
+      if (socket.readyState !== WS_OPEN_READY_STATE) {
+        return
+      }
+
       const childSession = await sessions.get(embeddedActivity.childSessionId)
-      if (!childSession || socket.readyState !== WS_OPEN_READY_STATE) {
+      if (socket.readyState !== WS_OPEN_READY_STATE) {
+        return
+      }
+      if (!childSession) {
         continue
       }
 

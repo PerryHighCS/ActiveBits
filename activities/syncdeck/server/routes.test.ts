@@ -685,6 +685,82 @@ void test('syncdeck websocket replays existing embedded activity starts to instr
   assert.equal(embeddedStart?.entryParticipantToken, null)
 })
 
+void test('syncdeck websocket stops replaying embedded activity starts after socket disconnects', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const childSession1: SessionRecord = {
+    id: 'child-raffle-1',
+    type: 'raffle',
+    created: Date.now(),
+    lastActivity: Date.now(),
+    data: {},
+  }
+  const childSession2: SessionRecord = {
+    id: 'child-video-1',
+    type: 'video-sync',
+    created: Date.now(),
+    lastActivity: Date.now(),
+    data: {},
+  }
+  const state = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        embeddedActivities: {
+          'raffle:3:1': {
+            childSessionId: 'child-raffle-1',
+            activityId: 'raffle',
+            startedAt: 120,
+            owner: 'syncdeck-instructor',
+            location: { h: 3, v: 1 },
+          },
+          'video-sync:4:0': {
+            childSessionId: 'child-video-1',
+            activityId: 'video-sync',
+            startedAt: 130,
+            owner: 'syncdeck-instructor',
+            location: { h: 4, v: 0 },
+          },
+        },
+      },
+    },
+    'child-raffle-1': childSession1,
+    'child-video-1': childSession2,
+  })
+
+  const originalGet = state.sessions.get.bind(state.sessions)
+  const getCalls: string[] = []
+  const instructorSocket = new MockSocket()
+  state.sessions.get = async (id: string) => {
+    getCalls.push(id)
+    const session = await originalGet(id)
+    if (id === 'child-raffle-1') {
+      instructorSocket.readyState = 3
+    }
+    return session
+  }
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  ws.wss.clients.add(instructorSocket)
+  handler?.(
+    instructorSocket,
+    new URLSearchParams({
+      sessionId: 's1',
+      role: 'instructor',
+    }),
+    ws.wss,
+  )
+  emitInstructorAuth(instructorSocket, 'teacher-pass')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.ok(getCalls.includes('child-raffle-1'))
+  assert.ok(!getCalls.includes('child-video-1'))
+})
+
 void test('waitForInstructorAuthMessage closes when auth does not arrive in time', async () => {
   const instructorSocket = new MockSocket()
   const authPromise = waitForInstructorAuthMessage(instructorSocket, 75)
