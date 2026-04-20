@@ -15,6 +15,15 @@ function normalizeCoordinate(value: unknown): number | null {
   return Math.trunc(value)
 }
 
+function parseIntegerSegment(value: string | undefined): number | null {
+  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isInteger(parsed) ? parsed : null
+}
+
 export function normalizeEmbeddedActivityLocation(value: unknown): SyncDeckEmbeddedActivityLocation | null {
   if (!isPlainObject(value)) {
     return null
@@ -68,9 +77,9 @@ export function parseEmbeddedActivityLocationFromInstanceKey(
     return null
   }
 
-  const h = Number.parseInt(segments[1] ?? '', 10)
-  const v = Number.parseInt(segments[2] ?? '', 10)
-  if (!Number.isFinite(h) || !Number.isFinite(v)) {
+  const h = parseIntegerSegment(segments[1])
+  const v = parseIntegerSegment(segments[2])
+  if (h == null || v == null) {
     return null
   }
 
