@@ -1,6 +1,13 @@
+import {
+  buildGeneratedEmbeddedActivityInstanceKey,
+  toEmbeddedActivityLocation,
+  type SyncDeckEmbeddedActivityLocation,
+} from '../../shared/embeddedActivityIdentity.js'
+
 export interface SyncDeckGroupedActivityRequest {
   activityId: string
   instanceKey: string
+  location?: SyncDeckEmbeddedActivityLocation
   activityOptions?: Record<string, unknown>
 }
 
@@ -29,11 +36,11 @@ function normalizeIndices(value: unknown): { h: number; v: number; f: number } |
   const v = value.v
   const f = value.f
 
-  if (typeof h !== 'number' || !Number.isFinite(h)) {
+  if (typeof h !== 'number' || !Number.isFinite(h) || !Number.isInteger(h)) {
     return null
   }
 
-  if (typeof v !== 'number' || !Number.isFinite(v)) {
+  if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v)) {
     return null
   }
 
@@ -57,10 +64,6 @@ function normalizeActivityOptions(value: unknown): Record<string, unknown> | und
   return isPlainObject(value) ? value : undefined
 }
 
-function buildAnchoredInstanceKey(activityId: string, indices: { h: number; v: number; f: number }): string {
-  return `${activityId}:${indices.h}:${indices.v}`
-}
-
 export function resolveGroupedActivityRequestStartInput(
   rawPayload: unknown,
   fallbackIndices: { h: number; v: number; f: number } | null,
@@ -76,28 +79,30 @@ export function resolveGroupedActivityRequestStartInput(
   }
 
   const activityOptions = normalizeActivityOptions(payload.activityOptions)
-  const requestedInstanceKey = typeof payload.instanceKey === 'string' ? payload.instanceKey.trim() : ''
-  if (requestedInstanceKey.length > 0) {
+  const hasRequestedIndices = Object.hasOwn(payload, 'indices')
+  const requestedIndices = normalizeIndices(payload.indices)
+  if (hasRequestedIndices && !requestedIndices) {
+    return null
+  }
+
+  const resolvedIndices = requestedIndices ?? fallbackIndices
+  const location = toEmbeddedActivityLocation(resolvedIndices)
+  if (!resolvedIndices) {
+    const requestedInstanceKey = typeof payload.instanceKey === 'string' ? payload.instanceKey.trim() : ''
     return {
       activityId,
-      instanceKey: requestedInstanceKey,
+      instanceKey: requestedInstanceKey || buildGeneratedEmbeddedActivityInstanceKey(activityId, null),
       ...(activityOptions ? { activityOptions } : {}),
     }
   }
-
-  const requestedIndices = normalizeIndices(payload.indices)
-  const resolvedIndices = requestedIndices ?? fallbackIndices
-  if (!resolvedIndices) {
-    return {
-      activityId,
-      instanceKey: `${activityId}:global`,
-      ...(activityOptions ? { activityOptions } : {}),
-    }
+  if (!location) {
+    return null
   }
 
   return {
     activityId,
-    instanceKey: buildAnchoredInstanceKey(activityId, resolvedIndices),
+    instanceKey: buildGeneratedEmbeddedActivityInstanceKey(activityId, location),
+    location,
     ...(activityOptions ? { activityOptions } : {}),
   }
 }

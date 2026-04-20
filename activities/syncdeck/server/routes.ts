@@ -29,6 +29,12 @@ import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../shared/revealSyncProtocol.js'
+import {
+  buildGeneratedEmbeddedActivityInstanceKey,
+  normalizeEmbeddedActivityLocation,
+  resolveEmbeddedActivityLocation,
+  type SyncDeckEmbeddedActivityLocation,
+} from '../shared/embeddedActivityIdentity.js'
 import { getActivityReportBuilder } from '../../../server/activities/activityReportRegistry.js'
 import { getActivityConfig, initializeActivityRegistry } from '../../../server/activities/activityRegistry.js'
 import { connectSyncDeckStudent } from './studentParticipants.js'
@@ -96,16 +102,13 @@ interface SyncDeckEmbeddedActivityRecord {
   activityId: string
   startedAt: number
   owner: string
-}
-
-interface SyncDeckEmbeddedInstancePosition {
-  h: number
-  v: number
+  location?: SyncDeckEmbeddedActivityLocation
 }
 
 interface SyncDeckEmbeddedLaunchPayload {
   parentSessionId: string
   instanceKey: string
+  location?: SyncDeckEmbeddedActivityLocation
   selectedOptions: Record<string, unknown>
 }
 
@@ -116,6 +119,7 @@ interface SyncDeckEmbeddedManagerBootstrapPayload {
 interface EmbeddedActivityStartResponsePayload {
   childSessionId: string
   instanceKey: string
+  location?: SyncDeckEmbeddedActivityLocation
   managerBootstrap?: SyncDeckEmbeddedManagerBootstrapPayload
 }
 
@@ -372,6 +376,7 @@ function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivi
     return null
   }
 
+  const location = resolveEmbeddedActivityLocation({ location: value.location })
   return {
     childSessionId,
     activityId,
@@ -380,26 +385,8 @@ function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivi
       typeof value.owner === 'string' && value.owner.trim().length > 0
         ? value.owner.trim()
         : SYNCDECK_EMBEDDED_OWNER,
+    ...(location ? { location } : {}),
   }
-}
-
-function parseEmbeddedInstancePosition(instanceKey: string | null): SyncDeckEmbeddedInstancePosition | null {
-  if (!instanceKey) {
-    return null
-  }
-
-  const segments = instanceKey.split(':')
-  if (segments.length < 3) {
-    return null
-  }
-
-  const h = Number.parseInt(segments[1] ?? '', 10)
-  const v = Number.parseInt(segments[2] ?? '', 10)
-  if (!Number.isFinite(h) || !Number.isFinite(v)) {
-    return null
-  }
-
-  return { h, v }
 }
 
 function normalizeEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivitiesMap {
@@ -419,11 +406,13 @@ function normalizeEmbeddedActivities(value: unknown): SyncDeckEmbeddedActivities
       if (sessionId.length === 0) {
         continue
       }
+      const location = resolveEmbeddedActivityLocation({ instanceKey })
       normalized[instanceKey] = {
         childSessionId: sessionId,
         activityId,
         startedAt: normalizeFiniteNumber(entry.createdAt, Date.now()),
         owner: 'legacy',
+        ...(location ? { location } : {}),
       }
     }
     return normalized
@@ -1078,6 +1067,7 @@ async function createEmbeddedChildSession(
   parentSessionId: string,
   activityId: string,
   instanceKey: string,
+  location: SyncDeckEmbeddedActivityLocation | null,
   selectedOptions: Record<string, unknown>,
 ): Promise<SessionRecord> {
   const childId = await generateHexId(sessions)
@@ -1091,9 +1081,11 @@ async function createEmbeddedChildSession(
     data: {
       embeddedParentSessionId: parentSessionId,
       embeddedInstanceKey: instanceKey,
+      ...(location ? { embeddedLocation: location } : {}),
       embeddedLaunch: {
         parentSessionId,
         instanceKey,
+        ...(location ? { location } : {}),
         selectedOptions,
       } satisfies SyncDeckEmbeddedLaunchPayload,
     },
@@ -1217,7 +1209,11 @@ function canStudentAutoActivateEmbeddedInstance(params: {
   instanceKey: string
   session: SyncDeckSession
 }): boolean {
-  const instancePosition = parseEmbeddedInstancePosition(params.instanceKey)
+  const embeddedActivity = params.session.data.embeddedActivities[params.instanceKey]
+  const instancePosition = resolveEmbeddedActivityLocation({
+    location: embeddedActivity?.location,
+    instanceKey: params.instanceKey,
+  })
   if (!instancePosition) {
     return false
   }
@@ -1239,6 +1235,7 @@ function buildEmbeddedActivityStartPayload(
   activityId: string,
   childSessionId: string,
   entryParticipantToken: string | null,
+  location?: SyncDeckEmbeddedActivityLocation,
 ): Record<string, unknown> {
   return {
     type: 'embedded-activity-start',
@@ -1246,6 +1243,7 @@ function buildEmbeddedActivityStartPayload(
     activityId,
     childSessionId,
     entryParticipantToken,
+    ...(location ? { location } : {}),
   }
 }
 
@@ -1346,6 +1344,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     instanceKey: string,
     activityId: string,
     childSessionId: string,
+    location: SyncDeckEmbeddedActivityLocation | null,
   ): Promise<void> => {
     const childSession = await sessions.get(childSessionId)
     if (!childSession) {
@@ -1388,7 +1387,54 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         : typeof peer.studentId === 'string'
           ? tokensByStudentId.get(peer.studentId) ?? null
           : null
-      sendSyncDeckState(peer, buildEmbeddedActivityStartPayload(instanceKey, activityId, childSessionId, entryParticipantToken))
+      sendSyncDeckState(peer, buildEmbeddedActivityStartPayload(
+        instanceKey,
+        activityId,
+        childSessionId,
+        entryParticipantToken,
+        location ?? undefined,
+      ))
+    }
+  }
+
+  const replayEmbeddedActivityStartsToSocket = async (
+    socket: SyncDeckSocket,
+    session: SyncDeckSession,
+    student: SyncDeckStudent | null,
+  ): Promise<void> => {
+    for (const [instanceKey, embeddedActivity] of Object.entries(session.data.embeddedActivities)) {
+      if (socket.readyState !== WS_OPEN_READY_STATE) {
+        return
+      }
+
+      const childSession = await sessions.get(embeddedActivity.childSessionId)
+      if (socket.readyState !== WS_OPEN_READY_STATE) {
+        return
+      }
+      if (!childSession) {
+        continue
+      }
+
+      let entryParticipantToken: string | null = null
+      if (student) {
+        const stored = storeSessionEntryParticipant(childSession, {
+          participantId: student.studentId,
+          displayName: student.name,
+        })
+        entryParticipantToken = stored.token
+        await sessions.set(childSession.id, childSession)
+      }
+
+      sendSyncDeckState(
+        socket,
+        buildEmbeddedActivityStartPayload(
+          instanceKey,
+          embeddedActivity.activityId,
+          embeddedActivity.childSessionId,
+          entryParticipantToken,
+          embeddedActivity.location,
+        ),
+      )
     }
   }
 
@@ -1588,6 +1634,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
     const activityId = normalizeActivityId(readStringField(req.body, 'activityId'))
     const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
+    const hasLocationField = isPlainObject(req.body) && Object.hasOwn(req.body, 'location')
+    const rawLocation = readObjectField(req.body, 'location')
+    const location = normalizeEmbeddedActivityLocation(rawLocation)
     const activityOptions = sanitizeEmbeddedLaunchSelectedOptions(readObjectField(req.body, 'activityOptions'))
     if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
       res.status(403).json({ error: 'forbidden' })
@@ -1595,6 +1644,14 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
     if (!activityId || !instanceKey) {
       res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+    if (hasLocationField && !location) {
+      res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+    if (location && instanceKey !== buildGeneratedEmbeddedActivityInstanceKey(activityId, location)) {
+      res.status(400).json({ error: 'location does not match instanceKey' })
       return
     }
 
@@ -1637,6 +1694,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
               body: {
                 childSessionId: existing.childSessionId,
                 instanceKey,
+                ...(existing.location ? { location: existing.location } : {}),
                 ...(managerBootstrap ? { managerBootstrap } : {}),
               },
             }
@@ -1645,15 +1703,16 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           delete lockedSession.data.embeddedActivities[instanceKey]
         }
 
-        const childSession = await createEmbeddedChildSession(sessions, lockedSession.id, activityId, instanceKey, activityOptions)
+        const childSession = await createEmbeddedChildSession(sessions, lockedSession.id, activityId, instanceKey, location, activityOptions)
         lockedSession.data.embeddedActivities[instanceKey] = {
           childSessionId: childSession.id,
           activityId,
           startedAt: Date.now(),
           owner: SYNCDECK_EMBEDDED_OWNER,
+          ...(location ? { location } : {}),
         }
         await sessions.set(lockedSession.id, lockedSession)
-        await broadcastEmbeddedActivityStart(lockedSession, instanceKey, activityId, childSession.id)
+        await broadcastEmbeddedActivityStart(lockedSession, instanceKey, activityId, childSession.id, location)
 
         const normalizedChildSession = await sessions.get(childSession.id)
         const managerBootstrap = normalizedChildSession
@@ -1664,6 +1723,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           body: {
             childSessionId: childSession.id,
             instanceKey,
+            ...(location ? { location } : {}),
             ...(managerBootstrap ? { managerBootstrap } : {}),
           },
         }
@@ -2078,6 +2138,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           return
         }
         client.isInstructor = true
+        await replayEmbeddedActivityStartsToSocket(client, session, null)
         if (session.data.lastInstructorStatePayload != null) {
           if (!parseChalkboardCommand(session.data.lastInstructorStatePayload)) {
             sendSyncDeckState(socket, session.data.lastInstructorStatePayload)
@@ -2114,6 +2175,8 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       client.studentId = connectedStudent.participantId
       await sessions.set(session.id, session)
       closeDuplicateParticipantSockets(ws.wss.clients as Set<SyncDeckSocket>, client)
+
+      await replayEmbeddedActivityStartsToSocket(client, session, connectedStudent.student)
 
       if (session.data.lastInstructorPayload != null) {
         if (session.data.lastInstructorStatePayload != null && !parseChalkboardCommand(session.data.lastInstructorStatePayload)) {

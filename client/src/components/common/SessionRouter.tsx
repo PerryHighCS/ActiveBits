@@ -6,6 +6,10 @@ import HomeTeacherJoinControls from './HomeTeacherJoinControls'
 import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
 import {
+  persistCreateSessionBootstrapToSessionStorage,
+  storeCreateSessionBootstrapPayload,
+} from './manageDashboardUtils'
+import {
   getTeacherJoinClosedState,
   getTeacherJoinInitialSessionId,
   normalizeTeacherJoinCode,
@@ -24,6 +28,7 @@ import {
   findUtilityRouteMatch,
   getHomeUtilityActivities,
   getSessionPresentationUrlForTeacherRedirect,
+  getTeacherJoinCreateSessionPayload,
   getStandaloneHomeActivities,
   isJoinSessionId,
   readCachedSession,
@@ -443,6 +448,7 @@ const SessionRouter = () => {
         error?: string
         activityName?: string
         sessionId?: string
+        createSessionPayload?: unknown
       }
 
       if (!response.ok) {
@@ -456,13 +462,29 @@ const SessionRouter = () => {
       const nextSessionId = typeof payload.sessionId === 'string' && payload.sessionId.length > 0
         ? payload.sessionId
         : normalizedSessionId
+      const activity = getActivity(payload.activityName)
+      const createSessionPayload = getTeacherJoinCreateSessionPayload(payload)
+
+      if (createSessionPayload) {
+        persistCreateSessionBootstrapToSessionStorage(activity?.createSessionBootstrap, nextSessionId, createSessionPayload)
+        storeCreateSessionBootstrapPayload(payload.activityName, nextSessionId, createSessionPayload)
+      }
+
       const path = await resolveTeacherManagePath(payload.activityName, nextSessionId, '')
 
       setShowTeacherJoinModal(false)
       setTeacherJoinSessionId('')
       setTeacherJoinCode('')
       setTeacherJoinError(null)
-      void navigate(path)
+      void navigate(path, {
+        ...(createSessionPayload
+          ? {
+            state: {
+              createSessionPayload,
+            },
+          }
+          : {}),
+      })
     } catch (joinError) {
       setTeacherJoinError(joinError instanceof Error ? joinError.message : 'Unable to join as teacher right now.')
     } finally {

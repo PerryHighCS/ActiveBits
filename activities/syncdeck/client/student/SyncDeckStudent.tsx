@@ -22,6 +22,10 @@ import {
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
 import {
+  resolveEmbeddedActivityLocation,
+  type SyncDeckEmbeddedActivityLocation,
+} from '../../shared/embeddedActivityIdentity.js'
+import {
   resolveGroupedActivityIds,
   resolveGroupedPreloadRequestBatchInputs,
 } from '../shared/groupedActivityRequests.js'
@@ -110,6 +114,7 @@ interface SyncDeckEmbeddedActivityRecord {
   activityId: string
   startedAt: number
   owner: string
+  location?: SyncDeckEmbeddedActivityLocation
 }
 
 type SyncDeckEmbeddedActivitiesMap = Record<string, SyncDeckEmbeddedActivityRecord>
@@ -125,6 +130,7 @@ interface SyncDeckEmbeddedLifecyclePayload {
   activityId?: string
   childSessionId: string
   entryParticipantToken?: string
+  location?: SyncDeckEmbeddedActivityLocation
 }
 
 interface SyncDeckEmbeddedEntryResponse {
@@ -1453,11 +1459,13 @@ function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivi
     return null
   }
 
+  const location = resolveEmbeddedActivityLocation({ location: candidate.location })
   return {
     childSessionId,
     activityId,
     startedAt: typeof candidate.startedAt === 'number' && Number.isFinite(candidate.startedAt) ? candidate.startedAt : Date.now(),
     owner: typeof candidate.owner === 'string' ? candidate.owner : 'syncdeck-instructor',
+    ...(location ? { location } : {}),
   }
 }
 
@@ -1484,19 +1492,7 @@ export function normalizeSyncDeckEmbeddedActivities(value: unknown): SyncDeckEmb
 }
 
 function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmbeddedInstancePosition | null {
-  const segments = instanceKey.split(':')
-  if (segments.length < 3) {
-    return null
-  }
-
-  const [, hSegment, vSegment] = segments as [string, string, string, ...string[]]
-  const h = Number.parseInt(hSegment, 10)
-  const v = Number.parseInt(vSegment, 10)
-  if (!Number.isFinite(h) || !Number.isFinite(v)) {
-    return null
-  }
-
-  return { h, v }
+  return resolveEmbeddedActivityLocation({ instanceKey })
 }
 
 function parseEmbeddedLifecyclePayload(payload: unknown): SyncDeckEmbeddedLifecyclePayload | null {
@@ -1518,6 +1514,10 @@ function parseEmbeddedLifecyclePayload(payload: unknown): SyncDeckEmbeddedLifecy
 
   const activityId = typeof candidate.activityId === 'string' ? candidate.activityId.trim() : undefined
   const entryParticipantToken = typeof candidate.entryParticipantToken === 'string' ? candidate.entryParticipantToken.trim() : undefined
+  const location = resolveEmbeddedActivityLocation({
+    location: candidate.location,
+    instanceKey,
+  })
 
   return {
     type: payloadType,
@@ -1525,6 +1525,7 @@ function parseEmbeddedLifecyclePayload(payload: unknown): SyncDeckEmbeddedLifecy
     activityId,
     childSessionId,
     ...(entryParticipantToken ? { entryParticipantToken } : {}),
+    ...(location ? { location } : {}),
   }
 }
 
@@ -1549,6 +1550,7 @@ export function applySyncDeckEmbeddedLifecyclePayload(
       activityId: payload.activityId,
       startedAt: Date.now(),
       owner: 'syncdeck-instructor',
+      ...(payload.location ? { location: payload.location } : {}),
     },
   }
 }
@@ -1563,7 +1565,10 @@ export function resolveStudentActiveEmbeddedInstanceKey(
 
   let selected: string | null = null
   for (const [instanceKey, record] of Object.entries(embeddedActivities)) {
-    const position = parseSyncDeckEmbeddedInstancePosition(instanceKey)
+    const position = resolveEmbeddedActivityLocation({
+      location: record.location,
+      instanceKey,
+    })
     if (!position) {
       continue
     }
