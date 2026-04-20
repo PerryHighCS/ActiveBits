@@ -15,6 +15,7 @@ import { createSession } from './sessions.js'
 import type { SessionStore as CoreSessionStore } from './sessions.js'
 import { buildSoloOnlyPolicyRejection } from './persistentSessionPolicyUtils.js'
 import { getActivityConfig } from '../activities/activityRegistry.js'
+import { normalizePossiblyEncodedHttpUrl } from './httpUrlUtils.js'
 
 const OPEN_SOCKET_STATE = 1
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -44,45 +45,10 @@ interface IncomingPersistentMessage {
   teacherCode?: unknown
 }
 
-function normalizePossiblyEncodedHttpUrl(value: string): string | null {
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return null
-  }
-
-  const candidates = [trimmed]
-  let current = trimmed
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const decoded = decodeURIComponent(current)
-      if (decoded === current) {
-        break
-      }
-      candidates.push(decoded)
-      current = decoded
-    } catch {
-      break
-    }
-  }
-
-  for (const candidate of candidates) {
-    try {
-      const parsed = new URL(candidate)
-      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0) {
-        return candidate
-      }
-    } catch {
-      // Try the next candidate.
-    }
-  }
-
-  return null
-}
-
 function getSelectedOptionSessionDataValue(
-  activityName: string,
   key: string,
   value: unknown,
+  deepLinkOptions: Record<string, { validator?: unknown }> | null,
 ): string | null {
   if (typeof value !== 'string') {
     return null
@@ -93,15 +59,7 @@ function getSelectedOptionSessionDataValue(
     return null
   }
 
-  const activityConfig = getActivityConfig(activityName)
-  const deepLinkOptions = activityConfig?.deepLinkOptions
-  const deepLinkOption = (
-    deepLinkOptions != null
-    && typeof deepLinkOptions === 'object'
-    && !Array.isArray(deepLinkOptions)
-  )
-    ? (deepLinkOptions as Record<string, { validator?: unknown }>)[key]
-    : null
+  const deepLinkOption = deepLinkOptions?.[key] ?? null
 
   if (deepLinkOption?.validator === 'url') {
     return normalizePossiblyEncodedHttpUrl(trimmed)
@@ -121,6 +79,13 @@ function buildPersistentSessionData(
   }
 
   const activityConfig = getActivityConfig(activityName)
+  const deepLinkOptions = (
+    activityConfig?.deepLinkOptions != null
+    && typeof activityConfig.deepLinkOptions === 'object'
+    && !Array.isArray(activityConfig.deepLinkOptions)
+  )
+    ? activityConfig.deepLinkOptions as Record<string, { validator?: unknown }>
+    : null
   const createSessionBootstrap = (
     activityConfig?.createSessionBootstrap != null
     && typeof activityConfig.createSessionBootstrap === 'object'
@@ -133,7 +98,7 @@ function buildPersistentSessionData(
     : []
 
   for (const key of topLevelSelectedOptionKeys) {
-    const normalizedValue = getSelectedOptionSessionDataValue(activityName, key, selectedOptions[key])
+    const normalizedValue = getSelectedOptionSessionDataValue(key, selectedOptions[key], deepLinkOptions)
     if (normalizedValue != null) {
       newSessionData[key] = normalizedValue
     }
