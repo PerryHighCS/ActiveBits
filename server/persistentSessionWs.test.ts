@@ -10,6 +10,7 @@ import {
   initializePersistentStorage,
   updatePersistentSessionUrlState,
 } from './core/persistentSessions.js'
+import { initializeActivityRegistry } from './activities/activityRegistry.js'
 
 interface MockSocket {
   id?: string
@@ -101,7 +102,6 @@ void test('persistent session websocket bootstraps started sessions with canonic
   const startedSession = Array.from(sessionStore.values())[0]
   assert.ok(startedSession)
   assert.deepEqual(startedSession.data, {
-    algorithm: 'merge-sort',
     embeddedLaunch: {
       selectedOptions: {
         algorithm: 'merge-sort',
@@ -117,6 +117,7 @@ void test('persistent session websocket bootstraps started sessions with canonic
 
 void test('persistent session websocket hydrates syncdeck presentationUrl onto live session data', async (t) => {
   initializePersistentStorage(null)
+  await initializeActivityRegistry()
 
   const sessionStore = new Map<string, SessionRecord>()
   const sessions = {
@@ -170,6 +171,68 @@ void test('persistent session websocket hydrates syncdeck presentationUrl onto l
     embeddedLaunch: {
       selectedOptions: {
         presentationUrl,
+      },
+    },
+  })
+})
+
+void test('persistent session websocket decodes syncdeck presentationUrl before hydrating live session data', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+
+  const sessionStore = new Map<string, SessionRecord>()
+  const sessions = {
+    async get(id: string) {
+      return sessionStore.get(id) ?? null
+    },
+    async set(id: string, value: SessionRecord) {
+      sessionStore.set(id, value)
+    },
+  }
+
+  let registeredHandler: ((socket: MockSocket, query: URLSearchParams, _wss: unknown) => void) | undefined
+  setupPersistentSessionWs({
+    register(pathname, handler) {
+      if (pathname === '/ws/persistent-session') {
+        registeredHandler = handler as (socket: MockSocket, query: URLSearchParams, _wss: unknown) => void
+      }
+    },
+  }, sessions)
+
+  assert.ok(registeredHandler)
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'encoded-syncdeck-persistent-code'
+  const presentationUrl = 'https://perryhighcs.github.io/Presentations/CSP/Algorithms/algorithms-solve-problems.html'
+  const encodedPresentationUrl = encodeURIComponent(presentationUrl)
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await updatePersistentSessionUrlState(hash, {
+    selectedOptions: {
+      presentationUrl: encodedPresentationUrl,
+    },
+  })
+
+  const socket = createMockSocket()
+  registeredHandler(socket, new URLSearchParams({ hash, activityName }), null)
+  await waitForAsyncWork()
+
+  socket.handlers.message?.(JSON.stringify({
+    type: 'verify-teacher-code',
+    teacherCode,
+  }))
+  await waitForAsyncWork()
+
+  assert.equal(sessionStore.size, 1)
+  const startedSession = Array.from(sessionStore.values())[0]
+  assert.ok(startedSession)
+  assert.deepEqual(startedSession.data, {
+    presentationUrl,
+    embeddedLaunch: {
+      selectedOptions: {
+        presentationUrl: encodedPresentationUrl,
       },
     },
   })

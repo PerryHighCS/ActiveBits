@@ -67,6 +67,7 @@ export interface ActivityCreateSessionBootstrapSessionStorageEntry {
 export interface ActivityCreateSessionBootstrapConfig {
   sessionStorage?: ActivityCreateSessionBootstrapSessionStorageEntry[]
   historyState?: string[]
+  selectedOptionsToSessionData?: string[]
 }
 
 export interface ActivityUtility {

@@ -445,3 +445,12 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Surface: Resonance student snapshot
 - Contract: `StudentSessionSnapshot` now includes `selfPacedMode: boolean`. For Resonance launched from a standalone SyncDeck parent, this flag reflects the effective fallback mode, not just session origin: it is `true` only while no instructor-activated run is active. In that mode, `activeQuestions`/`activeQuestionIds` fall back to the full question set, and once the viewer has submitted every question the snapshot synthesizes MCQ reveal entries with `correctOptionIds` and `viewerResponse` even though no instructor explicitly shared results.
 - Compatibility constraints: Live teacher-led Resonance sessions keep the previous semantics: only `activeQuestionIds` are askable, and MCQ correctness is still hidden until the instructor shares results. Self-paced reveals do not include shared-response percentages or peer data.
+
+- Date: 2026-04-20
+- Surface: persistent-session websocket | activity config
+- Contract: Activity configs can declare `createSessionBootstrap.selectedOptionsToSessionData` to copy specific persistent-link `selectedOptions` keys onto top-level live `session.data` when a teacher starts a persistent session from the waiting-room websocket. SyncDeck opts in for `presentationUrl` so live manager/student flows recover the authoritative deck URL from session state.
+- Compatibility constraints: The full selected-options payload remains available under `session.data.embeddedLaunch.selectedOptions`; only declared keys are duplicated at top level to avoid copying large payloads such as Resonance `q`. URL-validated deep-link options are normalized from encoded strings before top-level hydration.
+- Validation rules: Schema accepts only non-empty string keys in `selectedOptionsToSessionData`; server tests cover SyncDeck `presentationUrl` hydration and encoded URL normalization.
+- Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `activities/syncdeck/activity.config.ts`; `server/core/persistentSessionWs.ts`; `server/persistentSessionWs.test.ts`
+- Follow-up action: If another activity needs top-level live session bootstrap from permalink options, opt in through config rather than broad-copying every selected option.
+- Owner: Codex

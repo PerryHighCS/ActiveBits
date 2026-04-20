@@ -49,6 +49,7 @@ const syncdeckConfig: ActivityConfig = {
     },
   ],
   createSessionBootstrap: {
+    selectedOptionsToSessionData: ['presentationUrl'],
     sessionStorage: [
       {
         keyPrefix: 'syncdeck_instructor_',

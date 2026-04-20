@@ -61,6 +61,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
       },
       createSessionBootstrap: {
         historyState: ['instructorPasscode'],
+        selectedOptionsToSessionData: ['presentationUrl'],
         sessionStorage: [
           {
             keyPrefix: 'syncdeck_instructor_',
@@ -115,6 +116,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
     responseField: 'instructorPasscode',
   })
   assert.deepEqual(parsed.createSessionBootstrap?.historyState, ['instructorPasscode'])
+  assert.deepEqual(parsed.createSessionBootstrap?.selectedOptionsToSessionData, ['presentationUrl'])
   assert.equal(parsed.manageDashboard?.customPersistentLinkBuilder, true)
   assert.equal(parsed.embeddedRuntime?.instructorGated, 'runtime')
   assert.equal(parsed.reportEndpoint, '/api/syncdeck/s1/report')

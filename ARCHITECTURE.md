@@ -151,6 +151,7 @@ export default {
     },
   },
   createSessionBootstrap: { // optional: persist create-session response fields for manager entry
+    selectedOptionsToSessionData: ['presentationUrl'], // optional selectedOptions keys to hydrate onto live session.data
     sessionStorage: [
       {
         keyPrefix: 'my_activity_instructor_',
@@ -174,6 +175,7 @@ export default {
 
 - `sessionStorage`: Array of `{ keyPrefix, responseField }` entries. Each matching string field from the create-session API response is written to browser sessionStorage using `${keyPrefix}${sessionId}` as the key.
 - `historyState`: Array of response field names. Matching fields are attached to React Router navigation state when transitioning from `/manage/:activityId` to `/manage/:activityId/:sessionId`.
+- `selectedOptionsToSessionData`: Array of persistent-link `selectedOptions` keys to copy onto top-level live `session.data` when a teacher starts a persistent session from the waiting-room WebSocket. This is intended for values that the live manager/student runtime needs as authoritative session state, such as SyncDeck's `presentationUrl`; other selected options remain available under `session.data.embeddedLaunch.selectedOptions`.
 
 Use `historyState` when the value only needs to survive the immediate in-app navigation and should not be persisted in browser storage. Use `sessionStorage` when the value should still be recoverable after reloads or later manager re-entry in the same tab.
 
