@@ -8,11 +8,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeCoordinate(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value)) {
     return null
   }
 
-  return Math.trunc(value)
+  return value
 }
 
 function parseIntegerSegment(value: string | undefined): number | null {

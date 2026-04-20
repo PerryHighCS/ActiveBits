@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildGeneratedEmbeddedActivityInstanceKey,
+  normalizeEmbeddedActivityLocation,
   parseEmbeddedActivityLocationFromInstanceKey,
   resolveEmbeddedActivityLocation,
 } from './embeddedActivityIdentity.js'
@@ -18,6 +19,12 @@ void test('parseEmbeddedActivityLocationFromInstanceKey rejects malformed numeri
   assert.equal(parseEmbeddedActivityLocationFromInstanceKey('raffle:3.0:1'), null)
   assert.equal(parseEmbeddedActivityLocationFromInstanceKey('raffle::1'), null)
   assert.equal(parseEmbeddedActivityLocationFromInstanceKey('raffle:3:'), null)
+})
+
+void test('normalizeEmbeddedActivityLocation rejects fractional coordinates', () => {
+  assert.equal(normalizeEmbeddedActivityLocation({ h: 3.9, v: 1 }), null)
+  assert.equal(normalizeEmbeddedActivityLocation({ h: 3, v: 1.2 }), null)
+  assert.deepEqual(normalizeEmbeddedActivityLocation({ h: 3, v: 1 }), { h: 3, v: 1 })
 })
 
 void test('resolveEmbeddedActivityLocation prefers explicit location over legacy instanceKey parsing', () => {

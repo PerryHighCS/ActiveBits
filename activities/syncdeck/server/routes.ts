@@ -30,6 +30,7 @@ import {
   assessRevealSyncProtocolCompatibility,
 } from '../shared/revealSyncProtocol.js'
 import {
+  buildGeneratedEmbeddedActivityInstanceKey,
   normalizeEmbeddedActivityLocation,
   resolveEmbeddedActivityLocation,
   type SyncDeckEmbeddedActivityLocation,
@@ -1626,7 +1627,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
     const activityId = normalizeActivityId(readStringField(req.body, 'activityId'))
     const instanceKey = normalizeInstanceKey(readStringField(req.body, 'instanceKey'))
-    const location = normalizeEmbeddedActivityLocation(readObjectField(req.body, 'location'))
+    const hasLocationField = isPlainObject(req.body) && Object.hasOwn(req.body, 'location')
+    const rawLocation = readObjectField(req.body, 'location')
+    const location = normalizeEmbeddedActivityLocation(rawLocation)
     const activityOptions = sanitizeEmbeddedLaunchSelectedOptions(readObjectField(req.body, 'activityOptions'))
     if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
       res.status(403).json({ error: 'forbidden' })
@@ -1634,6 +1637,14 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
     if (!activityId || !instanceKey) {
       res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+    if (hasLocationField && !location) {
+      res.status(400).json({ error: 'invalid payload' })
+      return
+    }
+    if (location && instanceKey !== buildGeneratedEmbeddedActivityInstanceKey(activityId, location)) {
+      res.status(400).json({ error: 'location does not match instanceKey' })
       return
     }
 

@@ -2223,6 +2223,75 @@ void test('embedded-activity start route rejects unknown activities before creat
   assert.deepEqual(Object.keys(storeState.store), ['s1'])
 })
 
+void test('embedded-activity start route rejects invalid or mismatched locations before creating a child session', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-passcode-1'),
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+  assert.equal(typeof handler, 'function')
+
+  const fractionalRes = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instructorPasscode: 'teacher-passcode-1',
+        activityId: 'video-sync',
+        instanceKey: 'video-sync:3:0',
+        location: { h: 3.9, v: 0 },
+      },
+    ),
+    fractionalRes,
+  )
+
+  assert.equal(fractionalRes.statusCode, 400)
+  assert.deepEqual(fractionalRes.body, { error: 'invalid payload' })
+
+  const nonObjectRes = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instructorPasscode: 'teacher-passcode-1',
+        activityId: 'video-sync',
+        instanceKey: 'video-sync:3:0',
+        location: 'video-sync:3:0',
+      },
+    ),
+    nonObjectRes,
+  )
+
+  assert.equal(nonObjectRes.statusCode, 400)
+  assert.deepEqual(nonObjectRes.body, { error: 'invalid payload' })
+
+  const mismatchedRes = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instructorPasscode: 'teacher-passcode-1',
+        activityId: 'video-sync',
+        instanceKey: 'video-sync:3:0',
+        location: { h: 4, v: 0 },
+      },
+    ),
+    mismatchedRes,
+  )
+
+  assert.equal(mismatchedRes.statusCode, 400)
+  assert.deepEqual(mismatchedRes.body, { error: 'location does not match instanceKey' })
+
+  const parentSession = storeState.store.s1 as SessionRecord & {
+    data: { embeddedActivities: Record<string, unknown> }
+  }
+  assert.deepEqual(parentSession.data.embeddedActivities, {})
+  assert.deepEqual(Object.keys(storeState.store), ['s1'])
+})
+
 void test('embedded-activity start route is idempotent per instance key', async () => {
   const app = createMockApp()
   const ws = createMockWs()

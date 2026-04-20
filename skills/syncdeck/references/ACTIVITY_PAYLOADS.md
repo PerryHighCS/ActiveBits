@@ -202,6 +202,8 @@ The runtime also stores a separate embedded location such as `{ "h": 3, "v": 1 }
 - `data-activity-trigger`
 - `data-activity-options`
 
+When a launch request includes `location`, `h` and `v` must be finite integers and the `instanceKey` must match the generated key for that activity and location, such as `raffle:3:1`. Fractional coordinates and mismatched key/location pairs are rejected before a child session is created.
+
 ## Authoring Rules
 
 - Prefer activity-specific payloads that match the child activity's real bootstrap fields.
