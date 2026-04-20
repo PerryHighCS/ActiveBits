@@ -14,6 +14,7 @@ import {
   getPersistentLinkControlStateFromSearch,
   getPersistentSelectedOptionsFromSearchForActivity,
 } from './sessionRouterUtils'
+import { persistCreateSessionBootstrapToSessionStorage } from './manageDashboardUtils'
 import {
   buildWaitingRoomStorageKey,
   getWaitingRoomInitialValues,
@@ -294,13 +295,19 @@ export default function WaitingRoom({
       setEntryOutcome: setCurrentEntryOutcome,
       setStartedSessionId: setCurrentStartedSessionId,
       navigate,
+      onTeacherAuthenticated(message) {
+        const payload = message.createSessionPayload
+        if (payload) {
+          persistCreateSessionBootstrapToSessionStorage(activity?.createSessionBootstrap, message.sessionId, payload)
+        }
+      },
     })
 
     return () => {
       isCurrent = false
       closeSocketQuietly(ws)
     }
-  }, [activityName, hash, navigate, setCurrentEntryOutcome, shouldKeepWaitingRoomSocketOpen])
+  }, [activity?.createSessionBootstrap, activityName, hash, navigate, setCurrentEntryOutcome, shouldKeepWaitingRoomSocketOpen])
 
   const waitingRoomErrors = validateWaitingRoomValues(waitingRoomFields, waitingRoomValues)
   const handleTeacherCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {

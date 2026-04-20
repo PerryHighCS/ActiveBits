@@ -454,3 +454,12 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `activities/syncdeck/activity.config.ts`; `server/core/persistentSessionWs.ts`; `server/persistentSessionWs.test.ts`
 - Follow-up action: If another activity needs top-level live session bootstrap from permalink options, opt in through config rather than broad-copying every selected option.
 - Owner: Codex
+
+- Date: 2026-04-20
+- Surface: persistent-session websocket | waiting room
+- Contract: Persistent-session `teacher-authenticated` websocket messages may include `createSessionPayload` containing fields from an activity's `createSessionBootstrap` contract. The waiting room persists that payload before navigating to `/manage/:activityId/:sessionId`, matching dashboard-created session bootstrap behavior.
+- Compatibility constraints: The payload is limited to fields declared by the activity's `createSessionBootstrap.sessionStorage[].responseField` or `historyState`; for SyncDeck this carries `instructorPasscode` so the manager can authenticate `/ws/syncdeck` even when cookie-based passcode recovery fails.
+- Validation rules: Waiting-room message parsing accepts only object-shaped `createSessionPayload`; client socket tests assert the payload is surfaced before navigation, and server websocket tests assert SyncDeck emits the configured bootstrap payload.
+- Evidence (schema/tests/path): `server/core/persistentSessionWs.ts`; `server/persistentSessionWs.test.ts`; `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomSocketUtils.ts`; `client/src/components/common/waitingRoomSocketUtils.test.ts`; `client/src/components/common/waitingRoomUtils.ts`
+- Follow-up action: If future activities rely on persistent-session websocket starts for manager credentials, add the needed response fields to their `createSessionBootstrap` config rather than adding activity-specific waiting-room code.
+- Owner: Codex
