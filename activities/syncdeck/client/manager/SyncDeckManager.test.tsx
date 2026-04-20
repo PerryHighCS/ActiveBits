@@ -638,9 +638,9 @@ void test('resolveManagerActivityRequestBatchInputs keeps current slide primary 
       { h: 9, v: 0, f: 0 },
     ),
     [
-      { activityId: 'embedded-test', instanceKey: 'embedded-test:2:0', activityOptions: { prompt: 'hello' } },
-      { activityId: 'raffle', instanceKey: 'raffle:2:1', activityOptions: { title: 'raffle title' } },
-      { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:2' },
+      { activityId: 'embedded-test', instanceKey: 'embedded-test:2:0', location: { h: 2, v: 0 }, activityOptions: { prompt: 'hello' } },
+      { activityId: 'raffle', instanceKey: 'raffle:2:1', location: { h: 2, v: 1 }, activityOptions: { title: 'raffle title' } },
+      { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:2', location: { h: 2, v: 2 } },
     ],
   )
 })
@@ -670,6 +670,7 @@ void test('resolveVerticalStackActivityRequestsFromDeckDocument derives released
     {
       activityId: 'resonance',
       instanceKey: 'resonance:1:1',
+      location: { h: 1, v: 1 },
       activityOptions: {
         autoActivateAllQuestions: true,
         questions: [
@@ -718,9 +719,9 @@ void test('resolveManagerPreloadRequestBatchInputs flattens grouped requests and
       { h: 9, v: 0, f: 0 },
     ),
     [
-      { activityId: 'video-sync', instanceKey: 'video-sync:1:0', activityOptions: { mode: 'beta' } },
-      { activityId: 'raffle', instanceKey: 'raffle:1:1' },
-      { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:0' },
+      { activityId: 'video-sync', instanceKey: 'video-sync:1:0', location: { h: 1, v: 0 }, activityOptions: { mode: 'beta' } },
+      { activityId: 'raffle', instanceKey: 'raffle:1:1', location: { h: 1, v: 1 } },
+      { activityId: 'algorithm-demo', instanceKey: 'algorithm-demo:2:0', location: { h: 2, v: 0 } },
     ],
   )
 })
@@ -738,7 +739,7 @@ void test('resolveManagerPreloadRequestBatchInputs ignores malformed grouped pre
       null,
     ),
     [
-      { activityId: 'video-sync', instanceKey: 'video-sync:1:0' },
+      { activityId: 'video-sync', instanceKey: 'video-sync:1:0', location: { h: 1, v: 0 } },
     ],
   )
 })
@@ -1433,6 +1434,7 @@ void test('resolveManagerActivityRequestStartInput resolves anchored and global 
     {
       activityId: 'embedded-test',
       instanceKey: 'embedded-test:2:1',
+      location: { h: 2, v: 1 },
     },
   )
 
@@ -1450,7 +1452,7 @@ void test('resolveManagerActivityRequestStartInput resolves anchored and global 
   )
 })
 
-void test('resolveManagerActivityRequestStartInput prefers explicit instanceKey and falls back to instructor indices', () => {
+void test('resolveManagerActivityRequestStartInput generates position keys before honoring authored instanceKey', () => {
   assert.deepEqual(
     resolveManagerActivityRequestStartInput(
       {
@@ -1461,7 +1463,8 @@ void test('resolveManagerActivityRequestStartInput prefers explicit instanceKey 
     ),
     {
       activityId: 'video-sync',
-      instanceKey: 'video-sync:global',
+      instanceKey: 'video-sync:6:2',
+      location: { h: 6, v: 2 },
     },
   )
 
@@ -1475,6 +1478,7 @@ void test('resolveManagerActivityRequestStartInput prefers explicit instanceKey 
     {
       activityId: 'algorithm-demo',
       instanceKey: 'algorithm-demo:6:2',
+      location: { h: 6, v: 2 },
     },
   )
 
@@ -1494,6 +1498,7 @@ void test('resolveManagerActivityRequestStartInput preserves activity options wh
     {
       activityId: 'video-sync',
       instanceKey: 'video-sync:3:0',
+      location: { h: 3, v: 0 },
       activityOptions: { sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA' },
     },
   )

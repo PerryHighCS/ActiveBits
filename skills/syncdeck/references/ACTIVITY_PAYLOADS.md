@@ -183,9 +183,11 @@ The current deck example uses:
 
 Use a tiny payload like this for harness or diagnostics activities where the purpose is contract validation rather than rich child configuration.
 
-## Instance-Key Examples
+## Embedded Identity And Location
 
-Current position-based examples from the deck:
+Deck authors should not provide embedded instance IDs. SyncDeck derives runtime identity from the activity id and the slide's actual Reveal position when the instructor loads or enters the deck.
+
+Examples of generated runtime keys:
 
 - `resonance:2:0`
 - `embedded-test:3:0`
@@ -194,7 +196,11 @@ Current position-based examples from the deck:
 - `video-sync:4:0`
 - `gallery-walk:5:0`
 
-These are derived from `activityId` plus slide position and are usually the best default.
+The runtime also stores a separate embedded location such as `{ "h": 3, "v": 1 }`. Student activation should use that location contract rather than any ID authored into the presentation markup. Keep deck markup focused on:
+
+- `data-activity-id`
+- `data-activity-trigger`
+- `data-activity-options`
 
 ## Authoring Rules
 

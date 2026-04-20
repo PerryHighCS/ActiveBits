@@ -1998,6 +1998,7 @@ void test('embedded-activity start route creates a child session, stores keyed m
         instructorPasscode: 'teacher-passcode-1',
         activityId: 'video-sync',
         instanceKey: 'video-sync:3:0',
+        location: { h: 3, v: 0 },
         activityOptions: {
           sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
         },
@@ -2010,19 +2011,22 @@ void test('embedded-activity start route creates a child session, stores keyed m
   const body = res.body as {
     childSessionId: string
     instanceKey: string
+    location?: { h: number; v: number }
     managerBootstrap?: { instructorPasscode?: string }
   }
   assert.equal(body.instanceKey, 'video-sync:3:0')
+  assert.deepEqual(body.location, { h: 3, v: 0 })
   assert.match(body.childSessionId, /^CHILD:s1:[a-f0-9]{5}:video-sync$/)
   assert.equal(typeof body.managerBootstrap?.instructorPasscode, 'string')
   assert.equal(body.managerBootstrap?.instructorPasscode?.length, 32)
 
   const parentSession = storeState.store.s1 as SessionRecord & {
-    data: { embeddedActivities: Record<string, { childSessionId: string; activityId: string; startedAt: number; owner: string }> }
+    data: { embeddedActivities: Record<string, { childSessionId: string; activityId: string; startedAt: number; owner: string; location?: { h: number; v: number } }> }
   }
   assert.equal(parentSession.data.embeddedActivities['video-sync:3:0']?.childSessionId, body.childSessionId)
   assert.equal(parentSession.data.embeddedActivities['video-sync:3:0']?.activityId, 'video-sync')
   assert.equal(parentSession.data.embeddedActivities['video-sync:3:0']?.owner, 'syncdeck-instructor')
+  assert.deepEqual(parentSession.data.embeddedActivities['video-sync:3:0']?.location, { h: 3, v: 0 })
 
   const childSession = storeState.store[body.childSessionId] as SessionRecord | undefined
   assert.equal(childSession?.type, 'video-sync')
@@ -2031,6 +2035,7 @@ void test('embedded-activity start route creates a child session, stores keyed m
     {
       parentSessionId: 's1',
       instanceKey: 'video-sync:3:0',
+      location: { h: 3, v: 0 },
       selectedOptions: {
         sourceUrl: 'https://www.youtube.com/watch?v=mCq8-xTH7jA',
       },
@@ -2045,6 +2050,7 @@ void test('embedded-activity start route creates a child session, stores keyed m
   assert.equal(studentStart?.instanceKey, 'video-sync:3:0')
   assert.equal(studentStart?.activityId, 'video-sync')
   assert.equal(studentStart?.childSessionId, body.childSessionId)
+  assert.deepEqual(studentStart?.location, { h: 3, v: 0 })
   assert.equal(typeof studentStart?.entryParticipantToken, 'string')
 })
 

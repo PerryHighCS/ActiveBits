@@ -220,7 +220,10 @@ through activity-specific props.
 
 - Parent launchers store embedded bootstrap metadata on `session.data.embeddedLaunch`.
 - The bootstrap payload is activity-agnostic and should include the parent session identity,
-  the embedded `instanceKey`, and `selectedOptions` for the child activity.
+  the embedded `instanceKey`, optional slide `location`, and `selectedOptions` for the child activity.
+- SyncDeck treats embedded `instanceKey` values as runtime-generated identifiers. Student and
+  manager activation should prefer the explicit embedded `location` stored on the parent record
+  and broadcast in lifecycle payloads, with instance-key parsing kept only for legacy records.
 - Child managers should read that payload through shared bootstrap helpers in the same spirit
   as `createSessionBootstrap` or permalink `selectedOptions`, so reloads and redeploys keep
   the launch intent intact.

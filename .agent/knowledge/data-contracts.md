@@ -454,3 +454,12 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `activities/syncdeck/activity.config.ts`; `server/core/persistentSessionWs.ts`; `server/persistentSessionWs.test.ts`
 - Follow-up action: If another activity needs top-level live session bootstrap from permalink options, opt in through config rather than broad-copying every selected option.
 - Owner: Codex
+
+- Date: 2026-04-20
+- Surface: SyncDeck embedded activities
+- Contract: Embedded activity starts carry a generated `instanceKey` and, when anchored to a Reveal slide, an explicit `location: { h, v }`. New deck-driven launches derive both values from the actual instructor/deck indices at load/request time; presentation-authored `instanceKey` values are not trusted when position context is available.
+- Compatibility constraints: Existing records without `location` still fall back to parsing legacy `activityId:h:v` keys. New parent records, child `embeddedLaunch` payloads, start responses, and `embedded-activity-start` websocket payloads preserve `location` so student/manager activation can use the stored location instead of reparsing fragile IDs.
+- Validation rules: Client grouping tests assert generated position keys include `location`; server route tests assert start persists and broadcasts `location`.
+- Evidence (schema/tests/path): `activities/syncdeck/shared/embeddedActivityIdentity.ts`; `activities/syncdeck/client/shared/groupedActivityRequests.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: Keep future SyncDeck embedded activation logic keyed by explicit location first, with instance-key parsing only for legacy records.
+- Owner: Codex

@@ -111,8 +111,8 @@ void test('resolveGroupedPreloadRequestBatchInputs supports bundle-only preload 
   )
 
   assert.deepEqual(grouped, [
-    { activityId: 'video-sync', instanceKey: 'video-sync:4:0' },
-    { activityId: 'raffle', instanceKey: 'raffle:4:1' },
+    { activityId: 'video-sync', instanceKey: 'video-sync:4:0', location: { h: 4, v: 0 } },
+    { activityId: 'raffle', instanceKey: 'raffle:4:1', location: { h: 4, v: 1 } },
   ])
   assert.deepEqual(resolveGroupedActivityIds(grouped), ['video-sync', 'raffle'])
 })

@@ -1,6 +1,13 @@
+import {
+  buildGeneratedEmbeddedActivityInstanceKey,
+  toEmbeddedActivityLocation,
+  type SyncDeckEmbeddedActivityLocation,
+} from '../../shared/embeddedActivityIdentity.js'
+
 export interface SyncDeckGroupedActivityRequest {
   activityId: string
   instanceKey: string
+  location?: SyncDeckEmbeddedActivityLocation
   activityOptions?: Record<string, unknown>
 }
 
@@ -57,10 +64,6 @@ function normalizeActivityOptions(value: unknown): Record<string, unknown> | und
   return isPlainObject(value) ? value : undefined
 }
 
-function buildAnchoredInstanceKey(activityId: string, indices: { h: number; v: number; f: number }): string {
-  return `${activityId}:${indices.h}:${indices.v}`
-}
-
 export function resolveGroupedActivityRequestStartInput(
   rawPayload: unknown,
   fallbackIndices: { h: number; v: number; f: number } | null,
@@ -76,28 +79,22 @@ export function resolveGroupedActivityRequestStartInput(
   }
 
   const activityOptions = normalizeActivityOptions(payload.activityOptions)
-  const requestedInstanceKey = typeof payload.instanceKey === 'string' ? payload.instanceKey.trim() : ''
-  if (requestedInstanceKey.length > 0) {
-    return {
-      activityId,
-      instanceKey: requestedInstanceKey,
-      ...(activityOptions ? { activityOptions } : {}),
-    }
-  }
-
   const requestedIndices = normalizeIndices(payload.indices)
   const resolvedIndices = requestedIndices ?? fallbackIndices
+  const location = toEmbeddedActivityLocation(resolvedIndices)
   if (!resolvedIndices) {
+    const requestedInstanceKey = typeof payload.instanceKey === 'string' ? payload.instanceKey.trim() : ''
     return {
       activityId,
-      instanceKey: `${activityId}:global`,
+      instanceKey: requestedInstanceKey || buildGeneratedEmbeddedActivityInstanceKey(activityId, null),
       ...(activityOptions ? { activityOptions } : {}),
     }
   }
 
   return {
     activityId,
-    instanceKey: buildAnchoredInstanceKey(activityId, resolvedIndices),
+    instanceKey: buildGeneratedEmbeddedActivityInstanceKey(activityId, location),
+    ...(location ? { location } : {}),
     ...(activityOptions ? { activityOptions } : {}),
   }
 }
