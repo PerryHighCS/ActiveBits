@@ -1485,6 +1485,40 @@ void test('resolveManagerActivityRequestStartInput generates position keys befor
   assert.equal(resolveManagerActivityRequestStartInput({ activityId: '' }, { h: 1, v: 0, f: 0 }), null)
 })
 
+void test('resolveManagerActivityRequestStartInput rejects malformed anchored indices instead of falling back to global keys', () => {
+  assert.equal(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'video-sync',
+        indices: { h: 3.9, v: 0, f: 0 },
+      },
+      null,
+    ),
+    null,
+  )
+
+  assert.equal(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'video-sync',
+        indices: { h: 3, v: 0.5, f: 0 },
+      },
+      { h: 6, v: 2, f: 0 },
+    ),
+    null,
+  )
+
+  assert.equal(
+    resolveManagerActivityRequestStartInput(
+      {
+        activityId: 'video-sync',
+      },
+      { h: 6.2, v: 2, f: 0 },
+    ),
+    null,
+  )
+})
+
 void test('resolveManagerActivityRequestStartInput preserves activity options when present', () => {
   assert.deepEqual(
     resolveManagerActivityRequestStartInput(

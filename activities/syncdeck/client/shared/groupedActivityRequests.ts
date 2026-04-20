@@ -36,11 +36,11 @@ function normalizeIndices(value: unknown): { h: number; v: number; f: number } |
   const v = value.v
   const f = value.f
 
-  if (typeof h !== 'number' || !Number.isFinite(h)) {
+  if (typeof h !== 'number' || !Number.isFinite(h) || !Number.isInteger(h)) {
     return null
   }
 
-  if (typeof v !== 'number' || !Number.isFinite(v)) {
+  if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v)) {
     return null
   }
 
@@ -79,7 +79,12 @@ export function resolveGroupedActivityRequestStartInput(
   }
 
   const activityOptions = normalizeActivityOptions(payload.activityOptions)
+  const hasRequestedIndices = Object.hasOwn(payload, 'indices')
   const requestedIndices = normalizeIndices(payload.indices)
+  if (hasRequestedIndices && !requestedIndices) {
+    return null
+  }
+
   const resolvedIndices = requestedIndices ?? fallbackIndices
   const location = toEmbeddedActivityLocation(resolvedIndices)
   if (!resolvedIndices) {
@@ -90,11 +95,14 @@ export function resolveGroupedActivityRequestStartInput(
       ...(activityOptions ? { activityOptions } : {}),
     }
   }
+  if (!location) {
+    return null
+  }
 
   return {
     activityId,
     instanceKey: buildGeneratedEmbeddedActivityInstanceKey(activityId, location),
-    ...(location ? { location } : {}),
+    location,
     ...(activityOptions ? { activityOptions } : {}),
   }
 }
