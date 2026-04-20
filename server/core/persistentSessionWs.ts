@@ -14,6 +14,8 @@ import {
 import { createSession } from './sessions.js'
 import type { SessionStore as CoreSessionStore } from './sessions.js'
 import { buildSoloOnlyPolicyRejection } from './persistentSessionPolicyUtils.js'
+import { getActivityConfig } from '../activities/activityRegistry.js'
+import { normalizePossiblyEncodedHttpUrl } from './httpUrlUtils.js'
 
 const OPEN_SOCKET_STATE = 1
 const MAX_TEACHER_CODE_LENGTH = 100
@@ -41,6 +43,71 @@ interface WsRouter {
 interface IncomingPersistentMessage {
   type?: string
   teacherCode?: unknown
+}
+
+function getSelectedOptionSessionDataValue(
+  key: string,
+  value: unknown,
+  deepLinkOptions: Record<string, { validator?: unknown }> | null,
+): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  const deepLinkOption = deepLinkOptions?.[key] ?? null
+
+  if (deepLinkOption?.validator === 'url') {
+    return normalizePossiblyEncodedHttpUrl(trimmed)
+  }
+
+  return trimmed
+}
+
+function buildPersistentSessionData(
+  activityName: string,
+  selectedOptions: Record<string, unknown>,
+): Record<string, unknown> {
+  const newSessionData: Record<string, unknown> = {}
+  const selectedOptionKeys = Object.keys(selectedOptions)
+  if (selectedOptionKeys.length === 0) {
+    return newSessionData
+  }
+
+  const activityConfig = getActivityConfig(activityName)
+  const deepLinkOptions = (
+    activityConfig?.deepLinkOptions != null
+    && typeof activityConfig.deepLinkOptions === 'object'
+    && !Array.isArray(activityConfig.deepLinkOptions)
+  )
+    ? activityConfig.deepLinkOptions as Record<string, { validator?: unknown }>
+    : null
+  const createSessionBootstrap = (
+    activityConfig?.createSessionBootstrap != null
+    && typeof activityConfig.createSessionBootstrap === 'object'
+    && !Array.isArray(activityConfig.createSessionBootstrap)
+  )
+    ? activityConfig.createSessionBootstrap as { selectedOptionsToSessionData?: unknown }
+    : null
+  const topLevelSelectedOptionKeys = Array.isArray(createSessionBootstrap?.selectedOptionsToSessionData)
+    ? createSessionBootstrap.selectedOptionsToSessionData.filter((entry): entry is string => typeof entry === 'string')
+    : []
+
+  for (const key of topLevelSelectedOptionKeys) {
+    const normalizedValue = getSelectedOptionSessionDataValue(key, selectedOptions[key], deepLinkOptions)
+    if (normalizedValue != null) {
+      newSessionData[key] = normalizedValue
+    }
+  }
+
+  newSessionData.embeddedLaunch = {
+    selectedOptions: { ...selectedOptions },
+  }
+  return newSessionData
 }
 
 /**
@@ -191,14 +258,10 @@ async function handleTeacherCodeVerification(
   const selectedOptions = persistentSession.selectedOptions != null
     ? { ...persistentSession.selectedOptions }
     : {}
+  const newSessionData = buildPersistentSessionData(persistentSession.activityName, selectedOptions)
+
   const newSession = await createSession(sessions, {
-    data: Object.keys(selectedOptions).length > 0
-      ? {
-        embeddedLaunch: {
-          selectedOptions,
-        },
-      }
-      : {},
+    data: newSessionData,
   })
   newSession.type = persistentSession.activityName
   await sessions.set(newSession.id, newSession)

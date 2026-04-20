@@ -10,6 +10,10 @@ import {
   verifyPersistentLinkUrlHash,
   type PersistentLinkUrlState,
 } from 'activebits-server/core/persistentLinkUrlState.js'
+import {
+  isValidHttpUrl,
+  normalizePossiblyEncodedHttpUrl,
+} from 'activebits-server/core/httpUrlUtils.js'
 import { closeDuplicateParticipantSockets } from 'activebits-server/core/participantSockets.js'
 import {
   createSession,
@@ -1029,49 +1033,6 @@ function parsePersistentSessionsCookie(cookieValue: unknown): CookieSessionEntry
     }))
 }
 
-function validatePresentationUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value)
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
-  } catch {
-    return false
-  }
-}
-
-function normalizePersistentPresentationUrl(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const trimmed = value.trim()
-  if (trimmed.length === 0) {
-    return null
-  }
-
-  if (validatePresentationUrl(trimmed)) {
-    return trimmed
-  }
-
-  let current = trimmed
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const decoded = decodeURIComponent(current)
-      if (decoded === current) {
-        return null
-      }
-      if (validatePresentationUrl(decoded)) {
-        return decoded
-      }
-      current = decoded
-    } catch {
-      // Ignore decode errors and fall through to null.
-      return null
-    }
-  }
-
-  return null
-}
-
 function verifyInstructorPasscode(expected: string, candidate: string): boolean {
   const expectedBuffer = Buffer.from(expected, 'utf8')
   const candidateBuffer = Buffer.from(candidate, 'utf8')
@@ -1464,7 +1425,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     }
 
     const selectedOptions = isPlainObject(matchingEntry.selectedOptions) ? matchingEntry.selectedOptions : {}
-    const persistentPresentationUrl = normalizePersistentPresentationUrl(selectedOptions.presentationUrl)
+    const persistentPresentationUrl = normalizePossiblyEncodedHttpUrl(selectedOptions.presentationUrl)
     const persistentEntryPolicy = resolvePersistentSessionEntryPolicy(matchingEntry.entryPolicy)
     const candidateUrlHash =
       typeof matchingEntry.urlHash === 'string' && matchingEntry.urlHash.trim().length > 0
@@ -1511,7 +1472,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
-    if (!presentationUrl || !validatePresentationUrl(presentationUrl)) {
+    if (!presentationUrl || !isValidHttpUrl(presentationUrl)) {
       res.status(400).json({ error: 'presentationUrl must be a valid http(s) URL' })
       return
     }
@@ -2040,7 +2001,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const standaloneMode = readBooleanField(req.body, 'standaloneMode') === true
     if (
       !presentationUrl ||
-      !validatePresentationUrl(presentationUrl) ||
+      !isValidHttpUrl(presentationUrl) ||
       !instructorPasscode ||
       !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)
     ) {
