@@ -18,6 +18,7 @@ import {
   getPersistentSelectedOptionsFromSearch,
   getPersistentQuerySuffix,
   getSessionPresentationUrlForTeacherRedirect,
+  getTeacherJoinCreateSessionPayload,
   getStandaloneHomeActivities,
   isJoinSessionId,
   readCachedSession,
@@ -137,6 +138,21 @@ void test('buildSessionTeacherAuthenticateApiUrl encodes raw session identifiers
     buildSessionTeacherAuthenticateApiUrl('session/1?x y'),
     '/api/session/session%2F1%3Fx%20y/teacher-authenticate',
   )
+})
+
+void test('getTeacherJoinCreateSessionPayload accepts only object-shaped bootstrap payloads', () => {
+  const payload = {
+    createSessionPayload: {
+      instructorPasscode: 'pass-1',
+    },
+  }
+
+  assert.deepEqual(getTeacherJoinCreateSessionPayload(payload), {
+    instructorPasscode: 'pass-1',
+  })
+  assert.equal(getTeacherJoinCreateSessionPayload({ createSessionPayload: ['pass-1'] }), null)
+  assert.equal(getTeacherJoinCreateSessionPayload({ createSessionPayload: null }), null)
+  assert.equal(getTeacherJoinCreateSessionPayload(null), null)
 })
 
 void test('buildPersistentTeacherManagePath preserves query params for most activities but clears syncdeck bootstrap params', () => {

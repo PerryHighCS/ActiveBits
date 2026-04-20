@@ -481,3 +481,12 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
 - Follow-up action: Keep embedded activity state replayed from parent session state whenever adding new SyncDeck client activation paths, so activation does not depend on clients being online during the original start broadcast.
 - Owner: Codex
+
+- Date: 2026-04-20
+- Surface: Teacher Join | create-session bootstrap
+- Contract: `POST /api/session/:sessionId/teacher-authenticate` may include `createSessionPayload` for fields declared by the activity's `createSessionBootstrap` contract, mirroring persistent waiting-room `teacher-authenticated` websocket behavior. The home-page Teacher Join flow persists that payload before navigating to `/manage/:activityId/:sessionId`.
+- Compatibility constraints: For SyncDeck, this carries `instructorPasscode` so a second instructor joining from the ActiveBits home page can authenticate `/ws/syncdeck` without relying on cookie-based passcode recovery. Payload contents are limited to declared `createSessionBootstrap.sessionStorage[].responseField` or `historyState` fields.
+- Validation rules: Server route tests assert Teacher Join returns the SyncDeck instructor passcode bootstrap payload; client router utility tests reject non-object payload shapes.
+- Evidence (schema/tests/path): `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `client/src/components/common/sessionRouterUtils.test.ts`
+- Follow-up action: Keep Teacher Join and waiting-room teacher authentication bootstrap behavior aligned when future activities add manager credentials to `createSessionBootstrap`.
+- Owner: Codex
