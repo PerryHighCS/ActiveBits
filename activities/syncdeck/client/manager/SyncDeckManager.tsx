@@ -28,6 +28,11 @@ import {
   assessRevealSyncProtocolCompatibility,
 } from '../../shared/revealSyncProtocol.js'
 import {
+  buildGeneratedEmbeddedActivityInstanceKey,
+  resolveEmbeddedActivityLocation,
+  type SyncDeckEmbeddedActivityLocation,
+} from '../../shared/embeddedActivityIdentity.js'
+import {
   resolveGroupedActivityIds,
   resolveGroupedActivityRequestBatchInputs,
   resolveGroupedActivityRequestStartInput,
@@ -81,6 +86,7 @@ interface SyncDeckEmbeddedActivityRecord {
   activityId: string
   startedAt: number
   owner: string
+  location?: SyncDeckEmbeddedActivityLocation
 }
 
 type SyncDeckEmbeddedActivitiesMap = Record<string, SyncDeckEmbeddedActivityRecord>
@@ -122,6 +128,7 @@ interface SyncDeckEmbeddedBootstrapBackfillRequest {
   activityId: string
   childSessionId: string
   instanceKey: string
+  location?: SyncDeckEmbeddedActivityLocation
 }
 
 type ChalkboardRelayAction = 'chalkboardStroke' | 'chalkboardState'
@@ -468,6 +475,7 @@ interface SyncDeckEmbeddedLifecyclePayload {
   instanceKey: string
   activityId?: string
   childSessionId: string
+  location?: SyncDeckEmbeddedActivityLocation
 }
 
 type SyncDeckManagerOverlayNavigationDirection = 'left' | 'right' | 'up' | 'down' | 'slide'
@@ -482,6 +490,7 @@ interface SyncDeckActivityPickerEntry {
 interface SyncDeckActivityLaunchRequest {
   activityId: string
   instanceKey: string
+  location?: SyncDeckEmbeddedActivityLocation
   activityOptions?: Record<string, unknown>
 }
 
@@ -613,11 +622,13 @@ function normalizeEmbeddedActivityRecord(value: unknown): SyncDeckEmbeddedActivi
     return null
   }
 
+  const location = resolveEmbeddedActivityLocation({ location: value.location })
   return {
     childSessionId,
     activityId,
     startedAt: typeof value.startedAt === 'number' && Number.isFinite(value.startedAt) ? value.startedAt : Date.now(),
     owner: typeof value.owner === 'string' ? value.owner : 'syncdeck-instructor',
+    ...(location ? { location } : {}),
   }
 }
 
@@ -688,24 +699,7 @@ export function resolvePersistentEntryPolicyForConfigure(
 }
 
 function parseSyncDeckEmbeddedInstancePosition(instanceKey: string): SyncDeckEmbeddedInstancePosition | null {
-  const segments = instanceKey.split(':')
-  if (segments.length < 3) {
-    return null
-  }
-
-  const hSegment = segments.at(-2)
-  const vSegment = segments.at(-1)
-  if (typeof hSegment !== 'string' || typeof vSegment !== 'string') {
-    return null
-  }
-
-  const h = Number.parseInt(hSegment, 10)
-  const v = Number.parseInt(vSegment, 10)
-  if (!Number.isFinite(h) || !Number.isFinite(v)) {
-    return null
-  }
-
-  return { h, v }
+  return resolveEmbeddedActivityLocation({ instanceKey })
 }
 
 function parseEmbeddedLifecyclePayload(payload: unknown): SyncDeckEmbeddedLifecyclePayload | null {
@@ -725,11 +719,16 @@ function parseEmbeddedLifecyclePayload(payload: unknown): SyncDeckEmbeddedLifecy
   }
 
   const activityId = typeof payload.activityId === 'string' ? payload.activityId.trim() : undefined
+  const location = resolveEmbeddedActivityLocation({
+    location: payload.location,
+    instanceKey,
+  })
   return {
     type: payloadType,
     instanceKey,
     activityId,
     childSessionId,
+    ...(location ? { location } : {}),
   }
 }
 
@@ -754,6 +753,7 @@ export function applySyncDeckEmbeddedLifecyclePayload(
       activityId: payload.activityId,
       startedAt: Date.now(),
       owner: 'syncdeck-instructor',
+      ...(payload.location ? { location: payload.location } : {}),
     },
   }
 }
@@ -777,6 +777,7 @@ export function resolveEmbeddedBootstrapBackfillRequests(params: {
       activityId: record.activityId,
       childSessionId: record.childSessionId,
       instanceKey,
+      ...(record.location ? { location: record.location } : {}),
     })
   }
 
@@ -822,7 +823,10 @@ export function resolveManagerActiveEmbeddedInstanceKey(
 
   let selected: string | null = null
   for (const [instanceKey, record] of Object.entries(embeddedActivities)) {
-    const position = parseSyncDeckEmbeddedInstancePosition(instanceKey)
+    const position = resolveEmbeddedActivityLocation({
+      location: record.location,
+      instanceKey,
+    })
     if (!position) {
       continue
     }
@@ -1238,9 +1242,11 @@ export function resolveVerticalStackActivityRequestsFromDeckDocument(
         }
 
         const activityOptions = parseDeckActivityOptions(slide.getAttribute('data-activity-options'))
+        const location = { h, v }
         return withReleasedVerticalStackActivityOptions({
           activityId,
-          instanceKey: `${activityId}:${h}:${v}`,
+          instanceKey: buildGeneratedEmbeddedActivityInstanceKey(activityId, location),
+          location,
           ...(activityOptions ? { activityOptions } : {}),
         })
       })
@@ -2485,6 +2491,7 @@ const SyncDeckManager: FC = () => {
             instructorPasscode,
             activityId: request.activityId,
             instanceKey: request.instanceKey,
+            ...(request.location ? { location: request.location } : {}),
           }),
         })
 
@@ -2817,6 +2824,7 @@ const SyncDeckManager: FC = () => {
                 instructorPasscode,
                 activityId: request.activityId,
                 instanceKey: request.instanceKey,
+                ...(request.location ? { location: request.location } : {}),
                 ...(request.activityOptions ? { activityOptions: request.activityOptions } : {}),
               }),
             })

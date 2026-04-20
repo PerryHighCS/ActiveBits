@@ -463,3 +463,30 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `server/core/persistentSessionWs.ts`; `server/persistentSessionWs.test.ts`; `client/src/components/common/WaitingRoom.tsx`; `client/src/components/common/waitingRoomSocketUtils.ts`; `client/src/components/common/waitingRoomSocketUtils.test.ts`; `client/src/components/common/waitingRoomUtils.ts`
 - Follow-up action: If future activities rely on persistent-session websocket starts for manager credentials, add the needed response fields to their `createSessionBootstrap` config rather than adding activity-specific waiting-room code.
 - Owner: Codex
+
+- Date: 2026-04-20
+- Surface: SyncDeck embedded activities
+- Contract: Embedded activity starts carry a generated `instanceKey` and, when anchored to a Reveal slide, an explicit `location: { h, v }`. New deck-driven launches derive both values from the actual instructor/deck indices at load/request time; presentation-authored `instanceKey` values are not trusted when position context is available.
+- Compatibility constraints: Existing records without `location` still fall back to parsing legacy `activityId:h:v` keys. New parent records, child `embeddedLaunch` payloads, start responses, and `embedded-activity-start` websocket payloads preserve `location` so student/manager activation can use the stored location instead of reparsing fragile IDs.
+- Validation rules: Client grouping tests assert generated position keys include `location`; shared identity tests reject fractional coordinates; server route tests assert start persists and broadcasts `location` and rejects explicit locations that are malformed or inconsistent with the generated `instanceKey`.
+- Evidence (schema/tests/path): `activities/syncdeck/shared/embeddedActivityIdentity.ts`; `activities/syncdeck/client/shared/groupedActivityRequests.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: Keep future SyncDeck embedded activation logic keyed by explicit location first, with instance-key parsing only for legacy records.
+- Owner: Codex
+
+- Date: 2026-04-20
+- Surface: SyncDeck websocket | embedded activities
+- Contract: `/ws/syncdeck` replays existing `session.data.embeddedActivities` as `syncdeck-state` payloads with `type: "embedded-activity-start"` when an instructor or student connection is accepted. Student replays include a freshly stored child-session `entryParticipantToken`; instructor replays use `entryParticipantToken: null`.
+- Compatibility constraints: This supplements the live broadcast from `POST /api/syncdeck/:sessionId/embedded-activity/start` so clients that load or reconnect after a background prestart can still activate the embedded overlay once they receive the instructor slide state. Stale embedded records whose child session is missing are skipped rather than recreated on websocket bootstrap.
+- Validation rules: Server websocket tests assert replay ordering before slide-state snapshots and token persistence for students.
+- Evidence (schema/tests/path): `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: Keep embedded activity state replayed from parent session state whenever adding new SyncDeck client activation paths, so activation does not depend on clients being online during the original start broadcast.
+- Owner: Codex
+
+- Date: 2026-04-20
+- Surface: Teacher Join | create-session bootstrap
+- Contract: `POST /api/session/:sessionId/teacher-authenticate` may include `createSessionPayload` for fields declared by the activity's `createSessionBootstrap` contract, mirroring persistent waiting-room `teacher-authenticated` websocket behavior. The home-page Teacher Join flow persists that payload before navigating to `/manage/:activityId/:sessionId`.
+- Compatibility constraints: For SyncDeck, this carries `instructorPasscode` so a second instructor joining from the ActiveBits home page can authenticate `/ws/syncdeck` without relying on cookie-based passcode recovery. Payload contents are limited to declared `createSessionBootstrap.sessionStorage[].responseField` or `historyState` fields.
+- Validation rules: Server route tests assert Teacher Join returns the SyncDeck instructor passcode bootstrap payload; client router utility tests reject non-object payload shapes.
+- Evidence (schema/tests/path): `server/core/createSessionBootstrapPayload.ts`; `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `client/src/components/common/sessionRouterUtils.test.ts`
+- Follow-up action: Keep Teacher Join and waiting-room teacher authentication bootstrap behavior aligned when future activities add manager credentials to `createSessionBootstrap`.
+- Owner: Codex

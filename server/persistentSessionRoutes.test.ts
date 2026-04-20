@@ -1903,7 +1903,13 @@ void test('session teacher authenticate restores teacher cookie from active sess
   const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
   t.after(async () => cleanupPersistentSession(hash))
 
-  sessionMap.set('live-session', { id: 'live-session', type: activityName })
+  sessionMap.set('live-session', {
+    id: 'live-session',
+    type: activityName,
+    data: {
+      instructorPasscode: 'syncdeck-instructor-passcode',
+    },
+  })
   await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode, 'solo-allowed')
   await updatePersistentSessionUrlState(hash, {
     entryPolicy: 'solo-allowed',
@@ -1923,6 +1929,9 @@ void test('session teacher authenticate restores teacher cookie from active sess
     success: true,
     activityName,
     sessionId: 'live-session',
+    createSessionPayload: {
+      instructorPasscode: 'syncdeck-instructor-passcode',
+    },
   })
   assert.equal(res.headers['cache-control'], 'no-store')
 

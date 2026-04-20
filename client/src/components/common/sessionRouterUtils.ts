@@ -125,6 +125,12 @@ export function buildSessionTeacherAuthenticateApiUrl(sessionId: string): string
   return `/api/session/${encodeURIComponent(sessionId)}/teacher-authenticate`
 }
 
+export function getTeacherJoinCreateSessionPayload(value: unknown): Record<string, unknown> | null {
+  const payload = getObjectRecord(value)
+  const createSessionPayload = getObjectRecord(payload?.createSessionPayload)
+  return createSessionPayload && !Array.isArray(createSessionPayload) ? createSessionPayload : null
+}
+
 export function buildPersistentTeacherManagePath(activityName: string, sessionId: string, queryString: string): string {
   // SyncDeck should resume from live session state instead of reusing permalink bootstrap params.
   const search = activityName === 'syncdeck' ? '' : queryString

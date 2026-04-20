@@ -33,6 +33,7 @@ import {
   loadPersistentSessionEntryGatewayContext,
   loadPersistentSessionEntryStatus,
 } from '../core/persistentSessionEntryGateway.js'
+import { buildCreateSessionBootstrapPayload } from '../core/createSessionBootstrapPayload.js'
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const MAX_SESSIONS_PER_COOKIE = 20
@@ -751,10 +752,16 @@ export function registerPersistentSessionRoutes({ app, sessions }: RegisterPersi
     writePersistentSessionsCookie(res, sessionEntries)
     await updatePersistentSessionUrlState(hash, finalUrlState)
 
+    const activeSessionData = isPlainObject(activeSession) && isPlainObject(activeSession.data)
+      ? activeSession.data
+      : {}
+    const createSessionPayload = buildCreateSessionBootstrapPayload(activityName, activeSessionData)
+
     res.json({
       success: true,
       activityName,
       sessionId,
+      ...(createSessionPayload ? { createSessionPayload } : {}),
     })
   })
 
