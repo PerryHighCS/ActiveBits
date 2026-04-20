@@ -238,6 +238,66 @@ void test('persistent session websocket decodes syncdeck presentationUrl before 
   })
 })
 
+void test('persistent session websocket sends configured create-session bootstrap payload to teacher client', async (t) => {
+  initializePersistentStorage(null)
+  await initializeActivityRegistry()
+
+  const sessionStore = new Map<string, SessionRecord>()
+  const sessions = {
+    async get(id: string) {
+      return sessionStore.get(id) ?? null
+    },
+    async set(id: string, value: SessionRecord) {
+      if (value.type === 'syncdeck') {
+        value.data.instructorPasscode = 'teacher-passcode-from-normalizer'
+      }
+      sessionStore.set(id, value)
+    },
+  }
+
+  let registeredHandler: ((socket: MockSocket, query: URLSearchParams, _wss: unknown) => void) | undefined
+  setupPersistentSessionWs({
+    register(pathname, handler) {
+      if (pathname === '/ws/persistent-session') {
+        registeredHandler = handler as (socket: MockSocket, query: URLSearchParams, _wss: unknown) => void
+      }
+    },
+  }, sessions)
+
+  assert.ok(registeredHandler)
+
+  const activityName = 'syncdeck'
+  const teacherCode = 'syncdeck-bootstrap-payload-code'
+  const presentationUrl = 'https://slides.example/deck'
+  const { hash, hashedTeacherCode } = generatePersistentHash(activityName, teacherCode)
+  t.after(async () => cleanupPersistentSession(hash))
+
+  await getOrCreateActivePersistentSession(activityName, hash, hashedTeacherCode)
+  await updatePersistentSessionUrlState(hash, {
+    selectedOptions: {
+      presentationUrl,
+    },
+  })
+
+  const socket = createMockSocket()
+  registeredHandler(socket, new URLSearchParams({ hash, activityName }), null)
+  await waitForAsyncWork()
+
+  socket.handlers.message?.(JSON.stringify({
+    type: 'verify-teacher-code',
+    teacherCode,
+  }))
+  await waitForAsyncWork()
+
+  const teacherAuthenticated = socket.sent
+    .map((payload) => JSON.parse(payload) as { type?: string; createSessionPayload?: Record<string, unknown> })
+    .find((payload) => payload.type === 'teacher-authenticated')
+
+  assert.deepEqual(teacherAuthenticated?.createSessionPayload, {
+    instructorPasscode: 'teacher-passcode-from-normalizer',
+  })
+})
+
 void test('updatePersistentSessionUrlState keeps existing selectedOptions when selectedOptions is omitted', async (t) => {
   initializePersistentStorage(null)
 

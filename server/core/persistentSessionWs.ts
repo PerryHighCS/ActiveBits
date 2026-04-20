@@ -45,6 +45,62 @@ interface IncomingPersistentMessage {
   teacherCode?: unknown
 }
 
+function getStringArrayField(value: unknown, key: string): string[] {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return []
+  }
+
+  const field = (value as Record<string, unknown>)[key]
+  return Array.isArray(field)
+    ? field.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : []
+}
+
+function buildCreateSessionBootstrapPayload(
+  activityName: string,
+  sessionData: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const activityConfig = getActivityConfig(activityName)
+  const createSessionBootstrap = (
+    activityConfig?.createSessionBootstrap != null
+    && typeof activityConfig.createSessionBootstrap === 'object'
+    && !Array.isArray(activityConfig.createSessionBootstrap)
+  )
+    ? activityConfig.createSessionBootstrap as Record<string, unknown>
+    : null
+
+  if (!createSessionBootstrap) {
+    return null
+  }
+
+  const responseFields = new Set<string>()
+  for (const field of getStringArrayField(createSessionBootstrap, 'historyState')) {
+    responseFields.add(field.trim())
+  }
+
+  const sessionStorageEntries = Array.isArray(createSessionBootstrap.sessionStorage)
+    ? createSessionBootstrap.sessionStorage
+    : []
+  for (const entry of sessionStorageEntries) {
+    if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue
+    }
+    const responseField = (entry as Record<string, unknown>).responseField
+    if (typeof responseField === 'string' && responseField.trim().length > 0) {
+      responseFields.add(responseField.trim())
+    }
+  }
+
+  const payload: Record<string, unknown> = {}
+  for (const field of responseFields) {
+    if (Object.hasOwn(sessionData, field)) {
+      payload[field] = sessionData[field]
+    }
+  }
+
+  return Object.keys(payload).length > 0 ? payload : null
+}
+
 function getSelectedOptionSessionDataValue(
   key: string,
   value: unknown,
@@ -265,6 +321,7 @@ async function handleTeacherCodeVerification(
   })
   newSession.type = persistentSession.activityName
   await sessions.set(newSession.id, newSession)
+  const createSessionPayload = buildCreateSessionBootstrapPayload(persistentSession.activityName, newSession.data)
 
   console.log(`Created session ${newSession.id} for persistent session ${hash}`)
 
@@ -275,6 +332,7 @@ async function handleTeacherCodeVerification(
     JSON.stringify({
       type: 'teacher-authenticated',
       sessionId: newSession.id,
+      ...(createSessionPayload ? { createSessionPayload } : {}),
     }),
   )
 
