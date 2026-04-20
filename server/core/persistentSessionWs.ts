@@ -13,6 +13,7 @@ import {
 } from './persistentSessions.js'
 import { createSession } from './sessions.js'
 import type { SessionStore as CoreSessionStore } from './sessions.js'
+import { buildCreateSessionBootstrapPayload } from './createSessionBootstrapPayload.js'
 import { buildSoloOnlyPolicyRejection } from './persistentSessionPolicyUtils.js'
 import { getActivityConfig } from '../activities/activityRegistry.js'
 import { normalizePossiblyEncodedHttpUrl } from './httpUrlUtils.js'
@@ -43,62 +44,6 @@ interface WsRouter {
 interface IncomingPersistentMessage {
   type?: string
   teacherCode?: unknown
-}
-
-function getStringArrayField(value: unknown, key: string): string[] {
-  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
-    return []
-  }
-
-  const field = (value as Record<string, unknown>)[key]
-  return Array.isArray(field)
-    ? field.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-    : []
-}
-
-function buildCreateSessionBootstrapPayload(
-  activityName: string,
-  sessionData: Record<string, unknown>,
-): Record<string, unknown> | null {
-  const activityConfig = getActivityConfig(activityName)
-  const createSessionBootstrap = (
-    activityConfig?.createSessionBootstrap != null
-    && typeof activityConfig.createSessionBootstrap === 'object'
-    && !Array.isArray(activityConfig.createSessionBootstrap)
-  )
-    ? activityConfig.createSessionBootstrap as Record<string, unknown>
-    : null
-
-  if (!createSessionBootstrap) {
-    return null
-  }
-
-  const responseFields = new Set<string>()
-  for (const field of getStringArrayField(createSessionBootstrap, 'historyState')) {
-    responseFields.add(field.trim())
-  }
-
-  const sessionStorageEntries = Array.isArray(createSessionBootstrap.sessionStorage)
-    ? createSessionBootstrap.sessionStorage
-    : []
-  for (const entry of sessionStorageEntries) {
-    if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) {
-      continue
-    }
-    const responseField = (entry as Record<string, unknown>).responseField
-    if (typeof responseField === 'string' && responseField.trim().length > 0) {
-      responseFields.add(responseField.trim())
-    }
-  }
-
-  const payload: Record<string, unknown> = {}
-  for (const field of responseFields) {
-    if (Object.hasOwn(sessionData, field)) {
-      payload[field] = sessionData[field]
-    }
-  }
-
-  return Object.keys(payload).length > 0 ? payload : null
 }
 
 function getSelectedOptionSessionDataValue(
