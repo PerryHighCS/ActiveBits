@@ -46,7 +46,10 @@ import {
   shouldHandleEmbeddedOverlayNavigationPointerDown,
   shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
-import { SYNCDECK_IFRAME_SANDBOX } from '../shared/iframeSandbox.js'
+import {
+  SYNCDECK_IFRAME_SANDBOX,
+  SYNCDECK_PRESENTATION_IFRAME_SANDBOX_WITH_UNSANDBOXED_POPUPS,
+} from '../shared/iframeSandbox.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
 import EmbeddedOverlayNavigationIcon from '../shared/EmbeddedOverlayNavigationIcon.js'
 const isDevMode = import.meta.env?.DEV === true
@@ -3646,7 +3649,7 @@ const SyncDeckStudent: FC = () => {
           src={presentationUrl}
           className="w-full h-full"
           allow="fullscreen"
-          sandbox={SYNCDECK_IFRAME_SANDBOX}
+          sandbox={SYNCDECK_PRESENTATION_IFRAME_SANDBOX_WITH_UNSANDBOXED_POPUPS}
           onLoad={handleIframeLoad}
         />
 

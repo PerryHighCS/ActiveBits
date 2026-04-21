@@ -16,10 +16,10 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-04-21
 - Area: client | activities | syncdeck
-- Discovery: SyncDeck presentation and embedded-activity iframes need `allow-popups-to-escape-sandbox` in addition to `allow-popups` if sandboxed deck links should open real browser tabs.
-- Why it matters: `allow-popups` alone permits popup creation but keeps the new browsing context sandboxed, which breaks normal outbound navigation for presentation-authored external links.
+- Discovery: SyncDeck should scope `allow-popups-to-escape-sandbox` to instructor-configured presentation iframes only; embedded/internal iframes should keep the stricter sandbox without popup escape.
+- Why it matters: `allow-popups` alone permits popup creation but keeps the new browsing context sandboxed, which breaks normal outbound navigation for presentation-authored external links. Restricting popup escape to presentation iframes preserves the narrower trust boundary for internal child activities.
 - Evidence: `activities/syncdeck/client/shared/iframeSandbox.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
-- Follow-up action: Reuse the shared sandbox constant for future interactive SyncDeck iframes, and avoid adding top-navigation permissions unless a broader trust change is explicitly approved.
+- Follow-up action: Reuse the stricter base sandbox for embedded/internal SyncDeck iframes by default, and only opt into the presentation-specific escape token when unsandboxed new tabs are an explicit product requirement.
 - Owner: Codex
 
 - Date: 2026-03-27
