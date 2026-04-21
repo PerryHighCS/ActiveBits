@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import type { ActivityRegistryEntry } from '../../../../types/activity.js'
 import type { JSX } from 'react'
 import { JSDOM } from 'jsdom'
-import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ActivityLauncher from './ActivityLauncher.js'
 
 const videoSyncActivity: ActivityRegistryEntry = {
@@ -77,6 +77,21 @@ function ManagedRouteProbe(): JSX.Element {
     <div>
       Managed {params.activityId} {params.sessionId} {location.search} {instructorPasscode}
     </div>
+  )
+}
+
+function LaunchRouteNavigator(): JSX.Element {
+  const navigate = useNavigate()
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigate('/launch/raffle?start=1')
+      }}
+    >
+      Go to raffle launcher
+    </button>
   )
 }
 
@@ -226,6 +241,51 @@ void test('ActivityLauncher still starts instructor-managed activities when stan
       assert.deepEqual(fetchCalls, ['/api/raffle/create'])
       assert.notEqual(rendered.queryByText(/Managed raffle session-raffle/i), null)
     })
+  } finally {
+    cleanup()
+  }
+})
+
+void test('ActivityLauncher resets launch state when navigating between launcher URLs in one SPA session', async (t) => {
+  const restoreDom = installDomEnvironment('https://bits.example/launch/video-sync?start=1&sourceUrl=not-a-url')
+  const previousFetch = globalThis.fetch
+  const fetchCalls: string[] = []
+
+  globalThis.fetch = (async (input) => {
+    fetchCalls.push(String(input))
+    return new Response(JSON.stringify({ id: 'session-raffle-2' }), { status: 200 })
+  }) as typeof fetch
+
+  t.after(() => {
+    globalThis.fetch = previousFetch
+    restoreDom()
+  })
+
+  const { cleanup, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    const rendered = render(
+      <MemoryRouter initialEntries={['/launch/video-sync?start=1&sourceUrl=not-a-url']}>
+        <LaunchRouteNavigator />
+        <Routes>
+          <Route
+            path="/launch/:activityId"
+            element={<ActivityLauncher activityRegistry={[videoSyncActivity, instructorManagedOnlyActivity]} />}
+          />
+          <Route path="/manage/:activityId/:sessionId" element={<ManagedRouteProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    assert.notEqual(rendered.queryByText(/YouTube URL must be a valid http\(s\) URL/i), null)
+    assert.deepEqual(fetchCalls, [])
+
+    fireEvent.click(rendered.getByRole('button', { name: /go to raffle launcher/i }))
+
+    await waitFor(() => {
+      assert.deepEqual(fetchCalls, ['/api/raffle/create'])
+      assert.notEqual(rendered.queryByText(/Managed raffle session-raffle-2/i), null)
+    })
+    assert.equal(rendered.queryByText(/This launch link needs attention/i), null)
   } finally {
     cleanup()
   }

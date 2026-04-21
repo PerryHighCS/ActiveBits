@@ -26,32 +26,31 @@ interface ActivityLauncherProps {
 
 type LaunchStatus = 'idle' | 'starting' | 'failed' | 'started'
 
+interface ResolvedLaunchOptions {
+  errors: string[]
+  selectedOptions: Record<string, string>
+}
+
 function getActivityTitle(activity: ActivityRegistryEntry): string {
   return activity.title || activity.name
 }
 
-export default function ActivityLauncher({
-  activityRegistry = activities,
-}: ActivityLauncherProps = {}) {
-  const { activityId } = useParams<ActivityLauncherParams>()
-  const location = useLocation()
+function ActivityLauncherBody({
+  activity,
+  autoStart,
+  launchOptions,
+}: {
+  activity: ActivityRegistryEntry
+  autoStart: boolean
+  launchOptions: ResolvedLaunchOptions
+}) {
   const navigate = useNavigate()
   const autoStartAttemptedRef = useRef(false)
   const [status, setStatus] = useState<LaunchStatus>('idle')
   const [error, setError] = useState<string | null>(null)
 
-  const activity = useMemo(
-    () => activityRegistry.find((entry) => entry.id === activityId) ?? null,
-    [activityId, activityRegistry],
-  )
-  const autoStart = isStandaloneActivityLauncherAutoStart(location.search)
-  const launchOptions = useMemo(
-    () => resolveStandaloneActivityLauncherOptions(activity?.deepLinkOptions, location.search),
-    [activity?.deepLinkOptions, location.search],
-  )
-
   const startActivity = useCallback(async () => {
-    if (activity == null || status === 'starting') {
+    if (status === 'starting') {
       return
     }
 
@@ -82,7 +81,7 @@ export default function ActivityLauncher({
   }, [activity, launchOptions.selectedOptions, navigate, status])
 
   useEffect(() => {
-    if (!autoStart || autoStartAttemptedRef.current || activity == null || launchOptions.errors.length > 0) {
+    if (!autoStart || autoStartAttemptedRef.current || launchOptions.errors.length > 0) {
       return
     }
 
@@ -90,16 +89,7 @@ export default function ActivityLauncher({
     queueMicrotask(() => {
       void startActivity()
     })
-  }, [activity, autoStart, launchOptions.errors.length, startActivity])
-
-  if (activityId == null || activityId.length === 0 || activity == null) {
-    return (
-      <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-12">
-        <h1 className="text-2xl font-bold text-gray-900">Activity not found</h1>
-        <p className="text-gray-700">Check the launch link and try again.</p>
-      </main>
-    )
-  }
+  }, [autoStart, launchOptions.errors.length, startActivity])
 
   const activityTitle = getActivityTitle(activity)
   const isStarting = status === 'starting'
@@ -151,5 +141,40 @@ export default function ActivityLauncher({
         </Button>
       )}
     </main>
+  )
+}
+
+export default function ActivityLauncher({
+  activityRegistry = activities,
+}: ActivityLauncherProps = {}) {
+  const { activityId } = useParams<ActivityLauncherParams>()
+  const location = useLocation()
+
+  const activity = useMemo(
+    () => activityRegistry.find((entry) => entry.id === activityId) ?? null,
+    [activityId, activityRegistry],
+  )
+  const autoStart = isStandaloneActivityLauncherAutoStart(location.search)
+  const launchOptions = useMemo(
+    () => resolveStandaloneActivityLauncherOptions(activity?.deepLinkOptions, location.search),
+    [activity?.deepLinkOptions, location.search],
+  )
+
+  if (activityId == null || activityId.length === 0 || activity == null) {
+    return (
+      <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-12">
+        <h1 className="text-2xl font-bold text-gray-900">Activity not found</h1>
+        <p className="text-gray-700">Check the launch link and try again.</p>
+      </main>
+    )
+  }
+
+  return (
+    <ActivityLauncherBody
+      key={`${activity.id}:${location.search}`}
+      activity={activity}
+      autoStart={autoStart}
+      launchOptions={launchOptions}
+    />
   )
 }
