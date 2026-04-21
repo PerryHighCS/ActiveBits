@@ -46,6 +46,7 @@ import {
   shouldHandleEmbeddedOverlayNavigationPointerDown,
   shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
+import { SYNCDECK_IFRAME_SANDBOX } from '../shared/iframeSandbox.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
 import EmbeddedOverlayNavigationIcon from '../shared/EmbeddedOverlayNavigationIcon.js'
 const isDevMode = import.meta.env?.DEV === true
@@ -3645,7 +3646,7 @@ const SyncDeckStudent: FC = () => {
           src={presentationUrl}
           className="w-full h-full"
           allow="fullscreen"
-          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+          sandbox={SYNCDECK_IFRAME_SANDBOX}
           onLoad={handleIframeLoad}
         />
 
@@ -3664,7 +3665,7 @@ const SyncDeckStudent: FC = () => {
                 src={`/${encodeURIComponent(activeEmbeddedActivity.childSessionId)}`}
                 className="w-full h-full border-0"
                 allow="fullscreen"
-                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                sandbox={SYNCDECK_IFRAME_SANDBOX}
                 onLoad={sendSyncContextToEmbeddedIframe}
               />
             </div>
@@ -3681,7 +3682,7 @@ const SyncDeckStudent: FC = () => {
                   src={activeSoloOverlay.src}
                   className="w-full h-full border-0"
                   allow="fullscreen"
-                  sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                  sandbox={SYNCDECK_IFRAME_SANDBOX}
                   onLoad={sendSyncContextToEmbeddedIframe}
                 />
               </div>
