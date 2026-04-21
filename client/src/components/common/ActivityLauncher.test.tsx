@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import type { ActivityRegistryEntry } from '../../../../types/activity.js'
 import type { JSX } from 'react'
 import { JSDOM } from 'jsdom'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { BrowserRouter, MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import ActivityLauncher from './ActivityLauncher.js'
 
 const videoSyncActivity: ActivityRegistryEntry = {
@@ -77,21 +77,6 @@ function ManagedRouteProbe(): JSX.Element {
     <div>
       Managed {params.activityId} {params.sessionId} {location.search} {instructorPasscode}
     </div>
-  )
-}
-
-function LaunchRouteNavigator(): JSX.Element {
-  const navigate = useNavigate()
-
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        void navigate('/launch/raffle?start=1')
-      }}
-    >
-      Go to raffle launcher
-    </button>
   )
 }
 
@@ -313,11 +298,10 @@ void test('ActivityLauncher resets launch state when navigating between launcher
     restoreDom()
   })
 
-  const { cleanup, fireEvent, render, waitFor } = await import('@testing-library/react')
+  const { act, cleanup, render, waitFor } = await import('@testing-library/react')
   try {
     const rendered = render(
-      <MemoryRouter initialEntries={['/launch/video-sync?start=1&sourceUrl=not-a-url']}>
-        <LaunchRouteNavigator />
+      <BrowserRouter>
         <Routes>
           <Route
             path="/launch/:activityId"
@@ -325,13 +309,16 @@ void test('ActivityLauncher resets launch state when navigating between launcher
           />
           <Route path="/manage/:activityId/:sessionId" element={<ManagedRouteProbe />} />
         </Routes>
-      </MemoryRouter>,
+      </BrowserRouter>,
     )
 
     assert.notEqual(rendered.queryByText(/YouTube URL must be a valid http\(s\) URL/i), null)
     assert.deepEqual(fetchCalls, [])
 
-    fireEvent.click(rendered.getByRole('button', { name: /go to raffle launcher/i }))
+    await act(async () => {
+      window.history.pushState({}, '', '/launch/raffle?start=1')
+      window.dispatchEvent(new window.PopStateEvent('popstate'))
+    })
 
     await waitFor(() => {
       assert.deepEqual(fetchCalls, ['/api/raffle/create'])
