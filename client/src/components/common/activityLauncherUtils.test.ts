@@ -107,4 +107,25 @@ void test('createStandaloneActivitySession rejects failed or malformed create re
     createStandaloneActivitySession('video-sync', async () => new Response('{}', { status: 200 })),
     /Failed to create session/,
   )
+  await assert.rejects(
+    createStandaloneActivitySession('video-sync', async () => new Response('[]', { status: 200 })),
+    /Failed to create session/,
+  )
+})
+
+void test('createStandaloneActivitySession does not clone server JSON into a new object', async () => {
+  const payload = JSON.parse('{"id":"session-1","__proto__":{"polluted":true},"instructorPasscode":"pass-1"}') as Record<string, unknown>
+
+  const result = await createStandaloneActivitySession(
+    'video-sync',
+    async () => new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  )
+
+  assert.equal(result.id, 'session-1')
+  assert.equal(result.instructorPasscode, 'pass-1')
+  assert.equal(Object.hasOwn(result, '__proto__'), true)
+  assert.equal(({} as { polluted?: boolean }).polluted, undefined)
 })

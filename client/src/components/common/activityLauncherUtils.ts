@@ -89,13 +89,15 @@ export async function createStandaloneActivitySession(
     throw new Error('Failed to create session')
   }
 
-  const payload = (await response.json()) as Record<string, unknown>
+  const rawPayload = (await response.json()) as unknown
+  if (typeof rawPayload !== 'object' || rawPayload === null || Array.isArray(rawPayload)) {
+    throw new Error('Failed to create session')
+  }
+
+  const payload = rawPayload as Record<string, unknown>
   if (typeof payload.id !== 'string' || payload.id.length === 0) {
     throw new Error('Failed to create session')
   }
 
-  return {
-    ...payload,
-    id: payload.id,
-  }
+  return payload as ActivitySessionCreateResponse
 }
