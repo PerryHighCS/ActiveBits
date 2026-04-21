@@ -6,6 +6,7 @@ import ManageDashboard from './components/common/ManageDashboard'
 import StatusDashboard from './components/common/StatusDashboard'
 import LoadingFallback from './components/common/LoadingFallback'
 import ManagedSessionRoute from './components/common/ManagedSessionRoute'
+import ActivityLauncher from './components/common/ActivityLauncher'
 import { activities } from './activities'
 import { findFooterActivity } from './appUtils'
 
@@ -49,6 +50,7 @@ function AppShell() {
         <Routes>
           <Route path="/status" element={<StatusDashboard />} />
           <Route path="/manage" element={<ManageDashboard />} />
+          <Route path="/launch/:activityId" element={<ActivityLauncher />} />
           <Route path="/session-ended" element={<SessionEnded />} />
 
           {activities.map((activity) => {

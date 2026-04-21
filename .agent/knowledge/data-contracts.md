@@ -490,3 +490,12 @@ Document API and data-shape assumptions that must stay compatible over time.
 - Evidence (schema/tests/path): `server/core/createSessionBootstrapPayload.ts`; `server/routes/persistentSessionRoutes.ts`; `server/persistentSessionRoutes.test.ts`; `client/src/components/common/SessionRouter.tsx`; `client/src/components/common/sessionRouterUtils.ts`; `client/src/components/common/sessionRouterUtils.test.ts`
 - Follow-up action: Keep Teacher Join and waiting-room teacher authentication bootstrap behavior aligned when future activities add manager credentials to `createSessionBootstrap`.
 - Owner: Codex
+
+- Date: 2026-04-20
+- Surface: Standalone activity launcher
+- Contract: `/launch/:activityId` is a client-rendered instructor launcher for normal temporary sessions. Loading the route is non-mutating; the client creates a session with `POST /api/:activityId/create` only after a manual button click or explicit `?start=1`, then redirects to `/manage/:activityId/:sessionId`.
+- Compatibility constraints: Launcher query params are filtered through the activity's `deepLinkOptions`; unknown params and the control param `start` do not affect runtime behavior. Valid selected options are preserved on the manager URL so activities with existing query bootstrap support, such as Video Sync `sourceUrl`, can reuse the same manager path. The launcher uses the shared create-session bootstrap persistence helpers so activities that declare `createSessionBootstrap` receive the same immediate manager credentials as `/manage`.
+- Validation rules: Client utility tests cover `start=1`, query filtering, URL validation, manager-path building, and create-response validation. Component tests cover auto-start, manual start, invalid launch options, navigation state, and manager query preservation.
+- Evidence (schema/tests/path): `client/src/components/common/ActivityLauncher.tsx`; `client/src/components/common/activityLauncherUtils.ts`; `client/src/components/common/ActivityLauncher.test.tsx`; `client/src/components/common/activityLauncherUtils.test.ts`; `client/src/App.tsx`
+- Follow-up action: If future activities need server-side launch option hydration beyond manager query params, add an explicit activity-owned contract instead of copying arbitrary launcher query params into session data.
+- Owner: Codex

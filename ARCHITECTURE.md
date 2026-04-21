@@ -51,6 +51,13 @@ ActiveBits/
 5. Teacher manages the activity from the manager view
 6. Additional instructors can use `Teacher Join` on `/` with the session ID plus teacher code to recover the live manage view
 
+Teachers can also open `/launch/{activity-id}` to start the same temporary-session flow
+from a URL-addressable launcher. The default launcher page requires a button click before
+creating a session. Adding `?start=1` lets trusted instructor-authored links, such as links
+inside a SyncDeck presentation, create the session from the ActiveBits client page and
+redirect to `/manage/{activity-id}/{session-id}`. The GET route itself does not create a
+session.
+
 ### Teacher Flow - Persistent Sessions
 1. Navigate to `/manage`
 2. Click "Make Permanent Link" for any activity
@@ -259,6 +266,7 @@ Client entries are lazy-loaded with `React.lazy` so each activity ships in its o
 Routes are automatically generated in `App.tsx` based on registered activities:
 - `/manage/{activity-id}` - Manager view without a sessionId (manager components should create sessions via dashboard APIs)
 - `/manage/{activity-id}/{session-id}` - Manage existing session
+- `/launch/{activity-id}` - Standalone instructor launcher that creates a normal temporary session via `POST /api/{activity-id}/create`, then redirects to the manager route; query params declared in the activity's `deepLinkOptions` are filtered and carried to the manager URL
 
 ### Adding a New Activity
 

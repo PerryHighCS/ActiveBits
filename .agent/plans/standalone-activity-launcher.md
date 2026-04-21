@@ -1,6 +1,6 @@
 # Standalone Activity Launcher Plan
 
-## Status: Design / Pre-Implementation
+## Status: Initial Implementation In Progress
 
 This document sketches a standalone activity launcher route that lets an instructor
 start a normal ActiveBits activity session from a link, including a link embedded in a
@@ -215,21 +215,20 @@ tab, and the instructor can return to the deck when ready.
 
 ## Implementation Checklist
 
-- [ ] Audit the current "Start session now" client/server path and identify the exact
+- [x] Audit the current "Start session now" client/server path and identify the exact
   reusable create-session API call.
-- [ ] Add a shared route for `/launch/:activityId`.
-- [ ] Build a small `ActivityLauncher` component with manual and `start=1` modes.
-- [ ] Reuse existing activity registry/config data to resolve the activity and manager
+- [x] Add a shared route for `/launch/:activityId`.
+- [x] Build a small `ActivityLauncher` component with manual and `start=1` modes.
+- [x] Reuse existing activity registry/config data to resolve the activity and manager
   destination.
-- [ ] Define or reuse an activity-owned selected-options contract for launch query params.
-- [ ] Validate query params before creating a session.
-- [ ] POST to the existing create-session endpoint and redirect to
+- [x] Define or reuse an activity-owned selected-options contract for launch query params.
+- [x] Validate query params before creating a session.
+- [x] POST to the existing create-session endpoint and redirect to
   `/manage/:activityId/:sessionId`.
-- [ ] Add unit coverage for launcher utility parsing, unknown activity handling,
+- [x] Add unit coverage for launcher utility parsing, unknown activity handling,
   invalid query params, and `start=1` single-submit behavior.
 - [ ] Add browser-level coverage if routing/fetch/storage behavior differs from the
   existing home-page start flow.
-- [ ] Update `README.md`, `ARCHITECTURE.md`, and `DEPLOYMENT.md` if the launcher changes
+- [x] Update `README.md`, `ARCHITECTURE.md`, and `DEPLOYMENT.md` if the launcher changes
   documented runtime behavior.
 - [ ] Add or update SyncDeck authoring docs with example presentation links.
-
