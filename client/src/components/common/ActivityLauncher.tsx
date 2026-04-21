@@ -55,11 +55,6 @@ export default function ActivityLauncher({
       return
     }
 
-    if (launchOptions.errors.length > 0) {
-      setError('Fix the launch link before starting this activity.')
-      return
-    }
-
     setStatus('starting')
     setError(null)
 
@@ -84,7 +79,7 @@ export default function ActivityLauncher({
       setStatus('failed')
       setError('Could not start this activity. Please try again.')
     }
-  }, [activity, launchOptions.errors.length, launchOptions.selectedOptions, navigate, status])
+  }, [activity, launchOptions.selectedOptions, navigate, status])
 
   useEffect(() => {
     if (!autoStart || autoStartAttemptedRef.current || activity == null || launchOptions.errors.length > 0) {

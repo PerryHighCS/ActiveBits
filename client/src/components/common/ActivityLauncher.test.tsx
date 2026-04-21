@@ -28,6 +28,16 @@ const videoSyncActivity: ActivityRegistryEntry = {
   ManagerComponent: (() => null),
 }
 
+const instructorManagedOnlyActivity: ActivityRegistryEntry = {
+  ...videoSyncActivity,
+  id: 'raffle',
+  name: 'Raffle',
+  title: 'Raffle',
+  standaloneEntry: {
+    enabled: false,
+  },
+}
+
 function installDomEnvironment(url: string) {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { url })
   const previousWindow = globalThis.window
@@ -180,6 +190,42 @@ void test('ActivityLauncher blocks invalid launch options before creating a sess
     assert.notEqual(rendered.queryByText(/YouTube URL must be a valid http\(s\) URL/i), null)
     assert.equal((rendered.getByRole('button', { name: /start session/i }) as HTMLButtonElement).disabled, true)
     assert.equal(fetchCallCount, 0)
+  } finally {
+    cleanup()
+  }
+})
+
+void test('ActivityLauncher still starts instructor-managed activities when standalone entry is disabled', async (t) => {
+  const restoreDom = installDomEnvironment('https://bits.example/launch/raffle?start=1')
+  const previousFetch = globalThis.fetch
+  const fetchCalls: string[] = []
+
+  globalThis.fetch = (async (input) => {
+    fetchCalls.push(String(input))
+    return new Response(JSON.stringify({ id: 'session-raffle' }), { status: 200 })
+  }) as typeof fetch
+
+  t.after(() => {
+    globalThis.fetch = previousFetch
+    restoreDom()
+  })
+
+  const { cleanup, render } = await import('@testing-library/react')
+  try {
+    const rendered = render(
+      <MemoryRouter initialEntries={['/launch/raffle?start=1']}>
+        <Routes>
+          <Route path="/launch/:activityId" element={<ActivityLauncher activityRegistry={[instructorManagedOnlyActivity]} />} />
+          <Route path="/manage/:activityId/:sessionId" element={<ManagedRouteProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const { waitFor } = await import('@testing-library/react')
+    await waitFor(() => {
+      assert.deepEqual(fetchCalls, ['/api/raffle/create'])
+      assert.notEqual(rendered.queryByText(/Managed raffle session-raffle/i), null)
+    })
   } finally {
     cleanup()
   }
