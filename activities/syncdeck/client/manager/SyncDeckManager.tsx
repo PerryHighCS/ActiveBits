@@ -21,6 +21,9 @@ import {
   shouldHandleEmbeddedOverlayNavigationPointerDown,
   shouldNavigateEmbeddedOverlayOnPointerDown,
 } from '../shared/embeddedOverlayNavigation.js'
+import {
+  SYNCDECK_PRESENTATION_IFRAME_SANDBOX_WITH_UNSANDBOXED_POPUPS,
+} from '../shared/iframeSandbox.js'
 import { useEmbeddedOverlayNavigationInteraction } from '../shared/useEmbeddedOverlayNavigationInteraction.js'
 import EmbeddedOverlayNavigationIcon from '../shared/EmbeddedOverlayNavigationIcon.js'
 import {
@@ -4256,7 +4259,7 @@ const SyncDeckManager: FC = () => {
                   src={presentationUrl}
                   className="w-full h-full"
                   allow="fullscreen"
-                  sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                  sandbox={SYNCDECK_PRESENTATION_IFRAME_SANDBOX_WITH_UNSANDBOXED_POPUPS}
                   onLoad={handlePresentationIframeLoad}
                 />
 

@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-04-21
+- Area: client | activities | syncdeck
+- Discovery: SyncDeck should scope `allow-popups-to-escape-sandbox` to instructor-configured presentation iframes only; embedded/internal iframes should keep the stricter sandbox without popup escape.
+- Why it matters: `allow-popups` alone permits popup creation but keeps the new browsing context sandboxed, which breaks normal outbound navigation for presentation-authored external links. Restricting popup escape to presentation iframes preserves the narrower trust boundary for internal child activities.
+- Evidence: `activities/syncdeck/client/shared/iframeSandbox.ts`; `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: Reuse the stricter base sandbox for embedded/internal SyncDeck iframes by default, and only opt into the presentation-specific escape token when unsandboxed new tabs are an explicit product requirement.
+- Owner: Codex
+
 - Date: 2026-03-27
 - Area: server | activities | syncdeck
 - Discovery: SyncDeck embedded child sessions must refresh lifetime in both directions: active parent SyncDeck traffic should touch launched child sessions, and any embedded child session read should also refresh the parent session via `embeddedParentSessionId`.
