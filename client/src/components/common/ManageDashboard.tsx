@@ -16,7 +16,6 @@ import {
   buildManageDashboardUtilityUrl,
   buildPersistentSessionKey,
   storeCreateSessionBootstrapPayload,
-  buildCreateSessionBootstrapHistoryState,
   describeSelectedOptions,
   filterPersistentEntryPolicyOptionsForActivity,
   initializeDeepLinkOptions,
@@ -30,6 +29,11 @@ import {
   validateDeepLinkSelection,
   type DeepLinkSelection,
 } from './manageDashboardUtils'
+import {
+  buildStandaloneActivityLauncherManagePath,
+  buildStandaloneActivityLauncherState,
+  createStandaloneActivitySession,
+} from './activityLauncherUtils'
 import { resolveCustomPersistentLinkBuilder } from './manageDashboardViewUtils'
 import {
   getPersistentSessionEntryPolicyDescription,
@@ -57,11 +61,6 @@ interface PersistentSession {
 
 interface PersistentSessionListResponse {
   sessions?: PersistentSession[]
-}
-
-interface CreateSessionResponse {
-  id?: string
-  [key: string]: unknown
 }
 
 interface PersistentLinkCreateResponse {
@@ -267,36 +266,17 @@ export default function ManageDashboard({
     setSessionError(null)
 
     try {
-      const response = await fetch(`/api/${activityId}/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
+      const activity = getActivityById(activityId)
+      const payload = await createStandaloneActivitySession(activityId)
+      const navigationState = activity ? buildStandaloneActivityLauncherState(activity, payload) : null
 
-      if (!response.ok) {
-        throw new Error('Failed to create session')
+      persistCreateSessionBootstrapToSessionStorage(activity?.createSessionBootstrap, payload.id, payload)
+      if (navigationState != null) {
+        storeCreateSessionBootstrapPayload(activityId, payload.id, navigationState.createSessionPayload)
       }
 
-      const payload = (await response.json()) as CreateSessionResponse
-      if (!payload.id) {
-        throw new Error('Failed to create session')
-      }
-
-      const createSessionBootstrap = getActivityById(activityId)?.createSessionBootstrap
-      const historyStatePayload = buildCreateSessionBootstrapHistoryState(createSessionBootstrap, payload)
-
-      persistCreateSessionBootstrapToSessionStorage(createSessionBootstrap, payload.id, payload)
-      if (historyStatePayload) {
-        storeCreateSessionBootstrapPayload(activityId, payload.id, historyStatePayload)
-      }
-
-      void navigate(`/manage/${activityId}/${payload.id}`, {
-        ...(historyStatePayload
-          ? {
-            state: {
-              createSessionPayload: historyStatePayload,
-            },
-          }
-          : {}),
+      void navigate(buildStandaloneActivityLauncherManagePath(activityId, payload.id, {}), {
+        ...(navigationState ? { state: navigationState } : {}),
       })
     } catch (createError) {
       console.error(createError)

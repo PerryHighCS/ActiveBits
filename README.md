@@ -41,3 +41,4 @@ Additional operational docs:
 
 - Student site: <https://bits.mycode.run>
 - Instructor dashboard: <https://bits.mycode.run/manage>
+- Standalone activity launcher: `https://bits.mycode.run/launch/<activity-id>` with optional `?start=1` for instructor-authored links that should immediately start a new session and redirect to the activity manager.
