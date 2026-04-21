@@ -46,14 +46,16 @@ function ActivityLauncherBody({
 }) {
   const navigate = useNavigate()
   const autoStartAttemptedRef = useRef(false)
+  const startInFlightRef = useRef(false)
   const [status, setStatus] = useState<LaunchStatus>('idle')
   const [error, setError] = useState<string | null>(null)
 
   const startActivity = useCallback(async () => {
-    if (status === 'starting') {
+    if (status === 'starting' || startInFlightRef.current) {
       return
     }
 
+    startInFlightRef.current = true
     setStatus('starting')
     setError(null)
 
@@ -77,6 +79,8 @@ function ActivityLauncherBody({
       console.error(launchError)
       setStatus('failed')
       setError('Could not start this activity. Please try again.')
+    } finally {
+      startInFlightRef.current = false
     }
   }, [activity, launchOptions.selectedOptions, navigate, status])
 

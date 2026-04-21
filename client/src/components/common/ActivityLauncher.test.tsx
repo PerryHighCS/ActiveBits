@@ -177,6 +177,58 @@ void test('ActivityLauncher waits for manual start when start=1 is absent', asyn
   }
 })
 
+void test('ActivityLauncher ignores rapid double-clicks while a session create request is in flight', async (t) => {
+  const restoreDom = installDomEnvironment('https://bits.example/launch/video-sync')
+  const previousFetch = globalThis.fetch
+  const fetchCalls: string[] = []
+  let resolveRequest!: (response: Response) => void
+
+  globalThis.fetch = (async (input) => {
+    fetchCalls.push(String(input))
+    return await new Promise<Response>((resolve) => {
+      resolveRequest = resolve
+    })
+  }) as typeof fetch
+
+  t.after(() => {
+    globalThis.fetch = previousFetch
+    restoreDom()
+  })
+
+  const { cleanup, fireEvent, render, waitFor } = await import('@testing-library/react')
+  try {
+    const rendered = render(
+      <MemoryRouter initialEntries={['/launch/video-sync']}>
+        <Routes>
+          <Route path="/launch/:activityId" element={<ActivityLauncher activityRegistry={[videoSyncActivity]} />} />
+          <Route path="/manage/:activityId/:sessionId" element={<ManagedRouteProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const startButton = rendered.getByRole('button', { name: /start session/i })
+    fireEvent.click(startButton)
+    fireEvent.click(startButton)
+
+    await waitFor(() => {
+      assert.deepEqual(fetchCalls, ['/api/video-sync/create'])
+    })
+
+    resolveRequest(
+      new Response(JSON.stringify({ id: 'session-double-click' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await waitFor(() => {
+      assert.notEqual(rendered.queryByText(/Managed video-sync session-double-click/i), null)
+    })
+  } finally {
+    cleanup()
+  }
+})
+
 void test('ActivityLauncher blocks invalid launch options before creating a session', async (t) => {
   const restoreDom = installDomEnvironment('https://bits.example/launch/video-sync?start=1&sourceUrl=not-a-url')
   const previousFetch = globalThis.fetch
