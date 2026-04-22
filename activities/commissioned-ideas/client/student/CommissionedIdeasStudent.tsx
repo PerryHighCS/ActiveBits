@@ -1,18 +1,148 @@
+import { useEffect, useRef, useState } from 'react'
+import {
+  persistSessionParticipantIdentity,
+  resolveInitialEntryParticipantIdentity,
+} from '@src/components/common/entryParticipantIdentityUtils'
+import { useSessionEndedHandler } from '@src/hooks/useSessionEndedHandler'
+import { useStudentSession } from '../hooks/useCommissionedIdeasSession'
+import RegistrationForm from './RegistrationForm'
+import StudentRoster from './StudentRoster'
+
 interface SessionData {
   sessionId?: string
   data?: Record<string, unknown>
 }
 
 export default function CommissionedIdeasStudent({ sessionData }: { sessionData: SessionData }) {
+  const sessionId = sessionData?.sessionId ?? null
+  const attachSessionEndedHandler = useSessionEndedHandler()
+  const mountedRef = useRef(true)
+
+  // ── Identity state ──────────────────────────────────────────────────────────
+  const [studentName, setStudentName] = useState('')
+  const [studentId, setStudentId] = useState<string | null>(null)
+  const [nameSubmitted, setNameSubmitted] = useState(false)
+  const [registered, setRegistered] = useState(false)
+  const [identityResolved, setIdentityResolved] = useState(false)
+
+  // ── Resolve stored identity from localStorage (reconnect support) ───────────
+  useEffect(() => {
+    if (!sessionId) return
+    mountedRef.current = true
+
+    void (async () => {
+      try {
+        const identity = await resolveInitialEntryParticipantIdentity({
+          activityName: 'commissioned-ideas',
+          sessionId,
+          isSoloSession: false,
+          localStorage: window.localStorage,
+          sessionStorage: window.sessionStorage,
+        })
+        if (!mountedRef.current) return
+        setStudentName(identity.studentName)
+        setStudentId(identity.studentId)
+        setNameSubmitted(identity.nameSubmitted)
+        // Restore registered state so a returning student reconnects directly
+        // to the live roster without re-entering the registration form.
+        if (identity.studentId) {
+          setRegistered(true)
+        }
+      } catch {
+        // non-fatal — fall through to RegistrationForm
+      } finally {
+        if (mountedRef.current) setIdentityResolved(true)
+      }
+    })()
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [sessionId])
+
+  // ── WS connection (only after registered) ───────────────────────────────────
+  const { snapshot, connect, disconnect } = useStudentSession({
+    sessionId: registered ? sessionId : null,
+    participantId: studentId,
+    attachSessionEndedHandler,
+  })
+
+  useEffect(() => {
+    if (!registered || !sessionId) return
+    connect()
+    return () => disconnect()
+  }, [registered, sessionId, connect, disconnect])
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+  const handleRegistered = (participantId: string, name: string) => {
+    setStudentId(participantId)
+    setStudentName(name)
+    setRegistered(true)
+    if (sessionId) {
+      persistSessionParticipantIdentity(window.localStorage, sessionId, name, participantId)
+    }
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  if (!sessionId) {
+    return <div className="p-6 text-gray-500">Loading session…</div>
+  }
+
+  if (!identityResolved) {
+    return <div className="p-6 text-gray-500">Loading…</div>
+  }
+
+  if (!nameSubmitted || !registered) {
+    return (
+      <RegistrationForm
+        sessionId={sessionId}
+        initialName={studentName}
+        initialParticipantId={studentId}
+        onRegistered={handleRegistered}
+      />
+    )
+  }
+
+  const phase = snapshot?.phase ?? 'registration'
+  const participants = snapshot?.participantRoster ?? {}
+
   return (
-    <div className="p-6 max-w-2xl mx-auto">
-      <h2 className="text-2xl font-bold mb-4">Commissioned Ideas</h2>
-      <p className="text-gray-500">
-        Student view coming in Phase 2+
-      </p>
-      {sessionData?.sessionId && (
-        <p className="mt-2 text-sm font-mono text-gray-400">Session: {sessionData.sessionId}</p>
-      )}
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-white border-b border-gray-200 px-6 py-4">
+        <h1 className="text-xl font-bold text-gray-800">Commissioned Ideas</h1>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Joined as <span className="font-medium text-amber-700">{studentName}</span>
+        </p>
+      </div>
+
+      <div className="max-w-2xl mx-auto">
+        {phase === 'registration' && (
+          <StudentRoster
+            participants={participants}
+            myParticipantId={studentId ?? ''}
+            phase={phase}
+          />
+        )}
+
+        {phase === 'presentation' && (
+          <div className="p-6 text-gray-600">
+            <p className="font-medium">Presentations are underway.</p>
+            <p className="text-sm mt-1 text-gray-400">Your instructor will open voting when ready.</p>
+          </div>
+        )}
+
+        {phase === 'voting' && (
+          <div className="p-6 text-gray-600">
+            <p className="font-medium">Voting is open — ballot coming in Phase 6.</p>
+          </div>
+        )}
+
+        {phase === 'results' && (
+          <div className="p-6 text-gray-600">
+            <p className="font-medium">Results are being revealed — podium coming in Phase 7.</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

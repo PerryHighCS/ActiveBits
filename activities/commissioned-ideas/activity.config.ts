@@ -11,6 +11,14 @@ const commissionedIdeasConfig: ActivityConfig = {
     supportsPermalink: false,
     showOnHome: false,
   },
+  createSessionBootstrap: {
+    sessionStorage: [
+      {
+        keyPrefix: 'ci_instructor_',
+        responseField: 'instructorPasscode',
+      },
+    ],
+  },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }

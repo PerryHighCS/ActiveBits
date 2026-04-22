@@ -396,12 +396,12 @@ Goal:
 - Make individual student registration and instructor moderation work end to end.
 
 Implementation:
-- [ ] Implement participant registration and reconnect flow
-- [ ] Implement instructor edit/reject name flow
-- [ ] Implement roster state for connected, disconnected, and rejected students
-- [ ] Add manager registration dashboard shell
-- [ ] Add QR code and join-link display on the manager registration screen
-- [ ] Add tests for participant registration, normalization, and moderation routes
+- [x] Implement participant registration and reconnect flow
+- [x] Implement instructor edit/reject name flow
+- [x] Implement roster state for connected, disconnected, and rejected students
+- [x] Add manager registration dashboard shell
+- [x] Add QR code and join-link display on the manager registration screen
+- [x] Add tests for participant registration, normalization, and moderation routes
 
 Exit criteria:
 - Students can join by name, instructors can moderate names live, and both views stay in sync.
