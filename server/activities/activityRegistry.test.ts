@@ -19,6 +19,7 @@ let testImportCounter = 0
  */
 const EXPECTED_ACTIVITIES = [
   'algorithm-demo',
+  'commissioned-ideas',
   'resonance',
   'syncdeck',
   'video-sync',

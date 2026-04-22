@@ -364,11 +364,11 @@ Goal:
 - Lock the activity metadata and core product rules before code scaffolding starts.
 
 Implementation:
-- [ ] Confirm final activity metadata (`id`, name, description, color)
-- [ ] Confirm whether branch naming, file naming, and component naming should switch from legacy `SharkTank...` placeholders to `CommissionedIdeas...`
-- [ ] Confirm default grouping mode (`manual`) and whether `allowLateRegistration` should default on or off
-- [ ] Confirm whether presentation order can be edited after the first round begins or only before presentation starts
-- [ ] Confirm whether ballots remain editable until voting is locked
+- [x] Confirm final activity metadata (`id`, name, description, color)
+- [x] Confirm whether branch naming, file naming, and component naming should switch from legacy `SharkTank...` placeholders to `CommissionedIdeas...`
+- [x] Confirm default grouping mode (`manual`) and whether `allowLateRegistration` should default on or off
+- [x] Confirm whether presentation order can be edited after the first round begins or only before presentation starts
+- [x] Confirm whether ballots remain editable until voting is locked
 
 Exit criteria:
 - Product wording and default rules are stable enough to scaffold without churn.
@@ -379,13 +379,13 @@ Goal:
 - Create the self-contained activity shell and shared data contract.
 
 Implementation:
-- [ ] Scaffold `activities/commissioned-ideas/`
-- [ ] Add `activity.config.ts`
-- [ ] Add client entry and initial manager/student components
-- [ ] Add server routes entry
-- [ ] Define shared `types`, `validation`, and `scoring` modules
-- [ ] Register the session normalizer for `commissioned-ideas`
-- [ ] Add a minimal create-session route and student-safe state route
+- [x] Scaffold `activities/commissioned-ideas/`
+- [x] Add `activity.config.ts`
+- [x] Add client entry and initial manager/student components
+- [x] Add server routes entry
+- [x] Define shared `types`, `validation`, and `scoring` modules
+- [x] Register the session normalizer for `commissioned-ideas`
+- [x] Add a minimal create-session route and student-safe state route
 
 Exit criteria:
 - Activity loads through the normal registry and returns normalized empty session state safely.

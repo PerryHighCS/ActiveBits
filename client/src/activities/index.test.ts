@@ -16,6 +16,7 @@ const __dirname = dirname(__filename)
 
 const EXPECTED_ACTIVITIES = [
   'algorithm-demo',
+  'commissioned-ideas',
   'resonance',
   'syncdeck',
   'video-sync',
