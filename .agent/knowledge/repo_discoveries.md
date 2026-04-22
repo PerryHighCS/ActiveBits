@@ -16,6 +16,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 - Date: 2026-04-22
 - Area: client | activities | syncdeck
+- Discovery: SyncDeck overlay nav controls should not rely on native `disabled` buttons over embedded iframes; keep the control hit area active with handler guards plus `aria-disabled` so disabled-looking arrows still swallow pointer events instead of letting clicks pass through to the child iframe.
+- Why it matters: A native disabled button does not handle the click itself. On embedded activity overlays that can let a click bleed into the child iframe, which makes a visually disabled nav arrow appear to dismiss or otherwise interact with the activity underneath.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: For future overlay controls layered above iframes, prefer guarded active elements with explicit disabled styling over native disabled controls when click-through would be unsafe.
+- Owner: Codex
+
+- Date: 2026-04-22
+- Area: client | activities | syncdeck
 - Discovery: SyncDeck student overlay forward navigation must treat `navigation.canGoForward` as the authoritative “catch up” signal and, when the student is behind only by fragment on the same `h:v` slide, send Reveal's local `right` command instead of a horizontal `setState`.
 - Why it matters: `canGoRight` only describes strictly horizontal movement. If the host uses it as the primary forward capability, students who are behind by fragment on the same slide can lose their catch-up arrow; if the host then handles right-arrow presses as horizontal jumps, the control cannot advance through fragments correctly even when it is shown.
 - Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`

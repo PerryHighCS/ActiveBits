@@ -3759,58 +3759,70 @@ const SyncDeckStudent: FC = () => {
               onPointerDown={handleStudentOverlayNavigationGutterPointerDown}
               onClick={consumeEmbeddedOverlayNavigationEvent}
             />
-            <button
-              type="button"
-              onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'left')}
-              onPointerCancel={handleOverlayNavPointerCancel}
-              onClick={(event) => handleStudentOverlayNavigationClick(event, 'left')}
-              disabled={!canMoveBack}
-              aria-disabled={!canMoveBack}
-              aria-label="Previous slide"
-              title="Previous slide"
-              className="absolute left-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-            >
-              <EmbeddedOverlayNavigationIcon direction="left" />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'up')}
-              onPointerCancel={handleOverlayNavPointerCancel}
-              onClick={(event) => handleStudentOverlayNavigationClick(event, 'up')}
-              disabled={!canMoveUp}
-              aria-disabled={!canMoveUp}
-              aria-label="Move up"
-              title="Move up"
-              className="absolute top-3 left-1/2 -translate-x-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-            >
-              <EmbeddedOverlayNavigationIcon direction="up" />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'right')}
-              onPointerCancel={handleOverlayNavPointerCancel}
-              onClick={(event) => handleStudentOverlayNavigationClick(event, 'right')}
-              disabled={!canMoveForward}
-              aria-disabled={!canMoveForward}
-              aria-label="Next slide"
-              title="Next slide"
-              className="absolute right-3 top-1/2 -translate-y-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-            >
-              <EmbeddedOverlayNavigationIcon direction="right" />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'down')}
-              onPointerCancel={handleOverlayNavPointerCancel}
-              onClick={(event) => handleStudentOverlayNavigationClick(event, 'down')}
-              disabled={!canMoveDown}
-              aria-disabled={!canMoveDown}
-              aria-label="Move down"
-              title="Move down"
-              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-            >
-              <EmbeddedOverlayNavigationIcon direction="down" />
-            </button>
+              <button
+                type="button"
+                onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'left')}
+                onPointerCancel={handleOverlayNavPointerCancel}
+                onClick={(event) => handleStudentOverlayNavigationClick(event, 'left')}
+                aria-disabled={!canMoveBack}
+                aria-label="Previous slide"
+                title="Previous slide"
+                className={`absolute left-3 top-1/2 -translate-y-1/2 z-20 rounded-full border px-3 py-2 text-white shadow-sm ${
+                  canMoveBack
+                    ? 'border-white/20 bg-black/60 hover:bg-black/75'
+                    : 'cursor-not-allowed border-white/45 bg-transparent text-white/65'
+                }`}
+              >
+                <EmbeddedOverlayNavigationIcon direction="left" />
+              </button>
+              <button
+                type="button"
+                onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'up')}
+                onPointerCancel={handleOverlayNavPointerCancel}
+                onClick={(event) => handleStudentOverlayNavigationClick(event, 'up')}
+                aria-disabled={!canMoveUp}
+                aria-label="Move up"
+                title="Move up"
+                className={`absolute top-3 left-1/2 -translate-x-1/2 z-20 rounded-full border px-3 py-2 text-white shadow-sm ${
+                  canMoveUp
+                    ? 'border-white/20 bg-black/60 hover:bg-black/75'
+                    : 'cursor-not-allowed border-white/45 bg-transparent text-white/65'
+                }`}
+              >
+                <EmbeddedOverlayNavigationIcon direction="up" />
+              </button>
+              <button
+                type="button"
+                onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'right')}
+                onPointerCancel={handleOverlayNavPointerCancel}
+                onClick={(event) => handleStudentOverlayNavigationClick(event, 'right')}
+                aria-disabled={!canMoveForward}
+                aria-label="Next slide"
+                title="Next slide"
+                className={`absolute right-3 top-1/2 -translate-y-1/2 z-20 rounded-full border px-3 py-2 text-white shadow-sm ${
+                  canMoveForward
+                    ? 'border-white/20 bg-black/60 hover:bg-black/75'
+                    : 'cursor-not-allowed border-white/45 bg-transparent text-white/65'
+                }`}
+              >
+                <EmbeddedOverlayNavigationIcon direction="right" />
+              </button>
+              <button
+                type="button"
+                onPointerDown={(event) => handleStudentOverlayNavigationPointerDown(event, 'down')}
+                onPointerCancel={handleOverlayNavPointerCancel}
+                onClick={(event) => handleStudentOverlayNavigationClick(event, 'down')}
+                aria-disabled={!canMoveDown}
+                aria-label="Move down"
+                title="Move down"
+                className={`absolute bottom-3 left-1/2 -translate-x-1/2 z-20 rounded-full border px-3 py-2 text-white shadow-sm ${
+                  canMoveDown
+                    ? 'border-white/20 bg-black/60 hover:bg-black/75'
+                    : 'cursor-not-allowed border-white/45 bg-transparent text-white/65'
+                }`}
+              >
+                <EmbeddedOverlayNavigationIcon direction="down" />
+              </button>
           </>
         ) : null}
 
