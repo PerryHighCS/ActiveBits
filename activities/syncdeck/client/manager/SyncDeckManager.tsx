@@ -2782,18 +2782,7 @@ const SyncDeckManager: FC = () => {
       }
     }
 
-    targetWindow.postMessage(
-      {
-        type: 'reveal-sync',
-        version: REVEAL_SYNC_PROTOCOL_VERSION,
-        action: 'requestState',
-        source: 'activebits-syncdeck-host',
-        role: 'instructor',
-        ts: Date.now(),
-        payload: {},
-      },
-      presentationOrigin,
-    )
+    targetWindow.postMessage(buildRevealRequestStateMessage(), presentationOrigin)
 
     setStartError(null)
     setStartSuccess('Force sync sent. Students are syncing to your current position.')
