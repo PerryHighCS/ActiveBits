@@ -1172,6 +1172,22 @@ void test('resolveManagerActivityRequestTargetIndices preserves current indices 
   )
 })
 
+void test('resolveManagerActivityRequestTargetIndices preserves current fragment when already on the requested slide anchor', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestTargetIndices(
+      [
+        {
+          activityId: 'resonance',
+          instanceKey: 'resonance:12:0',
+          location: { h: 12, v: 0 },
+        },
+      ],
+      { h: 12, v: 0, f: 3 },
+    ),
+    { h: 12, v: 0, f: 3 },
+  )
+})
+
 void test('resolveNextPendingEmbeddedEndConfirmation requires two clicks before ending', () => {
   const first = resolveNextPendingEmbeddedEndConfirmation(null, 'video-sync:3:0')
   assert.deepEqual(first, { nextPending: 'video-sync:3:0', shouldEnd: false })

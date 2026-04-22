@@ -946,15 +946,19 @@ export function resolveManagerActivityRequestTargetIndices(
     return currentIndices
   }
 
-  const targetIndices = {
+  if (
+    currentIndices
+    && currentIndices.h === primaryRequest.location.h
+    && currentIndices.v === primaryRequest.location.v
+  ) {
+    return currentIndices
+  }
+
+  return {
     h: primaryRequest.location.h,
     v: primaryRequest.location.v,
     f: 0,
   }
-
-  return currentIndices && compareIndices(currentIndices, targetIndices) === 0
-    ? currentIndices
-    : targetIndices
 }
 
 export function extractManagerNavigationCapabilitiesFromRevealMessage(
