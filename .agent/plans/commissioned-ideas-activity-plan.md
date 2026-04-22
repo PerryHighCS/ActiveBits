@@ -358,38 +358,156 @@ The outer message shape should follow the repo's existing activity-local realtim
 
 ## Implementation Phases
 
-### Phase 1: Activity skeleton
+### Phase 0: Finalize Contract
 
-- Add the new `activities/commissioned-ideas/` structure
-- Add `activity.config.ts`, client entry, and server entry
-- Define shared types, validators, and scoring helpers
-- Register session normalization
+Goal:
+- Lock the activity metadata and core product rules before code scaffolding starts.
 
-### Phase 2: Registration and presentation
+Implementation:
+- [ ] Confirm final activity metadata (`id`, name, description, color)
+- [ ] Confirm whether branch naming, file naming, and component naming should switch from legacy `SharkTank...` placeholders to `CommissionedIdeas...`
+- [ ] Confirm default grouping mode (`manual`) and whether `allowLateRegistration` should default on or off
+- [ ] Confirm whether presentation order can be edited after the first round begins or only before presentation starts
+- [ ] Confirm whether ballots remain editable until voting is locked
 
-- Implement participant registration and instructor moderation
-- Implement max team size control
-- Implement manual team formation and leave/join flow
-- Implement optional random grouping flow
-- Implement reshuffle-ungrouped flow for post-lock cleanup
-- Implement instructor manual assignment flow for late/ungrouped students
-- Implement separate grouping lock and naming lock flow
-- Implement name/project proposal and team-member voting flow with editable votes until naming lock
-- Implement manager registration roster
-- Implement presentation order management
-- Implement current presenter controls, round tracking, and student queue view
+Exit criteria:
+- Product wording and default rules are stable enough to scaffold without churn.
 
-### Phase 3: Voting
+### Phase 1: Scaffold Activity Boundary
 
-- Implement weighted ballot UI
-- Implement ballot validation and persistence
-- Implement manager voting progress view
+Goal:
+- Create the self-contained activity shell and shared data contract.
 
-### Phase 4: Results and podium
+Implementation:
+- [ ] Scaffold `activities/commissioned-ideas/`
+- [ ] Add `activity.config.ts`
+- [ ] Add client entry and initial manager/student components
+- [ ] Add server routes entry
+- [ ] Define shared `types`, `validation`, and `scoring` modules
+- [ ] Register the session normalizer for `commissioned-ideas`
+- [ ] Add a minimal create-session route and student-safe state route
 
-- Implement ranking calculation
-- Implement podium reveal controls and display
-- Verify top-three rendering and tie handling
+Exit criteria:
+- Activity loads through the normal registry and returns normalized empty session state safely.
+
+### Phase 2: Registration Roster And Moderation
+
+Goal:
+- Make individual student registration and instructor moderation work end to end.
+
+Implementation:
+- [ ] Implement participant registration and reconnect flow
+- [ ] Implement instructor edit/reject name flow
+- [ ] Implement roster state for connected, disconnected, and rejected students
+- [ ] Add manager registration dashboard shell
+- [ ] Add QR code and join-link display on the manager registration screen
+- [ ] Add tests for participant registration, normalization, and moderation routes
+
+Exit criteria:
+- Students can join by name, instructors can moderate names live, and both views stay in sync.
+
+### Phase 3: Team Formation
+
+Goal:
+- Support classroom grouping workflows before naming begins.
+
+Implementation:
+- [ ] Implement max team size control
+- [ ] Implement manual team formation and leave/join flow
+- [ ] Implement optional random grouping flow
+- [ ] Implement reshuffle-ungrouped flow for post-lock cleanup
+- [ ] Implement instructor manual assignment flow for late/ungrouped students
+- [ ] Implement instructor removal of students from groups
+- [ ] Implement `studentGroupingLocked` behavior so grouped students are fixed while ungrouped/late students remain instructor-placeable
+- [ ] Add manager/team roster UI for grouped and ungrouped students
+- [ ] Add tests for membership constraints, random grouping, reshuffle-ungrouped, and instructor-only late assignment
+
+Exit criteria:
+- The teacher can get every student into a valid team structure without reopening full free-form grouping.
+
+### Phase 4: Team Naming And Proposal Voting
+
+Goal:
+- Let teams collaboratively settle on a team name and project name after grouping is mostly stable.
+
+Implementation:
+- [ ] Implement team-name proposal creation
+- [ ] Implement project-name proposal creation
+- [ ] Implement team-member voting and vote changes for both proposal types
+- [ ] Implement instructor proposal rejection/restoration
+- [ ] Implement deterministic current-name resolution from non-rejected proposals
+- [ ] Implement `namingLocked` behavior separately from student grouping lock
+- [ ] Add manager and student proposal/voting UI
+- [ ] Add tests for proposal tallying, vote changes, moderation, and naming lock enforcement
+
+Exit criteria:
+- Teams have stable displayed names and project titles that survive reloads and moderation.
+
+### Phase 5: Presentation Flow And Rounds
+
+Goal:
+- Support live presentation facilitation across one or more rounds.
+
+Implementation:
+- [ ] Implement presentation order management
+- [ ] Implement direct presenting-team selection
+- [ ] Implement randomizer for teams not yet presented in the current round
+- [ ] Implement `presentationRound` tracking and `presentationHistory`
+- [ ] Implement start-next-round/reset-round controls
+- [ ] Implement return-from-results to presentation
+- [ ] Add manager presentation queue UI and student active-presenter view
+- [ ] Add tests for round tracking, randomizer eligibility, and multi-round behavior
+
+Exit criteria:
+- The instructor can reliably run manual or randomized presentation rounds without losing team state.
+
+### Phase 6: Voting
+
+Goal:
+- Collect valid weighted ballots tied to participant identity and team membership.
+
+Implementation:
+- [ ] Implement voting ballot UI with accessibility semantics
+- [ ] Enforce `$100/$300/$500` distinct-team validation on client and server
+- [ ] Enforce self-vote blocking from `participant.teamId`
+- [ ] Implement ballot create/replace persistence
+- [ ] Implement manager voting-progress dashboard
+- [ ] Add tests for ballot validation, self-vote blocking, replace behavior, and progress reporting
+
+Exit criteria:
+- Valid ballots can be submitted and tracked live, and invalid/self-voting ballots are rejected deterministically.
+
+### Phase 7: Results And Podium
+
+Goal:
+- Reveal the winning teams in a clean, dramatic final phase.
+
+Implementation:
+- [ ] Implement ranking calculation and deterministic tie-breakers
+- [ ] Implement results route / results state derivation
+- [ ] Implement podium reveal sequencing
+- [ ] Implement manager podium controls
+- [ ] Implement student reveal screen updates
+- [ ] Verify top-three rendering, reveal resets, and return-to-presentation behavior
+- [ ] Add tests for scoring, tie-breakers, reveal-step transitions, and top-three rendering
+
+Exit criteria:
+- The instructor can reveal 3rd, 2nd, and winner cleanly, and rankings stay stable across reloads.
+
+### Phase 8: Verification And Polish
+
+Goal:
+- Close the feature with the expected repo validation and durable notes.
+
+Implementation:
+- [ ] Add any missing activity-specific tests
+- [ ] Run repo-appropriate validation commands
+- [ ] Run `npm run test:e2e` if shared browser seams changed materially
+- [ ] Update docs if runtime/build/deployment behavior changes
+- [ ] Record durable implementation discoveries in `.agent/knowledge/`
+
+Exit criteria:
+- The feature is reviewable, validated, and leaves reusable context for future contributors.
 
 ## Test Matrix
 
@@ -410,26 +528,16 @@ The outer message shape should follow the repo's existing activity-local realtim
 
 If the implementation changes shared routing or browser seams materially, include `npm run test:e2e` per repo guidance.
 
-## Checklist
+## Rollout Order
 
-- [ ] Confirm final activity metadata (`id`, name, description, color)
-- [ ] Scaffold `activities/commissioned-ideas/`
-- [ ] Define shared `types`, `validation`, and `scoring` modules
-- [ ] Add session normalizer and activity routes
-- [ ] Implement participant registration and instructor moderation flow
-- [ ] Implement team join/leave flow with max team size
-- [ ] Implement optional random grouping flow
-- [ ] Implement reshuffle-ungrouped and late manual assignment flow
-- [ ] Implement separate grouping lock and naming lock flow
-- [ ] Implement team/project proposal and voting flow
-- [ ] Implement instructor presentation queue, round tracking, and randomizer controls
-- [ ] Implement voting ballot UI with accessibility semantics
-- [ ] Enforce `$100/$300/$500` distinct-team validation on client and server
-- [ ] Implement results ranking and deterministic tie-breakers
-- [ ] Implement podium reveal sequencing
-- [ ] Add activity-specific tests
-- [ ] Run repo-appropriate validation commands
-- [ ] Record durable implementation discoveries in `.agent/knowledge/`
+Recommended execution order:
+
+1. Phase 0 and Phase 1 first so the data contract and activity shell are stable.
+2. Phase 2 and Phase 3 next so roster + grouping work before naming complexity is added.
+3. Phase 4 after grouping, because naming lock semantics depend on team membership already existing.
+4. Phase 5 before Phase 6 so the instructor can already facilitate presentations on stable teams.
+5. Phase 6 and Phase 7 last for the live competition outcome.
+6. Phase 8 at the end of each implementation slice, not only at the very end.
 
 ## Assumptions To Keep Unless Product Says Otherwise
 
