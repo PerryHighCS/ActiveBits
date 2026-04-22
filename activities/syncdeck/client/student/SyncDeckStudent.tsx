@@ -1757,8 +1757,8 @@ export function extractNavigationCapabilitiesFromStateMessage(rawPayload: unknow
 
   const canGoBack = typeof source.canGoLeft === 'boolean' ? source.canGoLeft
     : typeof source.canGoBack === 'boolean' ? source.canGoBack : null
-  const canGoForward = typeof source.canGoRight === 'boolean' ? source.canGoRight
-    : typeof source.canGoForward === 'boolean' ? source.canGoForward : null
+  const canGoForward = typeof source.canGoForward === 'boolean' ? source.canGoForward
+    : typeof source.canGoRight === 'boolean' ? source.canGoRight : null
   const canGoUp = typeof source.canGoUp === 'boolean' ? source.canGoUp : null
   const canGoDown = typeof source.canGoDown === 'boolean' ? source.canGoDown : null
 
@@ -1772,6 +1772,19 @@ export function extractNavigationCapabilitiesFromStateMessage(rawPayload: unknow
     canGoUp: canGoUp ?? true,
     canGoDown: canGoDown ?? true,
   }
+}
+
+export function shouldUseStudentFragmentCatchupForwardNavigation(params: {
+  studentIndices: { h: number; v: number; f: number } | null
+  instructorIndices: { h: number; v: number; f: number } | null
+}): boolean {
+  if (!params.studentIndices || !params.instructorIndices) {
+    return false
+  }
+
+  return params.studentIndices.h === params.instructorIndices.h
+    && params.studentIndices.v === params.instructorIndices.v
+    && params.studentIndices.f < params.instructorIndices.f
 }
 
 export function computeStudentEmbeddedSyncState(
@@ -3420,6 +3433,18 @@ const SyncDeckStudent: FC = () => {
   }, [activeEmbeddedInstanceKey, sendSyncContextToEmbeddedIframe, studentIndicesState, syncState])
 
   const sendStudentOverlayNavigation = useCallback((direction: 'left' | 'right' | 'up' | 'down') => {
+    if (
+      direction === 'right'
+      && shouldUseStudentFragmentCatchupForwardNavigation({
+        studentIndices: studentIndicesState,
+        instructorIndices: lastInstructorIndicesRef.current,
+      })
+    ) {
+      activateOverlayNavClickShield()
+      sendPayloadToIframe(buildRevealCommandMessage('right', {}))
+      return
+    }
+
     const optimisticIndices = resolveOptimisticEmbeddedOverlayIndices(
       overlayNavigationKeys,
       overlayNavigationBaseIndices,
@@ -3456,8 +3481,8 @@ const SyncDeckStudent: FC = () => {
     overlayNavigationKeys,
     overlayNavigationBaseIndices,
     sendPayloadToIframe,
-    studentAnchoredInstanceKey,
     studentIndicesState,
+    studentAnchoredInstanceKey,
   ])
 
   const handleStudentOverlayBack = useCallback(() => {

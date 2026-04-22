@@ -871,6 +871,18 @@ export function buildManagerOverlaySetStateCommand(
   })
 }
 
+export function buildRevealRequestStateMessage(): Record<string, unknown> {
+  return {
+    type: 'reveal-sync',
+    version: REVEAL_SYNC_PROTOCOL_VERSION,
+    action: 'requestState',
+    source: 'activebits-syncdeck-host',
+    role: 'instructor',
+    ts: Date.now(),
+    payload: {},
+  }
+}
+
 export function buildManagerResyncCommandForInstanceKey(instanceKey: string): Record<string, unknown> | null {
   const position = parseSyncDeckEmbeddedInstancePosition(instanceKey)
   if (!position) {
@@ -923,6 +935,26 @@ export function resolveManagerCurrentSlideNavigationCapability(params: {
     && params.capabilityIndices.v === params.currentIndices.v
     ? params.iframeCapability
     : null
+}
+
+export function resolveManagerActivityRequestTargetIndices(
+  startRequests: readonly SyncDeckActivityLaunchRequest[],
+  currentIndices: { h: number; v: number; f: number } | null,
+): { h: number; v: number; f: number } | null {
+  const primaryRequest = startRequests[0] ?? null
+  if (!primaryRequest?.location) {
+    return currentIndices
+  }
+
+  const targetIndices = {
+    h: primaryRequest.location.h,
+    v: primaryRequest.location.v,
+    f: 0,
+  }
+
+  return currentIndices && compareIndices(currentIndices, targetIndices) === 0
+    ? currentIndices
+    : targetIndices
 }
 
 export function extractManagerNavigationCapabilitiesFromRevealMessage(
@@ -3018,6 +3050,24 @@ const SyncDeckManager: FC = () => {
       return
     }
 
+    const currentInstructorIndices = instructorIndicesState ?? lastInstructorIndicesRef.current
+    const requestedInstructorIndices = resolveManagerActivityRequestTargetIndices(
+      startRequests,
+      currentInstructorIndices,
+    )
+    if (
+      requestedInstructorIndices
+      && (!currentInstructorIndices || compareIndices(currentInstructorIndices, requestedInstructorIndices) !== 0)
+    ) {
+      lastInstructorIndicesRef.current = requestedInstructorIndices
+      setInstructorIndicesState(requestedInstructorIndices)
+    }
+
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (targetWindow && presentationOrigin) {
+      targetWindow.postMessage(buildRevealRequestStateMessage(), presentationOrigin)
+    }
+
     if (startRequests.length === 1 && embeddedActivities[primaryStartRequest.instanceKey]) {
       const resyncCommand = buildManagerResyncCommandForInstanceKey(primaryStartRequest.instanceKey)
       if (resyncCommand && presentationOrigin) {
@@ -3046,7 +3096,7 @@ const SyncDeckManager: FC = () => {
         await launchEmbeddedActivityFromRequest(startRequest)
       }
     })()
-  }, [embeddedActivities, launchEmbeddedActivityFromRequest, presentationOrigin, relayInstructorPayload])
+  }, [embeddedActivities, instructorIndicesState, launchEmbeddedActivityFromRequest, presentationOrigin, relayInstructorPayload])
 
   const handleActivityPickerLaunch = useCallback((activityId: string): void => {
     const startRequests = resolveManagerActivityRequestBatchInputs(
@@ -3698,10 +3748,17 @@ const SyncDeckManager: FC = () => {
     overlayNavigationBaseIndices,
   )
   const canMoveBack =
-    overlayNavigationCapabilities?.canGoBack === true
-    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.h > 0 : false)
+    resolveManagerCurrentSlideNavigationCapability({
+      iframeCapability: overlayNavigationCapabilities?.canGoBack ?? null,
+      capabilityIndices: overlayNavigationCapabilityIndices,
+      currentIndices: overlayNavigationBaseIndices,
+    }) ?? (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.h > 0 : false)
   const canMoveForward =
-    overlayNavigationCapabilities?.canGoForward !== false
+    resolveManagerCurrentSlideNavigationCapability({
+      iframeCapability: overlayNavigationCapabilities?.canGoForward ?? null,
+      capabilityIndices: overlayNavigationCapabilityIndices,
+      currentIndices: overlayNavigationBaseIndices,
+    }) ?? true
   const canMoveUp =
     resolveEmbeddedOverlayVerticalMoveAllowed({
       direction: 'up',

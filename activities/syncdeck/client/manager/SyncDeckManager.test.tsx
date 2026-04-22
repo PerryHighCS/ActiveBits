@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import SyncDeckManager from './SyncDeckManager.js'
 import { buildInstructorRoleCommandMessage } from './SyncDeckManager.js'
 import { buildForceSyncToInstructorCommandMessage } from './SyncDeckManager.js'
+import { buildRevealRequestStateMessage } from './SyncDeckManager.js'
 import { buildClearBoundaryCommandMessage } from './SyncDeckManager.js'
 import { attachInstructorIndicesToBoundaryChangePayload } from './SyncDeckManager.js'
 import { shouldSuppressInstructorStateBroadcast } from './SyncDeckManager.js'
@@ -35,6 +36,7 @@ import { buildManagerOverlaySetStateCommand } from './SyncDeckManager.js'
 import { buildManagerResyncCommandForInstanceKey } from './SyncDeckManager.js'
 import { resolveManagerOverlayNavigationBaseIndices } from './SyncDeckManager.js'
 import { resolveManagerCurrentSlideNavigationCapability } from './SyncDeckManager.js'
+import { resolveManagerActivityRequestTargetIndices } from './SyncDeckManager.js'
 import { resolveNextPendingEmbeddedEndConfirmation } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestStartInput } from './SyncDeckManager.js'
 import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
@@ -253,6 +255,16 @@ void test('buildForceSyncToInstructorCommandMessage emits syncToInstructor comma
       },
     },
   })
+})
+
+void test('buildRevealRequestStateMessage emits requestState envelope', () => {
+  const message = buildRevealRequestStateMessage()
+
+  assert.equal(message.type, 'reveal-sync')
+  assert.equal(message.action, 'requestState')
+  assert.equal(message.role, 'instructor')
+  assert.equal(message.source, 'activebits-syncdeck-host')
+  assert.deepEqual(message.payload, {})
 })
 
 void test('evaluateRestoreSuppressionForOutboundState keeps outbound state when suppression is inactive', () => {
@@ -1121,6 +1133,42 @@ void test('resolveManagerCurrentSlideNavigationCapability only trusts iframe cap
       currentIndices: { h: 2, v: 2, f: 0 },
     }),
     null,
+  )
+})
+
+void test('resolveManagerActivityRequestTargetIndices prefers the primary request slide anchor', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestTargetIndices(
+      [
+        {
+          activityId: 'resonance',
+          instanceKey: 'resonance:12:0',
+          location: { h: 12, v: 0 },
+        },
+        {
+          activityId: 'raffle',
+          instanceKey: 'raffle:12:1',
+          location: { h: 12, v: 1 },
+        },
+      ],
+      { h: 11, v: 0, f: 0 },
+    ),
+    { h: 12, v: 0, f: 0 },
+  )
+})
+
+void test('resolveManagerActivityRequestTargetIndices preserves current indices when the primary request has no location', () => {
+  assert.deepEqual(
+    resolveManagerActivityRequestTargetIndices(
+      [
+        {
+          activityId: 'resonance',
+          instanceKey: 'resonance:global',
+        },
+      ],
+      { h: 11, v: 0, f: 0 },
+    ),
+    { h: 11, v: 0, f: 0 },
   )
 })
 
