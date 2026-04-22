@@ -361,6 +361,7 @@ void test('normalizeTeam returns null name when all proposals are rejected and n
 
 function makeFullSession(overrides: Partial<CommissionedIdeasSessionData> = {}): CommissionedIdeasSessionData {
   return {
+    instructorPasscode: 'TESTPASS',
     phase: 'registration',
     studentGroupingLocked: false,
     namingLocked: false,
@@ -402,6 +403,15 @@ void test('buildStudentSnapshot strips connected, lastSeen, rejectedByInstructor
   assert.equal('rejectedByInstructor' in p1, false)
   assert.equal(p1.id, 'p1')
   assert.equal(p1.name, 'Alice')
+})
+
+void test('buildStudentSnapshot does not expose instructorPasscode', () => {
+  const snapshot = buildStudentSnapshot(makeFullSession(), null)
+  assert.equal(
+    'instructorPasscode' in snapshot,
+    false,
+    'instructorPasscode must not appear in student snapshot',
+  )
 })
 
 void test('buildStudentSnapshot omits rejected participants from student roster', () => {
