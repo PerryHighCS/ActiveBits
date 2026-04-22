@@ -64,6 +64,7 @@ export interface PresentationHistoryEntry {
 }
 
 export interface CommissionedIdeasSessionData extends Record<string, unknown> {
+  instructorPasscode: string
   phase: CommissionedIdeasPhase
   studentGroupingLocked: boolean
   namingLocked: boolean
