@@ -871,6 +871,18 @@ export function buildManagerOverlaySetStateCommand(
   })
 }
 
+export function buildRevealRequestStateMessage(): Record<string, unknown> {
+  return {
+    type: 'reveal-sync',
+    version: REVEAL_SYNC_PROTOCOL_VERSION,
+    action: 'requestState',
+    source: 'activebits-syncdeck-host',
+    role: 'instructor',
+    ts: Date.now(),
+    payload: {},
+  }
+}
+
 export function buildManagerResyncCommandForInstanceKey(instanceKey: string): Record<string, unknown> | null {
   const position = parseSyncDeckEmbeddedInstancePosition(instanceKey)
   if (!position) {
@@ -923,6 +935,30 @@ export function resolveManagerCurrentSlideNavigationCapability(params: {
     && params.capabilityIndices.v === params.currentIndices.v
     ? params.iframeCapability
     : null
+}
+
+export function resolveManagerActivityRequestTargetIndices(
+  startRequests: readonly SyncDeckActivityLaunchRequest[],
+  currentIndices: { h: number; v: number; f: number } | null,
+): { h: number; v: number; f: number } | null {
+  const primaryRequest = startRequests[0] ?? null
+  if (!primaryRequest?.location) {
+    return currentIndices
+  }
+
+  if (
+    currentIndices
+    && currentIndices.h === primaryRequest.location.h
+    && currentIndices.v === primaryRequest.location.v
+  ) {
+    return currentIndices
+  }
+
+  return {
+    h: primaryRequest.location.h,
+    v: primaryRequest.location.v,
+    f: 0,
+  }
 }
 
 export function extractManagerNavigationCapabilitiesFromRevealMessage(
@@ -1851,6 +1887,7 @@ const SyncDeckManager: FC = () => {
     handleOverlayNavPointerCancel,
   } = useEmbeddedOverlayNavigationInteraction()
   const hasSeenInstructorIframeReadySignalRef = useRef(false)
+  const currentInstructorIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const suppressOutboundStateUntilRestoreRef = useRef(false)
   const restoreTargetIndicesRef = useRef<{ h: number; v: number; f: number } | null>(null)
   const isInstructorSyncEnabledRef = useRef(true)
@@ -1873,6 +1910,10 @@ const SyncDeckManager: FC = () => {
   useEffect(() => {
     syncDebugEnabledRef.current = isSyncDeckDebugEnabled()
   }, [location.search])
+
+  useEffect(() => {
+    currentInstructorIndicesRef.current = instructorIndicesState
+  }, [instructorIndicesState])
 
   useEffect(() => {
     completedVerticalStackPrestartKeysRef.current.clear()
@@ -2741,18 +2782,7 @@ const SyncDeckManager: FC = () => {
       }
     }
 
-    targetWindow.postMessage(
-      {
-        type: 'reveal-sync',
-        version: REVEAL_SYNC_PROTOCOL_VERSION,
-        action: 'requestState',
-        source: 'activebits-syncdeck-host',
-        role: 'instructor',
-        ts: Date.now(),
-        payload: {},
-      },
-      presentationOrigin,
-    )
+    targetWindow.postMessage(buildRevealRequestStateMessage(), presentationOrigin)
 
     setStartError(null)
     setStartSuccess('Force sync sent. Students are syncing to your current position.')
@@ -3016,6 +3046,24 @@ const SyncDeckManager: FC = () => {
       setStartError('Ignored activity request with missing activity id.')
       setStartSuccess(null)
       return
+    }
+
+    const currentInstructorIndices = currentInstructorIndicesRef.current ?? lastInstructorIndicesRef.current
+    const requestedInstructorIndices = resolveManagerActivityRequestTargetIndices(
+      startRequests,
+      currentInstructorIndices,
+    )
+    if (
+      requestedInstructorIndices
+      && (!currentInstructorIndices || compareIndices(currentInstructorIndices, requestedInstructorIndices) !== 0)
+    ) {
+      lastInstructorIndicesRef.current = requestedInstructorIndices
+      setInstructorIndicesState(requestedInstructorIndices)
+    }
+
+    const targetWindow = presentationIframeRef.current?.contentWindow
+    if (targetWindow && presentationOrigin) {
+      targetWindow.postMessage(buildRevealRequestStateMessage(), presentationOrigin)
     }
 
     if (startRequests.length === 1 && embeddedActivities[primaryStartRequest.instanceKey]) {
@@ -3698,10 +3746,17 @@ const SyncDeckManager: FC = () => {
     overlayNavigationBaseIndices,
   )
   const canMoveBack =
-    overlayNavigationCapabilities?.canGoBack === true
-    || (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.h > 0 : false)
+    resolveManagerCurrentSlideNavigationCapability({
+      iframeCapability: overlayNavigationCapabilities?.canGoBack ?? null,
+      capabilityIndices: overlayNavigationCapabilityIndices,
+      currentIndices: overlayNavigationBaseIndices,
+    }) ?? (overlayNavigationBaseIndices ? overlayNavigationBaseIndices.h > 0 : false)
   const canMoveForward =
-    overlayNavigationCapabilities?.canGoForward !== false
+    resolveManagerCurrentSlideNavigationCapability({
+      iframeCapability: overlayNavigationCapabilities?.canGoForward ?? null,
+      capabilityIndices: overlayNavigationCapabilityIndices,
+      currentIndices: overlayNavigationBaseIndices,
+    }) ?? true
   const canMoveUp =
     resolveEmbeddedOverlayVerticalMoveAllowed({
       direction: 'up',
@@ -4333,49 +4388,113 @@ const SyncDeckManager: FC = () => {
                           />
                           <button
                             type="button"
-                            className="absolute left-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-                            onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'left')}
+                            className={`absolute left-3 top-1/2 -translate-y-1/2 z-30 rounded-full border px-3 py-2 text-white shadow-sm ${
+                              canMoveBack
+                                ? 'border-white/20 bg-black/60 hover:bg-black/75'
+                                : 'cursor-not-allowed border-white/45 bg-transparent text-white/65'
+                            }`}
+                            onPointerDown={(event) => {
+                              if (!canMoveBack) {
+                                consumeEmbeddedOverlayNavigationEvent(event)
+                                return
+                              }
+                              handleManagerOverlayNavigationPointerDown(event, 'left')
+                            }}
                             onPointerCancel={handleOverlayNavPointerCancel}
-                            onClick={(event) => handleManagerOverlayNavigationClick(event, 'left')}
+                            onClick={(event) => {
+                              if (!canMoveBack) {
+                                consumeEmbeddedOverlayNavigationEvent(event)
+                                return
+                              }
+                              handleManagerOverlayNavigationClick(event, 'left')
+                            }}
                             aria-label="Move left"
                             title="Move left"
-                            disabled={!canMoveBack}
+                            aria-disabled={!canMoveBack}
                           >
                             <EmbeddedOverlayNavigationIcon direction="left" />
                           </button>
                           <button
                             type="button"
-                            className="absolute top-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-                            onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'up')}
+                            className={`absolute top-3 left-1/2 -translate-x-1/2 z-30 rounded-full border px-3 py-2 text-white shadow-sm ${
+                              canMoveUp
+                                ? 'border-white/20 bg-black/60 hover:bg-black/75'
+                                : 'cursor-not-allowed border-white/45 bg-transparent text-white/65'
+                            }`}
+                            onPointerDown={(event) => {
+                              if (!canMoveUp) {
+                                consumeEmbeddedOverlayNavigationEvent(event)
+                                return
+                              }
+                              handleManagerOverlayNavigationPointerDown(event, 'up')
+                            }}
                             onPointerCancel={handleOverlayNavPointerCancel}
-                            onClick={(event) => handleManagerOverlayNavigationClick(event, 'up')}
+                            onClick={(event) => {
+                              if (!canMoveUp) {
+                                consumeEmbeddedOverlayNavigationEvent(event)
+                                return
+                              }
+                              handleManagerOverlayNavigationClick(event, 'up')
+                            }}
                             aria-label="Move up"
                             title="Move up"
-                            disabled={!canMoveUp}
+                            aria-disabled={!canMoveUp}
                           >
                             <EmbeddedOverlayNavigationIcon direction="up" />
                           </button>
                           <button
                             type="button"
-                            className="absolute right-3 top-1/2 -translate-y-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-                            onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'right')}
+                            className={`absolute right-3 top-1/2 -translate-y-1/2 z-30 rounded-full border px-3 py-2 text-white shadow-sm ${
+                              canMoveForward
+                                ? 'border-white/20 bg-black/60 hover:bg-black/75'
+                                : 'cursor-not-allowed border-white/45 bg-transparent text-white/65'
+                            }`}
+                            onPointerDown={(event) => {
+                              if (!canMoveForward) {
+                                consumeEmbeddedOverlayNavigationEvent(event)
+                                return
+                              }
+                              handleManagerOverlayNavigationPointerDown(event, 'right')
+                            }}
                             onPointerCancel={handleOverlayNavPointerCancel}
-                            onClick={(event) => handleManagerOverlayNavigationClick(event, 'right')}
+                            onClick={(event) => {
+                              if (!canMoveForward) {
+                                consumeEmbeddedOverlayNavigationEvent(event)
+                                return
+                              }
+                              handleManagerOverlayNavigationClick(event, 'right')
+                            }}
                             aria-label="Move right"
                             title="Move right"
-                            disabled={!canMoveForward}
+                            aria-disabled={!canMoveForward}
                           >
                             <EmbeddedOverlayNavigationIcon direction="right" />
                           </button>
                           <button
                             type="button"
-                            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 rounded-full border border-white/20 bg-black/60 px-3 py-2 text-white shadow-sm hover:bg-black/75 disabled:cursor-not-allowed disabled:border-white/45 disabled:bg-transparent disabled:text-white/65"
-                            onPointerDown={(event) => handleManagerOverlayNavigationPointerDown(event, 'down')}
+                            className={`absolute bottom-3 left-1/2 -translate-x-1/2 z-30 rounded-full border px-3 py-2 text-white shadow-sm ${
+                              canMoveDown
+                                ? 'border-white/20 bg-black/60 hover:bg-black/75'
+                                : 'cursor-not-allowed border-white/45 bg-transparent text-white/65'
+                            }`}
+                            onPointerDown={(event) => {
+                              if (!canMoveDown) {
+                                consumeEmbeddedOverlayNavigationEvent(event)
+                                return
+                              }
+                              handleManagerOverlayNavigationPointerDown(event, 'down')
+                            }}
                             onPointerCancel={handleOverlayNavPointerCancel}
-                            onClick={(event) => handleManagerOverlayNavigationClick(event, 'down')}
+                            onClick={(event) => {
+                              if (!canMoveDown) {
+                                consumeEmbeddedOverlayNavigationEvent(event)
+                                return
+                              }
+                              handleManagerOverlayNavigationClick(event, 'down')
+                            }}
                             aria-label="Move down"
                             title="Move down"
-                            disabled={!canMoveDown}
+                            aria-disabled={!canMoveDown}
                           >
                             <EmbeddedOverlayNavigationIcon direction="down" />
                           </button>

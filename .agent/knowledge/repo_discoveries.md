@@ -14,6 +14,30 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-04-22
+- Area: client | activities | syncdeck
+- Discovery: SyncDeck overlay nav controls should not rely on native `disabled` buttons over embedded iframes; keep the control hit area active with handler guards plus `aria-disabled` so disabled-looking arrows still swallow pointer events instead of letting clicks pass through to the child iframe.
+- Why it matters: A native disabled button does not handle the click itself. On embedded activity overlays that can let a click bleed into the child iframe, which makes a visually disabled nav arrow appear to dismiss or otherwise interact with the activity underneath.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.tsx`
+- Follow-up action: For future overlay controls layered above iframes, prefer guarded active elements with explicit disabled styling over native disabled controls when click-through would be unsafe.
+- Owner: Codex
+
+- Date: 2026-04-22
+- Area: client | activities | syncdeck
+- Discovery: SyncDeck student overlay forward navigation must treat `navigation.canGoForward` as the authoritative “catch up” signal and, when the student is behind only by fragment on the same `h:v` slide, send Reveal's local `right` command instead of a horizontal `setState`.
+- Why it matters: `canGoRight` only describes strictly horizontal movement. If the host uses it as the primary forward capability, students who are behind by fragment on the same slide can lose their catch-up arrow; if the host then handles right-arrow presses as horizontal jumps, the control cannot advance through fragments correctly even when it is shown.
+- Evidence: `activities/syncdeck/client/student/SyncDeckStudent.tsx`; `activities/syncdeck/client/student/SyncDeckStudent.test.tsx`; `.agent/knowledge/reveal-iframe-sync-message-schema.md`
+- Follow-up action: Keep student forward controls split between fragment/within-slide Reveal commands and anchored-slide `setState` moves, and prefer `canGoForward` over `canGoRight` whenever the product intent is “advance toward the released instructor position.”
+- Owner: Codex
+
+- Date: 2026-04-22
+- Area: client | activities | syncdeck
+- Discovery: SyncDeck manager should treat an inbound embedded `activityRequest` slide location as authoritative immediately, updating local instructor indices and asking the presentation iframe for a fresh `requestState` snapshot before waiting on child-session creation or a later deck state echo.
+- Why it matters: Some presentation runtimes can emit `activityRequest` before the matching `state` payload settles. Without the optimistic anchor update plus explicit snapshot refresh, a last-slide embedded activity can intermittently leave the deck slide visible instead of opening the child overlay, and the overlay can keep stale horizontal arrow state from the previous slide.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `activities/syncdeck/client/manager/SyncDeckManager.test.tsx`
+- Follow-up action: Keep deck-driven embedded launches keyed to the request's resolved slide location, and refresh host navigation metadata from the iframe whenever an activity request becomes the newest authoritative anchor.
+- Owner: Codex
+
 - Date: 2026-04-21
 - Area: client | activities | syncdeck
 - Discovery: SyncDeck should scope `allow-popups-to-escape-sandbox` to instructor-configured presentation iframes only; embedded/internal iframes should keep the stricter sandbox without popup escape.

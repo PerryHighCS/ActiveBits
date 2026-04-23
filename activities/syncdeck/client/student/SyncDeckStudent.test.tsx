@@ -37,6 +37,7 @@ import { shouldRecoverEmbeddedEntryParticipantToken } from './SyncDeckStudent.js
 import { persistRecoveredEmbeddedEntryParticipantToken } from './SyncDeckStudent.js'
 import { shouldPersistRecoveredEmbeddedEntryResponse } from './SyncDeckStudent.js'
 import { extractNavigationCapabilitiesFromStateMessage } from './SyncDeckStudent.js'
+import { shouldUseStudentFragmentCatchupForwardNavigation } from './SyncDeckStudent.js'
 import { computeStudentEmbeddedSyncState } from './SyncDeckStudent.js'
 import { shouldAutoActivateReleasedResonanceQuestions } from './SyncDeckStudent.js'
 import { tryClaimReleasedResonanceAutoActivation } from './SyncDeckStudent.js'
@@ -1718,6 +1719,52 @@ void test('extractNavigationCapabilitiesFromStateMessage normalizes canGoLeft/ca
     canGoUp: true,
     canGoDown: true,
   })
+})
+
+void test('extractNavigationCapabilitiesFromStateMessage prefers canGoForward over canGoRight for fragment catch-up', () => {
+  const capabilities = extractNavigationCapabilitiesFromStateMessage({
+    type: 'reveal-sync',
+    action: 'state',
+    payload: {
+      navigation: {
+        canGoForward: true,
+        canGoRight: false,
+      },
+    },
+  })
+
+  assert.deepEqual(capabilities, {
+    canGoBack: true,
+    canGoForward: true,
+    canGoUp: true,
+    canGoDown: true,
+  })
+})
+
+void test('shouldUseStudentFragmentCatchupForwardNavigation only enables same-slide fragment catch-up', () => {
+  assert.equal(
+    shouldUseStudentFragmentCatchupForwardNavigation({
+      studentIndices: { h: 3, v: 0, f: 0 },
+      instructorIndices: { h: 3, v: 0, f: 2 },
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldUseStudentFragmentCatchupForwardNavigation({
+      studentIndices: { h: 3, v: 0, f: 2 },
+      instructorIndices: { h: 3, v: 0, f: 2 },
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldUseStudentFragmentCatchupForwardNavigation({
+      studentIndices: { h: 3, v: 0, f: 0 },
+      instructorIndices: { h: 4, v: 0, f: 0 },
+    }),
+    false,
+  )
 })
 
 void test('computeStudentEmbeddedSyncState resolves synchronized, vertical, behind, ahead, and solo', () => {
