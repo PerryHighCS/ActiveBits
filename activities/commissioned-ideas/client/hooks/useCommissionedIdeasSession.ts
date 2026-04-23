@@ -4,6 +4,14 @@ import type { StudentSafeParticipant } from '../../shared/types.js'
 
 // ── Client-side snapshot types ────────────────────────────────────────────────
 
+export interface ClientTeam {
+  id: string
+  groupName: string | null
+  projectName: string | null
+  registeredAt: number
+  memberIds: string[]
+}
+
 export interface StudentSnapshot {
   phase: string
   studentGroupingLocked: boolean
@@ -11,7 +19,7 @@ export interface StudentSnapshot {
   maxTeamSize: number
   groupingMode: string
   participantRoster: Record<string, StudentSafeParticipant>
-  teams: Record<string, unknown>
+  teams: Record<string, ClientTeam>
   ballotSubmitted: boolean
   myBallot: unknown | null
   ballotsReceived: number
@@ -35,7 +43,7 @@ export interface ManagerSnapshot {
   maxTeamSize: number
   groupingMode: string
   participantRoster: Record<string, ManagerParticipant>
-  teams: Record<string, unknown>
+  teams: Record<string, ClientTeam>
   ballotsReceived: number
   currentPresentationTeamId: string | null
   podiumRevealStep: string

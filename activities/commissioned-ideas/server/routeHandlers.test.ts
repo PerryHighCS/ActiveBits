@@ -111,6 +111,14 @@ function withPasscode(
   return createRequest(params, body, { 'x-commissioned-ideas-instructor-passcode': passcode })
 }
 
+function withParticipantToken(
+  params: Record<string, string | undefined>,
+  body: unknown,
+  token: string,
+): MockRequest {
+  return createRequest(params, body, { 'x-commissioned-ideas-participant-token': token })
+}
+
 function sessionData(store: Record<string, SessionRecord>, id: string): CommissionedIdeasSessionData {
   const session = store[id]
   assert.ok(session, `Session ${id} not found in store`)
@@ -385,6 +393,7 @@ void test('state route snapshot participantRoster omits instructor-only fields',
   assert.equal('connected' in p1, false)
   assert.equal('lastSeen' in p1, false)
   assert.equal('rejectedByInstructor' in p1, false)
+  assert.equal('token' in p1, false, 'token must never appear in student snapshot')
   assert.equal(p1.id, 'p1')
   assert.equal(p1.name, 'Alice')
   assert.equal(p1.teamId, null)
@@ -546,7 +555,7 @@ void test('register-participant returns 400 when name is missing', async () => {
   assert.deepEqual(res.body, { error: 'name is required' })
 })
 
-void test('register-participant creates a new participant and returns id + name', async () => {
+void test('register-participant creates a new participant and returns id + name + token', async () => {
   const app = createMockApp()
   const ws = createMockWs()
   const { sessions } = createMockSessions()
@@ -561,10 +570,12 @@ void test('register-participant creates a new participant and returns id + name'
   await handler(createRequest({ sessionId }, { name: 'Alice' }), res)
 
   assert.equal(res.statusCode, 200)
-  const body = res.body as { participantId: string; name: string }
+  const body = res.body as { participantId: string; name: string; token: string }
   assert.equal(typeof body.participantId, 'string')
   assert.ok(body.participantId.length > 0)
   assert.equal(body.name, 'Alice')
+  assert.equal(typeof body.token, 'string', 'token must be returned for student auth')
+  assert.ok(body.token.length > 0)
 })
 
 void test('register-participant stores participant in session roster', async () => {
@@ -930,4 +941,417 @@ void test('manager websocket authenticates with a post-connect message instead o
     true,
     'manager socket should receive a session snapshot after authenticating over the socket',
   )
+})
+
+// ── POST /api/commissioned-ideas/:sessionId/settings ─────────────────────────
+
+async function createSession(app: ReturnType<typeof createMockApp>) {
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/create']!(createRequest(), res)
+  return res.body as { id: string; instructorPasscode: string }
+}
+
+async function registerParticipant(
+  app: ReturnType<typeof createMockApp>,
+  sessionId: string,
+  name: string,
+): Promise<{ participantId: string; token: string }> {
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/register-participant']!(
+    createRequest({ sessionId }, { name }),
+    res,
+  )
+  return res.body as { participantId: string; token: string }
+}
+
+void test('settings route returns 403 without instructor auth', async () => {
+  const app = createMockApp()
+  setupCommissionedIdeasRoutes(app, createMockSessions().sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/settings']!(
+    createRequest({ sessionId }, { maxTeamSize: 5 }),
+    res,
+  )
+  assert.equal(res.statusCode, 403)
+})
+
+void test('settings route updates maxTeamSize', async () => {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/settings']!(
+    withPasscode({ sessionId }, { maxTeamSize: 5 }, instructorPasscode),
+    res,
+  )
+  assert.equal(res.statusCode, 200)
+  assert.equal(sessionData(store, sessionId).maxTeamSize, 5)
+})
+
+void test('settings route rejects non-integer maxTeamSize', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/settings']!(
+    withPasscode({ sessionId }, { maxTeamSize: 'big' }, instructorPasscode),
+    res,
+  )
+  assert.equal(res.statusCode, 400)
+})
+
+void test('settings route sets studentGroupingLocked', async () => {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/settings']!(
+    withPasscode({ sessionId }, { studentGroupingLocked: true }, instructorPasscode),
+    createResponse(),
+  )
+  assert.equal(sessionData(store, sessionId).studentGroupingLocked, true)
+})
+
+// ── POST /api/commissioned-ideas/:sessionId/create-team ───────────────────────
+
+void test('create-team creates a team and sets participant teamId', async () => {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+
+  const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId }, token),
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const { teamId } = res.body as { teamId: string }
+  assert.ok(teamId)
+  const data = sessionData(store, sessionId)
+  assert.ok(data.teams[teamId], 'team must exist in store')
+  assert.equal(data.participantRoster[participantId]?.teamId, teamId)
+  assert.deepEqual(data.teams[teamId]?.memberIds, [participantId])
+})
+
+void test('create-team returns 403 without participant token', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+  const { participantId } = await registerParticipant(app, sessionId, 'Alice')
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    createRequest({ sessionId }, { participantId }),
+    res,
+  )
+  assert.equal(res.statusCode, 403)
+})
+
+void test('create-team returns 403 when grouping is locked', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
+
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/settings']!(
+    withPasscode({ sessionId }, { studentGroupingLocked: true }, instructorPasscode),
+    createResponse(),
+  )
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId }, token),
+    res,
+  )
+  assert.equal(res.statusCode, 403)
+})
+
+void test('create-team returns 403 in random grouping mode', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
+
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/settings']!(
+    withPasscode({ sessionId }, { groupingMode: 'random' }, instructorPasscode),
+    createResponse(),
+  )
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId }, token),
+    res,
+  )
+  assert.equal(res.statusCode, 403)
+})
+
+// ── POST /api/commissioned-ideas/:sessionId/join-team ────────────────────────
+
+void test('join-team adds participant to existing team', async () => {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+
+  const { participantId: aliceId, token: aliceToken } = await registerParticipant(app, sessionId, 'Alice')
+  const { participantId: bobId, token: bobToken } = await registerParticipant(app, sessionId, 'Bob')
+
+  // Alice creates a team
+  const teamRes = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+  )
+  const { teamId } = teamRes.body as { teamId: string }
+
+  // Bob joins Alice's team
+  const joinRes = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/join-team']!(
+    withParticipantToken({ sessionId }, { participantId: bobId, teamId }, bobToken), joinRes,
+  )
+
+  assert.equal(joinRes.statusCode, 200)
+  const data = sessionData(store, sessionId)
+  assert.equal(data.participantRoster[bobId]?.teamId, teamId)
+  assert.ok(data.teams[teamId]?.memberIds.includes(bobId))
+})
+
+void test('join-team returns 403 without participant token', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+
+  const { participantId: aliceId, token: aliceToken } = await registerParticipant(app, sessionId, 'Alice')
+  const { participantId: bobId } = await registerParticipant(app, sessionId, 'Bob')
+
+  const teamRes = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+  )
+  const { teamId } = teamRes.body as { teamId: string }
+
+  // Bob tries to join without his token
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/join-team']!(
+    createRequest({ sessionId }, { participantId: bobId, teamId }), res,
+  )
+  assert.equal(res.statusCode, 403)
+})
+
+void test('join-team returns 403 in random grouping mode', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  const { participantId: aliceId, token: aliceToken } = await registerParticipant(app, sessionId, 'Alice')
+  const { participantId: bobId, token: bobToken } = await registerParticipant(app, sessionId, 'Bob')
+
+  // Alice creates team while still in manual mode, then instructor switches to random
+  const teamRes = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+  )
+  const { teamId } = teamRes.body as { teamId: string }
+
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/settings']!(
+    withPasscode({ sessionId }, { groupingMode: 'random' }, instructorPasscode), createResponse(),
+  )
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/join-team']!(
+    withParticipantToken({ sessionId }, { participantId: bobId, teamId }, bobToken), res,
+  )
+  assert.equal(res.statusCode, 403)
+})
+
+void test('join-team returns 409 when team is full', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/settings']!(
+    withPasscode({ sessionId }, { maxTeamSize: 1 }, instructorPasscode), createResponse(),
+  )
+
+  const { participantId: aliceId, token: aliceToken } = await registerParticipant(app, sessionId, 'Alice')
+  const { participantId: bobId, token: bobToken } = await registerParticipant(app, sessionId, 'Bob')
+
+  const teamRes = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+  )
+  const { teamId } = teamRes.body as { teamId: string }
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/join-team']!(
+    withParticipantToken({ sessionId }, { participantId: bobId, teamId }, bobToken), res,
+  )
+  assert.equal(res.statusCode, 409)
+})
+
+// ── POST /api/commissioned-ideas/:sessionId/leave-team ───────────────────────
+
+void test('leave-team removes participant from their team', async () => {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+
+  const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
+
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId }, token), createResponse(),
+  )
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/leave-team']!(
+    withParticipantToken({ sessionId }, { participantId }, token), res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(sessionData(store, sessionId).participantRoster[participantId]?.teamId, null)
+})
+
+void test('leave-team returns 403 without participant token', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+
+  const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId }, token), createResponse(),
+  )
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/leave-team']!(
+    createRequest({ sessionId }, { participantId }), res,
+  )
+  assert.equal(res.statusCode, 403)
+})
+
+void test('leave-team returns 409 when participant is not in a team', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+
+  const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/leave-team']!(
+    withParticipantToken({ sessionId }, { participantId }, token), res,
+  )
+  assert.equal(res.statusCode, 409)
+})
+
+// ── POST /api/commissioned-ideas/:sessionId/assign-participant ────────────────
+
+void test('assign-participant moves a participant to a specified team', async () => {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  const { participantId: aliceId, token: aliceToken } = await registerParticipant(app, sessionId, 'Alice')
+  const { participantId: bobId } = await registerParticipant(app, sessionId, 'Bob')
+
+  const teamRes = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId: aliceId }, aliceToken), teamRes,
+  )
+  const { teamId } = teamRes.body as { teamId: string }
+
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/settings']!(
+    withPasscode({ sessionId }, { studentGroupingLocked: true }, instructorPasscode), createResponse(),
+  )
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/assign-participant']!(
+    withPasscode({ sessionId }, { participantId: bobId, teamId }, instructorPasscode), res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(sessionData(store, sessionId).participantRoster[bobId]?.teamId, teamId)
+})
+
+void test('assign-participant removes from team when teamId is null', async () => {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  const { participantId, token } = await registerParticipant(app, sessionId, 'Alice')
+
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/create-team']!(
+    withParticipantToken({ sessionId }, { participantId }, token), createResponse(),
+  )
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/assign-participant']!(
+    withPasscode({ sessionId }, { participantId, teamId: null }, instructorPasscode), res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(sessionData(store, sessionId).participantRoster[participantId]?.teamId, null)
+})
+
+// ── POST /api/commissioned-ideas/:sessionId/assign-random ────────────────────
+
+void test('assign-random places all ungrouped participants', async () => {
+  const app = createMockApp()
+  const { store, sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId, instructorPasscode } = await createSession(app)
+
+  for (const name of ['A', 'B', 'C', 'D']) {
+    await app.handlers.post['/api/commissioned-ideas/:sessionId/register-participant']!(
+      createRequest({ sessionId }, { name }), createResponse(),
+    )
+  }
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/assign-random']!(
+    withPasscode({ sessionId }, {}, instructorPasscode), res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const data = sessionData(store, sessionId)
+  for (const p of Object.values(data.participantRoster)) {
+    assert.ok(p.teamId !== null, `${p.name} must be placed in a team`)
+  }
+  for (const team of Object.values(data.teams)) {
+    assert.ok(team.memberIds.length <= data.maxTeamSize, 'team must not exceed maxTeamSize')
+  }
+})
+
+void test('assign-random returns 403 without instructor auth', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+  setupCommissionedIdeasRoutes(app, sessions, createMockWs())
+  const { id: sessionId } = await createSession(app)
+
+  const res = createResponse()
+  await app.handlers.post['/api/commissioned-ideas/:sessionId/assign-random']!(
+    createRequest({ sessionId }, {}), res,
+  )
+  assert.equal(res.statusCode, 403)
 })

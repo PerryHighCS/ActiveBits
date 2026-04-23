@@ -412,15 +412,15 @@ Goal:
 - Support classroom grouping workflows before naming begins.
 
 Implementation:
-- [ ] Implement max team size control
-- [ ] Implement manual team formation and leave/join flow
-- [ ] Implement optional random grouping flow
-- [ ] Implement reshuffle-ungrouped flow for post-lock cleanup
-- [ ] Implement instructor manual assignment flow for late/ungrouped students
-- [ ] Implement instructor removal of students from groups
-- [ ] Implement `studentGroupingLocked` behavior so grouped students are fixed while ungrouped/late students remain instructor-placeable
-- [ ] Add manager/team roster UI for grouped and ungrouped students
-- [ ] Add tests for membership constraints, random grouping, reshuffle-ungrouped, and instructor-only late assignment
+- [x] Implement max team size control
+- [x] Implement manual team formation and leave/join flow
+- [x] Implement optional random grouping flow
+- [x] Implement reshuffle-ungrouped flow for post-lock cleanup
+- [x] Implement instructor manual assignment flow for late/ungrouped students
+- [x] Implement instructor removal of students from groups
+- [x] Implement `studentGroupingLocked` behavior so grouped students are fixed while ungrouped/late students remain instructor-placeable
+- [x] Add manager/team roster UI for grouped and ungrouped students
+- [x] Add tests for membership constraints, random grouping, reshuffle-ungrouped, and instructor-only late assignment
 
 Exit criteria:
 - The teacher can get every student into a valid team structure without reopening full free-form grouping.
