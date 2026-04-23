@@ -6,31 +6,9 @@ import { consumeCreateSessionBootstrapPayload } from '@src/components/common/man
 import { useManagerSession } from '../hooks/useCommissionedIdeasSession.js'
 import RegistrationDashboard from './RegistrationDashboard.js'
 
-const PASSCODE_STORAGE_KEY_PREFIX = 'ci_instructor_'
-
-function readStoredPasscode(sessionId: string): string | null {
-  try {
-    return window.sessionStorage.getItem(`${PASSCODE_STORAGE_KEY_PREFIX}${sessionId}`)
-  } catch {
-    return null
-  }
-}
-
-function writeStoredPasscode(sessionId: string, passcode: string): void {
-  try {
-    window.sessionStorage.setItem(`${PASSCODE_STORAGE_KEY_PREFIX}${sessionId}`, passcode)
-  } catch {
-    // best-effort
-  }
-}
-
 function resolvePasscode(sessionId: string): string | null {
-  const fromStorage = readStoredPasscode(sessionId)
-  if (fromStorage) return fromStorage
-
   const bootstrap = consumeCreateSessionBootstrapPayload('commissioned-ideas', sessionId)
   if (bootstrap !== null && typeof bootstrap.instructorPasscode === 'string' && bootstrap.instructorPasscode.length > 0) {
-    writeStoredPasscode(sessionId, bootstrap.instructorPasscode)
     return bootstrap.instructorPasscode
   }
 

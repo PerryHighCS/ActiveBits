@@ -26,6 +26,7 @@ import {
   parseDeepLinkGenerator,
   parseDeepLinkOptions,
   resolvePersistentLinkPreflightValue,
+  shouldPersistCreateSessionBootstrapPayloadToSessionStorage,
   validateDeepLinkSelection,
   type DeepLinkSelection,
 } from './manageDashboardUtils'
@@ -272,7 +273,9 @@ export default function ManageDashboard({
 
       persistCreateSessionBootstrapToSessionStorage(activity?.createSessionBootstrap, payload.id, payload)
       if (navigationState != null) {
-        storeCreateSessionBootstrapPayload(activityId, payload.id, navigationState.createSessionPayload)
+        storeCreateSessionBootstrapPayload(activityId, payload.id, navigationState.createSessionPayload, undefined, {
+          persistToSessionStorage: shouldPersistCreateSessionBootstrapPayloadToSessionStorage(activity?.createSessionBootstrap),
+        })
       }
 
       void navigate(buildStandaloneActivityLauncherManagePath(activityId, payload.id, {}), {

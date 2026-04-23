@@ -18,6 +18,7 @@ import {
   parseDeepLinkGenerator,
   persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkOptions,
+  shouldPersistCreateSessionBootstrapPayloadToSessionStorage,
   storeCreateSessionBootstrapPayload,
   validateDeepLinkSelection,
 } from './manageDashboardUtils'
@@ -319,13 +320,32 @@ void test('parseCreateSessionBootstrap validates sessionStorage bootstrap metada
         { keyPrefix: 'x_', responseField: '' },
       ],
       historyState: [' instructorPasscode ', '', 42],
+      allowSessionStorageFallback: false,
     }),
     {
       sessionStorage: [
         { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
       ],
       historyState: ['instructorPasscode'],
+      allowSessionStorageFallback: false,
     },
+  )
+})
+
+void test('shouldPersistCreateSessionBootstrapPayloadToSessionStorage respects explicit opt-out', () => {
+  assert.equal(
+    shouldPersistCreateSessionBootstrapPayloadToSessionStorage({
+      historyState: ['instructorPasscode'],
+      allowSessionStorageFallback: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldPersistCreateSessionBootstrapPayloadToSessionStorage({
+      historyState: ['instructorPasscode'],
+    }),
+    true,
   )
 })
 
@@ -463,6 +483,49 @@ void test('consumeCreateSessionBootstrapPayload clears sessionStorage even when 
     assert.equal(
       sessionStorage.get('create-session-bootstrap:video-sync:session-123') ?? null,
       null,
+    )
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
+void test('storeCreateSessionBootstrapPayload skips sessionStorage when fallback is disabled', () => {
+  const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage()
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: fakeSessionStorage,
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    storeCreateSessionBootstrapPayload(
+      'commissioned-ideas',
+      'session-123',
+      {
+        instructorPasscode: 'teacher-passcode',
+      },
+      10,
+      { persistToSessionStorage: false },
+    )
+
+    assert.equal(
+      sessionStorage.has('create-session-bootstrap:commissioned-ideas:session-123'),
+      false,
+    )
+
+    assert.deepEqual(
+      consumeCreateSessionBootstrapPayload('commissioned-ideas', 'session-123', 10),
+      {
+        instructorPasscode: 'teacher-passcode',
+      },
     )
   } finally {
     Object.defineProperty(globalThis, 'window', {
