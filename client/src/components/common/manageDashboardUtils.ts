@@ -42,6 +42,7 @@ export interface CreateSessionBootstrapSessionStorageEntry {
 export interface CreateSessionBootstrapConfig {
   sessionStorage: CreateSessionBootstrapSessionStorageEntry[]
   historyState?: string[]
+  allowSessionStorageFallback?: boolean
 }
 
 export type DeepLinkOptions = Record<string, DeepLinkOption>
@@ -465,6 +466,8 @@ export function parseCreateSessionBootstrap(rawCreateSessionBootstrap: unknown):
       .filter((entry) => entry.length > 0)
     : []
 
+  const allowSessionStorageFallback = rawCreateSessionBootstrap.allowSessionStorageFallback !== false
+
   if (sessionStorage.length === 0 && historyState.length === 0) {
     return null
   }
@@ -472,7 +475,12 @@ export function parseCreateSessionBootstrap(rawCreateSessionBootstrap: unknown):
   return {
     sessionStorage,
     ...(historyState.length > 0 ? { historyState } : {}),
+    ...(allowSessionStorageFallback ? {} : { allowSessionStorageFallback: false }),
   }
+}
+
+export function shouldPersistCreateSessionBootstrapPayloadToSessionStorage(rawCreateSessionBootstrap: unknown): boolean {
+  return parseCreateSessionBootstrap(rawCreateSessionBootstrap)?.allowSessionStorageFallback !== false
 }
 
 export function persistCreateSessionBootstrapToSessionStorage(
@@ -512,12 +520,17 @@ export function storeCreateSessionBootstrapPayload(
   sessionId: string,
   payload: Record<string, unknown>,
   nowMs = Date.now(),
+  options?: {
+    persistToSessionStorage?: boolean
+  },
 ): void {
   createSessionBootstrapPayloads.set(`${activityId}:${sessionId}`, {
     payload,
     createdAtMs: nowMs,
   })
-  persistCreateSessionBootstrapPayloadToSessionStorage(activityId, sessionId, payload, nowMs, nowMs)
+  if (options?.persistToSessionStorage !== false) {
+    persistCreateSessionBootstrapPayloadToSessionStorage(activityId, sessionId, payload, nowMs, nowMs)
+  }
   pruneCreateSessionBootstrapPayloads(nowMs)
 }
 

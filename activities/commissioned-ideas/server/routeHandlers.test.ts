@@ -853,3 +853,81 @@ void test('setupCommissionedIdeasRoutes registers the websocket namespace', () =
   setupCommissionedIdeasRoutes(app, sessions, trackingWs)
   assert.ok(registered.includes('/ws/commissioned-ideas'), 'WS namespace must be registered')
 })
+
+void test('manager websocket authenticates with a post-connect message instead of a URL passcode', async () => {
+  const app = createMockApp()
+  const { sessions } = createMockSessions()
+
+  type CommissionedIdeasWsTestSocket = {
+    sessionId?: string
+    participantId?: string | null
+    isManager?: boolean
+    wantsManager?: boolean
+    readyState: number
+    send(message: string): void
+    close(code?: number, reason?: string): void
+    on(event: string, handler: (raw?: unknown) => void): void
+  }
+
+  type CommissionedIdeasWsHandler = (socket: CommissionedIdeasWsTestSocket, query: URLSearchParams) => void
+
+  let wsHandler: CommissionedIdeasWsHandler | null = null
+
+  const trackingWs: WsRouter = {
+    wss: { clients: new Set(), close() {} },
+    register(path, handler) {
+      if (path === '/ws/commissioned-ideas') {
+        wsHandler = handler as CommissionedIdeasWsHandler
+      }
+    },
+  }
+
+  setupCommissionedIdeasRoutes(app, sessions, trackingWs)
+
+  const createHandler = app.handlers.post['/api/commissioned-ideas/create']
+  assert.ok(createHandler)
+  const createRes = createResponse()
+  await createHandler(createRequest(), createRes)
+
+  const { id: sessionId, instructorPasscode } = createRes.body as { id: string; instructorPasscode: string }
+  if (wsHandler == null) {
+    throw new Error('Expected commissioned-ideas websocket handler to be registered')
+  }
+  const registeredWsHandler: CommissionedIdeasWsHandler = wsHandler
+
+  const sentMessages: string[] = []
+  const messageHandlers: Array<(raw?: unknown) => void> = []
+  const socket: CommissionedIdeasWsTestSocket = {
+    readyState: 1,
+    send(message: string) {
+      sentMessages.push(message)
+    },
+    close() {},
+    on(event: string, handler: (raw?: unknown) => void) {
+      if (event === 'message') {
+        messageHandlers.push(handler)
+      }
+    },
+  }
+
+  registeredWsHandler(socket, new URLSearchParams({ sessionId, role: 'manager' }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(
+    sentMessages.some((message) => message.includes('commissioned-ideas:session-state')),
+    false,
+    'manager socket should not receive a privileged snapshot before authenticating',
+  )
+
+  messageHandlers[0]?.(JSON.stringify({
+    type: 'commissioned-ideas:manager-auth',
+    instructorPasscode,
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(
+    sentMessages.some((message) => message.includes('commissioned-ideas:session-state')),
+    true,
+    'manager socket should receive a session snapshot after authenticating over the socket',
+  )
+})

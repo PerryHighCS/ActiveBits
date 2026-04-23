@@ -30,6 +30,7 @@ interface CommissionedIdeasSession extends SessionRecord {
 interface CommissionedIdeasSocket extends ActiveBitsWebSocket {
   participantId?: string | null
   isManager?: boolean
+  wantsManager?: boolean
 }
 
 interface JsonResponse {
@@ -244,6 +245,24 @@ function checkInstructorAuth(req: RouteRequest, session: CommissionedIdeasSessio
   const raw = req.headers?.['x-commissioned-ideas-instructor-passcode']
   const header = Array.isArray(raw) ? raw[0] : raw
   return typeof header === 'string' && verifyPasscode(session.data.instructorPasscode, header.toUpperCase())
+}
+
+function parseSocketMessage(raw: unknown): Record<string, unknown> | null {
+  const text = typeof raw === 'string'
+    ? raw
+    : Buffer.isBuffer(raw)
+      ? raw.toString('utf8')
+      : null
+
+  if (!text) {
+    return null
+  }
+
+  try {
+    return ensurePlainObject(JSON.parse(text))
+  } catch {
+    return null
+  }
 }
 
 // ── Session normalizer ────────────────────────────────────────────────────────
@@ -547,7 +566,7 @@ export default function setupCommissionedIdeasRoutes(
     const typedSocket = socket as CommissionedIdeasSocket
     typedSocket.sessionId = sessionId
     typedSocket.participantId = query.get('participantId') ?? null
-    const wantsManager = query.get('role') === 'manager'
+    typedSocket.wantsManager = query.get('role') === 'manager'
 
     ensureBroadcastSubscription(sessionId)
 
@@ -559,17 +578,6 @@ export default function setupCommissionedIdeasRoutes(
         return
       }
 
-      // Verify instructor passcode before granting manager role.
-      if (wantsManager) {
-        const candidatePasscode = normalizeInstructorPasscode(query.get('instructorPasscode'))
-        if (!candidatePasscode || !verifyPasscode(session.data.instructorPasscode, candidatePasscode)) {
-          socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Invalid instructor passcode' }))
-          socket.close(1008, 'Invalid instructor passcode')
-          return
-        }
-        typedSocket.isManager = true
-      }
-
       const participantId = typedSocket.participantId
       if (participantId && session.data.participantRoster[participantId]) {
         const p = session.data.participantRoster[participantId]
@@ -579,18 +587,53 @@ export default function setupCommissionedIdeasRoutes(
         broadcastRegistrationUpdate(ws, sessionId, session.data)
       }
 
-      const initData = typedSocket.isManager
-        ? buildManagerSnapshot(session.data)
-        : buildStudentSnapshot(session.data, participantId ?? null)
-
-      socket.send(JSON.stringify({
-        type: 'commissioned-ideas:session-state',
-        sessionId,
-        data: initData,
-      }))
+      if (!typedSocket.wantsManager) {
+        socket.send(JSON.stringify({
+          type: 'commissioned-ideas:session-state',
+          sessionId,
+          data: buildStudentSnapshot(session.data, participantId ?? null),
+        }))
+      }
     })().catch((err: unknown) => {
       console.error('[commissioned-ideas] WS init error', err)
       socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Failed to load session' }))
+    })
+
+    socket.on('message', (raw: unknown) => {
+      void (async () => {
+        if (typedSocket.isManager || !typedSocket.wantsManager) {
+          return
+        }
+
+        const message = parseSocketMessage(raw)
+        if (message?.type !== 'commissioned-ideas:manager-auth') {
+          return
+        }
+
+        const session = await getSession(sessions, sessionId)
+        if (!session) {
+          socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Session not found' }))
+          socket.close(1008, 'Session not found')
+          return
+        }
+
+        const candidatePasscode = normalizeInstructorPasscode(message.instructorPasscode)
+        if (!candidatePasscode || !verifyPasscode(session.data.instructorPasscode, candidatePasscode)) {
+          socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Invalid instructor passcode' }))
+          socket.close(1008, 'Invalid instructor passcode')
+          return
+        }
+
+        typedSocket.isManager = true
+        socket.send(JSON.stringify({
+          type: 'commissioned-ideas:session-state',
+          sessionId,
+          data: buildManagerSnapshot(session.data),
+        }))
+      })().catch((err: unknown) => {
+        console.error('[commissioned-ideas] WS manager auth error', err)
+        socket.send(JSON.stringify({ type: 'commissioned-ideas:error', error: 'Failed to authenticate manager' }))
+      })
     })
 
     socket.on('close', () => {

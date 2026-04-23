@@ -334,6 +334,10 @@ function parseCreateSessionBootstrap(raw: unknown, context: string): ActivityCre
 
   const sessionStorage = parseCreateSessionBootstrapSessionStorage(raw.sessionStorage, `${context}.createSessionBootstrap`)
   const historyState = parseCreateSessionBootstrapHistoryState(raw.historyState, `${context}.createSessionBootstrap`)
+  const allowSessionStorageFallback = raw.allowSessionStorageFallback
+  if (allowSessionStorageFallback !== undefined && typeof allowSessionStorageFallback !== 'boolean') {
+    throw new Error(`${context}.createSessionBootstrap.allowSessionStorageFallback must be a boolean when provided`)
+  }
   const selectedOptionsToSessionData = parseCreateSessionBootstrapSelectedOptionsToSessionData(
     raw.selectedOptionsToSessionData,
     `${context}.createSessionBootstrap`,
@@ -341,6 +345,7 @@ function parseCreateSessionBootstrap(raw: unknown, context: string): ActivityCre
   return {
     ...(sessionStorage !== undefined ? { sessionStorage } : {}),
     ...(historyState !== undefined ? { historyState } : {}),
+    ...(allowSessionStorageFallback !== undefined ? { allowSessionStorageFallback } : {}),
     ...(selectedOptionsToSessionData !== undefined ? { selectedOptionsToSessionData } : {}),
   }
 }

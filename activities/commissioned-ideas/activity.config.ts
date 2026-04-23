@@ -12,12 +12,9 @@ const commissionedIdeasConfig: ActivityConfig = {
     showOnHome: false,
   },
   createSessionBootstrap: {
-    sessionStorage: [
-      {
-        keyPrefix: 'ci_instructor_',
-        responseField: 'instructorPasscode',
-      },
-    ],
+    sessionStorage: [],
+    historyState: ['instructorPasscode'],
+    allowSessionStorageFallback: false,
   },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
