@@ -128,9 +128,16 @@ export function useManagerSession({
   const buildWsUrl = useCallback(() => {
     if (!sessionId || !instructorPasscode) return null
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams({ sessionId, role: 'manager', instructorPasscode })
+    const params = new URLSearchParams({ sessionId, role: 'manager' })
     return `${proto}//${window.location.host}/ws/commissioned-ideas?${params.toString()}`
   }, [sessionId, instructorPasscode])
+
+  const handleOpen = useCallback((_event: Event, ws: WebSocket) => {
+    ws.send(JSON.stringify({
+      type: 'commissioned-ideas:manager-auth',
+      instructorPasscode,
+    }))
+  }, [instructorPasscode])
 
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
@@ -152,6 +159,7 @@ export function useManagerSession({
   const { connect, disconnect, socketRef } = useResilientWebSocket({
     buildUrl: buildWsUrl,
     shouldReconnect: Boolean(sessionId) && Boolean(instructorPasscode),
+    onOpen: handleOpen,
     onMessage: handleMessage,
     attachSessionEndedHandler,
   })
