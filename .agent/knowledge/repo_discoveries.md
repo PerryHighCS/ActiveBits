@@ -39,6 +39,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Owner: Codex
 
 - Date: 2026-04-21
+- Area: activities | planning | commissioned-ideas
+- Discovery: A staged classroom competition activity like Commissioned Ideas, described to teachers as Shark Tank-inspired, fits the current repo best when it combines activity-local stage control and registration patterns from `gallery-walk`, reveal/review flow ideas from `resonance`, leaderboard-style ranking from `traveling-salesman`, and a lightweight winner reveal borrowed from `raffle`, without adding any activity-specific branches to shared dashboard or routing layers.
+- Why it matters: The requested flow spans registration, instructor-controlled live progression, weighted peer voting, and a final reveal. Treating those as activity-owned concerns keeps the repo aligned with the activity-containment policy and avoids speculative shared abstractions for "multi-phase competition" behavior.
+- Evidence: `activities/gallery-walk/server/routes.ts`; `activities/gallery-walk/client/manager/ManagerPage.tsx`; `activities/gallery-walk/client/student/StudentPage.tsx`; `activities/resonance/server/routes.ts`; `activities/resonance/client/manager/ResonanceManager.tsx`; `activities/traveling-salesman/client/components/Leaderboard.tsx`; `activities/raffle/client/manager/RaffleManager.tsx`; `.agent/plans/commissioned-ideas-activity-plan.md`
+- Follow-up action: When implementation begins, keep Commissioned Ideas session state, voting rules, scoring, and podium reveal inside `activities/commissioned-ideas/...`, and only extract shared seams if a second activity later needs the same contracts.
+- Owner: Codex
+
+- Date: 2026-04-21
 - Area: client | activities | syncdeck
 - Discovery: SyncDeck should scope `allow-popups-to-escape-sandbox` to instructor-configured presentation iframes only; embedded/internal iframes should keep the stricter sandbox without popup escape.
 - Why it matters: `allow-popups` alone permits popup creation but keeps the new browsing context sandboxed, which breaks normal outbound navigation for presentation-authored external links. Restricting popup escape to presentation iframes preserves the narrower trust boundary for internal child activities.

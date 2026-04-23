@@ -12,6 +12,7 @@ import {
 } from './activityLauncherUtils'
 import {
   persistCreateSessionBootstrapToSessionStorage,
+  shouldPersistCreateSessionBootstrapPayloadToSessionStorage,
   storeCreateSessionBootstrapPayload,
 } from './manageDashboardUtils'
 
@@ -65,7 +66,9 @@ function ActivityLauncherBody({
 
       persistCreateSessionBootstrapToSessionStorage(activity.createSessionBootstrap, payload.id, payload)
       if (navigationState != null) {
-        storeCreateSessionBootstrapPayload(activity.id, payload.id, navigationState.createSessionPayload)
+        storeCreateSessionBootstrapPayload(activity.id, payload.id, navigationState.createSessionPayload, undefined, {
+          persistToSessionStorage: shouldPersistCreateSessionBootstrapPayloadToSessionStorage(activity.createSessionBootstrap),
+        })
       }
 
       setStatus('started')

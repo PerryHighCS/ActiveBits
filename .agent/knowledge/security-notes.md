@@ -130,3 +130,12 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 - Validation (test/review/path): `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/ManageDashboard.tsx`; `activities/syncdeck/server/routes.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `activities/syncdeck/server/routes.test.ts`; `npm test`.
 - Follow-up action: Add optional hostname/domain allowlist policy if deployment requires restricting presentation origins.
 - Owner: Codex
+
+- Date: 2026-04-23
+- Area: commissioned-ideas instructor bootstrap + manager websocket auth
+- Threat or risk: Storing `instructorPasscode` in browser `sessionStorage` and placing it in the websocket URL query string exposes the credential to client-side storage inspection, browser/network tooling, and URL-based logging surfaces. Those patterns are especially likely to trip CodeQL and create avoidable secret-handling risk.
+- Control or mitigation: `commissioned-ideas` now carries the passcode only in the one-time create-session bootstrap history payload, opts out of the generic same-tab `sessionStorage` fallback (`allowSessionStorageFallback: false`), and authenticates manager websocket connections with a post-connect `commissioned-ideas:manager-auth` message instead of a query parameter.
+- Residual risk: Reloading the manager page after the initial handoff drops the in-memory bootstrap payload, so the instructor must reopen from the create-session navigation flow. The create route still intentionally returns the passcode, so downstream consumers must avoid logging that response body.
+- Validation (test/review/path): `activities/commissioned-ideas/activity.config.ts`; `activities/commissioned-ideas/client/manager/CommissionedIdeasManager.tsx`; `activities/commissioned-ideas/client/hooks/useCommissionedIdeasSession.ts`; `activities/commissioned-ideas/server/routes.ts`; `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `activities/commissioned-ideas/server/routeHandlers.test.ts`; `npm test` (blocked only by unrelated existing server failures in `galleryWalkRoutes.test.ts`, `sessionStore.test.ts`, and `statusRoute.test.ts`).
+- Follow-up action: Reuse the same opt-out + post-connect auth pattern for any future activity that needs to hand an instructor secret from create-session into a websocket-managed screen.
+- Owner: Codex
