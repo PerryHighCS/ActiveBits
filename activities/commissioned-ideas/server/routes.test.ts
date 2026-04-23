@@ -25,6 +25,7 @@ function makeTeam(id: string, registeredAt = 0): CommissionedIdeasTeam {
 
 function makeSession(overrides: Partial<CommissionedIdeasSessionData> = {}): CommissionedIdeasSessionData {
   return {
+    instructorPasscode: 'TESTPASS',
     phase: 'voting',
     studentGroupingLocked: true,
     namingLocked: true,

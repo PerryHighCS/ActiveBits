@@ -573,12 +573,10 @@ export default function setupCommissionedIdeasRoutes(
       const participantId = typedSocket.participantId
       if (participantId && session.data.participantRoster[participantId]) {
         const p = session.data.participantRoster[participantId]
-        if (p) {
-          p.connected = true
-          p.lastSeen = Date.now()
-          await sessions.set(sessionId, session)
-          broadcastRegistrationUpdate(ws, sessionId, session.data)
-        }
+        p.connected = true
+        p.lastSeen = Date.now()
+        await sessions.set(sessionId, session)
+        broadcastRegistrationUpdate(ws, sessionId, session.data)
       }
 
       const initData = typedSocket.isManager
