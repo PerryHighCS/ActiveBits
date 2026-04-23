@@ -82,7 +82,7 @@ function createMockSessions(initial: Record<string, SessionRecord> = {}) {
       },
       async delete(id: string) {
         const had = id in store
-        delete store[id]  // eslint-disable-line @typescript-eslint/no-dynamic-delete
+        delete store[id]
         return had
       },
       async touch(_id: string) { return true },
