@@ -13,6 +13,11 @@ interface SessionData {
   data?: Record<string, unknown>
 }
 
+/** localStorage key for the activity-specific participant token. */
+function tokenKey(sessionId: string): string {
+  return `ci:${sessionId}:token`
+}
+
 export default function CommissionedIdeasStudent({ sessionData }: { sessionData: SessionData }) {
   const sessionId = sessionData?.sessionId ?? null
   const attachSessionEndedHandler = useSessionEndedHandler()
@@ -21,6 +26,7 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
   // ── Identity state ──────────────────────────────────────────────────────────
   const [studentName, setStudentName] = useState('')
   const [studentId, setStudentId] = useState<string | null>(null)
+  const [participantToken, setParticipantToken] = useState<string | null>(null)
   const [nameSubmitted, setNameSubmitted] = useState(false)
   const [registered, setRegistered] = useState(false)
   const [identityResolved, setIdentityResolved] = useState(false)
@@ -43,10 +49,17 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
         setStudentName(identity.studentName)
         setStudentId(identity.studentId)
         setNameSubmitted(identity.nameSubmitted)
-        // Restore registered state so a returning student reconnects directly
-        // to the live roster without re-entering the registration form.
+        // Restore the participant token so team actions remain authenticated.
+        // If the token is absent (cleared storage, new device), leave registered=false
+        // so the form re-appears with the pre-filled name. Submitting it calls
+        // register-participant with the stored participantId, which returns the same
+        // token from the server and restores full team-action capability.
         if (identity.studentId) {
-          setRegistered(true)
+          const stored = window.localStorage.getItem(tokenKey(sessionId))
+          if (stored) {
+            setParticipantToken(stored)
+            setRegistered(true)
+          }
         }
       } catch {
         // non-fatal — fall through to RegistrationForm
@@ -74,12 +87,14 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
   }, [registered, sessionId, connect, disconnect])
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-  const handleRegistered = (participantId: string, name: string) => {
+  const handleRegistered = (participantId: string, name: string, token: string) => {
     setStudentId(participantId)
     setStudentName(name)
+    setParticipantToken(token)
     setRegistered(true)
     if (sessionId) {
       persistSessionParticipantIdentity(window.localStorage, sessionId, name, participantId)
+      window.localStorage.setItem(tokenKey(sessionId), token)
     }
   }
 
@@ -105,6 +120,9 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
 
   const phase = snapshot?.phase ?? 'registration'
   const participants = snapshot?.participantRoster ?? {}
+  const teams = snapshot?.teams ?? {}
+  const studentGroupingLocked = snapshot?.studentGroupingLocked ?? false
+  const groupingMode = snapshot?.groupingMode ?? 'manual'
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -119,8 +137,12 @@ export default function CommissionedIdeasStudent({ sessionData }: { sessionData:
         {phase === 'registration' && (
           <StudentRoster
             participants={participants}
+            teams={teams}
             myParticipantId={studentId ?? ''}
-            phase={phase}
+            participantToken={participantToken ?? ''}
+            sessionId={sessionId}
+            studentGroupingLocked={studentGroupingLocked}
+            groupingMode={groupingMode}
           />
         )}
 

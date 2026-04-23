@@ -155,6 +155,7 @@ function normalizeParticipant(raw: unknown, id: string): CommissionedIdeasPartic
     connected: Boolean(item.connected),
     lastSeen: typeof item.lastSeen === 'number' ? item.lastSeen : 0,
     rejectedByInstructor: Boolean(item.rejectedByInstructor),
+    token: typeof item.token === 'string' && item.token.length > 0 ? item.token : generatePasscode(),
   }
 }
 
@@ -250,6 +251,31 @@ function checkInstructorAuth(req: RouteRequest, session: CommissionedIdeasSessio
   const raw = req.headers?.['x-commissioned-ideas-instructor-passcode']
   const header = Array.isArray(raw) ? raw[0] : raw
   return typeof header === 'string' && verifyPasscode(session.data.instructorPasscode, header.toUpperCase())
+}
+
+/**
+ * Verifies that the caller owns the participantId they are acting on.
+ * Reads the participantId from the request body and the token from the
+ * `X-Commissioned-Ideas-Participant-Token` header, then does a constant-time
+ * comparison against the stored token.  Returns the verified participant or
+ * null on any failure (missing token, bad token, unknown id, rejected).
+ */
+function checkParticipantAuth(
+  req: RouteRequest,
+  session: CommissionedIdeasSession,
+): CommissionedIdeasParticipant | null {
+  const body = ensurePlainObject(req.body)
+  const participantId = typeof body.participantId === 'string' ? body.participantId : null
+  if (!participantId) return null
+
+  const raw = req.headers?.['x-commissioned-ideas-participant-token']
+  const tokenHeader = Array.isArray(raw) ? raw[0] : raw
+  if (typeof tokenHeader !== 'string' || tokenHeader.length === 0) return null
+
+  const participant = session.data.participantRoster[participantId]
+  if (!participant || participant.rejectedByInstructor) return null
+
+  return verifyPasscode(participant.token, tokenHeader.toUpperCase()) ? participant : null
 }
 
 function parseSocketMessage(raw: unknown): Record<string, unknown> | null {
@@ -408,6 +434,79 @@ function broadcastToAll(
   }
 }
 
+// ── Team formation helpers ────────────────────────────────────────────────────
+
+/**
+ * Removes `participant` from their current team's memberIds and clears teamId.
+ * Deletes the team record if it becomes empty.
+ */
+function removeParticipantFromTeam(
+  data: CommissionedIdeasSessionData,
+  participant: CommissionedIdeasParticipant,
+): void {
+  const team = participant.teamId ? data.teams[participant.teamId] : null
+  if (team) {
+    team.memberIds = team.memberIds.filter((id) => id !== participant.id)
+    if (team.memberIds.length === 0) {
+      delete data.teams[team.id]
+    }
+  }
+  participant.teamId = null
+}
+
+/**
+ * Randomly assigns ungrouped (and non-rejected) participants to teams,
+ * filling existing teams with space before creating new ones.
+ *
+ * @param reshuffleOnly When true only ungrouped participants are placed;
+ *                      when false the same logic applies (both modes act on
+ *                      ungrouped participants only — grouped ones are never
+ *                      disturbed).
+ */
+function assignRandom(data: CommissionedIdeasSessionData, _reshuffleOnly: boolean): void {
+  const ungrouped = Object.values(data.participantRoster).filter(
+    (p) => !p.rejectedByInstructor && p.teamId === null,
+  )
+  if (ungrouped.length === 0) return
+
+  // Fisher-Yates shuffle using randomInt for uniform distribution
+  for (let i = ungrouped.length - 1; i > 0; i--) {
+    const j = randomInt(0, i + 1)
+    const tmp = ungrouped[i]!
+    ungrouped[i] = ungrouped[j]!
+    ungrouped[j] = tmp
+  }
+
+  const maxSize = data.maxTeamSize
+
+  // Fill existing teams with available space first, then create new ones.
+  const openTeams = Object.values(data.teams).filter((t) => t.memberIds.length < maxSize)
+
+  for (const participant of ungrouped) {
+    let target = openTeams.find((t) => t.memberIds.length < maxSize)
+    if (!target) {
+      const teamId = generateShortId()
+      target = {
+        id: teamId,
+        groupName: null,
+        projectName: null,
+        registeredAt: Date.now(),
+        presenterOrder: null,
+        locked: false,
+        memberIds: [],
+        proposedGroupNames: [],
+        proposedProjectNames: [],
+        groupNameVotes: {},
+        projectNameVotes: {},
+      }
+      data.teams[teamId] = target
+      openTeams.push(target)
+    }
+    target.memberIds.push(participant.id)
+    participant.teamId = target.id
+  }
+}
+
 // ── Route export ──────────────────────────────────────────────────────────────
 
 export default function setupCommissionedIdeasRoutes(
@@ -478,16 +577,19 @@ export default function setupCommissionedIdeasRoutes(
     const existing = requestedId ? session.data.participantRoster[requestedId] : null
 
     let participantId: string
+    let participantToken: string
     if (existing) {
       // Reconnect: mark connected only. The server-side name is authoritative —
       // overwriting it here would silently undo instructor moderation applied
       // between the student's last visit and this reconnect.
       participantId = existing.id
+      participantToken = existing.token
       existing.connected = true
       existing.lastSeen = Date.now()
     } else {
       // New registration
       participantId = requestedId ?? generateShortId()
+      participantToken = generatePasscode()
       const participant: CommissionedIdeasParticipant = {
         id: participantId,
         name,
@@ -495,6 +597,7 @@ export default function setupCommissionedIdeasRoutes(
         connected: true,
         lastSeen: Date.now(),
         rejectedByInstructor: false,
+        token: participantToken,
       }
       session.data.participantRoster[participantId] = participant
     }
@@ -503,7 +606,7 @@ export default function setupCommissionedIdeasRoutes(
     console.info(`[commissioned-ideas] Participant registered`, { sessionId, participantId, name })
 
     broadcastRegistrationUpdate(ws, sessionId, session.data)
-    res.json({ participantId, name })
+    res.json({ participantId, name, token: participantToken })
   })
 
   // ── Instructor: edit or reject a participant name ───────────────────────────
@@ -556,6 +659,269 @@ export default function setupCommissionedIdeasRoutes(
     await sessions.set(sessionId, session)
     console.info(`[commissioned-ideas] Participant name moderated`, { sessionId, participantId })
 
+    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    res.json({ ok: true })
+  })
+
+  // ── Instructor: update session settings ────────────────────────────────────
+  app.post('/api/commissioned-ideas/:sessionId/settings', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
+
+    const session = await getSession(sessions, sessionId)
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'Instructor authentication required' })
+      return
+    }
+
+    const body = ensurePlainObject(req.body)
+    if ('maxTeamSize' in body) {
+      const v = body.maxTeamSize
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 1) {
+        res.status(400).json({ error: 'maxTeamSize must be a positive integer' })
+        return
+      }
+      session.data.maxTeamSize = v
+    }
+    if ('groupingMode' in body) {
+      session.data.groupingMode = normalizeGroupingMode(body.groupingMode)
+    }
+    if ('studentGroupingLocked' in body) {
+      session.data.studentGroupingLocked = Boolean(body.studentGroupingLocked)
+    }
+    if ('namingLocked' in body) {
+      session.data.namingLocked = Boolean(body.namingLocked)
+    }
+    if ('allowLateRegistration' in body) {
+      session.data.allowLateRegistration = Boolean(body.allowLateRegistration)
+    }
+
+    await sessions.set(sessionId, session)
+    console.info('[commissioned-ideas] Settings updated', { sessionId })
+    broadcastToAll(ws, sessionId, 'commissioned-ideas:registration-updated', session.data)
+    res.json({ ok: true })
+  })
+
+  // ── Student: create a new team and join it ──────────────────────────────────
+  app.post('/api/commissioned-ideas/:sessionId/create-team', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
+
+    const session = await getSession(sessions, sessionId)
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
+
+    const participant = checkParticipantAuth(req, session)
+    if (!participant) {
+      res.status(403).json({ error: 'Participant authentication required' })
+      return
+    }
+
+    if (session.data.studentGroupingLocked) {
+      res.status(403).json({ error: 'Grouping is locked' })
+      return
+    }
+
+    if (session.data.groupingMode !== 'manual') {
+      res.status(403).json({ error: 'Self-grouping is not allowed in random mode' })
+      return
+    }
+
+    const participantId = participant.id
+
+    // Leave current team if already in one
+    if (participant.teamId) {
+      removeParticipantFromTeam(session.data, participant)
+    }
+
+    const teamId = generateShortId()
+    session.data.teams[teamId] = {
+      id: teamId,
+      groupName: null,
+      projectName: null,
+      registeredAt: Date.now(),
+      presenterOrder: null,
+      locked: false,
+      memberIds: [participantId],
+      proposedGroupNames: [],
+      proposedProjectNames: [],
+      groupNameVotes: {},
+      projectNameVotes: {},
+    }
+    participant.teamId = teamId
+
+    await sessions.set(sessionId, session)
+    console.info('[commissioned-ideas] Team created', { sessionId, teamId, participantId })
+    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    res.json({ teamId })
+  })
+
+  // ── Student: join an existing team ──────────────────────────────────────────
+  app.post('/api/commissioned-ideas/:sessionId/join-team', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
+
+    const session = await getSession(sessions, sessionId)
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
+
+    const participant = checkParticipantAuth(req, session)
+    if (!participant) {
+      res.status(403).json({ error: 'Participant authentication required' })
+      return
+    }
+
+    const body = ensurePlainObject(req.body)
+    const teamId = typeof body.teamId === 'string' ? body.teamId : null
+    if (!teamId) { res.status(400).json({ error: 'teamId is required' }); return }
+
+    if (session.data.studentGroupingLocked) {
+      res.status(403).json({ error: 'Grouping is locked' })
+      return
+    }
+
+    if (session.data.groupingMode !== 'manual') {
+      res.status(403).json({ error: 'Self-grouping is not allowed in random mode' })
+      return
+    }
+
+    const participantId = participant.id
+
+    const team = session.data.teams[teamId]
+    if (!team) { res.status(404).json({ error: 'Team not found' }); return }
+
+    const memberCount = team.memberIds.filter((id) => id in session.data.participantRoster).length
+    if (memberCount >= session.data.maxTeamSize) {
+      res.status(409).json({ error: 'Team is full' })
+      return
+    }
+
+    // Leave current team first
+    if (participant.teamId) {
+      removeParticipantFromTeam(session.data, participant)
+    }
+
+    team.memberIds.push(participantId)
+    participant.teamId = teamId
+
+    await sessions.set(sessionId, session)
+    console.info('[commissioned-ideas] Participant joined team', { sessionId, teamId, participantId })
+    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    res.json({ ok: true })
+  })
+
+  // ── Student: leave current team ─────────────────────────────────────────────
+  app.post('/api/commissioned-ideas/:sessionId/leave-team', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
+
+    const session = await getSession(sessions, sessionId)
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
+
+    const participant = checkParticipantAuth(req, session)
+    if (!participant) {
+      res.status(403).json({ error: 'Participant authentication required' })
+      return
+    }
+
+    if (session.data.studentGroupingLocked) {
+      res.status(403).json({ error: 'Grouping is locked' })
+      return
+    }
+
+    if (session.data.groupingMode !== 'manual') {
+      res.status(403).json({ error: 'Self-grouping is not allowed in random mode' })
+      return
+    }
+
+    if (!participant.teamId) {
+      res.status(409).json({ error: 'Participant is not in a team' })
+      return
+    }
+
+    const participantId = participant.id
+
+    removeParticipantFromTeam(session.data, participant)
+
+    await sessions.set(sessionId, session)
+    console.info('[commissioned-ideas] Participant left team', { sessionId, participantId })
+    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    res.json({ ok: true })
+  })
+
+  // ── Instructor: assign participant to a team (or remove with teamId=null) ───
+  app.post('/api/commissioned-ideas/:sessionId/assign-participant', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
+
+    const session = await getSession(sessions, sessionId)
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'Instructor authentication required' })
+      return
+    }
+
+    const body = ensurePlainObject(req.body)
+    const participantId = typeof body.participantId === 'string' ? body.participantId : null
+    if (!participantId) { res.status(400).json({ error: 'participantId is required' }); return }
+
+    const participant = session.data.participantRoster[participantId]
+    if (!participant) { res.status(404).json({ error: 'Participant not found' }); return }
+
+    const targetTeamId = typeof body.teamId === 'string' ? body.teamId : null
+
+    if (targetTeamId !== null) {
+      const team = session.data.teams[targetTeamId]
+      if (!team) { res.status(404).json({ error: 'Team not found' }); return }
+
+      const memberCount = team.memberIds.filter((id) => id in session.data.participantRoster).length
+      if (memberCount >= session.data.maxTeamSize && participant.teamId !== targetTeamId) {
+        res.status(409).json({ error: 'Team is full' })
+        return
+      }
+    }
+
+    if (participant.teamId) {
+      removeParticipantFromTeam(session.data, participant)
+    }
+
+    if (targetTeamId !== null) {
+      const team = session.data.teams[targetTeamId]
+      if (team) {
+        team.memberIds.push(participantId)
+        participant.teamId = targetTeamId
+      }
+    }
+
+    await sessions.set(sessionId, session)
+    console.info('[commissioned-ideas] Instructor assigned participant', { sessionId, participantId, targetTeamId })
+    broadcastRegistrationUpdate(ws, sessionId, session.data)
+    res.json({ ok: true })
+  })
+
+  // ── Instructor: randomly assign ungrouped participants ──────────────────────
+  // When reshuffleOnly=false (default), assigns all ungrouped participants.
+  // When reshuffleOnly=true, only places ungrouped participants (post-lock mode).
+  app.post('/api/commissioned-ideas/:sessionId/assign-random', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) { res.status(400).json({ error: 'Missing sessionId' }); return }
+
+    const session = await getSession(sessions, sessionId)
+    if (!session) { res.status(404).json({ error: 'Session not found' }); return }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'Instructor authentication required' })
+      return
+    }
+
+    const body = ensurePlainObject(req.body)
+    const reshuffleOnly = Boolean(body.reshuffleOnly)
+
+    assignRandom(session.data, reshuffleOnly)
+
+    await sessions.set(sessionId, session)
+    console.info('[commissioned-ideas] Random assignment complete', { sessionId, reshuffleOnly })
     broadcastRegistrationUpdate(ws, sessionId, session.data)
     res.json({ ok: true })
   })
@@ -668,4 +1034,6 @@ export {
   buildManagerSnapshot,
   broadcastRegistrationUpdate,
   broadcastToAll,
+  removeParticipantFromTeam,
+  assignRandom,
 }
