@@ -35,6 +35,8 @@ export interface CommissionedIdeasParticipant {
   connected: boolean
   lastSeen: number
   rejectedByInstructor: boolean
+  /** Server-only secret issued at registration; never included in any client snapshot. */
+  token: string
 }
 
 /** Student-visible participant shape — no moderation or connection metadata. */

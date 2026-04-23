@@ -5,7 +5,7 @@ interface RegistrationFormProps {
   sessionId: string
   initialName?: string
   initialParticipantId?: string | null
-  onRegistered: (participantId: string, name: string) => void
+  onRegistered: (participantId: string, name: string, token: string) => void
 }
 
 export default function RegistrationForm({
@@ -32,14 +32,14 @@ export default function RegistrationForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed, participantId: initialParticipantId }),
       })
-      const data = (await res.json()) as { participantId?: string; name?: string; error?: string }
+      const data = (await res.json()) as { participantId?: string; name?: string; token?: string; error?: string }
 
-      if (!res.ok || !data.participantId) {
+      if (!res.ok || !data.participantId || !data.token) {
         setError(data.error ?? 'Could not join. Please try again.')
         return
       }
 
-      onRegistered(data.participantId, data.name ?? trimmed)
+      onRegistered(data.participantId, data.name ?? trimmed, data.token)
     } catch {
       setError('Network error — could not join session')
     } finally {

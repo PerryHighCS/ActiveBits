@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { computeTeamScores, resolveLeadingProposal } from '../shared/scoring.js'
 import { validateBallot, sanitizeDisplayName, coerceAllocations } from '../shared/validation.js'
-import { normalizeTeam, buildStudentSnapshot } from './routes.js'
+import { normalizeTeam, buildStudentSnapshot, removeParticipantFromTeam, assignRandom } from './routes.js'
 import type { CommissionedIdeasSessionData, CommissionedIdeasTeam } from '../shared/types.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ function makeSession(overrides: Partial<CommissionedIdeasSessionData> = {}): Com
       t3: makeTeam('t3'),
     },
     participantRoster: {
-      voter1: { id: 'voter1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false },
+      voter1: { id: 'voter1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
     },
     ballots: {},
     presentationHistory: [],
@@ -236,7 +236,7 @@ void test('validateBallot rejects duplicate team targets', () => {
 void test('validateBallot blocks self-vote when voter belongs to a team', () => {
   const session = makeSession({
     participantRoster: {
-      voter1: { id: 'voter1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false },
+      voter1: { id: 'voter1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
     },
   })
   const result = validateBallot(
@@ -255,7 +255,7 @@ void test('validateBallot blocks self-vote when voter belongs to a team', () => 
 void test('validateBallot allows self-vote when allowSelfVote=true', () => {
   const session = makeSession({
     participantRoster: {
-      voter1: { id: 'voter1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false },
+      voter1: { id: 'voter1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
     },
   })
   const result = validateBallot(
@@ -372,8 +372,8 @@ function makeFullSession(overrides: Partial<CommissionedIdeasSessionData> = {}):
     allowLateRegistration: true,
     teams: {},
     participantRoster: {
-      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 999, rejectedByInstructor: false },
-      p2: { id: 'p2', name: 'BadName', teamId: null, connected: false, lastSeen: 100, rejectedByInstructor: true },
+      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 999, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      p2: { id: 'p2', name: 'BadName', teamId: null, connected: false, lastSeen: 100, rejectedByInstructor: true, token: 'TESTTOKEN' },
     },
     ballots: {
       p1: {
@@ -395,13 +395,14 @@ function makeFullSession(overrides: Partial<CommissionedIdeasSessionData> = {}):
   }
 }
 
-void test('buildStudentSnapshot strips connected, lastSeen, rejectedByInstructor from participants', () => {
+void test('buildStudentSnapshot strips connected, lastSeen, rejectedByInstructor, token from participants', () => {
   const snapshot = buildStudentSnapshot(makeFullSession(), null)
   const p1 = snapshot.participantRoster['p1']
   assert.ok(p1)
   assert.equal('connected' in p1, false)
   assert.equal('lastSeen' in p1, false)
   assert.equal('rejectedByInstructor' in p1, false)
+  assert.equal('token' in p1, false, 'participant token must never appear in student snapshot')
   assert.equal(p1.id, 'p1')
   assert.equal(p1.name, 'Alice')
 })
@@ -438,4 +439,150 @@ void test('buildStudentSnapshot does not include another participant ballot for 
   const snapshot = buildStudentSnapshot(makeFullSession(), 'p2')
   assert.equal(snapshot.myBallot, null)
   assert.equal(snapshot.ballotSubmitted, false)
+})
+
+// ── removeParticipantFromTeam ─────────────────────────────────────────────────
+
+function makeRegistrationSession(overrides: Partial<CommissionedIdeasSessionData> = {}): CommissionedIdeasSessionData {
+  return {
+    instructorPasscode: 'TESTPASS',
+    phase: 'registration',
+    studentGroupingLocked: false,
+    namingLocked: false,
+    maxTeamSize: 3,
+    groupingMode: 'manual',
+    presentationRound: 1,
+    allowLateRegistration: true,
+    teams: {},
+    participantRoster: {},
+    ballots: {},
+    presentationHistory: [],
+    currentPresentationTeamId: null,
+    podiumRevealStep: 'hidden',
+    ...overrides,
+  }
+}
+
+void test('removeParticipantFromTeam clears participant teamId and removes from team memberIds', () => {
+  const data = makeRegistrationSession({
+    teams: {
+      t1: { ...makeTeam('t1'), memberIds: ['p1', 'p2'] },
+    },
+    participantRoster: {
+      p1: { id: 'p1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      p2: { id: 'p2', name: 'Bob', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+    },
+  })
+
+  removeParticipantFromTeam(data, data.participantRoster['p1']!)
+
+  assert.equal(data.participantRoster['p1']?.teamId, null)
+  assert.deepEqual(data.teams['t1']?.memberIds, ['p2'])
+})
+
+void test('removeParticipantFromTeam deletes team when it becomes empty', () => {
+  const data = makeRegistrationSession({
+    teams: {
+      t1: { ...makeTeam('t1'), memberIds: ['p1'] },
+    },
+    participantRoster: {
+      p1: { id: 'p1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+    },
+  })
+
+  removeParticipantFromTeam(data, data.participantRoster['p1']!)
+
+  assert.equal('t1' in data.teams, false, 'empty team must be deleted')
+  assert.equal(data.participantRoster['p1']?.teamId, null)
+})
+
+// ── assignRandom ──────────────────────────────────────────────────────────────
+
+void test('assignRandom places all ungrouped participants into teams', () => {
+  const data = makeRegistrationSession({
+    maxTeamSize: 2,
+    participantRoster: {
+      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      p2: { id: 'p2', name: 'Bob', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      p3: { id: 'p3', name: 'Carol', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+    },
+  })
+
+  assignRandom(data, false)
+
+  for (const p of Object.values(data.participantRoster)) {
+    assert.ok(p.teamId !== null, `${p.name} must be in a team`)
+  }
+  for (const team of Object.values(data.teams)) {
+    assert.ok(team.memberIds.length <= 2, 'no team should exceed maxTeamSize')
+  }
+})
+
+void test('assignRandom skips rejected participants', () => {
+  const data = makeRegistrationSession({
+    maxTeamSize: 3,
+    participantRoster: {
+      p1: { id: 'p1', name: 'Alice', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      rejected: { id: 'rejected', name: 'Bad', teamId: null, connected: false, lastSeen: 0, rejectedByInstructor: true, token: 'TESTTOKEN' },
+    },
+  })
+
+  assignRandom(data, false)
+
+  assert.ok(data.participantRoster['p1']?.teamId !== null)
+  assert.equal(data.participantRoster['rejected']?.teamId, null, 'rejected participant must not be assigned')
+})
+
+void test('assignRandom does not disturb already-grouped participants', () => {
+  const data = makeRegistrationSession({
+    maxTeamSize: 3,
+    teams: {
+      existing: { ...makeTeam('existing'), memberIds: ['grouped'] },
+    },
+    participantRoster: {
+      grouped: { id: 'grouped', name: 'Already', teamId: 'existing', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      ungrouped: { id: 'ungrouped', name: 'New', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+    },
+  })
+
+  assignRandom(data, false)
+
+  assert.equal(data.participantRoster['grouped']?.teamId, 'existing', 'grouped participant must stay put')
+  assert.ok(data.participantRoster['ungrouped']?.teamId !== null, 'ungrouped participant must be placed')
+})
+
+void test('assignRandom fills existing teams before creating new ones', () => {
+  const data = makeRegistrationSession({
+    maxTeamSize: 3,
+    teams: {
+      partial: { ...makeTeam('partial'), memberIds: ['existing'] },
+    },
+    participantRoster: {
+      existing: { id: 'existing', name: 'E', teamId: 'partial', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+      new1: { id: 'new1', name: 'N1', teamId: null, connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+    },
+  })
+
+  assignRandom(data, false)
+
+  // 'partial' had 1 member with capacity 3 — new1 should land in it
+  assert.equal(data.participantRoster['new1']?.teamId, 'partial')
+  assert.equal(Object.keys(data.teams).length, 1, 'no new team should be created when existing one has space')
+})
+
+void test('assignRandom is a no-op when all participants are already grouped', () => {
+  const data = makeRegistrationSession({
+    maxTeamSize: 3,
+    teams: {
+      t1: { ...makeTeam('t1'), memberIds: ['p1'] },
+    },
+    participantRoster: {
+      p1: { id: 'p1', name: 'Alice', teamId: 't1', connected: true, lastSeen: 0, rejectedByInstructor: false, token: 'TESTTOKEN' },
+    },
+  })
+
+  assignRandom(data, false)
+
+  assert.equal(data.participantRoster['p1']?.teamId, 't1')
+  assert.equal(Object.keys(data.teams).length, 1)
 })
