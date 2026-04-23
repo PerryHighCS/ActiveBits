@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'crypto'
+import { randomInt, timingSafeEqual } from 'crypto'
 import { createSession, type SessionRecord, type SessionStore } from 'activebits-server/core/sessions.js'
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
@@ -225,7 +225,12 @@ function normalizeSessionData(data: unknown): CommissionedIdeasSessionData {
 // ── Instructor auth ───────────────────────────────────────────────────────────
 
 function generatePasscode(): string {
-  return Math.random().toString(36).slice(2, 10).toUpperCase()
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let passcode = ''
+  for (let index = 0; index < 8; index += 1) {
+    passcode += alphabet[randomInt(0, alphabet.length)]
+  }
+  return passcode
 }
 
 function normalizeInstructorPasscode(value: unknown): string | null {
