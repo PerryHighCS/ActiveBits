@@ -1,6 +1,6 @@
 # Control Authority Plan
 
-## Status: Design / Pre-Implementation
+## Status: In Progress
 
 This document is the working implementation plan for issue `#245`: replace fragile multi-instructor command races with an explicit server-owned control authority model that activities can opt into.
 
@@ -141,7 +141,7 @@ Prefer websocket-first authority updates because this is live session runtime st
 
 Client identity:
 - each instructor manager tab gets a stable `instructorInstanceId`
-- preserve it in `sessionStorage` or equivalent tab-scoped storage
+- persist it with a durable browser id plus a tab-scoped discriminator so normal reloads keep ownership while separate tabs remain distinct
 
 Authority actions:
 - client sends `take-control`
@@ -177,24 +177,24 @@ Shared enforcement rule:
 
 ### 1. Shared config and typing
 
-- [ ] Add `controlAuthority` to shared activity config types.
-- [ ] Add schema validation for `mode`, `scope`, and `gating`.
-- [ ] Document fallback semantics for `scope: 'inherited'` without a controlling parent.
-- [ ] Add runtime helpers to resolve effective authority scope and authority session id.
+- [x] Add `controlAuthority` to shared activity config types.
+- [x] Add schema validation for `mode`, `scope`, and `gating`.
+- [x] Document fallback semantics for `scope: 'inherited'` without a controlling parent.
+- [x] Add runtime helpers to resolve effective authority scope and authority session id.
 
 ### 2. Shared session model
 
-- [ ] Define shared authority session-state shape.
+- [x] Define shared authority session-state shape.
 - [ ] Add normalizer support so authority-enabled sessions recover safely after restart.
-- [ ] Define how embedded child sessions discover parent authority context.
-- [ ] Define local override semantics for inherited child sessions.
-- [ ] Define the persisted-empty-state behavior for older in-flight sessions so first manager connect auto-claims ownership intentionally.
+- [x] Define how embedded child sessions discover parent authority context.
+- [x] Define local override semantics for inherited child sessions.
+- [x] Define the persisted-empty-state behavior for older in-flight sessions so first manager connect auto-claims ownership intentionally.
 
 ### 3. Shared server enforcement
 
-- [ ] Add shared instructor instance identity handling for manager websocket/API traffic.
+- [x] Add shared instructor instance identity handling for manager websocket/API traffic.
 - [ ] Auto-assign first connected instructor as owner when no owner exists.
-- [ ] Add `take-control` server action and broadcast path.
+- [x] Add `take-control` server action and broadcast path.
 - [ ] Add generic authority checks before processing manager runtime commands.
 - [ ] Wire `gating: 'all' | 'none' | 'activity'` into enforcement.
 - [ ] Add activity callback lookup/invocation for `gating: 'activity'`.
@@ -204,9 +204,9 @@ Shared enforcement rule:
 
 ### 4. Shared client plumbing
 
-- [ ] Generate and persist stable `instructorInstanceId` values for manager tabs.
-- [ ] Subscribe authority-enabled manager views to live authority status updates.
-- [ ] Expose authority state to activity manager UIs through a shared hook/helper.
+- [x] Generate and persist stable `instructorInstanceId` values for manager tabs.
+- [x] Subscribe authority-enabled manager views to live authority status updates.
+- [x] Expose authority state to activity manager UIs through a shared hook/helper.
 - [ ] Provide shared disabled-state helpers and feedback text for gated controls.
 
 ### 5. Shared UI primitives
@@ -221,25 +221,42 @@ Shared enforcement rule:
 - [ ] Add `controlAuthority` config to SyncDeck.
 - [ ] Decide SyncDeck gating mode. Current expectation: `gating: 'activity'`.
 - [ ] Add `controlAuthority` config to Video Sync.
-- [ ] Decide Video Sync gating mode. Current expectation: `gating: 'activity'` or `all`, depending on final command surface.
+- [x] Decide Video Sync gating mode. Current expectation: `gating: 'activity'` or `all`, depending on final command surface.
 - [ ] Implement activity-owned command classifiers where `gating: 'activity'` is used.
-- [ ] Ensure embedded Video Sync defaults to inherited authority when launched under SyncDeck.
-- [ ] Ensure embedded Video Sync can be locally overridden by explicit `Take Control`.
+- [x] Ensure embedded Video Sync defaults to inherited authority when launched under SyncDeck.
+- [x] Ensure embedded Video Sync can be locally overridden by explicit `Take Control`.
 
 ### 7. Validation
 
-- [ ] Add unit tests for config validation and authority resolution helpers.
+- [x] Add unit tests for config validation and authority resolution helpers.
 - [ ] Add server tests for first-instructor auto-ownership.
-- [ ] Add server tests for `take-control` handoff.
-- [ ] Add server tests for inherited authority resolution and local child override.
+- [x] Add server tests for `take-control` handoff.
+- [x] Add server tests for inherited authority resolution and local child override.
 - [ ] Add server tests for non-owner gated-command rejection.
 - [ ] Add server tests covering older sessions with empty authority state that auto-initialize on first manager connect.
-- [ ] Add client tests for disabled controls and authority status messaging.
+- [x] Add client tests for disabled controls and authority status messaging.
 - [ ] Add activity-specific tests for SyncDeck command classification.
 - [ ] Add activity-specific tests for Video Sync command classification.
 - [ ] Add browser-level E2E coverage for two instructor views on the same authority-enabled session: first instructor default owner, second instructor disabled, live takeover, and disabled-state flip after handoff.
 - [ ] Add browser-level E2E coverage for embedded inherited authority plus local child override behavior.
-- [ ] Run scope-appropriate repo validation, likely `npm test`, and include `npm run test:e2e` for the multi-instructor manager and embedded authority scenarios when the harness can support them.
+- [x] Run scope-appropriate repo validation, likely `npm test`, and include `npm run test:e2e` for the multi-instructor manager and embedded authority scenarios when the harness can support them.
+
+## Current Progress Snapshot
+
+Implemented on this branch so far:
+- shared `controlAuthority` activity config shape and schema validation
+- shared authority state normalization, ownership helpers, and inherited/session resolution helpers
+- durable browser-plus-tab instructor identity generation for manager clients
+- Video Sync takeover endpoint and embedded-child local override handling
+- Video Sync manager authority status plumbing and `Take Control` UI wiring
+- Video Sync protocol/session payload support for `controlAuthority`
+
+Still pending before this feature is complete:
+- first-instructor auto-ownership on live manager connect
+- actual non-owner command rejection/disabled playback behavior in Video Sync
+- SyncDeck adoption and command classification
+- websocket broadcast/update path for authority changes across instructor views
+- browser-level E2E coverage for the multi-instructor handoff scenario
 
 ## Suggested Rollout Order
 

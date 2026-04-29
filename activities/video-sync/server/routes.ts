@@ -3,6 +3,7 @@ import { registerSessionNormalizer } from 'activebits-server/core/sessionNormali
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
   claimSessionControlAuthority,
+  getSessionControlAuthorityState,
   normalizeInstructorInstanceId,
 } from '../../../server/controlAuthority.js'
 import {
@@ -64,6 +65,7 @@ interface PublicVideoSyncSessionData {
   standaloneMode: boolean
   state: VideoSyncState
   telemetry: VideoSyncTelemetry
+  controlAuthority: ReturnType<typeof getSessionControlAuthorityState>
 }
 
 interface VideoSyncSession extends SessionRecord {
@@ -961,6 +963,7 @@ function toPublicSessionData(data: VideoSyncSessionData): PublicVideoSyncSession
     standaloneMode: data.standaloneMode,
     state: data.state,
     telemetry: data.telemetry,
+    controlAuthority: getSessionControlAuthorityState({ data }),
   }
 }
 
@@ -1512,6 +1515,7 @@ export default function setupVideoSyncRoutes(
     const envelope = createEnvelope(sessionId, 'state-update', {
       state: data.state,
       telemetry: data.telemetry,
+      controlAuthority: getSessionControlAuthorityState(session),
       reason: 'config-updated',
     })
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
@@ -1593,6 +1597,7 @@ export default function setupVideoSyncRoutes(
     const envelope = createEnvelope(sessionId, 'state-update', {
       state: data.state,
       telemetry: data.telemetry,
+      controlAuthority: getSessionControlAuthorityState(session),
       reason: body.type,
     })
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
@@ -1671,6 +1676,7 @@ export default function setupVideoSyncRoutes(
 
     const envelope = createEnvelope(sessionId, 'telemetry-update', {
       telemetry: data.telemetry,
+      controlAuthority: getSessionControlAuthorityState(session),
       reason: body.type,
     })
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
@@ -1757,6 +1763,7 @@ export default function setupVideoSyncRoutes(
 
         const disconnectTelemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
           telemetry: currentData.telemetry,
+          controlAuthority: getSessionControlAuthorityState(currentSession),
           reason: 'connection-change',
         })
         await broadcastEnvelope(sessions, ws, sessionId, disconnectTelemetryUpdate)
@@ -1825,6 +1832,7 @@ export default function setupVideoSyncRoutes(
       const snapshot = createEnvelope(sessionId, 'state-snapshot', {
         state: data.state,
         telemetry: data.telemetry,
+        controlAuthority: getSessionControlAuthorityState(session),
         role,
       })
 
@@ -1834,6 +1842,7 @@ export default function setupVideoSyncRoutes(
 
       const telemetryUpdate = createEnvelope(sessionId, 'telemetry-update', {
         telemetry: data.telemetry,
+        controlAuthority: getSessionControlAuthorityState(session),
         reason: 'connection-change',
       })
       await broadcastEnvelope(sessions, ws, sessionId, telemetryUpdate)

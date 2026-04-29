@@ -414,6 +414,12 @@ void test('session get route redacts instructor-only fields from public payload'
   assert.equal(payload.data?.standaloneMode, false)
   assert.equal(typeof payload.data?.state, 'object')
   assert.equal(typeof payload.data?.telemetry, 'object')
+  assert.deepEqual(payload.data?.controlAuthority, {
+    mode: 'single-instructor',
+    ownerInstanceId: null,
+    ownerTakenAt: null,
+    overrideInherited: false,
+  })
   assert.equal('instructorPasscode' in (payload.data ?? {}), false)
 })
 
@@ -1230,6 +1236,12 @@ void test('session patch can mark a configured session as standalone', async () 
           : undefined,
       },
       telemetry: updated.telemetry,
+      controlAuthority: {
+        mode: 'single-instructor',
+        ownerInstanceId: null,
+        ownerTakenAt: null,
+        overrideInherited: false,
+      },
     },
   })
 })

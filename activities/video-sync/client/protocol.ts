@@ -5,6 +5,13 @@ export type VideoSyncMessageType =
   | 'telemetry-update'
   | 'error'
 
+export interface VideoSyncControlAuthority {
+  mode: 'single-instructor'
+  ownerInstanceId: string | null
+  ownerTakenAt: number | null
+  overrideInherited: boolean
+}
+
 export interface VideoSyncState {
   provider: 'youtube'
   videoId: string
@@ -47,10 +54,12 @@ export interface VideoSyncWsEnvelope<TPayload = unknown> {
 export interface VideoSyncStateMessagePayload {
   state?: VideoSyncState
   telemetry?: VideoSyncTelemetry
+  controlAuthority?: VideoSyncControlAuthority
 }
 
 export interface VideoSyncTelemetryMessagePayload {
   telemetry?: VideoSyncTelemetry
+  controlAuthority?: VideoSyncControlAuthority
 }
 
 export interface VideoSyncErrorMessagePayload {
@@ -67,6 +76,19 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isNullableFiniteNumber(value: unknown): value is number | null {
   return value === null || isFiniteNumber(value)
+}
+
+export function isVideoSyncControlAuthority(value: unknown): value is VideoSyncControlAuthority {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    value.mode === 'single-instructor' &&
+    (value.ownerInstanceId === null || typeof value.ownerInstanceId === 'string') &&
+    isNullableFiniteNumber(value.ownerTakenAt) &&
+    typeof value.overrideInherited === 'boolean'
+  )
 }
 
 function normalizeUpdatedBy(value: unknown): VideoSyncState['updatedBy'] | null {
@@ -147,15 +169,23 @@ export function parseVideoSyncStateMessagePayload(payload: unknown): VideoSyncSt
   if ('telemetry' in payload && payload.telemetry !== undefined && !isVideoSyncTelemetry(payload.telemetry)) {
     return null
   }
+  if ('controlAuthority' in payload && payload.controlAuthority !== undefined && !isVideoSyncControlAuthority(payload.controlAuthority)) {
+    return null
+  }
 
   return {
-    state: isVideoSyncState(payload.state)
+    ...(isVideoSyncState(payload.state)
       ? {
-        ...payload.state,
-        updatedBy: normalizeUpdatedBy(payload.state.updatedBy) ?? 'system',
+        state: {
+          ...payload.state,
+          updatedBy: normalizeUpdatedBy(payload.state.updatedBy) ?? 'system',
+        },
       }
-      : undefined,
-    telemetry: isVideoSyncTelemetry(payload.telemetry) ? payload.telemetry : undefined,
+      : {}),
+    ...(isVideoSyncTelemetry(payload.telemetry) ? { telemetry: payload.telemetry } : {}),
+    ...(isVideoSyncControlAuthority(payload.controlAuthority)
+      ? { controlAuthority: payload.controlAuthority }
+      : {}),
   }
 }
 
@@ -167,9 +197,15 @@ export function parseVideoSyncTelemetryMessagePayload(payload: unknown): VideoSy
   if ('telemetry' in payload && payload.telemetry !== undefined && !isVideoSyncTelemetry(payload.telemetry)) {
     return null
   }
+  if ('controlAuthority' in payload && payload.controlAuthority !== undefined && !isVideoSyncControlAuthority(payload.controlAuthority)) {
+    return null
+  }
 
   return {
-    telemetry: isVideoSyncTelemetry(payload.telemetry) ? payload.telemetry : undefined,
+    ...(isVideoSyncTelemetry(payload.telemetry) ? { telemetry: payload.telemetry } : {}),
+    ...(isVideoSyncControlAuthority(payload.controlAuthority)
+      ? { controlAuthority: payload.controlAuthority }
+      : {}),
   }
 }
 

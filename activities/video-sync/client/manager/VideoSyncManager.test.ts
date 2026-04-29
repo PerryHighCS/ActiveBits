@@ -9,7 +9,9 @@ import {
   buildManagerWsUrl,
   clearManagerPlayerLoadError,
   createManagerWsAuthMessage,
+  getVideoSyncControlStatusLabel,
   getManagerPlaybackIntentForStateChange,
+  isVideoSyncControlOwner,
   parseManagerStopTimeInput,
   readBootstrapInstructorPasscode,
   readBootstrapSourceUrl,
@@ -243,6 +245,72 @@ void test('createManagerWsAuthMessage serializes the post-connect auth payload',
   )
   assert.equal(createManagerWsAuthMessage(''), null)
   assert.equal(createManagerWsAuthMessage(null), null)
+})
+
+void test('isVideoSyncControlOwner matches the current instructor instance against the owner id', () => {
+  assert.equal(
+    isVideoSyncControlOwner(
+      {
+        mode: 'single-instructor',
+        ownerInstanceId: 'inst-123',
+        ownerTakenAt: 1,
+        overrideInherited: false,
+      },
+      'inst-123',
+    ),
+    true,
+  )
+  assert.equal(
+    isVideoSyncControlOwner(
+      {
+        mode: 'single-instructor',
+        ownerInstanceId: 'inst-123',
+        ownerTakenAt: 1,
+        overrideInherited: false,
+      },
+      'inst-456',
+    ),
+    false,
+  )
+})
+
+void test('getVideoSyncControlStatusLabel reports owner, non-owner, and unclaimed states', () => {
+  assert.equal(
+    getVideoSyncControlStatusLabel({
+      controlAuthority: {
+        mode: 'single-instructor',
+        ownerInstanceId: 'inst-123',
+        ownerTakenAt: 1,
+        overrideInherited: false,
+      },
+      instructorInstanceId: 'inst-123',
+    }),
+    'You have control',
+  )
+  assert.equal(
+    getVideoSyncControlStatusLabel({
+      controlAuthority: {
+        mode: 'single-instructor',
+        ownerInstanceId: 'inst-123',
+        ownerTakenAt: 1,
+        overrideInherited: false,
+      },
+      instructorInstanceId: 'inst-456',
+    }),
+    'Another instructor currently has control',
+  )
+  assert.equal(
+    getVideoSyncControlStatusLabel({
+      controlAuthority: {
+        mode: 'single-instructor',
+        ownerInstanceId: null,
+        ownerTakenAt: null,
+        overrideInherited: false,
+      },
+      instructorInstanceId: 'inst-456',
+    }),
+    'Control owner is being established',
+  )
 })
 
 void test('shouldAutoStartBootstrapSource requires setup mode, source url, and ready credentials', () => {

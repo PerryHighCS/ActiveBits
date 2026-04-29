@@ -142,7 +142,6 @@ void test('parseVideoSyncStateMessagePayload normalizes legacy manager updates t
         updatedBy: 'instructor',
         serverTimestampMs: 1234,
       },
-      telemetry: undefined,
     },
   )
 })

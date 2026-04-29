@@ -10,6 +10,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   parseVideoSyncErrorMessagePayload,
   parseVideoSyncEnvelope,
+  type VideoSyncControlAuthority,
   parseVideoSyncStateMessagePayload,
   parseVideoSyncTelemetryMessagePayload,
   type VideoSyncState,
@@ -34,6 +35,7 @@ interface SessionResponse {
   data?: {
     state?: VideoSyncState
     telemetry?: VideoSyncTelemetry
+    controlAuthority?: VideoSyncControlAuthority
   }
 }
 
@@ -41,6 +43,7 @@ interface ConfigResponse {
   data?: {
     state?: VideoSyncState
     telemetry?: VideoSyncTelemetry
+    controlAuthority?: VideoSyncControlAuthority
   }
 }
 
@@ -48,6 +51,7 @@ interface CommandResponse {
   data?: {
     state?: VideoSyncState
     telemetry?: VideoSyncTelemetry
+    controlAuthority?: VideoSyncControlAuthority
   }
 }
 
@@ -74,6 +78,13 @@ const EMPTY_TELEMETRY: VideoSyncTelemetry = {
   autoplay: { blockedCount: 0 },
   sync: { unsyncedStudents: 0, lastDriftSec: null, lastCorrectionResult: 'none' },
   error: { code: null, message: null },
+}
+
+const EMPTY_CONTROL_AUTHORITY: VideoSyncControlAuthority = {
+  mode: 'single-instructor',
+  ownerInstanceId: null,
+  ownerTakenAt: null,
+  overrideInherited: false,
 }
 
 const DEFAULT_STATE: VideoSyncState = {
@@ -245,6 +256,32 @@ export function clearManagerPlayerLoadError(message: string | null): string | nu
   return message === YOUTUBE_MANAGER_LOAD_ERROR ? null : message
 }
 
+export function isVideoSyncControlOwner(
+  controlAuthority: VideoSyncControlAuthority | null | undefined,
+  instructorInstanceId: string | null | undefined,
+): boolean {
+  return (
+    controlAuthority?.ownerInstanceId != null &&
+    instructorInstanceId != null &&
+    controlAuthority.ownerInstanceId === instructorInstanceId
+  )
+}
+
+export function getVideoSyncControlStatusLabel(params: {
+  controlAuthority: VideoSyncControlAuthority | null | undefined
+  instructorInstanceId: string | null | undefined
+}): string {
+  if (isVideoSyncControlOwner(params.controlAuthority, params.instructorInstanceId)) {
+    return 'You have control'
+  }
+
+  if (params.controlAuthority?.ownerInstanceId) {
+    return 'Another instructor currently has control'
+  }
+
+  return 'Control owner is being established'
+}
+
 export function sanitizeManagerApiErrorMessage(
   message: unknown,
   fallback: string,
@@ -346,6 +383,7 @@ export default function VideoSyncManager() {
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
   const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
   const [persistentRecoverySourceUrl, setPersistentRecoverySourceUrl] = useState<string | null>(null)
+  const [controlAuthority, setControlAuthority] = useState<VideoSyncControlAuthority>(EMPTY_CONTROL_AUTHORITY)
   const instructorInstanceId = useMemo(() => {
     if (typeof window === 'undefined') {
       return null
@@ -490,6 +528,9 @@ export default function VideoSyncManager() {
       if (updated.data?.telemetry) {
         setTelemetry(updated.data.telemetry)
       }
+      if (updated.data?.controlAuthority) {
+        setControlAuthority(updated.data.controlAuthority)
+      }
       setErrorMessage(null)
       return true
     } catch (error) {
@@ -610,6 +651,9 @@ export default function VideoSyncManager() {
       if (data.data?.telemetry) {
         setTelemetry(data.data.telemetry)
       }
+      if (data.data?.controlAuthority) {
+        setControlAuthority(data.data.controlAuthority)
+      }
       setErrorMessage(null)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load video-sync session'
@@ -705,19 +749,25 @@ export default function VideoSyncManager() {
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
       const payload = parseVideoSyncStateMessagePayload(envelope.payload)
-      if (payload?.state) {
-        applyManagerStateUpdate(payload.state)
+        if (payload?.state) {
+          applyManagerStateUpdate(payload.state)
+        }
+        if (payload?.telemetry) {
+          setTelemetry(payload.telemetry)
+        }
+        if (payload?.controlAuthority) {
+          setControlAuthority(payload.controlAuthority)
+        }
+        return
       }
-      if (payload?.telemetry) {
-        setTelemetry(payload.telemetry)
-      }
-      return
-    }
 
     if (envelope.type === 'telemetry-update') {
       const payload = parseVideoSyncTelemetryMessagePayload(envelope.payload)
       if (payload?.telemetry) {
         setTelemetry(payload.telemetry)
+      }
+      if (payload?.controlAuthority) {
+        setControlAuthority(payload.controlAuthority)
       }
       return
     }
@@ -1001,6 +1051,40 @@ export default function VideoSyncManager() {
   }
 
   const displayPosition = useMemo(() => computeDesiredPositionSec(state), [state])
+  const hasControl = isVideoSyncControlOwner(controlAuthority, instructorInstanceId)
+  const controlStatusLabel = getVideoSyncControlStatusLabel({
+    controlAuthority,
+    instructorInstanceId,
+  })
+  const takeControl = useCallback(async (): Promise<void> => {
+    if (!sessionId || !instructorPasscode || !instructorInstanceId) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/video-sync/${sessionId}/control-authority/take`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instructorPasscode,
+          instructorInstanceId,
+        }),
+      })
+      if (!response.ok) {
+        const failure = (await response.json()) as { message?: string }
+        throw new Error(sanitizeManagerApiErrorMessage(failure.message, 'Failed to take control'))
+      }
+
+      const payload = (await response.json()) as { controlAuthority?: VideoSyncControlAuthority }
+      if (payload.controlAuthority) {
+        setControlAuthority(payload.controlAuthority)
+      }
+      setErrorMessage(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to take control'
+      setErrorMessage(message)
+    }
+  }, [instructorInstanceId, instructorPasscode, sessionId])
 
   if (setupMode) {
     const shouldShowAutoStartSplash = bootstrapSourceUrl != null && autoStartStatus !== 'failed'
@@ -1079,6 +1163,14 @@ export default function VideoSyncManager() {
             <Button disabled={!isPasscodeReady} onClick={() => void saveConfig()}>
               {isPasscodeReady ? 'Start instructor view' : 'Loading instructor access...'}
             </Button>
+            <div className="text-sm text-gray-600 flex items-center gap-3" aria-live="polite">
+              <span>{controlStatusLabel}</span>
+              {!hasControl ? (
+                <Button disabled={!isPasscodeReady || !instructorPasscode || !instructorInstanceId} onClick={() => void takeControl()}>
+                  Take Control
+                </Button>
+              ) : null}
+            </div>
           </section>
         )}
       </div>
@@ -1097,6 +1189,7 @@ export default function VideoSyncManager() {
               <span className="text-gray-300 truncate">Session: {sessionId ?? '—'}</span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              {!hasControl ? <Button onClick={() => void takeControl()}>Take Control</Button> : null}
               <Button onClick={() => void handleEndSession()}>End session</Button>
             </div>
           </div>
@@ -1123,6 +1216,7 @@ export default function VideoSyncManager() {
 
       <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-2 bg-black/80 border-t border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-200" aria-live="polite">
         <span>Video: {state.videoId || 'Not configured'}</span>
+        <span>{controlStatusLabel}</span>
         <span>Playing: {state.isPlaying ? 'Yes' : 'No'}</span>
         <span>Position: {displayPosition.toFixed(2)}s</span>
         <span>Connections: {telemetry.connections.activeCount}</span>
