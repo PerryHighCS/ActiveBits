@@ -94,6 +94,27 @@ export interface ActivityEmbeddedRuntimeConfig {
   instructorGated?: 'runtime' | 'waiting-room'
 }
 
+export interface ActivityControlAuthorityConfig {
+  mode: 'single-instructor'
+  scope?: 'session' | 'inherited'
+  gating?: 'all' | 'none' | 'activity'
+}
+
+export interface SessionControlAuthorityState {
+  mode: 'single-instructor'
+  ownerInstanceId: string | null
+  ownerTakenAt: number | null
+  overrideInherited: boolean
+}
+
+export interface ResolvedControlAuthority {
+  mode: 'single-instructor'
+  configuredScope: 'session' | 'inherited'
+  effectiveScope: 'session' | 'inherited'
+  authoritySessionId: string
+  inheritedFromSessionId: string | null
+}
+
 export type ActivityReportScope = 'activity-session' | 'student-cross-activity' | 'session-summary'
 
 export interface ActivityReportStudentRef {
@@ -200,6 +221,7 @@ export interface ActivityConfig {
     expandShell?: boolean
   }
   embeddedRuntime?: ActivityEmbeddedRuntimeConfig
+  controlAuthority?: ActivityControlAuthorityConfig
   reportEndpoint?: string
   waitingRoom?: ActivityWaitingRoomConfig
   isDev?: boolean

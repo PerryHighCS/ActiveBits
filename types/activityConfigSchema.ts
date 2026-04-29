@@ -1,5 +1,6 @@
 import type {
   ActivityConfig,
+  ActivityControlAuthorityConfig,
   ActivityCreateSessionBootstrapConfig,
   ActivityCreateSessionBootstrapSessionStorageEntry,
   ActivityDeepLinkOption,
@@ -305,6 +306,36 @@ function parseEmbeddedRuntime(raw: unknown, context: string): ActivityConfig['em
   }
 }
 
+function parseControlAuthority(raw: unknown, context: string): ActivityControlAuthorityConfig | undefined {
+  if (raw == null) {
+    return undefined
+  }
+  if (!isRecord(raw)) {
+    throw new Error(`${context}: "controlAuthority" must be an object when provided`)
+  }
+
+  const mode = raw.mode
+  if (mode !== 'single-instructor') {
+    throw new Error(`${context}.controlAuthority: "mode" must be "single-instructor"`)
+  }
+
+  const scopeRaw = raw.scope
+  if (scopeRaw !== undefined && scopeRaw !== null && scopeRaw !== 'session' && scopeRaw !== 'inherited') {
+    throw new Error(`${context}.controlAuthority: "scope" must be "session" or "inherited" when provided`)
+  }
+
+  const gatingRaw = raw.gating
+  if (gatingRaw !== undefined && gatingRaw !== null && gatingRaw !== 'all' && gatingRaw !== 'none' && gatingRaw !== 'activity') {
+    throw new Error(`${context}.controlAuthority: "gating" must be "all", "none", or "activity" when provided`)
+  }
+
+  return {
+    mode: 'single-instructor',
+    ...(scopeRaw === 'session' || scopeRaw === 'inherited' ? { scope: scopeRaw } : {}),
+    ...(gatingRaw === 'all' || gatingRaw === 'none' || gatingRaw === 'activity' ? { gating: gatingRaw } : {}),
+  }
+}
+
 function parseUtilities(raw: unknown, context: string): ActivityUtility[] | undefined {
   if (raw == null) {
     return undefined
@@ -538,6 +569,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const manageDashboard = parseManageDashboard(rawConfig.manageDashboard, context)
   const manageLayout = parseManageLayout(rawConfig.manageLayout, context)
   const embeddedRuntime = parseEmbeddedRuntime(rawConfig.embeddedRuntime, context)
+  const controlAuthority = parseControlAuthority(rawConfig.controlAuthority, context)
   const reportEndpoint = readOptionalString(rawConfig, 'reportEndpoint', context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)
 
@@ -557,6 +589,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   assignOptionalField(parsed, 'manageDashboard', manageDashboard)
   assignOptionalField(parsed, 'manageLayout', manageLayout)
   assignOptionalField(parsed, 'embeddedRuntime', embeddedRuntime)
+  assignOptionalField(parsed, 'controlAuthority', controlAuthority)
   assignOptionalField(parsed, 'reportEndpoint', reportEndpoint)
   assignOptionalField(parsed, 'waitingRoom', waitingRoom)
 

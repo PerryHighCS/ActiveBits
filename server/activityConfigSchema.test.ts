@@ -75,6 +75,11 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
       embeddedRuntime: {
         instructorGated: 'runtime',
       },
+      controlAuthority: {
+        mode: 'single-instructor',
+        scope: 'inherited',
+        gating: 'activity',
+      },
       reportEndpoint: '/api/syncdeck/s1/report',
       utilMode: true,
       waitingRoom: {
@@ -119,6 +124,11 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
   assert.deepEqual(parsed.createSessionBootstrap?.selectedOptionsToSessionData, ['presentationUrl'])
   assert.equal(parsed.manageDashboard?.customPersistentLinkBuilder, true)
   assert.equal(parsed.embeddedRuntime?.instructorGated, 'runtime')
+  assert.deepEqual(parsed.controlAuthority, {
+    mode: 'single-instructor',
+    scope: 'inherited',
+    gating: 'activity',
+  })
   assert.equal(parsed.reportEndpoint, '/api/syncdeck/s1/report')
   assert.deepEqual(parsed.utilities, [
     {
@@ -418,6 +428,77 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
     () =>
       parseActivityConfig(
         {
+          id: 'bad-control-mode',
+          name: 'BadControlMode',
+          description: 'desc',
+          color: 'gray',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          controlAuthority: {
+            mode: 'multi-instructor',
+          },
+        },
+        'bad-control-mode',
+      ),
+    /controlAuthority.*mode.*single-instructor/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad-control-scope',
+          name: 'BadControlScope',
+          description: 'desc',
+          color: 'gray',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          controlAuthority: {
+            mode: 'single-instructor',
+            scope: 'parent',
+          },
+        },
+        'bad-control-scope',
+      ),
+    /controlAuthority.*scope.*session.*inherited/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad-control-gating',
+          name: 'BadControlGating',
+          description: 'desc',
+          color: 'gray',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          controlAuthority: {
+            mode: 'single-instructor',
+            gating: 'server-only',
+          },
+        },
+        'bad-control-gating',
+      ),
+    /controlAuthority.*gating.*all.*none.*activity/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
           id: 'bad8',
           name: 'Bad8',
           description: 'desc',
@@ -451,6 +532,7 @@ void test('parseActivityConfig removes optional keys when input provides null', 
       },
       title: null,
       deepLinkOptions: null,
+      controlAuthority: null,
       reportEndpoint: null,
     },
     'null-config',
@@ -458,8 +540,10 @@ void test('parseActivityConfig removes optional keys when input provides null', 
 
   assert.equal(parsed.title, undefined)
   assert.equal(parsed.deepLinkOptions, undefined)
+  assert.equal(parsed.controlAuthority, undefined)
   assert.equal(parsed.reportEndpoint, undefined)
   assert.equal('title' in parsed, false)
   assert.equal('deepLinkOptions' in parsed, false)
+  assert.equal('controlAuthority' in parsed, false)
   assert.equal('reportEndpoint' in parsed, false)
 })
