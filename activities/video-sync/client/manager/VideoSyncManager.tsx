@@ -282,6 +282,22 @@ export function getVideoSyncControlStatusLabel(params: {
   return 'Control owner is being established'
 }
 
+export function canUseVideoSyncInstructorControls(params: {
+  controlAuthority: VideoSyncControlAuthority | null | undefined
+  instructorInstanceId: string | null | undefined
+  sessionId: string | null | undefined
+}): boolean {
+  if (isVideoSyncControlOwner(params.controlAuthority, params.instructorInstanceId)) {
+    return true
+  }
+
+  if (params.controlAuthority?.ownerInstanceId) {
+    return false
+  }
+
+  return !isEmbeddedChildSessionId(params.sessionId ?? undefined)
+}
+
 export function sanitizeManagerApiErrorMessage(
   message: unknown,
   fallback: string,
@@ -412,6 +428,16 @@ export default function VideoSyncManager() {
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
   const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
+  const hasControl = isVideoSyncControlOwner(controlAuthority, instructorInstanceId)
+  const canUseInstructorControls = canUseVideoSyncInstructorControls({
+    controlAuthority,
+    instructorInstanceId,
+    sessionId,
+  })
+  const controlStatusLabel = getVideoSyncControlStatusLabel({
+    controlAuthority,
+    instructorInstanceId,
+  })
 
   useEffect(() => {
     if (!shouldFetchEmbeddedBootstrapSourceUrl({ sessionId, queryBootstrapSourceUrl })) {
@@ -494,6 +520,12 @@ export default function VideoSyncManager() {
     if (!sessionId) {
       return false
     }
+    if (!canUseInstructorControls) {
+      if (options?.reportErrors !== false) {
+        setErrorMessage('Take control to use playback controls for this session.')
+      }
+      return false
+    }
     if (!instructorPasscode) {
       if (options?.reportErrors !== false) {
         setErrorMessage('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')
@@ -542,7 +574,7 @@ export default function VideoSyncManager() {
       }
       return false
     }
-  }, [instructorInstanceId, instructorPasscode, sessionId])
+  }, [canUseInstructorControls, instructorInstanceId, instructorPasscode, sessionId])
 
   const flushManagerPlaybackIntent = useCallback(async (): Promise<void> => {
     clearPlaybackCommandFlushTimer()
@@ -924,6 +956,10 @@ export default function VideoSyncManager() {
     stopSecTextValue: string,
   ): Promise<boolean> => {
     if (!sessionId) return false
+    if (!canUseInstructorControls) {
+      setErrorMessage('Take control to change the video configuration for this session.')
+      return false
+    }
     if (!isPasscodeReady) {
       setErrorMessage('Loading instructor credentials...')
       return false
@@ -968,6 +1004,9 @@ export default function VideoSyncManager() {
       if (updated.data?.telemetry) {
         setTelemetry(updated.data.telemetry)
       }
+      if (updated.data?.controlAuthority) {
+        setControlAuthority(updated.data.controlAuthority)
+      }
       setErrorMessage(null)
       return true
     } catch (error) {
@@ -975,7 +1014,7 @@ export default function VideoSyncManager() {
       setErrorMessage(message)
       return false
     }
-  }, [applyManagerStateUpdate, instructorInstanceId, instructorPasscode, isPasscodeReady, sessionId])
+  }, [applyManagerStateUpdate, canUseInstructorControls, instructorInstanceId, instructorPasscode, isPasscodeReady, sessionId])
 
   const saveConfig = useCallback(async (): Promise<void> => {
     await saveConfigWithValues(sourceUrlInput, hasStopTime, stopSecInput)
@@ -1051,11 +1090,6 @@ export default function VideoSyncManager() {
   }
 
   const displayPosition = useMemo(() => computeDesiredPositionSec(state), [state])
-  const hasControl = isVideoSyncControlOwner(controlAuthority, instructorInstanceId)
-  const controlStatusLabel = getVideoSyncControlStatusLabel({
-    controlAuthority,
-    instructorInstanceId,
-  })
   const takeControl = useCallback(async (): Promise<void> => {
     if (!sessionId || !instructorPasscode || !instructorInstanceId) {
       return
@@ -1126,6 +1160,7 @@ export default function VideoSyncManager() {
                 onChange={(event) => setSourceUrlInput(event.target.value)}
                 placeholder="https://www.youtube.com/watch?v=...&t=1m23s or https://youtu.be/..."
                 aria-label="YouTube URL"
+                disabled={!canUseInstructorControls}
               />
               <span className="mt-1 block text-sm text-gray-600">
                 Shared URLs can include `t`, `start`, and `end` timestamps like `1m23s`.
@@ -1139,6 +1174,7 @@ export default function VideoSyncManager() {
                 onChange={(event) => setHasStopTime(event.target.checked)}
                 aria-controls="video-sync-stop-time"
                 aria-expanded={hasStopTime}
+                disabled={!canUseInstructorControls}
               />
               <span className="font-medium">Set stop time</span>
             </label>
@@ -1153,6 +1189,7 @@ export default function VideoSyncManager() {
                   onChange={(event) => setStopSecInput(event.target.value)}
                   placeholder="2m10s or 130"
                   aria-label="Stop at"
+                  disabled={!canUseInstructorControls}
                 />
                 <span className="mt-1 block text-sm text-gray-600">
                   Accepts seconds or `h/m/s` format.
@@ -1160,7 +1197,7 @@ export default function VideoSyncManager() {
               </label>
             ) : null}
 
-            <Button disabled={!isPasscodeReady} onClick={() => void saveConfig()}>
+            <Button disabled={!isPasscodeReady || !canUseInstructorControls} onClick={() => void saveConfig()}>
               {isPasscodeReady ? 'Start instructor view' : 'Loading instructor access...'}
             </Button>
             <div className="text-sm text-gray-600 flex items-center gap-3" aria-live="polite">
@@ -1206,6 +1243,14 @@ export default function VideoSyncManager() {
         {state.videoId ? (
           <div className="w-full h-full">
             <div ref={playerContainerRef} className="w-full h-full" aria-label="Video Sync manager preview" />
+            {!canUseInstructorControls ? (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 px-6">
+                <div className="max-w-md rounded border border-white/20 bg-black/80 p-4 text-center space-y-3">
+                  <p className="text-sm text-gray-100">Take control to use playback controls for this session.</p>
+                  <Button onClick={() => void takeControl()}>Take Control</Button>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="h-full flex items-center justify-center text-sm text-gray-300">

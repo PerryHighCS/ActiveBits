@@ -7,6 +7,7 @@ import {
 import {
   autoConfigureBootstrapSource,
   buildManagerWsUrl,
+  canUseVideoSyncInstructorControls,
   clearManagerPlayerLoadError,
   createManagerWsAuthMessage,
   getVideoSyncControlStatusLabel,
@@ -310,6 +311,64 @@ void test('getVideoSyncControlStatusLabel reports owner, non-owner, and unclaime
       instructorInstanceId: 'inst-456',
     }),
     'Control owner is being established',
+  )
+})
+
+void test('canUseVideoSyncInstructorControls allows owners and standalone unclaimed sessions, but blocks claimed or embedded-unclaimed sessions', () => {
+  assert.equal(
+    canUseVideoSyncInstructorControls({
+      controlAuthority: {
+        mode: 'single-instructor',
+        ownerInstanceId: 'inst-123',
+        ownerTakenAt: 1,
+        overrideInherited: false,
+      },
+      instructorInstanceId: 'inst-123',
+      sessionId: 'session-123',
+    }),
+    true,
+  )
+
+  assert.equal(
+    canUseVideoSyncInstructorControls({
+      controlAuthority: {
+        mode: 'single-instructor',
+        ownerInstanceId: null,
+        ownerTakenAt: null,
+        overrideInherited: false,
+      },
+      instructorInstanceId: 'inst-456',
+      sessionId: 'session-123',
+    }),
+    true,
+  )
+
+  assert.equal(
+    canUseVideoSyncInstructorControls({
+      controlAuthority: {
+        mode: 'single-instructor',
+        ownerInstanceId: 'inst-123',
+        ownerTakenAt: 1,
+        overrideInherited: false,
+      },
+      instructorInstanceId: 'inst-456',
+      sessionId: 'session-123',
+    }),
+    false,
+  )
+
+  assert.equal(
+    canUseVideoSyncInstructorControls({
+      controlAuthority: {
+        mode: 'single-instructor',
+        ownerInstanceId: null,
+        ownerTakenAt: null,
+        overrideInherited: false,
+      },
+      instructorInstanceId: 'inst-456',
+      sessionId: 'CHILD:parent:abcde:video-sync',
+    }),
+    false,
   )
 })
 

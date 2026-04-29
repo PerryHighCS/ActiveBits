@@ -112,6 +112,7 @@ interface VideoSyncWsMessageEnvelope<TPayload = unknown> {
 interface VideoSyncSocket extends ActiveBitsWebSocket {
   sessionId?: string | null
   videoSyncRole?: VideoSyncRole
+  instructorInstanceId?: string | null
 }
 
 interface VideoSyncInstructorAuthMessage {
@@ -217,6 +218,61 @@ function readInstructorInstanceId(body: unknown): string | null {
   }
 
   return normalizeInstructorInstanceId(body.instructorInstanceId)
+}
+
+function buildControlAuthorityRequiredError(): { error: 'CONTROL_AUTHORITY_REQUIRED'; message: string } {
+  return {
+    error: 'CONTROL_AUTHORITY_REQUIRED',
+    message: 'Take control to use instructor controls for this session.',
+  }
+}
+
+function ensureInstructorControlAuthority(params: {
+  session: VideoSyncSession
+  instructorInstanceId: string | null
+  allowInlineAutoClaim: boolean
+}): { ok: true } | { ok: false; status: number; body: { error: string; message: string } } {
+  const normalizedInstructorInstanceId = normalizeInstructorInstanceId(params.instructorInstanceId)
+  if (!normalizedInstructorInstanceId) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'INVALID_INSTRUCTOR_INSTANCE_ID',
+        message: 'Valid instructorInstanceId is required',
+      },
+    }
+  }
+
+  const embeddedParentContext = readEmbeddedParentSessionContext(params.session.data)
+  const controlAuthority = getSessionControlAuthorityState(params.session)
+
+  if (controlAuthority.ownerInstanceId == null) {
+    if (!params.allowInlineAutoClaim || embeddedParentContext != null) {
+      return {
+        ok: false,
+        status: 403,
+        body: buildControlAuthorityRequiredError(),
+      }
+    }
+
+    claimSessionControlAuthority({
+      session: params.session,
+      instructorInstanceId: normalizedInstructorInstanceId,
+      overrideInherited: false,
+    })
+    return { ok: true }
+  }
+
+  if (controlAuthority.ownerInstanceId !== normalizedInstructorInstanceId) {
+    return {
+      ok: false,
+      status: 403,
+      body: buildControlAuthorityRequiredError(),
+    }
+  }
+
+  return { ok: true }
 }
 
 function verifyInstructorPasscode(expected: string, candidate: string): boolean {
@@ -925,6 +981,7 @@ function scheduleUnsyncedStudentsPrune(
       console.error(`Failed to prune stale video-sync unsynced students for session ${sessionId}:`, error)
     })
   }, delayMs)
+  timer.unref?.()
 
   unsyncedStudentPruneTimersBySession.set(sessionId, timer)
 }
@@ -1418,6 +1475,15 @@ export default function setupVideoSyncRoutes(
       res.status(403).json({ error: 'FORBIDDEN', message: 'Valid instructorPasscode is required' })
       return
     }
+    const instructorAuthority = ensureInstructorControlAuthority({
+      session,
+      instructorInstanceId: readInstructorInstanceId(req.body),
+      allowInlineAutoClaim: true,
+    })
+    if (!instructorAuthority.ok) {
+      res.status(instructorAuthority.status).json(instructorAuthority.body)
+      return
+    }
 
     const data = ensureVideoSyncSessionData(session)
     if (data.state.videoId.length > 0) {
@@ -1539,6 +1605,15 @@ export default function setupVideoSyncRoutes(
     const instructorPasscode = readInstructorPasscode(req.body)
     if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'Valid instructorPasscode is required' })
+      return
+    }
+    const instructorAuthority = ensureInstructorControlAuthority({
+      session,
+      instructorInstanceId: readInstructorInstanceId(req.body),
+      allowInlineAutoClaim: true,
+    })
+    if (!instructorAuthority.ok) {
+      res.status(instructorAuthority.status).json(instructorAuthority.body)
       return
     }
 
@@ -1813,10 +1888,25 @@ export default function setupVideoSyncRoutes(
       const role: VideoSyncRole = isInstructorRoleParam(roleParam) ? 'instructor' : 'student'
       typedSocket.sessionId = sessionId
       typedSocket.videoSyncRole = role
+      typedSocket.instructorInstanceId = role === 'instructor'
+        ? normalizeInstructorInstanceId(query.get('instructorInstanceId'))
+        : null
 
       if (cleanedUp || typedSocket.readyState !== WS_OPEN_READY_STATE) {
         handleSocketClosed()
         return
+      }
+
+      if (role === 'instructor') {
+        const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
+        const controlAuthority = getSessionControlAuthorityState(session)
+        if (controlAuthority.ownerInstanceId == null && embeddedParentContext == null && typedSocket.instructorInstanceId) {
+          claimSessionControlAuthority({
+            session,
+            instructorInstanceId: typedSocket.instructorInstanceId,
+            overrideInherited: false,
+          })
+        }
       }
 
       ensureBroadcastSubscription(sessionId)

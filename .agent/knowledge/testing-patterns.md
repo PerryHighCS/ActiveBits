@@ -15,6 +15,15 @@ Capture reusable test setup patterns, common failure modes, and reliability guid
 
 ## Entries
 
+- Date: 2026-04-29
+- Scope: integration
+- Pattern: Server-side maintenance timers created during route handling should call `unref?.()` when they are only background cleanup helpers, especially in activity route modules that schedule delayed pruning or telemetry refresh work.
+- Why it helps: Real `setTimeout` handles created during focused route tests can keep the Node process alive and make a healthy suite hang with `Promise resolution is still pending but the event loop has already resolved`, even when the assertions themselves pass. `unref()` keeps production cleanup behavior while letting tests and short-lived processes exit cleanly.
+- Example (file/path): `activities/video-sync/server/routes.ts`; `activities/video-sync/server/routes.test.ts`
+- Failure signal: A route test file appears to pass in narrowed subsets but the full file hangs until external timeout because background timers remain referenced after the test completes.
+- Follow-up action: Prefer `unref?.()` for non-critical cleanup timers, and if a test needs to inspect timer scheduling directly, patch `setTimeout` locally while still returning an object shape that tolerates optional `unref`.
+- Owner: Codex
+
 - Date: 2026-03-04
 - Scope: integration
 - Pattern: Session-store mocks for route tests should return deep clones from `get()` and store clones on `set()` when production storage serializes records between calls.

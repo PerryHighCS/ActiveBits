@@ -198,9 +198,9 @@ Shared enforcement rule:
 - [ ] Add generic authority checks before processing manager runtime commands.
 - [ ] Wire `gating: 'all' | 'none' | 'activity'` into enforcement.
 - [ ] Add activity callback lookup/invocation for `gating: 'activity'`.
-- [ ] Return explicit non-owner feedback for gated command attempts while keeping the server state unchanged.
-- [ ] Document that owner disconnect does not auto-release authority and that explicit takeover is the only reassignment path.
-- [ ] Document last-write-wins behavior for concurrent `take-control` requests.
+- [x] Return explicit non-owner feedback for gated command attempts while keeping the server state unchanged.
+- [x] Document that owner disconnect does not auto-release authority and that explicit takeover is the only reassignment path.
+- [x] Document last-write-wins behavior for concurrent `take-control` requests.
 
 ### 4. Shared client plumbing
 
@@ -225,6 +225,8 @@ Shared enforcement rule:
 - [ ] Implement activity-owned command classifiers where `gating: 'activity'` is used.
 - [x] Ensure embedded Video Sync defaults to inherited authority when launched under SyncDeck.
 - [x] Ensure embedded Video Sync can be locally overridden by explicit `Take Control`.
+- [x] Enforce Video Sync non-owner command rejection for config and playback command routes.
+- [x] Disable Video Sync gated controls locally with explicit takeover feedback.
 
 ### 7. Validation
 
@@ -232,11 +234,11 @@ Shared enforcement rule:
 - [ ] Add server tests for first-instructor auto-ownership.
 - [x] Add server tests for `take-control` handoff.
 - [x] Add server tests for inherited authority resolution and local child override.
-- [ ] Add server tests for non-owner gated-command rejection.
+- [x] Add server tests for non-owner gated-command rejection.
 - [ ] Add server tests covering older sessions with empty authority state that auto-initialize on first manager connect.
 - [x] Add client tests for disabled controls and authority status messaging.
 - [ ] Add activity-specific tests for SyncDeck command classification.
-- [ ] Add activity-specific tests for Video Sync command classification.
+- [x] Add activity-specific tests for Video Sync command classification helpers.
 - [ ] Add browser-level E2E coverage for two instructor views on the same authority-enabled session: first instructor default owner, second instructor disabled, live takeover, and disabled-state flip after handoff.
 - [ ] Add browser-level E2E coverage for embedded inherited authority plus local child override behavior.
 - [x] Run scope-appropriate repo validation, likely `npm test`, and include `npm run test:e2e` for the multi-instructor manager and embedded authority scenarios when the harness can support them.
@@ -250,10 +252,12 @@ Implemented on this branch so far:
 - Video Sync takeover endpoint and embedded-child local override handling
 - Video Sync manager authority status plumbing and `Take Control` UI wiring
 - Video Sync protocol/session payload support for `controlAuthority`
+- Video Sync server-side owner checks for playback/config commands plus standalone first-owner auto-claim
+- Video Sync manager disabled-state enforcement and takeover feedback for non-owners
+- Video Sync unsynced-student prune timers now `unref()` so maintenance timers do not keep tests or Node processes alive unnecessarily
 
 Still pending before this feature is complete:
-- first-instructor auto-ownership on live manager connect
-- actual non-owner command rejection/disabled playback behavior in Video Sync
+- shared/generic first-instructor auto-ownership support beyond the current Video Sync adoption
 - SyncDeck adoption and command classification
 - websocket broadcast/update path for authority changes across instructor views
 - browser-level E2E coverage for the multi-instructor handoff scenario
