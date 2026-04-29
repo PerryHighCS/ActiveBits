@@ -1,5 +1,6 @@
 import SessionHeader from '@src/components/common/SessionHeader'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
+import { resolveOrCreateInstructorControlInstanceId } from '@src/components/common/instructorControlIdentity'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
@@ -180,14 +181,15 @@ export function resolveBootstrapInstructorPasscode(params: {
 
 export function buildManagerWsUrl(params: {
   sessionId: string | null | undefined
+  instructorInstanceId: string | null | undefined
   location: Pick<Location, 'protocol' | 'host'> | null | undefined
 }): string | null {
-  if (!params.sessionId || params.location == null) {
+  if (!params.sessionId || !params.instructorInstanceId || params.location == null) {
     return null
   }
 
   const protocol = params.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${params.location.host}/ws/video-sync?sessionId=${encodeURIComponent(params.sessionId)}&role=instructor`
+  return `${protocol}//${params.location.host}/ws/video-sync?sessionId=${encodeURIComponent(params.sessionId)}&role=instructor&instructorInstanceId=${encodeURIComponent(params.instructorInstanceId)}`
 }
 
 export function createManagerWsAuthMessage(instructorPasscode: string | null | undefined): string | null {
@@ -344,6 +346,19 @@ export default function VideoSyncManager() {
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
   const [embeddedBootstrapSourceUrl, setEmbeddedBootstrapSourceUrl] = useState<string | null>(null)
   const [persistentRecoverySourceUrl, setPersistentRecoverySourceUrl] = useState<string | null>(null)
+  const instructorInstanceId = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return null
+    }
+
+    return resolveOrCreateInstructorControlInstanceId(
+      {
+        localStorage: window.localStorage,
+        sessionStorage: window.sessionStorage,
+      },
+      () => window.crypto.randomUUID(),
+    )
+  }, [])
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<YoutubePlayerLike | null>(null)
@@ -453,6 +468,7 @@ export default function VideoSyncManager() {
       payload.positionSec = clampNumber(options.positionSec)
     }
     payload.instructorPasscode = instructorPasscode
+    payload.instructorInstanceId = instructorInstanceId
 
     try {
       const response = await fetch(`/api/video-sync/${sessionId}/command`, {
@@ -485,7 +501,7 @@ export default function VideoSyncManager() {
       }
       return false
     }
-  }, [instructorPasscode, sessionId])
+  }, [instructorInstanceId, instructorPasscode, sessionId])
 
   const flushManagerPlaybackIntent = useCallback(async (): Promise<void> => {
     clearPlaybackCommandFlushTimer()
@@ -604,10 +620,11 @@ export default function VideoSyncManager() {
   const buildWsUrl = useCallback(() => {
     if (typeof window === 'undefined') return null
     return buildManagerWsUrl({
+      instructorInstanceId,
       sessionId,
       location: window.location,
     })
-  }, [sessionId])
+  }, [instructorInstanceId, sessionId])
 
   useEffect(() => {
     if (!sessionId || typeof window === 'undefined') {
@@ -883,6 +900,7 @@ export default function VideoSyncManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           instructorPasscode,
+          instructorInstanceId,
           sourceUrl: sourceUrlValue,
           stopSec: stopSecValue,
         }),
@@ -907,7 +925,7 @@ export default function VideoSyncManager() {
       setErrorMessage(message)
       return false
     }
-  }, [applyManagerStateUpdate, instructorPasscode, isPasscodeReady, sessionId])
+  }, [applyManagerStateUpdate, instructorInstanceId, instructorPasscode, isPasscodeReady, sessionId])
 
   const saveConfig = useCallback(async (): Promise<void> => {
     await saveConfigWithValues(sourceUrlInput, hasStopTime, stopSecInput)

@@ -208,13 +208,28 @@ void test('shouldFetchEmbeddedBootstrapSourceUrl only fetches for embedded child
 void test('buildManagerWsUrl omits instructor credentials from the websocket URL', () => {
   assert.equal(
     buildManagerWsUrl({
+      instructorInstanceId: 'inst-123',
       sessionId: 'session-123',
       location: {
         protocol: 'https:',
         host: 'bits.example.test',
       },
     }),
-    'wss://bits.example.test/ws/video-sync?sessionId=session-123&role=instructor',
+    'wss://bits.example.test/ws/video-sync?sessionId=session-123&role=instructor&instructorInstanceId=inst-123',
+  )
+})
+
+void test('buildManagerWsUrl requires an instructor instance id', () => {
+  assert.equal(
+    buildManagerWsUrl({
+      instructorInstanceId: null,
+      sessionId: 'session-123',
+      location: {
+        protocol: 'https:',
+        host: 'bits.example.test',
+      },
+    }),
+    null,
   )
 })
 

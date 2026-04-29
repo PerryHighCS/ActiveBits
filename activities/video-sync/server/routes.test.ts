@@ -776,6 +776,106 @@ void test('session get route returns projected playback without persisting ordin
   }
 })
 
+void test('take control claims video-sync session control authority for the requesting instructor instance', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/control-authority/take']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
+        instructorInstanceId: 'inst-1',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.deepEqual(res.body, {
+    success: true,
+    controlAuthority: {
+      mode: 'single-instructor',
+      ownerInstanceId: 'inst-1',
+      ownerTakenAt: (res.body as { controlAuthority: { ownerTakenAt: number } }).controlAuthority.ownerTakenAt,
+      overrideInherited: false,
+    },
+  })
+
+  const persisted = storeState.store.s1?.data as {
+    controlAuthority?: Record<string, unknown>
+  }
+  assert.equal(persisted.controlAuthority?.ownerInstanceId, 'inst-1')
+  assert.equal(persisted.controlAuthority?.overrideInherited, false)
+})
+
+void test('take control marks embedded video-sync sessions as locally overriding inherited authority', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const session = createVideoSyncSession('child-1')
+  ;(session.data as Record<string, unknown>).embeddedParentSessionId = 'parent-syncdeck'
+  const storeState = createSessionStore({ 'child-1': session })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/control-authority/take']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 'child-1' },
+      body: {
+        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
+        instructorInstanceId: 'inst-2',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const persisted = storeState.store['child-1']?.data as {
+    controlAuthority?: Record<string, unknown>
+  }
+  assert.equal(persisted.controlAuthority?.ownerInstanceId, 'inst-2')
+  assert.equal(persisted.controlAuthority?.overrideInherited, true)
+})
+
+void test('take control rejects missing instructor instance ids', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/video-sync/:sessionId/control-authority/take']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    error: 'INVALID_INSTRUCTOR_INSTANCE_ID',
+    message: 'Valid instructorInstanceId is required',
+  })
+})
+
 void test('session get route persists the session when projected playback reaches stopSec', async () => {
   const originalDateNow = Date.now
   const nowMs = 12_000

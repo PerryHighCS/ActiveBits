@@ -2,6 +2,10 @@ import { createSession, type SessionRecord, type SessionStore } from 'activebits
 import { registerSessionNormalizer } from 'activebits-server/core/sessionNormalization.js'
 import { createBroadcastSubscriptionHelper } from 'activebits-server/core/broadcastUtils.js'
 import {
+  claimSessionControlAuthority,
+  normalizeInstructorInstanceId,
+} from '../../../server/controlAuthority.js'
+import {
   findHashBySessionId,
   resolvePersistentSessionEntryPolicy,
   verifyTeacherCodeWithHash,
@@ -203,6 +207,14 @@ function normalizeInstructorPasscode(value: unknown): string | null {
   }
 
   return normalized.toLowerCase()
+}
+
+function readInstructorInstanceId(body: unknown): string | null {
+  if (!isPlainObject(body)) {
+    return null
+  }
+
+  return normalizeInstructorInstanceId(body.instructorInstanceId)
 }
 
 function verifyInstructorPasscode(expected: string, candidate: string): boolean {
@@ -1664,6 +1676,45 @@ export default function setupVideoSyncRoutes(
     await broadcastEnvelope(sessions, ws, sessionId, envelope)
 
     res.json({ success: true, telemetry: data.telemetry })
+  })
+
+  app.post('/api/video-sync/:sessionId/control-authority/take', async (req, res) => {
+    const sessionId = resolveSessionId(req)
+    if (!sessionId) {
+      res.status(400).json({ error: 'INVALID_SESSION_ID', message: 'sessionId is required' })
+      return
+    }
+
+    const session = await getVideoSyncSession(sessions, sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Session not found' })
+      return
+    }
+
+    const instructorPasscode = readInstructorPasscode(req.body)
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Valid instructorPasscode is required' })
+      return
+    }
+
+    const instructorInstanceId = readInstructorInstanceId(req.body)
+    if (!instructorInstanceId) {
+      res.status(400).json({ error: 'INVALID_INSTRUCTOR_INSTANCE_ID', message: 'Valid instructorInstanceId is required' })
+      return
+    }
+
+    const embeddedParentContext = readEmbeddedParentSessionContext(session.data)
+    const controlAuthority = claimSessionControlAuthority({
+      session,
+      instructorInstanceId,
+      overrideInherited: embeddedParentContext != null,
+    })
+    await sessions.set(session.id, session)
+
+    res.json({
+      success: true,
+      controlAuthority,
+    })
   })
 
   ws.register('/ws/video-sync', (socket, query) => {
