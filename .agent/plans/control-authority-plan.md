@@ -228,6 +228,8 @@ Shared enforcement rule:
 - [x] Enforce Video Sync non-owner command rejection for config and playback command routes.
 - [x] Disable Video Sync gated controls locally with explicit takeover feedback.
 - [x] Add first-pass SyncDeck manager authority plumbing: instructor instance identity, takeover route, websocket authority status, and local gating for the websocket relay controls.
+- [x] Enforce SyncDeck non-owner rejection for configure and embedded activity start/end routes.
+- [x] Disable SyncDeck configure, activity launch, and embedded end controls locally for non-owners.
 
 ### 7. Validation
 
@@ -262,11 +264,13 @@ Implemented on this branch so far:
 - SyncDeck session normalization now preserves shared `controlAuthority` state instead of dropping it on activity-local normalization
 - SyncDeck manager shows first-pass control status UI and blocks non-owner websocket relay controls locally
 - SyncDeck websocket relay path rejects non-owner instructor updates and reflects current ownership back to the non-owner socket
+- SyncDeck configure and embedded lifecycle REST routes require the owning instructor instance and auto-claim only when ownership is empty
+- SyncDeck manager sends `instructorInstanceId` with configure, embedded start, and embedded end requests
 
 Still pending before this feature is complete:
 - shared/generic first-instructor auto-ownership support beyond the current Video Sync adoption
-- broader SyncDeck gating coverage for non-websocket manager actions like configure and embedded activity lifecycle controls
-- SyncDeck adoption and command classification
+- decide whether lower-risk SyncDeck report/download routes should remain passcode-only or also require current control ownership
+- SyncDeck adoption and command classification cleanup
 - websocket broadcast/update path for authority changes across instructor views
 - browser-level E2E coverage for the multi-instructor handoff scenario
 

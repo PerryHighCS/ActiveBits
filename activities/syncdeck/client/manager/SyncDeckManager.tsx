@@ -2585,7 +2585,7 @@ const SyncDeckManager: FC = () => {
   }, [hostProtocol, sessionId, userAgent])
 
   useEffect(() => {
-    if (!sessionId || !instructorPasscode) {
+    if (!sessionId || !instructorPasscode || !instructorInstanceId) {
       return
     }
 
@@ -2615,6 +2615,7 @@ const SyncDeckManager: FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             instructorPasscode,
+            instructorInstanceId,
             activityId: request.activityId,
             instanceKey: request.instanceKey,
             ...(request.location ? { location: request.location } : {}),
@@ -2695,7 +2696,7 @@ const SyncDeckManager: FC = () => {
         pendingEmbeddedBootstrapChildSessionIdsRef.current.delete(request.childSessionId)
       }
     }
-  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, embeddedBootstrapBackfillRetryNonce, instructorPasscode, sessionId])
+  }, [clearEmbeddedBootstrapBackfillRetryTimeout, embeddedActivities, embeddedBootstrapBackfillRetryNonce, instructorInstanceId, instructorPasscode, sessionId])
 
   const copyValue = async (value: string): Promise<void> => {
     if (!value || typeof navigator === 'undefined' || navigator.clipboard === undefined) {
@@ -2949,9 +2950,17 @@ const SyncDeckManager: FC = () => {
         return false
       }
 
-      if (!instructorPasscode) {
+      if (!instructorPasscode || !instructorInstanceId) {
         if (!background) {
           setStartError('Instructor passcode missing. Refresh SyncDeck manager and try again.')
+          setStartSuccess(null)
+        }
+        return false
+      }
+
+      if (!canUseInstructorControls) {
+        if (!background) {
+          setStartError('Take control to launch embedded activities.')
           setStartSuccess(null)
         }
         return false
@@ -2972,6 +2981,7 @@ const SyncDeckManager: FC = () => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 instructorPasscode,
+                instructorInstanceId,
                 activityId: request.activityId,
                 instanceKey: request.instanceKey,
                 ...(request.location ? { location: request.location } : {}),
@@ -3071,7 +3081,7 @@ const SyncDeckManager: FC = () => {
         },
       })
     },
-    [sessionId, instructorPasscode, embeddedActivities, instructorIndicesState],
+    [canUseInstructorControls, sessionId, instructorInstanceId, instructorPasscode, embeddedActivities, instructorIndicesState],
   )
 
   const loadDeckActivityRequests = useCallback(async (): Promise<SyncDeckDeckActivityRequestsByHorizontalIndex> => {
@@ -3355,6 +3365,7 @@ const SyncDeckManager: FC = () => {
           presentationUrl: normalizedUrl,
           entryPolicy,
           instructorPasscode,
+          instructorInstanceId,
           ...(urlHash ? { urlHash } : {}),
         }),
       })
@@ -3969,7 +3980,13 @@ const SyncDeckManager: FC = () => {
   }
 
   const endEmbeddedActivity = async (instanceKey: string): Promise<void> => {
-    if (!sessionId || !instructorPasscode) {
+    if (!sessionId || !instructorPasscode || !instructorInstanceId) {
+      return
+    }
+
+    if (!canUseInstructorControls) {
+      setStartError('Take control to end embedded activities.')
+      setStartSuccess(null)
       return
     }
 
@@ -3980,6 +3997,7 @@ const SyncDeckManager: FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           instructorPasscode,
+          instructorInstanceId,
           instanceKey,
         }),
       })
@@ -4198,7 +4216,7 @@ const SyncDeckManager: FC = () => {
                 className="px-2 py-1 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-expanded={isActivityPickerOpen}
                 aria-controls="syncdeck-activity-picker-panel"
-                disabled={isConfigurePanelOpen}
+                disabled={isConfigurePanelOpen || !canUseInstructorControls}
               >
                 Activities
               </button>
@@ -4311,7 +4329,7 @@ const SyncDeckManager: FC = () => {
                           onClick={() => {
                             handleEmbeddedEndControlClick(instanceKey)
                           }}
-                          disabled={endingEmbeddedInstanceKey === instanceKey}
+                          disabled={endingEmbeddedInstanceKey === instanceKey || !canUseInstructorControls}
                           className="px-2 py-1 rounded border border-red-600 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
                         >
                           {endingEmbeddedInstanceKey === instanceKey
@@ -4395,7 +4413,7 @@ const SyncDeckManager: FC = () => {
                 <button
                   type="submit"
                   className="px-3 py-2 rounded bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60"
-                  disabled={isStartingSession || !isPasscodeReady || isPreflightChecking || presentationUrlError != null}
+                  disabled={isStartingSession || !isPasscodeReady || isPreflightChecking || presentationUrlError != null || !canUseInstructorControls}
                 >
                   {isPreflightChecking
                     ? 'Validating…'

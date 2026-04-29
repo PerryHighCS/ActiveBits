@@ -123,7 +123,16 @@ function createRequest(
   cookies: Record<string, unknown> = {},
   headers: Record<string, unknown> = {},
 ): RouteRequest {
-  return { params, body, cookies, headers }
+  const normalizedBody =
+    body != null &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    'instructorPasscode' in body &&
+    !('instructorInstanceId' in body)
+      ? { ...(body as Record<string, unknown>), instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID }
+      : body
+
+  return { params, body: normalizedBody, cookies, headers }
 }
 
 function createSessionStore(initial: Record<string, SessionRecord>) {
@@ -2374,6 +2383,49 @@ void test('embedded-activity start route creates a child session, stores keyed m
   assert.equal(typeof studentStart?.entryParticipantToken, 'string')
 })
 
+void test('embedded-activity start route rejects non-owner instructor instances', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        controlAuthority: {
+          mode: 'single-instructor',
+          ownerInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
+          ownerTakenAt: 123,
+          overrideInherited: false,
+        },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/start']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instructorPasscode: 'teacher-passcode-1',
+        instructorInstanceId: PEER_INSTRUCTOR_INSTANCE_ID,
+        activityId: 'video-sync',
+        instanceKey: 'video-sync:3:0',
+        location: { h: 3, v: 0 },
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, { error: 'control authority required' })
+  const storedParentSession = storeState.store.s1 as SessionRecord
+  assert.deepEqual(asRecord(storedParentSession.data)?.embeddedActivities, {})
+})
+
 void test('embedded-activity start route rejects unknown activities before creating a child session', async () => {
   const app = createMockApp()
   const ws = createMockWs()
@@ -3071,6 +3123,63 @@ void test('embedded-activity end route removes keyed state, deletes child sessio
 
   const payloads = studentSocket.sent.map((entry) => JSON.parse(entry) as { payload?: Record<string, unknown> })
   assert.ok(payloads.some((entry) => entry.payload?.type === 'embedded-activity-end' && entry.payload?.instanceKey === 'video-sync:3:0'))
+})
+
+void test('embedded-activity end route rejects non-owner instructor instances', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-passcode-1'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-passcode-1').data,
+        controlAuthority: {
+          mode: 'single-instructor',
+          ownerInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
+          ownerTakenAt: 123,
+          overrideInherited: false,
+        },
+        embeddedActivities: {
+          'video-sync:3:0': {
+            childSessionId: 'CHILD:s1:abc12:video-sync',
+            activityId: 'video-sync',
+            startedAt: 123,
+            owner: 'syncdeck-instructor',
+          },
+        },
+      },
+    },
+    'CHILD:s1:abc12:video-sync': {
+      id: 'CHILD:s1:abc12:video-sync',
+      type: 'video-sync',
+      created: 1,
+      lastActivity: 1,
+      data: {},
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/embedded-activity/end']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        instructorPasscode: 'teacher-passcode-1',
+        instructorInstanceId: PEER_INSTRUCTOR_INSTANCE_ID,
+        instanceKey: 'video-sync:3:0',
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, { error: 'control authority required' })
+  const storedParentSession = storeState.store.s1 as SessionRecord
+  assert.ok(asRecord(storedParentSession.data)?.embeddedActivities)
+  assert.ok(storeState.store['CHILD:s1:abc12:video-sync'])
 })
 
 void test('embedded-activity entry route issues a fresh token for a registered parent student', async () => {
@@ -4374,6 +4483,48 @@ void test('configure route sets presentation url for valid passcode', async () =
   const updated = storeState.store.s1?.data as Record<string, unknown>
   assert.equal(updated.presentationUrl, 'https://example.com/deck')
   assert.equal(updated.standaloneMode, false)
+  assert.equal(asRecord(updated.controlAuthority)?.ownerInstanceId, PRIMARY_INSTRUCTOR_INSTANCE_ID)
+})
+
+void test('configure route rejects non-owner instructor instances after control is claimed', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const storeState = createSessionStore({
+    s1: {
+      ...createSyncDeckSession('s1', 'teacher-pass'),
+      data: {
+        ...createSyncDeckSession('s1', 'teacher-pass').data,
+        controlAuthority: {
+          mode: 'single-instructor',
+          ownerInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
+          ownerTakenAt: 123,
+          overrideInherited: false,
+        },
+      },
+    },
+  })
+  setupSyncDeckRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/configure']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    createRequest(
+      { sessionId: 's1' },
+      {
+        presentationUrl: 'https://example.com/deck',
+        instructorPasscode: 'teacher-pass',
+        instructorInstanceId: PEER_INSTRUCTOR_INSTANCE_ID,
+      },
+    ),
+    res,
+  )
+
+  assert.equal(res.statusCode, 403)
+  assert.deepEqual(res.body, { error: 'control authority required' })
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  assert.equal(updated.presentationUrl, null)
 })
 
 void test('configure route can enable standalone mode for solo-launched sessions', async () => {

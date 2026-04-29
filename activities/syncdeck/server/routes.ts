@@ -852,6 +852,35 @@ function readInstructorInstanceId(body: unknown): string | null {
   return normalizeInstructorInstanceId(body.instructorInstanceId)
 }
 
+function buildSyncDeckControlAuthorityRequiredError(): { error: string } {
+  return { error: 'control authority required' }
+}
+
+function ensureSyncDeckInstructorControlAuthority(params: {
+  session: SyncDeckSession
+  instructorInstanceId: string | null
+}): { ok: true; changed: boolean } | { ok: false; statusCode: number; body: { error: string } } {
+  const instructorInstanceId = normalizeInstructorInstanceId(params.instructorInstanceId)
+  if (!instructorInstanceId) {
+    return { ok: false, statusCode: 400, body: { error: 'invalid instructorInstanceId' } }
+  }
+
+  const controlAuthority = getSessionControlAuthorityState(params.session)
+  if (controlAuthority.ownerInstanceId == null) {
+    claimSessionControlAuthority({
+      session: params.session,
+      instructorInstanceId,
+    })
+    return { ok: true, changed: true }
+  }
+
+  if (controlAuthority.ownerInstanceId !== instructorInstanceId) {
+    return { ok: false, statusCode: 403, body: buildSyncDeckControlAuthorityRequiredError() }
+  }
+
+  return { ok: true, changed: false }
+}
+
 function asSyncDeckSession(session: SessionRecord | null): SyncDeckSession | null {
   if (!session || session.type !== 'syncdeck') {
     return null
@@ -1295,6 +1324,27 @@ registerSessionNormalizer('syncdeck', (session) => {
 export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: SessionStore, ws: WsRouter): void {
   const embeddedActivityStartLocks = new Map<string, Promise<void>>()
 
+  const broadcastControlAuthorityToInstructors = (session: SyncDeckSession): void => {
+    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+      if (peer.sessionId !== session.id || peer.isInstructor !== true) {
+        continue
+      }
+      sendSyncDeckControlAuthority(peer, session)
+    }
+  }
+
+  const persistAndBroadcastControlAuthorityChange = async (
+    session: SyncDeckSession,
+    authorityResult: { ok: true; changed: boolean },
+  ): Promise<void> => {
+    if (!authorityResult.changed) {
+      return
+    }
+
+    await sessions.set(session.id, session)
+    broadcastControlAuthorityToInstructors(session)
+  }
+
   const withEmbeddedActivityStartLock = async <T,>(lockKey: string, work: () => Promise<T>): Promise<T> => {
     const previous = embeddedActivityStartLocks.get(lockKey) ?? Promise.resolve()
     let releaseCurrent!: () => void
@@ -1681,12 +1731,7 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       instructorInstanceId,
     })
     await sessions.set(session.id, session)
-    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
-      if (peer.sessionId !== session.id || peer.isInstructor !== true) {
-        continue
-      }
-      sendSyncDeckControlAuthority(peer, session)
-    }
+    broadcastControlAuthorityToInstructors(session)
     res.json({ ok: true, controlAuthority })
   })
 
@@ -1714,6 +1759,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       res.status(403).json({ error: 'forbidden' })
       return
     }
+    const authorityResult = ensureSyncDeckInstructorControlAuthority({
+      session,
+      instructorInstanceId: readInstructorInstanceId(req.body),
+    })
+    if (!authorityResult.ok) {
+      res.status(authorityResult.statusCode).json(authorityResult.body)
+      return
+    }
+    await persistAndBroadcastControlAuthorityChange(session, authorityResult)
     if (!activityId || !instanceKey) {
       res.status(400).json({ error: 'invalid payload' })
       return
@@ -1748,6 +1802,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
         if (!verifyInstructorPasscode(lockedSession.data.instructorPasscode, instructorPasscode)) {
           return { statusCode: 403, body: { error: 'forbidden' } }
         }
+
+        const lockedAuthorityResult = ensureSyncDeckInstructorControlAuthority({
+          session: lockedSession,
+          instructorInstanceId: readInstructorInstanceId(req.body),
+        })
+        if (!lockedAuthorityResult.ok) {
+          return { statusCode: lockedAuthorityResult.statusCode, body: lockedAuthorityResult.body }
+        }
+        await persistAndBroadcastControlAuthorityChange(lockedSession, lockedAuthorityResult)
 
         const existing = lockedSession.data.embeddedActivities[instanceKey]
         if (existing) {
@@ -1824,6 +1887,15 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       res.status(403).json({ error: 'forbidden' })
       return
     }
+    const authorityResult = ensureSyncDeckInstructorControlAuthority({
+      session,
+      instructorInstanceId: readInstructorInstanceId(req.body),
+    })
+    if (!authorityResult.ok) {
+      res.status(authorityResult.statusCode).json(authorityResult.body)
+      return
+    }
+    await persistAndBroadcastControlAuthorityChange(session, authorityResult)
     if (!instanceKey) {
       res.status(400).json({ error: 'invalid payload' })
       return
@@ -2148,6 +2220,16 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
       return
     }
 
+    const authorityResult = ensureSyncDeckInstructorControlAuthority({
+      session,
+      instructorInstanceId: readInstructorInstanceId(req.body),
+    })
+    if (!authorityResult.ok) {
+      const response = res as unknown as JsonResponse
+      response.status(authorityResult.statusCode).json(authorityResult.body)
+      return
+    }
+
     if (urlHash) {
       const persistentHash = await findHashBySessionId(sessionId)
       if (!persistentHash) {
@@ -2170,6 +2252,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     session.data.presentationUrl = presentationUrl
     session.data.standaloneMode = standaloneMode
     await sessions.set(session.id, session)
+    if (authorityResult.changed) {
+      broadcastControlAuthorityToInstructors(session)
+    }
 
     const response = res as unknown as JsonResponse
     response.json({ ok: true })
