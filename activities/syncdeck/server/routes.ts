@@ -26,6 +26,12 @@ import { storeSessionEntryParticipant } from 'activebits-server/core/sessionEntr
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
 import {
+  claimSessionControlAuthority,
+  getSessionControlAuthorityState,
+  normalizeSessionControlAuthorityState,
+  normalizeInstructorInstanceId,
+} from '../../../server/controlAuthority.js'
+import {
   REVEAL_SYNC_PROTOCOL_VERSION,
   assessRevealSyncProtocolCompatibility,
 } from '../shared/revealSyncProtocol.js'
@@ -136,6 +142,7 @@ interface SyncDeckSessionData extends Record<string, unknown> {
   presentationUrl: string | null
   standaloneMode: boolean
   instructorPasscode: string
+  controlAuthority: ReturnType<typeof normalizeSessionControlAuthorityState>
   instructorState: SyncDeckInstructorState | null
   lastInstructorPayload: unknown
   lastInstructorStatePayload: unknown
@@ -152,6 +159,7 @@ interface SyncDeckSession extends SessionRecord {
 
 interface SyncDeckSocket extends ActiveBitsWebSocket {
   isInstructor?: boolean
+  instructorInstanceId?: string | null
   sessionId?: string | null
   studentId?: string | null
 }
@@ -171,6 +179,7 @@ const WS_OPEN_READY_STATE = 1
 const SYNCDECK_WS_UPDATE_TYPE = 'syncdeck-state-update'
 const SYNCDECK_WS_BROADCAST_TYPE = 'syncdeck-state'
 const SYNCDECK_WS_STUDENTS_TYPE = 'syncdeck-students'
+const SYNCDECK_WS_CONTROL_AUTHORITY_TYPE = 'syncdeck-control-authority'
 const DEFAULT_INSTRUCTOR_AUTH_TIMEOUT_MS = 5_000
 const MAX_CHALKBOARD_DELTA_STROKES = 200
 const SYNCDECK_EMBEDDED_OWNER = 'syncdeck-instructor'
@@ -571,6 +580,7 @@ function normalizeSessionData(data: unknown): SyncDeckSessionData {
       typeof source.instructorPasscode === 'string' && source.instructorPasscode.length > 0
         ? source.instructorPasscode
         : createInstructorPasscode(),
+    controlAuthority: normalizeSessionControlAuthorityState(source.controlAuthority),
     instructorState: null,
     lastInstructorPayload: normalizedLastInstructorPayload,
     lastInstructorStatePayload: normalizedLastInstructorStatePayload,
@@ -780,6 +790,21 @@ function sendSyncDeckState(socket: ActiveBitsWebSocket, payload: unknown): void 
   }
 }
 
+function sendSyncDeckControlAuthority(socket: ActiveBitsWebSocket, session: Pick<SessionRecord, 'data'>): void {
+  if (socket.readyState !== WS_OPEN_READY_STATE) {
+    return
+  }
+
+  try {
+    socket.send(JSON.stringify({
+      type: SYNCDECK_WS_CONTROL_AUTHORITY_TYPE,
+      payload: getSessionControlAuthorityState(session),
+    }))
+  } catch {
+    // Ignore socket send failures.
+  }
+}
+
 function normalizeStudentId(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null
@@ -817,6 +842,14 @@ function normalizeInstructorPasscode(value: unknown): string | null {
   }
 
   return trimmed
+}
+
+function readInstructorInstanceId(body: unknown): string | null {
+  if (!isPlainObject(body)) {
+    return null
+  }
+
+  return normalizeInstructorInstanceId(body.instructorInstanceId)
 }
 
 function asSyncDeckSession(session: SessionRecord | null): SyncDeckSession | null {
@@ -1618,6 +1651,45 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     response.status(403).json({ error: 'forbidden' })
   })
 
+  app.post('/api/syncdeck/:sessionId/control-authority/take', async (req, res) => {
+    const sessionId = req.params.sessionId
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = await getSyncDeckSessionWithEmbeddedKeepalive(sessions, sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+
+    const instructorPasscode = normalizeInstructorPasscode(readStringField(req.body, 'instructorPasscode'))
+    if (!instructorPasscode || !verifyInstructorPasscode(session.data.instructorPasscode, instructorPasscode)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const instructorInstanceId = readInstructorInstanceId(req.body)
+    if (!instructorInstanceId) {
+      res.status(400).json({ error: 'invalid instructorInstanceId' })
+      return
+    }
+
+    const controlAuthority = claimSessionControlAuthority({
+      session,
+      instructorInstanceId,
+    })
+    await sessions.set(session.id, session)
+    for (const peer of ws.wss.clients as Set<SyncDeckSocket>) {
+      if (peer.sessionId !== session.id || peer.isInstructor !== true) {
+        continue
+      }
+      sendSyncDeckControlAuthority(peer, session)
+    }
+    res.json({ ok: true, controlAuthority })
+  })
+
   app.post('/api/syncdeck/:sessionId/embedded-activity/start', async (req, res) => {
     const sessionId = req.params.sessionId
     if (!sessionId) {
@@ -2107,6 +2179,9 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
     const client = socket as SyncDeckSocket
     client.sessionId = query.get('sessionId')
     client.isInstructor = false
+    client.instructorInstanceId = query.get('role') === 'instructor'
+      ? normalizeInstructorInstanceId(query.get('instructorInstanceId'))
+      : null
     client.studentId = normalizeStudentId(query.get('studentId'))
 
     const sessionId = client.sessionId
@@ -2137,8 +2212,17 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           socket.close(1008, 'forbidden')
           return
         }
+        const controlAuthority = getSessionControlAuthorityState(session)
+        if (controlAuthority.ownerInstanceId == null && client.instructorInstanceId) {
+          claimSessionControlAuthority({
+            session,
+            instructorInstanceId: client.instructorInstanceId,
+          })
+          await sessions.set(session.id, session)
+        }
         client.isInstructor = true
         await replayEmbeddedActivityStartsToSocket(client, session, null)
+        sendSyncDeckControlAuthority(socket, session)
         if (session.data.lastInstructorStatePayload != null) {
           if (!parseChalkboardCommand(session.data.lastInstructorStatePayload)) {
             sendSyncDeckState(socket, session.data.lastInstructorStatePayload)
@@ -2232,6 +2316,14 @@ export default function setupSyncDeckRoutes(app: SyncDeckRouteApp, sessions: Ses
           logSyncDeckProtocolEvent('info', 'ignore_instructor_ws_message_missing_session', {
             sessionId: client.sessionId,
           })
+          return
+        }
+
+        if (
+          !client.instructorInstanceId ||
+          getSessionControlAuthorityState(session).ownerInstanceId !== client.instructorInstanceId
+        ) {
+          sendSyncDeckControlAuthority(socket, session)
           return
         }
 

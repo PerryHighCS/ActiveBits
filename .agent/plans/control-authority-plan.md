@@ -218,15 +218,16 @@ Shared enforcement rule:
 
 ### 6. Activity adoption
 
-- [ ] Add `controlAuthority` config to SyncDeck.
+- [x] Add `controlAuthority` config to SyncDeck.
 - [ ] Decide SyncDeck gating mode. Current expectation: `gating: 'activity'`.
-- [ ] Add `controlAuthority` config to Video Sync.
+- [x] Add `controlAuthority` config to Video Sync.
 - [x] Decide Video Sync gating mode. Current expectation: `gating: 'activity'` or `all`, depending on final command surface.
 - [ ] Implement activity-owned command classifiers where `gating: 'activity'` is used.
 - [x] Ensure embedded Video Sync defaults to inherited authority when launched under SyncDeck.
 - [x] Ensure embedded Video Sync can be locally overridden by explicit `Take Control`.
 - [x] Enforce Video Sync non-owner command rejection for config and playback command routes.
 - [x] Disable Video Sync gated controls locally with explicit takeover feedback.
+- [x] Add first-pass SyncDeck manager authority plumbing: instructor instance identity, takeover route, websocket authority status, and local gating for the websocket relay controls.
 
 ### 7. Validation
 
@@ -249,15 +250,22 @@ Implemented on this branch so far:
 - shared `controlAuthority` activity config shape and schema validation
 - shared authority state normalization, ownership helpers, and inherited/session resolution helpers
 - durable browser-plus-tab instructor identity generation for manager clients
+- activity config opt-in for Video Sync (`inherited`) and SyncDeck (`session`)
 - Video Sync takeover endpoint and embedded-child local override handling
 - Video Sync manager authority status plumbing and `Take Control` UI wiring
 - Video Sync protocol/session payload support for `controlAuthority`
 - Video Sync server-side owner checks for playback/config commands plus standalone first-owner auto-claim
 - Video Sync manager disabled-state enforcement and takeover feedback for non-owners
 - Video Sync unsynced-student prune timers now `unref()` so maintenance timers do not keep tests or Node processes alive unnecessarily
+- SyncDeck manager websocket identity + authority status plumbing
+- SyncDeck takeover endpoint plus first-owner auto-claim on instructor websocket auth
+- SyncDeck session normalization now preserves shared `controlAuthority` state instead of dropping it on activity-local normalization
+- SyncDeck manager shows first-pass control status UI and blocks non-owner websocket relay controls locally
+- SyncDeck websocket relay path rejects non-owner instructor updates and reflects current ownership back to the non-owner socket
 
 Still pending before this feature is complete:
 - shared/generic first-instructor auto-ownership support beyond the current Video Sync adoption
+- broader SyncDeck gating coverage for non-websocket manager actions like configure and embedded activity lifecycle controls
 - SyncDeck adoption and command classification
 - websocket broadcast/update path for authority changes across instructor views
 - browser-level E2E coverage for the multi-instructor handoff scenario

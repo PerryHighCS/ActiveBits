@@ -8,6 +8,7 @@ import {
 void test('buildSyncDeckInstructorWsUrl omits instructor credentials from websocket URL', () => {
   assert.equal(
     buildSyncDeckInstructorWsUrl({
+      instructorInstanceId: 'inst-123',
       sessionId: 'session-123',
       location: {
         protocol: 'https:',
@@ -15,13 +16,14 @@ void test('buildSyncDeckInstructorWsUrl omits instructor credentials from websoc
       },
       isConfigurePanelOpen: false,
     }),
-    'wss://bits.example.test/ws/syncdeck?sessionId=session-123&role=instructor',
+    'wss://bits.example.test/ws/syncdeck?instructorInstanceId=inst-123&sessionId=session-123&role=instructor',
   )
 })
 
 void test('buildSyncDeckInstructorWsUrl returns null when configure panel is open or session missing', () => {
   assert.equal(
     buildSyncDeckInstructorWsUrl({
+      instructorInstanceId: 'inst-123',
       sessionId: 'session-123',
       location: {
         protocol: 'https:',
@@ -33,6 +35,7 @@ void test('buildSyncDeckInstructorWsUrl returns null when configure panel is ope
   )
   assert.equal(
     buildSyncDeckInstructorWsUrl({
+      instructorInstanceId: 'inst-123',
       sessionId: null,
       location: {
         protocol: 'https:',

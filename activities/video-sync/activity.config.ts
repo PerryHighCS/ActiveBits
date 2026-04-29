@@ -32,6 +32,11 @@ const videoSyncConfig: ActivityConfig = {
   createSessionBootstrap: {
     historyState: ['instructorPasscode'],
   },
+  controlAuthority: {
+    mode: 'single-instructor',
+    scope: 'inherited',
+    gating: 'all',
+  },
   manageLayout: {
     expandShell: true,
   },

@@ -20,6 +20,8 @@ import '../../resonance/server/routes.js'
 import '../../video-sync/server/routes.js'
 
 const DEFAULT_SYNCDECK_ENTRY_POLICY = 'instructor-required'
+const PRIMARY_INSTRUCTOR_INSTANCE_ID = 'inst-primary'
+const PEER_INSTRUCTOR_INSTANCE_ID = 'inst-peer'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -602,6 +604,7 @@ void test('syncdeck websocket sends latest state snapshot to instructor on conne
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -662,6 +665,7 @@ void test('syncdeck websocket replays existing embedded activity starts to instr
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -749,6 +753,7 @@ void test('syncdeck websocket stops replaying embedded activity starts after soc
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -789,6 +794,7 @@ void test('syncdeck websocket does not issue forbidden close after auth wait res
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -832,6 +838,7 @@ void test('syncdeck websocket sends latest position snapshot to instructor when 
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -883,6 +890,7 @@ void test('syncdeck websocket relays instructor updates to students in session',
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -941,6 +949,7 @@ void test('syncdeck websocket relays instructor updates to other instructors in 
   handler?.(
     primaryInstructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -950,6 +959,7 @@ void test('syncdeck websocket relays instructor updates to other instructors in 
   handler?.(
     peerInstructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PEER_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -979,6 +989,68 @@ void test('syncdeck websocket relays instructor updates to other instructors in 
     latestDelivered?.payload,
     { type: 'slidechanged', payload: { h: 4, v: 0, f: 0 } },
   )
+})
+
+void test('syncdeck websocket ignores non-owner instructor updates after another instructor auto-claims control', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = ws.registered['/ws/syncdeck']
+  assert.equal(typeof handler, 'function')
+
+  const primaryInstructorSocket = new MockSocket()
+  const peerInstructorSocket = new MockSocket()
+  ws.wss.clients.add(primaryInstructorSocket)
+  ws.wss.clients.add(peerInstructorSocket)
+
+  handler?.(
+    primaryInstructorSocket,
+    new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
+      sessionId: 's1',
+      role: 'instructor',
+    }),
+    ws.wss,
+  )
+  emitInstructorAuth(primaryInstructorSocket, 'teacher-pass')
+
+  handler?.(
+    peerInstructorSocket,
+    new URLSearchParams({
+      instructorInstanceId: PEER_INSTRUCTOR_INSTANCE_ID,
+      sessionId: 's1',
+      role: 'instructor',
+    }),
+    ws.wss,
+  )
+  emitInstructorAuth(peerInstructorSocket, 'teacher-pass')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  peerInstructorSocket.emit(
+    'message',
+    JSON.stringify({
+      type: 'syncdeck-state-update',
+      payload: { type: 'slidechanged', payload: { h: 9, v: 0, f: 0 } },
+    }),
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const updatedSession = state.store.s1?.data as {
+    controlAuthority?: { ownerInstanceId?: string | null }
+    lastInstructorPayload?: unknown
+  }
+  assert.equal(updatedSession.controlAuthority?.ownerInstanceId, PRIMARY_INSTRUCTOR_INSTANCE_ID)
+  assert.equal(updatedSession.lastInstructorPayload, null)
+
+  const controlAuthorityMessages = peerInstructorSocket.sent
+    .map((entry) => JSON.parse(entry) as { type?: string; payload?: { ownerInstanceId?: string | null } })
+    .filter((entry) => entry.type === 'syncdeck-control-authority')
+  assert.ok(controlAuthorityMessages.length >= 2)
+  assert.equal(controlAuthorityMessages[controlAuthorityMessages.length - 1]?.payload?.ownerInstanceId, PRIMARY_INSTRUCTOR_INSTANCE_ID)
 })
 
 void test('syncdeck websocket replays buffered chalkboard snapshot and delta to student on connect', async () => {
@@ -1097,6 +1169,7 @@ void test('syncdeck websocket replays buffered chalkboard snapshot and delta to 
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -1216,6 +1289,7 @@ void test('syncdeck websocket updates and clears chalkboard buffer from instruct
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -1347,6 +1421,7 @@ void test('syncdeck websocket persists drawing tool mode updates from instructor
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -1403,6 +1478,7 @@ void test('syncdeck websocket broadcasts student presence count to instructor', 
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -1476,6 +1552,7 @@ void test('syncdeck session normalization filters malformed persisted students a
   handler?.(
     instructorSocket,
     new URLSearchParams({
+      instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
       sessionId: 's1',
       role: 'instructor',
     }),
@@ -2161,6 +2238,38 @@ void test('embedded-context route rejects unknown parent identity', async () => 
 
   assert.equal(res.statusCode, 403)
   assert.deepEqual(res.body, { error: 'forbidden' })
+})
+
+void test('control-authority take route claims syncdeck control for the requesting instructor instance', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const state = createSessionStore({
+    s1: createSyncDeckSession('s1', 'teacher-pass'),
+  })
+
+  setupSyncDeckRoutes(app, state.sessions, ws)
+  const handler = app.handlers.post['/api/syncdeck/:sessionId/control-authority/take']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        instructorPasscode: 'teacher-pass',
+        instructorInstanceId: PRIMARY_INSTRUCTOR_INSTANCE_ID,
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  assert.equal((res.body as { controlAuthority?: { ownerInstanceId?: string | null } }).controlAuthority?.ownerInstanceId, PRIMARY_INSTRUCTOR_INSTANCE_ID)
+
+  const persisted = state.store.s1?.data as {
+    controlAuthority?: { ownerInstanceId?: string | null }
+  }
+  assert.equal(persisted.controlAuthority?.ownerInstanceId, PRIMARY_INSTRUCTOR_INSTANCE_ID)
 })
 
 void test('embedded-activity start route creates a child session, stores keyed map state, and broadcasts tokens', async () => {

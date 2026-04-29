@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-04-29
+- Surface: internal module | activity interface
+- Contract: Activity-owned session normalizers that return a typed `data` object must preserve the shared `controlAuthority` record whenever the activity opts into single-instructor control ownership.
+- Compatibility constraints: Shared ownership helpers store authority in `session.data.controlAuthority`, but activity-local normalizers like SyncDeck's may rebuild `data` field-by-field. If they omit `controlAuthority`, ownership appears to claim successfully in one code path and then vanishes on the next normalized read or websocket update.
+- Validation rules: Normalization should round-trip `{ mode, ownerInstanceId, ownerTakenAt, overrideInherited }`, defaulting through the shared control-authority normalizer rather than trusting arbitrary persisted values.
+- Evidence (schema/tests/path): `server/controlAuthority.ts`; `activities/syncdeck/server/routes.ts`; `activities/syncdeck/server/routes.test.ts`
+- Follow-up action: When another activity with its own `normalizeSessionData(...)` adopts control authority, audit that normalizer immediately instead of assuming shared helper writes are enough.
+- Owner: Codex
+
 - Date: 2026-04-17
 - Surface: activity interface | websocket | internal module
 - Contract: SyncDeck student-side instructor sync suppression must derive incoming slide indices from all Reveal state shapes that can drive a `setState`, including `payload.indices`, `payload.navigation.current`, `payload.revealState`, and top-level state fields. Same-horizontal vertical instructor moves must remain suppressible even when the deck emits `revealState` without a separate `indices` object.

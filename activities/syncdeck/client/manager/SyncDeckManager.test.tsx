@@ -43,6 +43,7 @@ import { resolveManagerActivityRequestBatchInputs } from './SyncDeckManager.js'
 import { resolveManagerPreloadRequestBatchInputs } from './SyncDeckManager.js'
 import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
 import { processManagerPreloadRequests } from './SyncDeckManager.js'
+import { buildSyncDeckInstructorWsUrl } from './SyncDeckManager.js'
 import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
 import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
@@ -111,6 +112,27 @@ void test('SyncDeckManager pre-fills presentation URL from query params', () => 
   )
 
   assert.match(html, /value="https:\/\/slides\.example\/deck"/i)
+})
+
+void test('buildSyncDeckInstructorWsUrl includes instructor instance identity for manager sockets', () => {
+  assert.equal(
+    buildSyncDeckInstructorWsUrl({
+      sessionId: 'session-123',
+      instructorInstanceId: 'inst-123',
+      location: { protocol: 'https:', host: 'bits.example.test' },
+      isConfigurePanelOpen: false,
+    }),
+    'wss://bits.example.test/ws/syncdeck?instructorInstanceId=inst-123&sessionId=session-123&role=instructor',
+  )
+  assert.equal(
+    buildSyncDeckInstructorWsUrl({
+      sessionId: 'session-123',
+      instructorInstanceId: null,
+      location: { protocol: 'https:', host: 'bits.example.test' },
+      isConfigurePanelOpen: false,
+    }),
+    null,
+  )
 })
 
 void test('activitySupportsEmbeddedReport reflects shared activity config metadata', () => {

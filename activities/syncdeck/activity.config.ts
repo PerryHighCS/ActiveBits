@@ -57,6 +57,11 @@ const syncdeckConfig: ActivityConfig = {
       },
     ],
   },
+  controlAuthority: {
+    mode: 'single-instructor',
+    scope: 'session',
+    gating: 'all',
+  },
   manageDashboard: {
     customPersistentLinkBuilder: true,
   },

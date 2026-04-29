@@ -1,4 +1,5 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
+import { resolveOrCreateInstructorControlInstanceId } from '@src/components/common/instructorControlIdentity'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
@@ -99,6 +100,28 @@ interface SyncDeckInstructorAuthMessage {
   instructorPasscode: string
 }
 
+interface SyncDeckControlAuthority {
+  mode: 'single-instructor'
+  ownerInstanceId: string | null
+  ownerTakenAt: number | null
+  overrideInherited: boolean
+}
+
+const EMPTY_SYNCDECK_CONTROL_AUTHORITY: SyncDeckControlAuthority = {
+  mode: 'single-instructor',
+  ownerInstanceId: null,
+  ownerTakenAt: null,
+  overrideInherited: false,
+}
+
+function createInstructorControlId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 interface RevealCommandPayload {
   [key: string]: unknown
 }
@@ -160,15 +183,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 export function buildSyncDeckInstructorWsUrl(params: {
   sessionId: string | null | undefined
+  instructorInstanceId: string | null | undefined
   location: Pick<Location, 'protocol' | 'host'> | null | undefined
   isConfigurePanelOpen: boolean
 }): string | null {
-  if (!params.sessionId || params.location == null || params.isConfigurePanelOpen) {
+  if (!params.sessionId || !params.instructorInstanceId || params.location == null || params.isConfigurePanelOpen) {
     return null
   }
 
   const protocol = params.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const query = new URLSearchParams({
+    instructorInstanceId: params.instructorInstanceId,
     sessionId: params.sessionId,
     role: 'instructor',
   })
@@ -187,6 +212,28 @@ export function createSyncDeckInstructorWsAuthMessage(
     instructorPasscode,
   }
   return JSON.stringify(message)
+}
+
+function isSyncDeckControlOwner(
+  controlAuthority: SyncDeckControlAuthority | null | undefined,
+  instructorInstanceId: string | null | undefined,
+): boolean {
+  return (
+    controlAuthority?.ownerInstanceId != null &&
+    instructorInstanceId != null &&
+    controlAuthority.ownerInstanceId === instructorInstanceId
+  )
+}
+
+function canUseSyncDeckInstructorControls(
+  controlAuthority: SyncDeckControlAuthority | null | undefined,
+  instructorInstanceId: string | null | undefined,
+): boolean {
+  if (controlAuthority?.ownerInstanceId == null) {
+    return true
+  }
+
+  return isSyncDeckControlOwner(controlAuthority, instructorInstanceId)
 }
 
 function stripOverviewFromStateEnvelope(data: unknown): unknown {
@@ -1817,6 +1864,16 @@ const SyncDeckManager: FC = () => {
   const { sessionId } = useParams<{ sessionId?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
+  const instructorInstanceId = useMemo(() => {
+    if (sessionId == null || typeof window === 'undefined') {
+      return null
+    }
+
+    return resolveOrCreateInstructorControlInstanceId({
+      localStorage: window.localStorage,
+      sessionStorage: window.sessionStorage,
+    }, createInstructorControlId)
+  }, [sessionId])
   const [copiedValue, setCopiedValue] = useState<string | null>(null)
   const [presentationUrl, setPresentationUrl] = useState(() => {
     const params = new URLSearchParams(location.search)
@@ -1834,6 +1891,7 @@ const SyncDeckManager: FC = () => {
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
   const [instructorConnectionState, setInstructorConnectionState] = useState<'connected' | 'disconnected'>('disconnected')
   const [instructorConnectionTooltip, setInstructorConnectionTooltip] = useState('Not connected to sync server')
+  const [controlAuthority, setControlAuthority] = useState<SyncDeckControlAuthority>(EMPTY_SYNCDECK_CONTROL_AUTHORITY)
   const [isInstructorSyncEnabled, setIsInstructorSyncEnabled] = useState(true)
   const [connectedStudentCount, setConnectedStudentCount] = useState(0)
   const [students, setStudents] = useState<SyncDeckStudentPresence[]>([])
@@ -2127,17 +2185,26 @@ const SyncDeckManager: FC = () => {
     }
   }, [presentationUrlError, isConfigurePanelOpen])
 
+  const hasControl = isSyncDeckControlOwner(controlAuthority, instructorInstanceId)
+  const canUseInstructorControls = canUseSyncDeckInstructorControls(controlAuthority, instructorInstanceId)
+  const controlStatusLabel = hasControl
+    ? 'You have control'
+    : controlAuthority.ownerInstanceId
+      ? 'Another instructor has control'
+      : 'Take control to present from this manager'
+
   const buildInstructorWsUrl = useCallback((): string | null => {
     if (typeof window === 'undefined') {
       return null
     }
 
     return buildSyncDeckInstructorWsUrl({
+      instructorInstanceId,
       sessionId,
       location: window.location,
       isConfigurePanelOpen,
     })
-  }, [sessionId, isConfigurePanelOpen])
+  }, [instructorInstanceId, sessionId, isConfigurePanelOpen])
 
   const { connect: connectInstructorWs, disconnect: disconnectInstructorWs, socketRef: instructorSocketRef } =
     useResilientWebSocket({
@@ -2168,7 +2235,22 @@ const SyncDeckManager: FC = () => {
       },
       onMessage: (event) => {
         try {
-          const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage
+          const message = JSON.parse(event.data) as SyncDeckStudentPresenceMessage & {
+            payload?: SyncDeckControlAuthority | SyncDeckStudentPresenceMessage['payload']
+          }
+          if (message.type === 'syncdeck-control-authority') {
+            const payload = message.payload
+            if (payload && typeof payload === 'object') {
+              const controlPayload = payload as Record<string, unknown>
+              setControlAuthority({
+                mode: 'single-instructor',
+                ownerInstanceId: typeof controlPayload.ownerInstanceId === 'string' ? controlPayload.ownerInstanceId : null,
+                ownerTakenAt: typeof controlPayload.ownerTakenAt === 'number' && Number.isFinite(controlPayload.ownerTakenAt) ? controlPayload.ownerTakenAt : null,
+                overrideInherited: controlPayload.overrideInherited === true,
+              })
+            }
+            return
+          }
           const statePayload = extractSyncDeckStatePayload(message)
           if (statePayload != null) {
             const embeddedLifecyclePayload = parseEmbeddedLifecyclePayload(statePayload)
@@ -2625,6 +2707,35 @@ const SyncDeckManager: FC = () => {
     setTimeout(() => setCopiedValue((current) => (current === value ? null : current)), 1500)
   }
 
+  const takeControl = async (): Promise<void> => {
+    if (!sessionId || !instructorPasscode || !instructorInstanceId) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/syncdeck/${encodeURIComponent(sessionId)}/control-authority/take`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instructorPasscode,
+          instructorInstanceId,
+        }),
+      })
+      const payload = await response.json() as { controlAuthority?: SyncDeckControlAuthority }
+      if (!response.ok) {
+        throw new Error('Unable to take control.')
+      }
+      if (payload.controlAuthority) {
+        setControlAuthority(payload.controlAuthority)
+      }
+      setStartError(null)
+      setStartSuccess(null)
+    } catch {
+      setStartError('Unable to take control right now.')
+      setStartSuccess(null)
+    }
+  }
+
   const handleEndSession = async (): Promise<void> => {
     if (!sessionId) return
 
@@ -2651,6 +2762,12 @@ const SyncDeckManager: FC = () => {
 
   const relayInstructorPayload = (payload: unknown): void => {
     if (!isInstructorSyncEnabledRef.current) {
+      return
+    }
+
+    if (!canUseInstructorControls) {
+      setStartError('Take control to use instructor presentation controls.')
+      setStartSuccess(null)
       return
     }
 
@@ -4006,7 +4123,7 @@ const SyncDeckManager: FC = () => {
               }`}
               title={isInstructorSyncEnabled ? 'Disable instructor sync' : 'Enable instructor sync'}
               aria-label={isInstructorSyncEnabled ? 'Disable instructor sync' : 'Enable instructor sync'}
-              disabled={isConfigurePanelOpen}
+              disabled={isConfigurePanelOpen || !canUseInstructorControls}
             >
               🔗
             </button>
@@ -4016,7 +4133,7 @@ const SyncDeckManager: FC = () => {
               className="ml-2 px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Force sync students to current position"
               aria-label="Force sync students to current position"
-              disabled={isConfigurePanelOpen || instructorConnectionState !== 'connected' || !isInstructorSyncEnabled}
+              disabled={isConfigurePanelOpen || instructorConnectionState !== 'connected' || !isInstructorSyncEnabled || !canUseInstructorControls}
             >
               📍
             </button>
@@ -4030,7 +4147,7 @@ const SyncDeckManager: FC = () => {
               }`}
               title={isPresentationPaused ? 'Resume presentation' : 'Pause presentation'}
               aria-label={isPresentationPaused ? 'Resume presentation' : 'Pause presentation'}
-              disabled={isConfigurePanelOpen}
+              disabled={isConfigurePanelOpen || !canUseInstructorControls}
             >
               ⬛
             </button>
@@ -4044,7 +4161,7 @@ const SyncDeckManager: FC = () => {
               }`}
               title="Toggle chalkboard screen"
               aria-label="Toggle chalkboard screen"
-              disabled={isConfigurePanelOpen}
+              disabled={isConfigurePanelOpen || !canUseInstructorControls}
             >
               🖍️
             </button>
@@ -4058,7 +4175,7 @@ const SyncDeckManager: FC = () => {
               }`}
               title="Toggle pen overlay"
               aria-label="Toggle pen overlay"
-              disabled={isConfigurePanelOpen}
+              disabled={isConfigurePanelOpen || !canUseInstructorControls}
             >
               ✏️
             </button>
@@ -4092,6 +4209,19 @@ const SyncDeckManager: FC = () => {
               >
                 Students: {connectedStudentCount}
               </button>
+              <div className="flex items-center gap-2 rounded border border-gray-200 bg-gray-50 px-2 py-1">
+                <span className="text-xs font-medium text-gray-600">{controlStatusLabel}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void takeControl()
+                  }}
+                  className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={hasControl || !instructorPasscode || !instructorInstanceId}
+                >
+                  {hasControl ? 'In Control' : 'Take Control'}
+                </button>
+              </div>
               <ConnectionStatusDot state={instructorConnectionState} tooltip={instructorConnectionTooltip} />
               <span className="text-sm text-gray-600">Join Code:</span>
               <code
