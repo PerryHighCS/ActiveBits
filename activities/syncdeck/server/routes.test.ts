@@ -3178,7 +3178,7 @@ void test('embedded-activity end route rejects non-owner instructor instances', 
   assert.equal(res.statusCode, 403)
   assert.deepEqual(res.body, { error: 'control authority required' })
   const storedParentSession = storeState.store.s1 as SessionRecord
-  assert.ok(asRecord(storedParentSession.data)?.embeddedActivities)
+  assert.notEqual(asRecord(storedParentSession.data)?.embeddedActivities, undefined)
   assert.ok(storeState.store['CHILD:s1:abc12:video-sync'])
 })
 
