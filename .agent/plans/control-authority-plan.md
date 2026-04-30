@@ -220,10 +220,10 @@ Shared enforcement rule:
 ### 6. Activity adoption
 
 - [x] Add `controlAuthority` config to SyncDeck.
-- [ ] Decide SyncDeck gating mode. Current expectation: `gating: 'activity'`.
+- [x] Decide SyncDeck gating mode. Current decision: `gating: 'all'` because manager runtime controls are the command surface.
 - [x] Add `controlAuthority` config to Video Sync.
 - [x] Decide Video Sync gating mode. Current expectation: `gating: 'activity'` or `all`, depending on final command surface.
-- [ ] Implement activity-owned command classifiers where `gating: 'activity'` is used.
+- [x] Implement activity-owned command classifiers where `gating: 'activity'` is used or explicitly document that the adopted activity uses `gating: 'all'`.
 - [x] Ensure embedded Video Sync defaults to inherited authority when launched under SyncDeck.
 - [x] Ensure embedded Video Sync can be locally overridden by explicit `Take Control`.
 - [x] Enforce Video Sync non-owner command rejection for config and playback command routes.
@@ -242,7 +242,7 @@ Shared enforcement rule:
 - [x] Add server tests for non-owner gated-command rejection.
 - [ ] Add server tests covering older sessions with empty authority state that auto-initialize on first manager connect.
 - [x] Add client tests for disabled controls and authority status messaging.
-- [ ] Add activity-specific tests for SyncDeck command classification.
+- [x] Add activity-specific tests for SyncDeck command classification or confirm `gating: 'all'` avoids an activity classifier.
 - [x] Add activity-specific tests for Video Sync command classification helpers.
 - [x] Add browser-level E2E coverage for two instructor views on the same authority-enabled session: first instructor default owner, second instructor disabled, live takeover, and disabled-state flip after handoff.
 - [ ] Add browser-level E2E coverage for embedded inherited authority plus local child override behavior.
@@ -275,8 +275,7 @@ Implemented on this branch so far:
 Still pending before this feature is complete:
 - shared/generic first-instructor auto-ownership support beyond the current Video Sync adoption
 - decide whether lower-risk SyncDeck report/download routes should remain passcode-only or also require current control ownership
-- SyncDeck adoption and command classification cleanup
-- websocket broadcast/update path for authority changes across instructor views
+- shared/generic command filtering beyond the current Video Sync and SyncDeck activity-local enforcement
 - browser-level E2E coverage for embedded inherited authority plus local child override behavior
 
 ## Suggested Rollout Order
