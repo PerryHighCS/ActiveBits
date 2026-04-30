@@ -244,7 +244,7 @@ Shared enforcement rule:
 - [x] Add client tests for disabled controls and authority status messaging.
 - [ ] Add activity-specific tests for SyncDeck command classification.
 - [x] Add activity-specific tests for Video Sync command classification helpers.
-- [ ] Add browser-level E2E coverage for two instructor views on the same authority-enabled session: first instructor default owner, second instructor disabled, live takeover, and disabled-state flip after handoff.
+- [x] Add browser-level E2E coverage for two instructor views on the same authority-enabled session: first instructor default owner, second instructor disabled, live takeover, and disabled-state flip after handoff.
 - [ ] Add browser-level E2E coverage for embedded inherited authority plus local child override behavior.
 - [x] Run scope-appropriate repo validation, likely `npm test`, and include `npm run test:e2e` for the multi-instructor manager and embedded authority scenarios when the harness can support them.
 
@@ -269,13 +269,14 @@ Implemented on this branch so far:
 - SyncDeck configure and embedded lifecycle REST routes require the owning instructor instance and auto-claim only when ownership is empty
 - SyncDeck manager sends `instructorInstanceId` with configure, embedded start, and embedded end requests
 - SyncDeck standalone and persistent solo launch helpers now resolve the same browser/tab instructor identity before configuring the session
+- Playwright coverage now exercises two SyncDeck instructor contexts, non-owner disabled controls, live takeover, and disabled-state flip after handoff
 
 Still pending before this feature is complete:
 - shared/generic first-instructor auto-ownership support beyond the current Video Sync adoption
 - decide whether lower-risk SyncDeck report/download routes should remain passcode-only or also require current control ownership
 - SyncDeck adoption and command classification cleanup
 - websocket broadcast/update path for authority changes across instructor views
-- browser-level E2E coverage for the multi-instructor handoff scenario
+- browser-level E2E coverage for embedded inherited authority plus local child override behavior
 
 ## Suggested Rollout Order
 
@@ -299,3 +300,6 @@ Still pending before this feature is complete:
 ## Validation Notes
 
 Because this feature changes live runtime coordination and embedded activity behavior, expect both server-level and browser-visible risk. If sandbox limits block full browser verification, keep `npm test` as the minimum merge gate, use `npm run test:codex` if port-binding is the blocker, and record any environment limitation in the implementation notes.
+
+Current environment note:
+- `npx playwright test playwright/control-authority.spec.ts --project=chromium` requires escalation for local port binding and then fails because the Playwright Chromium browser binary is not installed in this container (`npx playwright install` needed in a network-enabled setup).
