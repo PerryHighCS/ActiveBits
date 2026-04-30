@@ -1,4 +1,5 @@
 import SessionHeader from '@src/components/common/SessionHeader'
+import ControlAuthorityStatus from '@src/components/common/ControlAuthorityStatus'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
 import {
   createDefaultInstructorControlId,
@@ -1203,14 +1204,14 @@ export default function VideoSyncManager() {
             <Button disabled={!isPasscodeReady || !canUseInstructorControls} onClick={() => void saveConfig()}>
               {isPasscodeReady ? 'Start instructor view' : 'Loading instructor access...'}
             </Button>
-            <div className="text-sm text-gray-600 flex items-center gap-3" aria-live="polite">
-              <span>{controlStatusLabel}</span>
-              {!hasControl ? (
-                <Button disabled={!isPasscodeReady || !instructorPasscode || !instructorInstanceId} onClick={() => void takeControl()}>
-                  Take Control
-                </Button>
-              ) : null}
-            </div>
+            <ControlAuthorityStatus
+              className="text-sm text-gray-600 flex items-center gap-3"
+              statusLabel={controlStatusLabel}
+              hasControl={hasControl}
+              canTakeControl={Boolean(isPasscodeReady && instructorPasscode && instructorInstanceId)}
+              hideButtonWhenOwner={true}
+              onTakeControl={() => void takeControl()}
+            />
           </section>
         )}
       </div>

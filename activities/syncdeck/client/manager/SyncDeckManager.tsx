@@ -3,6 +3,7 @@ import {
   createDefaultInstructorControlId,
   resolveOrCreateInstructorControlInstanceId,
 } from '@src/components/common/instructorControlIdentity'
+import ControlAuthorityStatus from '@src/components/common/ControlAuthorityStatus'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
@@ -4222,19 +4223,15 @@ const SyncDeckManager: FC = () => {
               >
                 Students: {connectedStudentCount}
               </button>
-              <div className="flex items-center gap-2 rounded border border-gray-200 bg-gray-50 px-2 py-1">
-                <span className="text-xs font-medium text-gray-600">{controlStatusLabel}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void takeControl()
-                  }}
-                  className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={hasControl || !instructorPasscode || !instructorInstanceId}
-                >
-                  {hasControl ? 'In Control' : 'Take Control'}
-                </button>
-              </div>
+              <ControlAuthorityStatus
+                statusLabel={controlStatusLabel}
+                hasControl={hasControl}
+                canTakeControl={Boolean(instructorPasscode && instructorInstanceId)}
+                onTakeControl={() => {
+                  void takeControl()
+                }}
+                buttonClassName="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              />
               <ConnectionStatusDot state={instructorConnectionState} tooltip={instructorConnectionTooltip} />
               <span className="text-sm text-gray-600">Join Code:</span>
               <code

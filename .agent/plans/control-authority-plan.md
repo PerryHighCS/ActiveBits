@@ -208,14 +208,14 @@ Shared enforcement rule:
 - [x] Subscribe authority-enabled manager views to live authority status updates.
 - [x] Expose authority state to activity manager UIs through a shared hook/helper.
 - [x] Share the default instructor control id generator across manager and launch flows.
-- [ ] Provide shared disabled-state helpers and feedback text for gated controls.
+- [x] Provide shared disabled-state helpers and feedback text for gated controls.
 
 ### 5. Shared UI primitives
 
-- [ ] Build a reusable control-authority status component.
-- [ ] Support at least one compact variant for embedded manager surfaces.
-- [ ] Include accessible disabled-state explanations and button labeling.
-- [ ] Ensure live authority updates are announced appropriately for assistive tech where needed.
+- [x] Build a reusable control-authority status component.
+- [x] Support at least one compact variant for embedded manager surfaces.
+- [x] Include accessible disabled-state explanations and button labeling.
+- [x] Ensure live authority updates are announced appropriately for assistive tech where needed.
 
 ### 6. Activity adoption
 
@@ -270,6 +270,7 @@ Implemented on this branch so far:
 - SyncDeck manager sends `instructorInstanceId` with configure, embedded start, and embedded end requests
 - SyncDeck standalone and persistent solo launch helpers now resolve the same browser/tab instructor identity before configuring the session
 - Playwright coverage now exercises two SyncDeck instructor contexts, non-owner disabled controls, live takeover, and disabled-state flip after handoff
+- shared `ControlAuthorityStatus` component now renders the live authority label and accessible takeover action for SyncDeck and Video Sync managers
 
 Still pending before this feature is complete:
 - shared/generic first-instructor auto-ownership support beyond the current Video Sync adoption
