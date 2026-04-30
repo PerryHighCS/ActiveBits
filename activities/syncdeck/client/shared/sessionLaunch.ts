@@ -1,3 +1,8 @@
+import {
+  createDefaultInstructorControlId,
+  resolveOrCreateInstructorControlInstanceId,
+} from '@src/components/common/instructorControlIdentity'
+
 interface SyncDeckCreateSessionResponse {
   id?: unknown
   instructorPasscode?: unknown
@@ -10,6 +15,7 @@ function readString(value: unknown): string | null {
 export interface CreateConfiguredSyncDeckSessionParams {
   presentationUrl: string
   standaloneMode: boolean
+  instructorInstanceId?: string | null
   fetchFn?: typeof fetch
 }
 
@@ -38,10 +44,35 @@ async function bestEffortDeleteSyncDeckSession(params: {
   }
 }
 
+function resolveLaunchInstructorInstanceId(value: string | null | undefined): string | null {
+  const provided = readString(value)
+  if (provided) {
+    return provided
+  }
+
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  return resolveOrCreateInstructorControlInstanceId(
+    {
+      localStorage: window.localStorage,
+      sessionStorage: window.sessionStorage,
+    },
+    createDefaultInstructorControlId,
+  )
+}
+
 export async function createConfiguredSyncDeckSession(
   params: CreateConfiguredSyncDeckSessionParams,
 ): Promise<CreateConfiguredSyncDeckSessionResult> {
   const fetchFn = params.fetchFn ?? fetch
+  const instructorInstanceId = resolveLaunchInstructorInstanceId(params.instructorInstanceId)
+  if (!instructorInstanceId) {
+    throw new Error(params.standaloneMode
+      ? 'Unable to start solo mode right now.'
+      : 'Unable to start a hosted SyncDeck session right now.')
+  }
 
   const createResponse = await fetchFn('/api/syncdeck/create', {
     method: 'POST',
@@ -69,6 +100,7 @@ export async function createConfiguredSyncDeckSession(
     body: JSON.stringify({
       presentationUrl: params.presentationUrl,
       instructorPasscode,
+      instructorInstanceId,
       standaloneMode: params.standaloneMode,
     }),
   })

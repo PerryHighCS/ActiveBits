@@ -1,5 +1,8 @@
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
-import { resolveOrCreateInstructorControlInstanceId } from '@src/components/common/instructorControlIdentity'
+import {
+  createDefaultInstructorControlId,
+  resolveOrCreateInstructorControlInstanceId,
+} from '@src/components/common/instructorControlIdentity'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
@@ -112,14 +115,6 @@ const EMPTY_SYNCDECK_CONTROL_AUTHORITY: SyncDeckControlAuthority = {
   ownerInstanceId: null,
   ownerTakenAt: null,
   overrideInherited: false,
-}
-
-function createInstructorControlId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 interface RevealCommandPayload {
@@ -1872,7 +1867,7 @@ const SyncDeckManager: FC = () => {
     return resolveOrCreateInstructorControlInstanceId({
       localStorage: window.localStorage,
       sessionStorage: window.sessionStorage,
-    }, createInstructorControlId)
+    }, createDefaultInstructorControlId)
   }, [sessionId])
   const [copiedValue, setCopiedValue] = useState<string | null>(null)
   const [presentationUrl, setPresentationUrl] = useState(() => {

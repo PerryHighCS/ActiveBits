@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildInstructorControlInstanceId,
+  createDefaultInstructorControlId,
   resolveBrowserInstructorControlId,
   resolveOrCreateInstructorControlInstanceId,
   resolveTabInstructorControlId,
@@ -23,6 +24,10 @@ function createStorage(): InstructorControlIdentityStorageLike {
 
 void test('buildInstructorControlInstanceId joins browser and tab ids', () => {
   assert.equal(buildInstructorControlInstanceId('browser-1', 'tab-1'), 'browser-1:tab-1')
+})
+
+void test('createDefaultInstructorControlId returns a non-empty id', () => {
+  assert.equal(createDefaultInstructorControlId().trim().length > 0, true)
 })
 
 void test('resolveOrCreateInstructorControlInstanceId creates and persists browser and tab ids', () => {

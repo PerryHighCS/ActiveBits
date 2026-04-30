@@ -207,6 +207,7 @@ Shared enforcement rule:
 - [x] Generate and persist stable `instructorInstanceId` values for manager tabs.
 - [x] Subscribe authority-enabled manager views to live authority status updates.
 - [x] Expose authority state to activity manager UIs through a shared hook/helper.
+- [x] Share the default instructor control id generator across manager and launch flows.
 - [ ] Provide shared disabled-state helpers and feedback text for gated controls.
 
 ### 5. Shared UI primitives
@@ -230,6 +231,7 @@ Shared enforcement rule:
 - [x] Add first-pass SyncDeck manager authority plumbing: instructor instance identity, takeover route, websocket authority status, and local gating for the websocket relay controls.
 - [x] Enforce SyncDeck non-owner rejection for configure and embedded activity start/end routes.
 - [x] Disable SyncDeck configure, activity launch, and embedded end controls locally for non-owners.
+- [x] Ensure SyncDeck standalone/persistent launch configure requests include `instructorInstanceId`.
 
 ### 7. Validation
 
@@ -266,6 +268,7 @@ Implemented on this branch so far:
 - SyncDeck websocket relay path rejects non-owner instructor updates and reflects current ownership back to the non-owner socket
 - SyncDeck configure and embedded lifecycle REST routes require the owning instructor instance and auto-claim only when ownership is empty
 - SyncDeck manager sends `instructorInstanceId` with configure, embedded start, and embedded end requests
+- SyncDeck standalone and persistent solo launch helpers now resolve the same browser/tab instructor identity before configuring the session
 
 Still pending before this feature is complete:
 - shared/generic first-instructor auto-ownership support beyond the current Video Sync adoption

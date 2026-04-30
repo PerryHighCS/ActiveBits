@@ -1,6 +1,9 @@
 import SessionHeader from '@src/components/common/SessionHeader'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
-import { resolveOrCreateInstructorControlInstanceId } from '@src/components/common/instructorControlIdentity'
+import {
+  createDefaultInstructorControlId,
+  resolveOrCreateInstructorControlInstanceId,
+} from '@src/components/common/instructorControlIdentity'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
@@ -410,7 +413,7 @@ export default function VideoSyncManager() {
         localStorage: window.localStorage,
         sessionStorage: window.sessionStorage,
       },
-      () => window.crypto.randomUUID(),
+      createDefaultInstructorControlId,
     )
   }, [])
 

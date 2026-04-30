@@ -20,6 +20,7 @@ function normalizePreflightWarning(warning: string | null): string {
 
 export interface LaunchStandaloneSyncDeckPresentationParams {
   presentationUrl: string
+  instructorInstanceId?: string | null
   hostProtocol?: string | null
   userAgent?: string | null
   preflightRunner?: (url: string) => Promise<SyncDeckPreflightResult>
@@ -53,6 +54,7 @@ export async function launchStandaloneSyncDeckPresentation(
   const { sessionId } = await createConfiguredSyncDeckSession({
     presentationUrl,
     standaloneMode: true,
+    instructorInstanceId: params.instructorInstanceId,
     fetchFn: params.fetchFn,
   })
 

@@ -24,6 +24,14 @@ export function buildInstructorControlInstanceId(browserId: string, tabId: strin
   return `${browserId}:${tabId}`
 }
 
+export function createDefaultInstructorControlId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 export function resolveOrCreateInstructorControlInstanceId(
   storage: InstructorControlIdentityStorageSet,
   createId: () => string,

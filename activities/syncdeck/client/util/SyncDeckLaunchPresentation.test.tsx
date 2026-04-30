@@ -39,6 +39,7 @@ void test('launchStandaloneSyncDeckPresentation validates, creates, configures, 
 
   const result = await launchStandaloneSyncDeckPresentation({
     presentationUrl: 'https://slides.example/deck',
+    instructorInstanceId: 'launch-instructor',
     hostProtocol: 'https:',
     userAgent: 'Mozilla/5.0 Chrome/123.0.0.0 Safari/537.36',
     preflightRunner: async () => ({ valid: true, warning: null }),
@@ -77,6 +78,7 @@ void test('launchStandaloneSyncDeckPresentation validates, creates, configures, 
     {
       presentationUrl: 'https://slides.example/deck',
       instructorPasscode: 'launch-passcode',
+      instructorInstanceId: 'launch-instructor',
       standaloneMode: true,
     },
   )
