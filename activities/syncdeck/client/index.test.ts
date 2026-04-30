@@ -63,14 +63,11 @@ void test('launchSyncDeckPersistentSoloEntry creates and configures a solo sessi
     assert.equal(requests.length, 2)
     assert.equal(requests[0]?.input, '/api/syncdeck/create')
     assert.equal(requests[1]?.input, '/api/syncdeck/syncdeck-solo-1/configure')
-    assert.deepEqual(
-      JSON.parse(String(requests[1]?.init?.body ?? '{}')),
-      {
-        presentationUrl: 'https://slides.example/deck',
-        instructorPasscode: 'pass-123',
-        standaloneMode: true,
-      },
-    )
+    const configureBody = JSON.parse(String(requests[1]?.init?.body ?? '{}')) as Record<string, unknown>
+    assert.equal(configureBody.presentationUrl, 'https://slides.example/deck')
+    assert.equal(configureBody.instructorPasscode, 'pass-123')
+    assert.equal(configureBody.standaloneMode, true)
+    assert.equal(typeof configureBody.instructorInstanceId, 'string')
   } finally {
     globalThis.fetch = originalFetch
   }

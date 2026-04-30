@@ -1,4 +1,5 @@
 import {
+  buildInstructorControlInstanceId,
   createDefaultInstructorControlId,
   resolveOrCreateInstructorControlInstanceId,
 } from '@src/components/common/instructorControlIdentity'
@@ -51,7 +52,7 @@ function resolveLaunchInstructorInstanceId(value: string | null | undefined): st
   }
 
   if (typeof window === 'undefined') {
-    return null
+    return buildInstructorControlInstanceId(createDefaultInstructorControlId(), createDefaultInstructorControlId())
   }
 
   return resolveOrCreateInstructorControlInstanceId(
