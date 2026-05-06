@@ -48,6 +48,7 @@ const STUDENT_PLAYING_DRIFT_TOLERANCE_SEC = 0.5
 const STUDENT_HARD_SEEK_DRIFT_SEC = 1.5
 const STUDENT_CATCH_UP_PLAYBACK_RATE = 1.25
 const STUDENT_SLOW_DOWN_PLAYBACK_RATE = 0.75
+const YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS = 1_500
 
 interface StudentPlaybackSyncAction {
   type: 'none' | 'rate' | 'seek'
@@ -588,12 +589,18 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           events: {
             onReady: () => {
               if (cancelled || candidateIndex !== activeAttemptIndex) return
-              clearPlayerReadyTimeout()
+              if (candidateIndex + 1 >= playerHostCandidates.length) {
+                clearPlayerReadyTimeout()
+              }
               setPlayerReady(true)
               setErrorMessage(null)
               if (!isStandaloneSession) {
                 player.mute()
               }
+            },
+            onStateChange: () => {
+              if (cancelled || candidateIndex !== activeAttemptIndex) return
+              clearPlayerReadyTimeout()
             },
             onError: () => {
               if (cancelled || candidateIndex !== activeAttemptIndex) return
@@ -615,7 +622,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         if (candidateIndex + 1 < playerHostCandidates.length) {
           playerReadyTimeoutId = window.setTimeout(() => {
             fallbackToNextHost(player)
-          }, 8_000)
+          }, YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS)
         }
       } catch {
         if (cancelled) {

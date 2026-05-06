@@ -68,6 +68,7 @@ interface ManagerLocationState {
 type AutoStartStatus = 'idle' | 'starting' | 'failed'
 
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
+const YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS = 1_500
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
 const MAX_MANAGER_API_ERROR_MESSAGE_LENGTH = 160
@@ -798,13 +799,21 @@ export default function VideoSyncManager() {
           events: {
             onReady: () => {
               if (cancelled || candidateIndex !== activeAttemptIndex) return
-              clearPlayerReadyTimeout()
+              if (candidateIndex + 1 >= playerHostCandidates.length) {
+                clearPlayerReadyTimeout()
+              }
               setPlayerReady(true)
               setErrorMessage((current) => clearManagerPlayerLoadError(current))
               applyStateToPlayer(latestStateRef.current)
             },
             onStateChange: (event) => {
-              if (cancelled || suppressPlayerEventsRef.current) {
+              if (cancelled || candidateIndex !== activeAttemptIndex) {
+                return
+              }
+
+              clearPlayerReadyTimeout()
+
+              if (suppressPlayerEventsRef.current) {
                 return
               }
 
@@ -843,7 +852,7 @@ export default function VideoSyncManager() {
         if (candidateIndex + 1 < playerHostCandidates.length) {
           playerReadyTimeoutId = window.setTimeout(() => {
             fallbackToNextHost(player)
-          }, 8_000)
+          }, YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS)
         }
       } catch {
         if (cancelled) {
