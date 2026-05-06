@@ -2,10 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  formatVideoSyncPlayerHostLabel,
   resolveYoutubeIframeApiSrc,
   resolveYoutubePlayerHostCandidates,
   resolveYoutubePlayerHostUrl,
 } from './playerHosts.js'
+
+void test('formatVideoSyncPlayerHostLabel names status bar hosts', () => {
+  assert.equal(formatVideoSyncPlayerHostLabel('youtube-education'), 'YouTube Education')
+  assert.equal(formatVideoSyncPlayerHostLabel('youtube-nocookie'), 'YouTube no-cookie')
+  assert.equal(formatVideoSyncPlayerHostLabel(null), 'Not loaded')
+})
 
 void test('resolveYoutubePlayerHostUrl maps no-cookie and education hosts', () => {
   assert.equal(resolveYoutubePlayerHostUrl('youtube-nocookie'), 'https://www.youtube-nocookie.com')
