@@ -61,6 +61,8 @@ declare global {
 }
 
 let apiLoadPromise: Promise<YoutubeNamespace> | null = null
+let apiLoadScriptSrc: string | null = null
+let cancelApiLoad: ((error: Error) => void) | null = null
 let iframeReadyBridgeInstalled = false
 
 function resolveYoutubeNamespace(): YoutubeNamespace | null {
@@ -126,8 +128,12 @@ function removeScriptTag(): void {
 function ensureScriptTag(scriptSrc: string, onError: () => void): void {
   const existing = document.getElementById(YOUTUBE_IFRAME_API_SCRIPT_ID)
   if (existing instanceof HTMLScriptElement) {
-    existing.onerror = onError
-    return
+    if (existing.src !== scriptSrc) {
+      existing.remove()
+    } else {
+      existing.onerror = onError
+      return
+    }
   }
 
   const script = document.createElement('script')
@@ -140,6 +146,18 @@ function ensureScriptTag(scriptSrc: string, onError: () => void): void {
 
 function resetApiLoadState(): void {
   apiLoadPromise = null
+  apiLoadScriptSrc = null
+  cancelApiLoad = null
+}
+
+function cancelPendingApiLoad(error: Error): void {
+  if (cancelApiLoad) {
+    cancelApiLoad(error)
+    return
+  }
+
+  resetApiLoadState()
+  removeScriptTag()
 }
 
 export async function loadYoutubeIframeApi(scriptSrc = YOUTUBE_IFRAME_API_SRC): Promise<YoutubeNamespace> {
@@ -149,9 +167,14 @@ export async function loadYoutubeIframeApi(scriptSrc = YOUTUBE_IFRAME_API_SRC): 
   }
 
   if (apiLoadPromise) {
-    return apiLoadPromise
+    if (apiLoadScriptSrc === scriptSrc) {
+      return apiLoadPromise
+    }
+
+    cancelPendingApiLoad(new Error('YouTube IFrame API script source changed before initialization'))
   }
 
+  apiLoadScriptSrc = scriptSrc
   apiLoadPromise = new Promise<YoutubeNamespace>((resolve, reject) => {
     let settled = false
 
@@ -175,6 +198,8 @@ export async function loadYoutubeIframeApi(scriptSrc = YOUTUBE_IFRAME_API_SRC): 
       reject(error)
     }
 
+    cancelApiLoad = finishReject
+
     const timeoutId = window.setTimeout(() => {
       finishReject(new Error('YouTube IFrame API did not initialize within timeout'))
     }, 10_000)
@@ -190,6 +215,7 @@ export async function loadYoutubeIframeApi(scriptSrc = YOUTUBE_IFRAME_API_SRC): 
 
       settled = true
       window.clearTimeout(timeoutId)
+      cancelApiLoad = null
       resolve(namespace)
     }
     finalizeRef = finalize
