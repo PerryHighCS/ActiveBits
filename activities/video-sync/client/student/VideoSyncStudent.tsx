@@ -26,6 +26,10 @@ import {
   type YoutubeNamespace,
   type YoutubePlayerLike,
 } from '../youtubeIframeApi.js'
+import {
+  DEFAULT_VIDEO_SYNC_PLAYER_HOST,
+  resolveYoutubePlayerHostCandidates,
+} from '../../shared/playerHosts.js'
 
 interface VideoSyncStudentProps {
   sessionData?: {
@@ -44,6 +48,7 @@ const STUDENT_PLAYING_DRIFT_TOLERANCE_SEC = 0.5
 const STUDENT_HARD_SEEK_DRIFT_SEC = 1.5
 const STUDENT_CATCH_UP_PLAYBACK_RATE = 1.25
 const STUDENT_SLOW_DOWN_PLAYBACK_RATE = 0.75
+const YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS = 1_500
 
 interface StudentPlaybackSyncAction {
   type: 'none' | 'rate' | 'seek'
@@ -60,6 +65,7 @@ export function shouldInitializeYoutubePlayer(
 
 const DEFAULT_STATE: VideoSyncState = {
   provider: 'youtube',
+  playerHost: DEFAULT_VIDEO_SYNC_PLAYER_HOST,
   videoId: '',
   startSec: 0,
   stopSec: null,
@@ -521,28 +527,99 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     }
 
     let cancelled = false
+    let playerReadyTimeoutId: number | null = null
+    let activeAttemptIndex = 0
+    const playerHostCandidates = resolveYoutubePlayerHostCandidates(state.playerHost)
+    const clearPlayerReadyTimeout = () => {
+      if (playerReadyTimeoutId != null) {
+        window.clearTimeout(playerReadyTimeoutId)
+        playerReadyTimeoutId = null
+      }
+    }
+    const resetPlayerInstance = (player: YoutubePlayerLike): void => {
+      clearPlayerReadyTimeout()
+      setPlayerReady(false)
+      loadedVideoIdRef.current = null
+      resetUnsyncedPlaybackTelemetry({
+        isLocallyUnsyncedRef,
+        lastUnsyncReportAtRef,
+      })
+      clearAutoplayCheckTimer(autoplayCheckTimerRef)
+      player.destroy()
+      if (playerRef.current === player) {
+        playerRef.current = null
+      }
+    }
 
-    const initializePlayer = async (): Promise<void> => {
+    const initializePlayer = async (candidateIndex = 0): Promise<void> => {
+      const candidate = playerHostCandidates[candidateIndex]
+      if (!candidate) {
+        setErrorMessage('Unable to initialize YouTube player.')
+        return
+      }
+
+      const fallbackToNextHost = (player: YoutubePlayerLike): void => {
+        if (cancelled || candidateIndex !== activeAttemptIndex) return
+        const nextCandidateIndex = candidateIndex + 1
+        if (nextCandidateIndex >= playerHostCandidates.length) {
+          setErrorMessage('YouTube player failed to load for this video.')
+          void reportEvent('load-failure', {
+            correctionResult: 'failed',
+            errorCode: 'PLAYER_LOAD_FAILED',
+            errorMessage: 'YouTube player failed to load in synchronized student view',
+          })
+          return
+        }
+
+        resetPlayerInstance(player)
+        void initializePlayer(nextCandidateIndex)
+      }
+      const hasFallbackHost = candidateIndex + 1 < playerHostCandidates.length
+      const armFallbackTimeout = (player: YoutubePlayerLike): void => {
+        if (!hasFallbackHost) {
+          clearPlayerReadyTimeout()
+          return
+        }
+
+        clearPlayerReadyTimeout()
+        playerReadyTimeoutId = window.setTimeout(() => {
+          fallbackToNextHost(player)
+        }, YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS)
+      }
+
       try {
-        const youtube = await loadYoutubeIframeApi()
-        if (cancelled || !playerContainerRef.current) return
+        activeAttemptIndex = candidateIndex
+        const youtube = await loadYoutubeIframeApi(candidate.iframeApiSrc)
+        if (cancelled || candidateIndex !== activeAttemptIndex || !playerContainerRef.current) return
 
         youtubeRef.current = youtube
         const player = new youtube.Player(playerContainerRef.current, {
           width: '100%',
           height: '100%',
-          host: 'https://www.youtube-nocookie.com',
+          host: candidate.hostUrl,
           playerVars: buildStudentPlayerVars(isStandaloneSession),
           events: {
             onReady: () => {
-              if (cancelled) return
+              if (cancelled || candidateIndex !== activeAttemptIndex) return
+              // A refused education iframe can still complete wrapper setup.
+              // Keep the fallback watchdog armed until the player emits state.
+              armFallbackTimeout(player)
               setPlayerReady(true)
+              setErrorMessage(null)
               if (!isStandaloneSession) {
                 player.mute()
               }
             },
+            onStateChange: () => {
+              if (cancelled || candidateIndex !== activeAttemptIndex) return
+              clearPlayerReadyTimeout()
+            },
             onError: () => {
-              if (cancelled) return
+              if (cancelled || candidateIndex !== activeAttemptIndex) return
+              if (hasFallbackHost) {
+                fallbackToNextHost(player)
+                return
+              }
               setErrorMessage('YouTube player failed to load for this video.')
               void reportEvent('load-failure', {
                 correctionResult: 'failed',
@@ -554,8 +631,14 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         })
 
         playerRef.current = player
+        armFallbackTimeout(player)
       } catch {
-        if (!cancelled) {
+        if (cancelled) {
+          return
+        }
+        if (candidateIndex + 1 < playerHostCandidates.length) {
+          void initializePlayer(candidateIndex + 1)
+        } else {
           setErrorMessage('Unable to initialize YouTube player.')
         }
       }
@@ -565,6 +648,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
     return () => {
       cancelled = true
+      clearPlayerReadyTimeout()
       setPlayerReady(false)
       loadedVideoIdRef.current = null
       resetUnsyncedPlaybackTelemetry({
@@ -575,7 +659,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       playerRef.current?.destroy()
       playerRef.current = null
     }
-  }, [isStandaloneSession, reportEvent, state.videoId])
+  }, [isStandaloneSession, reportEvent, state.playerHost, state.videoId])
 
   useEffect(() => {
     if (!playerReady) return

@@ -14,6 +14,11 @@ import {
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
+import {
+  DEFAULT_VIDEO_SYNC_PLAYER_HOST,
+  normalizeVideoSyncPlayerHost,
+  type VideoSyncPlayerHost,
+} from '../shared/playerHosts.js'
 
 type VideoSyncRole = 'instructor' | 'student'
 type VideoSyncCommandType = 'play' | 'pause' | 'seek'
@@ -21,6 +26,7 @@ type VideoSyncEventType = 'autoplay-blocked' | 'unsync' | 'sync-correction' | 'l
 
 interface VideoSyncState {
   provider: 'youtube'
+  playerHost: VideoSyncPlayerHost
   videoId: string
   startSec: number
   stopSec: number | null
@@ -137,6 +143,7 @@ interface EventBody {
 
 interface ParsedVideoSource {
   videoId: string
+  playerHost: VideoSyncPlayerHost
   startSec: number
   stopSec: number | null
 }
@@ -152,6 +159,8 @@ const WS_OPEN_READY_STATE = 1
 const MAX_TELEMETRY_ERROR_CODE_LENGTH = 64
 const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/
+const INVALID_SOURCE_URL_MESSAGE =
+  'Only YouTube watch/embed, YouTube Education watch/embed, and youtu.be URLs are supported in v1.'
 const INSTRUCTOR_PASSCODE_LENGTH = 32
 const INSTRUCTOR_PASSCODE_PATTERN = /^[a-f0-9]{32}$/i
 const UNSYNCED_STUDENTS_KEY_PREFIX = 'video-sync:unsynced:'
@@ -281,15 +290,21 @@ function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): Par
 
   const host = parsedUrl.hostname.toLowerCase()
   const isYouTubeHost = host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com'
+  const isYouTubeEducationHost = host === 'www.youtubeeducation.com' || host === 'youtubeeducation.com'
   const isShortHost = host === 'youtu.be' || host === 'www.youtu.be'
 
-  if (!isYouTubeHost && !isShortHost) {
+  if (!isYouTubeHost && !isYouTubeEducationHost && !isShortHost) {
     return { ok: false, reason: 'invalid-url' }
   }
 
   let videoId: string | null = null
-  if (isYouTubeHost && parsedUrl.pathname === '/watch') {
+  if ((isYouTubeHost || isYouTubeEducationHost) && parsedUrl.pathname === '/watch') {
     videoId = normalizeYouTubeVideoId(parsedUrl.searchParams.get('v'))
+  }
+
+  if ((isYouTubeHost || isYouTubeEducationHost) && parsedUrl.pathname.startsWith('/embed/')) {
+    const [, , embedId] = parsedUrl.pathname.split('/')
+    videoId = normalizeYouTubeVideoId(embedId ?? null)
   }
 
   if (isShortHost) {
@@ -317,6 +332,7 @@ function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): Par
     ok: true,
     source: {
       videoId,
+      playerHost: isYouTubeEducationHost ? 'youtube-education' : DEFAULT_VIDEO_SYNC_PLAYER_HOST,
       startSec: startFromUrl,
       stopSec,
     },
@@ -326,6 +342,7 @@ function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): Par
 function createDefaultState(): VideoSyncState {
   return {
     provider,
+    playerHost: DEFAULT_VIDEO_SYNC_PLAYER_HOST,
     videoId: '',
     startSec: 0,
     stopSec: null,
@@ -361,6 +378,7 @@ function normalizeState(raw: unknown): VideoSyncState {
 
   return {
     provider,
+    playerHost: normalizeVideoSyncPlayerHost(source.playerHost),
     videoId: normalizeYouTubeVideoId(typeof source.videoId === 'string' ? source.videoId : null) ?? '',
     startSec: clampSeconds(toFiniteNumber(source.startSec, 0)),
     stopSec: normalizedStop,
@@ -1421,7 +1439,7 @@ export default function setupVideoSyncRoutes(
     if (typeof body.sourceUrl !== 'string' || body.sourceUrl.trim().length === 0) {
       data.telemetry.error = {
         code: 'INVALID_SOURCE_URL',
-        message: 'Only youtube.com/watch and youtu.be URLs are supported in v1.',
+        message: INVALID_SOURCE_URL_MESSAGE,
       }
       await sessions.set(session.id, session)
       res.status(400).json({ error: 'INVALID_SOURCE_URL', message: data.telemetry.error.message })
@@ -1450,7 +1468,7 @@ export default function setupVideoSyncRoutes(
       if (parsedSource.reason === 'invalid-url') {
         data.telemetry.error = {
           code: 'INVALID_SOURCE_URL',
-          message: 'Only youtube.com/watch and youtu.be URLs are supported in v1.',
+          message: INVALID_SOURCE_URL_MESSAGE,
         }
         await sessions.set(session.id, session)
         res.status(400).json({ error: 'INVALID_SOURCE_URL', message: data.telemetry.error.message })
@@ -1480,6 +1498,7 @@ export default function setupVideoSyncRoutes(
     data.state = {
       ...data.state,
       provider,
+      playerHost: parsedSource.source.playerHost,
       videoId: parsedSource.source.videoId,
       startSec: parsedSource.source.startSec,
       stopSec: parsedSource.source.stopSec,

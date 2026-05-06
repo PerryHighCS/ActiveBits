@@ -31,9 +31,10 @@ export function parseYouTubeStartSecondsFromUrl(sourceUrl: string): number | nul
 
   const host = parsedUrl.hostname.toLowerCase()
   const isYouTubeHost = host === 'www.youtube.com' || host === 'youtube.com' || host === 'm.youtube.com'
+  const isYouTubeEducationHost = host === 'www.youtubeeducation.com' || host === 'youtubeeducation.com'
   const isShortHost = host === 'youtu.be' || host === 'www.youtu.be'
 
-  if (!isYouTubeHost && !isShortHost) {
+  if (!isYouTubeHost && !isYouTubeEducationHost && !isShortHost) {
     return null
   }
 

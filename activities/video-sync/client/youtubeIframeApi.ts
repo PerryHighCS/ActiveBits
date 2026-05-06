@@ -1,4 +1,5 @@
-const YOUTUBE_IFRAME_API_SRC = 'https://www.youtube.com/iframe_api'
+import { YOUTUBE_IFRAME_API_SRC } from '../shared/playerHosts.js'
+
 const YOUTUBE_IFRAME_API_SCRIPT_ID = 'video-sync-youtube-iframe-api'
 
 export interface YoutubePlayerVars {
@@ -54,11 +55,14 @@ declare global {
   interface Window {
     YT?: YoutubeNamespace
     onYouTubeIframeAPIReady?: () => void
+    onYTReady?: () => void
     __videoSyncYouTubeReadyCallbacks?: Array<() => void>
   }
 }
 
 let apiLoadPromise: Promise<YoutubeNamespace> | null = null
+let apiLoadScriptSrc: string | null = null
+let cancelApiLoad: ((error: Error) => void) | null = null
 let iframeReadyBridgeInstalled = false
 
 function resolveYoutubeNamespace(): YoutubeNamespace | null {
@@ -79,21 +83,41 @@ function installIframeReadyBridge(): void {
   }
 
   iframeReadyBridgeInstalled = true
-  const previous = window.onYouTubeIframeAPIReady
-  window.onYouTubeIframeAPIReady = () => {
-    if (typeof previous === 'function') {
-      try {
-        previous()
-      } catch (error) {
-        console.error('Existing YouTube iframe ready handler failed:', error)
-      }
-    }
-
+  const flushReadyCallbacks = () => {
     const callbacks = ensureReadyCallbackQueue()
     while (callbacks.length > 0) {
       const callback = callbacks.shift()
       callback?.()
     }
+  }
+  const previousIframeApiReady = window.onYouTubeIframeAPIReady
+  const previousYoutubeReady = window.onYTReady
+
+  window.onYouTubeIframeAPIReady = () => {
+    if (typeof previousIframeApiReady === 'function') {
+      try {
+        previousIframeApiReady()
+      } catch (error) {
+        console.error('Existing YouTube iframe ready handler failed:', error)
+      }
+    }
+
+    flushReadyCallbacks()
+  }
+
+  window.onYTReady = () => {
+    // Current YouTube iframe_api bootstraps the widget script through onYTReady.
+    // Keep listening to onYouTubeIframeAPIReady too for compatibility with older loaders.
+    // Both callbacks drain the same queue, so duplicate ready notifications are harmless.
+    if (typeof previousYoutubeReady === 'function') {
+      try {
+        previousYoutubeReady()
+      } catch (error) {
+        console.error('Existing YouTube iframe ready handler failed:', error)
+      }
+    }
+
+    flushReadyCallbacks()
   }
 }
 
@@ -101,16 +125,20 @@ function removeScriptTag(): void {
   document.getElementById(YOUTUBE_IFRAME_API_SCRIPT_ID)?.remove()
 }
 
-function ensureScriptTag(onError: () => void): void {
+function ensureScriptTag(scriptSrc: string, onError: () => void): void {
   const existing = document.getElementById(YOUTUBE_IFRAME_API_SCRIPT_ID)
   if (existing instanceof HTMLScriptElement) {
-    existing.onerror = onError
-    return
+    if (existing.src !== scriptSrc) {
+      existing.remove()
+    } else {
+      existing.onerror = onError
+      return
+    }
   }
 
   const script = document.createElement('script')
   script.id = YOUTUBE_IFRAME_API_SCRIPT_ID
-  script.src = YOUTUBE_IFRAME_API_SRC
+  script.src = scriptSrc
   script.async = true
   script.onerror = onError
   document.head.appendChild(script)
@@ -118,18 +146,35 @@ function ensureScriptTag(onError: () => void): void {
 
 function resetApiLoadState(): void {
   apiLoadPromise = null
+  apiLoadScriptSrc = null
+  cancelApiLoad = null
 }
 
-export async function loadYoutubeIframeApi(): Promise<YoutubeNamespace> {
+function cancelPendingApiLoad(error: Error): void {
+  if (cancelApiLoad) {
+    cancelApiLoad(error)
+    return
+  }
+
+  resetApiLoadState()
+  removeScriptTag()
+}
+
+export async function loadYoutubeIframeApi(scriptSrc = YOUTUBE_IFRAME_API_SRC): Promise<YoutubeNamespace> {
   const existing = resolveYoutubeNamespace()
   if (existing) {
     return existing
   }
 
   if (apiLoadPromise) {
-    return apiLoadPromise
+    if (apiLoadScriptSrc === scriptSrc) {
+      return apiLoadPromise
+    }
+
+    cancelPendingApiLoad(new Error('YouTube IFrame API script source changed before initialization'))
   }
 
+  apiLoadScriptSrc = scriptSrc
   apiLoadPromise = new Promise<YoutubeNamespace>((resolve, reject) => {
     let settled = false
 
@@ -153,6 +198,8 @@ export async function loadYoutubeIframeApi(): Promise<YoutubeNamespace> {
       reject(error)
     }
 
+    cancelApiLoad = finishReject
+
     const timeoutId = window.setTimeout(() => {
       finishReject(new Error('YouTube IFrame API did not initialize within timeout'))
     }, 10_000)
@@ -168,13 +215,14 @@ export async function loadYoutubeIframeApi(): Promise<YoutubeNamespace> {
 
       settled = true
       window.clearTimeout(timeoutId)
+      cancelApiLoad = null
       resolve(namespace)
     }
     finalizeRef = finalize
 
     callbacks.push(finalize)
     installIframeReadyBridge()
-    ensureScriptTag(() => {
+    ensureScriptTag(scriptSrc, () => {
       finishReject(new Error('YouTube IFrame API script failed to load'))
     })
     finalize()

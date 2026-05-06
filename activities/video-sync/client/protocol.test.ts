@@ -58,6 +58,7 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
     parseVideoSyncStateMessagePayload({
       state: {
         provider: 'youtube',
+        playerHost: 'youtube-education',
         videoId: 'abcdefghijk',
         startSec: 12,
         stopSec: null,
@@ -81,6 +82,7 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
     {
       state: {
         provider: 'youtube',
+        playerHost: 'youtube-education',
         videoId: 'abcdefghijk',
         startSec: 12,
         stopSec: null,
@@ -107,6 +109,7 @@ void test('parseVideoSyncStateMessagePayload validates nested state and telemetr
     parseVideoSyncStateMessagePayload({
       state: {
         provider: 'youtube',
+        playerHost: 'youtube-nocookie',
         videoId: 'abcdefghijk',
         startSec: 'oops',
       },
@@ -120,6 +123,7 @@ void test('parseVideoSyncStateMessagePayload normalizes legacy manager updates t
     parseVideoSyncStateMessagePayload({
       state: {
         provider: 'youtube',
+        playerHost: 'youtube-nocookie',
         videoId: 'abcdefghijk',
         startSec: 12,
         stopSec: null,
@@ -133,6 +137,7 @@ void test('parseVideoSyncStateMessagePayload normalizes legacy manager updates t
     {
       state: {
         provider: 'youtube',
+        playerHost: 'youtube-nocookie',
         videoId: 'abcdefghijk',
         startSec: 12,
         stopSec: null,
@@ -144,6 +149,25 @@ void test('parseVideoSyncStateMessagePayload normalizes legacy manager updates t
       },
       telemetry: undefined,
     },
+  )
+})
+
+void test('parseVideoSyncStateMessagePayload defaults missing playerHost for legacy payloads', () => {
+  assert.deepEqual(
+    parseVideoSyncStateMessagePayload({
+      state: {
+        provider: 'youtube',
+        videoId: 'abcdefghijk',
+        startSec: 12,
+        stopSec: null,
+        positionSec: 18,
+        isPlaying: false,
+        playbackRate: 1,
+        updatedBy: 'system',
+        serverTimestampMs: 1234,
+      },
+    })?.state?.playerHost,
+    'youtube-nocookie',
   )
 })
 

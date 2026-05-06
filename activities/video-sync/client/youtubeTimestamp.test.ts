@@ -44,6 +44,13 @@ void test('parseYouTubeStartSecondsFromUrl falls back to t and defaults to zero'
   )
 })
 
+void test('parseYouTubeStartSecondsFromUrl supports YouTube Education URLs', () => {
+  assert.equal(
+    parseYouTubeStartSecondsFromUrl('https://www.youtubeeducation.com/watch?v=dQw4w9WgXcQ&t=1m23s'),
+    83,
+  )
+})
+
 void test('parseYouTubeStartSecondsFromUrl ignores invalid or unsupported URLs', () => {
   assert.equal(parseYouTubeStartSecondsFromUrl('not a url'), null)
   assert.equal(parseYouTubeStartSecondsFromUrl('https://vimeo.com/1234?t=83'), null)

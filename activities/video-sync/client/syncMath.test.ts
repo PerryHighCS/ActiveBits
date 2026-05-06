@@ -12,6 +12,7 @@ import {
 function createState(overrides: Partial<VideoSyncState> = {}): VideoSyncState {
   return {
     provider: 'youtube',
+    playerHost: 'youtube-nocookie',
     videoId: 'abc123',
     startSec: 0,
     stopSec: null,
