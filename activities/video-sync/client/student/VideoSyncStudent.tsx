@@ -26,6 +26,11 @@ import {
   type YoutubeNamespace,
   type YoutubePlayerLike,
 } from '../youtubeIframeApi.js'
+import {
+  DEFAULT_VIDEO_SYNC_PLAYER_HOST,
+  resolveYoutubeIframeApiSrc,
+  resolveYoutubePlayerHostUrl,
+} from '../../shared/playerHosts.js'
 
 interface VideoSyncStudentProps {
   sessionData?: {
@@ -60,6 +65,7 @@ export function shouldInitializeYoutubePlayer(
 
 const DEFAULT_STATE: VideoSyncState = {
   provider: 'youtube',
+  playerHost: DEFAULT_VIDEO_SYNC_PLAYER_HOST,
   videoId: '',
   startSec: 0,
   stopSec: null,
@@ -314,6 +320,8 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [playerReady, setPlayerReady] = useState(false)
   const [hasStartedInstructorPlayback, setHasStartedInstructorPlayback] = useState(false)
+  const playerHostUrl = resolveYoutubePlayerHostUrl(state.playerHost)
+  const iframeApiSrc = resolveYoutubeIframeApiSrc(state.playerHost)
   const [isStandaloneSession, setIsStandaloneSession] = useState(false)
   const [isSessionModeResolved, setIsSessionModeResolved] = useState(false)
   const [studentIdentity, setStudentIdentity] = useState<VideoSyncStudentIdentity>(() => ({
@@ -524,14 +532,14 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
     const initializePlayer = async (): Promise<void> => {
       try {
-        const youtube = await loadYoutubeIframeApi()
+        const youtube = await loadYoutubeIframeApi(iframeApiSrc)
         if (cancelled || !playerContainerRef.current) return
 
         youtubeRef.current = youtube
         const player = new youtube.Player(playerContainerRef.current, {
           width: '100%',
           height: '100%',
-          host: 'https://www.youtube-nocookie.com',
+          host: playerHostUrl,
           playerVars: buildStudentPlayerVars(isStandaloneSession),
           events: {
             onReady: () => {
@@ -575,7 +583,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       playerRef.current?.destroy()
       playerRef.current = null
     }
-  }, [isStandaloneSession, reportEvent, state.videoId])
+  }, [iframeApiSrc, isStandaloneSession, playerHostUrl, reportEvent, state.videoId])
 
   useEffect(() => {
     if (!playerReady) return

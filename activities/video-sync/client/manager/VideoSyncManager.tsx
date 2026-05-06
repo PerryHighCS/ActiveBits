@@ -27,6 +27,11 @@ import {
   type YoutubePlayerLike,
 } from '../youtubeIframeApi.js'
 import { parseYouTubeStartSecondsFromUrl, parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
+import {
+  DEFAULT_VIDEO_SYNC_PLAYER_HOST,
+  resolveYoutubeIframeApiSrc,
+  resolveYoutubePlayerHostUrl,
+} from '../../shared/playerHosts.js'
 
 interface SessionResponse {
   id?: string
@@ -77,6 +82,7 @@ const EMPTY_TELEMETRY: VideoSyncTelemetry = {
 
 const DEFAULT_STATE: VideoSyncState = {
   provider: 'youtube',
+  playerHost: DEFAULT_VIDEO_SYNC_PLAYER_HOST,
   videoId: '',
   startSec: 0,
   stopSec: null,
@@ -359,6 +365,8 @@ export default function VideoSyncManager() {
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
   const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
+  const playerHostUrl = resolveYoutubePlayerHostUrl(state.playerHost)
+  const iframeApiSrc = resolveYoutubeIframeApiSrc(state.playerHost)
 
   useEffect(() => {
     if (!shouldFetchEmbeddedBootstrapSourceUrl({ sessionId, queryBootstrapSourceUrl })) {
@@ -735,14 +743,14 @@ export default function VideoSyncManager() {
 
     const initializePlayer = async (): Promise<void> => {
       try {
-        const youtube = await loadYoutubeIframeApi()
+        const youtube = await loadYoutubeIframeApi(iframeApiSrc)
         if (cancelled || !playerContainerRef.current) return
 
         youtubeRef.current = youtube
         const player = new youtube.Player(playerContainerRef.current, {
           width: '100%',
           height: '100%',
-          host: 'https://www.youtube-nocookie.com',
+          host: playerHostUrl,
           playerVars: {
             controls: 1,
             rel: 0,
@@ -809,7 +817,15 @@ export default function VideoSyncManager() {
       playerRef.current = null
       clearPlayerEventSuppression()
     }
-  }, [applyStateToPlayer, clearPlaybackCommandFlushTimer, clearPlayerEventSuppression, scheduleManagerPlaybackIntentFlush, setupMode])
+  }, [
+    applyStateToPlayer,
+    clearPlaybackCommandFlushTimer,
+    clearPlayerEventSuppression,
+    iframeApiSrc,
+    playerHostUrl,
+    scheduleManagerPlaybackIntentFlush,
+    setupMode,
+  ])
 
   useEffect(() => {
     setStopSecInput(state.stopSec == null ? '' : String(state.stopSec))
@@ -1022,7 +1038,7 @@ export default function VideoSyncManager() {
                 type="url"
                 value={sourceUrlInput}
                 onChange={(event) => setSourceUrlInput(event.target.value)}
-                placeholder="https://www.youtube.com/watch?v=...&t=1m23s or https://youtu.be/..."
+                placeholder="https://www.youtube.com/watch?v=..., /embed/..., or https://youtu.be/..."
                 aria-label="YouTube URL"
               />
               <span className="mt-1 block text-sm text-gray-600">

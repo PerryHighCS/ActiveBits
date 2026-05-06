@@ -335,6 +335,7 @@ function createVideoSyncSession(id: string, instructorPasscode = TEST_INSTRUCTOR
       standaloneMode: false,
       state: {
         provider: 'youtube',
+        playerHost: 'youtube-nocookie',
         videoId: '',
         startSec: 0,
         stopSec: null,
@@ -703,6 +704,7 @@ void test('session get route returns projected playback without persisting ordin
     ;(session.data as {
       state: {
         provider: 'youtube'
+        playerHost: 'youtube-nocookie'
         videoId: string
         startSec: number
         stopSec: number | null
@@ -714,6 +716,7 @@ void test('session get route returns projected playback without persisting ordin
       }
     }).state = {
       provider: 'youtube',
+      playerHost: 'youtube-nocookie',
       videoId: 'dQw4w9WgXcQ',
       startSec: 0,
       stopSec: null,
@@ -883,7 +886,8 @@ void test('session patch returns invalid source url for unsupported non-YouTube 
   assert.equal(res.statusCode, 400)
   assert.deepEqual(res.body, {
     error: 'INVALID_SOURCE_URL',
-    message: 'Only youtube.com/watch and youtu.be URLs are supported in v1.',
+    message:
+      'Only youtube.com/watch, youtube.com/embed, youtubeeducation.com/watch, youtubeeducation.com/embed, and youtu.be URLs are supported in v1.',
   })
 })
 
@@ -909,7 +913,8 @@ void test('session patch returns invalid source url for malformed url input', as
   assert.equal(res.statusCode, 400)
   assert.deepEqual(res.body, {
     error: 'INVALID_SOURCE_URL',
-    message: 'Only youtube.com/watch and youtu.be URLs are supported in v1.',
+    message:
+      'Only youtube.com/watch, youtube.com/embed, youtubeeducation.com/watch, youtubeeducation.com/embed, and youtu.be URLs are supported in v1.',
   })
 })
 
@@ -963,6 +968,96 @@ void test('session patch accepts youtu.be urls with extra path segments by using
   const state = updated.state as Record<string, unknown>
   assert.equal(state.videoId, 'dQw4w9WgXcQ')
   assert.equal(state.startSec, 45)
+})
+
+void test('session patch accepts YouTube Education watch urls and falls back to no-cookie player host', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        sourceUrl: 'https://www.youtubeeducation.com/watch?v=zZkY3MLBGh8&t=1m23s',
+        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  const state = updated.state as Record<string, unknown>
+  assert.equal(state.videoId, 'zZkY3MLBGh8')
+  assert.equal(state.playerHost, 'youtube-nocookie')
+  assert.equal(state.startSec, 83)
+})
+
+void test('session patch accepts YouTube Education embed urls and falls back to no-cookie player host', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        sourceUrl: 'https://youtubeeducation.com/embed/zZkY3MLBGh8?start=12',
+        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  const state = updated.state as Record<string, unknown>
+  assert.equal(state.videoId, 'zZkY3MLBGh8')
+  assert.equal(state.playerHost, 'youtube-nocookie')
+  assert.equal(state.startSec, 12)
+})
+
+void test('session patch accepts YouTube embed urls and falls back to no-cookie player host', async () => {
+  const app = createMockApp()
+  const ws = createMockWs() as unknown as WsRouter
+  const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
+
+  setupVideoSyncRoutes(app, storeState.sessions, ws)
+
+  const handler = app.handlers.patch['/api/video-sync/:sessionId/session']
+  assert.equal(typeof handler, 'function')
+
+  const res = createResponse()
+  await handler?.(
+    {
+      params: { sessionId: 's1' },
+      body: {
+        sourceUrl: 'https://www.youtube.com/embed/zZkY3MLBGh8?start=12',
+        instructorPasscode: TEST_INSTRUCTOR_PASSCODE,
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const updated = storeState.store.s1?.data as Record<string, unknown>
+  const state = updated.state as Record<string, unknown>
+  assert.equal(state.videoId, 'zZkY3MLBGh8')
+  assert.equal(state.playerHost, 'youtube-nocookie')
+  assert.equal(state.startSec, 12)
 })
 
 void test('session patch returns invalid video id for malformed youtu.be ids', async () => {
@@ -1071,6 +1166,7 @@ void test('session patch normalizes youtube source and publishes extensible enve
   assert.equal(updated.standaloneMode, false)
   const state = updated.state as Record<string, unknown>
   assert.equal(state.videoId, 'dQw4w9WgXcQ')
+  assert.equal(state.playerHost, 'youtube-nocookie')
   assert.equal(state.startSec, 43)
   assert.equal(state.stopSec, 120)
 
@@ -1118,6 +1214,7 @@ void test('session patch can mark a configured session as standalone', async () 
       standaloneMode: true,
       state: {
         provider: 'youtube',
+        playerHost: 'youtube-nocookie',
         videoId: 'dQw4w9WgXcQ',
         startSec: 43,
         stopSec: null,

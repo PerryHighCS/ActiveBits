@@ -21,6 +21,7 @@ import type { YoutubePlayerLike } from '../youtubeIframeApi.js'
 
 const BASE_STATE: VideoSyncState = {
   provider: 'youtube',
+  playerHost: 'youtube-nocookie',
   videoId: '',
   startSec: 0,
   stopSec: null,

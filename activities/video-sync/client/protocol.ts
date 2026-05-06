@@ -1,3 +1,10 @@
+import {
+  DEFAULT_VIDEO_SYNC_PLAYER_HOST,
+  isVideoSyncPlayerHost,
+  normalizeVideoSyncPlayerHost,
+  type VideoSyncPlayerHost,
+} from '../shared/playerHosts.js'
+
 export type VideoSyncMessageType =
   | 'state-snapshot'
   | 'state-update'
@@ -7,6 +14,7 @@ export type VideoSyncMessageType =
 
 export interface VideoSyncState {
   provider: 'youtube'
+  playerHost: VideoSyncPlayerHost
   videoId: string
   startSec: number
   stopSec: number | null
@@ -78,21 +86,48 @@ function normalizeUpdatedBy(value: unknown): VideoSyncState['updatedBy'] | null 
 }
 
 export function isVideoSyncState(value: unknown): value is VideoSyncState {
+  return normalizeState(value, false) != null
+}
+
+function normalizeState(value: unknown, allowLegacyMissingPlayerHost = true): VideoSyncState | null {
   if (!isRecord(value)) {
-    return false
+    return null
   }
 
-  return (
-    value.provider === 'youtube' &&
-    typeof value.videoId === 'string' &&
-    isFiniteNumber(value.startSec) &&
-    isNullableFiniteNumber(value.stopSec) &&
-    isFiniteNumber(value.positionSec) &&
-    typeof value.isPlaying === 'boolean' &&
-    value.playbackRate === 1 &&
-    normalizeUpdatedBy(value.updatedBy) != null &&
-    isFiniteNumber(value.serverTimestampMs)
-  )
+  if (
+    value.provider !== 'youtube' ||
+    typeof value.videoId !== 'string' ||
+    !isFiniteNumber(value.startSec) ||
+    !isNullableFiniteNumber(value.stopSec) ||
+    !isFiniteNumber(value.positionSec) ||
+    typeof value.isPlaying !== 'boolean' ||
+    value.playbackRate !== 1 ||
+    normalizeUpdatedBy(value.updatedBy) == null ||
+    !isFiniteNumber(value.serverTimestampMs)
+  ) {
+    return null
+  }
+
+  if ('playerHost' in value && !isVideoSyncPlayerHost(value.playerHost)) {
+    return null
+  }
+
+  if (!('playerHost' in value) && !allowLegacyMissingPlayerHost) {
+    return null
+  }
+
+  return {
+    provider: 'youtube',
+    playerHost: normalizeVideoSyncPlayerHost(value.playerHost ?? DEFAULT_VIDEO_SYNC_PLAYER_HOST),
+    videoId: value.videoId,
+    startSec: value.startSec,
+    stopSec: value.stopSec,
+    positionSec: value.positionSec,
+    isPlaying: value.isPlaying,
+    playbackRate: 1,
+    updatedBy: normalizeUpdatedBy(value.updatedBy) ?? 'system',
+    serverTimestampMs: value.serverTimestampMs,
+  }
 }
 
 export function isVideoSyncTelemetry(value: unknown): value is VideoSyncTelemetry {
@@ -140,7 +175,7 @@ export function parseVideoSyncStateMessagePayload(payload: unknown): VideoSyncSt
     return null
   }
 
-  if ('state' in payload && payload.state !== undefined && !isVideoSyncState(payload.state)) {
+  if ('state' in payload && payload.state !== undefined && normalizeState(payload.state) == null) {
     return null
   }
 
@@ -148,13 +183,10 @@ export function parseVideoSyncStateMessagePayload(payload: unknown): VideoSyncSt
     return null
   }
 
+  const state = normalizeState(payload.state)
+
   return {
-    state: isVideoSyncState(payload.state)
-      ? {
-        ...payload.state,
-        updatedBy: normalizeUpdatedBy(payload.state.updatedBy) ?? 'system',
-      }
-      : undefined,
+    state: state ?? undefined,
     telemetry: isVideoSyncTelemetry(payload.telemetry) ? payload.telemetry : undefined,
   }
 }

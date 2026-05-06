@@ -462,6 +462,30 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Keep client and server ID-validation behavior aligned if future URL formats are added.
 - Owner: Codex
 
+- Date: 2026-05-06
+- Area: activities
+- Discovery: `video-sync` supports YouTube and YouTube Education URLs by parsing `youtube.com/watch?v=<id>`, `youtube.com/embed/<id>`, `youtubeeducation.com/watch?v=<id>`, and `youtubeeducation.com/embed/<id>` to the same 11-character YouTube video ID, but normalizes playback to `state.playerHost = "youtube-nocookie"`. Direct `youtubeeducation.com` watch/embed URLs can fail outside Google-controlled contexts, so manager and student clients keep using the proven no-cookie YouTube player host even when instructors paste an education URL.
+- Why it matters: Google Slides may expose or internally use YouTube Education-shaped URLs while falling back to ordinary YouTube playback behind the scenes. Video Sync should accept those URL formats, plus ordinary YouTube embed codes, without depending on `youtubeeducation.com` as the actual embeddable player host.
+- Evidence: `activities/video-sync/shared/playerHosts.ts`; `activities/video-sync/server/routes.ts`; `activities/video-sync/client/youtubeIframeApi.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/student/VideoSyncStudent.tsx`; `activities/video-sync/server/routes.test.ts`; `activities/video-sync/client/protocol.test.ts`; `activities/video-sync/client/youtubeIframeApi.test.ts`.
+- Follow-up action: If additional approved YouTube-family hosts are added, extend the shared player host contract and include both API-script and player-host tests.
+- Owner: Codex
+
+- Date: 2026-05-06
+- Area: activities
+- Discovery: The current YouTube iframe API bootstrap may signal readiness through `window.onYTReady` after loading `www-widgetapi.js`, not only through `window.onYouTubeIframeAPIReady`. Video Sync's iframe API loader listens to both callbacks and drains one shared ready queue so either standard YouTube or YouTube Education API bootstraps can initialize `YT.Player`.
+- Why it matters: Waiting only for `onYouTubeIframeAPIReady` can leave the manager/student player initialization pending until timeout and surface "Unable to initialize YouTube player" even though the API scripts loaded successfully.
+- Evidence: `activities/video-sync/client/youtubeIframeApi.ts`; `activities/video-sync/client/youtubeIframeApi.test.ts`.
+- Follow-up action: If YouTube changes the bootstrap callback again, update the loader and keep callback-behavior tests close to the loader.
+- Owner: Codex
+
+- Date: 2026-05-06
+- Area: activities
+- Discovery: `video-sync` manager credential recovery intentionally keeps dashboard-created temporary-session passcodes in router state plus the shared same-tab in-memory bootstrap cache, not browser storage. Persistent-link manager recovery can still fetch a passcode from the teacher-validated httpOnly cookie path.
+- Why it matters: Video Sync configuration requires the instructor passcode on the first `PATCH /api/video-sync/:sessionId/session`, but storing that passcode in `sessionStorage` triggers CodeQL clear-text sensitive-storage alerts and increases exposure. If the manager page is refreshed after temporary-session creation, create a fresh session or use an authenticated persistent link rather than adding a browser-storage fallback.
+- Evidence: `activities/video-sync/activity.config.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`; `client/src/components/common/manageDashboardUtils.ts`.
+- Follow-up action: Do not add a `sessionStorage` create-session bootstrap entry for Video Sync instructor passcodes unless a safer token/recovery design replaces raw passcode storage.
+- Owner: Codex
+
 - Date: 2026-03-03
 - Area: activities
 - Discovery: `video-sync` student overlay keyboard filtering now blocks only known YouTube/media-control keys (space, transport letters, arrows, paging/home-end, and digits) instead of every key except `Tab`/`Escape`.

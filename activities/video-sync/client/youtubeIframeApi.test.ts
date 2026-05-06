@@ -28,6 +28,7 @@ interface MockDocument {
 interface MockWindowLike {
   YT?: YoutubeNamespace
   onYouTubeIframeAPIReady?: () => void
+  onYTReady?: () => void
   __videoSyncYouTubeReadyCallbacks?: Array<() => void>
   setTimeout(handler: () => void, timeoutMs?: number): number
   clearTimeout(id: number): void
@@ -131,6 +132,62 @@ void test('loadYoutubeIframeApi retries after script load failure and recreates 
 
     const namespace = await secondLoadPromise
     assert.equal(namespace, mockDom.windowMock.YT)
+  } finally {
+    mockDom.restore()
+  }
+})
+
+void test('loadYoutubeIframeApi uses the requested iframe API script source', async () => {
+  const mockDom = installMockDom()
+
+  try {
+    const loadPromise = loadYoutubeIframeApi('https://www.youtubeeducation.com/iframe_api')
+    assert.equal(mockDom.scripts.length, 1)
+    assert.equal(mockDom.scripts[0]?.src, 'https://www.youtubeeducation.com/iframe_api')
+
+    mockDom.windowMock.YT = {
+      Player: class MockPlayer {} as unknown as YoutubeNamespace['Player'],
+    }
+    mockDom.windowMock.onYouTubeIframeAPIReady?.()
+
+    const namespace = await loadPromise
+    assert.equal(namespace, mockDom.windowMock.YT)
+  } finally {
+    mockDom.restore()
+  }
+})
+
+void test('loadYoutubeIframeApi resolves from onYTReady widget callback', async () => {
+  const mockDom = installMockDom()
+
+  try {
+    const loadPromise = loadYoutubeIframeApi('https://www.youtubeeducation.com/iframe_api')
+    mockDom.windowMock.YT = {
+      Player: class MockPlayer {} as unknown as YoutubeNamespace['Player'],
+    }
+    mockDom.windowMock.onYTReady?.()
+
+    const namespace = await loadPromise
+    assert.equal(namespace, mockDom.windowMock.YT)
+  } finally {
+    mockDom.restore()
+  }
+})
+
+void test('loadYoutubeIframeApi drains ready callbacks only once when both callbacks fire', async () => {
+  const mockDom = installMockDom()
+
+  try {
+    const loadPromise = loadYoutubeIframeApi()
+    mockDom.windowMock.YT = {
+      Player: class MockPlayer {} as unknown as YoutubeNamespace['Player'],
+    }
+    mockDom.windowMock.onYTReady?.()
+    mockDom.windowMock.onYouTubeIframeAPIReady?.()
+
+    const namespace = await loadPromise
+    assert.equal(namespace, mockDom.windowMock.YT)
+    assert.equal(mockDom.windowMock.__videoSyncYouTubeReadyCallbacks?.length, 0)
   } finally {
     mockDom.restore()
   }
