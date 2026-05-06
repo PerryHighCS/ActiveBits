@@ -886,8 +886,7 @@ void test('session patch returns invalid source url for unsupported non-YouTube 
   assert.equal(res.statusCode, 400)
   assert.deepEqual(res.body, {
     error: 'INVALID_SOURCE_URL',
-    message:
-      'Only youtube.com/watch, youtube.com/embed, youtubeeducation.com/watch, youtubeeducation.com/embed, and youtu.be URLs are supported in v1.',
+    message: 'Only YouTube watch/embed, YouTube Education watch/embed, and youtu.be URLs are supported in v1.',
   })
 })
 
@@ -913,8 +912,7 @@ void test('session patch returns invalid source url for malformed url input', as
   assert.equal(res.statusCode, 400)
   assert.deepEqual(res.body, {
     error: 'INVALID_SOURCE_URL',
-    message:
-      'Only youtube.com/watch, youtube.com/embed, youtubeeducation.com/watch, youtubeeducation.com/embed, and youtu.be URLs are supported in v1.',
+    message: 'Only YouTube watch/embed, YouTube Education watch/embed, and youtu.be URLs are supported in v1.',
   })
 })
 

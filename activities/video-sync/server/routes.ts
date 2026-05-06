@@ -160,7 +160,7 @@ const MAX_TELEMETRY_ERROR_CODE_LENGTH = 64
 const MAX_TELEMETRY_ERROR_MESSAGE_LENGTH = 256
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/
 const INVALID_SOURCE_URL_MESSAGE =
-  'Only youtube.com/watch, youtube.com/embed, youtubeeducation.com/watch, youtubeeducation.com/embed, and youtu.be URLs are supported in v1.'
+  'Only YouTube watch/embed, YouTube Education watch/embed, and youtu.be URLs are supported in v1.'
 const INSTRUCTOR_PASSCODE_LENGTH = 32
 const INSTRUCTOR_PASSCODE_PATTERN = /^[a-f0-9]{32}$/i
 const UNSYNCED_STUDENTS_KEY_PREFIX = 'video-sync:unsynced:'

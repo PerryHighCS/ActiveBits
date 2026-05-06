@@ -574,6 +574,18 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         resetPlayerInstance(player)
         void initializePlayer(nextCandidateIndex)
       }
+      const hasFallbackHost = candidateIndex + 1 < playerHostCandidates.length
+      const armFallbackTimeout = (player: YoutubePlayerLike): void => {
+        if (!hasFallbackHost) {
+          clearPlayerReadyTimeout()
+          return
+        }
+
+        clearPlayerReadyTimeout()
+        playerReadyTimeoutId = window.setTimeout(() => {
+          fallbackToNextHost(player)
+        }, YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS)
+      }
 
       try {
         activeAttemptIndex = candidateIndex
@@ -589,9 +601,9 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
           events: {
             onReady: () => {
               if (cancelled || candidateIndex !== activeAttemptIndex) return
-              if (candidateIndex + 1 >= playerHostCandidates.length) {
-                clearPlayerReadyTimeout()
-              }
+              // A refused education iframe can still complete wrapper setup.
+              // Keep the fallback watchdog armed until the player emits state.
+              armFallbackTimeout(player)
               setPlayerReady(true)
               setErrorMessage(null)
               if (!isStandaloneSession) {
@@ -604,7 +616,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
             },
             onError: () => {
               if (cancelled || candidateIndex !== activeAttemptIndex) return
-              if (candidateIndex + 1 < playerHostCandidates.length) {
+              if (hasFallbackHost) {
                 fallbackToNextHost(player)
                 return
               }
@@ -619,11 +631,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         })
 
         playerRef.current = player
-        if (candidateIndex + 1 < playerHostCandidates.length) {
-          playerReadyTimeoutId = window.setTimeout(() => {
-            fallbackToNextHost(player)
-          }, YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS)
-        }
+        armFallbackTimeout(player)
       } catch {
         if (cancelled) {
           return
