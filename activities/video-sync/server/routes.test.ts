@@ -970,7 +970,7 @@ void test('session patch accepts youtu.be urls with extra path segments by using
   assert.equal(state.startSec, 45)
 })
 
-void test('session patch accepts YouTube Education watch urls and falls back to no-cookie player host', async () => {
+void test('session patch accepts YouTube Education watch urls and prefers education player host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
@@ -996,11 +996,11 @@ void test('session patch accepts YouTube Education watch urls and falls back to 
   const updated = storeState.store.s1?.data as Record<string, unknown>
   const state = updated.state as Record<string, unknown>
   assert.equal(state.videoId, 'zZkY3MLBGh8')
-  assert.equal(state.playerHost, 'youtube-nocookie')
+  assert.equal(state.playerHost, 'youtube-education')
   assert.equal(state.startSec, 83)
 })
 
-void test('session patch accepts YouTube Education embed urls and falls back to no-cookie player host', async () => {
+void test('session patch accepts YouTube Education embed urls and prefers education player host', async () => {
   const app = createMockApp()
   const ws = createMockWs() as unknown as WsRouter
   const storeState = createSessionStore({ s1: createVideoSyncSession('s1') })
@@ -1026,7 +1026,7 @@ void test('session patch accepts YouTube Education embed urls and falls back to 
   const updated = storeState.store.s1?.data as Record<string, unknown>
   const state = updated.state as Record<string, unknown>
   assert.equal(state.videoId, 'zZkY3MLBGh8')
-  assert.equal(state.playerHost, 'youtube-nocookie')
+  assert.equal(state.playerHost, 'youtube-education')
   assert.equal(state.startSec, 12)
 })
 

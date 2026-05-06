@@ -6,6 +6,12 @@ export const YOUTUBE_EDUCATION_PLAYER_HOST_URL = 'https://www.youtubeeducation.c
 export const YOUTUBE_IFRAME_API_SRC = 'https://www.youtube.com/iframe_api'
 export const YOUTUBE_EDUCATION_IFRAME_API_SRC = 'https://www.youtubeeducation.com/iframe_api'
 
+export interface VideoSyncPlayerHostCandidate {
+  playerHost: VideoSyncPlayerHost
+  hostUrl: string
+  iframeApiSrc: string
+}
+
 export function isVideoSyncPlayerHost(value: unknown): value is VideoSyncPlayerHost {
   return value === 'youtube-nocookie' || value === 'youtube-education'
 }
@@ -15,15 +21,37 @@ export function normalizeVideoSyncPlayerHost(value: unknown): VideoSyncPlayerHos
 }
 
 export function resolveYoutubePlayerHostUrl(playerHost: VideoSyncPlayerHost): string {
-  // YouTube Education URLs are accepted as source aliases, but direct
-  // youtubeeducation.com player embeds can reject otherwise-valid videos.
-  // Keep playback on the proven no-cookie YouTube host unless this policy is
-  // deliberately revisited with working education-host embed evidence.
-  void playerHost
-  return YOUTUBE_NOCOOKIE_PLAYER_HOST_URL
+  return playerHost === 'youtube-education'
+    ? YOUTUBE_EDUCATION_PLAYER_HOST_URL
+    : YOUTUBE_NOCOOKIE_PLAYER_HOST_URL
 }
 
 export function resolveYoutubeIframeApiSrc(playerHost: VideoSyncPlayerHost): string {
-  void playerHost
-  return YOUTUBE_IFRAME_API_SRC
+  return playerHost === 'youtube-education'
+    ? YOUTUBE_EDUCATION_IFRAME_API_SRC
+    : YOUTUBE_IFRAME_API_SRC
+}
+
+export function resolveYoutubePlayerHostCandidates(
+  playerHost: VideoSyncPlayerHost,
+): VideoSyncPlayerHostCandidate[] {
+  const primary = normalizeVideoSyncPlayerHost(playerHost)
+  const primaryCandidate = {
+    playerHost: primary,
+    hostUrl: resolveYoutubePlayerHostUrl(primary),
+    iframeApiSrc: resolveYoutubeIframeApiSrc(primary),
+  }
+
+  if (primary !== 'youtube-education') {
+    return [primaryCandidate]
+  }
+
+  return [
+    primaryCandidate,
+    {
+      playerHost: DEFAULT_VIDEO_SYNC_PLAYER_HOST,
+      hostUrl: resolveYoutubePlayerHostUrl(DEFAULT_VIDEO_SYNC_PLAYER_HOST),
+      iframeApiSrc: resolveYoutubeIframeApiSrc(DEFAULT_VIDEO_SYNC_PLAYER_HOST),
+    },
+  ]
 }

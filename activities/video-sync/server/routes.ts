@@ -332,7 +332,7 @@ function parseYouTubeSource(sourceUrl: string, stopOverride: number | null): Par
     ok: true,
     source: {
       videoId,
-      playerHost: DEFAULT_VIDEO_SYNC_PLAYER_HOST,
+      playerHost: isYouTubeEducationHost ? 'youtube-education' : DEFAULT_VIDEO_SYNC_PLAYER_HOST,
       startSec: startFromUrl,
       stopSec,
     },

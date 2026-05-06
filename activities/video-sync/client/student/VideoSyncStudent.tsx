@@ -28,8 +28,7 @@ import {
 } from '../youtubeIframeApi.js'
 import {
   DEFAULT_VIDEO_SYNC_PLAYER_HOST,
-  resolveYoutubeIframeApiSrc,
-  resolveYoutubePlayerHostUrl,
+  resolveYoutubePlayerHostCandidates,
 } from '../../shared/playerHosts.js'
 
 interface VideoSyncStudentProps {
@@ -320,8 +319,6 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
   const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const [playerReady, setPlayerReady] = useState(false)
   const [hasStartedInstructorPlayback, setHasStartedInstructorPlayback] = useState(false)
-  const playerHostUrl = resolveYoutubePlayerHostUrl(state.playerHost)
-  const iframeApiSrc = resolveYoutubeIframeApiSrc(state.playerHost)
   const [isStandaloneSession, setIsStandaloneSession] = useState(false)
   const [isSessionModeResolved, setIsSessionModeResolved] = useState(false)
   const [studentIdentity, setStudentIdentity] = useState<VideoSyncStudentIdentity>(() => ({
@@ -529,28 +526,81 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
     }
 
     let cancelled = false
+    let playerReadyTimeoutId: number | null = null
+    let activeAttemptIndex = 0
+    const playerHostCandidates = resolveYoutubePlayerHostCandidates(state.playerHost)
+    const clearPlayerReadyTimeout = () => {
+      if (playerReadyTimeoutId != null) {
+        window.clearTimeout(playerReadyTimeoutId)
+        playerReadyTimeoutId = null
+      }
+    }
+    const resetPlayerInstance = (player: YoutubePlayerLike): void => {
+      clearPlayerReadyTimeout()
+      setPlayerReady(false)
+      loadedVideoIdRef.current = null
+      resetUnsyncedPlaybackTelemetry({
+        isLocallyUnsyncedRef,
+        lastUnsyncReportAtRef,
+      })
+      clearAutoplayCheckTimer(autoplayCheckTimerRef)
+      player.destroy()
+      if (playerRef.current === player) {
+        playerRef.current = null
+      }
+    }
 
-    const initializePlayer = async (): Promise<void> => {
+    const initializePlayer = async (candidateIndex = 0): Promise<void> => {
+      const candidate = playerHostCandidates[candidateIndex]
+      if (!candidate) {
+        setErrorMessage('Unable to initialize YouTube player.')
+        return
+      }
+
+      const fallbackToNextHost = (player: YoutubePlayerLike): void => {
+        if (cancelled || candidateIndex !== activeAttemptIndex) return
+        const nextCandidateIndex = candidateIndex + 1
+        if (nextCandidateIndex >= playerHostCandidates.length) {
+          setErrorMessage('YouTube player failed to load for this video.')
+          void reportEvent('load-failure', {
+            correctionResult: 'failed',
+            errorCode: 'PLAYER_LOAD_FAILED',
+            errorMessage: 'YouTube player failed to load in synchronized student view',
+          })
+          return
+        }
+
+        resetPlayerInstance(player)
+        void initializePlayer(nextCandidateIndex)
+      }
+
       try {
-        const youtube = await loadYoutubeIframeApi(iframeApiSrc)
-        if (cancelled || !playerContainerRef.current) return
+        activeAttemptIndex = candidateIndex
+        const youtube = await loadYoutubeIframeApi(candidate.iframeApiSrc)
+        if (cancelled || candidateIndex !== activeAttemptIndex || !playerContainerRef.current) return
 
         youtubeRef.current = youtube
         const player = new youtube.Player(playerContainerRef.current, {
           width: '100%',
           height: '100%',
-          host: playerHostUrl,
+          host: candidate.hostUrl,
           playerVars: buildStudentPlayerVars(isStandaloneSession),
           events: {
             onReady: () => {
-              if (cancelled) return
+              if (cancelled || candidateIndex !== activeAttemptIndex) return
+              clearPlayerReadyTimeout()
               setPlayerReady(true)
+              setErrorMessage(null)
               if (!isStandaloneSession) {
                 player.mute()
               }
             },
             onError: () => {
-              if (cancelled) return
+              if (cancelled || candidateIndex !== activeAttemptIndex) return
+              if (candidateIndex + 1 < playerHostCandidates.length) {
+                fallbackToNextHost(player)
+                return
+              }
               setErrorMessage('YouTube player failed to load for this video.')
               void reportEvent('load-failure', {
                 correctionResult: 'failed',
@@ -562,8 +612,18 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
         })
 
         playerRef.current = player
+        if (candidateIndex + 1 < playerHostCandidates.length) {
+          playerReadyTimeoutId = window.setTimeout(() => {
+            fallbackToNextHost(player)
+          }, 8_000)
+        }
       } catch {
-        if (!cancelled) {
+        if (cancelled) {
+          return
+        }
+        if (candidateIndex + 1 < playerHostCandidates.length) {
+          void initializePlayer(candidateIndex + 1)
+        } else {
           setErrorMessage('Unable to initialize YouTube player.')
         }
       }
@@ -573,6 +633,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
 
     return () => {
       cancelled = true
+      clearPlayerReadyTimeout()
       setPlayerReady(false)
       loadedVideoIdRef.current = null
       resetUnsyncedPlaybackTelemetry({
@@ -583,7 +644,7 @@ export default function VideoSyncStudent({ sessionData }: VideoSyncStudentProps)
       playerRef.current?.destroy()
       playerRef.current = null
     }
-  }, [iframeApiSrc, isStandaloneSession, playerHostUrl, reportEvent, state.videoId])
+  }, [isStandaloneSession, reportEvent, state.playerHost, state.videoId])
 
   useEffect(() => {
     if (!playerReady) return

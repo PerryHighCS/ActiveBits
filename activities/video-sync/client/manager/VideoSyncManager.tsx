@@ -29,8 +29,7 @@ import {
 import { parseYouTubeStartSecondsFromUrl, parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
 import {
   DEFAULT_VIDEO_SYNC_PLAYER_HOST,
-  resolveYoutubeIframeApiSrc,
-  resolveYoutubePlayerHostUrl,
+  resolveYoutubePlayerHostCandidates,
 } from '../../shared/playerHosts.js'
 
 interface SessionResponse {
@@ -365,8 +364,6 @@ export default function VideoSyncManager() {
   const autoStartAttemptKeyRef = useRef<string | null>(null)
   const queryBootstrapSourceUrl = useMemo(() => readBootstrapSourceUrl(location.search), [location.search])
   const bootstrapSourceUrl = persistentRecoverySourceUrl ?? queryBootstrapSourceUrl ?? embeddedBootstrapSourceUrl
-  const playerHostUrl = resolveYoutubePlayerHostUrl(state.playerHost)
-  const iframeApiSrc = resolveYoutubeIframeApiSrc(state.playerHost)
 
   useEffect(() => {
     if (!shouldFetchEmbeddedBootstrapSourceUrl({ sessionId, queryBootstrapSourceUrl })) {
@@ -740,17 +737,59 @@ export default function VideoSyncManager() {
     }
 
     let cancelled = false
+    let playerReadyTimeoutId: number | null = null
+    let activeAttemptIndex = 0
+    const playerHostCandidates = resolveYoutubePlayerHostCandidates(state.playerHost)
+    const clearPlayerReadyTimeout = () => {
+      if (playerReadyTimeoutId != null) {
+        window.clearTimeout(playerReadyTimeoutId)
+        playerReadyTimeoutId = null
+      }
+    }
+    const resetPlayerInstance = (player: YoutubePlayerLike): void => {
+      clearPlayerReadyTimeout()
+      setPlayerReady(false)
+      loadedVideoIdRef.current = null
+      desiredPlaybackIntentRef.current = null
+      desiredPlaybackPositionRef.current = null
+      playbackCommandInFlightRef.current = false
+      clearPlaybackCommandFlushTimer()
+      clearPlayerEventSuppression()
+      player.destroy()
+      if (playerRef.current === player) {
+        playerRef.current = null
+      }
+    }
 
-    const initializePlayer = async (): Promise<void> => {
+    const initializePlayer = async (candidateIndex = 0): Promise<void> => {
+      const candidate = playerHostCandidates[candidateIndex]
+      if (!candidate) {
+        setErrorMessage('Unable to initialize YouTube player.')
+        return
+      }
+
+      const fallbackToNextHost = (player: YoutubePlayerLike): void => {
+        if (cancelled || candidateIndex !== activeAttemptIndex) return
+        const nextCandidateIndex = candidateIndex + 1
+        if (nextCandidateIndex >= playerHostCandidates.length) {
+          setErrorMessage(YOUTUBE_MANAGER_LOAD_ERROR)
+          return
+        }
+
+        resetPlayerInstance(player)
+        void initializePlayer(nextCandidateIndex)
+      }
+
       try {
-        const youtube = await loadYoutubeIframeApi(iframeApiSrc)
-        if (cancelled || !playerContainerRef.current) return
+        activeAttemptIndex = candidateIndex
+        const youtube = await loadYoutubeIframeApi(candidate.iframeApiSrc)
+        if (cancelled || candidateIndex !== activeAttemptIndex || !playerContainerRef.current) return
 
         youtubeRef.current = youtube
         const player = new youtube.Player(playerContainerRef.current, {
           width: '100%',
           height: '100%',
-          host: playerHostUrl,
+          host: candidate.hostUrl,
           playerVars: {
             controls: 1,
             rel: 0,
@@ -758,7 +797,8 @@ export default function VideoSyncManager() {
           },
           events: {
             onReady: () => {
-              if (cancelled) return
+              if (cancelled || candidateIndex !== activeAttemptIndex) return
+              clearPlayerReadyTimeout()
               setPlayerReady(true)
               setErrorMessage((current) => clearManagerPlayerLoadError(current))
               applyStateToPlayer(latestStateRef.current)
@@ -789,15 +829,29 @@ export default function VideoSyncManager() {
               scheduleManagerPlaybackIntentFlush()
             },
             onError: () => {
-              if (cancelled) return
+              if (cancelled || candidateIndex !== activeAttemptIndex) return
+              if (candidateIndex + 1 < playerHostCandidates.length) {
+                fallbackToNextHost(player)
+                return
+              }
               setErrorMessage(YOUTUBE_MANAGER_LOAD_ERROR)
             },
           },
         })
 
         playerRef.current = player
+        if (candidateIndex + 1 < playerHostCandidates.length) {
+          playerReadyTimeoutId = window.setTimeout(() => {
+            fallbackToNextHost(player)
+          }, 8_000)
+        }
       } catch {
-        if (!cancelled) {
+        if (cancelled) {
+          return
+        }
+        if (candidateIndex + 1 < playerHostCandidates.length) {
+          void initializePlayer(candidateIndex + 1)
+        } else {
           setErrorMessage('Unable to initialize YouTube player.')
         }
       }
@@ -807,6 +861,7 @@ export default function VideoSyncManager() {
 
     return () => {
       cancelled = true
+      clearPlayerReadyTimeout()
       setPlayerReady(false)
       loadedVideoIdRef.current = null
       desiredPlaybackIntentRef.current = null
@@ -821,10 +876,9 @@ export default function VideoSyncManager() {
     applyStateToPlayer,
     clearPlaybackCommandFlushTimer,
     clearPlayerEventSuppression,
-    iframeApiSrc,
-    playerHostUrl,
     scheduleManagerPlaybackIntentFlush,
     setupMode,
+    state.playerHost,
   ])
 
   useEffect(() => {
