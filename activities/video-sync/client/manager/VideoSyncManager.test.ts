@@ -1,29 +1,29 @@
+import {
+    consumeCreateSessionBootstrapPayload,
+    storeCreateSessionBootstrapPayload,
+} from '@src/components/common/manageDashboardUtils'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {
-  consumeCreateSessionBootstrapPayload,
-  storeCreateSessionBootstrapPayload,
-} from '@src/components/common/manageDashboardUtils'
-import {
-  autoConfigureBootstrapSource,
-  buildManagerWsUrl,
-  clearManagerPlayerLoadError,
-  createManagerWsAuthMessage,
-  getManagerPlaybackIntentForStateChange,
-  parseManagerStopTimeInput,
-  readBootstrapInstructorPasscode,
-  readBootstrapSourceUrl,
-  readRecoveredPersistentSourceUrl,
-  readEmbeddedBootstrapSourceUrl,
-  resolveBootstrapInstructorPasscode,
-  sanitizeManagerApiErrorMessage,
-  shouldRenderManagerHeaderForSession,
-  shouldFetchEmbeddedBootstrapSourceUrl,
-  shouldCorrectManagerPlaybackDrift,
-  shouldApplyManagerStateUpdate,
-  shouldAutoStartBootstrapSource,
-} from './VideoSyncManager.js'
 import type { VideoSyncState } from '../protocol.js'
+import {
+    autoConfigureBootstrapSource,
+    buildManagerWsUrl,
+    clearManagerPlayerLoadError,
+    createManagerWsAuthMessage,
+    getManagerPlaybackIntentForStateChange,
+    parseManagerStopTimeInput,
+    readBootstrapInstructorPasscode,
+    readBootstrapSourceUrl,
+    readEmbeddedBootstrapSourceUrl,
+    readRecoveredPersistentSourceUrl,
+    resolveBootstrapInstructorPasscode,
+    sanitizeManagerApiErrorMessage,
+    shouldApplyManagerStateUpdate,
+    shouldAutoStartBootstrapSource,
+    shouldCorrectManagerPlaybackDrift,
+    shouldFetchEmbeddedBootstrapSourceUrl,
+    shouldRenderManagerHeaderForSession,
+} from './VideoSyncManager.js'
 
 const BASE_STATE: VideoSyncState = {
   provider: 'youtube',

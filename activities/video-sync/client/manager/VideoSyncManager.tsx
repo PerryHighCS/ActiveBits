@@ -688,7 +688,7 @@ export default function VideoSyncManager() {
     return () => {
       isCancelled = true
     }
-  }, [location.pathname, location.search, location.state, navigate, sessionId])
+  }, [location.pathname, location.search, navigate, sessionId])
 
   const handleEnvelope = useCallback((envelope: VideoSyncWsEnvelope) => {
     if (envelope.type === 'state-update' || envelope.type === 'state-snapshot' || envelope.type === 'heartbeat') {
