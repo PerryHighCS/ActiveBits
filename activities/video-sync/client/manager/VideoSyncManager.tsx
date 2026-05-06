@@ -29,7 +29,9 @@ import {
 import { parseYouTubeStartSecondsFromUrl, parseYouTubeTimestampSeconds } from '../youtubeTimestamp.js'
 import {
   DEFAULT_VIDEO_SYNC_PLAYER_HOST,
+  formatVideoSyncPlayerHostLabel,
   resolveYoutubePlayerHostCandidates,
+  type VideoSyncPlayerHost,
 } from '../../shared/playerHosts.js'
 
 interface SessionResponse {
@@ -345,6 +347,7 @@ export default function VideoSyncManager() {
   const [setupMode, setSetupMode] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [playerReady, setPlayerReady] = useState(false)
+  const [activePlayerHost, setActivePlayerHost] = useState<VideoSyncPlayerHost | null>(null)
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
   const [autoStartStatus, setAutoStartStatus] = useState<AutoStartStatus>('idle')
@@ -729,6 +732,7 @@ export default function VideoSyncManager() {
       clearPlaybackCommandFlushTimer()
       playerRef.current?.destroy()
       playerRef.current = null
+      setActivePlayerHost(null)
       clearPlayerEventSuppression()
       return
     }
@@ -795,6 +799,7 @@ export default function VideoSyncManager() {
 
       try {
         activeAttemptIndex = candidateIndex
+        setActivePlayerHost(candidate.playerHost)
         const youtube = await loadYoutubeIframeApi(candidate.iframeApiSrc)
         if (cancelled || candidateIndex !== activeAttemptIndex || !playerContainerRef.current) return
 
@@ -887,6 +892,7 @@ export default function VideoSyncManager() {
       clearPlaybackCommandFlushTimer()
       playerRef.current?.destroy()
       playerRef.current = null
+      setActivePlayerHost(null)
       clearPlayerEventSuppression()
     }
   }, [
@@ -1192,6 +1198,7 @@ export default function VideoSyncManager() {
 
       <div className="absolute bottom-0 left-0 right-0 z-20 px-4 py-2 bg-black/80 border-t border-white/10 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-200" aria-live="polite">
         <span>Video: {state.videoId || 'Not configured'}</span>
+        <span>Host: {formatVideoSyncPlayerHostLabel(state.videoId ? activePlayerHost : null)}</span>
         <span>Playing: {state.isPlaying ? 'Yes' : 'No'}</span>
         <span>Position: {displayPosition.toFixed(2)}s</span>
         <span>Connections: {telemetry.connections.activeCount}</span>

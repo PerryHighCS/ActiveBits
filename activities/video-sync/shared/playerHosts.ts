@@ -20,6 +20,18 @@ export function normalizeVideoSyncPlayerHost(value: unknown): VideoSyncPlayerHos
   return isVideoSyncPlayerHost(value) ? value : DEFAULT_VIDEO_SYNC_PLAYER_HOST
 }
 
+export function formatVideoSyncPlayerHostLabel(playerHost: VideoSyncPlayerHost | null): string {
+  if (playerHost === 'youtube-education') {
+    return 'YouTube Education'
+  }
+
+  if (playerHost === 'youtube-nocookie') {
+    return 'YouTube no-cookie'
+  }
+
+  return 'Not loaded'
+}
+
 export function resolveYoutubePlayerHostUrl(playerHost: VideoSyncPlayerHost): string {
   return playerHost === 'youtube-education'
     ? YOUTUBE_EDUCATION_PLAYER_HOST_URL
