@@ -13,7 +13,7 @@ export const BINARY_BREACH_CHALLENGE_TYPES: BinaryBreachChallengeType[] = [
 ]
 
 export const DEFAULT_BINARY_BREACH_SETTINGS: BinaryBreachSettings = {
-  maxBits: 4,
+  maxBits: 8,
   challengeTypes: [...BINARY_BREACH_CHALLENGE_TYPES],
   missionLength: 5,
   timerMode: 'off',
@@ -31,6 +31,17 @@ const SYSTEM_NAMES = [
   'Backup Generator',
   'Drone Recovery',
 ]
+
+const SYSTEM_TRANSMISSIONS: Record<string, string> = {
+  'Door Lock': 'Security door motors are ignoring badge traffic. Restore the access code before the lab shifts into manual lockdown.',
+  'Signal Router': 'The campus router is dropping packets from the robotics lab. Verify the strongest signal path and reopen the route.',
+  'Sorting Core': 'A scrambled priority queue is delaying every recovery job. Put the packets back in order so repairs can resume.',
+  'Memory Bank': 'The memory vault is rejecting address reads after a rogue bit sweep. Decode the value and rebuild the access table.',
+  'Repair Console': 'The maintenance console is waiting on a clean override. Send the corrected value so the control panel can reboot.',
+  'Firewall Rule': 'The firewall is quarantining safe classroom traffic. Confirm the rule value and release the blocked channel.',
+  'Backup Generator': 'The backup generator is online but its controller has lost calibration. Translate the packet before power is rerouted.',
+  'Drone Recovery': 'A training drone is hovering in safe mode with a scrambled nav token. Recover the code and guide it home.',
+}
 
 function hashSeed(seed: string): number {
   let hash = 2166136261
@@ -110,6 +121,8 @@ export function createBinaryBreachChallenge(
   const type = pick(settings.challengeTypes, random)
   const max = maxUnsignedValueForBits(settings.maxBits)
   const systemName = SYSTEM_NAMES[challengeIndex % SYSTEM_NAMES.length] ?? 'Locked System'
+  const transmission = SYSTEM_TRANSMISSIONS[systemName]
+    ?? 'A locked classroom system is waiting for a verified binary override. Solve the packet and restore control.'
   const id = `${seed}:${challengeIndex}:${type}`
   const maxBits = settings.maxBits
 
@@ -120,7 +133,7 @@ export function createBinaryBreachChallenge(
       id,
       type,
       systemName,
-      prompt: `Decode ${binary} to restore ${systemName}.`,
+      prompt: `${transmission} Decode ${binary} to restore ${systemName}.`,
       maxBits,
       hintLevel: 0,
       binary,
@@ -135,7 +148,7 @@ export function createBinaryBreachChallenge(
       id,
       type,
       systemName,
-      prompt: `Upload the binary access code for ${decimal}.`,
+      prompt: `${transmission} Upload the binary access code for ${decimal}.`,
       maxBits,
       hintLevel: 0,
       decimal,
@@ -157,7 +170,7 @@ export function createBinaryBreachChallenge(
       id,
       type,
       systemName,
-      prompt: `Select the ${target} signal to verify ${systemName}.`,
+      prompt: `${transmission} Select the ${target} signal to verify ${systemName}.`,
       maxBits,
       hintLevel: 0,
       left: decimalToBinary(leftValue),
@@ -176,7 +189,7 @@ export function createBinaryBreachChallenge(
     id,
     type: 'order-binary',
     systemName,
-    prompt: `Arrange the recovery queue from least to greatest for ${systemName}.`,
+    prompt: `${transmission} Arrange the recovery queue from least to greatest for ${systemName}.`,
     maxBits,
     hintLevel: 0,
     values: shuffled,

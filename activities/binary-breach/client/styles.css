@@ -239,9 +239,9 @@
 }
 
 .bb-bit--0 {
-  color: var(--bb-text-dim);
-  border-color: var(--bb-border);
-  background: var(--bb-bg);
+  color: #2a90aa;
+  border-color: #1a5a6e;
+  background: rgba(42, 144, 170, 0.06);
 }
 
 /* --- Decimal value display --- */
@@ -321,7 +321,7 @@
 }
 
 .bb-register-cell-bit--0 {
-  color: var(--bb-text-dim);
+  color: #2a90aa;
 }
 
 .bb-register-cell-bit--empty {
@@ -424,18 +424,38 @@
 
 .bb-order-item {
   display: grid;
-  grid-template-columns: 2.2rem 1fr auto;
+  grid-template-columns: 1.4rem 2.2rem 1fr auto;
   gap: 10px;
   align-items: center;
   background: var(--bb-bg);
   border: 1px solid var(--bb-border);
   border-radius: 3px;
   padding: 9px 12px;
-  transition: border-color 0.12s;
+  transition: border-color 0.12s, opacity 0.12s, box-shadow 0.12s;
+  cursor: grab;
+  user-select: none;
 }
 
 .bb-order-item:hover {
   border-color: var(--bb-border-hi);
+}
+
+.bb-order-item--dragging {
+  opacity: 0.35;
+  border-style: dashed;
+  cursor: grabbing;
+}
+
+.bb-order-item--drag-over {
+  border-color: var(--bb-accent);
+  box-shadow: 0 0 10px rgba(0, 204, 221, 0.2);
+}
+
+.bb-drag-handle {
+  font-size: 1rem;
+  color: var(--bb-text-dim);
+  line-height: 1;
+  cursor: grab;
 }
 
 .bb-order-pos {

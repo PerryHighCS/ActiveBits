@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type FormEvent } from 'react'
 import {
   persistSessionParticipantIdentity,
   resolveInitialEntryParticipantIdentity,
@@ -94,6 +94,8 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
   const [submitting, setSubmitting] = useState(false)
   const [localSeed] = useState(() => createMissionSeed())
   const [localIndex, setLocalIndex] = useState(0)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const missionLength = DEFAULT_BINARY_BREACH_SETTINGS.missionLength
 
   const accuracy = progress.attempts === 0 ? 100 : Math.round((progress.correct / progress.attempts) * 100)
@@ -232,6 +234,39 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
       setHint(getHintForChallenge(challenge))
       setProgress((current) => applyHintUse(current))
     }
+  }
+
+  const handleDragStart = (index: number) => {
+    setDragIndex(index)
+    setDragOverIndex(index)
+  }
+
+  const handleDragOver = (event: DragEvent, index: number) => {
+    event.preventDefault()
+    setDragOverIndex(index)
+  }
+
+  const handleDrop = (event: DragEvent, dropIndex: number) => {
+    event.preventDefault()
+    if (dragIndex == null || dragIndex === dropIndex) {
+      setDragIndex(null)
+      setDragOverIndex(null)
+      return
+    }
+    setOrderAnswer((current) => {
+      const next = [...current]
+      const moved = next.splice(dragIndex, 1)[0]
+      if (moved == null) return current
+      next.splice(dropIndex, 0, moved)
+      return next
+    })
+    setDragIndex(null)
+    setDragOverIndex(null)
+  }
+
+  const handleDragEnd = () => {
+    setDragIndex(null)
+    setDragOverIndex(null)
   }
 
   const traceDanger = progress.traceLevel >= 3
@@ -420,7 +455,20 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
                     aria-label="Binary values in selected order"
                   >
                     {orderAnswer.map((value, index) => (
-                      <div className="bb-order-item" key={value}>
+                      <div
+                        key={value}
+                        className={[
+                          'bb-order-item',
+                          dragIndex === index ? 'bb-order-item--dragging' : '',
+                          dragOverIndex === index && dragIndex !== index ? 'bb-order-item--drag-over' : '',
+                        ].join(' ').trim()}
+                        draggable
+                        onDragStart={() => handleDragStart(index)}
+                        onDragOver={(event) => handleDragOver(event, index)}
+                        onDrop={(event) => handleDrop(event, index)}
+                        onDragEnd={handleDragEnd}
+                      >
+                        <span className="bb-drag-handle" aria-hidden="true">⠿</span>
                         <span className="bb-order-pos" aria-hidden="true">[{index + 1}]</span>
                         <span className="bb-order-value">{value}</span>
                         <div className="bb-order-controls">

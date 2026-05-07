@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { BinaryBreachSettings } from '../binaryBreachTypes.js'
 import {
   BINARY_BREACH_CHALLENGE_TYPES,
+  DEFAULT_BINARY_BREACH_SETTINGS,
   createBinaryBreachChallenge,
   normalizeBinaryBreachSettings,
 } from './challengeGenerator.js'
@@ -39,6 +40,20 @@ void test('normalizes settings into safe classroom bounds', () => {
   assert.deepEqual(normalized.challengeTypes, ['decimal-to-binary'])
   assert.equal(normalized.hintsEnabled, false)
   assert.equal(normalized.placeValueSupport, 'hidden')
+})
+
+void test('defaults new missions to eight-bit challenges', () => {
+  assert.equal(DEFAULT_BINARY_BREACH_SETTINGS.maxBits, 8)
+})
+
+void test('adds story context to challenge transmissions', () => {
+  const challenge = createBinaryBreachChallenge(
+    { ...settings, challengeTypes: ['binary-to-decimal'] },
+    'story',
+    0,
+  )
+  assert.match(challenge.prompt, /Security door motors/)
+  assert.match(challenge.prompt, /Decode [01]+ to restore Door Lock/)
 })
 
 void test('validates answers for each MVP challenge type', () => {
