@@ -19,10 +19,12 @@ import { validateBinaryBreachAnswer } from '../../shared/challengeValidation.js'
 import { applyAnswerResult, applyHintUse, createInitialProgress } from '../../shared/scoring.js'
 import PlaceValueChart from '../components/PlaceValueChart'
 import {
-  getSelectedDecimalPlaceValues,
+  appendCalculatorInput,
+  backspaceCalculatorInput,
+  evaluateCalculatorExpression,
   toggleBinaryPlaceValueAnswer,
-  toggleDecimalPlaceValueAnswer,
 } from './placeValueInputUtils.js'
+import { normalizeStudentMissionSettings } from './studentSettingsUtils.js'
 
 interface BinaryBreachStudentProps {
   sessionData?: {
@@ -92,6 +94,58 @@ function SignalBits({ value }: { value: string }) {
   )
 }
 
+interface PowerCalculatorProps {
+  expression: string
+  onInput: (input: string) => void
+  onBackspace: () => void
+  onEvaluate: () => void
+  onClear: () => void
+}
+
+function PowerCalculator({
+  expression,
+  onInput,
+  onBackspace,
+  onEvaluate,
+  onClear,
+}: PowerCalculatorProps) {
+  const keys = ['7', '8', '9', '+', '4', '5', '6', '-', '1', '2', '3', 'backspace', '0', 'clear', 'equals']
+  return (
+    <div className="bb-calculator-body">
+      <div className="bb-calculator-display" aria-live="polite">
+        {expression || '0'}
+      </div>
+      <div className="bb-calculator-grid">
+        {keys.map((key) => {
+          const label = key === 'backspace' ? 'Backspace'
+            : key === 'clear' ? 'Clear'
+            : key === 'equals' ? 'Equals'
+            : key
+          const text = key === 'backspace' ? 'DEL'
+            : key === 'clear' ? 'C'
+            : key === 'equals' ? '='
+            : key
+          const onClick = key === 'backspace' ? onBackspace
+            : key === 'clear' ? onClear
+            : key === 'equals' ? onEvaluate
+            : () => onInput(key)
+          return (
+            <button
+              className="bb-btn bb-btn--secondary bb-calculator-key"
+              type="button"
+              aria-label={label}
+              key={key}
+              onClick={onClick}
+            >
+              {text}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudentProps) {
   const sessionId = sessionData?.sessionId
   const solo = isSoloSession(sessionId)
@@ -100,7 +154,8 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
   const [identityReady, setIdentityReady] = useState(false)
   const [challenge, setChallenge] = useState<BinaryBreachChallenge | null>(null)
   const [progress, setProgress] = useState<BinaryBreachProgress>(() => createInitialProgress())
-  const [missionSettings, setMissionSettings] = useState<BinaryBreachSettings>(() => ({ ...DEFAULT_BINARY_BREACH_SETTINGS }))
+  const [missionSettings, setMissionSettings] = useState<BinaryBreachSettings>(() =>
+    normalizeStudentMissionSettings(DEFAULT_BINARY_BREACH_SETTINGS))
   const [textAnswer, setTextAnswer] = useState('')
   const [choiceAnswer, setChoiceAnswer] = useState<'left' | 'right' | null>(null)
   const [orderAnswer, setOrderAnswer] = useState<string[]>([])
@@ -114,6 +169,8 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [placeValueChartOpen, setPlaceValueChartOpen] = useState(false)
+  const [calculatorOpen, setCalculatorOpen] = useState(false)
+  const [calculatorExpression, setCalculatorExpression] = useState('')
   const missionLength = missionSettings.missionLength
 
   const accuracy = progress.attempts === 0 ? 100 : Math.round((progress.correct / progress.attempts) * 100)
@@ -127,6 +184,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
     setFeedback(null)
     setPendingChallenge(undefined)
     setPlaceValueChartOpen(false)
+    setCalculatorExpression('')
   }, [])
 
   const awaitingFeedbackContinue = feedback != null && !feedback.correct && !progress.completed && pendingChallenge !== undefined
@@ -161,14 +219,14 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
           if (cancelled) return
           setStudentId(payload.studentId)
           setStudentName(payload.studentName)
-          setMissionSettings(payload.settings)
+          setMissionSettings(normalizeStudentMissionSettings(payload.settings))
           setChallenge(payload.challenge)
           setProgress(payload.progress)
           resetAnswerState(payload.challenge)
           persistSessionParticipantIdentity(window.localStorage, sessionId, payload.studentName, payload.studentId)
         } else {
           const firstChallenge = createBinaryBreachChallenge(DEFAULT_BINARY_BREACH_SETTINGS, localSeed, 0)
-          setMissionSettings(DEFAULT_BINARY_BREACH_SETTINGS)
+          setMissionSettings(normalizeStudentMissionSettings(DEFAULT_BINARY_BREACH_SETTINGS))
           setChallenge(firstChallenge)
           resetAnswerState(firstChallenge)
         }
@@ -213,7 +271,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         })
         if (response.status === 409) {
           const payload = await response.json() as StaleChallengeResponse
-          setMissionSettings(payload.settings)
+          setMissionSettings(normalizeStudentMissionSettings(payload.settings))
           setProgress(payload.progress)
           setChallenge(payload.challenge)
           resetAnswerState(payload.challenge)
@@ -222,7 +280,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         }
         if (!response.ok) throw new Error('Failed to submit answer')
         const payload = await response.json() as AnswerResponse
-        setMissionSettings(payload.settings)
+        setMissionSettings(normalizeStudentMissionSettings(payload.settings))
         setProgress(payload.progress)
         if (payload.feedback.correct) {
           setChallenge(payload.challenge)
@@ -281,7 +339,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         settings: BinaryBreachSettings
       }
       setHint(payload.hint)
-      setMissionSettings(payload.settings)
+      setMissionSettings(normalizeStudentMissionSettings(payload.settings))
       setProgress(payload.progress)
       setChallenge(payload.challenge)
     } else {
@@ -345,8 +403,9 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         <span className="bb-header-badge">BINARY BREACH</span>
         <span className="bb-header-sep">//</span>
         <span className="bb-header-title">SYSTEM OVERRIDE</span>
-        <span className="bb-header-channel">CHANNEL CODE: {channelCode}</span>
+        <span className="bb-header-spacer" aria-hidden="true" />
         <span className="bb-header-tech">TECH: {studentName || '...'}</span>
+        <span className="bb-header-channel">CHANNEL CODE: {channelCode}</span>
       </header>
 
       <main className="bb-page">
@@ -441,6 +500,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         )}
 
         {identityReady && challenge && !progress.completed && !awaitingFeedbackContinue && (
+          <div className="bb-terminal-wrap">
           <form className="bb-terminal" onSubmit={submitAnswer} noValidate>
             <div className="bb-terminal-titlebar">
               <span className="bb-terminal-sys">{challenge.systemName}</span>
@@ -458,13 +518,6 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
                     <PlaceValueChart
                       bits={challenge.maxBits}
                       value={challenge.binary}
-                      mode="add-values"
-                      selectedPlaceValues={getSelectedDecimalPlaceValues(textAnswer, challenge.maxBits)}
-                      onPlaceValueClick={(power, _index, currentBit) => {
-                        if (currentBit === '1') {
-                          setTextAnswer((current) => toggleDecimalPlaceValueAnswer(current, power))
-                        }
-                      }}
                     />
                   )}
                 </>
@@ -624,6 +677,36 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
               </div>
             </div>
           </form>
+          <div
+            className={`bb-drawer${calculatorOpen ? ' bb-drawer--open' : ''}`}
+          >
+            <div
+              id="bb-drawer-panel"
+              className="bb-drawer-panel"
+              {...(!calculatorOpen ? { inert: true } : {})}
+            >
+              <div className="bb-drawer-panel-inner">
+                <PowerCalculator
+                  expression={calculatorExpression}
+                  onInput={(input) => setCalculatorExpression((current) => appendCalculatorInput(current, input))}
+                  onBackspace={() => setCalculatorExpression((current) => backspaceCalculatorInput(current))}
+                  onEvaluate={() => setCalculatorExpression((current) => evaluateCalculatorExpression(current))}
+                  onClear={() => setCalculatorExpression('')}
+                />
+              </div>
+            </div>
+            <button
+              className="bb-drawer-tab"
+              type="button"
+              aria-expanded={calculatorOpen}
+              aria-controls="bb-drawer-panel"
+              aria-label={calculatorOpen ? 'Close calculator' : 'Open calculator'}
+              onClick={() => setCalculatorOpen((current) => !current)}
+            >
+              <span className="bb-drawer-tab-label">CALC</span>
+            </button>
+          </div>
+          </div>
         )}
       </main>
     </div>

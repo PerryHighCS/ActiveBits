@@ -245,7 +245,7 @@ export default function BinaryBreachManager() {
             </div>
 
             <button className="bb-btn bb-btn--primary" type="submit" disabled={saving}>
-              {saving ? 'SAVING...' : 'SAVE & RESET MISSIONS'}
+              {saving ? 'SAVING...' : 'SAVE SETTINGS'}
             </button>
           </form>
 

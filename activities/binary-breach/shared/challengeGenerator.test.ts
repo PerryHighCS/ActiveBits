@@ -136,7 +136,8 @@ void test('explains incorrect answers with challenge-specific feedback', () => {
   })
   assert.equal(conversionFeedback.correct, false)
   assert.match(conversionFeedback.message, /You entered 44/)
-  assert.match(conversionFeedback.message, /101101 equals 45/)
+  assert.match(conversionFeedback.message, /too low/)
+  assert.match(conversionFeedback.message, /32 \+ 8 \+ 4 \+ 1/)
 
   const compareFeedback = validateBinaryBreachAnswer({
     id: 'c2',

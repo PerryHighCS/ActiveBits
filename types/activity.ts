@@ -199,6 +199,9 @@ export interface ActivityConfig {
   manageLayout?: {
     expandShell?: boolean
   }
+  standaloneLayout?: {
+    expandShell?: boolean
+  }
   embeddedRuntime?: ActivityEmbeddedRuntimeConfig
   reportEndpoint?: string
   waitingRoom?: ActivityWaitingRoomConfig

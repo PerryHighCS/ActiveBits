@@ -199,7 +199,7 @@ export function createBinaryBreachChallenge(
 
 export function getHintForChallenge(challenge: BinaryBreachChallenge): string {
   if (challenge.type === 'binary-to-decimal') {
-    return `Use place values from right to left. ${challenge.binary} uses 1s, 2s, 4s, and higher powers of two.`
+    return `Use the chart as a map: add the place values under 1 bits and ignore every column with a 0.`
   }
   if (challenge.type === 'decimal-to-binary') {
     return `Start with the largest power of two that fits inside ${challenge.decimal}, then subtract what you used.`

@@ -39,7 +39,12 @@ function AppShell() {
   const pathSegments = location.pathname.split('/').filter(Boolean)
   const manageActivityId = pathSegments[0] === 'manage' && pathSegments.length >= 2 ? pathSegments[1] : null
   const manageActivity = manageActivityId ? activities.find((activity) => activity.id === manageActivityId) : null
+  const standaloneActivityId = (pathSegments[0] === 'solo' && pathSegments[1])
+    || (pathSegments[0] === 'activity' && pathSegments[1])
+    || null
+  const standaloneActivity = standaloneActivityId ? activities.find((activity) => activity.id === standaloneActivityId) : null
   const shouldExpandShell = manageActivity?.manageLayout?.expandShell === true
+    || standaloneActivity?.standaloneLayout?.expandShell === true
   const appClassName = shouldExpandShell
     ? 'w-full flex flex-col items-center min-h-screen print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
     : 'w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'

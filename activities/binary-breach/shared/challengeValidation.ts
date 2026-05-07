@@ -13,11 +13,24 @@ function formatBinaryValue(binary: string): string {
   return decimal == null ? `${binary}` : `${binary} (${decimal})`
 }
 
+function activePlaceValueText(binary: string): string {
+  const bits = binary.split('')
+  const values = bits
+    .map((bit, index) => bit === '1' ? 2 ** (bits.length - index - 1) : null)
+    .filter((value): value is number => value != null)
+  return values.length > 0 ? values.join(' + ') : '0'
+}
+
 function incorrectFeedbackMessage(challenge: BinaryBreachChallenge, answer: BinaryBreachAnswer): string {
   if (challenge.type === 'binary-to-decimal' && answer.type === challenge.type) {
     const submitted = normalizeDecimalAnswer(answer.decimal)
     const submittedText = submitted == null ? 'that entry' : String(submitted)
-    return `Code rejected. You entered ${submittedText}, but ${challenge.binary} equals ${challenge.decimal}. Add the active place values from right to left.`
+    const direction = submitted == null
+      ? 'Check that the access code uses only digits.'
+      : submitted < challenge.decimal
+        ? 'Your answer is too low.'
+        : 'Your answer is too high.'
+    return `Code rejected. You entered ${submittedText}. ${direction} Add only the place values under 1 bits: ${activePlaceValueText(challenge.binary)}.`
   }
 
   if (challenge.type === 'decimal-to-binary' && answer.type === challenge.type) {

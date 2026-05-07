@@ -201,13 +201,6 @@ export default function setupBinaryBreachRoutes(
       return
     }
     session.data.settings = normalizeBinaryBreachSettings(req.body)
-    session.data.missionSeed = createMissionSeed()
-    session.data.students = session.data.students.map((student) => ({
-      ...student,
-      progress: createInitialProgress(),
-      currentChallenge: createBinaryBreachChallenge(session.data.settings, `${session.data.missionSeed}:${student.id}`, 0),
-      challengeIndex: 0,
-    }))
     await sessions.set(session.id, session)
     await broadcastRoster(session)
     res.json({ ok: true, settings: session.data.settings })

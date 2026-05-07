@@ -1,10 +1,3 @@
-export function toggleDecimalPlaceValueAnswer(answer: string, power: number): string {
-  const trimmed = answer.trim()
-  const current = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0
-  const next = (current & power) === power ? current - power : current + power
-  return String(Math.max(0, next))
-}
-
 export function toggleBinaryPlaceValueAnswer(answer: string, bits: number, index: number): string {
   const sanitized = answer.replace(/[^01]/g, '')
   const padded = sanitized.padStart(bits, '0').slice(-bits).split('')
@@ -15,9 +8,23 @@ export function toggleBinaryPlaceValueAnswer(answer: string, bits: number, index
   return next === '' ? '0' : next
 }
 
-export function getSelectedDecimalPlaceValues(answer: string, bits: number): number[] {
-  const trimmed = answer.trim()
-  const current = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0
-  return Array.from({ length: bits }, (_unused, index) => 2 ** (bits - index - 1))
-    .filter((power) => (current & power) === power)
+export function appendCalculatorInput(expression: string, input: string): string {
+  if (/^\d$/.test(input)) {
+    return expression === '0' ? input : `${expression}${input}`
+  }
+  if (input !== '+' && input !== '-') return expression
+  if (expression.length === 0) return input === '-' ? '-' : expression
+  return /[+-]$/.test(expression) ? `${expression.slice(0, -1)}${input}` : `${expression}${input}`
+}
+
+export function backspaceCalculatorInput(expression: string): string {
+  return expression.slice(0, -1)
+}
+
+export function evaluateCalculatorExpression(expression: string): string {
+  const compact = expression.replace(/\s/g, '')
+  if (!/^-?\d+(?:[+-]\d+)*$/.test(compact)) return expression
+  const tokens = compact.match(/[+-]?\d+/g) ?? []
+  const total = tokens.reduce((sum, token) => sum + Number.parseInt(token, 10), 0)
+  return String(total)
 }

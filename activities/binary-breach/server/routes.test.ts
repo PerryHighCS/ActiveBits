@@ -214,7 +214,7 @@ void test('applies manager settings to student missions and hint availability', 
   assert.equal(hintResponse.statusCode, 400)
 })
 
-void test('does not score stale student answers after manager resets a mission', async () => {
+void test('keeps a current student challenge answerable after manager settings change', async () => {
   const app = new TestApp()
   const sessions = createSessionStore()
   setupBinaryBreachRoutes(app, sessions, createWsRouter())
@@ -231,7 +231,13 @@ void test('does not score stale student answers after manager resets a mission',
 
   const registered = registerResponse.payload as {
     studentId: string
-    challenge: { id: string; type: string }
+    challenge: {
+      id: string
+      type: string
+      decimal?: number
+      binary?: string
+      answer?: string[] | 'left' | 'right'
+    }
   }
 
   const settingsResponse = createResponse()
@@ -247,25 +253,34 @@ void test('does not score stale student answers after manager resets a mission',
   }, settingsResponse)
   assert.equal(settingsResponse.statusCode, 200)
 
-  const staleAnswerResponse = createResponse()
+  const answer = registered.challenge.type === 'binary-to-decimal'
+    ? { decimal: String(registered.challenge.decimal) }
+    : registered.challenge.type === 'decimal-to-binary'
+      ? { binary: registered.challenge.binary }
+      : registered.challenge.type === 'order-binary'
+        ? { values: registered.challenge.answer }
+        : { choice: registered.challenge.answer }
+
+  const answerResponse = createResponse()
   await app.postRoutes.get('/api/binary-breach/:sessionId/student/answer')?.({
     params: { sessionId },
     body: {
       studentName: 'Katherine',
       studentId: registered.studentId,
       challengeId: registered.challenge.id,
-      answer: { decimal: '4' },
+      answer,
     },
-  }, staleAnswerResponse)
+  }, answerResponse)
 
-  assert.equal(staleAnswerResponse.statusCode, 409)
-  const payload = staleAnswerResponse.payload as {
-    error: string
-    challenge: { id: string }
+  assert.equal(answerResponse.statusCode, 200)
+  const payload = answerResponse.payload as {
+    feedback: { correct: boolean }
+    challenge: { type: string; maxBits: number }
     progress: { attempts: number; incorrect: number }
   }
-  assert.equal(payload.error, 'stale_challenge')
-  assert.notEqual(payload.challenge.id, registered.challenge.id)
-  assert.equal(payload.progress.attempts, 0)
+  assert.equal(payload.feedback.correct, true)
+  assert.equal(payload.progress.attempts, 1)
   assert.equal(payload.progress.incorrect, 0)
+  assert.equal(payload.challenge.type, 'binary-to-decimal')
+  assert.equal(payload.challenge.maxBits, 8)
 })

@@ -1,20 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  getSelectedDecimalPlaceValues,
+  appendCalculatorInput,
+  backspaceCalculatorInput,
+  evaluateCalculatorExpression,
   toggleBinaryPlaceValueAnswer,
-  toggleDecimalPlaceValueAnswer,
 } from './placeValueInputUtils.js'
-
-void test('adds and removes place values from decimal answers', () => {
-  assert.equal(toggleDecimalPlaceValueAnswer('', 8), '8')
-  assert.equal(toggleDecimalPlaceValueAnswer('8', 4), '12')
-  assert.equal(toggleDecimalPlaceValueAnswer('12', 4), '8')
-})
-
-void test('starts decimal place value input from zero when the answer is not numeric', () => {
-  assert.equal(toggleDecimalPlaceValueAnswer('pending', 16), '16')
-})
 
 void test('toggles binary bits by place-value chart index', () => {
   assert.equal(toggleBinaryPlaceValueAnswer('', 8, 0), '10000000')
@@ -26,7 +17,22 @@ void test('ignores non-binary characters before toggling binary bits', () => {
   assert.equal(toggleBinaryPlaceValueAnswer('10a1', 4, 1), '1')
 })
 
-void test('reports selected decimal place values from the current answer', () => {
-  assert.deepEqual(getSelectedDecimalPlaceValues('13', 8), [8, 4, 1])
-  assert.deepEqual(getSelectedDecimalPlaceValues('waiting', 8), [])
+void test('appends calculator digits and operators safely', () => {
+  assert.equal(appendCalculatorInput('', '4'), '4')
+  assert.equal(appendCalculatorInput('0', '8'), '8')
+  assert.equal(appendCalculatorInput('4', '+'), '4+')
+  assert.equal(appendCalculatorInput('4+', '-'), '4-')
+  assert.equal(appendCalculatorInput('', '-'), '-')
+  assert.equal(appendCalculatorInput('', '+'), '')
+  assert.equal(appendCalculatorInput('4', '*'), '4')
+})
+
+void test('backspaces calculator input', () => {
+  assert.equal(backspaceCalculatorInput('128+'), '128')
+})
+
+void test('evaluates calculator expressions with addition and subtraction', () => {
+  assert.equal(evaluateCalculatorExpression('128+16-4'), '140')
+  assert.equal(evaluateCalculatorExpression('-5+9'), '4')
+  assert.equal(evaluateCalculatorExpression('12+'), '12+')
 })
