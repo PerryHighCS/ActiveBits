@@ -53,6 +53,30 @@ function moveValue(values: string[], index: number, direction: -1 | 1): string[]
   return next
 }
 
+function BitCells({ value }: { value: string }) {
+  return (
+    <div className="bb-binary-display" aria-label={`Binary value: ${value}`}>
+      {value.split('').map((bit, index) => (
+        <span key={index} className={`bb-bit bb-bit--${bit}`} aria-hidden="true">
+          {bit}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function SignalBits({ value }: { value: string }) {
+  return (
+    <div className="bb-signal-bits" aria-hidden="true">
+      {value.split('').map((bit, index) => (
+        <span key={index} className={`bb-bit bb-bit--${bit}`}>
+          {bit}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudentProps) {
   const sessionId = sessionData?.sessionId
   const solo = isSoloSession(sessionId)
@@ -70,14 +94,17 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
   const [submitting, setSubmitting] = useState(false)
   const [localSeed] = useState(() => createMissionSeed())
   const [localIndex, setLocalIndex] = useState(0)
+  const missionLength = DEFAULT_BINARY_BREACH_SETTINGS.missionLength
 
   const accuracy = progress.attempts === 0 ? 100 : Math.round((progress.correct / progress.attempts) * 100)
+  const progressPct = Math.min(100, Math.round((progress.systemsRestored / missionLength) * 100))
 
   const resetAnswerState = useCallback((nextChallenge: BinaryBreachChallenge | null) => {
     setTextAnswer('')
     setChoiceAnswer(null)
     setOrderAnswer(nextChallenge?.type === 'order-binary' ? nextChallenge.values : [])
     setHint(null)
+    setFeedback(null)
   }, [])
 
   useEffect(() => {
@@ -166,7 +193,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         resetAnswerState(payload.challenge)
       } else {
         const localFeedback = validateBinaryBreachAnswer(challenge, { type: challenge.type, ...answer } as never)
-        const nextProgress = applyAnswerResult(progress, localFeedback.correct, DEFAULT_BINARY_BREACH_SETTINGS.missionLength)
+        const nextProgress = applyAnswerResult(progress, localFeedback.correct, missionLength)
         const nextIndex = localIndex + 1
         const nextChallenge = nextProgress.completed
           ? null
@@ -207,109 +234,244 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
     }
   }
 
+  const traceDanger = progress.traceLevel >= 3
+  const streakHot = progress.streak >= 3
+
   return (
     <div className="binary-breach-shell">
-      <main className="binary-breach-page">
-        <div className="mb-5">
-          <p className="text-sm font-semibold uppercase tracking-wide text-cyan-800">Binary Breach</p>
-          <h1 className="text-3xl font-bold">System Override</h1>
-          <p className="text-gray-600">Technician: {studentName || 'Connecting...'}</p>
-        </div>
+      <header className="bb-mission-header">
+        <span className="bb-header-badge">BINARY BREACH</span>
+        <span className="bb-header-sep">//</span>
+        <span className="bb-header-title">SYSTEM OVERRIDE</span>
+        <span className="bb-header-tech">TECH: {studentName || '...'}</span>
+      </header>
 
-        <section className="binary-breach-grid mb-5" aria-label="Mission stats">
-          <div className="binary-breach-stat"><span>Systems Restored</span><strong>{progress.systemsRestored}</strong></div>
-          <div className="binary-breach-stat"><span>Accuracy</span><strong>{accuracy}%</strong></div>
-          <div className="binary-breach-stat"><span>Streak</span><strong>{progress.streak}</strong></div>
-          <div className="binary-breach-stat"><span>Trace Level</span><strong>{progress.traceLevel}</strong></div>
-          <div className="binary-breach-stat"><span>Score</span><strong>{progress.score}</strong></div>
+      <main className="bb-page">
+        <section className="bb-stats" aria-label="Mission stats">
+          <div className="bb-stat bb-stat--accent">
+            <div className="bb-stat-label">SYSTEMS</div>
+            <div className="bb-stat-value">{progress.systemsRestored}</div>
+          </div>
+          <div className="bb-stat">
+            <div className="bb-stat-label">ACCURACY</div>
+            <div className="bb-stat-value">{accuracy}%</div>
+          </div>
+          <div className={`bb-stat ${streakHot ? 'bb-stat--success' : ''}`}>
+            <div className="bb-stat-label">STREAK</div>
+            <div className="bb-stat-value">{progress.streak}</div>
+          </div>
+          <div className={`bb-stat ${traceDanger ? 'bb-stat--danger' : ''}`}>
+            <div className="bb-stat-label">TRACE LVL</div>
+            <div className="bb-stat-value">{progress.traceLevel}</div>
+          </div>
+          <div className="bb-stat">
+            <div className="bb-stat-label">SCORE</div>
+            <div className="bb-stat-value">{progress.score}</div>
+          </div>
         </section>
 
-        {error && <div className="binary-breach-feedback incorrect mb-4" role="alert">{error}</div>}
-        {feedback && (
-          <div className={`binary-breach-feedback ${feedback.correct ? 'correct' : 'incorrect'} mb-4`} aria-live="polite">
+        <div className="bb-progress-bar" aria-hidden="true">
+          <div className="bb-progress-fill" style={{ width: `${progressPct}%` }} />
+        </div>
+
+        {error && (
+          <div className="bb-feedback bb-feedback--error" role="alert">{error}</div>
+        )}
+
+        {feedback && !progress.completed && (
+          <div
+            className={`bb-feedback ${feedback.correct ? 'bb-feedback--correct' : 'bb-feedback--incorrect'}`}
+            aria-live="polite"
+          >
             {feedback.message}
           </div>
         )}
 
-        {!identityReady && <div className="binary-breach-card">Connecting to mission console...</div>}
+        {!identityReady && (
+          <div className="bb-loading">Connecting to mission console...</div>
+        )}
 
         {identityReady && progress.completed && (
-          <section className="binary-breach-panel p-6">
-            <h2 className="text-2xl font-bold mb-3">Rogue process contained</h2>
-            <p className="mb-4">You restored {progress.systemsRestored} systems with {accuracy}% accuracy.</p>
-            <div className="binary-breach-grid">
-              <div className="binary-breach-stat"><span>Best Streak</span><strong>{progress.bestStreak}</strong></div>
-              <div className="binary-breach-stat"><span>Hints Used</span><strong>{progress.hintsUsed}</strong></div>
-              <div className="binary-breach-stat"><span>Final Score</span><strong>{progress.score}</strong></div>
+          <section className="bb-mission-complete" aria-label="Mission complete">
+            <div className="bb-mission-complete-header">
+              <div className="bb-mission-complete-title">ROGUE PROCESS CONTAINED</div>
+              <div className="bb-mission-complete-sub">MISSION STATUS: SUCCESS</div>
+            </div>
+            <div className="bb-mission-complete-body">
+              <div className="bb-mission-stats">
+                <div className="bb-stat bb-stat--accent">
+                  <div className="bb-stat-label">SYSTEMS RESTORED</div>
+                  <div className="bb-stat-value">{progress.systemsRestored}</div>
+                </div>
+                <div className="bb-stat">
+                  <div className="bb-stat-label">ACCURACY</div>
+                  <div className="bb-stat-value">{accuracy}%</div>
+                </div>
+                <div className="bb-stat bb-stat--success">
+                  <div className="bb-stat-label">BEST STREAK</div>
+                  <div className="bb-stat-value">{progress.bestStreak}</div>
+                </div>
+                <div className="bb-stat">
+                  <div className="bb-stat-label">HINTS USED</div>
+                  <div className="bb-stat-value">{progress.hintsUsed}</div>
+                </div>
+                <div className={`bb-stat ${traceDanger ? 'bb-stat--danger' : ''}`}>
+                  <div className="bb-stat-label">TRACE LEVEL</div>
+                  <div className="bb-stat-value">{progress.traceLevel}</div>
+                </div>
+                <div className="bb-stat bb-stat--accent">
+                  <div className="bb-stat-label">FINAL SCORE</div>
+                  <div className="bb-stat-value">{progress.score}</div>
+                </div>
+              </div>
             </div>
           </section>
         )}
 
         {identityReady && challenge && !progress.completed && (
-          <form className="binary-breach-panel p-6" onSubmit={submitAnswer}>
-            <div className="mb-4">
-              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-800">{challenge.systemName}</p>
-              <h2 className="text-2xl font-bold">{challenge.prompt}</h2>
+          <form className="bb-terminal" onSubmit={submitAnswer} noValidate>
+            <div className="bb-terminal-titlebar">
+              <span className="bb-terminal-sys">{challenge.systemName}</span>
+              <span className="bb-terminal-locked">STATUS: LOCKED</span>
             </div>
+            <div className="bb-terminal-body">
+              <div className="bb-prompt">INCOMING TRANSMISSION</div>
+              <div className="bb-challenge-text">{challenge.prompt}</div>
 
-            <div className="mb-5">
-              <PlaceValueChart bits={challenge.maxBits} />
-            </div>
+              {challenge.type === 'binary-to-decimal' && (
+                <>
+                  <BitCells value={challenge.binary} />
+                  <PlaceValueChart bits={challenge.maxBits} value={challenge.binary} />
+                </>
+              )}
 
-            {(challenge.type === 'binary-to-decimal' || challenge.type === 'decimal-to-binary') && (
-              <label className="block mb-5">
-                <span className="block mb-2 font-semibold">
-                  {challenge.type === 'binary-to-decimal' ? 'Decimal access code' : 'Binary upload code'}
-                </span>
-                <input
-                  className="binary-breach-input"
-                  inputMode="numeric"
-                  value={textAnswer}
-                  onChange={(event) => setTextAnswer(event.target.value)}
-                  aria-describedby="binary-breach-answer-help"
-                />
-                <span id="binary-breach-answer-help" className="text-sm text-gray-600">
-                  {challenge.type === 'binary-to-decimal' ? 'Enter digits like 45.' : 'Enter only 0s and 1s.'}
-                </span>
-              </label>
-            )}
+              {challenge.type === 'decimal-to-binary' && (
+                <>
+                  <div className="bb-decimal-display">
+                    <span className="bb-decimal-label">PACKET VALUE</span>
+                    <span className="bb-decimal-value" aria-label={`Decimal value: ${challenge.decimal}`}>
+                      {challenge.decimal}
+                    </span>
+                  </div>
+                  <PlaceValueChart bits={challenge.maxBits} value={textAnswer} />
+                </>
+              )}
 
-            {challenge.type === 'compare-binary' && (
-              <div className="grid gap-3 md:grid-cols-2 mb-5" role="group" aria-label={`Choose the ${challenge.target} signal`}>
-                <button type="button" className="binary-breach-choice" aria-pressed={choiceAnswer === 'left'} onClick={() => setChoiceAnswer('left')}>
-                  {challenge.left}
-                </button>
-                <button type="button" className="binary-breach-choice" aria-pressed={choiceAnswer === 'right'} onClick={() => setChoiceAnswer('right')}>
-                  {challenge.right}
-                </button>
-              </div>
-            )}
+              {(challenge.type === 'binary-to-decimal' || challenge.type === 'decimal-to-binary') && (
+                <div className="bb-input-block">
+                  <label htmlFor="bb-answer-input">
+                    <span className="bb-input-label">
+                      {challenge.type === 'binary-to-decimal' ? 'DECIMAL ACCESS CODE' : 'BINARY UPLOAD CODE'}
+                    </span>
+                  </label>
+                  <input
+                    id="bb-answer-input"
+                    className="bb-input"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder={challenge.type === 'binary-to-decimal' ? 'e.g. 45' : 'e.g. 101101'}
+                    value={textAnswer}
+                    onChange={(event) => setTextAnswer(event.target.value)}
+                    aria-describedby="bb-answer-hint"
+                  />
+                  <span id="bb-answer-hint" className="bb-input-hint">
+                    {challenge.type === 'binary-to-decimal'
+                      ? 'Enter the decimal equivalent.'
+                      : 'Enter only 0s and 1s.'}
+                  </span>
+                </div>
+              )}
 
-            {challenge.type === 'order-binary' && (
-              <div className="space-y-2 mb-5" aria-label="Binary values in selected order">
-                {orderAnswer.map((value, index) => (
-                  <div className="binary-breach-order-row" key={value}>
-                    <span className="font-mono text-lg">{value}</span>
-                    <button type="button" className="binary-breach-button secondary" disabled={index === 0} aria-label={`Move ${value} up`} onClick={() => setOrderAnswer((current) => moveValue(current, index, -1))}>
-                      Up
+              {challenge.type === 'compare-binary' && (
+                <>
+                  <PlaceValueChart bits={challenge.maxBits} />
+                  <div
+                    className="bb-compare-grid"
+                    role="group"
+                    aria-label={`Choose the ${challenge.target} signal`}
+                  >
+                    <button
+                      type="button"
+                      className="bb-signal-panel"
+                      aria-pressed={choiceAnswer === 'left'}
+                      onClick={() => setChoiceAnswer('left')}
+                    >
+                      <div className="bb-signal-id">SIGNAL A</div>
+                      <SignalBits value={challenge.left} />
                     </button>
-                    <button type="button" className="binary-breach-button secondary" disabled={index === orderAnswer.length - 1} aria-label={`Move ${value} down`} onClick={() => setOrderAnswer((current) => moveValue(current, index, 1))}>
-                      Down
+                    <button
+                      type="button"
+                      className="bb-signal-panel"
+                      aria-pressed={choiceAnswer === 'right'}
+                      onClick={() => setChoiceAnswer('right')}
+                    >
+                      <div className="bb-signal-id">SIGNAL B</div>
+                      <SignalBits value={challenge.right} />
                     </button>
                   </div>
-                ))}
+                </>
+              )}
+
+              {challenge.type === 'order-binary' && (
+                <>
+                  <PlaceValueChart bits={challenge.maxBits} />
+                  <div
+                    className="bb-order-list"
+                    aria-label="Binary values in selected order"
+                  >
+                    {orderAnswer.map((value, index) => (
+                      <div className="bb-order-item" key={value}>
+                        <span className="bb-order-pos" aria-hidden="true">[{index + 1}]</span>
+                        <span className="bb-order-value">{value}</span>
+                        <div className="bb-order-controls">
+                          <button
+                            type="button"
+                            className="bb-btn bb-btn--icon bb-btn--secondary"
+                            disabled={index === 0}
+                            aria-label={`Move ${value} up`}
+                            onClick={() => setOrderAnswer((current) => moveValue(current, index, -1))}
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            className="bb-btn bb-btn--icon bb-btn--secondary"
+                            disabled={index === orderAnswer.length - 1}
+                            aria-label={`Move ${value} down`}
+                            onClick={() => setOrderAnswer((current) => moveValue(current, index, 1))}
+                          >
+                            ▼
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {hint != null && (
+                <div className="bb-feedback bb-feedback--hint" aria-live="polite">
+                  {hint}
+                </div>
+              )}
+
+              <div className="bb-action-row">
+                <button
+                  className="bb-btn bb-btn--primary"
+                  type="submit"
+                  disabled={!canSubmit || submitting}
+                >
+                  {submitting ? 'TRANSMITTING...' : 'SUBMIT OVERRIDE'}
+                </button>
+                <button
+                  className="bb-btn bb-btn--secondary"
+                  type="button"
+                  onClick={requestHint}
+                  disabled={challenge == null}
+                >
+                  REQUEST HINT
+                </button>
               </div>
-            )}
-
-            {hint != null && <div className="binary-breach-feedback correct mb-4" aria-live="polite">{hint}</div>}
-
-            <div className="flex flex-wrap gap-3">
-              <button className="binary-breach-button" type="submit" disabled={!canSubmit || submitting}>
-                {submitting ? 'Transmitting...' : 'Submit Override'}
-              </button>
-              <button className="binary-breach-button secondary" type="button" onClick={requestHint} disabled={challenge == null}>
-                Request Hint
-              </button>
             </div>
           </form>
         )}

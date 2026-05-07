@@ -22,8 +22,8 @@ interface StateResponse {
 }
 
 const CHALLENGE_LABELS: Record<BinaryBreachChallengeType, string> = {
-  'binary-to-decimal': 'Binary to decimal',
-  'decimal-to-binary': 'Decimal to binary',
+  'binary-to-decimal': 'Binary → Decimal',
+  'decimal-to-binary': 'Decimal → Binary',
   'compare-binary': 'Compare binary',
   'order-binary': 'Order binary',
 }
@@ -118,75 +118,103 @@ export default function BinaryBreachManager() {
   return (
     <div className="binary-breach-shell">
       <SessionHeader activityName="Binary Breach: System Override" sessionId={sessionId} />
-      <main className="binary-breach-page">
-        {error && <div className="binary-breach-feedback incorrect mb-4" role="alert">{error}</div>}
+      <main className="bb-page">
+        {error && (
+          <div className="bb-feedback bb-feedback--error" role="alert">{error}</div>
+        )}
 
-        <section className="binary-breach-grid mb-5" aria-label="Class mission summary">
-          <div className="binary-breach-stat"><span>Technicians</span><strong>{students.length}</strong></div>
-          <div className="binary-breach-stat"><span>Connected</span><strong>{students.filter((student) => student.connected).length}</strong></div>
-          <div className="binary-breach-stat"><span>Class Accuracy</span><strong>{classAccuracy}%</strong></div>
-          <div className="binary-breach-stat"><span>Systems Restored</span><strong>{students.reduce((total, student) => total + student.progress.systemsRestored, 0)}</strong></div>
+        <section className="bb-stats" style={{ marginBottom: '20px' }} aria-label="Class mission summary">
+          <div className="bb-stat bb-stat--accent">
+            <div className="bb-stat-label">TECHNICIANS</div>
+            <div className="bb-stat-value">{students.length}</div>
+          </div>
+          <div className="bb-stat bb-stat--success">
+            <div className="bb-stat-label">CONNECTED</div>
+            <div className="bb-stat-value">{students.filter((s) => s.connected).length}</div>
+          </div>
+          <div className="bb-stat">
+            <div className="bb-stat-label">CLASS ACCURACY</div>
+            <div className="bb-stat-value">{classAccuracy}%</div>
+          </div>
+          <div className="bb-stat">
+            <div className="bb-stat-label">SYSTEMS RESTORED</div>
+            <div className="bb-stat-value">
+              {students.reduce((total, s) => total + s.progress.systemsRestored, 0)}
+            </div>
+          </div>
         </section>
 
-        <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
-          <form className="binary-breach-panel p-5" onSubmit={saveSettings}>
-            <h2 className="text-xl font-bold mb-4">Mission Settings</h2>
+        <div className="bb-manager-grid">
+          <form className="bb-panel" onSubmit={saveSettings}>
+            <h2 className="bb-panel-title">MISSION SETTINGS</h2>
 
-            <label className="block mb-4">
-              <span className="block mb-1 font-semibold">Maximum bits</span>
+            <div className="bb-form-field">
+              <label className="bb-form-label" htmlFor="bb-max-bits">MAXIMUM BITS</label>
               <select
-                className="binary-breach-select"
+                id="bb-max-bits"
+                className="bb-select"
                 value={settings.maxBits}
-                onChange={(event) => setSettings((current) => ({ ...current, maxBits: Number(event.target.value) as BinaryBreachSettings['maxBits'] }))}
+                onChange={(event) => setSettings((current) => ({
+                  ...current,
+                  maxBits: Number(event.target.value) as BinaryBreachSettings['maxBits'],
+                }))}
               >
-                {[4, 5, 6, 7, 8].map((bits) => <option key={bits} value={bits}>{bits} bits</option>)}
+                {[4, 5, 6, 7, 8].map((bits) => (
+                  <option key={bits} value={bits}>{bits} bits</option>
+                ))}
               </select>
-            </label>
+            </div>
 
-            <label className="block mb-4">
-              <span className="block mb-1 font-semibold">Systems per mission</span>
+            <div className="bb-form-field">
+              <label className="bb-form-label" htmlFor="bb-mission-length">SYSTEMS PER MISSION</label>
               <input
-                className="binary-breach-input"
+                id="bb-mission-length"
+                className="bb-input-sm"
                 type="number"
                 min="3"
                 max="12"
                 value={settings.missionLength}
-                onChange={(event) => setSettings((current) => ({ ...current, missionLength: Number(event.target.value) }))}
+                onChange={(event) => setSettings((current) => ({
+                  ...current,
+                  missionLength: Number(event.target.value),
+                }))}
               />
-            </label>
+            </div>
 
-            <fieldset className="mb-4">
-              <legend className="font-semibold mb-2">Challenge types</legend>
-              <div className="space-y-2">
-                {BINARY_BREACH_CHALLENGE_TYPES.map((type) => (
-                  <label className="flex items-center gap-2" key={type}>
-                    <input
-                      type="checkbox"
-                      checked={settings.challengeTypes.includes(type)}
-                      onChange={() => setSettings((current) => ({
-                        ...current,
-                        challengeTypes: toggleChallengeType(current.challengeTypes, type),
-                      }))}
-                    />
-                    <span>{CHALLENGE_LABELS[type]}</span>
-                  </label>
-                ))}
-              </div>
+            <fieldset className="bb-form-field" style={{ border: 'none', padding: 0, margin: 0 }}>
+              <legend className="bb-form-label">CHALLENGE TYPES</legend>
+              {BINARY_BREACH_CHALLENGE_TYPES.map((type) => (
+                <label className="bb-checkbox-row" key={type}>
+                  <input
+                    type="checkbox"
+                    checked={settings.challengeTypes.includes(type)}
+                    onChange={() => setSettings((current) => ({
+                      ...current,
+                      challengeTypes: toggleChallengeType(current.challengeTypes, type),
+                    }))}
+                  />
+                  <span>{CHALLENGE_LABELS[type]}</span>
+                </label>
+              ))}
             </fieldset>
 
-            <label className="flex items-center gap-2 mb-4">
+            <label className="bb-checkbox-row bb-form-field">
               <input
                 type="checkbox"
                 checked={settings.hintsEnabled}
-                onChange={(event) => setSettings((current) => ({ ...current, hintsEnabled: event.target.checked }))}
+                onChange={(event) => setSettings((current) => ({
+                  ...current,
+                  hintsEnabled: event.target.checked,
+                }))}
               />
               <span>Hints available</span>
             </label>
 
-            <label className="block mb-4">
-              <span className="block mb-1 font-semibold">Place-value support</span>
+            <div className="bb-form-field">
+              <label className="bb-form-label" htmlFor="bb-place-value">PLACE-VALUE SUPPORT</label>
               <select
-                className="binary-breach-select"
+                id="bb-place-value"
+                className="bb-select"
                 value={settings.placeValueSupport}
                 onChange={(event) => setSettings((current) => ({
                   ...current,
@@ -197,47 +225,57 @@ export default function BinaryBreachManager() {
                 <option value="optional">Optional</option>
                 <option value="hidden">Hidden</option>
               </select>
-            </label>
+            </div>
 
-            <button className="binary-breach-button" type="submit" disabled={saving}>
-              {saving ? 'Saving...' : 'Save and Reset Missions'}
+            <button className="bb-btn bb-btn--primary" type="submit" disabled={saving}>
+              {saving ? 'SAVING...' : 'SAVE & RESET MISSIONS'}
             </button>
           </form>
 
-          <section className="binary-breach-panel p-5">
-            <h2 className="text-xl font-bold mb-4">Live Mission Roster</h2>
-            <div className="overflow-x-auto">
-              <table className="binary-breach-table">
+          <section className="bb-panel">
+            <h2 className="bb-panel-title">LIVE MISSION ROSTER</h2>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="bb-roster-table">
                 <thead>
                   <tr>
-                    <th scope="col">Student</th>
-                    <th scope="col">Restored</th>
-                    <th scope="col">Accuracy</th>
-                    <th scope="col">Streak</th>
-                    <th scope="col">Hints</th>
-                    <th scope="col">Trace</th>
-                    <th scope="col">Status</th>
+                    <th scope="col">TECHNICIAN</th>
+                    <th scope="col">SYS</th>
+                    <th scope="col">ACC</th>
+                    <th scope="col">STREAK</th>
+                    <th scope="col">HINTS</th>
+                    <th scope="col">TRACE</th>
+                    <th scope="col">STATUS</th>
                   </tr>
                 </thead>
                 <tbody>
                   {students.length === 0 && (
                     <tr>
-                      <td colSpan={7}>Waiting for technicians to join.</td>
+                      <td colSpan={7} style={{ color: 'var(--bb-text-dim)', fontStyle: 'italic' }}>
+                        Waiting for technicians to join...
+                      </td>
                     </tr>
                   )}
                   {students.map((student) => {
-                    const accuracy = student.progress.attempts === 0
+                    const acc = student.progress.attempts === 0
                       ? 100
                       : Math.round((student.progress.correct / student.progress.attempts) * 100)
                     return (
                       <tr key={student.id}>
                         <td>{student.name}</td>
-                        <td>{student.progress.systemsRestored}</td>
-                        <td>{accuracy}%</td>
+                        <td style={{ color: 'var(--bb-accent)' }}>{student.progress.systemsRestored}</td>
+                        <td>{acc}%</td>
                         <td>{student.progress.streak}</td>
                         <td>{student.progress.hintsUsed}</td>
-                        <td>{student.progress.traceLevel}</td>
-                        <td>{student.connected ? 'Connected' : 'Disconnected'}</td>
+                        <td style={{ color: student.progress.traceLevel >= 3 ? 'var(--bb-danger)' : undefined }}>
+                          {student.progress.traceLevel}
+                        </td>
+                        <td>
+                          <span
+                            className={`bb-status-dot ${student.connected ? 'bb-status-dot--online' : ''}`}
+                            aria-hidden="true"
+                          />
+                          {student.connected ? 'Online' : 'Offline'}
+                        </td>
                       </tr>
                     )
                   })}
