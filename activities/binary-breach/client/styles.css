@@ -279,7 +279,7 @@
 .bb-register-label {
   font-size: 0.6rem;
   letter-spacing: 0.16em;
-  color: var(--bb-text-dim);
+  color: var(--bb-text);
   margin-bottom: 5px;
 }
 
@@ -297,16 +297,38 @@
   background: var(--bb-bg);
 }
 
+.bb-register-cell--interactive {
+  appearance: none;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.bb-register-cell--interactive:hover,
+.bb-register-cell--interactive:focus-visible {
+  background: #12364a;
+}
+
+.bb-register-cell--interactive:focus-visible {
+  outline: 2px solid var(--bb-accent);
+  outline-offset: -2px;
+}
+
 .bb-register-cell:last-child {
   border-right: none;
 }
 
 .bb-register-cell-power {
-  font-size: 0.58rem;
-  color: var(--bb-text-dim);
-  padding: 4px 2px;
-  border-bottom: 1px solid var(--bb-border);
-  background: var(--bb-bg-3);
+  font-size: 0.75rem;
+  color: var(--bb-text-hi);
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--bb-border-hi);
+  background: #0f2535;
   letter-spacing: 0.04em;
 }
 
