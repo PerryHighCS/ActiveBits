@@ -279,17 +279,17 @@ Clamp score at zero and keep the formula in a tested shared helper.
 
 - [x] Create branch `plan/binary-breach-system-override`.
 - [x] Capture implementation plan in `.agent/plans/binary-breach-system-override.md`.
-- [ ] Scaffold `activities/binary-breach/` with config, client entry, server routes, and shared types.
-- [ ] Implement and test binary utilities: parse, format, compare, bit limits, ordering.
-- [ ] Implement and test MVP challenge generation and validation.
-- [ ] Implement and test scoring/progress helpers.
-- [ ] Implement server create/state/register/answer/hint routes with session normalization.
-- [ ] Implement manager view settings and live roster summary.
-- [ ] Implement student gameplay UI for four MVP challenge types.
-- [ ] Add activity-scoped lint/type/test coverage.
-- [ ] Add browser-level Playwright coverage if shared routing, activity-card surfacing, standalone entry, or waiting-room behavior changes.
+- [x] Scaffold `activities/binary-breach/` with config, client entry, server routes, and shared types.
+- [x] Implement and test binary utilities: parse, format, compare, bit limits, ordering.
+- [x] Implement and test MVP challenge generation and validation.
+- [x] Implement and test scoring/progress helpers.
+- [x] Implement server create/state/register/answer/hint routes with session normalization.
+- [x] Implement manager view settings and live roster summary.
+- [x] Implement student gameplay UI for four MVP challenge types.
+- [x] Add activity-scoped lint/type/test coverage.
+- [x] Add browser-level Playwright coverage if shared routing, activity-card surfacing, standalone entry, or waiting-room behavior changes.
 - [ ] Update docs if runtime/build/deployment behavior changes.
-- [ ] Record durable discoveries in `.agent/knowledge/*` as implementation patterns emerge.
+- [x] Record durable discoveries in `.agent/knowledge/*` as implementation patterns emerge.
 
 ## Suggested Milestones
 
@@ -345,4 +345,3 @@ Clamp score at zero and keep the formula in a tested shared helper.
 - Timer and lockout pressure can be motivating, but MVP should default to low-pressure settings to keep classroom use safe and growth-oriented.
 - Student progress persistence should be explicit. If the first version only preserves current-session progress, UI copy must avoid implying long-term best-score history.
 - If future SyncDeck embedding is requested, update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` in the same branch when adding or changing embedded launch payload formats.
-

@@ -1,0 +1,198 @@
+import type {
+  BinaryBreachChallenge,
+  BinaryBreachChallengeType,
+  BinaryBreachSettings,
+} from '../binaryBreachTypes.js'
+import { decimalToBinary, maxUnsignedValueForBits, orderBinaryValues } from './binaryUtils.js'
+
+export const BINARY_BREACH_CHALLENGE_TYPES: BinaryBreachChallengeType[] = [
+  'binary-to-decimal',
+  'decimal-to-binary',
+  'compare-binary',
+  'order-binary',
+]
+
+export const DEFAULT_BINARY_BREACH_SETTINGS: BinaryBreachSettings = {
+  maxBits: 4,
+  challengeTypes: [...BINARY_BREACH_CHALLENGE_TYPES],
+  missionLength: 5,
+  timerMode: 'off',
+  hintsEnabled: true,
+  placeValueSupport: 'visible',
+}
+
+const SYSTEM_NAMES = [
+  'Door Lock',
+  'Signal Router',
+  'Sorting Core',
+  'Memory Bank',
+  'Repair Console',
+  'Firewall Rule',
+  'Backup Generator',
+  'Drone Recovery',
+]
+
+function hashSeed(seed: string): number {
+  let hash = 2166136261
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+function createSeededRandom(seed: string): () => number {
+  let state = hashSeed(seed) || 1
+  return () => {
+    state = Math.imul(1664525, state) + 1013904223
+    return ((state >>> 0) / 4294967296)
+  }
+}
+
+function pick<T>(items: T[], random: () => number): T {
+  const first = items[0]
+  if (first == null) {
+    throw new Error('Cannot pick from an empty list')
+  }
+  return items[Math.floor(random() * items.length)] ?? first
+}
+
+function integerBetween(min: number, max: number, random: () => number): number {
+  return min + Math.floor(random() * (max - min + 1))
+}
+
+function normalizeMaxBits(bits: number): 4 | 5 | 6 | 7 | 8 {
+  if (bits <= 4) return 4
+  if (bits >= 8) return 8
+  return bits as 4 | 5 | 6 | 7 | 8
+}
+
+export function sanitizeChallengeTypes(value: unknown): BinaryBreachChallengeType[] {
+  if (!Array.isArray(value)) return [...BINARY_BREACH_CHALLENGE_TYPES]
+  const types = value.filter((type): type is BinaryBreachChallengeType =>
+    typeof type === 'string'
+      && (BINARY_BREACH_CHALLENGE_TYPES as string[]).includes(type),
+  )
+  return types.length > 0 ? Array.from(new Set(types)) : [...BINARY_BREACH_CHALLENGE_TYPES]
+}
+
+export function normalizeBinaryBreachSettings(value: unknown): BinaryBreachSettings {
+  const source = value != null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+  const maxBitsValue = Number.parseInt(String(source.maxBits ?? DEFAULT_BINARY_BREACH_SETTINGS.maxBits), 10)
+  const missionLengthValue = Number.parseInt(String(source.missionLength ?? DEFAULT_BINARY_BREACH_SETTINGS.missionLength), 10)
+  const timerMode = source.timerMode === 'generous' || source.timerMode === 'standard' ? source.timerMode : 'off'
+  const placeValueSupport = source.placeValueSupport === 'optional' || source.placeValueSupport === 'hidden'
+    ? source.placeValueSupport
+    : 'visible'
+
+  return {
+    maxBits: normalizeMaxBits(Number.isFinite(maxBitsValue) ? maxBitsValue : DEFAULT_BINARY_BREACH_SETTINGS.maxBits),
+    challengeTypes: sanitizeChallengeTypes(source.challengeTypes),
+    missionLength: Math.max(3, Math.min(12, Number.isFinite(missionLengthValue) ? missionLengthValue : 5)),
+    timerMode,
+    hintsEnabled: source.hintsEnabled !== false,
+    placeValueSupport,
+  }
+}
+
+export function createMissionSeed(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export function createBinaryBreachChallenge(
+  settings: BinaryBreachSettings,
+  seed: string,
+  challengeIndex: number,
+): BinaryBreachChallenge {
+  const random = createSeededRandom(`${seed}:${challengeIndex}`)
+  const type = pick(settings.challengeTypes, random)
+  const max = maxUnsignedValueForBits(settings.maxBits)
+  const systemName = SYSTEM_NAMES[challengeIndex % SYSTEM_NAMES.length] ?? 'Locked System'
+  const id = `${seed}:${challengeIndex}:${type}`
+  const maxBits = settings.maxBits
+
+  if (type === 'binary-to-decimal') {
+    const decimal = integerBetween(1, max, random)
+    const binary = decimalToBinary(decimal)
+    return {
+      id,
+      type,
+      systemName,
+      prompt: `Decode ${binary} to restore ${systemName}.`,
+      maxBits,
+      hintLevel: 0,
+      binary,
+      decimal,
+    }
+  }
+
+  if (type === 'decimal-to-binary') {
+    const decimal = integerBetween(1, max, random)
+    const binary = decimalToBinary(decimal)
+    return {
+      id,
+      type,
+      systemName,
+      prompt: `Upload the binary access code for ${decimal}.`,
+      maxBits,
+      hintLevel: 0,
+      decimal,
+      binary,
+    }
+  }
+
+  if (type === 'compare-binary') {
+    const leftValue = integerBetween(1, max, random)
+    let rightValue = integerBetween(1, max, random)
+    if (leftValue === rightValue) {
+      rightValue = rightValue === max ? rightValue - 1 : rightValue + 1
+    }
+    const target = random() > 0.5 ? 'larger' : 'smaller'
+    const answer = target === 'larger'
+      ? leftValue > rightValue ? 'left' : 'right'
+      : leftValue < rightValue ? 'left' : 'right'
+    return {
+      id,
+      type,
+      systemName,
+      prompt: `Select the ${target} signal to verify ${systemName}.`,
+      maxBits,
+      hintLevel: 0,
+      left: decimalToBinary(leftValue),
+      right: decimalToBinary(rightValue),
+      target,
+      answer,
+    }
+  }
+
+  const values = new Set<string>()
+  while (values.size < 4) {
+    values.add(decimalToBinary(integerBetween(1, max, random)))
+  }
+  const shuffled = Array.from(values).sort(() => random() - 0.5)
+  return {
+    id,
+    type: 'order-binary',
+    systemName,
+    prompt: `Arrange the recovery queue from least to greatest for ${systemName}.`,
+    maxBits,
+    hintLevel: 0,
+    values: shuffled,
+    answer: orderBinaryValues(shuffled),
+  }
+}
+
+export function getHintForChallenge(challenge: BinaryBreachChallenge): string {
+  if (challenge.type === 'binary-to-decimal') {
+    return `Use place values from right to left. ${challenge.binary} uses 1s, 2s, 4s, and higher powers of two.`
+  }
+  if (challenge.type === 'decimal-to-binary') {
+    return `Start with the largest power of two that fits inside ${challenge.decimal}, then subtract what you used.`
+  }
+  if (challenge.type === 'compare-binary') {
+    return 'A longer binary number is usually larger. If lengths match, compare from the leftmost bit.'
+  }
+  return 'Shorter binary numbers often come first. When lengths match, compare from left to right.'
+}
