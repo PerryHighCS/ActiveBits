@@ -8,6 +8,39 @@ function expectedAnswerText(challenge: BinaryBreachChallenge): string {
   return challenge.answer.join(', ')
 }
 
+function formatBinaryValue(binary: string): string {
+  const decimal = binaryToDecimal(binary)
+  return decimal == null ? `${binary}` : `${binary} (${decimal})`
+}
+
+function incorrectFeedbackMessage(challenge: BinaryBreachChallenge, answer: BinaryBreachAnswer): string {
+  if (challenge.type === 'binary-to-decimal' && answer.type === challenge.type) {
+    const submitted = normalizeDecimalAnswer(answer.decimal)
+    const submittedText = submitted == null ? 'that entry' : String(submitted)
+    return `Code rejected. You entered ${submittedText}, but ${challenge.binary} equals ${challenge.decimal}. Add the active place values from right to left.`
+  }
+
+  if (challenge.type === 'decimal-to-binary' && answer.type === challenge.type) {
+    const submitted = normalizeBinaryAnswer(answer.binary)
+    const submittedText = submitted == null ? 'an invalid binary code' : submitted
+    return `Upload rejected. You sent ${submittedText}, but ${challenge.decimal} needs ${challenge.binary}. Start with the largest fitting power of two and mark each used bit with 1.`
+  }
+
+  if (challenge.type === 'compare-binary' && answer.type === challenge.type) {
+    const chosen = answer.choice === 'left' ? challenge.left : challenge.right
+    const expected = challenge.answer === 'left' ? challenge.left : challenge.right
+    const targetLabel = challenge.target === 'larger' ? 'stronger' : 'lower'
+    return `Signal mismatch. You chose ${formatBinaryValue(chosen)}, but the ${targetLabel} signal is ${formatBinaryValue(expected)}. Compare bit length first, then scan left to right.`
+  }
+
+  if (challenge.type === 'order-binary' && answer.type === challenge.type) {
+    const submitted = answer.values.length > 0 ? answer.values.join(', ') : 'no queue'
+    return `Queue rejected. You submitted ${submitted}. Correct least-to-greatest order is ${challenge.answer.join(', ')}. Shorter values usually come first; matching lengths compare left to right.`
+  }
+
+  return `Code rejected. Expected ${expectedAnswerText(challenge)}. Check the place values and try the next system.`
+}
+
 export function validateBinaryBreachAnswer(
   challenge: BinaryBreachChallenge,
   answer: BinaryBreachAnswer,
@@ -39,7 +72,7 @@ export function validateBinaryBreachAnswer(
     decimalValue,
     message: correct
       ? 'Access granted. System restored.'
-      : `Code rejected. Expected ${expectedAnswer}. Check the place values and try the next system.`,
+      : incorrectFeedbackMessage(challenge, answer),
   }
 }
 

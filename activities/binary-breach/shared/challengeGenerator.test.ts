@@ -102,6 +102,61 @@ void test('validates answers for each MVP challenge type', () => {
   }).correct, true)
 })
 
+void test('accepts 100 as decimal 4 for binary-to-decimal challenges', () => {
+  const feedback = validateBinaryBreachAnswer({
+    id: 'regression-100',
+    type: 'binary-to-decimal',
+    systemName: 'Door Lock',
+    prompt: 'Decode 100.',
+    maxBits: 8,
+    hintLevel: 0,
+    binary: '100',
+    decimal: 4,
+  }, {
+    type: 'binary-to-decimal',
+    decimal: '4',
+  })
+
+  assert.equal(feedback.correct, true)
+})
+
+void test('explains incorrect answers with challenge-specific feedback', () => {
+  const conversionFeedback = validateBinaryBreachAnswer({
+    id: 'c1',
+    type: 'binary-to-decimal',
+    systemName: 'Door Lock',
+    prompt: 'Decode the packet.',
+    maxBits: 8,
+    hintLevel: 0,
+    binary: '101101',
+    decimal: 45,
+  }, {
+    type: 'binary-to-decimal',
+    decimal: '44',
+  })
+  assert.equal(conversionFeedback.correct, false)
+  assert.match(conversionFeedback.message, /You entered 44/)
+  assert.match(conversionFeedback.message, /101101 equals 45/)
+
+  const compareFeedback = validateBinaryBreachAnswer({
+    id: 'c2',
+    type: 'compare-binary',
+    systemName: 'Signal Router',
+    prompt: 'Choose the stronger signal.',
+    maxBits: 8,
+    hintLevel: 0,
+    left: '10111',
+    right: '11001',
+    target: 'larger',
+    answer: 'right',
+  }, {
+    type: 'compare-binary',
+    choice: 'left',
+  })
+  assert.match(compareFeedback.message, /You chose 10111 \(23\)/)
+  assert.match(compareFeedback.message, /stronger signal is 11001 \(25\)/)
+})
+
 void test('updates progress and clamps score at zero', () => {
   const afterCorrect = applyAnswerResult(createInitialProgress(), true, 1)
   assert.equal(afterCorrect.systemsRestored, 1)

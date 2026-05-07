@@ -154,3 +154,118 @@ void test('registers a student and validates an answer against the stored challe
   const payload = answerResponse.payload as { progress: { attempts: number } }
   assert.equal(payload.progress.attempts, 1)
 })
+
+void test('applies manager settings to student missions and hint availability', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const settingsResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/settings')?.({
+    params: { sessionId },
+    body: {
+      maxBits: 4,
+      missionLength: 3,
+      challengeTypes: ['decimal-to-binary'],
+      hintsEnabled: false,
+      placeValueSupport: 'hidden',
+    },
+  }, settingsResponse)
+
+  assert.equal(settingsResponse.statusCode, 200)
+  assert.deepEqual((settingsResponse.payload as { settings: unknown }).settings, {
+    maxBits: 4,
+    missionLength: 3,
+    challengeTypes: ['decimal-to-binary'],
+    timerMode: 'off',
+    hintsEnabled: false,
+    placeValueSupport: 'hidden',
+  })
+
+  const registerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Grace' },
+  }, registerResponse)
+
+  assert.equal(registerResponse.statusCode, 200)
+  const registered = registerResponse.payload as {
+    studentId: string
+    challenge: { type: string; maxBits: number }
+    progress: { completed: boolean }
+    settings: { missionLength: number; hintsEnabled: boolean; placeValueSupport: string }
+  }
+  assert.equal(registered.challenge.type, 'decimal-to-binary')
+  assert.equal(registered.challenge.maxBits, 4)
+  assert.equal(registered.settings.missionLength, 3)
+  assert.equal(registered.settings.hintsEnabled, false)
+  assert.equal(registered.settings.placeValueSupport, 'hidden')
+
+  const hintResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/hint')?.({
+    params: { sessionId },
+    body: { studentName: 'Grace', studentId: registered.studentId },
+  }, hintResponse)
+
+  assert.equal(hintResponse.statusCode, 400)
+})
+
+void test('does not score stale student answers after manager resets a mission', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const registerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Katherine' },
+  }, registerResponse)
+
+  const registered = registerResponse.payload as {
+    studentId: string
+    challenge: { id: string; type: string }
+  }
+
+  const settingsResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/settings')?.({
+    params: { sessionId },
+    body: {
+      maxBits: 8,
+      missionLength: 5,
+      challengeTypes: ['binary-to-decimal'],
+      hintsEnabled: true,
+      placeValueSupport: 'visible',
+    },
+  }, settingsResponse)
+  assert.equal(settingsResponse.statusCode, 200)
+
+  const staleAnswerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/answer')?.({
+    params: { sessionId },
+    body: {
+      studentName: 'Katherine',
+      studentId: registered.studentId,
+      challengeId: registered.challenge.id,
+      answer: { decimal: '4' },
+    },
+  }, staleAnswerResponse)
+
+  assert.equal(staleAnswerResponse.statusCode, 409)
+  const payload = staleAnswerResponse.payload as {
+    error: string
+    challenge: { id: string }
+    progress: { attempts: number; incorrect: number }
+  }
+  assert.equal(payload.error, 'stale_challenge')
+  assert.notEqual(payload.challenge.id, registered.challenge.id)
+  assert.equal(payload.progress.attempts, 0)
+  assert.equal(payload.progress.incorrect, 0)
+})

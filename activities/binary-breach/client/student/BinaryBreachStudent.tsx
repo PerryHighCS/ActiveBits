@@ -7,6 +7,7 @@ import type {
   BinaryBreachChallenge,
   BinaryBreachFeedback,
   BinaryBreachProgress,
+  BinaryBreachSettings,
 } from '../../binaryBreachTypes.js'
 import {
   DEFAULT_BINARY_BREACH_SETTINGS,
@@ -17,6 +18,11 @@ import {
 import { validateBinaryBreachAnswer } from '../../shared/challengeValidation.js'
 import { applyAnswerResult, applyHintUse, createInitialProgress } from '../../shared/scoring.js'
 import PlaceValueChart from '../components/PlaceValueChart'
+import {
+  getSelectedDecimalPlaceValues,
+  toggleBinaryPlaceValueAnswer,
+  toggleDecimalPlaceValueAnswer,
+} from './placeValueInputUtils.js'
 
 interface BinaryBreachStudentProps {
   sessionData?: {
@@ -29,12 +35,21 @@ interface RegisterResponse {
   studentName: string
   challenge: BinaryBreachChallenge | null
   progress: BinaryBreachProgress
+  settings: BinaryBreachSettings
 }
 
 interface AnswerResponse {
   feedback: BinaryBreachFeedback
   progress: BinaryBreachProgress
   challenge: BinaryBreachChallenge | null
+  settings: BinaryBreachSettings
+}
+
+interface StaleChallengeResponse {
+  error: 'stale_challenge'
+  challenge: BinaryBreachChallenge | null
+  progress: BinaryBreachProgress
+  settings: BinaryBreachSettings
 }
 
 function isSoloSession(sessionId: string | undefined): boolean {
@@ -85,10 +100,12 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
   const [identityReady, setIdentityReady] = useState(false)
   const [challenge, setChallenge] = useState<BinaryBreachChallenge | null>(null)
   const [progress, setProgress] = useState<BinaryBreachProgress>(() => createInitialProgress())
+  const [missionSettings, setMissionSettings] = useState<BinaryBreachSettings>(() => ({ ...DEFAULT_BINARY_BREACH_SETTINGS }))
   const [textAnswer, setTextAnswer] = useState('')
   const [choiceAnswer, setChoiceAnswer] = useState<'left' | 'right' | null>(null)
   const [orderAnswer, setOrderAnswer] = useState<string[]>([])
   const [feedback, setFeedback] = useState<BinaryBreachFeedback | null>(null)
+  const [pendingChallenge, setPendingChallenge] = useState<BinaryBreachChallenge | null | undefined>(undefined)
   const [hint, setHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -96,7 +113,8 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
   const [localIndex, setLocalIndex] = useState(0)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
-  const missionLength = DEFAULT_BINARY_BREACH_SETTINGS.missionLength
+  const [placeValueChartOpen, setPlaceValueChartOpen] = useState(false)
+  const missionLength = missionSettings.missionLength
 
   const accuracy = progress.attempts === 0 ? 100 : Math.round((progress.correct / progress.attempts) * 100)
   const progressPct = Math.min(100, Math.round((progress.systemsRestored / missionLength) * 100))
@@ -107,7 +125,11 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
     setOrderAnswer(nextChallenge?.type === 'order-binary' ? nextChallenge.values : [])
     setHint(null)
     setFeedback(null)
+    setPendingChallenge(undefined)
+    setPlaceValueChartOpen(false)
   }, [])
+
+  const awaitingFeedbackContinue = feedback != null && !feedback.correct && !progress.completed && pendingChallenge !== undefined
 
   useEffect(() => {
     let cancelled = false
@@ -139,12 +161,14 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
           if (cancelled) return
           setStudentId(payload.studentId)
           setStudentName(payload.studentName)
+          setMissionSettings(payload.settings)
           setChallenge(payload.challenge)
           setProgress(payload.progress)
           resetAnswerState(payload.challenge)
           persistSessionParticipantIdentity(window.localStorage, sessionId, payload.studentName, payload.studentId)
         } else {
           const firstChallenge = createBinaryBreachChallenge(DEFAULT_BINARY_BREACH_SETTINGS, localSeed, 0)
+          setMissionSettings(DEFAULT_BINARY_BREACH_SETTINGS)
           setChallenge(firstChallenge)
           resetAnswerState(firstChallenge)
         }
@@ -161,11 +185,11 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
   }, [localSeed, resetAnswerState, sessionId, solo])
 
   const canSubmit = useMemo(() => {
-    if (!challenge || progress.completed) return false
+    if (!challenge || progress.completed || awaitingFeedbackContinue) return false
     if (challenge.type === 'compare-binary') return choiceAnswer != null
     if (challenge.type === 'order-binary') return orderAnswer.length === challenge.values.length
     return textAnswer.trim().length > 0
-  }, [challenge, choiceAnswer, orderAnswer, progress.completed, textAnswer])
+  }, [awaitingFeedbackContinue, challenge, choiceAnswer, orderAnswer, progress.completed, textAnswer])
 
   const submitAnswer = async (event: FormEvent) => {
     event.preventDefault()
@@ -185,14 +209,28 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         const response = await fetch(`/api/binary-breach/${sessionId}/student/answer`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ studentName, studentId, answer }),
+          body: JSON.stringify({ studentName, studentId, challengeId: challenge.id, answer }),
         })
+        if (response.status === 409) {
+          const payload = await response.json() as StaleChallengeResponse
+          setMissionSettings(payload.settings)
+          setProgress(payload.progress)
+          setChallenge(payload.challenge)
+          resetAnswerState(payload.challenge)
+          setError('Mission settings changed. The console loaded the current transmission.')
+          return
+        }
         if (!response.ok) throw new Error('Failed to submit answer')
         const payload = await response.json() as AnswerResponse
-        setFeedback(payload.feedback)
+        setMissionSettings(payload.settings)
         setProgress(payload.progress)
-        setChallenge(payload.challenge)
-        resetAnswerState(payload.challenge)
+        if (payload.feedback.correct) {
+          setChallenge(payload.challenge)
+          resetAnswerState(payload.challenge)
+        } else {
+          setFeedback(payload.feedback)
+          setPendingChallenge(payload.challenge)
+        }
       } else {
         const localFeedback = validateBinaryBreachAnswer(challenge, { type: challenge.type, ...answer } as never)
         const nextProgress = applyAnswerResult(progress, localFeedback.correct, missionLength)
@@ -200,11 +238,15 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         const nextChallenge = nextProgress.completed
           ? null
           : createBinaryBreachChallenge(DEFAULT_BINARY_BREACH_SETTINGS, localSeed, nextIndex)
-        setFeedback(localFeedback)
         setProgress(nextProgress)
         setLocalIndex(nextIndex)
-        setChallenge(nextChallenge)
-        resetAnswerState(nextChallenge)
+        if (localFeedback.correct) {
+          setChallenge(nextChallenge)
+          resetAnswerState(nextChallenge)
+        } else {
+          setFeedback(localFeedback)
+          setPendingChallenge(nextChallenge)
+        }
       }
     } catch (err) {
       console.error('Binary Breach answer submit failed:', err)
@@ -212,6 +254,12 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const continueAfterFeedback = () => {
+    const nextChallenge = pendingChallenge ?? null
+    setChallenge(nextChallenge)
+    resetAnswerState(nextChallenge)
   }
 
   const requestHint = async () => {
@@ -226,8 +274,14 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         setError('No hint is available for this system.')
         return
       }
-      const payload = await response.json() as { hint: string; progress: BinaryBreachProgress; challenge: BinaryBreachChallenge }
+      const payload = await response.json() as {
+        hint: string
+        progress: BinaryBreachProgress
+        challenge: BinaryBreachChallenge
+        settings: BinaryBreachSettings
+      }
       setHint(payload.hint)
+      setMissionSettings(payload.settings)
       setProgress(payload.progress)
       setChallenge(payload.challenge)
     } else {
@@ -271,6 +325,19 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
 
   const traceDanger = progress.traceLevel >= 3
   const streakHot = progress.streak >= 3
+  const channelCode = sessionId && !solo ? sessionId : 'SOLO'
+  const showPlaceValueChart = missionSettings.placeValueSupport === 'visible'
+    || (missionSettings.placeValueSupport === 'optional' && placeValueChartOpen)
+  const placeValueToggle = missionSettings.placeValueSupport === 'optional' ? (
+    <button
+      className="bb-btn bb-btn--secondary bb-btn--tool"
+      type="button"
+      aria-pressed={placeValueChartOpen}
+      onClick={() => setPlaceValueChartOpen((current) => !current)}
+    >
+      {placeValueChartOpen ? 'HIDE PLACE GRID' : 'OPEN PLACE GRID'}
+    </button>
+  ) : null
 
   return (
     <div className="binary-breach-shell">
@@ -278,6 +345,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         <span className="bb-header-badge">BINARY BREACH</span>
         <span className="bb-header-sep">//</span>
         <span className="bb-header-title">SYSTEM OVERRIDE</span>
+        <span className="bb-header-channel">CHANNEL CODE: {channelCode}</span>
         <span className="bb-header-tech">TECH: {studentName || '...'}</span>
       </header>
 
@@ -318,7 +386,16 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
             className={`bb-feedback ${feedback.correct ? 'bb-feedback--correct' : 'bb-feedback--incorrect'}`}
             aria-live="polite"
           >
-            {feedback.message}
+            <div>{feedback.message}</div>
+            {awaitingFeedbackContinue && (
+              <button
+                className="bb-btn bb-btn--secondary"
+                type="button"
+                onClick={continueAfterFeedback}
+              >
+                NEXT TRANSMISSION
+              </button>
+            )}
           </div>
         )}
 
@@ -363,7 +440,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
           </section>
         )}
 
-        {identityReady && challenge && !progress.completed && (
+        {identityReady && challenge && !progress.completed && !awaitingFeedbackContinue && (
           <form className="bb-terminal" onSubmit={submitAnswer} noValidate>
             <div className="bb-terminal-titlebar">
               <span className="bb-terminal-sys">{challenge.systemName}</span>
@@ -376,7 +453,20 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
               {challenge.type === 'binary-to-decimal' && (
                 <>
                   <BitCells value={challenge.binary} />
-                  <PlaceValueChart bits={challenge.maxBits} value={challenge.binary} />
+                  {placeValueToggle}
+                  {showPlaceValueChart && (
+                    <PlaceValueChart
+                      bits={challenge.maxBits}
+                      value={challenge.binary}
+                      mode="add-values"
+                      selectedPlaceValues={getSelectedDecimalPlaceValues(textAnswer, challenge.maxBits)}
+                      onPlaceValueClick={(power, _index, currentBit) => {
+                        if (currentBit === '1') {
+                          setTextAnswer((current) => toggleDecimalPlaceValueAnswer(current, power))
+                        }
+                      }}
+                    />
+                  )}
                 </>
               )}
 
@@ -388,7 +478,17 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
                       {challenge.decimal}
                     </span>
                   </div>
-                  <PlaceValueChart bits={challenge.maxBits} value={textAnswer} />
+                  {placeValueToggle}
+                  {showPlaceValueChart && (
+                    <PlaceValueChart
+                      bits={challenge.maxBits}
+                      value={textAnswer.replace(/[^01]/g, '')}
+                      mode="toggle-bits"
+                      onPlaceValueClick={(_power, index) => {
+                        setTextAnswer((current) => toggleBinaryPlaceValueAnswer(current, challenge.maxBits, index))
+                      }}
+                    />
+                  )}
                 </>
               )}
 
@@ -419,7 +519,8 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
 
               {challenge.type === 'compare-binary' && (
                 <>
-                  <PlaceValueChart bits={challenge.maxBits} />
+                  {placeValueToggle}
+                  {showPlaceValueChart && <PlaceValueChart bits={challenge.maxBits} />}
                   <div
                     className="bb-compare-grid"
                     role="group"
@@ -449,7 +550,8 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
 
               {challenge.type === 'order-binary' && (
                 <>
-                  <PlaceValueChart bits={challenge.maxBits} />
+                  {placeValueToggle}
+                  {showPlaceValueChart && <PlaceValueChart bits={challenge.maxBits} />}
                   <div
                     className="bb-order-list"
                     aria-label="Binary values in selected order"
@@ -515,7 +617,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
                   className="bb-btn bb-btn--secondary"
                   type="button"
                   onClick={requestHint}
-                  disabled={challenge == null}
+                  disabled={challenge == null || !missionSettings.hintsEnabled}
                 >
                   REQUEST HINT
                 </button>

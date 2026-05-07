@@ -84,6 +84,16 @@
   letter-spacing: 0.06em;
 }
 
+.bb-header-channel {
+  font-size: 0.68rem;
+  color: var(--bb-success);
+  letter-spacing: 0.08em;
+  border: 1px solid rgba(34, 221, 119, 0.35);
+  padding: 3px 8px;
+  border-radius: 2px;
+  background: rgba(34, 221, 119, 0.06);
+}
+
 .bb-header-tech {
   margin-left: auto;
   font-size: 0.7rem;
@@ -312,6 +322,10 @@
 .bb-register-cell--interactive:hover,
 .bb-register-cell--interactive:focus-visible {
   background: #12364a;
+}
+
+.bb-register-cell--interactive[aria-pressed="true"] {
+  background: rgba(34, 221, 119, 0.08);
 }
 
 .bb-register-cell--interactive:focus-visible {
@@ -548,6 +562,12 @@
   padding: 5px 9px;
   font-size: 0.9rem;
   line-height: 1;
+}
+
+.bb-btn--tool {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  font-size: 0.68rem;
 }
 
 /* --- Feedback banners --- */
@@ -787,5 +807,9 @@
   .bb-header-tech {
     margin-left: 0;
     width: 100%;
+  }
+
+  .bb-header-channel {
+    order: 4;
   }
 }

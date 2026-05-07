@@ -227,7 +227,13 @@ export default function setupBinaryBreachRoutes(
     }
     await sessions.set(session.id, session)
     await broadcastRoster(session)
-    res.json({ studentId: student.id, studentName: student.name, challenge: student.currentChallenge, progress: student.progress })
+    res.json({
+      studentId: student.id,
+      studentName: student.name,
+      challenge: student.currentChallenge,
+      progress: student.progress,
+      settings: session.data.settings,
+    })
   })
 
   app.post('/api/binary-breach/:sessionId/student/answer', async (req, res) => {
@@ -240,6 +246,15 @@ export default function setupBinaryBreachRoutes(
     const student = ensureStudent(session, body.studentId, body.studentName)
     if (!student || !student.currentChallenge) {
       res.status(400).json({ error: 'invalid student' })
+      return
+    }
+    if (typeof body.challengeId === 'string' && body.challengeId !== student.currentChallenge.id) {
+      res.status(409).json({
+        error: 'stale_challenge',
+        challenge: student.currentChallenge,
+        progress: student.progress,
+        settings: session.data.settings,
+      })
       return
     }
     const answer = serializeAnswerFromUnknown(student.currentChallenge, body.answer) as BinaryBreachAnswer | null
@@ -266,6 +281,7 @@ export default function setupBinaryBreachRoutes(
       feedback,
       progress: student.progress,
       challenge: student.currentChallenge,
+      settings: session.data.settings,
     })
   })
 
@@ -292,6 +308,7 @@ export default function setupBinaryBreachRoutes(
       hint: getHintForChallenge(student.currentChallenge),
       progress: student.progress,
       challenge: student.currentChallenge,
+      settings: session.data.settings,
     })
   })
 
@@ -331,4 +348,3 @@ export default function setupBinaryBreachRoutes(
     })
   })
 }
-

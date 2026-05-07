@@ -43,6 +43,7 @@ export default function BinaryBreachManager() {
   const [settings, setSettings] = useState<BinaryBreachSettings>(() => ({ ...DEFAULT_BINARY_BREACH_SETTINGS }))
   const [students, setStudents] = useState<RosterStudent[]>([])
   const [saving, setSaving] = useState(false)
+  const [settingsDirty, setSettingsDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const loadState = useCallback(async () => {
@@ -51,14 +52,14 @@ export default function BinaryBreachManager() {
       const response = await fetch(`/api/binary-breach/${sessionId}/state`)
       if (!response.ok) throw new Error('Failed to load Binary Breach state')
       const payload = await response.json() as StateResponse
-      setSettings(payload.settings)
+      if (!settingsDirty) setSettings(payload.settings)
       setStudents(payload.students)
       setError(null)
     } catch (err) {
       console.error('Failed to load Binary Breach manager state:', err)
       setError('Unable to load mission state.')
     }
-  }, [sessionId])
+  }, [sessionId, settingsDirty])
 
   useEffect(() => {
     void loadState()
@@ -76,7 +77,7 @@ export default function BinaryBreachManager() {
       try {
         const message = JSON.parse(String(event.data)) as { type?: string; payload?: StateResponse }
         if (message.type === 'binary-breach:roster' && message.payload) {
-          setSettings(message.payload.settings)
+          if (!settingsDirty) setSettings(message.payload.settings)
           setStudents(message.payload.students)
         }
       } catch (err) {
@@ -84,7 +85,7 @@ export default function BinaryBreachManager() {
       }
     }
     return () => socket.close()
-  }, [sessionId])
+  }, [sessionId, settingsDirty])
 
   const classAccuracy = useMemo(() => {
     const attempts = students.reduce((total, student) => total + student.progress.attempts, 0)
@@ -106,6 +107,7 @@ export default function BinaryBreachManager() {
       if (!response.ok) throw new Error('Failed to save settings')
       const payload = await response.json() as { settings: BinaryBreachSettings }
       setSettings(payload.settings)
+      setSettingsDirty(false)
       await loadState()
     } catch (err) {
       console.error('Failed to save Binary Breach settings:', err)
@@ -154,10 +156,13 @@ export default function BinaryBreachManager() {
                 id="bb-max-bits"
                 className="bb-select"
                 value={settings.maxBits}
-                onChange={(event) => setSettings((current) => ({
-                  ...current,
-                  maxBits: Number(event.target.value) as BinaryBreachSettings['maxBits'],
-                }))}
+                onChange={(event) => {
+                  setSettingsDirty(true)
+                  setSettings((current) => ({
+                    ...current,
+                    maxBits: Number(event.target.value) as BinaryBreachSettings['maxBits'],
+                  }))
+                }}
               >
                 {[4, 5, 6, 7, 8].map((bits) => (
                   <option key={bits} value={bits}>{bits} bits</option>
@@ -174,10 +179,13 @@ export default function BinaryBreachManager() {
                 min="3"
                 max="12"
                 value={settings.missionLength}
-                onChange={(event) => setSettings((current) => ({
-                  ...current,
-                  missionLength: Number(event.target.value),
-                }))}
+                onChange={(event) => {
+                  setSettingsDirty(true)
+                  setSettings((current) => ({
+                    ...current,
+                    missionLength: Number(event.target.value),
+                  }))
+                }}
               />
             </div>
 
@@ -188,10 +196,13 @@ export default function BinaryBreachManager() {
                   <input
                     type="checkbox"
                     checked={settings.challengeTypes.includes(type)}
-                    onChange={() => setSettings((current) => ({
-                      ...current,
-                      challengeTypes: toggleChallengeType(current.challengeTypes, type),
-                    }))}
+                    onChange={() => {
+                      setSettingsDirty(true)
+                      setSettings((current) => ({
+                        ...current,
+                        challengeTypes: toggleChallengeType(current.challengeTypes, type),
+                      }))
+                    }}
                   />
                   <span>{CHALLENGE_LABELS[type]}</span>
                 </label>
@@ -202,10 +213,13 @@ export default function BinaryBreachManager() {
               <input
                 type="checkbox"
                 checked={settings.hintsEnabled}
-                onChange={(event) => setSettings((current) => ({
-                  ...current,
-                  hintsEnabled: event.target.checked,
-                }))}
+                onChange={(event) => {
+                  setSettingsDirty(true)
+                  setSettings((current) => ({
+                    ...current,
+                    hintsEnabled: event.target.checked,
+                  }))
+                }}
               />
               <span>Hints available</span>
             </label>
@@ -216,10 +230,13 @@ export default function BinaryBreachManager() {
                 id="bb-place-value"
                 className="bb-select"
                 value={settings.placeValueSupport}
-                onChange={(event) => setSettings((current) => ({
-                  ...current,
-                  placeValueSupport: event.target.value as BinaryBreachSettings['placeValueSupport'],
-                }))}
+                onChange={(event) => {
+                  setSettingsDirty(true)
+                  setSettings((current) => ({
+                    ...current,
+                    placeValueSupport: event.target.value as BinaryBreachSettings['placeValueSupport'],
+                  }))
+                }}
               >
                 <option value="visible">Visible</option>
                 <option value="optional">Optional</option>
