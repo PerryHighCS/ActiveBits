@@ -88,6 +88,7 @@ session.data.presentationLocalActivities = {
     instanceKey: string
     location?: { h: number; v: number; f?: number }
     updatedAt: number
+    // Optional future generic state escape hatch. Phase one should prefer typed services.
     sharedState?: Record<string, unknown>
     services?: Record<string, {
       type: string
@@ -106,11 +107,13 @@ session.data.presentationLocalActivities = {
 
 This namespace is intentionally separate from `session.data.embeddedActivities`.
 
+`services` is keyed by `serviceId` within the channel. If collision risk becomes meaningful, the stored key can be derived as `${serviceType}:${serviceId}`, while the public protocol can keep `serviceType` and `serviceId` as separate fields.
+
 Student-private restore state should not live beside shared channel state. If SyncDeck later persists local student state, use a separate per-student namespace so replay paths cannot accidentally broadcast private work:
 
 ```ts
 session.data.presentationLocalStudentState = {
-  [studentId: string]: {
+  [participantId: string]: {
     [channelKey: string]: {
       updatedAt: number
       localState: Record<string, unknown>
@@ -130,14 +133,16 @@ This API would sit above the existing `RevealIframeSyncAPI.sendCustom(...)` mech
 At a high level:
 
 - presentation-local activities register themselves with the host
-- activities can store local state
-- activities can emit progress or shared events
+- activities may eventually store local private state
+- activities may eventually emit progress or shared events
 - activities can subscribe to host-relayed events or state updates
 - shared utilities can be controlled by the instructor and rendered consistently across all participants
 
 ## Example Authoring API
 
 ### Register A Presentation-Local Activity
+
+This is a future/full API example. Phase one can start narrower with declaration plus instructor-owned service commands.
 
 ```js
 const keyLab = SyncDeckSession.activities.register({
