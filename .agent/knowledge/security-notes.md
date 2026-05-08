@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-05-08
+- Area: Playwright SyncDeck instructor bootstrap
+- Threat or risk: Seeding E2E manager pages by writing a real `instructorPasscode` into browser `sessionStorage` creates the same clear-text credential persistence pattern the product avoids where possible, and triggers CodeQL clear-text storage findings.
+- Control or mitigation: The control-authority Playwright test now exposes the passcode through a test-only `sessionStorage.getItem` shim for the exact SyncDeck passcode key instead of calling `sessionStorage.setItem` with the secret.
+- Residual risk: The passcode still exists in test process memory and is returned to app code as part of the manager bootstrap path; the mitigation only removes browser storage persistence from the harness.
+- Validation (test/review/path): `playwright/control-authority.spec.ts`
+- Follow-up action: Prefer route/cookie/bootstrap shims or same-tab memory helpers over Web Storage writes when E2E tests need manager credentials.
+- Owner: Codex
+
 - Date: 2026-03-22
 - Area: Playwright production-mode test secret handling
 - Threat or risk: Committing a fixed `PERSISTENT_SESSION_SECRET` in the Playwright harness creates secret-scanner noise and normalizes checking pseudo-secrets into the repo, even when the value is test-only.

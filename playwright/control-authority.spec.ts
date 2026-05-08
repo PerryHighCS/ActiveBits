@@ -1,7 +1,5 @@
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test'
 
-const SYNCDECK_PASSCODE_KEY_PREFIX = 'syncdeck_instructor_'
-
 async function createConfiguredSyncDeckSession(request: APIRequestContext): Promise<{
   sessionId: string
   instructorPasscode: string
@@ -41,15 +39,24 @@ async function openSyncDeckInstructorPage(params: {
   const context = await params.browser.newContext()
   const page = await context.newPage()
   await page.addInitScript(
-    ({ sessionId, instructorPasscode, passcodeKeyPrefix, browserId, tabId }) => {
+    ({ sessionId, instructorPasscode, browserId, tabId }) => {
+      const passcodeStorageKey = `syncdeck_instructor_${sessionId}`
+      const originalGetItem = window.sessionStorage.getItem.bind(window.sessionStorage)
+
+      window.sessionStorage.getItem = (key: string): string | null => {
+        if (key === passcodeStorageKey) {
+          return instructorPasscode
+        }
+
+        return originalGetItem(key)
+      }
+
       window.localStorage.setItem('activebits:instructor-control:browser-id', browserId)
       window.sessionStorage.setItem('activebits:instructor-control:tab-id', tabId)
-      window.sessionStorage.setItem(`${passcodeKeyPrefix}${sessionId}`, instructorPasscode)
     },
     {
       sessionId: params.sessionId,
       instructorPasscode: params.instructorPasscode,
-      passcodeKeyPrefix: SYNCDECK_PASSCODE_KEY_PREFIX,
       browserId: params.browserId,
       tabId: params.tabId,
     },
