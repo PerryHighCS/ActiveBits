@@ -67,7 +67,7 @@ Field guidance:
 - `order` should be explicit and zero-based
 - `responseTimeLimitMs` should be provided when timed launch behavior matters
 - multiple-choice questions should carry an `options` array
-- a resonance MCQ with one correct option behaves as single-select; with multiple correct options it behaves as multi-select and requires the full correct set
+- a resonance MCQ with zero correct options is poll mode and remains single-select; with one correct option it behaves as single-select; with multiple correct options it behaves as multi-select and requires the full correct set
 
 ### Child embedded launch state
 
