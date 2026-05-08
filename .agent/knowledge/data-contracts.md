@@ -15,6 +15,24 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-05-08
+- Surface: activity interface | client bootstrap
+- Contract: Shared activity `deepLinkOptions` may now describe common permalink/embed controls with `text`, `select`, `number`, `checkbox`, and `multiselect` field types. Values still canonicalize to string selected-options records; multiselect values use a comma-separated string, and checkbox values use `"true"` / `"false"`.
+- Compatibility constraints: Existing text/select options remain unchanged. Activities that need richer or protocol-specific setup can still use `manageDashboard.customPersistentLinkBuilder`, but simple dashboard-like settings should prefer the generic fields so the same selected-options contract works for persistent links, `/launch` query params, and SyncDeck embedded `activityOptions`.
+- Validation rules: Number fields may enforce finite `min`/`max`; multiselect values are filtered/validated against declared option values; URL validators continue to require valid http(s) URLs.
+- Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `server/activityConfigSchema.test.ts`; `ARCHITECTURE.md`; `ADDING_ACTIVITIES.md`
+- Follow-up action: If activities need labels/help text per option beyond current fields, extend the generic option schema rather than adding one-off dashboard controls.
+- Owner: Codex
+
+- Date: 2026-05-08
+- Surface: activity interface | SyncDeck embedded launch
+- Contract: Binary Breach consumes mission setup from `embeddedLaunch.selectedOptions` using the same keys exposed in its permalink builder: `maxBits`, `missionLength`, `challengeTypes`, `hintsEnabled`, and `placeValueSupport`.
+- Compatibility constraints: Stored `session.data.settings` remains authoritative once present, so manager edits are not overwritten by launch options after session creation. Missing launch fields fall back through normal Binary Breach defaults.
+- Validation rules: `challengeTypes` may arrive as a comma-separated string and normalizes to the supported challenge-type array. `hintsEnabled` string `"false"` disables hints; all other malformed values fall back safely.
+- Evidence (schema/tests/path): `activities/binary-breach/activity.config.ts`; `activities/binary-breach/server/routeUtils.ts`; `activities/binary-breach/server/routeUtils.test.ts`; `activities/binary-breach/server/routes.test.ts`; `skills/syncdeck/references/ACTIVITY_PAYLOADS.md`
+- Follow-up action: Keep Binary Breach deck examples aligned with activity config if future challenge types or settings are added.
+- Owner: Codex
+
 - Date: 2026-04-17
 - Surface: activity interface | websocket | internal module
 - Contract: SyncDeck student-side instructor sync suppression must derive incoming slide indices from all Reveal state shapes that can drive a `setState`, including `payload.indices`, `payload.navigation.current`, `payload.revealState`, and top-level state fields. Same-horizontal vertical instructor moves must remain suppressible even when the deck emits `revealState` without a separate `indices` object.

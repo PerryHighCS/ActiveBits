@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useLocation, useParams } from 'react-router-dom'
 import SessionHeader from '@src/components/common/SessionHeader'
 import type {
   BinaryBreachChallengeType,
@@ -9,6 +9,7 @@ import type {
 import {
   BINARY_BREACH_CHALLENGE_TYPES,
   DEFAULT_BINARY_BREACH_SETTINGS,
+  normalizeBinaryBreachSettings,
 } from '../../shared/challengeGenerator.js'
 
 type RosterStudent = Pick<
@@ -40,6 +41,8 @@ function toggleChallengeType(
 
 export default function BinaryBreachManager() {
   const { sessionId } = useParams()
+  const location = useLocation()
+  const querySettingsAppliedRef = useRef(false)
   const [settings, setSettings] = useState<BinaryBreachSettings>(() => ({ ...DEFAULT_BINARY_BREACH_SETTINGS }))
   const [students, setStudents] = useState<RosterStudent[]>([])
   const [saving, setSaving] = useState(false)
@@ -60,6 +63,39 @@ export default function BinaryBreachManager() {
       setError('Unable to load mission state.')
     }
   }, [sessionId, settingsDirty])
+
+  useEffect(() => {
+    if (!sessionId || querySettingsAppliedRef.current || location.search.length === 0) return
+    const params = new URLSearchParams(location.search)
+    const hasLinkSettings = ['maxBits', 'missionLength', 'challengeTypes', 'hintsEnabled', 'placeValueSupport']
+      .some((key) => params.has(key))
+    if (!hasLinkSettings) return
+    const querySettings = normalizeBinaryBreachSettings({
+      maxBits: params.get('maxBits'),
+      missionLength: params.get('missionLength'),
+      challengeTypes: (params.get('challengeTypes') ?? '').split(',').map((entry) => entry.trim()).filter(Boolean),
+      hintsEnabled: params.get('hintsEnabled') === 'false' ? false : undefined,
+      placeValueSupport: params.get('placeValueSupport'),
+    })
+    querySettingsAppliedRef.current = true
+    setSettings(querySettings)
+    setSettingsDirty(true)
+    void (async () => {
+      try {
+        const response = await fetch(`/api/binary-breach/${sessionId}/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(querySettings),
+        })
+        if (!response.ok) throw new Error('Failed to apply link settings')
+        setSettingsDirty(false)
+        await loadState()
+      } catch (err) {
+        console.error('Failed to apply Binary Breach link settings:', err)
+        setError('Unable to apply link mission settings.')
+      }
+    })()
+  }, [loadState, location.search, sessionId])
 
   useEffect(() => {
     void loadState()

@@ -389,6 +389,7 @@ Each activity defines its own endpoints under `/api/{activity-id}/...`
 Activities can override the default link-generation endpoint using `activity.config.ts > deepLinkGenerator.endpoint`.
 
 For simple permanent-link UX, shared `ManageDashboard` can render generic fields from `deepLinkOptions` and submit to the configured generator endpoint.
+Supported generic field types are `text`, `select`, `number`, `checkbox`, and `multiselect`; `number` fields may declare `min`/`max`/`step`, and any field may declare a `defaultValue` that seeds the shared modal and launch-link parser.
 
 For advanced or protocol-specific UX (for example iframe preview, upload-driven validation, or custom previews), an activity can set `activity.config.ts > manageDashboard.customPersistentLinkBuilder = true` and export `PersistentLinkBuilderComponent` from its client entry.
 

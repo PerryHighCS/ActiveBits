@@ -114,8 +114,15 @@ function parseDeepLinkOptions(raw: unknown, context: string): Record<string, Act
     const optionContext = `${context}.deepLinkOptions.${optionKey}`
     const label = readOptionalString(optionValue, 'label', optionContext)
     const typeValue = optionValue.type
-    if (typeValue !== undefined && typeValue !== 'select' && typeValue !== 'text') {
-      throw new Error(`${optionContext}: "type" must be "select" or "text" when provided`)
+    if (
+      typeValue !== undefined
+      && typeValue !== 'select'
+      && typeValue !== 'text'
+      && typeValue !== 'number'
+      && typeValue !== 'checkbox'
+      && typeValue !== 'multiselect'
+    ) {
+      throw new Error(`${optionContext}: "type" must be "select", "text", "number", "checkbox", or "multiselect" when provided`)
     }
 
     const validatorValue = optionValue.validator
@@ -124,11 +131,40 @@ function parseDeepLinkOptions(raw: unknown, context: string): Record<string, Act
     }
 
     const options = parseDeepLinkOptionChoices(optionValue.options, optionContext)
+    const defaultValue = optionValue.defaultValue
+    if (
+      defaultValue !== undefined
+      && typeof defaultValue !== 'string'
+      && typeof defaultValue !== 'number'
+      && typeof defaultValue !== 'boolean'
+      && !Array.isArray(defaultValue)
+    ) {
+      throw new Error(`${optionContext}: "defaultValue" must be a string, number, boolean, or string array when provided`)
+    }
+    if (Array.isArray(defaultValue) && !defaultValue.every((entry) => typeof entry === 'string')) {
+      throw new Error(`${optionContext}: "defaultValue" string arrays may only contain strings`)
+    }
+    const min = optionValue.min
+    if (min !== undefined && (typeof min !== 'number' || !Number.isFinite(min))) {
+      throw new Error(`${optionContext}: "min" must be a finite number when provided`)
+    }
+    const max = optionValue.max
+    if (max !== undefined && (typeof max !== 'number' || !Number.isFinite(max))) {
+      throw new Error(`${optionContext}: "max" must be a finite number when provided`)
+    }
+    const step = optionValue.step
+    if (step !== undefined && (typeof step !== 'number' || !Number.isFinite(step) || step <= 0)) {
+      throw new Error(`${optionContext}: "step" must be a positive finite number when provided`)
+    }
     parsed[optionKey] = {
       ...(label !== undefined ? { label } : {}),
       ...(typeValue !== undefined ? { type: typeValue } : {}),
       ...(validatorValue !== undefined ? { validator: validatorValue } : {}),
       ...(options !== undefined ? { options } : {}),
+      ...(defaultValue !== undefined ? { defaultValue } : {}),
+      ...(min !== undefined ? { min } : {}),
+      ...(max !== undefined ? { max } : {}),
+      ...(step !== undefined ? { step } : {}),
     }
   }
 

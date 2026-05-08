@@ -24,6 +24,43 @@ export function validateStudentId(value: unknown): string | null {
   return /^[a-zA-Z0-9._:/-]+$/.test(trimmed) ? trimmed : null
 }
 
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return isPlainObject(value) ? value : null
+}
+
+function readEmbeddedLaunchSelectedOptions(data: unknown): Record<string, unknown> | null {
+  const source = readRecord(data)
+  const embeddedLaunch = readRecord(source?.embeddedLaunch)
+  return readRecord(embeddedLaunch?.selectedOptions)
+}
+
+export function normalizeBinaryBreachSettingsFromLaunchOptions(value: unknown): BinaryBreachSettings {
+  const source = readRecord(value) ?? {}
+  return normalizeBinaryBreachSettings({
+    maxBits: source.maxBits,
+    missionLength: source.missionLength,
+    challengeTypes: typeof source.challengeTypes === 'string'
+      ? source.challengeTypes.split(',').map((entry) => entry.trim()).filter(Boolean)
+      : source.challengeTypes,
+    hintsEnabled: source.hintsEnabled === 'false' ? false : source.hintsEnabled,
+    placeValueSupport: source.placeValueSupport,
+  })
+}
+
+export function normalizeBinaryBreachSettingsFromSessionData(data: unknown): BinaryBreachSettings {
+  const source = readRecord(data) ?? {}
+  if (source.settings !== undefined) {
+    return normalizeBinaryBreachSettings(source.settings)
+  }
+
+  const selectedOptions = readEmbeddedLaunchSelectedOptions(source)
+  if (selectedOptions) {
+    return normalizeBinaryBreachSettingsFromLaunchOptions(selectedOptions)
+  }
+
+  return normalizeBinaryBreachSettings(source)
+}
+
 function clampInt(value: unknown, fallback: number, max: number): number {
   const parsed = Number.parseInt(String(value), 10)
   if (!Number.isFinite(parsed) || parsed < 0) return fallback

@@ -48,6 +48,28 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
           type: 'text',
           validator: 'url',
         },
+        missionLength: {
+          label: 'Systems per mission',
+          type: 'number',
+          defaultValue: 5,
+          min: 3,
+          max: 12,
+          step: 1,
+        },
+        hintsEnabled: {
+          label: 'Hints available',
+          type: 'checkbox',
+          defaultValue: true,
+        },
+        challengeTypes: {
+          label: 'Challenge types',
+          type: 'multiselect',
+          defaultValue: ['binary-to-decimal', 'decimal-to-binary'],
+          options: [
+            { value: 'binary-to-decimal', label: 'Binary to decimal' },
+            { value: 'decimal-to-binary', label: 'Decimal to binary' },
+          ],
+        },
       },
       deepLinkGenerator: {
         endpoint: '/api/syncdeck/generate-url',
@@ -110,6 +132,10 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
   )
 
   assert.equal(parsed.id, 'syncdeck')
+  assert.equal(parsed.deepLinkOptions?.missionLength?.type, 'number')
+  assert.equal(parsed.deepLinkOptions?.missionLength?.min, 3)
+  assert.equal(parsed.deepLinkOptions?.hintsEnabled?.defaultValue, true)
+  assert.deepEqual(parsed.deepLinkOptions?.challengeTypes?.defaultValue, ['binary-to-decimal', 'decimal-to-binary'])
   assert.equal(parsed.deepLinkGenerator?.preflight?.timeoutMs, 4000)
   assert.deepEqual(parsed.createSessionBootstrap?.sessionStorage?.[0], {
     keyPrefix: 'syncdeck_instructor_',

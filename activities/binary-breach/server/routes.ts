@@ -19,6 +19,7 @@ import { serializeAnswerFromUnknown, validateBinaryBreachAnswer } from '../share
 import { applyAnswerResult, applyHintUse, createInitialProgress } from '../shared/scoring.js'
 import {
   isPlainObject,
+  normalizeBinaryBreachSettingsFromSessionData,
   normalizeBinaryBreachStudent,
   validateStudentId,
   validateStudentName,
@@ -51,7 +52,7 @@ interface BinaryBreachSocket extends ActiveBitsWebSocket {
 
 function normalizeSessionData(data: unknown): BinaryBreachSessionData {
   const source = isPlainObject(data) ? data : {}
-  const settings = normalizeBinaryBreachSettings(source.settings)
+  const settings = normalizeBinaryBreachSettingsFromSessionData(source)
   const students = Array.isArray(source.students)
     ? source.students
         .map((student) => normalizeBinaryBreachStudent(student, settings))

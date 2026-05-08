@@ -3,6 +3,8 @@ import test from 'node:test'
 import { DEFAULT_BINARY_BREACH_SETTINGS } from '../shared/challengeGenerator.js'
 import {
   normalizeBinaryBreachStudent,
+  normalizeBinaryBreachSettingsFromLaunchOptions,
+  normalizeBinaryBreachSettingsFromSessionData,
   normalizeProgress,
   validateStudentId,
   validateStudentName,
@@ -43,4 +45,49 @@ void test('drops malformed student records during normalization', () => {
   assert.equal(student?.id, 'abc')
   assert.equal(student?.name, 'Grace')
   assert.equal(student?.connected, true)
+})
+
+void test('normalizes Binary Breach launch options from permalink and embedded selections', () => {
+  assert.deepEqual(normalizeBinaryBreachSettingsFromLaunchOptions({
+    maxBits: '4',
+    missionLength: '3',
+    challengeTypes: 'decimal-to-binary,order-binary',
+    hintsEnabled: 'false',
+    placeValueSupport: 'hidden',
+  }), {
+    maxBits: 4,
+    missionLength: 3,
+    challengeTypes: ['decimal-to-binary', 'order-binary'],
+    timerMode: 'off',
+    hintsEnabled: false,
+    placeValueSupport: 'hidden',
+  })
+})
+
+void test('session settings prefer stored settings and fall back to embedded launch options', () => {
+  assert.equal(normalizeBinaryBreachSettingsFromSessionData({
+    settings: { maxBits: 5 },
+    embeddedLaunch: {
+      selectedOptions: { maxBits: '4' },
+    },
+  }).maxBits, 5)
+
+  assert.deepEqual(normalizeBinaryBreachSettingsFromSessionData({
+    embeddedLaunch: {
+      selectedOptions: {
+        maxBits: '6',
+        missionLength: '9',
+        challengeTypes: 'compare-binary',
+        hintsEnabled: 'true',
+        placeValueSupport: 'optional',
+      },
+    },
+  }), {
+    maxBits: 6,
+    missionLength: 9,
+    challengeTypes: ['compare-binary'],
+    timerMode: 'off',
+    hintsEnabled: true,
+    placeValueSupport: 'optional',
+  })
 })

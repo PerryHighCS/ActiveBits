@@ -715,30 +715,46 @@ export default function ManageDashboard({
           <div className="flex flex-col gap-3">
             {Object.entries(selectedActivityOptions).map(([key, option]) => {
               const optionInputId = `persistent-link-option-${key}`
+              const updatePersistentOption = (nextValue: string): void => {
+                setPersistentOptions((previous) => ({
+                  ...previous,
+                  [key]: nextValue,
+                }))
+                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
+                  preflightRequestIdRef.current += 1
+                  setPreflightValidatedValue(null)
+                  setPreflightWarning(null)
+                  setIsPreflightChecking(false)
+                }
+              }
 
               return (
-              <div key={key} className="text-sm text-gray-700">
-                <label htmlFor={optionInputId} className="block font-semibold mb-1">
-                  {option.label || key}
-                </label>
-                {option.type === 'select' ? (
+                <div key={key} className="text-sm text-gray-700">
+                  {option.type === 'multiselect' ? (
+                    <p className="block font-semibold mb-1">{option.label || key}</p>
+                  ) : (
+                    <label
+                      htmlFor={optionInputId}
+                      className={`${option.type === 'checkbox' ? 'inline-flex items-center gap-2' : 'block'} font-semibold mb-1`}
+                    >
+                      {option.type === 'checkbox' && (
+                        <input
+                          id={optionInputId}
+                          type="checkbox"
+                          checked={(persistentOptions[key] ?? '') === 'true'}
+                          onChange={(event) => updatePersistentOption(event.target.checked ? 'true' : 'false')}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                      )}
+                      {option.label || key}
+                    </label>
+                  )}
+                {option.type === 'checkbox' ? null : option.type === 'select' ? (
                   <>
                     <select
                       id={optionInputId}
                       value={persistentOptions[key] ?? ''}
-                      onChange={(event) => {
-                        const nextValue = event.target.value
-                                setPersistentOptions((previous) => ({
-                                  ...previous,
-                                  [key]: nextValue,
-                                }))
-                                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
-                                  preflightRequestIdRef.current += 1
-                                  setPreflightValidatedValue(null)
-                                  setPreflightWarning(null)
-                                  setIsPreflightChecking(false)
-                                }
-                              }}
+                      onChange={(event) => updatePersistentOption(event.target.value)}
                       className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
                     >
                       {(option.options || []).map((entry) => (
@@ -761,25 +777,42 @@ export default function ManageDashboard({
                       </Button>
                     )}
                   </>
+                ) : option.type === 'multiselect' ? (
+                  <fieldset className="flex flex-col gap-2" aria-describedby={persistentOptionErrors[key] ? `${optionInputId}-error` : undefined}>
+                    <legend className="sr-only">{option.label || key}</legend>
+                    {(option.options || []).map((entry) => {
+                      const values = new Set((persistentOptions[key] ?? '').split(',').filter(Boolean))
+                      return (
+                        <label key={entry.value} className="inline-flex items-center gap-2 font-normal">
+                          <input
+                            type="checkbox"
+                            checked={values.has(entry.value)}
+                            onChange={(event) => {
+                              const nextValues = new Set(values)
+                              if (event.target.checked) {
+                                nextValues.add(entry.value)
+                              } else {
+                                nextValues.delete(entry.value)
+                              }
+                              updatePersistentOption(Array.from(nextValues).join(','))
+                            }}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          {entry.label}
+                        </label>
+                      )
+                    })}
+                  </fieldset>
                 ) : (
                   <div className="flex items-center gap-2">
                     <input
                       id={optionInputId}
-                      type="text"
+                      type={option.type === 'number' ? 'number' : 'text'}
+                      min={option.min}
+                      max={option.max}
+                      step={option.step}
                       value={persistentOptions[key] ?? ''}
-                      onChange={(event) => {
-                        const nextValue = event.target.value
-                                setPersistentOptions((previous) => ({
-                                  ...previous,
-                                  [key]: nextValue,
-                                }))
-                                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
-                                  preflightRequestIdRef.current += 1
-                                  setPreflightValidatedValue(null)
-                                  setPreflightWarning(null)
-                                  setIsPreflightChecking(false)
-                                }
-                              }}
+                      onChange={(event) => updatePersistentOption(event.target.value)}
                       className={`w-full border-2 rounded px-3 py-2 ${persistentOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
                     />
                     {selectedActivityPreflight?.optionKey === key && (
@@ -798,7 +831,7 @@ export default function ManageDashboard({
                   </div>
                 )}
                 {persistentOptionErrors[key] !== undefined && (
-                  <span className="block mt-1 text-xs text-red-600">{persistentOptionErrors[key]}</span>
+                  <span id={`${optionInputId}-error`} className="block mt-1 text-xs text-red-600">{persistentOptionErrors[key]}</span>
                 )}
                 {persistentOptionErrors[key] === undefined && selectedActivityPreflight?.optionKey === key && (persistentOptions[key] ?? '').trim().length > 0 && (
                   <span className={`block mt-1 text-xs ${isPreflightVerified === true ? 'text-green-700' : 'text-gray-600'}`}>

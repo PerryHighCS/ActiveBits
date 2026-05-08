@@ -16,9 +16,13 @@ export interface ActivityDeepLinkOptionChoice {
 
 export interface ActivityDeepLinkOption {
   label?: string
-  type?: 'select' | 'text'
+  type?: 'select' | 'text' | 'number' | 'checkbox' | 'multiselect'
   options?: ActivityDeepLinkOptionChoice[]
   validator?: 'url'
+  defaultValue?: string | number | boolean | string[]
+  min?: number
+  max?: number
+  step?: number
 }
 
 export interface ActivityDeepLinkPreflightConfig {

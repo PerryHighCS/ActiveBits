@@ -7,9 +7,13 @@ export interface DeepLinkOptionChoice {
 
 export interface DeepLinkOption {
   label?: string
-  type?: 'select' | 'text'
+  type?: 'select' | 'text' | 'number' | 'checkbox' | 'multiselect'
   options?: DeepLinkOptionChoice[]
   validator?: 'url'
+  defaultValue?: string | number | boolean | string[]
+  min?: number
+  max?: number
+  step?: number
 }
 
 export interface DeepLinkGeneratorConfig {
@@ -101,6 +105,56 @@ function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function toStringValue(value: unknown): string {
   return typeof value === 'string' ? value : String(value ?? '')
+}
+
+function toOptionType(value: unknown): DeepLinkOption['type'] {
+  return value === 'select'
+    || value === 'number'
+    || value === 'checkbox'
+    || value === 'multiselect'
+    || value === 'text'
+    ? value
+    : 'text'
+}
+
+function toDefaultOptionValue(value: unknown): DeepLinkOption['defaultValue'] | undefined {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+  if (Array.isArray(value) && value.every((entry) => typeof entry === 'string')) {
+    return value
+  }
+  return undefined
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function normalizeMultiselectValue(value: unknown, option: DeepLinkOption): string {
+  const allowedValues = new Set((option.options ?? []).map((entry) => entry.value))
+  const rawValues = Array.isArray(value) ? value : toStringValue(value).split(',')
+  const values = rawValues
+    .map((entry) => toStringValue(entry).trim())
+    .filter((entry) => entry.length > 0 && (allowedValues.size === 0 || allowedValues.has(entry)))
+
+  return Array.from(new Set(values)).join(',')
+}
+
+function normalizeDefaultDeepLinkValue(option: DeepLinkOption): string {
+  if (option.defaultValue === undefined) {
+    return ''
+  }
+
+  if (option.type === 'checkbox') {
+    return option.defaultValue === true || option.defaultValue === 'true' ? 'true' : 'false'
+  }
+
+  if (option.type === 'multiselect') {
+    return normalizeMultiselectValue(option.defaultValue, option)
+  }
+
+  return toStringValue(option.defaultValue)
 }
 
 function buildCreateSessionBootstrapStorageKey(activityId: string, sessionId: string): string {
@@ -467,9 +521,10 @@ export function parseDeepLinkOptions(rawDeepLinkOptions: unknown): DeepLinkOptio
 
     const rawOptions = Array.isArray(rawOption.options) ? rawOption.options : []
 
+    const type = toOptionType(rawOption.type)
     parsed[key] = {
       label: (rawOption.label != null) ? toStringValue(rawOption.label) : undefined,
-      type: rawOption.type === 'select' ? 'select' : 'text',
+      type,
       validator: rawOption.validator === 'url' ? 'url' : undefined,
       options: rawOptions
         .filter((option): option is Record<string, unknown> => isObjectRecord(option))
@@ -477,6 +532,10 @@ export function parseDeepLinkOptions(rawDeepLinkOptions: unknown): DeepLinkOptio
           value: toStringValue(option.value),
           label: toStringValue(option.label),
         })),
+      defaultValue: toDefaultOptionValue(rawOption.defaultValue),
+      min: toFiniteNumber(rawOption.min),
+      max: toFiniteNumber(rawOption.max),
+      step: toFiniteNumber(rawOption.step),
     }
   }
 
@@ -487,7 +546,7 @@ export function initializeDeepLinkOptions(rawDeepLinkOptions: unknown): DeepLink
   const options = parseDeepLinkOptions(rawDeepLinkOptions)
 
   return Object.keys(options).reduce<DeepLinkSelection>((selection, key) => {
-    selection[key] = ''
+    selection[key] = normalizeDefaultDeepLinkValue(options[key] ?? {})
     return selection
   }, {})
 }
@@ -507,7 +566,16 @@ export function normalizeSelectedOptions(
     if (!option) return selection
     if (value === null || value === undefined || value === '') return selection
 
-    const normalizedValue = option.type === 'text' || option.validator === 'url' ? toStringValue(value).trim() : toStringValue(value)
+    let normalizedValue: string
+    if (option.type === 'checkbox') {
+      normalizedValue = value === true || value === 'true' ? 'true' : 'false'
+    } else if (option.type === 'multiselect') {
+      normalizedValue = normalizeMultiselectValue(value, option)
+    } else {
+      normalizedValue = option.type === 'text' || option.type === 'number' || option.validator === 'url'
+        ? toStringValue(value).trim()
+        : toStringValue(value)
+    }
     if (normalizedValue === '') return selection
 
     selection[key] = normalizedValue
@@ -523,12 +591,40 @@ export function validateDeepLinkSelection(
   const errors: DeepLinkValidationErrors = {}
 
   for (const [key, option] of Object.entries(options)) {
+    const rawValue = rawSelectedOptions?.[key]
+    const value = typeof rawValue === 'string' ? rawValue.trim() : toStringValue(rawValue).trim()
+
+    if (option.type === 'number' && value.length > 0) {
+      const numericValue = Number(value)
+      if (!Number.isFinite(numericValue)) {
+        errors[key] = `${option.label || key} must be a number`
+        continue
+      }
+      if (option.min !== undefined && numericValue < option.min) {
+        errors[key] = `${option.label || key} must be at least ${option.min}`
+        continue
+      }
+      if (option.max !== undefined && numericValue > option.max) {
+        errors[key] = `${option.label || key} must be at most ${option.max}`
+        continue
+      }
+    }
+
+    if (option.type === 'multiselect' && value.length > 0) {
+      const allowedValues = new Set((option.options ?? []).map((entry) => entry.value))
+      const invalidValue = value.split(',').map((entry) => entry.trim()).find((entry) => (
+        entry.length > 0 && allowedValues.size > 0 && !allowedValues.has(entry)
+      ))
+      if (invalidValue) {
+        errors[key] = `${option.label || key} contains an unsupported option`
+        continue
+      }
+    }
+
     if (option.validator !== 'url') {
       continue
     }
 
-    const rawValue = rawSelectedOptions?.[key]
-    const value = typeof rawValue === 'string' ? rawValue.trim() : toStringValue(rawValue).trim()
     if (!value) {
       errors[key] = `${option.label || key} is required`
       continue
@@ -661,7 +757,13 @@ export function describeSelectedOptions(
 
   return Object.entries(selectedOptions).map(([key, value]) => {
     const option = parsedOptions[key]
-    const displayValue = option?.options?.find((candidate) => candidate.value === value)?.label ?? value
+    const displayValue = option?.type === 'checkbox'
+      ? value === 'true' ? 'Yes' : 'No'
+      : option?.type === 'multiselect'
+        ? value.split(',').map((entry) => (
+          option.options?.find((candidate) => candidate.value === entry)?.label ?? entry
+        )).join(', ')
+        : option?.options?.find((candidate) => candidate.value === value)?.label ?? value
     return `${option?.label || key}: ${displayValue}`
   })
 }

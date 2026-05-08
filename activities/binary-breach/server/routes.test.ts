@@ -110,6 +110,45 @@ void test('creates a Binary Breach session and returns manager-visible state', a
   assert.deepEqual((stateResponse.payload as { students: unknown[] }).students, [])
 })
 
+void test('hydrates Binary Breach settings from embedded launch selected options', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  await sessions.set('CHILD:syncdeck:abc12:binary-breach', {
+    id: 'CHILD:syncdeck:abc12:binary-breach',
+    type: 'binary-breach',
+    created: Date.now(),
+    lastActivity: Date.now(),
+    data: {
+      embeddedLaunch: {
+        selectedOptions: {
+          maxBits: '4',
+          missionLength: '3',
+          challengeTypes: 'binary-to-decimal,compare-binary',
+          hintsEnabled: 'false',
+          placeValueSupport: 'hidden',
+        },
+      },
+    },
+  } as SessionRecord)
+
+  const stateResponse = createResponse()
+  const stateRoute = app.getRoutes.get('/api/binary-breach/:sessionId/state')
+  assert.ok(stateRoute)
+  await stateRoute({ params: { sessionId: 'CHILD:syncdeck:abc12:binary-breach' } }, stateResponse)
+
+  assert.equal(stateResponse.statusCode, 200)
+  assert.deepEqual((stateResponse.payload as { settings: unknown }).settings, {
+    maxBits: 4,
+    missionLength: 3,
+    challengeTypes: ['binary-to-decimal', 'compare-binary'],
+    timerMode: 'off',
+    hintsEnabled: false,
+    placeValueSupport: 'hidden',
+  })
+})
+
 void test('registers a student and validates an answer against the stored challenge', async () => {
   const app = new TestApp()
   const sessions = createSessionStore()
