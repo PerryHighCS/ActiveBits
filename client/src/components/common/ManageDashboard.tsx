@@ -571,6 +571,7 @@ export default function ManageDashboard({
   const selectedActivityOptions = selectedActivity ? parseDeepLinkOptions(selectedActivity.deepLinkOptions) : {}
   const selectedActivityDeepLinkGenerator = selectedActivity ? parseDeepLinkGenerator(selectedActivity.deepLinkGenerator) : null
   const selectedActivityPreflight = selectedActivityDeepLinkGenerator?.preflight ?? null
+  const selectedActivityPreflightOptionKey = selectedActivityPreflight?.optionKey ?? null
   const persistentEntryPolicyOptions = selectedActivity
     ? filterPersistentEntryPolicyOptionsForActivity(
       PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS,
@@ -586,6 +587,23 @@ export default function ManageDashboard({
     persistentOptions,
     preflightValidatedValue,
   )
+
+  useEffect(() => {
+    if (selectedActivityPreflightOptionKey == null || preflightValidatedValue == null) {
+      return
+    }
+
+    const currentValue = (persistentOptions[selectedActivityPreflightOptionKey] ?? '').trim()
+    if (currentValue === preflightValidatedValue) {
+      return
+    }
+
+    preflightRequestIdRef.current += 1
+    setPreflightValidatedValue(null)
+    setPreflightWarning(null)
+    setIsPreflightChecking(false)
+  }, [persistentOptions, preflightValidatedValue, selectedActivityPreflightOptionKey])
+
   const existingTeacherCodeForEdit = editingPersistentSession
     ? (savedSessions[buildPersistentSessionKey(editingPersistentSession.activityName, editingPersistentSession.hash)] ?? '').trim()
     : ''
@@ -729,12 +747,6 @@ export default function ManageDashboard({
                   ...previous,
                   [key]: nextValue,
                 }))
-                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
-                  preflightRequestIdRef.current += 1
-                  setPreflightValidatedValue(null)
-                  setPreflightWarning(null)
-                  setIsPreflightChecking(false)
-                }
               }
 
               return (
@@ -799,13 +811,19 @@ export default function ManageDashboard({
                             type="checkbox"
                             checked={values.has(entry.value)}
                             onChange={(event) => {
-                              const nextValues = new Set(values)
-                              if (event.target.checked) {
-                                nextValues.add(entry.value)
-                              } else {
-                                nextValues.delete(entry.value)
-                              }
-                              updatePersistentOption(Array.from(nextValues).join(','))
+                              const checked = event.target.checked
+                              setPersistentOptions((previous) => {
+                                const nextValues = new Set(parseMultiselectValues(previous[key] ?? ''))
+                                if (checked) {
+                                  nextValues.add(entry.value)
+                                } else {
+                                  nextValues.delete(entry.value)
+                                }
+                                return {
+                                  ...previous,
+                                  [key]: Array.from(nextValues).join(','),
+                                }
+                              })
                             }}
                             className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                             {...optionErrorAttributes}

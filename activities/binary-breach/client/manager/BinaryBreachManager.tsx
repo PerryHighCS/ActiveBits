@@ -42,7 +42,7 @@ function toggleChallengeType(
 export default function BinaryBreachManager() {
   const { sessionId } = useParams()
   const location = useLocation()
-  const querySettingsAppliedRef = useRef(false)
+  const querySettingsAppliedSessionRef = useRef<string | null>(null)
   const [settings, setSettings] = useState<BinaryBreachSettings>(() => ({ ...DEFAULT_BINARY_BREACH_SETTINGS }))
   const [students, setStudents] = useState<RosterStudent[]>([])
   const [saving, setSaving] = useState(false)
@@ -67,7 +67,7 @@ export default function BinaryBreachManager() {
   }, [sessionId, settingsDirty])
 
   useEffect(() => {
-    if (!sessionId || querySettingsAppliedRef.current || location.search.length === 0) return
+    if (!sessionId || querySettingsAppliedSessionRef.current === sessionId || location.search.length === 0) return
     const params = new URLSearchParams(location.search)
     const hasLinkSettings = ['maxBits', 'missionLength', 'challengeTypes', 'hintsEnabled', 'placeValueSupport']
       .some((key) => params.has(key))
@@ -79,7 +79,7 @@ export default function BinaryBreachManager() {
       hintsEnabled: params.get('hintsEnabled') === 'false' ? false : undefined,
       placeValueSupport: params.get('placeValueSupport'),
     })
-    querySettingsAppliedRef.current = true
+    querySettingsAppliedSessionRef.current = sessionId
     setSettings(querySettings)
     setSettingsDirty(true)
     void (async () => {
