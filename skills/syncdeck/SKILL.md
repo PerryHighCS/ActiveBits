@@ -96,6 +96,8 @@ Required implications:
       storyboard: {
         // Optional: storyboardId / trackId / toggleKey
       },
+      // Optional: set false only when a deck intentionally owns image zoom UI.
+      imageLightbox: true,
       afterInit: function (Reveal) {
         // Optional deck-specific hooks
       },
@@ -110,7 +112,7 @@ the directory that hosts the SyncDeck runtime bundle. The correct value depends
 on your deployment's directory structure — check the local repo's skill overrides
 or deployment docs for the concrete path used in your environment.
 
-The bundle provides `Reveal`, `RevealNotes`, `RevealChalkboard`, `RevealIframeSync`, `initRevealStoryboard`, and `initSyncDeckReveal`. Do not add CDN links for Reveal.js or its plugins when authoring SyncDeck decks.
+The bundle provides `Reveal`, `RevealNotes`, `RevealChalkboard`, `RevealIframeSync`, `initRevealStoryboard`, `initSyncDeckImageLightbox`, and `initSyncDeckReveal`. Do not add CDN links for Reveal.js or its plugins when authoring SyncDeck decks.
 
 The bundle also exposes `buildSyncDeckLaunchUrl(...)` and
 `launchPresentationInSyncDeck(...)`, but deck authors should usually enable the
@@ -123,6 +125,27 @@ runtime can show the short-lived standalone CTA automatically.
 - Keep each top-level slide visually complete at 16:9.
 - Use fragments for progressive reveal when a presenter needs pacing.
 - Use semantic controls and accessible names for any custom buttons or toggles.
+
+## Zoomable Images
+
+The SyncDeck runtime includes a shared image lightbox for slide images that need a larger preview.
+
+Use the `img-zoomable` class on any image that should open in the runtime lightbox:
+
+```html
+<img class="img-zoomable" src="assets/class-diagram.png" alt="Class diagram for the sample app">
+```
+
+Decks do not need to include `#img-modal` markup, lightbox CSS, or `openImgModal(...)` / `closeImgModal()` scripts. The bundled runtime creates the modal, handles delegated clicks, closes on Escape or backdrop click, and keeps the legacy globals available for older inline handlers.
+
+The lightbox is enabled automatically by `initSyncDeckReveal(...)`. Disable it only when a deck intentionally provides its own image zoom UI:
+
+```js
+initSyncDeckReveal({
+  deckId: 'my-deck-name',
+  imageLightbox: false,
+});
+```
 
 ## Storyboard Contract
 
@@ -143,6 +166,38 @@ Storyboard expectations:
 - click-to-navigate
 - active-slide highlighting
 - 16:9 thumbnails that do not cover the deck when opened
+
+Storyboard DOM safety:
+
+- The storyboard renders thumbnail copies of slide content. Those copies can
+  duplicate slide IDs, controls, and other interactive DOM.
+- Do not wire deck-specific interactivity with global lookups such as
+  `document.getElementById('my-button')` or
+  `document.querySelector('#my-slide .thing')` when storyboard is enabled; those
+  selectors may match a storyboard thumbnail instead of the live Reveal slide.
+- In `afterInit`, first find the real top-level slide by excluding anything
+  inside `#storyboard`, then scope all child lookups to that slide:
+
+```js
+var liveSlide = Array.prototype.find.call(
+  document.querySelectorAll('#my-interactive-slide'),
+  function(slide) { return !slide.closest('#storyboard'); }
+);
+if (!liveSlide) return;
+
+var button = liveSlide.querySelector('#my-button');
+var output = liveSlide.querySelector('#my-output');
+```
+
+- For fragment listeners, ignore events from storyboard clones:
+
+```js
+Reveal.on('fragmentshown', function(event) {
+  var section = event.fragment.closest ? event.fragment.closest('section') : null;
+  if (!section || section.closest('#storyboard')) return;
+  // Handle the live slide fragment.
+});
+```
 
 ## Iframe Sync Contract
 
@@ -213,6 +268,12 @@ If the deck should trigger activity launches or act as a host shell for interact
 - use declarative slide metadata for activity launch intent
 - let the host own session lifecycle and orchestration
 - keep embedded activity behavior isolated from shared slide plumbing
+
+For activity links that should launch an activity outside the deck rather than embedding it:
+
+- use the pattern `<activeBitsOrigin>/launch/<activity-id>`
+- add `?start=1` for instructor-authored links that should immediately create a new session and redirect to the activity manager
+- treat this as an activity-launch pattern, not as `standaloneHosting` for the presentation itself
 
 ## Delivery Standard
 
