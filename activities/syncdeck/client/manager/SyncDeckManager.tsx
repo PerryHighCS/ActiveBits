@@ -7,7 +7,6 @@ import ControlAuthorityStatus from '@src/components/common/ControlAuthorityStatu
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import { resolvePersistentSessionEntryPolicy, type PersistentSessionEntryPolicy } from '../../../../types/waitingRoom.js'
 import { runSyncDeckPresentationPreflight } from '../shared/presentationPreflight.js'
-import { buildSyncDeckPasscodeKey } from '../shared/authStorage.js'
 import {
   getStudentPresentationCompatibilityError,
 } from '../shared/presentationUrlCompatibility.js'
@@ -575,6 +574,20 @@ export function normalizeStoredInstructorPasscode(value: string | null): string 
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function readBootstrapInstructorPasscode(state: unknown): string | null {
+  if (state == null || typeof state !== 'object' || Array.isArray(state)) {
+    return null
+  }
+
+  const payload = (state as { createSessionPayload?: unknown }).createSessionPayload
+  if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null
+  }
+
+  const value = (payload as { instructorPasscode?: unknown }).instructorPasscode
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
 export function validatePresentationUrl(value: string, hostProtocol?: string | null, userAgent?: string | null): boolean {
@@ -1881,6 +1894,10 @@ const SyncDeckManager: FC = () => {
   const [, setStartSuccess] = useState<string | null>(null)
   const [isConfigurePanelOpen, setIsConfigurePanelOpen] = useState(true)
   const [instructorPasscode, setInstructorPasscode] = useState<string | null>(null)
+  const bootstrapInstructorPasscode = useMemo(
+    () => readBootstrapInstructorPasscode(location.state),
+    [location.state],
+  )
   const [persistentUrlHashFallback, setPersistentUrlHashFallback] = useState<string | null>(null)
   const [persistentEntryPolicyFallback, setPersistentEntryPolicyFallback] = useState<PersistentSessionEntryPolicy | null>(null)
   const [isPasscodeReady, setIsPasscodeReady] = useState(false)
@@ -2502,12 +2519,8 @@ const SyncDeckManager: FC = () => {
     let isCancelled = false
 
     const loadInstructorPasscode = async (): Promise<void> => {
-      const cachedPasscode = normalizeStoredInstructorPasscode(
-        window.sessionStorage.getItem(buildSyncDeckPasscodeKey(sessionId)),
-      )
-
       if (!isCancelled) {
-        setInstructorPasscode(cachedPasscode)
+        setInstructorPasscode(bootstrapInstructorPasscode)
         setPersistentUrlHashFallback(null)
         setPersistentEntryPolicyFallback(null)
       }
@@ -2518,7 +2531,7 @@ const SyncDeckManager: FC = () => {
         })
         if (!response.ok) {
           if (!isCancelled) {
-            if (!cachedPasscode) {
+            if (!bootstrapInstructorPasscode) {
               setInstructorPasscode(null)
             }
             setPersistentUrlHashFallback(null)
@@ -2529,11 +2542,10 @@ const SyncDeckManager: FC = () => {
 
         const payload = (await response.json()) as InstructorPasscodeResponsePayload
         if (typeof payload.instructorPasscode === 'string' && payload.instructorPasscode.length > 0) {
-          window.sessionStorage.setItem(buildSyncDeckPasscodeKey(sessionId), payload.instructorPasscode)
           if (!isCancelled) {
             setInstructorPasscode(payload.instructorPasscode)
           }
-        } else if (!isCancelled && !cachedPasscode) {
+        } else if (!isCancelled && !bootstrapInstructorPasscode) {
           setInstructorPasscode(null)
         }
 
@@ -2559,7 +2571,7 @@ const SyncDeckManager: FC = () => {
         }
       } catch {
         if (!isCancelled) {
-          if (!cachedPasscode) {
+          if (!bootstrapInstructorPasscode) {
             setInstructorPasscode(null)
           }
           setPersistentUrlHashFallback(null)
@@ -2578,7 +2590,7 @@ const SyncDeckManager: FC = () => {
     return () => {
       isCancelled = true
     }
-  }, [hostProtocol, sessionId, userAgent])
+  }, [bootstrapInstructorPasscode, hostProtocol, sessionId, userAgent])
 
   useEffect(() => {
     if (!sessionId || !instructorPasscode || !instructorInstanceId) {

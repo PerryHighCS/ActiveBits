@@ -18,6 +18,7 @@ import {
   parseDeepLinkGenerator,
   persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkOptions,
+  shouldPersistCreateSessionBootstrapPayload,
   storeCreateSessionBootstrapPayload,
   validateDeepLinkSelection,
 } from './manageDashboardUtils'
@@ -319,13 +320,32 @@ void test('parseCreateSessionBootstrap validates sessionStorage bootstrap metada
         { keyPrefix: 'x_', responseField: '' },
       ],
       historyState: [' instructorPasscode ', '', 42],
+      transientOnly: true,
     }),
     {
       sessionStorage: [
         { keyPrefix: 'syncdeck_instructor_', responseField: 'instructorPasscode' },
       ],
       historyState: ['instructorPasscode'],
+      transientOnly: true,
     },
+  )
+})
+
+void test('shouldPersistCreateSessionBootstrapPayload respects transient-only bootstrap payloads', () => {
+  assert.equal(shouldPersistCreateSessionBootstrapPayload(null), true)
+  assert.equal(
+    shouldPersistCreateSessionBootstrapPayload({
+      historyState: ['instructorPasscode'],
+      transientOnly: true,
+    }),
+    false,
+  )
+  assert.equal(
+    shouldPersistCreateSessionBootstrapPayload({
+      historyState: ['instructorPasscode'],
+    }),
+    true,
   )
 })
 

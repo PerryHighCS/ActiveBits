@@ -38,6 +38,7 @@ export interface CreateSessionBootstrapSessionStorageEntry {
 export interface CreateSessionBootstrapConfig {
   sessionStorage: CreateSessionBootstrapSessionStorageEntry[]
   historyState?: string[]
+  transientOnly?: boolean
 }
 
 export type DeepLinkOptions = Record<string, DeepLinkOption>
@@ -344,6 +345,7 @@ export function parseCreateSessionBootstrap(rawCreateSessionBootstrap: unknown):
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0)
     : []
+  const transientOnly = rawCreateSessionBootstrap.transientOnly === true
 
   if (sessionStorage.length === 0 && historyState.length === 0) {
     return null
@@ -352,7 +354,13 @@ export function parseCreateSessionBootstrap(rawCreateSessionBootstrap: unknown):
   return {
     sessionStorage,
     ...(historyState.length > 0 ? { historyState } : {}),
+    ...(transientOnly ? { transientOnly } : {}),
   }
+}
+
+export function shouldPersistCreateSessionBootstrapPayload(rawCreateSessionBootstrap: unknown): boolean {
+  const createSessionBootstrap = parseCreateSessionBootstrap(rawCreateSessionBootstrap)
+  return createSessionBootstrap?.transientOnly !== true
 }
 
 export function persistCreateSessionBootstrapToSessionStorage(

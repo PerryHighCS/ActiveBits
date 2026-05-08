@@ -49,13 +49,9 @@ const syncdeckConfig: ActivityConfig = {
     },
   ],
   createSessionBootstrap: {
+    historyState: ['instructorPasscode'],
+    transientOnly: true,
     selectedOptionsToSessionData: ['presentationUrl'],
-    sessionStorage: [
-      {
-        keyPrefix: 'syncdeck_instructor_',
-        responseField: 'instructorPasscode',
-      },
-    ],
   },
   controlAuthority: {
     mode: 'single-instructor',

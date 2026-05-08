@@ -38,25 +38,22 @@ async function openSyncDeckInstructorPage(params: {
 }): Promise<Page> {
   const context = await params.browser.newContext()
   const page = await context.newPage()
+  await page.route(
+    `**/api/syncdeck/${encodeURIComponent(params.sessionId)}/instructor-passcode`,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ instructorPasscode: params.instructorPasscode }),
+      })
+    },
+  )
   await page.addInitScript(
-    ({ sessionId, instructorPasscode, browserId, tabId }) => {
-      const passcodeStorageKey = `syncdeck_instructor_${sessionId}`
-      const originalGetItem = window.sessionStorage.getItem.bind(window.sessionStorage)
-
-      window.sessionStorage.getItem = (key: string): string | null => {
-        if (key === passcodeStorageKey) {
-          return instructorPasscode
-        }
-
-        return originalGetItem(key)
-      }
-
+    ({ browserId, tabId }) => {
       window.localStorage.setItem('activebits:instructor-control:browser-id', browserId)
       window.sessionStorage.setItem('activebits:instructor-control:tab-id', tabId)
     },
     {
-      sessionId: params.sessionId,
-      instructorPasscode: params.instructorPasscode,
       browserId: params.browserId,
       tabId: params.tabId,
     },

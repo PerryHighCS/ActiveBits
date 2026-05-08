@@ -7,6 +7,7 @@ import WaitingRoom from './WaitingRoom'
 import LoadingFallback from './LoadingFallback'
 import {
   persistCreateSessionBootstrapToSessionStorage,
+  shouldPersistCreateSessionBootstrapPayload,
   storeCreateSessionBootstrapPayload,
 } from './manageDashboardUtils'
 import {
@@ -467,7 +468,9 @@ const SessionRouter = () => {
 
       if (createSessionPayload) {
         persistCreateSessionBootstrapToSessionStorage(activity?.createSessionBootstrap, nextSessionId, createSessionPayload)
-        storeCreateSessionBootstrapPayload(payload.activityName, nextSessionId, createSessionPayload)
+        if (shouldPersistCreateSessionBootstrapPayload(activity?.createSessionBootstrap)) {
+          storeCreateSessionBootstrapPayload(payload.activityName, nextSessionId, createSessionPayload)
+        }
       }
 
       const path = await resolveTeacherManagePath(payload.activityName, nextSessionId, '')

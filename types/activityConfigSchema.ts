@@ -256,6 +256,7 @@ function parseCreateSessionBootstrap(raw: unknown, context: string): ActivityCre
 
   const sessionStorage = parseCreateSessionBootstrapSessionStorage(raw.sessionStorage, `${context}.createSessionBootstrap`)
   const historyState = parseCreateSessionBootstrapHistoryState(raw.historyState, `${context}.createSessionBootstrap`)
+  const transientOnly = raw.transientOnly === true
   const selectedOptionsToSessionData = parseCreateSessionBootstrapSelectedOptionsToSessionData(
     raw.selectedOptionsToSessionData,
     `${context}.createSessionBootstrap`,
@@ -263,6 +264,7 @@ function parseCreateSessionBootstrap(raw: unknown, context: string): ActivityCre
   return {
     ...(sessionStorage !== undefined ? { sessionStorage } : {}),
     ...(historyState !== undefined ? { historyState } : {}),
+    ...(transientOnly ? { transientOnly } : {}),
     ...(selectedOptionsToSessionData !== undefined ? { selectedOptionsToSessionData } : {}),
   }
 }

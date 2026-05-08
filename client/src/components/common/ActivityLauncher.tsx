@@ -12,6 +12,7 @@ import {
 } from './activityLauncherUtils'
 import {
   persistCreateSessionBootstrapToSessionStorage,
+  shouldPersistCreateSessionBootstrapPayload,
   storeCreateSessionBootstrapPayload,
 } from './manageDashboardUtils'
 
@@ -64,7 +65,7 @@ function ActivityLauncherBody({
       const navigationState = buildStandaloneActivityLauncherState(activity, payload)
 
       persistCreateSessionBootstrapToSessionStorage(activity.createSessionBootstrap, payload.id, payload)
-      if (navigationState != null) {
+      if (navigationState != null && shouldPersistCreateSessionBootstrapPayload(activity.createSessionBootstrap)) {
         storeCreateSessionBootstrapPayload(activity.id, payload.id, navigationState.createSessionPayload)
       }
 

@@ -61,6 +61,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
       },
       createSessionBootstrap: {
         historyState: ['instructorPasscode'],
+        transientOnly: true,
         selectedOptionsToSessionData: ['presentationUrl'],
         sessionStorage: [
           {
@@ -121,6 +122,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
     responseField: 'instructorPasscode',
   })
   assert.deepEqual(parsed.createSessionBootstrap?.historyState, ['instructorPasscode'])
+  assert.equal(parsed.createSessionBootstrap?.transientOnly, true)
   assert.deepEqual(parsed.createSessionBootstrap?.selectedOptionsToSessionData, ['presentationUrl'])
   assert.equal(parsed.manageDashboard?.customPersistentLinkBuilder, true)
   assert.equal(parsed.embeddedRuntime?.instructorGated, 'runtime')
