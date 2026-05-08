@@ -101,7 +101,7 @@ export default function BinaryBreachManager() {
         setError('Unable to apply link mission settings.')
       }
     })()
-  }, [loadState, location.search, sessionId])
+  }, [loadState, location.search, sessionId, updateSettingsDirty])
 
   useEffect(() => {
     void loadState()

@@ -114,7 +114,10 @@ export function normalizeBinaryBreachSettings(value: unknown): BinaryBreachSetti
   return {
     maxBits: normalizeMaxBits(Number.isFinite(maxBitsValue) ? maxBitsValue : DEFAULT_BINARY_BREACH_SETTINGS.maxBits),
     challengeTypes: sanitizeChallengeTypes(source.challengeTypes),
-    missionLength: Math.max(3, Math.min(12, Number.isFinite(missionLengthValue) ? missionLengthValue : 5)),
+    missionLength: Math.max(3, Math.min(
+      12,
+      Number.isFinite(missionLengthValue) ? missionLengthValue : DEFAULT_BINARY_BREACH_SETTINGS.missionLength,
+    )),
     timerMode,
     hintsEnabled: source.hintsEnabled !== false,
     placeValueSupport,

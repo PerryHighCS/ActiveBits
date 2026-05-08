@@ -42,6 +42,13 @@ void test('normalizes settings into safe classroom bounds', () => {
   assert.equal(normalized.placeValueSupport, 'hidden')
 })
 
+void test('normalizes invalid mission length to the configured default', () => {
+  assert.equal(
+    normalizeBinaryBreachSettings({ missionLength: 'not-a-number' }).missionLength,
+    DEFAULT_BINARY_BREACH_SETTINGS.missionLength,
+  )
+})
+
 void test('defaults new missions to eight-bit challenges', () => {
   assert.equal(DEFAULT_BINARY_BREACH_SETTINGS.maxBits, 8)
 })
