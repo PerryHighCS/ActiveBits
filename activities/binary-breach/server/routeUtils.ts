@@ -80,7 +80,7 @@ export function normalizeProgress(value: unknown, settings: BinaryBreachSettings
     hintsUsed: clampInt(value.hintsUsed, 0, 100000),
     traceLevel: clampInt(value.traceLevel, 0, 100000),
     score: 0,
-    completed: Boolean(value.completed),
+    completed: value.completed === true,
   }
   if (progress.correct > progress.attempts) progress.correct = progress.attempts
   if (progress.incorrect > progress.attempts) progress.incorrect = progress.attempts - progress.correct
@@ -134,7 +134,7 @@ export function normalizeBinaryBreachStudent(
   return {
     id,
     name,
-    connected: Boolean(value.connected),
+    connected: value.connected === true,
     joined,
     lastSeen,
     progress: normalizeProgress(value.progress, settings),

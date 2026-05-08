@@ -34,12 +34,24 @@ void test('normalizes progress into bounded mission stats', () => {
   assert.equal(progress.completed, true)
 })
 
+void test('normalizes progress completion from strict booleans only', () => {
+  assert.equal(normalizeProgress({
+    completed: 'false',
+    systemsRestored: 1,
+  }, DEFAULT_BINARY_BREACH_SETTINGS).completed, false)
+
+  assert.equal(normalizeProgress({
+    completed: true,
+    systemsRestored: 1,
+  }, DEFAULT_BINARY_BREACH_SETTINGS).completed, true)
+})
+
 void test('drops malformed student records during normalization', () => {
   assert.equal(normalizeBinaryBreachStudent({ id: 'abc', name: '<bad>' }, DEFAULT_BINARY_BREACH_SETTINGS), null)
   const student = normalizeBinaryBreachStudent({
     id: 'abc',
     name: 'Grace',
-    connected: true,
+    connected: 'false',
     progress: {},
     currentChallenge: {
       id: 'legacy-order',
@@ -54,7 +66,7 @@ void test('drops malformed student records during normalization', () => {
   }, DEFAULT_BINARY_BREACH_SETTINGS)
   assert.equal(student?.id, 'abc')
   assert.equal(student?.name, 'Grace')
-  assert.equal(student?.connected, true)
+  assert.equal(student?.connected, false)
   assert.equal(student?.currentChallenge?.type, 'order-binary')
   if (student?.currentChallenge?.type === 'order-binary') {
     assert.equal(student.currentChallenge.direction, 'least-to-greatest')

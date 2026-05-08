@@ -613,6 +613,14 @@ export function validateDeepLinkSelection(
         errors[key] = `${option.label || key} must be at most ${option.max}`
         continue
       }
+      if (option.step !== undefined) {
+        const stepBase = option.min ?? 0
+        const stepsFromBase = (numericValue - stepBase) / option.step
+        if (Math.abs(stepsFromBase - Math.round(stepsFromBase)) > 1e-9) {
+          errors[key] = `${option.label || key} must align to increments of ${option.step}`
+          continue
+        }
+      }
     }
 
     if (option.type === 'multiselect' && value.length > 0) {

@@ -200,6 +200,10 @@ void test('validateDeepLinkSelection enforces number ranges and multiselect choi
     missionLength: 'Systems per mission must be a number',
   })
 
+  assert.deepEqual(validateDeepLinkSelection(rawOptions, { presentationUrl: 'https://slides.example', missionLength: '7.5' }), {
+    missionLength: 'Systems per mission must align to increments of 1',
+  })
+
   assert.deepEqual(validateDeepLinkSelection(rawOptions, { presentationUrl: 'https://slides.example', challengeTypes: 'binary-to-decimal,missing-bit' }), {
     challengeTypes: 'Challenge types contains an unsupported option',
   })
