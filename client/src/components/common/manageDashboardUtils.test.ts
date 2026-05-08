@@ -13,6 +13,7 @@ import {
   filterPersistentEntryPolicyOptionsForActivity,
   initializeDeepLinkOptions,
   normalizePersistentEntryPolicyForActivity,
+  normalizeMultiselectValue,
   normalizeSelectedOptions,
   parseCreateSessionBootstrap,
   parseDeepLinkGenerator,
@@ -167,6 +168,14 @@ void test('parseMultiselectValues trims comma-separated selections', () => {
     'decimal-to-binary',
     'compare-binary',
   ])
+})
+
+void test('normalizeMultiselectValue removes duplicate and unsupported selections', () => {
+  const parsedOptions = parseDeepLinkOptions(rawOptions)
+  assert.equal(
+    normalizeMultiselectValue('binary-to-decimal, missing-bit, decimal-to-binary, binary-to-decimal', parsedOptions.challengeTypes ?? {}),
+    'binary-to-decimal,decimal-to-binary',
+  )
 })
 
 void test('buildQueryString and buildSoloLink include only non-empty params', () => {

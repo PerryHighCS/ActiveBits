@@ -22,6 +22,7 @@ import {
   isPersistentLinkPreflightVerified,
   normalizePersistentEntryPolicyForActivity,
   normalizeSelectedOptions,
+  normalizeMultiselectValue,
   parseMultiselectValues,
   persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkGenerator,
@@ -807,7 +808,7 @@ export default function ManageDashboard({
                   <fieldset className="flex flex-col gap-2" {...optionErrorAttributes}>
                     <legend className="sr-only">{option.label || key}</legend>
                     {(() => {
-                      const values = new Set(parseMultiselectValues(persistentOptions[key] ?? ''))
+                      const values = new Set(parseMultiselectValues(normalizeMultiselectValue(persistentOptions[key] ?? '', option)))
                       return (option.options || []).map((entry) => (
                         <label key={entry.value} className="inline-flex items-center gap-2 font-normal">
                           <input
@@ -823,7 +824,7 @@ export default function ManageDashboard({
                               }
                               resetPreflightStateForOptionChange(key, Array.from(previewValues).join(','))
                               setPersistentOptions((previous) => {
-                                const nextValues = new Set(parseMultiselectValues(previous[key] ?? ''))
+                                const nextValues = new Set(parseMultiselectValues(normalizeMultiselectValue(previous[key] ?? '', option)))
                                 if (checked) {
                                   nextValues.add(entry.value)
                                 } else {

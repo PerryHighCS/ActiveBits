@@ -135,7 +135,7 @@ function toPositiveFiniteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
 }
 
-function normalizeMultiselectValue(value: unknown, option: DeepLinkOption): string {
+export function normalizeMultiselectValue(value: unknown, option: DeepLinkOption): string {
   const allowedValues = new Set((option.options ?? []).map((entry) => entry.value))
   const values = parseMultiselectValues(value)
     .filter((entry) => allowedValues.size === 0 || allowedValues.has(entry))
