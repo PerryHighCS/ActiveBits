@@ -25,11 +25,16 @@ import {
   evaluateCalculatorExpression,
   toggleBinaryPlaceValueAnswer,
 } from './placeValueInputUtils.js'
-import { normalizeStudentMissionSettings } from './studentSettingsUtils.js'
+import {
+  normalizeSoloMissionSettingsFromSearch,
+  normalizeStudentMissionSettings,
+  normalizeStudentMissionSettingsFromLaunchOptions,
+} from './studentSettingsUtils.js'
 
 interface BinaryBreachStudentProps {
   sessionData?: {
     sessionId?: string
+    selectedOptions?: Record<string, unknown>
   }
 }
 
@@ -174,6 +179,16 @@ function PowerCalculator({
 export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudentProps) {
   const sessionId = sessionData?.sessionId
   const solo = isSoloSession(sessionId)
+  const soloMissionSettings = useMemo(() => {
+    if (!solo) return DEFAULT_BINARY_BREACH_SETTINGS
+    if (sessionData?.selectedOptions) {
+      return normalizeStudentMissionSettingsFromLaunchOptions(sessionData.selectedOptions)
+    }
+    if (typeof window !== 'undefined') {
+      return normalizeSoloMissionSettingsFromSearch(window.location.search)
+    }
+    return DEFAULT_BINARY_BREACH_SETTINGS
+  }, [sessionData?.selectedOptions, solo])
   const [studentName, setStudentName] = useState('')
   const [studentId, setStudentId] = useState<string | null>(null)
   const [identityReady, setIdentityReady] = useState(false)
@@ -255,8 +270,8 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
           applyMissionState(payload)
           persistSessionParticipantIdentity(window.localStorage, sessionId, payload.studentName, payload.studentId)
         } else {
-          const firstChallenge = createBinaryBreachChallenge(DEFAULT_BINARY_BREACH_SETTINGS, localSeed, 0)
-          setMissionSettings(normalizeStudentMissionSettings(DEFAULT_BINARY_BREACH_SETTINGS))
+          const firstChallenge = createBinaryBreachChallenge(soloMissionSettings, localSeed, 0)
+          setMissionSettings(normalizeStudentMissionSettings(soloMissionSettings))
           setChallenge(firstChallenge)
           resetAnswerState(firstChallenge)
         }
@@ -270,7 +285,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
     return () => {
       cancelled = true
     }
-  }, [applyMissionState, localSeed, resetAnswerState, sessionId, solo])
+  }, [applyMissionState, localSeed, resetAnswerState, sessionId, solo, soloMissionSettings])
 
   useEffect(() => {
     if (!sessionId || solo || !studentId) return undefined
@@ -344,7 +359,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         const nextIndex = localIndex + 1
         const nextChallenge = nextProgress.completed
           ? null
-          : createBinaryBreachChallenge(DEFAULT_BINARY_BREACH_SETTINGS, localSeed, nextIndex)
+          : createBinaryBreachChallenge(missionSettings, localSeed, nextIndex)
         setProgress(nextProgress)
         setLocalIndex(nextIndex)
         if (localFeedback.correct) {
@@ -407,13 +422,12 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         )
         applyMissionState(payload)
       } else {
-        const firstChallenge = createBinaryBreachChallenge(DEFAULT_BINARY_BREACH_SETTINGS, localSeed, 0)
+        const firstChallenge = createBinaryBreachChallenge(missionSettings, localSeed, 0)
         setLocalIndex(0)
-        setMissionSettings(normalizeStudentMissionSettings(DEFAULT_BINARY_BREACH_SETTINGS))
         applyMissionState({
           challenge: firstChallenge,
           progress: createInitialProgress(),
-          settings: DEFAULT_BINARY_BREACH_SETTINGS,
+          settings: missionSettings,
         })
       }
     } catch (err) {
