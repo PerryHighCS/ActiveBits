@@ -513,47 +513,131 @@ The instructor can move a class through shared phases:
 
 Each phase is shared state, and deck UI can respond to phase changes.
 
-## Implementation Roadmap
+## Implementation Plan
 
-### Phase 1: Instructor-Owned Service Channels
+### Ownership Callout
 
-- Add shared SyncDeck types for presentation-local activity channel messages.
-- Add a `presentationLocalActivities` normalizer to SyncDeck session data.
-- Add server helpers to normalize `localActivityId`, `instanceKey`, service commands, and canonical service state.
-- Add instructor-only websocket handling for shared service commands.
-- Broadcast and replay canonical service state to instructor and student sockets.
-- Add manager/student host code that forwards scoped channel updates into the Reveal iframe.
-- Provide a standalone no-op/local shim.
-- Add one reference service, likely a synchronized timer, to prove command/state semantics.
-- Add tests for command handling, replay, rejected student mutation, payload limits, session isolation, iframe-ready caching, and no interaction with `embeddedActivities`.
+Keep implementation authority split deliberately:
 
-### Phase 2: Local State And Progress
+- SyncDeck host owns session authority, role/participant validation, websocket handling, persistence, canonical service state, replay, payload limits, and iframe forwarding.
+- The shared `syncdeck-reveal` runtime library imported by presentation HTML owns the deck-author-facing `window.SyncDeckSession` API, local subscription dispatch, Reveal-derived defaults, convenience service helpers, and standalone/no-host preview behavior.
+- Shared protocol types should live in one versioned contract that both sides can consume or mirror safely. Older decks and older hosts should fail gracefully when presentation-local services are unavailable.
 
-- Add student-private local restore state if persistence is needed.
-- Add progress event ingestion with aggregate instructor views.
-- Keep raw student work and aggregate progress as separate data classes.
+### Phase 0: Contract Lock
 
-### Phase 3: Optional Event Routing
+- [ ] Define shared TypeScript types for presentation-local activity channels, service commands, service state, and host-to-iframe replay messages.
+- [ ] Put the types in a SyncDeck-owned shared module, likely under `activities/syncdeck/shared/`, so server, manager, student, and runtime helpers use one contract.
+- [ ] Add pure validators/normalizers for `localActivityId`, `instanceKey`, `location`, `serviceId`, `serviceType`, `command`, and command `params`.
+- [ ] Define hard limits before wiring runtime behavior:
+  - maximum channels per SyncDeck session
+  - maximum services per channel
+  - maximum serialized params/state size
+  - maximum identifier lengths
+  - service-specific limits for the reference service
+- [ ] Decide whether phase one requires explicit channel declaration before commands. Recommended: require declaration for clearer replay and authorization semantics.
 
-- Add controlled event scopes such as `instructor`, `all`, `group`, or `partner`.
-- Add explicit capability gates before students can broadcast or peer-route events.
-- Revisit reporting and scoring only after the channel model is stable.
+Acceptance checks:
+
+- Types compile in both client and server imports.
+- Normalizer tests cover malformed ids, overlong ids, invalid locations, unknown service types, oversized params, and valid command payloads.
+- Contract docs in this proposal remain aligned with exported type names.
+
+### Phase 1: Server Session State And Command Handling
+
+- [ ] Extend SyncDeck session data normalization with `presentationLocalActivities`.
+- [ ] Keep the new namespace independent from `embeddedActivities`; do not create or read child sessions.
+- [ ] Add server helpers to create/update channel records by derived `channelKey`.
+- [ ] Add instructor-only handling for `presentationLocalActivity:serviceCommand` on the existing SyncDeck parent websocket path.
+- [ ] Treat iframe-supplied `deckId` and `role` as descriptive only; derive authority from the authenticated SyncDeck socket context.
+- [ ] Implement one reference service using the generic command/state pattern. A synchronized timer is the likely first service because it proves canonical server time, replay, and client-side derivation.
+- [ ] Persist canonical service state under `presentationLocalActivities[channelKey].services[serviceId]`.
+- [ ] Broadcast host-authored `presentationLocalActivity:serviceState` messages to connected SyncDeck viewers.
+- [ ] Replay canonical service state to newly authenticated instructors and newly registered students.
+
+Acceptance checks:
+
+- Instructor command creates or updates only the requested parent-session channel.
+- Student-originated instructor-owned service commands are rejected.
+- Service command params are bounded and sanitized before persistence.
+- Server-authored state includes server-owned fields for the reference service.
+- Ending the parent SyncDeck session removes presentation-local state with normal parent session deletion.
+
+### Phase 2: Manager And Student Host Forwarding
+
+- [ ] Add manager-side handling for presentation-local iframe messages from the Reveal deck.
+- [ ] Add student-side handling for declaration and supported read-only presentation-local messages.
+- [ ] Forward valid iframe-originated service commands from manager host to the SyncDeck websocket using the existing instructor-authenticated connection.
+- [ ] Maintain a local host cache of latest canonical service state by `channelKey + serviceId`.
+- [ ] Forward host-authored service state into the Reveal iframe only after iframe ready and `SyncDeckSession` runtime initialization.
+- [ ] On late channel declaration, replay matching cached state into the iframe.
+- [ ] Ensure cached state is scoped to the current SyncDeck session and cleared on session/presentation changes.
+
+Acceptance checks:
+
+- State replay is not lost when websocket replay arrives before iframe ready.
+- State replay is not lost when the iframe declares a channel after host replay.
+- Student host receives service state but cannot issue instructor-owned commands.
+- Manager and student hosts do not interpret presentation-local messages as embedded activity launch requests.
+
+### Phase 3: Presentation Runtime Shim
+
+- [ ] Add a small `window.SyncDeckSession` runtime helper for decks.
+- [ ] Support channel declaration and subscription to service state.
+- [ ] Support generic service command helpers, with a convenience wrapper for the reference service if useful.
+- [ ] Provide standalone behavior for direct Reveal preview:
+  - declaration succeeds locally
+  - service subscriptions do not throw
+  - reference service can run locally when SyncDeck is unavailable
+  - unsupported host-backed operations return predictable `{ supported: false }`-style results
+- [ ] Document how deck authors should use the runtime without depending on ActiveBits internals.
+
+Acceptance checks:
+
+- Deck-local code can declare a channel in SyncDeck and standalone preview.
+- A reference service can be driven through the runtime API.
+- Unknown host messages do not break existing Reveal sync command handling.
+
+### Phase 4: Reference Flow And Tests
+
+- [ ] Add a small deck-local reference fixture or dev presentation section that uses the service API.
+- [ ] Exercise one instructor-owned command and service-state replay path.
+- [ ] Add server route/websocket tests in `activities/syncdeck/server/routes.test.ts` or extracted helper tests.
+- [ ] Add client helper tests for manager/student host replay and iframe-ready caching.
+- [ ] Add runtime helper tests if the runtime lives in testable TypeScript.
+- [ ] Keep tests focused on presentation-local channels and include negative assertions that `embeddedActivities` is unchanged.
+
+Validation targets:
+
+- Focused SyncDeck server tests for command handling, auth rejection, replay, and payload limits.
+- Focused SyncDeck manager/student tests for iframe-ready replay behavior.
+- Activities workspace lint/typecheck for touched SyncDeck files.
+- Broader `npm test` before merge when environment allows.
+- If browser-level presentation load behavior changes, add or run the shared Playwright harness through `npm run test:e2e`.
+
+### Future Phases
+
+- [ ] Student-private restore state under `presentationLocalStudentState`.
+- [ ] Progress event ingestion and aggregate instructor views.
+- [ ] Controlled event routing for `instructor`, `all`, `group`, or `partner` scopes.
+- [ ] Presentation-owned report blocks or score contributions, only after the channel model stabilizes.
+- [ ] Optional dashboard surfacing for active presentation-local channels.
 
 ## Open Questions
 
-- Should deck-local activities be allowed to create student-private state in phase one, or should phase one be instructor-owned broadcast state only?
-- Should generic shared state updates be full replacement, shallow patch, or operation-based?
-- Should channel declarations be required before updates, or can updates implicitly create channels?
-- Should the deck runtime expose one generic channel API, or separate service helpers such as `createSyncedTimer(...)`?
-- How much of this should be available in standalone presentation preview outside a live SyncDeck session?
+- Should phase one require explicit channel declaration before any service command? Recommended: yes.
+- Should generic shared state remain only a future escape hatch, or should it be removed until a concrete non-service use case appears?
+- Should service storage keys remain `serviceId`, or should implementation immediately use `${serviceType}:${serviceId}`?
+- Should the deck runtime expose only one generic service API in phase one, or include a reference convenience helper such as `createSyncedTimer(...)`?
+- How much standalone-preview behavior should be implemented in the same branch as host-backed service channels?
 - Should channel identity include a deck or presentation identifier beyond the parent SyncDeck session and `instanceKey`?
 
 ## Definition Of Done
 
-- Presentation-local activity service state is clearly separate from embedded ActiveBits activity state.
-- A reference service can be controlled by the instructor and stays synchronized across manager and student presentation iframes.
-- Late joiners receive current service state.
-- Iframe-ready and late-declare replay paths deliver current channel state reliably.
-- Student-originated instructor-only mutations are rejected.
-- Payload limits and validation prevent deck-authored messages from writing arbitrary or unbounded session data.
-- Existing embedded activity behavior and tests continue to pass.
+- [ ] Presentation-local activity service state is clearly separate from embedded ActiveBits activity state.
+- [ ] Phase-one implementation uses generic service command/state contracts, with any reference timer treated as one service implementation.
+- [ ] A reference service can be controlled by the instructor and stays synchronized across manager and student presentation iframes.
+- [ ] Late joiners receive current service state.
+- [ ] Iframe-ready and late-declare replay paths deliver current channel state reliably.
+- [ ] Student-originated instructor-only mutations are rejected.
+- [ ] Payload limits and validation prevent deck-authored messages from writing arbitrary or unbounded session data.
+- [ ] Existing embedded activity behavior and tests continue to pass.
