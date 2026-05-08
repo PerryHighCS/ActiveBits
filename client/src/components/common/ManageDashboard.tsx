@@ -588,21 +588,15 @@ export default function ManageDashboard({
     preflightValidatedValue,
   )
 
-  useEffect(() => {
-    if (selectedActivityPreflightOptionKey == null || preflightValidatedValue == null) {
+  const resetPreflightStateForOptionChange = (key: string, nextValue: string): void => {
+    if (selectedActivityPreflightOptionKey !== key || nextValue.trim() === preflightValidatedValue) {
       return
     }
-
-    const currentValue = (persistentOptions[selectedActivityPreflightOptionKey] ?? '').trim()
-    if (currentValue === preflightValidatedValue) {
-      return
-    }
-
     preflightRequestIdRef.current += 1
     setPreflightValidatedValue(null)
     setPreflightWarning(null)
     setIsPreflightChecking(false)
-  }, [persistentOptions, preflightValidatedValue, selectedActivityPreflightOptionKey])
+  }
 
   const existingTeacherCodeForEdit = editingPersistentSession
     ? (savedSessions[buildPersistentSessionKey(editingPersistentSession.activityName, editingPersistentSession.hash)] ?? '').trim()
@@ -668,7 +662,15 @@ export default function ManageDashboard({
               entryPolicy: editingPersistentSession.entryPolicy,
             }
             : null}
-          onSelectedOptionsChange={setPersistentOptions}
+          onSelectedOptionsChange={(nextSelectedOptions) => {
+            if (selectedActivityPreflightOptionKey != null) {
+              resetPreflightStateForOptionChange(
+                selectedActivityPreflightOptionKey,
+                nextSelectedOptions[selectedActivityPreflightOptionKey] ?? '',
+              )
+            }
+            setPersistentOptions(nextSelectedOptions)
+          }}
           onSubmitReadinessChange={setCustomBuilderCanSubmit}
         />
       </Suspense>
@@ -743,6 +745,7 @@ export default function ManageDashboard({
                   'aria-invalid': true,
                 }
               const updatePersistentOption = (nextValue: string): void => {
+                resetPreflightStateForOptionChange(key, nextValue)
                 setPersistentOptions((previous) => ({
                   ...previous,
                   [key]: nextValue,
@@ -812,6 +815,13 @@ export default function ManageDashboard({
                             checked={values.has(entry.value)}
                             onChange={(event) => {
                               const checked = event.target.checked
+                              const previewValues = new Set(values)
+                              if (checked) {
+                                previewValues.add(entry.value)
+                              } else {
+                                previewValues.delete(entry.value)
+                              }
+                              resetPreflightStateForOptionChange(key, Array.from(previewValues).join(','))
                               setPersistentOptions((previous) => {
                                 const nextValues = new Set(parseMultiselectValues(previous[key] ?? ''))
                                 if (checked) {
