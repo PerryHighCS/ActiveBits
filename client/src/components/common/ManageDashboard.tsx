@@ -791,9 +791,9 @@ export default function ManageDashboard({
                 ) : option.type === 'multiselect' ? (
                   <fieldset className="flex flex-col gap-2" {...optionErrorAttributes}>
                     <legend className="sr-only">{option.label || key}</legend>
-                    {(option.options || []).map((entry) => {
+                    {(() => {
                       const values = new Set(parseMultiselectValues(persistentOptions[key] ?? ''))
-                      return (
+                      return (option.options || []).map((entry) => (
                         <label key={entry.value} className="inline-flex items-center gap-2 font-normal">
                           <input
                             type="checkbox"
@@ -811,8 +811,8 @@ export default function ManageDashboard({
                           />
                           {entry.label}
                         </label>
-                      )
-                    })}
+                      ))
+                    })()}
                   </fieldset>
                 ) : (
                   <div className="flex items-center gap-2">
