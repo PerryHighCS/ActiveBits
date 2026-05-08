@@ -47,9 +47,13 @@ export default function BinaryBreachManager() {
   const [students, setStudents] = useState<RosterStudent[]>([])
   const [saving, setSaving] = useState(false)
   const [startingMission, setStartingMission] = useState(false)
-  const [settingsDirty, setSettingsDirty] = useState(false)
+  const settingsDirtyRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+
+  const updateSettingsDirty = useCallback((dirty: boolean): void => {
+    settingsDirtyRef.current = dirty
+  }, [])
 
   const loadState = useCallback(async () => {
     if (!sessionId) return
@@ -57,14 +61,14 @@ export default function BinaryBreachManager() {
       const response = await fetch(`/api/binary-breach/${sessionId}/state`)
       if (!response.ok) throw new Error('Failed to load Binary Breach state')
       const payload = await response.json() as StateResponse
-      if (!settingsDirty) setSettings(payload.settings)
+      if (!settingsDirtyRef.current) setSettings(payload.settings)
       setStudents(payload.students)
       setError(null)
     } catch (err) {
       console.error('Failed to load Binary Breach manager state:', err)
       setError('Unable to load mission state.')
     }
-  }, [sessionId, settingsDirty])
+  }, [sessionId])
 
   useEffect(() => {
     if (!sessionId || querySettingsAppliedSessionRef.current === sessionId || location.search.length === 0) return
@@ -81,7 +85,7 @@ export default function BinaryBreachManager() {
     })
     querySettingsAppliedSessionRef.current = sessionId
     setSettings(querySettings)
-    setSettingsDirty(true)
+    updateSettingsDirty(true)
     void (async () => {
       try {
         const response = await fetch(`/api/binary-breach/${sessionId}/settings`, {
@@ -90,7 +94,7 @@ export default function BinaryBreachManager() {
           body: JSON.stringify(querySettings),
         })
         if (!response.ok) throw new Error('Failed to apply link settings')
-        setSettingsDirty(false)
+        updateSettingsDirty(false)
         await loadState()
       } catch (err) {
         console.error('Failed to apply Binary Breach link settings:', err)
@@ -115,7 +119,7 @@ export default function BinaryBreachManager() {
       try {
         const message = JSON.parse(String(event.data)) as { type?: string; payload?: StateResponse }
         if (message.type === 'binary-breach:roster' && message.payload) {
-          if (!settingsDirty) setSettings(message.payload.settings)
+          if (!settingsDirtyRef.current) setSettings(message.payload.settings)
           setStudents(message.payload.students)
           setStatusMessage(null)
         }
@@ -124,7 +128,7 @@ export default function BinaryBreachManager() {
       }
     }
     return () => socket.close()
-  }, [sessionId, settingsDirty])
+  }, [sessionId])
 
   const classAccuracy = useMemo(() => {
     const attempts = students.reduce((total, student) => total + student.progress.attempts, 0)
@@ -146,7 +150,7 @@ export default function BinaryBreachManager() {
       if (!response.ok) throw new Error('Failed to save settings')
       const payload = await response.json() as { settings: BinaryBreachSettings }
       setSettings(payload.settings)
-      setSettingsDirty(false)
+      updateSettingsDirty(false)
       setStatusMessage('Mission settings saved.')
       await loadState()
     } catch (err) {
@@ -172,7 +176,7 @@ export default function BinaryBreachManager() {
       const payload = await response.json() as StateResponse
       setSettings(payload.settings)
       setStudents(payload.students)
-      setSettingsDirty(false)
+      updateSettingsDirty(false)
       setStatusMessage('New mission sent to technicians.')
     } catch (err) {
       console.error('Failed to start new Binary Breach mission:', err)
@@ -225,7 +229,7 @@ export default function BinaryBreachManager() {
                 className="bb-select"
                 value={settings.maxBits}
                 onChange={(event) => {
-                  setSettingsDirty(true)
+                  updateSettingsDirty(true)
                   setSettings((current) => ({
                     ...current,
                     maxBits: Number(event.target.value) as BinaryBreachSettings['maxBits'],
@@ -248,7 +252,7 @@ export default function BinaryBreachManager() {
                 max="12"
                 value={settings.missionLength}
                 onChange={(event) => {
-                  setSettingsDirty(true)
+                  updateSettingsDirty(true)
                   setSettings((current) => ({
                     ...current,
                     missionLength: Number(event.target.value),
@@ -265,7 +269,7 @@ export default function BinaryBreachManager() {
                     type="checkbox"
                     checked={settings.challengeTypes.includes(type)}
                     onChange={() => {
-                      setSettingsDirty(true)
+                      updateSettingsDirty(true)
                       setSettings((current) => ({
                         ...current,
                         challengeTypes: toggleChallengeType(current.challengeTypes, type),
@@ -282,7 +286,7 @@ export default function BinaryBreachManager() {
                 type="checkbox"
                 checked={settings.hintsEnabled}
                 onChange={(event) => {
-                  setSettingsDirty(true)
+                  updateSettingsDirty(true)
                   setSettings((current) => ({
                     ...current,
                     hintsEnabled: event.target.checked,
@@ -299,7 +303,7 @@ export default function BinaryBreachManager() {
                 className="bb-select"
                 value={settings.placeValueSupport}
                 onChange={(event) => {
-                  setSettingsDirty(true)
+                  updateSettingsDirty(true)
                   setSettings((current) => ({
                     ...current,
                     placeValueSupport: event.target.value as BinaryBreachSettings['placeValueSupport'],
