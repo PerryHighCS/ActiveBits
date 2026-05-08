@@ -52,6 +52,14 @@ For concrete launch payloads, read `ACTIVITY_PAYLOADS.md`.
 - notes:
   good when the deck needs a low-friction interactive beat rather than a deep workflow
 
+### Binary Breach
+
+- id: `binary-breach`
+- best for: binary and decimal number-sense practice, especially conversion, comparison, and ordering fluency
+- classroom shape: branch into a short mission where students restore systems by solving binary challenges, then return to the deck
+- notes:
+  supports deck-authored launch options for bit width, mission length, challenge types, hints, and place-value support; teachers can still adjust settings from the Binary Breach console
+
 ## Utility / Contract-Test Activity
 
 ### Embedded Test
@@ -83,6 +91,7 @@ Choose:
 - `algorithm-demo` for “show a concept in motion”
 - `gallery-walk` for “structured critique or feedback artifacts”
 - `raffle` for “quick lightweight interaction”
+- `binary-breach` for “binary number-sense practice mission”
 - `embedded-test` for “verify the embedding contract itself”
 
 ## Maintenance Rule
