@@ -13,10 +13,10 @@ The goal is to support a spectrum of classroom interactions:
 - local-only student activities that survive reloads, if the host later supports private restore state
 - shared activities where students exchange or submit events
 - instructor-visible progress and checkpoints
-- instructor-controlled shared state such as timers, phases, random seeds, or released challenges
+- instructor-controlled shared state such as phases, random seeds, released challenges, prompts, or timers
 - eventual dashboard views for activity progress and shared classroom state
 
-The motivating first service is a synchronized timer. When the instructor starts a deck-local timer, all viewers should derive the same remaining time from canonical SyncDeck state. The timer should not become an embedded ActiveBits activity just to synchronize.
+The motivating first slice is a generic service channel with one concrete reference service. A synchronized timer is a useful proof case, but the architecture should work the same way for phases, prompts, random seeds, lightweight pairing, or other presentation-owned classroom coordination.
 
 ## Motivation
 
@@ -70,7 +70,7 @@ A deck-local timer should not be represented as an embedded child session, and a
 2. Presentation-local activity APIs should be generic and activity-agnostic.
 3. Activities must continue to work in standalone Reveal preview mode.
 4. Local student state and shared classroom state should be clearly separate.
-5. Timers and other shared state should sync canonical state, not high-frequency UI updates.
+5. Shared services should sync canonical state, not high-frequency UI updates.
 6. The protocol should use stable local identity based on `localActivityId`, `instanceKey`, and optional slide `location`.
 7. The host should decide routing, persistence, permissions, and dashboard display.
 8. Existing embedded activity contracts should remain unchanged.
@@ -89,13 +89,11 @@ session.data.presentationLocalActivities = {
     location?: { h: number; v: number; f?: number }
     updatedAt: number
     sharedState?: Record<string, unknown>
-    timer?: {
-      status: 'idle' | 'running' | 'paused'
-      durationMs: number
-      startedAt: number | null
-      pausedAt: number | null
-      elapsedBeforePauseMs: number
-    }
+    services?: Record<string, {
+      type: string
+      state: Record<string, unknown>
+      updatedAt: number
+    }>
   }
 }
 ```
@@ -107,6 +105,19 @@ session.data.presentationLocalActivities = {
 ```
 
 This namespace is intentionally separate from `session.data.embeddedActivities`.
+
+Student-private restore state should not live beside shared channel state. If SyncDeck later persists local student state, use a separate per-student namespace so replay paths cannot accidentally broadcast private work:
+
+```ts
+session.data.presentationLocalStudentState = {
+  [studentId: string]: {
+    [channelKey: string]: {
+      updatedAt: number
+      localState: Record<string, unknown>
+    }
+  }
+}
+```
 
 Add a browser API exposed by the SyncDeck Reveal runtime:
 
@@ -122,7 +133,7 @@ At a high level:
 - activities can store local state
 - activities can emit progress or shared events
 - activities can subscribe to host-relayed events or state updates
-- shared utilities, especially timers, can be controlled by the instructor and rendered consistently across all participants
+- shared utilities can be controlled by the instructor and rendered consistently across all participants
 
 ## Example Authoring API
 
@@ -145,6 +156,8 @@ The runtime should derive useful defaults when possible:
 - role/session support from the SyncDeck host handshake
 
 ### Local Student State
+
+Student-private restore state is a future capability, not a phase-one requirement. It is included here to show the intended API direction and to keep private state separate from shared channel state from the beginning.
 
 ```js
 keyLab.local.set({
@@ -194,10 +207,19 @@ The host decides whether events go to:
 - a specific partner
 - no one, if the current role is not allowed
 
-### Shared Timers
+### Shared Service Commands
+
+Presentation-local activities should request service actions; SyncDeck should produce canonical state. This keeps deck-authored code from writing host-owned timestamps, phase versions, or authoritative counters directly.
 
 ```js
-const timer = SyncDeckSession.timers.get('discussion-timer');
+const discussionTools = SyncDeckSession.activities.register({
+  localActivityId: 'discussion-tools',
+  instanceKey: 'discussion-tools:4:0',
+  title: 'Discussion Tools',
+  capabilities: ['sharedState', 'services']
+});
+
+const timer = discussionTools.timers.get('discussion-timer');
 
 timer.start({
   durationMs: 180000,
@@ -209,7 +231,7 @@ timer.onChange((state) => {
 });
 ```
 
-Timer state should sync canonical timestamps rather than remaining seconds:
+For a timer service, the deck requests `start` with a duration. SyncDeck stamps canonical server-owned fields such as `startedAt`, then broadcasts state:
 
 ```json
 {
@@ -223,13 +245,15 @@ Timer state should sync canonical timestamps rather than remaining seconds:
 }
 ```
 
-Each iframe computes display time locally from the canonical state. This keeps students aligned without sending updates every second.
+Each iframe computes display time locally from canonical state. Clients should use `serverNow` to establish a server-clock offset instead of relying on raw local `Date.now()` alone. This keeps students aligned without sending updates every second.
 
-Student-originated timer control should be rejected unless a future capability explicitly allows student-owned channels.
+The same command/state pattern can support other services later, such as released phases, random seeds, classroom prompts, progress checkpoints, or lightweight pairing. Student-originated service commands should be rejected unless a future capability explicitly allows student-owned channels.
 
 ## Proposed Message Types
 
 These would be host-facing messages sent through the existing `reveal-sync` envelope.
+
+Fields such as `deckId` and `role` in iframe-originated examples are descriptive only. SyncDeck must derive the authoritative session, role, student identity, and instructor authority from the host/websocket context.
 
 ### `presentationLocalActivity:declare`
 
@@ -294,45 +318,46 @@ Sent when a student activity updates private restore state.
 }
 ```
 
-### `presentationLocalActivity:sharedStateSet`
+### `presentationLocalActivity:serviceCommand`
 
-Sent when authorized deck code requests an update to shared state for its isolated channel.
+Sent when authorized deck code requests a service action for its isolated channel. The iframe sends intent; SyncDeck validates the request, applies policy, and creates canonical state.
 
 ```json
 {
   "type": "reveal-sync",
-  "action": "presentationLocalActivity:sharedStateSet",
+  "action": "presentationLocalActivity:serviceCommand",
   "deckId": "protecting-data",
   "role": "instructor",
   "payload": {
     "localActivityId": "discussion-tools",
     "instanceKey": "discussion-tools:4:0",
-    "key": "timer:discussion-timer",
-    "value": {
-      "status": "running",
-      "startedAt": 1778240000000,
-      "durationMs": 180000,
-      "pausedAt": null,
-      "elapsedBeforePauseMs": 0
+    "serviceId": "discussion-timer",
+    "serviceType": "timer",
+    "command": "start",
+    "params": {
+      "durationMs": 180000
     }
   }
 }
 ```
 
-### `presentationLocalActivity:sharedState`
+### `presentationLocalActivity:serviceState`
 
-Sent by the host to iframes when shared state changes or when a participant joins late.
+Sent by the host to iframes when service state changes or when a participant joins late.
+
+The Reveal runtime should intercept and dispatch this command to `SyncDeckSession` subscribers before the generic iframe-sync command handler treats it as an unknown deck command.
 
 ```json
 {
   "type": "reveal-sync",
   "action": "command",
   "payload": {
-    "name": "presentationLocalActivity:sharedState",
+    "name": "presentationLocalActivity:serviceState",
     "localActivityId": "discussion-tools",
     "instanceKey": "discussion-tools:4:0",
-    "key": "timer:discussion-timer",
-    "value": {
+    "serviceId": "discussion-timer",
+    "serviceType": "timer",
+    "state": {
       "status": "running",
       "startedAt": 1778240000000,
       "durationMs": 180000,
@@ -354,8 +379,8 @@ The host should enforce routing and mutation rules. Suggested defaults:
 | Write local private state | yes | yes |
 | Emit progress | yes | yes |
 | Read aggregate progress | yes | no |
-| Start/pause/reset shared timer | yes | no, unless delegated |
-| Read shared timer | yes | yes |
+| Send instructor-owned service command | yes | no, unless delegated |
+| Read shared service state | yes | yes |
 | Broadcast event to all | yes | no, unless delegated |
 | Submit event to instructor | yes | yes |
 | Send peer/group event | configurable | configurable |
@@ -389,7 +414,8 @@ The host should enforce:
 
 - maximum channels per SyncDeck session
 - maximum serialized state size per channel
-- maximum timer duration
+- maximum service command parameter sizes
+- service-specific bounds, such as maximum timer duration
 - maximum string lengths for ids and state fields
 - explicit rejection of unknown capabilities or unauthorized scopes
 - pruning for stale channels if needed
@@ -409,6 +435,8 @@ Expected behavior:
 - manager and student hosts forward the scoped update into their presentation iframes
 - new or reconnecting viewers receive replayed channel state after SyncDeck websocket authentication or registration
 
+Iframe readiness should be handled explicitly. SyncDeck hosts should cache the latest canonical state per channel locally after websocket replay, then forward it only after the presentation iframe is ready and `SyncDeckSession` has initialized. If a local activity declares its channel after replay has already happened, the host should replay the matching cached state to that iframe on declaration. This avoids dropping state when the parent websocket connects before the deck runtime finishes loading.
+
 ## Storage And Cleanup
 
 Presentation-local activity state should live and expire with the parent SyncDeck session. Ending a SyncDeck session removes the local channel state automatically because it is part of the parent session data.
@@ -424,7 +452,7 @@ In standalone mode:
 - `SyncDeckSession` may exist as a no-op/local-only shim
 - local state can use in-memory storage or browser storage if enabled by the deck
 - shared events should not throw errors
-- timers can run locally
+- services such as timers can run locally
 - methods should return predictable results such as `{ supported: false }` or resolve without network effects
 
 Example:
@@ -442,6 +470,8 @@ if (!SyncDeckSession.supported) {
 Deck-authored timers can be controlled by the instructor and displayed consistently across instructor and student views.
 
 Important implementation detail: sync timer state, not per-second ticks.
+
+Timers are one example of the generic service command/canonical state pattern, not the center of the architecture.
 
 ### Public/Private Key Lab
 
@@ -480,16 +510,17 @@ Each phase is shared state, and deck UI can respond to phase changes.
 
 ## Implementation Roadmap
 
-### Phase 1: Instructor-Owned Broadcast Channels And Timers
+### Phase 1: Instructor-Owned Service Channels
 
 - Add shared SyncDeck types for presentation-local activity channel messages.
 - Add a `presentationLocalActivities` normalizer to SyncDeck session data.
-- Add server helpers to normalize `localActivityId`, `instanceKey`, timer state, and state patches.
-- Add instructor-only websocket handling for shared timer commands.
-- Broadcast and replay timer state to instructor and student sockets.
+- Add server helpers to normalize `localActivityId`, `instanceKey`, service commands, and canonical service state.
+- Add instructor-only websocket handling for shared service commands.
+- Broadcast and replay canonical service state to instructor and student sockets.
 - Add manager/student host code that forwards scoped channel updates into the Reveal iframe.
 - Provide a standalone no-op/local shim.
-- Add tests for timer start/replay, rejected student mutation, payload limits, session isolation, and no interaction with `embeddedActivities`.
+- Add one reference service, likely a synchronized timer, to prove command/state semantics.
+- Add tests for command handling, replay, rejected student mutation, payload limits, session isolation, iframe-ready caching, and no interaction with `embeddedActivities`.
 
 ### Phase 2: Local State And Progress
 
@@ -506,17 +537,18 @@ Each phase is shared state, and deck UI can respond to phase changes.
 ## Open Questions
 
 - Should deck-local activities be allowed to create student-private state in phase one, or should phase one be instructor-owned broadcast state only?
-- Should shared state updates be full replacement, shallow patch, or operation-based?
+- Should generic shared state updates be full replacement, shallow patch, or operation-based?
 - Should channel declarations be required before updates, or can updates implicitly create channels?
-- Should the deck runtime expose one generic channel API, or separate helpers such as `createSyncedTimer(...)`?
+- Should the deck runtime expose one generic channel API, or separate service helpers such as `createSyncedTimer(...)`?
 - How much of this should be available in standalone presentation preview outside a live SyncDeck session?
 - Should channel identity include a deck or presentation identifier beyond the parent SyncDeck session and `instanceKey`?
 
 ## Definition Of Done
 
 - Presentation-local activity service state is clearly separate from embedded ActiveBits activity state.
-- A deck-local timer can be started by the instructor and stays synchronized across manager and student presentation iframes.
-- Late joiners receive current timer state.
+- A reference service can be controlled by the instructor and stays synchronized across manager and student presentation iframes.
+- Late joiners receive current service state.
+- Iframe-ready and late-declare replay paths deliver current channel state reliably.
 - Student-originated instructor-only mutations are rejected.
 - Payload limits and validation prevent deck-authored messages from writing arbitrary or unbounded session data.
 - Existing embedded activity behavior and tests continue to pass.
