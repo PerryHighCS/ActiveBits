@@ -43,15 +43,32 @@ Recommended attributes:
 
 Use stable instance identity so revisit behavior is predictable.
 
-Good default:
+### Format
 
-- derive the instance key from `activityId` plus slide position
+The instance key is `{activityId}:{h}:{v}` where:
+
+- `h` is the **1-based horizontal slide index** (matches the slide's position in the top-level `<div class="slides">` sequence, counting each top-level `<section>` as one, regardless of whether it is a vertical stack)
+- `v` is the **0-based vertical sub-slide index** within that horizontal position (0 for a flat slide or for the first sub-slide in a vertical stack, 1 for the second sub-slide, and so on)
 
 Examples:
 
-- `video-sync:3:0`
-- `raffle:5:0`
-- `resonance:2:0`
+- `resonance:2:0` — flat slide at horizontal position 2
+- `video-sync:3:0` — flat slide at horizontal position 3
+- `resonance:6:1` — MCQ on the second sub-slide of a vertical stack at horizontal position 6
+- `raffle:5:0` — activity on the first (or only) sub-slide at horizontal position 5
+
+For vertical stacks, the top-level `<section>` wrapping the stack counts as one horizontal position. The nested `<section>` elements count as vertical positions starting at 0.
+
+### Renumbering requirement
+
+**Whenever slides are added, moved, or removed, all `data-activity-instance-key` values must be audited and updated to match the new positions.** The host uses these keys to associate live session state with specific slides, so a stale key silently links the wrong activity state to the wrong slide.
+
+Checklist after any structural change:
+
+1. Count every top-level `<section>` from 1 to assign `h`.
+2. For each vertical stack, count its nested `<section>` elements from 0 to assign `v`.
+3. Update every `data-activity-instance-key` in the file to reflect the new `h:v` values.
+4. Also update the corresponding HTML comment slide labels (e.g. `SLIDE 06 ·`) so they stay in sync.
 
 Use an explicit `data-activity-instance-key` only when the deck needs a non-positional identity.
 
