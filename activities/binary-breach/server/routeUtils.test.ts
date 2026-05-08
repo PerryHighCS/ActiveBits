@@ -72,6 +72,24 @@ void test('drops malformed student records during normalization', () => {
     assert.equal(student.currentChallenge.direction, 'least-to-greatest')
     assert.equal(student.currentChallenge.promptEmphasis, 'least to greatest')
   }
+
+  const malformedChallengeStudent = normalizeBinaryBreachStudent({
+    id: 'abc',
+    name: 'Grace',
+    progress: {},
+    currentChallenge: {
+      id: 'bad-order',
+      type: 'order-binary',
+      systemName: 'Sorting Core',
+      prompt: 'Arrange the queue from least to greatest.',
+      promptEmphasis: 'least to greatest',
+      maxBits: 8,
+      hintLevel: 0,
+      values: ['10', '1'],
+      answer: 'not-an-array',
+    },
+  }, DEFAULT_BINARY_BREACH_SETTINGS)
+  assert.equal(malformedChallengeStudent?.currentChallenge, null)
 })
 
 void test('normalizes Binary Breach launch options from permalink and embedded selections', () => {

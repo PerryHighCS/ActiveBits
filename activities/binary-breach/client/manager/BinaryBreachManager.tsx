@@ -14,7 +14,7 @@ import {
 
 type RosterStudent = Pick<
   BinaryBreachStudentRecord,
-  'id' | 'name' | 'connected' | 'joined' | 'lastSeen' | 'progress' | 'challengeIndex'
+  'name' | 'connected' | 'progress' | 'challengeIndex'
 >
 
 interface StateResponse {
@@ -350,12 +350,12 @@ export default function BinaryBreachManager() {
                       </td>
                     </tr>
                   )}
-                  {students.map((student) => {
+                  {students.map((student, index) => {
                     const acc = student.progress.attempts === 0
                       ? 100
                       : Math.round((student.progress.correct / student.progress.attempts) * 100)
                     return (
-                      <tr key={student.id}>
+                      <tr key={`${student.name}:${index}`}>
                         <td>{student.name}</td>
                         <td style={{ color: 'var(--bb-accent)' }}>{student.progress.systemsRestored}</td>
                         <td>{acc}%</td>

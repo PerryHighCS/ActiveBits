@@ -4,7 +4,7 @@ import type {
   BinaryBreachSettings,
   BinaryBreachStudentRecord,
 } from '../binaryBreachTypes.js'
-import { normalizeBinaryBreachSettings } from '../shared/challengeGenerator.js'
+import { BINARY_BREACH_CHALLENGE_TYPES, normalizeBinaryBreachSettings } from '../shared/challengeGenerator.js'
 import { calculateMissionScore, createInitialProgress } from '../shared/scoring.js'
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -91,11 +91,25 @@ export function normalizeProgress(value: unknown, settings: BinaryBreachSettings
 }
 
 function normalizePersistedChallenge(value: unknown): BinaryBreachChallenge | null {
-  if (!isPlainObject(value) || typeof value.type !== 'string') {
+  if (
+    !isPlainObject(value)
+    || typeof value.type !== 'string'
+    || !(BINARY_BREACH_CHALLENGE_TYPES as string[]).includes(value.type)
+  ) {
     return null
   }
 
   const challenge = { ...value } as Record<string, unknown>
+  if (
+    typeof challenge.id !== 'string'
+    || typeof challenge.systemName !== 'string'
+    || typeof challenge.prompt !== 'string'
+    || typeof challenge.maxBits !== 'number'
+    || typeof challenge.hintLevel !== 'number'
+  ) {
+    return null
+  }
+
   if (typeof challenge.promptEmphasis !== 'string') {
     if (challenge.type === 'binary-to-decimal' && typeof challenge.binary === 'string') {
       challenge.promptEmphasis = `Decode ${challenge.binary}`
@@ -114,6 +128,42 @@ function normalizePersistedChallenge(value: unknown): BinaryBreachChallenge | nu
 
   if (challenge.type === 'order-binary' && challenge.direction !== 'greatest-to-least') {
     challenge.direction = 'least-to-greatest'
+  }
+
+  if (
+    challenge.type === 'binary-to-decimal'
+    && (typeof challenge.binary !== 'string' || typeof challenge.decimal !== 'number')
+  ) {
+    return null
+  }
+  if (
+    challenge.type === 'decimal-to-binary'
+    && (typeof challenge.decimal !== 'number' || typeof challenge.binary !== 'string')
+  ) {
+    return null
+  }
+  if (
+    challenge.type === 'compare-binary'
+    && (
+      typeof challenge.left !== 'string'
+      || typeof challenge.right !== 'string'
+      || (challenge.target !== 'larger' && challenge.target !== 'smaller')
+      || (challenge.answer !== 'left' && challenge.answer !== 'right')
+    )
+  ) {
+    return null
+  }
+  if (
+    challenge.type === 'order-binary'
+    && (
+      !Array.isArray(challenge.values)
+      || !challenge.values.every((entry) => typeof entry === 'string')
+      || !Array.isArray(challenge.answer)
+      || !challenge.answer.every((entry) => typeof entry === 'string')
+      || (challenge.direction !== 'least-to-greatest' && challenge.direction !== 'greatest-to-least')
+    )
+  ) {
+    return null
   }
 
   return challenge as unknown as BinaryBreachChallenge

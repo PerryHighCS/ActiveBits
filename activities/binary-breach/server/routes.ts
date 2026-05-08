@@ -149,11 +149,8 @@ function startNewMission(session: BinaryBreachSession): void {
 
 function toRosterStudent(student: BinaryBreachStudentRecord): Record<string, unknown> {
   return {
-    id: student.id,
     name: student.name,
     connected: student.connected,
-    joined: student.joined,
-    lastSeen: student.lastSeen,
     progress: student.progress,
     challengeIndex: student.challengeIndex,
   }

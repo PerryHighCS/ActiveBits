@@ -280,6 +280,15 @@ void test('student registration does not merge duplicate display names without a
   const secondStudent = secondRegisterResponse.payload as { studentId: string }
   assert.notEqual(firstStudent.studentId, secondStudent.studentId)
 
+  const stateResponse = createResponse()
+  await app.getRoutes.get('/api/binary-breach/:sessionId/state')?.({
+    params: { sessionId },
+  }, stateResponse)
+  const rosterStudent = (stateResponse.payload as { students: Array<Record<string, unknown>> }).students[0]
+  assert.equal(rosterStudent?.id, undefined)
+  assert.equal(rosterStudent?.joined, undefined)
+  assert.equal(rosterStudent?.lastSeen, undefined)
+
   const stored = await sessions.get(sessionId)
   const students = Array.isArray(stored?.data.students) ? stored.data.students : []
   assert.equal(students.length, 2)
@@ -415,8 +424,9 @@ void test('manager new mission resets all students with a fresh mission seed', a
   }, newMissionResponse)
 
   assert.equal(newMissionResponse.statusCode, 200)
-  const payload = newMissionResponse.payload as { students: Array<{ id: string; progress: { attempts: number }; challengeIndex: number }> }
+  const payload = newMissionResponse.payload as { students: Array<{ id?: string; progress: { attempts: number }; challengeIndex: number }> }
   assert.equal(payload.students.length, 2)
+  assert.ok(payload.students.every((student) => student.id === undefined))
   assert.ok(payload.students.every((student) => student.progress.attempts === 0 && student.challengeIndex === 0))
 
   const stored = await sessions.get(sessionId)
