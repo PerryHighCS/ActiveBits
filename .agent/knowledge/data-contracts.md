@@ -16,6 +16,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-05-08
+- Surface: REST | websocket | activity interface
+- Contract: Binary Breach mission reset has two activity-owned scopes. `POST /api/binary-breach/:sessionId/mission/new` is instructor/class scoped: it creates a fresh `missionSeed`, resets every student progress record, and broadcasts `binary-breach:mission-reset` with each connected student's own current challenge. `POST /api/binary-breach/:sessionId/student/retry` is student scoped: it resets only the requesting student against the current active mission seed/settings.
+- Compatibility constraints: Student retry must not rotate `missionSeed` or disturb other students. Manager new mission must preserve session settings and roster identity while resetting progress/challenge state. Reconnecting students recover the current mission from stored session state through the existing register route.
+- Validation rules: Both reset paths use normal Binary Breach session normalization and student identity validation; reset progress returns to `createInitialProgress()` and challenge index `0`.
+- Evidence (schema/tests/path): `activities/binary-breach/server/routes.ts`; `activities/binary-breach/server/routes.test.ts`; `activities/binary-breach/client/manager/BinaryBreachManager.tsx`; `activities/binary-breach/client/student/BinaryBreachStudent.tsx`
+- Follow-up action: If instructor auth is later added to Binary Breach manager routes, apply it consistently to settings and mission reset endpoints together.
+- Owner: Codex
+
+- Date: 2026-05-08
 - Surface: activity interface | client bootstrap
 - Contract: Shared activity `deepLinkOptions` may now describe common permalink/embed controls with `text`, `select`, `number`, `checkbox`, and `multiselect` field types. Values still canonicalize to string selected-options records; multiselect values use a comma-separated string, and checkbox values use `"true"` / `"false"`.
 - Compatibility constraints: Existing text/select options remain unchanged. Activities that need richer or protocol-specific setup can still use `manageDashboard.customPersistentLinkBuilder`, but simple dashboard-like settings should prefer the generic fields so the same selected-options contract works for persistent links, `/launch` query params, and SyncDeck embedded `activityOptions`.

@@ -46,8 +46,10 @@ export default function BinaryBreachManager() {
   const [settings, setSettings] = useState<BinaryBreachSettings>(() => ({ ...DEFAULT_BINARY_BREACH_SETTINGS }))
   const [students, setStudents] = useState<RosterStudent[]>([])
   const [saving, setSaving] = useState(false)
+  const [startingMission, setStartingMission] = useState(false)
   const [settingsDirty, setSettingsDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
   const loadState = useCallback(async () => {
     if (!sessionId) return
@@ -115,6 +117,7 @@ export default function BinaryBreachManager() {
         if (message.type === 'binary-breach:roster' && message.payload) {
           if (!settingsDirty) setSettings(message.payload.settings)
           setStudents(message.payload.students)
+          setStatusMessage(null)
         }
       } catch (err) {
         console.error('Failed to parse Binary Breach websocket message:', err)
@@ -144,6 +147,7 @@ export default function BinaryBreachManager() {
       const payload = await response.json() as { settings: BinaryBreachSettings }
       setSettings(payload.settings)
       setSettingsDirty(false)
+      setStatusMessage('Mission settings saved.')
       await loadState()
     } catch (err) {
       console.error('Failed to save Binary Breach settings:', err)
@@ -153,12 +157,40 @@ export default function BinaryBreachManager() {
     }
   }
 
+  const startNewMission = async () => {
+    if (!sessionId) return
+    const confirmed = window.confirm('Start a new Binary Breach mission for every connected technician? This resets current student progress for this session.')
+    if (!confirmed) return
+    setStartingMission(true)
+    setError(null)
+    try {
+      const response = await fetch(`/api/binary-breach/${sessionId}/mission/new`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!response.ok) throw new Error('Failed to start new mission')
+      const payload = await response.json() as StateResponse
+      setSettings(payload.settings)
+      setStudents(payload.students)
+      setSettingsDirty(false)
+      setStatusMessage('New mission sent to technicians.')
+    } catch (err) {
+      console.error('Failed to start new Binary Breach mission:', err)
+      setError('Unable to start a new mission.')
+    } finally {
+      setStartingMission(false)
+    }
+  }
+
   return (
     <div className="binary-breach-shell">
       <SessionHeader activityName="Binary Breach: System Override" sessionId={sessionId} />
       <main className="bb-page">
         {error && (
           <div className="bb-feedback bb-feedback--error" role="alert">{error}</div>
+        )}
+        {statusMessage && (
+          <div className="bb-feedback bb-feedback--correct" role="status">{statusMessage}</div>
         )}
 
         <section className="bb-stats" style={{ marginBottom: '20px' }} aria-label="Class mission summary">
@@ -282,6 +314,14 @@ export default function BinaryBreachManager() {
 
             <button className="bb-btn bb-btn--primary" type="submit" disabled={saving}>
               {saving ? 'SAVING...' : 'SAVE SETTINGS'}
+            </button>
+            <button
+              className="bb-btn bb-btn--secondary"
+              type="button"
+              onClick={startNewMission}
+              disabled={saving || startingMission}
+            >
+              {startingMission ? 'STARTING...' : 'START NEW MISSION'}
             </button>
           </form>
 

@@ -122,6 +122,28 @@ function ensureStudent(
   return student
 }
 
+function resetStudentMission(
+  session: BinaryBreachSession,
+  student: BinaryBreachStudentRecord,
+): void {
+  student.progress = createInitialProgress()
+  student.challengeIndex = 0
+  student.currentChallenge = createBinaryBreachChallenge(
+    session.data.settings,
+    `${session.data.missionSeed}:${student.id}`,
+    0,
+  )
+  student.lastSeen = Date.now()
+}
+
+function startNewMission(session: BinaryBreachSession): void {
+  session.data.missionSeed = createMissionSeed()
+  session.data.active = true
+  for (const student of session.data.students) {
+    resetStudentMission(session, student)
+  }
+}
+
 function toRosterStudent(student: BinaryBreachStudentRecord): Record<string, unknown> {
   return {
     id: student.id,
@@ -169,6 +191,39 @@ export default function setupBinaryBreachRoutes(
     )
   }
 
+  function sendStudentMissionState(
+    socket: BinaryBreachSocket,
+    session: BinaryBreachSession,
+    student: BinaryBreachStudentRecord,
+    type: string,
+  ): void {
+    try {
+      socket.send(JSON.stringify({
+        type,
+        payload: {
+          challenge: student.currentChallenge,
+          progress: student.progress,
+          settings: session.data.settings,
+        },
+      }))
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'binary-breach.ws-student-state-send-failed', sessionId: session.id, error: String(error) }))
+    }
+  }
+
+  function broadcastStudentMissionStates(session: BinaryBreachSession, type: string): void {
+    for (const socket of ws.wss.clients as Set<BinaryBreachSocket>) {
+      if (socket.readyState !== 1 || socket.sessionId !== session.id) {
+        continue
+      }
+      const student = findStudent(session.data.students, socket.studentId ?? null, socket.studentName ?? null)
+      if (!student) {
+        continue
+      }
+      sendStudentMissionState(socket, session, student, type)
+    }
+  }
+
   app.post('/api/binary-breach/create', async (_req, res) => {
     const session = await createSession(sessions, { data: {} })
     session.type = 'binary-breach'
@@ -205,6 +260,23 @@ export default function setupBinaryBreachRoutes(
     await sessions.set(session.id, session)
     await broadcastRoster(session)
     res.json({ ok: true, settings: session.data.settings })
+  })
+
+  app.post('/api/binary-breach/:sessionId/mission/new', async (req, res) => {
+    const session = asBinaryBreachSession(await sessions.get(req.params.sessionId ?? ''))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+    startNewMission(session)
+    await sessions.set(session.id, session)
+    await broadcastRoster(session)
+    broadcastStudentMissionStates(session, 'binary-breach:mission-reset')
+    res.json({
+      ok: true,
+      settings: session.data.settings,
+      students: session.data.students.map(toRosterStudent),
+    })
   })
 
   app.post('/api/binary-breach/:sessionId/student/register', async (req, res) => {
@@ -275,6 +347,28 @@ export default function setupBinaryBreachRoutes(
       feedback,
       progress: student.progress,
       challenge: student.currentChallenge,
+      settings: session.data.settings,
+    })
+  })
+
+  app.post('/api/binary-breach/:sessionId/student/retry', async (req, res) => {
+    const session = asBinaryBreachSession(await sessions.get(req.params.sessionId ?? ''))
+    if (!session) {
+      res.status(404).json({ error: 'invalid session' })
+      return
+    }
+    const body = isPlainObject(req.body) ? req.body : {}
+    const student = ensureStudent(session, body.studentId, body.studentName)
+    if (!student) {
+      res.status(400).json({ error: 'invalid student' })
+      return
+    }
+    resetStudentMission(session, student)
+    await sessions.set(session.id, session)
+    await broadcastRoster(session)
+    res.json({
+      challenge: student.currentChallenge,
+      progress: student.progress,
       settings: session.data.settings,
     })
   })

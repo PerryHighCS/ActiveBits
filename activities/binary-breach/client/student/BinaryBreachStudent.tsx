@@ -47,6 +47,12 @@ interface AnswerResponse {
   settings: BinaryBreachSettings
 }
 
+interface StudentMissionStateResponse {
+  challenge: BinaryBreachChallenge | null
+  progress: BinaryBreachProgress
+  settings: BinaryBreachSettings
+}
+
 interface StaleChallengeResponse {
   error: 'stale_challenge'
   challenge: BinaryBreachChallenge | null
@@ -164,6 +170,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
   const [hint, setHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const [localSeed] = useState(() => createMissionSeed())
   const [localIndex, setLocalIndex] = useState(0)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -188,6 +195,13 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
   }, [])
 
   const awaitingFeedbackContinue = feedback != null && !feedback.correct && !progress.completed && pendingChallenge !== undefined
+
+  const applyMissionState = useCallback((payload: StudentMissionStateResponse) => {
+    setMissionSettings(normalizeStudentMissionSettings(payload.settings))
+    setProgress(payload.progress)
+    setChallenge(payload.challenge)
+    resetAnswerState(payload.challenge)
+  }, [resetAnswerState])
 
   useEffect(() => {
     let cancelled = false
@@ -219,10 +233,7 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
           if (cancelled) return
           setStudentId(payload.studentId)
           setStudentName(payload.studentName)
-          setMissionSettings(normalizeStudentMissionSettings(payload.settings))
-          setChallenge(payload.challenge)
-          setProgress(payload.progress)
-          resetAnswerState(payload.challenge)
+          applyMissionState(payload)
           persistSessionParticipantIdentity(window.localStorage, sessionId, payload.studentName, payload.studentId)
         } else {
           const firstChallenge = createBinaryBreachChallenge(DEFAULT_BINARY_BREACH_SETTINGS, localSeed, 0)
@@ -240,7 +251,27 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
     return () => {
       cancelled = true
     }
-  }, [localSeed, resetAnswerState, sessionId, solo])
+  }, [applyMissionState, localSeed, resetAnswerState, sessionId, solo])
+
+  useEffect(() => {
+    if (!sessionId || solo || !studentId) return undefined
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const socket = new WebSocket(
+      `${wsProtocol}//${window.location.host}/ws/binary-breach?sessionId=${encodeURIComponent(sessionId)}&studentId=${encodeURIComponent(studentId)}&studentName=${encodeURIComponent(studentName)}`,
+    )
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data)) as { type?: string; payload?: StudentMissionStateResponse }
+        if (message.type === 'binary-breach:mission-reset' && message.payload) {
+          applyMissionState(message.payload)
+          setError(null)
+        }
+      } catch (err) {
+        console.error('Failed to parse Binary Breach student websocket message:', err)
+      }
+    }
+    return () => socket.close()
+  }, [applyMissionState, sessionId, solo, studentId, studentName])
 
   const canSubmit = useMemo(() => {
     if (!challenge || progress.completed || awaitingFeedbackContinue) return false
@@ -280,12 +311,11 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
         }
         if (!response.ok) throw new Error('Failed to submit answer')
         const payload = await response.json() as AnswerResponse
-        setMissionSettings(normalizeStudentMissionSettings(payload.settings))
-        setProgress(payload.progress)
         if (payload.feedback.correct) {
-          setChallenge(payload.challenge)
-          resetAnswerState(payload.challenge)
+          applyMissionState(payload)
         } else {
+          setMissionSettings(normalizeStudentMissionSettings(payload.settings))
+          setProgress(payload.progress)
           setFeedback(payload.feedback)
           setPendingChallenge(payload.challenge)
         }
@@ -318,6 +348,37 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
     const nextChallenge = pendingChallenge ?? null
     setChallenge(nextChallenge)
     resetAnswerState(nextChallenge)
+  }
+
+  const retryMission = async () => {
+    setRetrying(true)
+    setError(null)
+    try {
+      if (sessionId && !solo) {
+        const response = await fetch(`/api/binary-breach/${sessionId}/student/retry`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentName, studentId }),
+        })
+        if (!response.ok) throw new Error('Failed to retry mission')
+        const payload = await response.json() as StudentMissionStateResponse
+        applyMissionState(payload)
+      } else {
+        const firstChallenge = createBinaryBreachChallenge(DEFAULT_BINARY_BREACH_SETTINGS, localSeed, 0)
+        setLocalIndex(0)
+        setMissionSettings(normalizeStudentMissionSettings(DEFAULT_BINARY_BREACH_SETTINGS))
+        applyMissionState({
+          challenge: firstChallenge,
+          progress: createInitialProgress(),
+          settings: DEFAULT_BINARY_BREACH_SETTINGS,
+        })
+      }
+    } catch (err) {
+      console.error('Binary Breach retry failed:', err)
+      setError('Unable to restart this mission. Try rejoining from the activity link.')
+    } finally {
+      setRetrying(false)
+    }
   }
 
   const requestHint = async () => {
@@ -495,6 +556,14 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
                   <div className="bb-stat-value">{progress.score}</div>
                 </div>
               </div>
+              <button
+                className="bb-btn bb-btn--primary"
+                type="button"
+                onClick={retryMission}
+                disabled={retrying}
+              >
+                {retrying ? 'RESTARTING...' : 'RETRY ACTIVE MISSION'}
+              </button>
             </div>
           </section>
         )}
@@ -673,6 +742,14 @@ export default function BinaryBreachStudent({ sessionData }: BinaryBreachStudent
                   disabled={challenge == null || !missionSettings.hintsEnabled}
                 >
                   REQUEST HINT
+                </button>
+                <button
+                  className="bb-btn bb-btn--secondary"
+                  type="button"
+                  onClick={retryMission}
+                  disabled={submitting || retrying}
+                >
+                  {retrying ? 'RESTARTING...' : 'RETRY MISSION'}
                 </button>
               </div>
             </div>

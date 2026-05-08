@@ -253,6 +253,156 @@ void test('applies manager settings to student missions and hint availability', 
   assert.equal(hintResponse.statusCode, 400)
 })
 
+void test('student retry resets only that student against the active mission', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const firstRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada' },
+  }, firstRegisterResponse)
+  const firstStudent = firstRegisterResponse.payload as {
+    studentId: string
+    challenge: {
+      id: string
+      type: string
+      decimal?: number
+      binary?: string
+      left?: string
+      right?: string
+      answer?: string[] | 'left' | 'right'
+      values?: string[]
+    }
+  }
+
+  const secondRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Grace' },
+  }, secondRegisterResponse)
+  const secondStudent = secondRegisterResponse.payload as {
+    studentId: string
+    challenge: { id: string }
+  }
+
+  const wrongAnswer = firstStudent.challenge.type === 'binary-to-decimal'
+    ? { decimal: String((firstStudent.challenge.decimal ?? 0) + 1) }
+    : firstStudent.challenge.type === 'decimal-to-binary'
+      ? { binary: `${firstStudent.challenge.binary ?? ''}0` }
+      : firstStudent.challenge.type === 'order-binary'
+        ? { values: [...(firstStudent.challenge.values ?? [])].reverse() }
+        : { choice: firstStudent.challenge.answer === 'left' ? 'right' : 'left' }
+
+  const answerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/answer')?.({
+    params: { sessionId },
+    body: {
+      studentName: 'Ada',
+      studentId: firstStudent.studentId,
+      challengeId: firstStudent.challenge.id,
+      answer: wrongAnswer,
+    },
+  }, answerResponse)
+  assert.equal(answerResponse.statusCode, 200)
+  assert.equal((answerResponse.payload as { progress: { attempts: number } }).progress.attempts, 1)
+
+  const retryResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/retry')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada', studentId: firstStudent.studentId },
+  }, retryResponse)
+
+  assert.equal(retryResponse.statusCode, 200)
+  const retryPayload = retryResponse.payload as {
+    challenge: { id: string }
+    progress: { attempts: number; systemsRestored: number; completed: boolean }
+  }
+  assert.equal(retryPayload.challenge.id, firstStudent.challenge.id)
+  assert.deepEqual(retryPayload.progress, {
+    systemsRestored: 0,
+    attempts: 0,
+    correct: 0,
+    incorrect: 0,
+    streak: 0,
+    bestStreak: 0,
+    hintsUsed: 0,
+    traceLevel: 0,
+    score: 0,
+    completed: false,
+  })
+
+  const stored = await sessions.get(sessionId)
+  const students = Array.isArray(stored?.data.students) ? stored.data.students : []
+  const secondStored = students.find((student) => (
+    typeof student === 'object'
+    && student != null
+    && 'id' in student
+    && student.id === secondStudent.studentId
+  )) as { currentChallenge?: { id?: string } } | undefined
+  assert.equal(secondStored?.currentChallenge?.id, secondStudent.challenge.id)
+})
+
+void test('manager new mission resets all students with a fresh mission seed', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const firstRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada' },
+  }, firstRegisterResponse)
+  const firstStudent = firstRegisterResponse.payload as {
+    studentId: string
+    challenge: { id: string }
+  }
+
+  const secondRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Grace' },
+  }, secondRegisterResponse)
+  const secondStudent = secondRegisterResponse.payload as {
+    studentId: string
+    challenge: { id: string }
+  }
+
+  const newMissionResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/mission/new')?.({
+    params: { sessionId },
+  }, newMissionResponse)
+
+  assert.equal(newMissionResponse.statusCode, 200)
+  const payload = newMissionResponse.payload as { students: Array<{ id: string; progress: { attempts: number }; challengeIndex: number }> }
+  assert.equal(payload.students.length, 2)
+  assert.ok(payload.students.every((student) => student.progress.attempts === 0 && student.challengeIndex === 0))
+
+  const stored = await sessions.get(sessionId)
+  const students = Array.isArray(stored?.data.students) ? stored.data.students : []
+  const nextChallengeIds = students.map((student) => (
+    typeof student === 'object'
+    && student != null
+    && 'currentChallenge' in student
+    && typeof student.currentChallenge === 'object'
+    && student.currentChallenge != null
+    && 'id' in student.currentChallenge
+      ? student.currentChallenge.id
+      : null
+  ))
+  assert.ok(!nextChallengeIds.includes(firstStudent.challenge.id))
+  assert.ok(!nextChallengeIds.includes(secondStudent.challenge.id))
+})
+
 void test('keeps a current student challenge answerable after manager settings change', async () => {
   const app = new TestApp()
   const sessions = createSessionStore()
