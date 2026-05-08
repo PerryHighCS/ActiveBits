@@ -520,6 +520,84 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
     () =>
       parseActivityConfig(
         {
+          id: 'bad13',
+          name: 'Bad13',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            title: {
+              type: 'text',
+              step: 1,
+            },
+          },
+        },
+        'bad-config-13',
+      ),
+    /deepLinkOptions\.title.*min.*max.*step.*number/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad14',
+          name: 'Bad14',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            challenge: {
+              type: 'text',
+              defaultValue: ['binary-to-decimal'],
+            },
+          },
+        },
+        'bad-config-14',
+      ),
+    /deepLinkOptions\.challenge.*defaultValue.*multiselect/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad15',
+          name: 'Bad15',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            hintsEnabled: {
+              type: 'checkbox',
+              defaultValue: 'yes',
+            },
+          },
+        },
+        'bad-config-15',
+      ),
+    /deepLinkOptions\.hintsEnabled.*defaultValue.*checkbox/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
           id: 'bad12',
           name: 'Bad12',
           description: 'desc',

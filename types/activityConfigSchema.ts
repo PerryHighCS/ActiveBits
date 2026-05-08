@@ -114,6 +114,7 @@ function parseDeepLinkOptions(raw: unknown, context: string): Record<string, Act
     const optionContext = `${context}.deepLinkOptions.${optionKey}`
     const label = readOptionalString(optionValue, 'label', optionContext)
     const typeValue = optionValue.type
+    const optionType = typeof typeValue === 'string' ? typeValue : 'text'
     if (
       typeValue !== undefined
       && typeValue !== 'select'
@@ -144,6 +145,32 @@ function parseDeepLinkOptions(raw: unknown, context: string): Record<string, Act
     if (Array.isArray(defaultValue) && !defaultValue.every((entry) => typeof entry === 'string')) {
       throw new Error(`${optionContext}: "defaultValue" string arrays may only contain strings`)
     }
+    if (Array.isArray(defaultValue) && optionType !== 'multiselect') {
+      throw new Error(`${optionContext}: "defaultValue" string arrays are only supported when "type" is "multiselect"`)
+    }
+    if (defaultValue !== undefined && optionType === 'multiselect' && !Array.isArray(defaultValue)) {
+      throw new Error(`${optionContext}: "defaultValue" must be a string array when "type" is "multiselect"`)
+    }
+    if (
+      defaultValue !== undefined
+      && optionType === 'checkbox'
+      && defaultValue !== true
+      && defaultValue !== false
+      && defaultValue !== 'true'
+      && defaultValue !== 'false'
+    ) {
+      throw new Error(`${optionContext}: "defaultValue" must be a boolean or "true"/"false" string when "type" is "checkbox"`)
+    }
+    if (defaultValue !== undefined && optionType === 'number' && (typeof defaultValue !== 'number' || !Number.isFinite(defaultValue))) {
+      throw new Error(`${optionContext}: "defaultValue" must be a finite number when "type" is "number"`)
+    }
+    if (
+      defaultValue !== undefined
+      && (optionType === 'select' || optionType === 'text')
+      && typeof defaultValue !== 'string'
+    ) {
+      throw new Error(`${optionContext}: "defaultValue" must be a string when "type" is "${optionType}"`)
+    }
     const min = optionValue.min
     if (min !== undefined && (typeof min !== 'number' || !Number.isFinite(min))) {
       throw new Error(`${optionContext}: "min" must be a finite number when provided`)
@@ -155,6 +182,9 @@ function parseDeepLinkOptions(raw: unknown, context: string): Record<string, Act
     const step = optionValue.step
     if (step !== undefined && (typeof step !== 'number' || !Number.isFinite(step) || step <= 0)) {
       throw new Error(`${optionContext}: "step" must be a positive finite number when provided`)
+    }
+    if (optionType !== 'number' && (min !== undefined || max !== undefined || step !== undefined)) {
+      throw new Error(`${optionContext}: "min", "max", and "step" are only supported when "type" is "number"`)
     }
     if (typeof min === 'number' && typeof max === 'number' && min > max) {
       throw new Error(`${optionContext}: "min" must be less than or equal to "max"`)

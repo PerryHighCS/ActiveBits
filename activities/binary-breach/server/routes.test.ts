@@ -253,6 +253,38 @@ void test('applies manager settings to student missions and hint availability', 
   assert.equal(hintResponse.statusCode, 400)
 })
 
+void test('student registration does not merge duplicate display names without a participant id', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const firstRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada' },
+  }, firstRegisterResponse)
+
+  const secondRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada' },
+  }, secondRegisterResponse)
+
+  assert.equal(firstRegisterResponse.statusCode, 200)
+  assert.equal(secondRegisterResponse.statusCode, 200)
+  const firstStudent = firstRegisterResponse.payload as { studentId: string }
+  const secondStudent = secondRegisterResponse.payload as { studentId: string }
+  assert.notEqual(firstStudent.studentId, secondStudent.studentId)
+
+  const stored = await sessions.get(sessionId)
+  const students = Array.isArray(stored?.data.students) ? stored.data.students : []
+  assert.equal(students.length, 2)
+})
+
 void test('student retry resets only that student against the active mission', async () => {
   const app = new TestApp()
   const sessions = createSessionStore()

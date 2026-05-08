@@ -80,7 +80,10 @@ function findStudent(
   studentName: string | null,
 ): BinaryBreachStudentRecord | null {
   return students.find((student) => student.id === studentId)
-    ?? students.find((student) => student.name.toLowerCase() === studentName?.toLowerCase())
+    ?? students.find((student) => (
+      !validateStudentId(student.id)
+      && student.name.toLowerCase() === studentName?.toLowerCase()
+    ))
     ?? null
 }
 
