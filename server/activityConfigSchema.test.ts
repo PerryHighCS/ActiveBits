@@ -460,6 +460,84 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
       ),
     /reportEndpoint.*non-empty string/,
   )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad10',
+          name: 'Bad10',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            missionLength: {
+              type: 'number',
+              min: 12,
+              max: 3,
+            },
+          },
+        },
+        'bad-config-10',
+      ),
+    /deepLinkOptions\.missionLength.*min.*max/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad11',
+          name: 'Bad11',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            missionLength: {
+              type: 'number',
+              min: 3,
+              max: 12,
+              step: 10,
+            },
+          },
+        },
+        'bad-config-11',
+      ),
+    /deepLinkOptions\.missionLength.*step.*range/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad12',
+          name: 'Bad12',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          standaloneLayout: {
+            expandShell: 'yes',
+          },
+        },
+        'bad-config-12',
+      ),
+    /standaloneLayout.*expandShell.*boolean/,
+  )
 })
 
 void test('parseActivityConfig removes optional keys when input provides null', () => {

@@ -72,6 +72,19 @@ function integerBetween(min: number, max: number, random: () => number): number 
   return min + Math.floor(random() * (max - min + 1))
 }
 
+function shuffleValues<T>(items: T[], random: () => number): T[] {
+  const shuffled = [...items]
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1))
+    const current = shuffled[index]
+    const swap = shuffled[swapIndex]
+    if (current === undefined || swap === undefined) continue
+    shuffled[index] = swap
+    shuffled[swapIndex] = current
+  }
+  return shuffled
+}
+
 function normalizeMaxBits(bits: number): 4 | 5 | 6 | 7 | 8 {
   if (bits <= 4) return 4
   if (bits >= 8) return 8
@@ -187,7 +200,7 @@ export function createBinaryBreachChallenge(
   while (values.size < 4) {
     values.add(decimalToBinary(integerBetween(1, max, random)))
   }
-  const shuffled = Array.from(values).sort(() => random() - 0.5)
+  const shuffled = shuffleValues(Array.from(values), random)
   const direction = random() > 0.5 ? 'least-to-greatest' : 'greatest-to-least'
   const ascendingAnswer = orderBinaryValues(shuffled)
   const answer = direction === 'least-to-greatest' ? ascendingAnswer : [...ascendingAnswer].reverse()

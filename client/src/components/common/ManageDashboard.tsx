@@ -22,6 +22,7 @@ import {
   isPersistentLinkPreflightVerified,
   normalizePersistentEntryPolicyForActivity,
   normalizeSelectedOptions,
+  parseMultiselectValues,
   persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkGenerator,
   parseDeepLinkOptions,
@@ -715,6 +716,14 @@ export default function ManageDashboard({
           <div className="flex flex-col gap-3">
             {Object.entries(selectedActivityOptions).map(([key, option]) => {
               const optionInputId = `persistent-link-option-${key}`
+              const optionErrorId = `${optionInputId}-error`
+              const optionError = persistentOptionErrors[key]
+              const optionErrorAttributes = optionError === undefined
+                ? {}
+                : {
+                  'aria-describedby': optionErrorId,
+                  'aria-invalid': true,
+                }
               const updatePersistentOption = (nextValue: string): void => {
                 setPersistentOptions((previous) => ({
                   ...previous,
@@ -744,6 +753,7 @@ export default function ManageDashboard({
                           checked={(persistentOptions[key] ?? '') === 'true'}
                           onChange={(event) => updatePersistentOption(event.target.checked ? 'true' : 'false')}
                           className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          {...optionErrorAttributes}
                         />
                       )}
                       {option.label || key}
@@ -756,6 +766,7 @@ export default function ManageDashboard({
                       value={persistentOptions[key] ?? ''}
                       onChange={(event) => updatePersistentOption(event.target.value)}
                       className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
+                      {...optionErrorAttributes}
                     >
                       {(option.options || []).map((entry) => (
                         <option key={entry.value} value={entry.value}>
@@ -778,10 +789,10 @@ export default function ManageDashboard({
                     )}
                   </>
                 ) : option.type === 'multiselect' ? (
-                  <fieldset className="flex flex-col gap-2" aria-describedby={persistentOptionErrors[key] ? `${optionInputId}-error` : undefined}>
+                  <fieldset className="flex flex-col gap-2" {...optionErrorAttributes}>
                     <legend className="sr-only">{option.label || key}</legend>
                     {(option.options || []).map((entry) => {
-                      const values = new Set((persistentOptions[key] ?? '').split(',').filter(Boolean))
+                      const values = new Set(parseMultiselectValues(persistentOptions[key] ?? ''))
                       return (
                         <label key={entry.value} className="inline-flex items-center gap-2 font-normal">
                           <input
@@ -814,6 +825,7 @@ export default function ManageDashboard({
                       value={persistentOptions[key] ?? ''}
                       onChange={(event) => updatePersistentOption(event.target.value)}
                       className={`w-full border-2 rounded px-3 py-2 ${persistentOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
+                      {...optionErrorAttributes}
                     />
                     {selectedActivityPreflight?.optionKey === key && (
                       <Button
@@ -830,10 +842,10 @@ export default function ManageDashboard({
                     )}
                   </div>
                 )}
-                {persistentOptionErrors[key] !== undefined && (
-                  <span id={`${optionInputId}-error`} className="block mt-1 text-xs text-red-600">{persistentOptionErrors[key]}</span>
+                {optionError !== undefined && (
+                  <span id={optionErrorId} className="block mt-1 text-xs text-red-600">{optionError}</span>
                 )}
-                {persistentOptionErrors[key] === undefined && selectedActivityPreflight?.optionKey === key && (persistentOptions[key] ?? '').trim().length > 0 && (
+                {optionError === undefined && selectedActivityPreflight?.optionKey === key && (persistentOptions[key] ?? '').trim().length > 0 && (
                   <span className={`block mt-1 text-xs ${isPreflightVerified === true ? 'text-green-700' : 'text-gray-600'}`}>
                     {isPreflightVerified === true
                       ? 'Value verified. You can now create the link.'

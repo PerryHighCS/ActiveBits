@@ -156,6 +156,18 @@ function parseDeepLinkOptions(raw: unknown, context: string): Record<string, Act
     if (step !== undefined && (typeof step !== 'number' || !Number.isFinite(step) || step <= 0)) {
       throw new Error(`${optionContext}: "step" must be a positive finite number when provided`)
     }
+    if (typeof min === 'number' && typeof max === 'number' && min > max) {
+      throw new Error(`${optionContext}: "min" must be less than or equal to "max"`)
+    }
+    if (
+      typeof min === 'number'
+      && typeof max === 'number'
+      && typeof step === 'number'
+      && max > min
+      && step > max - min
+    ) {
+      throw new Error(`${optionContext}: "step" must be less than or equal to the configured range`)
+    }
     parsed[optionKey] = {
       ...(label !== undefined ? { label } : {}),
       ...(typeValue !== undefined ? { type: typeValue } : {}),
@@ -302,15 +314,19 @@ function parseCreateSessionBootstrap(raw: unknown, context: string): ActivityCre
   }
 }
 
-function parseManageLayout(raw: unknown, context: string): ActivityConfig['manageLayout'] {
+function parseManageLayout(
+  raw: unknown,
+  context: string,
+  fieldName: 'manageLayout' | 'standaloneLayout' = 'manageLayout',
+): ActivityConfig['manageLayout'] {
   if (raw == null) {
     return undefined
   }
   if (!isRecord(raw)) {
-    throw new Error(`${context}: "manageLayout" must be an object when provided`)
+    throw new Error(`${context}: "${fieldName}" must be an object when provided`)
   }
 
-  const expandShell = readOptionalBoolean(raw, 'expandShell', `${context}.manageLayout`)
+  const expandShell = readOptionalBoolean(raw, 'expandShell', `${context}.${fieldName}`)
   return {
     ...(expandShell !== undefined ? { expandShell } : {}),
   }
@@ -572,8 +588,8 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const createSessionBootstrap = parseCreateSessionBootstrap(rawConfig.createSessionBootstrap, context)
   const utilities = parseUtilities(rawConfig.utilities, context)
   const manageDashboard = parseManageDashboard(rawConfig.manageDashboard, context)
-  const manageLayout = parseManageLayout(rawConfig.manageLayout, context)
-  const standaloneLayout = parseManageLayout(rawConfig.standaloneLayout, context)
+  const manageLayout = parseManageLayout(rawConfig.manageLayout, context, 'manageLayout')
+  const standaloneLayout = parseManageLayout(rawConfig.standaloneLayout, context, 'standaloneLayout')
   const embeddedRuntime = parseEmbeddedRuntime(rawConfig.embeddedRuntime, context)
   const reportEndpoint = readOptionalString(rawConfig, 'reportEndpoint', context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)

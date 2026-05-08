@@ -133,12 +133,17 @@ function toFiniteNumber(value: unknown): number | undefined {
 
 function normalizeMultiselectValue(value: unknown, option: DeepLinkOption): string {
   const allowedValues = new Set((option.options ?? []).map((entry) => entry.value))
-  const rawValues = Array.isArray(value) ? value : toStringValue(value).split(',')
-  const values = rawValues
-    .map((entry) => toStringValue(entry).trim())
-    .filter((entry) => entry.length > 0 && (allowedValues.size === 0 || allowedValues.has(entry)))
+  const values = parseMultiselectValues(value)
+    .filter((entry) => allowedValues.size === 0 || allowedValues.has(entry))
 
   return Array.from(new Set(values)).join(',')
+}
+
+export function parseMultiselectValues(value: unknown): string[] {
+  const rawValues = Array.isArray(value) ? value : toStringValue(value).split(',')
+  return rawValues
+    .map((entry) => toStringValue(entry).trim())
+    .filter((entry) => entry.length > 0)
 }
 
 function normalizeDefaultDeepLinkValue(option: DeepLinkOption): string {

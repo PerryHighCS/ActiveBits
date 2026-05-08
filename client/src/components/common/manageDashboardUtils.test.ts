@@ -17,6 +17,7 @@ import {
   parseCreateSessionBootstrap,
   parseDeepLinkGenerator,
   persistCreateSessionBootstrapToSessionStorage,
+  parseMultiselectValues,
   parseDeepLinkOptions,
   storeCreateSessionBootstrapPayload,
   validateDeepLinkSelection,
@@ -150,6 +151,14 @@ void test('normalizeSelectedOptions serializes common checkbox and multiselect c
     hintsEnabled: 'false',
     challengeTypes: 'compare-binary,decimal-to-binary',
   })
+})
+
+void test('parseMultiselectValues trims comma-separated selections', () => {
+  assert.deepEqual(parseMultiselectValues('binary-to-decimal, decimal-to-binary,  compare-binary '), [
+    'binary-to-decimal',
+    'decimal-to-binary',
+    'compare-binary',
+  ])
 })
 
 void test('buildQueryString and buildSoloLink include only non-empty params', () => {

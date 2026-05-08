@@ -342,6 +342,59 @@ void test('ManageDashboard generic preflight option requires verify before submi
   }
 })
 
+void test('ManageDashboard associates persistent option errors with their controls', { concurrency: false }, async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const fetchStub = installFetchStub()
+  const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
+  let unmount: (() => void) | null = null
+  let cleanup: (() => void) | null = null
+  let act: TestingLibraryAct | null = null
+  testActivity.manageDashboard = {
+    ...testActivity.manageDashboard,
+    customPersistentLinkBuilder: false,
+  }
+
+  try {
+    const testingLibrary = await import('@testing-library/react')
+    const { fireEvent, render, waitFor } = testingLibrary
+    cleanup = testingLibrary.cleanup
+    act = testingLibrary.act
+    const { default: ManageDashboard } = await import('./ManageDashboard.js')
+    const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
+    const rendered = render(
+      React.createElement(
+        MemoryRouter,
+        null,
+        React.createElement(TypedManageDashboard, {
+          activityRegistry: testActivityRegistryHooks.activityRegistry,
+          runDeepLinkPreflight: testActivityRegistryHooks.runDeepLinkPreflight,
+        }),
+      ),
+    )
+    unmount = rendered.unmount
+
+    await openPermanentLinkModal(rendered)
+
+    const presentationUrlInput = await waitFor(() => rendered.getByLabelText(/presentation url/i))
+    fireEvent.input(presentationUrlInput, { target: { value: 'not-a-valid-url' } })
+
+    await waitFor(() => {
+      const errorId = presentationUrlInput.getAttribute('aria-describedby')
+      assert.equal(presentationUrlInput.getAttribute('aria-invalid'), 'true')
+      assert.match(errorId ?? '', /persistent-link-option-presentationUrl-error/)
+      assert.notEqual(document.getElementById(errorId ?? ''), null)
+    })
+  } finally {
+    await settleRenderedDashboard({ act, cleanup, unmount })
+    testActivity.manageDashboard = {
+      ...testActivity.manageDashboard,
+      ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),
+    }
+    fetchStub.restore()
+    restoreDomEnvironment()
+  }
+})
+
 void test('ManageDashboard custom builders must signal readiness before submit proceeds', { concurrency: false }, async () => {
   const restoreDomEnvironment = installDomEnvironment()
   const fetchStub = installFetchStub()
