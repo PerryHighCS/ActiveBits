@@ -808,6 +808,7 @@ export default function ManageDashboard({
                               updatePersistentOption(Array.from(nextValues).join(','))
                             }}
                             className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            {...optionErrorAttributes}
                           />
                           {entry.label}
                         </label>

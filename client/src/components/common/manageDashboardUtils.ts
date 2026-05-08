@@ -131,6 +131,10 @@ function toFiniteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+function toPositiveFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
 function normalizeMultiselectValue(value: unknown, option: DeepLinkOption): string {
   const allowedValues = new Set((option.options ?? []).map((entry) => entry.value))
   const values = parseMultiselectValues(value)
@@ -540,7 +544,7 @@ export function parseDeepLinkOptions(rawDeepLinkOptions: unknown): DeepLinkOptio
       defaultValue: toDefaultOptionValue(rawOption.defaultValue),
       min: toFiniteNumber(rawOption.min),
       max: toFiniteNumber(rawOption.max),
-      step: toFiniteNumber(rawOption.step),
+      step: toPositiveFiniteNumber(rawOption.step),
     }
   }
 

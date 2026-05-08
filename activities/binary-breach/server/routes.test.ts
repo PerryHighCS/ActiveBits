@@ -253,6 +253,32 @@ void test('applies manager settings to student missions and hint availability', 
   assert.equal(hintResponse.statusCode, 400)
 })
 
+void test('settings route succeeds when broadcast publishing fails', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  sessions.publishBroadcast = async () => {
+    throw new Error('pubsub down')
+  }
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const settingsResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/settings')?.({
+    params: { sessionId },
+    body: {
+      maxBits: 4,
+      missionLength: 3,
+      challengeTypes: ['binary-to-decimal'],
+    },
+  }, settingsResponse)
+
+  assert.equal(settingsResponse.statusCode, 200)
+  assert.equal((settingsResponse.payload as { settings: { maxBits: number } }).settings.maxBits, 4)
+})
+
 void test('student registration does not merge duplicate display names without a participant id', async () => {
   const app = new TestApp()
   const sessions = createSessionStore()

@@ -90,6 +90,22 @@ void test('drops malformed student records during normalization', () => {
     },
   }, DEFAULT_BINARY_BREACH_SETTINGS)
   assert.equal(malformedChallengeStudent?.currentChallenge, null)
+
+  const unsupportedChallengeStudent = normalizeBinaryBreachStudent({
+    id: 'abc',
+    name: 'Grace',
+    progress: {},
+    currentChallenge: {
+      id: 'bad-type',
+      type: 'unknown-challenge',
+      systemName: 'Sorting Core',
+      prompt: 'Do something unexpected.',
+      promptEmphasis: 'unexpected',
+      maxBits: 8,
+      hintLevel: 0,
+    },
+  }, DEFAULT_BINARY_BREACH_SETTINGS)
+  assert.equal(unsupportedChallengeStudent?.currentChallenge, null)
 })
 
 void test('normalizes Binary Breach launch options from permalink and embedded selections', () => {

@@ -104,6 +104,14 @@ void test('parseDeepLinkOptions keeps supported option metadata', () => {
   assert.equal(parsed.hintsEnabled?.type, 'checkbox')
   assert.equal(parsed.hintsEnabled?.defaultValue, true)
   assert.equal(parsed.challengeTypes?.type, 'multiselect')
+
+  const nonPositiveStep = parseDeepLinkOptions({
+    count: {
+      type: 'number',
+      step: 0,
+    },
+  })
+  assert.equal(nonPositiveStep.count?.step, undefined)
 })
 
 void test('initializeDeepLinkOptions and normalizeSelectedOptions respect allowed keys', () => {

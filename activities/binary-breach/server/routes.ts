@@ -170,7 +170,11 @@ export default function setupBinaryBreachRoutes(
   async function broadcast(type: string, payload: unknown, sessionId: string): Promise<void> {
     const message = JSON.stringify({ type, payload })
     if (sessions.publishBroadcast) {
-      await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload } as Record<string, unknown>)
+      try {
+        await sessions.publishBroadcast(`session:${sessionId}:broadcast`, { type, payload } as Record<string, unknown>)
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'binary-breach.publish-failed', sessionId, error: String(error) }))
+      }
     }
     for (const socket of ws.wss.clients as Set<BinaryBreachSocket>) {
       if (socket.readyState === 1 && socket.sessionId === sessionId) {
