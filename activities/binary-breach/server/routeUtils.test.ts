@@ -41,10 +41,25 @@ void test('drops malformed student records during normalization', () => {
     name: 'Grace',
     connected: true,
     progress: {},
+    currentChallenge: {
+      id: 'legacy-order',
+      type: 'order-binary',
+      systemName: 'Sorting Core',
+      prompt: 'Arrange the queue from least to greatest.',
+      maxBits: 8,
+      hintLevel: 0,
+      values: ['10', '1'],
+      answer: ['1', '10'],
+    },
   }, DEFAULT_BINARY_BREACH_SETTINGS)
   assert.equal(student?.id, 'abc')
   assert.equal(student?.name, 'Grace')
   assert.equal(student?.connected, true)
+  assert.equal(student?.currentChallenge?.type, 'order-binary')
+  if (student?.currentChallenge?.type === 'order-binary') {
+    assert.equal(student.currentChallenge.direction, 'least-to-greatest')
+    assert.equal(student.currentChallenge.promptEmphasis, 'least to greatest')
+  }
 })
 
 void test('normalizes Binary Breach launch options from permalink and embedded selections', () => {

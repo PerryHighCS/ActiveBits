@@ -54,6 +54,29 @@ void test('adds story context to challenge transmissions', () => {
   )
   assert.match(challenge.prompt, /Security door motors/)
   assert.match(challenge.prompt, /Decode [01]+ to restore Door Lock/)
+  assert.match(challenge.prompt, new RegExp(challenge.promptEmphasis.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+})
+
+void test('order challenges can ask for least-to-greatest or greatest-to-least order', () => {
+  const seenDirections = new Set<string>()
+  for (let index = 0; index < 30; index += 1) {
+    const challenge = createBinaryBreachChallenge(
+      { ...settings, challengeTypes: ['order-binary'] },
+      `direction-${index}`,
+      0,
+    )
+    assert.equal(challenge.type, 'order-binary')
+    seenDirections.add(challenge.direction)
+    assert.equal(challenge.promptEmphasis, challenge.direction === 'least-to-greatest' ? 'least to greatest' : 'greatest to least')
+    const ascending = [...challenge.answer].sort((left, right) => parseInt(left, 2) - parseInt(right, 2))
+    if (challenge.direction === 'least-to-greatest') {
+      assert.deepEqual(challenge.answer, ascending)
+    } else {
+      assert.deepEqual(challenge.answer, [...ascending].reverse())
+    }
+  }
+
+  assert.deepEqual([...seenDirections].sort(), ['greatest-to-least', 'least-to-greatest'])
 })
 
 void test('validates answers for each MVP challenge type', () => {
@@ -108,6 +131,7 @@ void test('accepts 100 as decimal 4 for binary-to-decimal challenges', () => {
     type: 'binary-to-decimal',
     systemName: 'Door Lock',
     prompt: 'Decode 100.',
+    promptEmphasis: 'Decode 100',
     maxBits: 8,
     hintLevel: 0,
     binary: '100',
@@ -126,6 +150,7 @@ void test('explains incorrect answers with challenge-specific feedback', () => {
     type: 'binary-to-decimal',
     systemName: 'Door Lock',
     prompt: 'Decode the packet.',
+    promptEmphasis: 'Decode the packet',
     maxBits: 8,
     hintLevel: 0,
     binary: '101101',
@@ -144,6 +169,7 @@ void test('explains incorrect answers with challenge-specific feedback', () => {
     type: 'compare-binary',
     systemName: 'Signal Router',
     prompt: 'Choose the stronger signal.',
+    promptEmphasis: 'stronger signal',
     maxBits: 8,
     hintLevel: 0,
     left: '10111',
@@ -156,6 +182,24 @@ void test('explains incorrect answers with challenge-specific feedback', () => {
   })
   assert.match(compareFeedback.message, /You chose 10111 \(23\)/)
   assert.match(compareFeedback.message, /stronger signal is 11001 \(25\)/)
+
+  const descendingOrderFeedback = validateBinaryBreachAnswer({
+    id: 'c3',
+    type: 'order-binary',
+    systemName: 'Sorting Core',
+    prompt: 'Arrange the queue from greatest to least.',
+    promptEmphasis: 'greatest to least',
+    maxBits: 8,
+    hintLevel: 0,
+    values: ['1', '10', '11'],
+    direction: 'greatest-to-least',
+    answer: ['11', '10', '1'],
+  }, {
+    type: 'order-binary',
+    values: ['1', '10', '11'],
+  })
+  assert.equal(descendingOrderFeedback.correct, false)
+  assert.match(descendingOrderFeedback.message, /Correct greatest-to-least order is 11, 10, 1/)
 })
 
 void test('updates progress and clamps score at zero', () => {

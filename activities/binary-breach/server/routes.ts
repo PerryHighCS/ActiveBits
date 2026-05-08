@@ -367,6 +367,8 @@ export default function setupBinaryBreachRoutes(
     await sessions.set(session.id, session)
     await broadcastRoster(session)
     res.json({
+      studentId: student.id,
+      studentName: student.name,
       challenge: student.currentChallenge,
       progress: student.progress,
       settings: session.data.settings,

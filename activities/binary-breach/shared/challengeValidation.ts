@@ -48,7 +48,11 @@ function incorrectFeedbackMessage(challenge: BinaryBreachChallenge, answer: Bina
 
   if (challenge.type === 'order-binary' && answer.type === challenge.type) {
     const submitted = answer.values.length > 0 ? answer.values.join(', ') : 'no queue'
-    return `Queue rejected. You submitted ${submitted}. Correct least-to-greatest order is ${challenge.answer.join(', ')}. Shorter values usually come first; matching lengths compare left to right.`
+    const directionText = challenge.direction === 'greatest-to-least' ? 'greatest-to-least' : 'least-to-greatest'
+    const guidance = challenge.direction === 'greatest-to-least'
+      ? 'Larger decimal values come first; matching lengths compare left to right.'
+      : 'Shorter values usually come first; matching lengths compare left to right.'
+    return `Queue rejected. You submitted ${submitted}. Correct ${directionText} order is ${challenge.answer.join(', ')}. ${guidance}`
   }
 
   return `Code rejected. Expected ${expectedAnswerText(challenge)}. Check the place values and try the next system.`
@@ -121,7 +125,8 @@ export function buildAnswerSummary(challenge: BinaryBreachChallenge): string {
     return `${winningBinary} equals ${value}`
   }
   if (challenge.type === 'order-binary') {
-    return orderBinaryValues(challenge.values).join(', ')
+    const ordered = orderBinaryValues(challenge.values)
+    return (challenge.direction === 'greatest-to-least' ? ordered.reverse() : ordered).join(', ')
   }
   return expectedAnswerText(challenge)
 }

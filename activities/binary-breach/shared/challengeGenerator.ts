@@ -134,6 +134,7 @@ export function createBinaryBreachChallenge(
       type,
       systemName,
       prompt: `${transmission} Decode ${binary} to restore ${systemName}.`,
+      promptEmphasis: `Decode ${binary}`,
       maxBits,
       hintLevel: 0,
       binary,
@@ -149,6 +150,7 @@ export function createBinaryBreachChallenge(
       type,
       systemName,
       prompt: `${transmission} Upload the binary access code for ${decimal}.`,
+      promptEmphasis: `binary access code for ${decimal}`,
       maxBits,
       hintLevel: 0,
       decimal,
@@ -171,6 +173,7 @@ export function createBinaryBreachChallenge(
       type,
       systemName,
       prompt: `${transmission} Select the ${target} signal to verify ${systemName}.`,
+      promptEmphasis: `Select the ${target} signal`,
       maxBits,
       hintLevel: 0,
       left: decimalToBinary(leftValue),
@@ -185,15 +188,21 @@ export function createBinaryBreachChallenge(
     values.add(decimalToBinary(integerBetween(1, max, random)))
   }
   const shuffled = Array.from(values).sort(() => random() - 0.5)
+  const direction = random() > 0.5 ? 'least-to-greatest' : 'greatest-to-least'
+  const ascendingAnswer = orderBinaryValues(shuffled)
+  const answer = direction === 'least-to-greatest' ? ascendingAnswer : [...ascendingAnswer].reverse()
+  const directionText = direction === 'least-to-greatest' ? 'least to greatest' : 'greatest to least'
   return {
     id,
     type: 'order-binary',
     systemName,
-    prompt: `${transmission} Arrange the recovery queue from least to greatest for ${systemName}.`,
+    prompt: `${transmission} Arrange the recovery queue from ${directionText} for ${systemName}.`,
+    promptEmphasis: directionText,
     maxBits,
     hintLevel: 0,
     values: shuffled,
-    answer: orderBinaryValues(shuffled),
+    direction,
+    answer,
   }
 }
 

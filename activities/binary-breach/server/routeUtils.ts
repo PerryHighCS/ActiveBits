@@ -1,4 +1,5 @@
 import type {
+  BinaryBreachChallenge,
   BinaryBreachProgress,
   BinaryBreachSettings,
   BinaryBreachStudentRecord,
@@ -89,6 +90,35 @@ export function normalizeProgress(value: unknown, settings: BinaryBreachSettings
   return progress
 }
 
+function normalizePersistedChallenge(value: unknown): BinaryBreachChallenge | null {
+  if (!isPlainObject(value) || typeof value.type !== 'string') {
+    return null
+  }
+
+  const challenge = { ...value } as Record<string, unknown>
+  if (typeof challenge.promptEmphasis !== 'string') {
+    if (challenge.type === 'binary-to-decimal' && typeof challenge.binary === 'string') {
+      challenge.promptEmphasis = `Decode ${challenge.binary}`
+    } else if (challenge.type === 'decimal-to-binary' && typeof challenge.decimal === 'number') {
+      challenge.promptEmphasis = `binary access code for ${challenge.decimal}`
+    } else if (challenge.type === 'compare-binary' && (challenge.target === 'larger' || challenge.target === 'smaller')) {
+      challenge.promptEmphasis = `Select the ${challenge.target} signal`
+    } else if (challenge.type === 'order-binary') {
+      challenge.promptEmphasis = typeof challenge.prompt === 'string' && challenge.prompt.includes('greatest to least')
+        ? 'greatest to least'
+        : 'least to greatest'
+    } else {
+      challenge.promptEmphasis = ''
+    }
+  }
+
+  if (challenge.type === 'order-binary' && challenge.direction !== 'greatest-to-least') {
+    challenge.direction = 'least-to-greatest'
+  }
+
+  return challenge as unknown as BinaryBreachChallenge
+}
+
 export function normalizeBinaryBreachStudent(
   value: unknown,
   settingsInput: unknown,
@@ -108,9 +138,7 @@ export function normalizeBinaryBreachStudent(
     joined,
     lastSeen,
     progress: normalizeProgress(value.progress, settings),
-    currentChallenge: isPlainObject(value.currentChallenge)
-      ? value.currentChallenge as unknown as BinaryBreachStudentRecord['currentChallenge']
-      : null,
+    currentChallenge: normalizePersistedChallenge(value.currentChallenge),
     challengeIndex,
   }
 }

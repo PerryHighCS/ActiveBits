@@ -312,17 +312,19 @@ export default function BinaryBreachManager() {
               </select>
             </div>
 
-            <button className="bb-btn bb-btn--primary" type="submit" disabled={saving}>
-              {saving ? 'SAVING...' : 'SAVE SETTINGS'}
-            </button>
-            <button
-              className="bb-btn bb-btn--secondary"
-              type="button"
-              onClick={startNewMission}
-              disabled={saving || startingMission}
-            >
-              {startingMission ? 'STARTING...' : 'START NEW MISSION'}
-            </button>
+            <div className="bb-manager-actions">
+              <button className="bb-btn bb-btn--primary" type="submit" disabled={saving}>
+                {saving ? 'SAVING...' : 'SAVE SETTINGS'}
+              </button>
+              <button
+                className="bb-btn bb-btn--secondary"
+                type="button"
+                onClick={startNewMission}
+                disabled={saving || startingMission}
+              >
+                {startingMission ? 'STARTING...' : 'START NEW MISSION'}
+              </button>
+            </div>
           </form>
 
           <section className="bb-panel">

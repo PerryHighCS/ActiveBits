@@ -52,6 +52,7 @@ export interface BinaryBreachBaseChallenge {
   type: BinaryBreachChallengeType
   systemName: string
   prompt: string
+  promptEmphasis: string
   maxBits: number
   hintLevel: number
 }
@@ -79,6 +80,7 @@ export interface CompareBinaryChallenge extends BinaryBreachBaseChallenge {
 export interface OrderBinaryChallenge extends BinaryBreachBaseChallenge {
   type: 'order-binary'
   values: string[]
+  direction: 'least-to-greatest' | 'greatest-to-least'
   answer: string[]
 }
 

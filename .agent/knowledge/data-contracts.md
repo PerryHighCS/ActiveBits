@@ -16,6 +16,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-05-08
+- Surface: activity interface | internal module
+- Contract: Binary Breach challenges now carry `promptEmphasis`, and order-binary challenges carry `direction: 'least-to-greatest' | 'greatest-to-least'`. The student UI bolds the `promptEmphasis` substring inside the prompt, and validation uses `direction` as authoritative for sorted-answer order.
+- Compatibility constraints: Persisted pre-field challenges are normalized on session read. Missing `promptEmphasis` is reconstructed from the challenge type when possible, and legacy order-binary challenges default to `least-to-greatest`.
+- Validation rules: Order-binary answers must match `challenge.answer` exactly after binary normalization; descending challenges store `answer` in greatest-to-least order, not ascending order plus a display flag.
+- Evidence (schema/tests/path): `activities/binary-breach/binaryBreachTypes.ts`; `activities/binary-breach/shared/challengeGenerator.ts`; `activities/binary-breach/shared/challengeGenerator.test.ts`; `activities/binary-breach/server/routeUtils.ts`; `activities/binary-breach/server/routeUtils.test.ts`; `activities/binary-breach/client/student/BinaryBreachStudent.tsx`
+- Follow-up action: Add any future prompt-highlighting fields to the challenge contract rather than embedding markup in prompt strings.
+- Owner: Codex
+
+- Date: 2026-05-08
 - Surface: REST | websocket | activity interface
 - Contract: Binary Breach mission reset has two activity-owned scopes. `POST /api/binary-breach/:sessionId/mission/new` is instructor/class scoped: it creates a fresh `missionSeed`, resets every student progress record, and broadcasts `binary-breach:mission-reset` with each connected student's own current challenge. `POST /api/binary-breach/:sessionId/student/retry` is student scoped: it resets only the requesting student against the current active mission seed/settings.
 - Compatibility constraints: Student retry must not rotate `missionSeed` or disturb other students. Manager new mission must preserve session settings and roster identity while resetting progress/challenge state. Reconnecting students recover the current mission from stored session state through the existing register route.
