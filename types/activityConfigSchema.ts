@@ -114,8 +114,16 @@ function parseDeepLinkOptions(raw: unknown, context: string): Record<string, Act
     const optionContext = `${context}.deepLinkOptions.${optionKey}`
     const label = readOptionalString(optionValue, 'label', optionContext)
     const typeValue = optionValue.type
-    if (typeValue !== undefined && typeValue !== 'select' && typeValue !== 'text') {
-      throw new Error(`${optionContext}: "type" must be "select" or "text" when provided`)
+    const optionType = typeof typeValue === 'string' ? typeValue : 'text'
+    if (
+      typeValue !== undefined
+      && typeValue !== 'select'
+      && typeValue !== 'text'
+      && typeValue !== 'number'
+      && typeValue !== 'checkbox'
+      && typeValue !== 'multiselect'
+    ) {
+      throw new Error(`${optionContext}: "type" must be "select", "text", "number", "checkbox", or "multiselect" when provided`)
     }
 
     const validatorValue = optionValue.validator
@@ -124,11 +132,81 @@ function parseDeepLinkOptions(raw: unknown, context: string): Record<string, Act
     }
 
     const options = parseDeepLinkOptionChoices(optionValue.options, optionContext)
+    const defaultValue = optionValue.defaultValue
+    if (
+      defaultValue !== undefined
+      && typeof defaultValue !== 'string'
+      && typeof defaultValue !== 'number'
+      && typeof defaultValue !== 'boolean'
+      && !Array.isArray(defaultValue)
+    ) {
+      throw new Error(`${optionContext}: "defaultValue" must be a string, number, boolean, or string array when provided`)
+    }
+    if (Array.isArray(defaultValue) && !defaultValue.every((entry) => typeof entry === 'string')) {
+      throw new Error(`${optionContext}: "defaultValue" string arrays may only contain strings`)
+    }
+    if (Array.isArray(defaultValue) && optionType !== 'multiselect') {
+      throw new Error(`${optionContext}: "defaultValue" string arrays are only supported when "type" is "multiselect"`)
+    }
+    if (defaultValue !== undefined && optionType === 'multiselect' && !Array.isArray(defaultValue)) {
+      throw new Error(`${optionContext}: "defaultValue" must be a string array when "type" is "multiselect"`)
+    }
+    if (
+      defaultValue !== undefined
+      && optionType === 'checkbox'
+      && defaultValue !== true
+      && defaultValue !== false
+      && defaultValue !== 'true'
+      && defaultValue !== 'false'
+    ) {
+      throw new Error(`${optionContext}: "defaultValue" must be a boolean or "true"/"false" string when "type" is "checkbox"`)
+    }
+    if (defaultValue !== undefined && optionType === 'number' && (typeof defaultValue !== 'number' || !Number.isFinite(defaultValue))) {
+      throw new Error(`${optionContext}: "defaultValue" must be a finite number when "type" is "number"`)
+    }
+    if (
+      defaultValue !== undefined
+      && (optionType === 'select' || optionType === 'text')
+      && typeof defaultValue !== 'string'
+    ) {
+      throw new Error(`${optionContext}: "defaultValue" must be a string when "type" is "${optionType}"`)
+    }
+    const min = optionValue.min
+    if (min !== undefined && (typeof min !== 'number' || !Number.isFinite(min))) {
+      throw new Error(`${optionContext}: "min" must be a finite number when provided`)
+    }
+    const max = optionValue.max
+    if (max !== undefined && (typeof max !== 'number' || !Number.isFinite(max))) {
+      throw new Error(`${optionContext}: "max" must be a finite number when provided`)
+    }
+    const step = optionValue.step
+    if (step !== undefined && (typeof step !== 'number' || !Number.isFinite(step) || step <= 0)) {
+      throw new Error(`${optionContext}: "step" must be a positive finite number when provided`)
+    }
+    if (optionType !== 'number' && (min !== undefined || max !== undefined || step !== undefined)) {
+      throw new Error(`${optionContext}: "min", "max", and "step" are only supported when "type" is "number"`)
+    }
+    if (typeof min === 'number' && typeof max === 'number' && min > max) {
+      throw new Error(`${optionContext}: "min" must be less than or equal to "max"`)
+    }
+    if (
+      typeof min === 'number'
+      && typeof max === 'number'
+      && typeof step === 'number'
+      && max > min
+      && step > max - min
+    ) {
+      throw new Error(`${optionContext}: "step" must be less than or equal to the configured range`)
+    }
     parsed[optionKey] = {
       ...(label !== undefined ? { label } : {}),
       ...(typeValue !== undefined ? { type: typeValue } : {}),
       ...(validatorValue !== undefined ? { validator: validatorValue } : {}),
       ...(options !== undefined ? { options } : {}),
+      ...(defaultValue !== undefined ? { defaultValue } : {}),
+      ...(min !== undefined ? { min } : {}),
+      ...(max !== undefined ? { max } : {}),
+      ...(step !== undefined ? { step } : {}),
     }
   }
 
@@ -266,15 +344,19 @@ function parseCreateSessionBootstrap(raw: unknown, context: string): ActivityCre
   }
 }
 
-function parseManageLayout(raw: unknown, context: string): ActivityConfig['manageLayout'] {
+function parseManageLayout(
+  raw: unknown,
+  context: string,
+  fieldName: 'manageLayout' | 'standaloneLayout' = 'manageLayout',
+): ActivityConfig['manageLayout'] {
   if (raw == null) {
     return undefined
   }
   if (!isRecord(raw)) {
-    throw new Error(`${context}: "manageLayout" must be an object when provided`)
+    throw new Error(`${context}: "${fieldName}" must be an object when provided`)
   }
 
-  const expandShell = readOptionalBoolean(raw, 'expandShell', `${context}.manageLayout`)
+  const expandShell = readOptionalBoolean(raw, 'expandShell', `${context}.${fieldName}`)
   return {
     ...(expandShell !== undefined ? { expandShell } : {}),
   }
@@ -536,7 +618,8 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const createSessionBootstrap = parseCreateSessionBootstrap(rawConfig.createSessionBootstrap, context)
   const utilities = parseUtilities(rawConfig.utilities, context)
   const manageDashboard = parseManageDashboard(rawConfig.manageDashboard, context)
-  const manageLayout = parseManageLayout(rawConfig.manageLayout, context)
+  const manageLayout = parseManageLayout(rawConfig.manageLayout, context, 'manageLayout')
+  const standaloneLayout = parseManageLayout(rawConfig.standaloneLayout, context, 'standaloneLayout')
   const embeddedRuntime = parseEmbeddedRuntime(rawConfig.embeddedRuntime, context)
   const reportEndpoint = readOptionalString(rawConfig, 'reportEndpoint', context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)
@@ -556,6 +639,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   assignOptionalField(parsed, 'utilities', utilities)
   assignOptionalField(parsed, 'manageDashboard', manageDashboard)
   assignOptionalField(parsed, 'manageLayout', manageLayout)
+  assignOptionalField(parsed, 'standaloneLayout', standaloneLayout)
   assignOptionalField(parsed, 'embeddedRuntime', embeddedRuntime)
   assignOptionalField(parsed, 'reportEndpoint', reportEndpoint)
   assignOptionalField(parsed, 'waitingRoom', waitingRoom)

@@ -137,6 +137,32 @@ Note:
 - the current conversion-lab deck uses `{"seed":"syncdeck-ui-check"}` as a lightweight conversion-check payload
 - for a real authored deck, prefer the activity's actual `algorithm` option unless you intentionally need host-only test metadata
 
+## Binary Breach
+
+### Deck launch payload
+
+Binary Breach reads the same option keys used by its permanent-link builder. Omit fields to use the activity defaults.
+
+```html
+<section
+  data-activity-id="binary-breach"
+  data-activity-trigger="slide-enter"
+  data-activity-options='{"maxBits":"6","missionLength":"5","challengeTypes":"binary-to-decimal,decimal-to-binary,compare-binary","hintsEnabled":"true","placeValueSupport":"optional"}'
+>
+```
+
+Field guidance:
+
+- `maxBits` accepts `"4"` through `"8"`
+- `missionLength` accepts `"3"` through `"12"`
+- `challengeTypes` is a comma-separated list using `binary-to-decimal`, `decimal-to-binary`, `compare-binary`, and `order-binary`
+- `hintsEnabled` accepts `"true"` or `"false"`
+- `placeValueSupport` accepts `visible`, `optional`, or `hidden`
+
+### Child embedded launch state
+
+Binary Breach reads these values from `embeddedLaunch.selectedOptions` and normalizes them into the live session's mission settings before students receive challenges.
+
 ## Gallery Walk
 
 ### Deck launch payload

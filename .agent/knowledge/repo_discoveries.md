@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-05-07
+- Area: activities | binary-breach
+- Discovery: Binary Breach is registered as a production standalone-capable activity under `activities/binary-breach`, so both client and server activity inventory tests must include `binary-breach` in their expected production activity lists.
+- Why it matters: The registry guard tests intentionally fail when a new production activity appears without an explicit expectation update, which catches accidental activity surfacing changes on `/`, `/manage`, and server route discovery.
+- Evidence: `client/src/activities/index.test.ts`; `server/activities/activityRegistry.test.ts`; `activities/binary-breach/activity.config.ts`
+- Follow-up action: When adding future production activities, update both registry expectation lists and include Playwright smoke if the activity is visible on home/manage surfaces.
+- Owner: Codex
+
 - Date: 2026-04-22
 - Area: client | activities | syncdeck
 - Discovery: SyncDeck overlay nav controls should not rely on native `disabled` buttons over embedded iframes; keep the control hit area active with handler guards plus `aria-disabled` so disabled-looking arrows still swallow pointer events instead of letting clicks pass through to the child iframe.

@@ -13,10 +13,12 @@ import {
   filterPersistentEntryPolicyOptionsForActivity,
   initializeDeepLinkOptions,
   normalizePersistentEntryPolicyForActivity,
+  normalizeMultiselectValue,
   normalizeSelectedOptions,
   parseCreateSessionBootstrap,
   parseDeepLinkGenerator,
   persistCreateSessionBootstrapToSessionStorage,
+  parseMultiselectValues,
   parseDeepLinkOptions,
   storeCreateSessionBootstrapPayload,
   validateDeepLinkSelection,
@@ -65,6 +67,29 @@ const rawOptions = {
     type: 'text',
     validator: 'url',
   },
+  missionLength: {
+    label: 'Systems per mission',
+    type: 'number',
+    defaultValue: 5,
+    min: 3,
+    max: 12,
+    step: 1,
+  },
+  hintsEnabled: {
+    label: 'Hints available',
+    type: 'checkbox',
+    defaultValue: true,
+  },
+  challengeTypes: {
+    label: 'Challenge types',
+    type: 'multiselect',
+    defaultValue: ['binary-to-decimal', 'decimal-to-binary'],
+    options: [
+      { value: 'binary-to-decimal', label: 'Binary to decimal' },
+      { value: 'decimal-to-binary', label: 'Decimal to binary' },
+      { value: 'compare-binary', label: 'Compare binary' },
+    ],
+  },
 }
 
 void test('parseDeepLinkOptions keeps supported option metadata', () => {
@@ -75,6 +100,19 @@ void test('parseDeepLinkOptions keeps supported option metadata', () => {
   assert.deepEqual(parsed.algorithm?.options?.[1], { value: 'merge-sort', label: 'Merge Sort' })
   assert.equal(parsed.challenge?.type, 'text')
   assert.equal(parsed.presentationUrl?.validator, 'url')
+  assert.equal(parsed.missionLength?.type, 'number')
+  assert.equal(parsed.missionLength?.min, 3)
+  assert.equal(parsed.hintsEnabled?.type, 'checkbox')
+  assert.equal(parsed.hintsEnabled?.defaultValue, true)
+  assert.equal(parsed.challengeTypes?.type, 'multiselect')
+
+  const nonPositiveStep = parseDeepLinkOptions({
+    count: {
+      type: 'number',
+      step: 0,
+    },
+  })
+  assert.equal(nonPositiveStep.count?.step, undefined)
 })
 
 void test('initializeDeepLinkOptions and normalizeSelectedOptions respect allowed keys', () => {
@@ -82,6 +120,9 @@ void test('initializeDeepLinkOptions and normalizeSelectedOptions respect allowe
     algorithm: '',
     challenge: '',
     presentationUrl: '',
+    missionLength: '5',
+    hintsEnabled: 'true',
+    challengeTypes: 'binary-to-decimal,decimal-to-binary',
   })
 
   const normalized = normalizeSelectedOptions(rawOptions, {
@@ -95,18 +136,46 @@ void test('initializeDeepLinkOptions and normalizeSelectedOptions respect allowe
   })
 })
 
-void test('normalizeSelectedOptions trims text/url values and keeps select values as-is', () => {
+void test('normalizeSelectedOptions trims text/url/number values and keeps select values as-is', () => {
   const normalized = normalizeSelectedOptions(rawOptions, {
     algorithm: ' merge-sort ',
     challenge: '  arrays  ',
     presentationUrl: '  https://slides.example.com/deck  ',
+    missionLength: ' 7 ',
   })
 
   assert.deepEqual(normalized, {
     algorithm: ' merge-sort ',
     challenge: 'arrays',
     presentationUrl: 'https://slides.example.com/deck',
+    missionLength: '7',
   })
+})
+
+void test('normalizeSelectedOptions serializes common checkbox and multiselect controls', () => {
+  assert.deepEqual(normalizeSelectedOptions(rawOptions, {
+    hintsEnabled: false,
+    challengeTypes: ['compare-binary', 'bogus', 'decimal-to-binary', 'compare-binary'],
+  }), {
+    hintsEnabled: 'false',
+    challengeTypes: 'compare-binary,decimal-to-binary',
+  })
+})
+
+void test('parseMultiselectValues trims comma-separated selections', () => {
+  assert.deepEqual(parseMultiselectValues('binary-to-decimal, decimal-to-binary,  compare-binary '), [
+    'binary-to-decimal',
+    'decimal-to-binary',
+    'compare-binary',
+  ])
+})
+
+void test('normalizeMultiselectValue removes duplicate and unsupported selections', () => {
+  const parsedOptions = parseDeepLinkOptions(rawOptions)
+  assert.equal(
+    normalizeMultiselectValue('binary-to-decimal, missing-bit, decimal-to-binary, binary-to-decimal', parsedOptions.challengeTypes ?? {}),
+    'binary-to-decimal,decimal-to-binary',
+  )
 })
 
 void test('buildQueryString and buildSoloLink include only non-empty params', () => {
@@ -133,6 +202,28 @@ void test('validateDeepLinkSelection enforces URL validator options', () => {
   })
 
   assert.deepEqual(validateDeepLinkSelection(rawOptions, { presentationUrl: 'https://slides.example.com/deck' }), {})
+})
+
+void test('validateDeepLinkSelection enforces number ranges and multiselect choices', () => {
+  assert.deepEqual(validateDeepLinkSelection(rawOptions, { presentationUrl: 'https://slides.example', missionLength: '2' }), {
+    missionLength: 'Systems per mission must be at least 3',
+  })
+
+  assert.deepEqual(validateDeepLinkSelection(rawOptions, { presentationUrl: 'https://slides.example', missionLength: '13' }), {
+    missionLength: 'Systems per mission must be at most 12',
+  })
+
+  assert.deepEqual(validateDeepLinkSelection(rawOptions, { presentationUrl: 'https://slides.example', missionLength: 'five' }), {
+    missionLength: 'Systems per mission must be a number',
+  })
+
+  assert.deepEqual(validateDeepLinkSelection(rawOptions, { presentationUrl: 'https://slides.example', missionLength: '7.5' }), {
+    missionLength: 'Systems per mission must align to increments of 1',
+  })
+
+  assert.deepEqual(validateDeepLinkSelection(rawOptions, { presentationUrl: 'https://slides.example', challengeTypes: 'binary-to-decimal,missing-bit' }), {
+    challengeTypes: 'Challenge types contains an unsupported option',
+  })
 })
 
 void test('buildPersistentSessionKey creates stable map keys', () => {

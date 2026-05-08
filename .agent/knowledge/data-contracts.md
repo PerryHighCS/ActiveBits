@@ -15,6 +15,42 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-05-08
+- Surface: activity interface | internal module
+- Contract: Binary Breach challenges now carry `promptEmphasis`, and order-binary challenges carry `direction: 'least-to-greatest' | 'greatest-to-least'`. The student UI bolds the `promptEmphasis` substring inside the prompt, and validation uses `direction` as authoritative for sorted-answer order.
+- Compatibility constraints: Persisted pre-field challenges are normalized on session read. Missing `promptEmphasis` is reconstructed from the challenge type when possible, and legacy order-binary challenges default to `least-to-greatest`.
+- Validation rules: Order-binary answers must match `challenge.answer` exactly after binary normalization; descending challenges store `answer` in greatest-to-least order, not ascending order plus a display flag.
+- Evidence (schema/tests/path): `activities/binary-breach/binaryBreachTypes.ts`; `activities/binary-breach/shared/challengeGenerator.ts`; `activities/binary-breach/shared/challengeGenerator.test.ts`; `activities/binary-breach/server/routeUtils.ts`; `activities/binary-breach/server/routeUtils.test.ts`; `activities/binary-breach/client/student/BinaryBreachStudent.tsx`
+- Follow-up action: Add any future prompt-highlighting fields to the challenge contract rather than embedding markup in prompt strings.
+- Owner: Codex
+
+- Date: 2026-05-08
+- Surface: REST | websocket | activity interface
+- Contract: Binary Breach mission reset has two activity-owned scopes. `POST /api/binary-breach/:sessionId/mission/new` is instructor/class scoped: it creates a fresh `missionSeed`, resets every student progress record, and broadcasts `binary-breach:mission-reset` with each connected student's own current challenge. `POST /api/binary-breach/:sessionId/student/retry` is student scoped: it resets only the requesting student against the current active mission seed/settings.
+- Compatibility constraints: Student retry must not rotate `missionSeed` or disturb other students. Manager new mission must preserve session settings and roster identity while resetting progress/challenge state. Reconnecting students recover the current mission from stored session state through the existing register route.
+- Validation rules: Both reset paths use normal Binary Breach session normalization and student identity validation; reset progress returns to `createInitialProgress()` and challenge index `0`.
+- Evidence (schema/tests/path): `activities/binary-breach/server/routes.ts`; `activities/binary-breach/server/routes.test.ts`; `activities/binary-breach/client/manager/BinaryBreachManager.tsx`; `activities/binary-breach/client/student/BinaryBreachStudent.tsx`
+- Follow-up action: If instructor auth is later added to Binary Breach manager routes, apply it consistently to settings and mission reset endpoints together.
+- Owner: Codex
+
+- Date: 2026-05-08
+- Surface: activity interface | client bootstrap
+- Contract: Shared activity `deepLinkOptions` may now describe common permalink/embed controls with `text`, `select`, `number`, `checkbox`, and `multiselect` field types. Values still canonicalize to string selected-options records; multiselect values use a comma-separated string, and checkbox values use `"true"` / `"false"`.
+- Compatibility constraints: Existing text/select options remain unchanged. Activities that need richer or protocol-specific setup can still use `manageDashboard.customPersistentLinkBuilder`, but simple dashboard-like settings should prefer the generic fields so the same selected-options contract works for persistent links, `/launch` query params, and SyncDeck embedded `activityOptions`.
+- Validation rules: Number fields may enforce finite `min`/`max`; multiselect values are filtered/validated against declared option values; URL validators continue to require valid http(s) URLs.
+- Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/components/common/manageDashboardUtils.ts`; `client/src/components/common/manageDashboardUtils.test.ts`; `server/activityConfigSchema.test.ts`; `ARCHITECTURE.md`; `ADDING_ACTIVITIES.md`
+- Follow-up action: If activities need labels/help text per option beyond current fields, extend the generic option schema rather than adding one-off dashboard controls.
+- Owner: Codex
+
+- Date: 2026-05-08
+- Surface: activity interface | SyncDeck embedded launch
+- Contract: Binary Breach consumes mission setup from `embeddedLaunch.selectedOptions` using the same keys exposed in its permalink builder: `maxBits`, `missionLength`, `challengeTypes`, `hintsEnabled`, and `placeValueSupport`.
+- Compatibility constraints: Stored `session.data.settings` remains authoritative once present, so manager edits are not overwritten by launch options after session creation. Missing launch fields fall back through normal Binary Breach defaults.
+- Validation rules: `challengeTypes` may arrive as a comma-separated string and normalizes to the supported challenge-type array. `hintsEnabled` string `"false"` disables hints; all other malformed values fall back safely.
+- Evidence (schema/tests/path): `activities/binary-breach/activity.config.ts`; `activities/binary-breach/server/routeUtils.ts`; `activities/binary-breach/server/routeUtils.test.ts`; `activities/binary-breach/server/routes.test.ts`; `skills/syncdeck/references/ACTIVITY_PAYLOADS.md`
+- Follow-up action: Keep Binary Breach deck examples aligned with activity config if future challenge types or settings are added.
+- Owner: Codex
+
 - Date: 2026-04-17
 - Surface: activity interface | websocket | internal module
 - Contract: SyncDeck student-side instructor sync suppression must derive incoming slide indices from all Reveal state shapes that can drive a `setState`, including `payload.indices`, `payload.navigation.current`, `payload.revealState`, and top-level state fields. Same-horizontal vertical instructor moves must remain suppressible even when the deck emits `revealState` without a separate `indices` object.

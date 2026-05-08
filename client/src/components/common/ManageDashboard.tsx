@@ -22,6 +22,8 @@ import {
   isPersistentLinkPreflightVerified,
   normalizePersistentEntryPolicyForActivity,
   normalizeSelectedOptions,
+  normalizeMultiselectValue,
+  parseMultiselectValues,
   persistCreateSessionBootstrapToSessionStorage,
   parseDeepLinkGenerator,
   parseDeepLinkOptions,
@@ -570,6 +572,7 @@ export default function ManageDashboard({
   const selectedActivityOptions = selectedActivity ? parseDeepLinkOptions(selectedActivity.deepLinkOptions) : {}
   const selectedActivityDeepLinkGenerator = selectedActivity ? parseDeepLinkGenerator(selectedActivity.deepLinkGenerator) : null
   const selectedActivityPreflight = selectedActivityDeepLinkGenerator?.preflight ?? null
+  const selectedActivityPreflightOptionKey = selectedActivityPreflight?.optionKey ?? null
   const persistentEntryPolicyOptions = selectedActivity
     ? filterPersistentEntryPolicyOptionsForActivity(
       PERSISTENT_SESSION_ENTRY_POLICY_OPTIONS,
@@ -585,6 +588,17 @@ export default function ManageDashboard({
     persistentOptions,
     preflightValidatedValue,
   )
+
+  const resetPreflightStateForOptionChange = (key: string, nextValue: string): void => {
+    if (selectedActivityPreflightOptionKey !== key || nextValue.trim() === preflightValidatedValue) {
+      return
+    }
+    preflightRequestIdRef.current += 1
+    setPreflightValidatedValue(null)
+    setPreflightWarning(null)
+    setIsPreflightChecking(false)
+  }
+
   const existingTeacherCodeForEdit = editingPersistentSession
     ? (savedSessions[buildPersistentSessionKey(editingPersistentSession.activityName, editingPersistentSession.hash)] ?? '').trim()
     : ''
@@ -649,7 +663,15 @@ export default function ManageDashboard({
               entryPolicy: editingPersistentSession.entryPolicy,
             }
             : null}
-          onSelectedOptionsChange={setPersistentOptions}
+          onSelectedOptionsChange={(nextSelectedOptions) => {
+            if (selectedActivityPreflightOptionKey != null) {
+              resetPreflightStateForOptionChange(
+                selectedActivityPreflightOptionKey,
+                nextSelectedOptions[selectedActivityPreflightOptionKey] ?? '',
+              )
+            }
+            setPersistentOptions(nextSelectedOptions)
+          }}
           onSubmitReadinessChange={setCustomBuilderCanSubmit}
         />
       </Suspense>
@@ -715,31 +737,52 @@ export default function ManageDashboard({
           <div className="flex flex-col gap-3">
             {Object.entries(selectedActivityOptions).map(([key, option]) => {
               const optionInputId = `persistent-link-option-${key}`
+              const optionErrorId = `${optionInputId}-error`
+              const optionError = persistentOptionErrors[key]
+              const optionErrorAttributes = optionError === undefined
+                ? {}
+                : {
+                  'aria-describedby': optionErrorId,
+                  'aria-invalid': true,
+                }
+              const updatePersistentOption = (nextValue: string): void => {
+                resetPreflightStateForOptionChange(key, nextValue)
+                setPersistentOptions((previous) => ({
+                  ...previous,
+                  [key]: nextValue,
+                }))
+              }
 
               return (
-              <div key={key} className="text-sm text-gray-700">
-                <label htmlFor={optionInputId} className="block font-semibold mb-1">
-                  {option.label || key}
-                </label>
-                {option.type === 'select' ? (
+                <div key={key} className="text-sm text-gray-700">
+                  {option.type === 'multiselect' ? (
+                    <p className="block font-semibold mb-1">{option.label || key}</p>
+                  ) : (
+                    <label
+                      htmlFor={optionInputId}
+                      className={`${option.type === 'checkbox' ? 'inline-flex items-center gap-2' : 'block'} font-semibold mb-1`}
+                    >
+                      {option.type === 'checkbox' && (
+                        <input
+                          id={optionInputId}
+                          type="checkbox"
+                          checked={(persistentOptions[key] ?? '') === 'true'}
+                          onChange={(event) => updatePersistentOption(event.target.checked ? 'true' : 'false')}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          {...optionErrorAttributes}
+                        />
+                      )}
+                      {option.label || key}
+                    </label>
+                  )}
+                {option.type === 'checkbox' ? null : option.type === 'select' ? (
                   <>
                     <select
                       id={optionInputId}
                       value={persistentOptions[key] ?? ''}
-                      onChange={(event) => {
-                        const nextValue = event.target.value
-                                setPersistentOptions((previous) => ({
-                                  ...previous,
-                                  [key]: nextValue,
-                                }))
-                                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
-                                  preflightRequestIdRef.current += 1
-                                  setPreflightValidatedValue(null)
-                                  setPreflightWarning(null)
-                                  setIsPreflightChecking(false)
-                                }
-                              }}
+                      onChange={(event) => updatePersistentOption(event.target.value)}
                       className="w-full border-2 border-gray-300 rounded px-3 py-2 bg-white"
+                      {...optionErrorAttributes}
                     >
                       {(option.options || []).map((entry) => (
                         <option key={entry.value} value={entry.value}>
@@ -761,26 +804,58 @@ export default function ManageDashboard({
                       </Button>
                     )}
                   </>
+                ) : option.type === 'multiselect' ? (
+                  <fieldset className="flex flex-col gap-2" {...optionErrorAttributes}>
+                    <legend className="sr-only">{option.label || key}</legend>
+                    {(() => {
+                      const values = new Set(parseMultiselectValues(normalizeMultiselectValue(persistentOptions[key] ?? '', option)))
+                      return (option.options || []).map((entry) => (
+                        <label key={entry.value} className="inline-flex items-center gap-2 font-normal">
+                          <input
+                            type="checkbox"
+                            checked={values.has(entry.value)}
+                            onChange={(event) => {
+                              const checked = event.target.checked
+                              const previewValues = new Set(values)
+                              if (checked) {
+                                previewValues.add(entry.value)
+                              } else {
+                                previewValues.delete(entry.value)
+                              }
+                              resetPreflightStateForOptionChange(key, Array.from(previewValues).join(','))
+                              setPersistentOptions((previous) => {
+                                const nextValues = new Set(parseMultiselectValues(normalizeMultiselectValue(previous[key] ?? '', option)))
+                                if (checked) {
+                                  nextValues.add(entry.value)
+                                } else {
+                                  nextValues.delete(entry.value)
+                                }
+                                return {
+                                  ...previous,
+                                  [key]: Array.from(nextValues).join(','),
+                                }
+                              })
+                            }}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            {...optionErrorAttributes}
+                          />
+                          {entry.label}
+                        </label>
+                      ))
+                    })()}
+                  </fieldset>
                 ) : (
                   <div className="flex items-center gap-2">
                     <input
                       id={optionInputId}
-                      type="text"
+                      type={option.type === 'number' ? 'number' : 'text'}
+                      min={option.min}
+                      max={option.max}
+                      step={option.step}
                       value={persistentOptions[key] ?? ''}
-                      onChange={(event) => {
-                        const nextValue = event.target.value
-                                setPersistentOptions((previous) => ({
-                                  ...previous,
-                                  [key]: nextValue,
-                                }))
-                                if (selectedActivityPreflight?.optionKey === key && nextValue.trim() !== preflightValidatedValue) {
-                                  preflightRequestIdRef.current += 1
-                                  setPreflightValidatedValue(null)
-                                  setPreflightWarning(null)
-                                  setIsPreflightChecking(false)
-                                }
-                              }}
+                      onChange={(event) => updatePersistentOption(event.target.value)}
                       className={`w-full border-2 rounded px-3 py-2 ${persistentOptionErrors[key] ? 'border-red-400' : 'border-gray-300'}`}
+                      {...optionErrorAttributes}
                     />
                     {selectedActivityPreflight?.optionKey === key && (
                       <Button
@@ -797,10 +872,10 @@ export default function ManageDashboard({
                     )}
                   </div>
                 )}
-                {persistentOptionErrors[key] !== undefined && (
-                  <span className="block mt-1 text-xs text-red-600">{persistentOptionErrors[key]}</span>
+                {optionError !== undefined && (
+                  <span id={optionErrorId} className="block mt-1 text-xs text-red-600">{optionError}</span>
                 )}
-                {persistentOptionErrors[key] === undefined && selectedActivityPreflight?.optionKey === key && (persistentOptions[key] ?? '').trim().length > 0 && (
+                {optionError === undefined && selectedActivityPreflight?.optionKey === key && (persistentOptions[key] ?? '').trim().length > 0 && (
                   <span className={`block mt-1 text-xs ${isPreflightVerified === true ? 'text-green-700' : 'text-gray-600'}`}>
                     {isPreflightVerified === true
                       ? 'Value verified. You can now create the link.'

@@ -1,0 +1,543 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import type { SessionRecord, SessionStore } from 'activebits-server/core/sessions.js'
+import type { ActiveBitsWebSocket, WsRouter } from '../../../types/websocket.js'
+import setupBinaryBreachRoutes from './routes.js'
+
+interface TestResponse {
+  statusCode: number
+  payload: unknown
+  status(code: number): TestResponse
+  json(payload: unknown): void
+}
+
+interface TestRequest {
+  params: Record<string, string | undefined>
+  body?: unknown
+}
+
+type RouteHandler = (req: TestRequest, res: TestResponse) => void | Promise<void>
+
+class TestApp {
+  readonly getRoutes = new Map<string, RouteHandler>()
+  readonly postRoutes = new Map<string, RouteHandler>()
+
+  get(path: string, handler: RouteHandler): void {
+    this.getRoutes.set(path, handler)
+  }
+
+  post(path: string, handler: RouteHandler): void {
+    this.postRoutes.set(path, handler)
+  }
+}
+
+function createResponse(): TestResponse {
+  return {
+    statusCode: 200,
+    payload: null,
+    status(code: number) {
+      this.statusCode = code
+      return this
+    },
+    json(payload: unknown) {
+      this.payload = payload
+    },
+  }
+}
+
+function cloneSession(session: SessionRecord): SessionRecord {
+  return JSON.parse(JSON.stringify(session)) as SessionRecord
+}
+
+function createSessionStore(): SessionStore {
+  const records = new Map<string, SessionRecord>()
+  return {
+    async get(id: string) {
+      const session = records.get(id)
+      return session ? cloneSession(session) : null
+    },
+    async set(id: string, session: SessionRecord) {
+      records.set(id, cloneSession(session))
+    },
+    async delete(id: string) {
+      return records.delete(id)
+    },
+    async touch() {
+      return true
+    },
+    async getAll() {
+      return Array.from(records.values()).map(cloneSession)
+    },
+    async getAllIds() {
+      return Array.from(records.keys())
+    },
+    cleanup() {},
+    async close() {},
+  }
+}
+
+function createWsRouter(): WsRouter {
+  return {
+    wss: {
+      clients: new Set<ActiveBitsWebSocket>(),
+      close(callback?: () => void) {
+        callback?.()
+      },
+    },
+    register() {},
+  }
+}
+
+void test('creates a Binary Breach session and returns manager-visible state', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  const createRoute = app.postRoutes.get('/api/binary-breach/create')
+  assert.ok(createRoute)
+  await createRoute({ params: {} }, createResponsePayload)
+
+  const created = createResponsePayload.payload as { id: string }
+  assert.equal(typeof created.id, 'string')
+
+  const stateResponse = createResponse()
+  const stateRoute = app.getRoutes.get('/api/binary-breach/:sessionId/state')
+  assert.ok(stateRoute)
+  await stateRoute({ params: { sessionId: created.id } }, stateResponse)
+
+  assert.equal(stateResponse.statusCode, 200)
+  assert.deepEqual((stateResponse.payload as { students: unknown[] }).students, [])
+})
+
+void test('hydrates Binary Breach settings from embedded launch selected options', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  await sessions.set('CHILD:syncdeck:abc12:binary-breach', {
+    id: 'CHILD:syncdeck:abc12:binary-breach',
+    type: 'binary-breach',
+    created: Date.now(),
+    lastActivity: Date.now(),
+    data: {
+      embeddedLaunch: {
+        selectedOptions: {
+          maxBits: '4',
+          missionLength: '3',
+          challengeTypes: 'binary-to-decimal,compare-binary',
+          hintsEnabled: 'false',
+          placeValueSupport: 'hidden',
+        },
+      },
+    },
+  } as SessionRecord)
+
+  const stateResponse = createResponse()
+  const stateRoute = app.getRoutes.get('/api/binary-breach/:sessionId/state')
+  assert.ok(stateRoute)
+  await stateRoute({ params: { sessionId: 'CHILD:syncdeck:abc12:binary-breach' } }, stateResponse)
+
+  assert.equal(stateResponse.statusCode, 200)
+  assert.deepEqual((stateResponse.payload as { settings: unknown }).settings, {
+    maxBits: 4,
+    missionLength: 3,
+    challengeTypes: ['binary-to-decimal', 'compare-binary'],
+    timerMode: 'off',
+    hintsEnabled: false,
+    placeValueSupport: 'hidden',
+  })
+})
+
+void test('registers a student and validates an answer against the stored challenge', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const registerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada' },
+  }, registerResponse)
+
+  assert.equal(registerResponse.statusCode, 200)
+  const registered = registerResponse.payload as {
+    studentId: string
+    challenge: { type: string; decimal?: number; binary?: string; answer?: string[]; values?: string[] }
+  }
+  assert.equal(typeof registered.studentId, 'string')
+
+  const answer = registered.challenge.type === 'binary-to-decimal'
+    ? { decimal: String(registered.challenge.decimal) }
+    : registered.challenge.type === 'decimal-to-binary'
+      ? { binary: registered.challenge.binary }
+      : registered.challenge.type === 'order-binary'
+        ? { values: registered.challenge.answer }
+        : { choice: 'left' }
+
+  const answerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/answer')?.({
+    params: { sessionId },
+    body: {
+      studentName: 'Ada',
+      studentId: registered.studentId,
+      answer,
+    },
+  }, answerResponse)
+
+  assert.equal(answerResponse.statusCode, 200)
+  const payload = answerResponse.payload as { progress: { attempts: number } }
+  assert.equal(payload.progress.attempts, 1)
+})
+
+void test('applies manager settings to student missions and hint availability', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const settingsResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/settings')?.({
+    params: { sessionId },
+    body: {
+      maxBits: 4,
+      missionLength: 3,
+      challengeTypes: ['decimal-to-binary'],
+      hintsEnabled: false,
+      placeValueSupport: 'hidden',
+    },
+  }, settingsResponse)
+
+  assert.equal(settingsResponse.statusCode, 200)
+  assert.deepEqual((settingsResponse.payload as { settings: unknown }).settings, {
+    maxBits: 4,
+    missionLength: 3,
+    challengeTypes: ['decimal-to-binary'],
+    timerMode: 'off',
+    hintsEnabled: false,
+    placeValueSupport: 'hidden',
+  })
+
+  const registerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Grace' },
+  }, registerResponse)
+
+  assert.equal(registerResponse.statusCode, 200)
+  const registered = registerResponse.payload as {
+    studentId: string
+    challenge: { type: string; maxBits: number }
+    progress: { completed: boolean }
+    settings: { missionLength: number; hintsEnabled: boolean; placeValueSupport: string }
+  }
+  assert.equal(registered.challenge.type, 'decimal-to-binary')
+  assert.equal(registered.challenge.maxBits, 4)
+  assert.equal(registered.settings.missionLength, 3)
+  assert.equal(registered.settings.hintsEnabled, false)
+  assert.equal(registered.settings.placeValueSupport, 'hidden')
+
+  const hintResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/hint')?.({
+    params: { sessionId },
+    body: { studentName: 'Grace', studentId: registered.studentId },
+  }, hintResponse)
+
+  assert.equal(hintResponse.statusCode, 400)
+})
+
+void test('settings route succeeds when broadcast publishing fails', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  sessions.publishBroadcast = async () => {
+    throw new Error('pubsub down')
+  }
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const settingsResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/settings')?.({
+    params: { sessionId },
+    body: {
+      maxBits: 4,
+      missionLength: 3,
+      challengeTypes: ['binary-to-decimal'],
+    },
+  }, settingsResponse)
+
+  assert.equal(settingsResponse.statusCode, 200)
+  assert.equal((settingsResponse.payload as { settings: { maxBits: number } }).settings.maxBits, 4)
+})
+
+void test('student registration does not merge duplicate display names without a participant id', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const firstRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada' },
+  }, firstRegisterResponse)
+
+  const secondRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada' },
+  }, secondRegisterResponse)
+
+  assert.equal(firstRegisterResponse.statusCode, 200)
+  assert.equal(secondRegisterResponse.statusCode, 200)
+  const firstStudent = firstRegisterResponse.payload as { studentId: string }
+  const secondStudent = secondRegisterResponse.payload as { studentId: string }
+  assert.notEqual(firstStudent.studentId, secondStudent.studentId)
+
+  const stateResponse = createResponse()
+  await app.getRoutes.get('/api/binary-breach/:sessionId/state')?.({
+    params: { sessionId },
+  }, stateResponse)
+  const rosterStudent = (stateResponse.payload as { students: Array<Record<string, unknown>> }).students[0]
+  assert.equal(rosterStudent?.id, undefined)
+  assert.equal(rosterStudent?.joined, undefined)
+  assert.equal(rosterStudent?.lastSeen, undefined)
+
+  const stored = await sessions.get(sessionId)
+  const students = Array.isArray(stored?.data.students) ? stored.data.students : []
+  assert.equal(students.length, 2)
+})
+
+void test('student retry resets only that student against the active mission', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const firstRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada' },
+  }, firstRegisterResponse)
+  const firstStudent = firstRegisterResponse.payload as {
+    studentId: string
+    challenge: {
+      id: string
+      type: string
+      decimal?: number
+      binary?: string
+      left?: string
+      right?: string
+      answer?: string[] | 'left' | 'right'
+      values?: string[]
+    }
+  }
+
+  const secondRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Grace' },
+  }, secondRegisterResponse)
+  const secondStudent = secondRegisterResponse.payload as {
+    studentId: string
+    challenge: { id: string }
+  }
+
+  const wrongAnswer = firstStudent.challenge.type === 'binary-to-decimal'
+    ? { decimal: String((firstStudent.challenge.decimal ?? 0) + 1) }
+    : firstStudent.challenge.type === 'decimal-to-binary'
+      ? { binary: `${firstStudent.challenge.binary ?? ''}0` }
+      : firstStudent.challenge.type === 'order-binary'
+        ? { values: [...(firstStudent.challenge.values ?? [])].reverse() }
+        : { choice: firstStudent.challenge.answer === 'left' ? 'right' : 'left' }
+
+  const answerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/answer')?.({
+    params: { sessionId },
+    body: {
+      studentName: 'Ada',
+      studentId: firstStudent.studentId,
+      challengeId: firstStudent.challenge.id,
+      answer: wrongAnswer,
+    },
+  }, answerResponse)
+  assert.equal(answerResponse.statusCode, 200)
+  assert.equal((answerResponse.payload as { progress: { attempts: number } }).progress.attempts, 1)
+
+  const retryResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/retry')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada', studentId: firstStudent.studentId },
+  }, retryResponse)
+
+  assert.equal(retryResponse.statusCode, 200)
+  const retryPayload = retryResponse.payload as {
+    challenge: { id: string }
+    progress: { attempts: number; systemsRestored: number; completed: boolean }
+  }
+  assert.equal(retryPayload.challenge.id, firstStudent.challenge.id)
+  assert.deepEqual(retryPayload.progress, {
+    systemsRestored: 0,
+    attempts: 0,
+    correct: 0,
+    incorrect: 0,
+    streak: 0,
+    bestStreak: 0,
+    hintsUsed: 0,
+    traceLevel: 0,
+    score: 0,
+    completed: false,
+  })
+
+  const stored = await sessions.get(sessionId)
+  const students = Array.isArray(stored?.data.students) ? stored.data.students : []
+  const secondStored = students.find((student) => (
+    typeof student === 'object'
+    && student != null
+    && 'id' in student
+    && student.id === secondStudent.studentId
+  )) as { currentChallenge?: { id?: string } } | undefined
+  assert.equal(secondStored?.currentChallenge?.id, secondStudent.challenge.id)
+})
+
+void test('manager new mission resets all students with a fresh mission seed', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const firstRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Ada' },
+  }, firstRegisterResponse)
+  const firstStudent = firstRegisterResponse.payload as {
+    studentId: string
+    challenge: { id: string }
+  }
+
+  const secondRegisterResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Grace' },
+  }, secondRegisterResponse)
+  const secondStudent = secondRegisterResponse.payload as {
+    studentId: string
+    challenge: { id: string }
+  }
+
+  const newMissionResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/mission/new')?.({
+    params: { sessionId },
+  }, newMissionResponse)
+
+  assert.equal(newMissionResponse.statusCode, 200)
+  const payload = newMissionResponse.payload as { students: Array<{ id?: string; progress: { attempts: number }; challengeIndex: number }> }
+  assert.equal(payload.students.length, 2)
+  assert.ok(payload.students.every((student) => student.id === undefined))
+  assert.ok(payload.students.every((student) => student.progress.attempts === 0 && student.challengeIndex === 0))
+
+  const stored = await sessions.get(sessionId)
+  const students = Array.isArray(stored?.data.students) ? stored.data.students : []
+  const nextChallengeIds = students.map((student) => (
+    typeof student === 'object'
+    && student != null
+    && 'currentChallenge' in student
+    && typeof student.currentChallenge === 'object'
+    && student.currentChallenge != null
+    && 'id' in student.currentChallenge
+      ? student.currentChallenge.id
+      : null
+  ))
+  assert.ok(!nextChallengeIds.includes(firstStudent.challenge.id))
+  assert.ok(!nextChallengeIds.includes(secondStudent.challenge.id))
+})
+
+void test('keeps a current student challenge answerable after manager settings change', async () => {
+  const app = new TestApp()
+  const sessions = createSessionStore()
+  setupBinaryBreachRoutes(app, sessions, createWsRouter())
+
+  const createResponsePayload = createResponse()
+  await app.postRoutes.get('/api/binary-breach/create')?.({ params: {} }, createResponsePayload)
+  const sessionId = (createResponsePayload.payload as { id: string }).id
+
+  const registerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/register')?.({
+    params: { sessionId },
+    body: { studentName: 'Katherine' },
+  }, registerResponse)
+
+  const registered = registerResponse.payload as {
+    studentId: string
+    challenge: {
+      id: string
+      type: string
+      decimal?: number
+      binary?: string
+      answer?: string[] | 'left' | 'right'
+    }
+  }
+
+  const settingsResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/settings')?.({
+    params: { sessionId },
+    body: {
+      maxBits: 8,
+      missionLength: 5,
+      challengeTypes: ['binary-to-decimal'],
+      hintsEnabled: true,
+      placeValueSupport: 'visible',
+    },
+  }, settingsResponse)
+  assert.equal(settingsResponse.statusCode, 200)
+
+  const answer = registered.challenge.type === 'binary-to-decimal'
+    ? { decimal: String(registered.challenge.decimal) }
+    : registered.challenge.type === 'decimal-to-binary'
+      ? { binary: registered.challenge.binary }
+      : registered.challenge.type === 'order-binary'
+        ? { values: registered.challenge.answer }
+        : { choice: registered.challenge.answer }
+
+  const answerResponse = createResponse()
+  await app.postRoutes.get('/api/binary-breach/:sessionId/student/answer')?.({
+    params: { sessionId },
+    body: {
+      studentName: 'Katherine',
+      studentId: registered.studentId,
+      challengeId: registered.challenge.id,
+      answer,
+    },
+  }, answerResponse)
+
+  assert.equal(answerResponse.statusCode, 200)
+  const payload = answerResponse.payload as {
+    feedback: { correct: boolean }
+    challenge: { type: string; maxBits: number }
+    progress: { attempts: number; incorrect: number }
+  }
+  assert.equal(payload.feedback.correct, true)
+  assert.equal(payload.progress.attempts, 1)
+  assert.equal(payload.progress.incorrect, 0)
+  assert.equal(payload.challenge.type, 'binary-to-decimal')
+  assert.equal(payload.challenge.maxBits, 8)
+})

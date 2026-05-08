@@ -48,6 +48,28 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
           type: 'text',
           validator: 'url',
         },
+        missionLength: {
+          label: 'Systems per mission',
+          type: 'number',
+          defaultValue: 5,
+          min: 3,
+          max: 12,
+          step: 1,
+        },
+        hintsEnabled: {
+          label: 'Hints available',
+          type: 'checkbox',
+          defaultValue: true,
+        },
+        challengeTypes: {
+          label: 'Challenge types',
+          type: 'multiselect',
+          defaultValue: ['binary-to-decimal', 'decimal-to-binary'],
+          options: [
+            { value: 'binary-to-decimal', label: 'Binary to decimal' },
+            { value: 'decimal-to-binary', label: 'Decimal to binary' },
+          ],
+        },
       },
       deepLinkGenerator: {
         endpoint: '/api/syncdeck/generate-url',
@@ -110,6 +132,10 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
   )
 
   assert.equal(parsed.id, 'syncdeck')
+  assert.equal(parsed.deepLinkOptions?.missionLength?.type, 'number')
+  assert.equal(parsed.deepLinkOptions?.missionLength?.min, 3)
+  assert.equal(parsed.deepLinkOptions?.hintsEnabled?.defaultValue, true)
+  assert.deepEqual(parsed.deepLinkOptions?.challengeTypes?.defaultValue, ['binary-to-decimal', 'decimal-to-binary'])
   assert.equal(parsed.deepLinkGenerator?.preflight?.timeoutMs, 4000)
   assert.deepEqual(parsed.createSessionBootstrap?.sessionStorage?.[0], {
     keyPrefix: 'syncdeck_instructor_',
@@ -433,6 +459,162 @@ void test('parseActivityConfig rejects invalid shared contract enums and shapes'
         'bad-config-8',
       ),
     /reportEndpoint.*non-empty string/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad10',
+          name: 'Bad10',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            missionLength: {
+              type: 'number',
+              min: 12,
+              max: 3,
+            },
+          },
+        },
+        'bad-config-10',
+      ),
+    /deepLinkOptions\.missionLength.*min.*max/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad11',
+          name: 'Bad11',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            missionLength: {
+              type: 'number',
+              min: 3,
+              max: 12,
+              step: 10,
+            },
+          },
+        },
+        'bad-config-11',
+      ),
+    /deepLinkOptions\.missionLength.*step.*range/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad13',
+          name: 'Bad13',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            title: {
+              type: 'text',
+              step: 1,
+            },
+          },
+        },
+        'bad-config-13',
+      ),
+    /deepLinkOptions\.title.*min.*max.*step.*number/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad14',
+          name: 'Bad14',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            challenge: {
+              type: 'text',
+              defaultValue: ['binary-to-decimal'],
+            },
+          },
+        },
+        'bad-config-14',
+      ),
+    /deepLinkOptions\.challenge.*defaultValue.*multiselect/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad15',
+          name: 'Bad15',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          deepLinkOptions: {
+            hintsEnabled: {
+              type: 'checkbox',
+              defaultValue: 'yes',
+            },
+          },
+        },
+        'bad-config-15',
+      ),
+    /deepLinkOptions\.hintsEnabled.*defaultValue.*checkbox/,
+  )
+
+  assert.throws(
+    () =>
+      parseActivityConfig(
+        {
+          id: 'bad12',
+          name: 'Bad12',
+          description: 'desc',
+          color: 'cyan',
+          standaloneEntry: {
+            enabled: true,
+            supportsDirectPath: true,
+            supportsPermalink: true,
+            showOnHome: true,
+          },
+          standaloneLayout: {
+            expandShell: 'yes',
+          },
+        },
+        'bad-config-12',
+      ),
+    /standaloneLayout.*expandShell.*boolean/,
   )
 })
 

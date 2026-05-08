@@ -63,6 +63,14 @@ const testActivity: ActivityRegistryEntry = {
       type: 'text',
       validator: 'url',
     },
+    challengeTypes: {
+      label: 'Challenge types',
+      type: 'multiselect',
+      options: [
+        { value: 'binary-to-decimal', label: 'Binary to Decimal' },
+        { value: 'decimal-to-binary', label: 'Decimal to Binary' },
+      ],
+    },
   },
   deepLinkGenerator: {
     endpoint: '/api/persistent-session/create',
@@ -163,10 +171,14 @@ async function openPermanentLinkModal(rendered: RenderedScreenLike) {
 function installFetchStub() {
   const previousFetch = globalThis.fetch
   const calls: string[] = []
+  const requestBodies: unknown[] = []
 
-  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL) => {
+  ;(globalThis as { fetch?: typeof fetch }).fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     calls.push(url)
+    if (typeof init?.body === 'string') {
+      requestBodies.push(JSON.parse(init.body) as unknown)
+    }
 
     if (url === '/api/persistent-session/list') {
       return {
@@ -190,6 +202,7 @@ function installFetchStub() {
 
   return {
     calls,
+    requestBodies,
     restore: () => {
       ;(globalThis as { fetch?: typeof fetch }).fetch = previousFetch
     },
@@ -330,6 +343,137 @@ void test('ManageDashboard generic preflight option requires verify before submi
     await waitFor(() => {
       assert.equal(submitButton.disabled, true)
       assert.notEqual(rendered.queryByText('Verify this value before creating the link.'), null)
+    })
+  } finally {
+    await settleRenderedDashboard({ act, cleanup, unmount })
+    testActivity.manageDashboard = {
+      ...testActivity.manageDashboard,
+      ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),
+    }
+    fetchStub.restore()
+    restoreDomEnvironment()
+  }
+})
+
+void test('ManageDashboard multiselect updates from the latest persistent option state', { concurrency: false }, async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const fetchStub = installFetchStub()
+  const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
+  let unmount: (() => void) | null = null
+  let cleanup: (() => void) | null = null
+  let act: TestingLibraryAct | null = null
+  testActivity.manageDashboard = {
+    ...testActivity.manageDashboard,
+    customPersistentLinkBuilder: false,
+  }
+
+  try {
+    const testingLibrary = await import('@testing-library/react')
+    const { fireEvent, render, waitFor } = testingLibrary
+    cleanup = testingLibrary.cleanup
+    act = testingLibrary.act
+    const { default: ManageDashboard } = await import('./ManageDashboard.js')
+    const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
+    const rendered = render(
+      React.createElement(
+        MemoryRouter,
+        null,
+        React.createElement(TypedManageDashboard, {
+          activityRegistry: testActivityRegistryHooks.activityRegistry,
+          runDeepLinkPreflight: testActivityRegistryHooks.runDeepLinkPreflight,
+        }),
+      ),
+    )
+    unmount = rendered.unmount
+
+    await openPermanentLinkModal(rendered)
+
+    const teacherCodeInput = await waitFor(() => rendered.getByLabelText(/teacher code/i))
+    const presentationUrlInput = rendered.getByLabelText(/presentation url/i)
+    const binaryToDecimalInput = rendered.getByLabelText(/binary to decimal/i)
+    const decimalToBinaryInput = rendered.getByLabelText(/decimal to binary/i)
+    const submitButton = rendered.getByRole('button', { name: /generate link/i }) as HTMLButtonElement
+
+    fireEvent.change(teacherCodeInput, { target: { value: 'teacher-code' } })
+    fireEvent.input(presentationUrlInput, { target: { value: 'https://slides.example/deck-one' } })
+    fireEvent.click(rendered.getByRole('button', { name: /verify url/i }))
+
+    await waitFor(() => {
+      assert.equal(submitButton.disabled, false)
+    })
+
+    await act(async () => {
+      fireEvent.click(binaryToDecimalInput)
+      fireEvent.click(decimalToBinaryInput)
+    })
+
+    fireEvent.click(submitButton)
+
+    await waitFor(() => {
+      assert.equal(fetchStub.requestBodies.length, 1)
+    })
+
+    assert.deepEqual(fetchStub.requestBodies[0], {
+      activityName: 'test-activity',
+      teacherCode: 'teacher-code',
+      selectedOptions: {
+        presentationUrl: 'https://slides.example/deck-one',
+        challengeTypes: 'binary-to-decimal,decimal-to-binary',
+      },
+      entryPolicy: 'instructor-required',
+    })
+  } finally {
+    await settleRenderedDashboard({ act, cleanup, unmount })
+    testActivity.manageDashboard = {
+      ...testActivity.manageDashboard,
+      ...(originalCustomBuilder !== undefined ? { customPersistentLinkBuilder: originalCustomBuilder } : {}),
+    }
+    fetchStub.restore()
+    restoreDomEnvironment()
+  }
+})
+
+void test('ManageDashboard associates persistent option errors with their controls', { concurrency: false }, async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const fetchStub = installFetchStub()
+  const originalCustomBuilder = testActivity.manageDashboard?.customPersistentLinkBuilder
+  let unmount: (() => void) | null = null
+  let cleanup: (() => void) | null = null
+  let act: TestingLibraryAct | null = null
+  testActivity.manageDashboard = {
+    ...testActivity.manageDashboard,
+    customPersistentLinkBuilder: false,
+  }
+
+  try {
+    const testingLibrary = await import('@testing-library/react')
+    const { fireEvent, render, waitFor } = testingLibrary
+    cleanup = testingLibrary.cleanup
+    act = testingLibrary.act
+    const { default: ManageDashboard } = await import('./ManageDashboard.js')
+    const TypedManageDashboard = ManageDashboard as ComponentType<ManageDashboardTestProps>
+    const rendered = render(
+      React.createElement(
+        MemoryRouter,
+        null,
+        React.createElement(TypedManageDashboard, {
+          activityRegistry: testActivityRegistryHooks.activityRegistry,
+          runDeepLinkPreflight: testActivityRegistryHooks.runDeepLinkPreflight,
+        }),
+      ),
+    )
+    unmount = rendered.unmount
+
+    await openPermanentLinkModal(rendered)
+
+    const presentationUrlInput = await waitFor(() => rendered.getByLabelText(/presentation url/i))
+    fireEvent.input(presentationUrlInput, { target: { value: 'not-a-valid-url' } })
+
+    await waitFor(() => {
+      const errorId = presentationUrlInput.getAttribute('aria-describedby')
+      assert.equal(presentationUrlInput.getAttribute('aria-invalid'), 'true')
+      assert.match(errorId ?? '', /persistent-link-option-presentationUrl-error/)
+      assert.notEqual(document.getElementById(errorId ?? ''), null)
     })
   } finally {
     await settleRenderedDashboard({ act, cleanup, unmount })

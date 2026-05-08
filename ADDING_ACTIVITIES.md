@@ -264,6 +264,28 @@ export default {
       type: 'text',
       validator: 'url',
     },
+    hintsEnabled: {
+      label: 'Hints available',
+      type: 'checkbox',
+      defaultValue: true,
+    },
+    missionLength: {
+      label: 'Systems per mission',
+      type: 'number',
+      defaultValue: 5,
+      min: 3,
+      max: 12,
+      step: 1,
+    },
+    challengeTypes: {
+      label: 'Challenge types',
+      type: 'multiselect',
+      defaultValue: ['binary-to-decimal', 'decimal-to-binary'],
+      options: [
+        { value: 'binary-to-decimal', label: 'Binary to decimal' },
+        { value: 'decimal-to-binary', label: 'Decimal to binary' },
+      ],
+    },
   },
   // Optional: use an activity-specific permanent-link generator endpoint
   deepLinkGenerator: {
