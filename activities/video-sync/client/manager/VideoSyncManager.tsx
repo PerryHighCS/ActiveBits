@@ -249,12 +249,14 @@ export function shouldRecoverAutoStartAfterCredentialLoad(params: {
   bootstrapSourceUrl: string | null
   instructorPasscode: string | null
   autoStartStatus: AutoStartStatus
+  errorMessage: string | null
 }): boolean {
   return (
     params.setupMode
     && params.bootstrapSourceUrl != null
     && params.instructorPasscode != null
     && params.autoStartStatus === 'failed'
+    && params.errorMessage === MISSING_INSTRUCTOR_CREDENTIALS_ERROR
   )
 }
 
@@ -1100,6 +1102,7 @@ export default function VideoSyncManager() {
       bootstrapSourceUrl,
       instructorPasscode,
       autoStartStatus,
+      errorMessage,
     })) {
       return
     }
@@ -1109,7 +1112,7 @@ export default function VideoSyncManager() {
     setErrorMessage((current) => (
       current === MISSING_INSTRUCTOR_CREDENTIALS_ERROR ? null : current
     ))
-  }, [autoStartStatus, bootstrapSourceUrl, instructorPasscode, setupMode])
+  }, [autoStartStatus, bootstrapSourceUrl, errorMessage, instructorPasscode, setupMode])
 
   const handleEndSession = async (): Promise<void> => {
     if (!sessionId) return

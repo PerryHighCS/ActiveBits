@@ -382,6 +382,7 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
       instructorPasscode: 'teacher-passcode',
       autoStartStatus: 'failed',
+      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
     }),
     true,
   )
@@ -391,6 +392,7 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
       bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
       instructorPasscode: null,
       autoStartStatus: 'failed',
+      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
     }),
     false,
   )
@@ -400,6 +402,17 @@ void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap on
       bootstrapSourceUrl: null,
       instructorPasscode: 'teacher-passcode',
       autoStartStatus: 'failed',
+      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+    }),
+    false,
+  )
+  assert.equal(
+    shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode: true,
+      bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+      instructorPasscode: 'teacher-passcode',
+      autoStartStatus: 'failed',
+      errorMessage: 'Could not save video configuration. Please try again.',
     }),
     false,
   )
