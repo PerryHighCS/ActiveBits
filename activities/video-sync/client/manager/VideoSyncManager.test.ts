@@ -24,6 +24,7 @@ import {
     shouldFetchEmbeddedBootstrapSourceUrl,
     shouldRecoverAutoStartAfterCredentialLoad,
     shouldRenderManagerHeaderForSession,
+    shouldSendManagerPlaybackPositionUpdate,
 } from './VideoSyncManager.js'
 
 const BASE_STATE: VideoSyncState = {
@@ -503,6 +504,63 @@ void test('getManagerPlaybackIntentForStateChange maps native player transitions
       pausedStateValue: 2,
     }),
     null,
+  )
+})
+
+void test('shouldSendManagerPlaybackPositionUpdate catches iframe seeks without play state changes', () => {
+  assert.equal(
+    shouldSendManagerPlaybackPositionUpdate({
+      authoritativeState: {
+        ...BASE_STATE,
+        videoId: 'abcdefghijk',
+        positionSec: 10,
+        isPlaying: false,
+      },
+      desiredPositionSec: 45,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldSendManagerPlaybackPositionUpdate({
+      authoritativeState: {
+        ...BASE_STATE,
+        videoId: 'abcdefghijk',
+        positionSec: 10,
+        isPlaying: true,
+        serverTimestampMs: Date.now(),
+      },
+      desiredPositionSec: 45,
+    }),
+    true,
+  )
+})
+
+void test('shouldSendManagerPlaybackPositionUpdate ignores missing or in-tolerance positions', () => {
+  assert.equal(
+    shouldSendManagerPlaybackPositionUpdate({
+      authoritativeState: {
+        ...BASE_STATE,
+        videoId: 'abcdefghijk',
+        positionSec: 10,
+        isPlaying: false,
+      },
+      desiredPositionSec: null,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldSendManagerPlaybackPositionUpdate({
+      authoritativeState: {
+        ...BASE_STATE,
+        videoId: 'abcdefghijk',
+        positionSec: 10,
+        isPlaying: false,
+      },
+      desiredPositionSec: 10.1,
+    }),
+    false,
   )
 })
 
