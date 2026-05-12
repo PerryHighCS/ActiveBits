@@ -14,6 +14,14 @@ Use this log for durable findings that future contributors and agents should reu
 
 ## Discoveries
 
+- Date: 2026-05-12
+- Area: server | tooling
+- Discovery: `http-proxy-middleware` can be upgraded to `^4.0.0` in this repo without code changes in `server/server.ts`; existing `createProxyMiddleware` usage, `pathFilter`, and websocket upgrade handling remain compatible.
+- Why it matters: The package has a major-version jump and a stricter engine declaration (`^22.15.0 || ^24 || >=26`), so future upgrades should verify runtime Node compatibility but do not need immediate proxy wiring refactors on ActiveBits.
+- Evidence: `server/package.json`; `server/server.ts`; `package-lock.json`; `npm --workspace server run typecheck`; `npm --workspace server run lint`; `npm --workspace server test`
+- Follow-up action: Keep server dependency updates on Node 24.x environments and re-run server workspace checks when touching proxy config.
+- Owner: Codex
+
 - Date: 2026-05-07
 - Area: activities | binary-breach
 - Discovery: Binary Breach is registered as a production standalone-capable activity under `activities/binary-breach`, so both client and server activity inventory tests must include `binary-breach` in their expected production activity lists.

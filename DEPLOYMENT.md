@@ -34,7 +34,7 @@ ActiveBits supports two session storage modes:
 
 - Render.com account
 - GitHub repository with ActiveBits code
-- Node.js 22+ environment
+- Node.js 24.x environment
 
 ### Step 1: Create Valkey Instance
 
