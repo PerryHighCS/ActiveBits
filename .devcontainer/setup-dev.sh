@@ -94,6 +94,16 @@ if ! command -v rg >/dev/null 2>&1; then
   fi
 fi
 
+# Sandbox tooling used by agents may rely on bubblewrap in privileged images.
+if ! command -v bwrap >/dev/null 2>&1; then
+  echo "⏳ bubblewrap (bwrap) not found; installing..."
+  if ! run_with_available_privilege apt-get update; then
+    echo "⚠️ Unable to install bubblewrap automatically (no root/sudo)."
+  elif ! run_with_available_privilege apt-get install -y bubblewrap; then
+    echo "⚠️ Unable to install bubblewrap automatically."
+  fi
+fi
+
 # GitHub CLI is used by agents and contributors to inspect PR checks/comments.
 if ! command -v gh >/dev/null 2>&1; then
   echo "⏳ GitHub CLI (gh) not found; installing..."

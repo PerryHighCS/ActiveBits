@@ -13,6 +13,13 @@ Track durable local-development and devcontainer behavior that future contributo
 
 ## Entries
 
+- Date: 2026-05-12
+- Change: `.devcontainer/setup-dev.sh` now installs `bubblewrap` when `bwrap` is missing, using the same privileged `apt-get` fallback pattern already used for other devcontainer tool gaps.
+- Risk: The setup script may perform one extra `apt-get update` on images that omit `bwrap`, but bootstrap now restores the sandbox dependency expected by privileged agent workflows.
+- Evidence: `.devcontainer/setup-dev.sh`; `bash -n .devcontainer/setup-dev.sh`
+- Follow-up action: If more bootstrap packages depend on the same fallback behavior, consider consolidating the repeated `apt-get update && apt-get install` pattern into a small helper.
+- Owner: GitHub Copilot
+
 - Date: 2026-04-17
 - Change: GitHub CLI setup in `.devcontainer/setup-dev.sh` downloads the APT keyring to a temporary file first, then installs it with `install -m 0644` instead of using `curl | tee`; temp-file creation failures are handled explicitly so `set -e` does not abort the rest of setup.
 - Risk: The install path is slightly more verbose, but failed key downloads and failed temp-file creation are now reported at the relevant step instead of being masked or aborting unrelated setup work.
