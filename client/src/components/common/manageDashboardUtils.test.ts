@@ -20,6 +20,7 @@ import {
   persistCreateSessionBootstrapToSessionStorage,
   parseMultiselectValues,
   parseDeepLinkOptions,
+  readCreateSessionBootstrapPayload,
   storeCreateSessionBootstrapPayload,
   validateDeepLinkSelection,
 } from './manageDashboardUtils'
@@ -554,6 +555,48 @@ void test('consumeCreateSessionBootstrapPayload clears sessionStorage even when 
     assert.equal(
       sessionStorage.get('create-session-bootstrap:video-sync:session-123') ?? null,
       null,
+    )
+  } finally {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    })
+  }
+})
+
+void test('readCreateSessionBootstrapPayload leaves iframe bootstrap storage available until explicit consume', () => {
+  const originalWindow = globalThis.window
+  const { backing: sessionStorage, storage: fakeSessionStorage } = createFakeSessionStorage()
+
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      sessionStorage: fakeSessionStorage,
+    },
+    configurable: true,
+    writable: true,
+  })
+
+  try {
+    sessionStorage.set(
+      'create-session-bootstrap:video-sync:session-iframe',
+      JSON.stringify({
+        createdAtMs: 10,
+        payload: {
+          instructorPasscode: 'teacher-passcode',
+        },
+      }),
+    )
+
+    assert.deepEqual(
+      readCreateSessionBootstrapPayload('video-sync', 'session-iframe', 10),
+      {
+        instructorPasscode: 'teacher-passcode',
+      },
+    )
+    assert.equal(
+      sessionStorage.has('create-session-bootstrap:video-sync:session-iframe'),
+      true,
     )
   } finally {
     Object.defineProperty(globalThis, 'window', {

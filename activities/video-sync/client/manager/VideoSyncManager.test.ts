@@ -127,6 +127,31 @@ void test('resolveBootstrapInstructorPasscode preserves same-tab bootstrap paylo
   )
 })
 
+void test('resolveBootstrapInstructorPasscode can be read again before the settled manager consumes bootstrap', () => {
+  storeCreateSessionBootstrapPayload('video-sync', 'child-session-1', {
+    instructorPasscode: 'embedded-passcode',
+  })
+
+  const expected = {
+    instructorPasscode: 'embedded-passcode',
+    shouldClearLocationState: false,
+  }
+  assert.deepEqual(
+    resolveBootstrapInstructorPasscode({
+      locationState: null,
+      sessionId: 'child-session-1',
+    }),
+    expected,
+  )
+  assert.deepEqual(
+    resolveBootstrapInstructorPasscode({
+      locationState: null,
+      sessionId: 'child-session-1',
+    }),
+    expected,
+  )
+})
+
 void test('readBootstrapSourceUrl returns sourceUrl from query string', () => {
   assert.equal(
     readBootstrapSourceUrl('?sourceUrl=https%3A%2F%2Fyoutu.be%2FdQw4w9WgXcQ%3Ft%3D43'),

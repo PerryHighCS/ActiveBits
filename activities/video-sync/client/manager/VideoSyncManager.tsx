@@ -1,6 +1,9 @@
 import SessionHeader from '@src/components/common/SessionHeader'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
-import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import {
+  consumeCreateSessionBootstrapPayload,
+  readCreateSessionBootstrapPayload,
+} from '@src/components/common/manageDashboardUtils'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
@@ -178,7 +181,7 @@ export function resolveBootstrapInstructorPasscode(params: {
   }
 
   const fromBootstrapPayload = readBootstrapInstructorPasscode({
-    createSessionPayload: consumeCreateSessionBootstrapPayload('video-sync', params.sessionId) ?? undefined,
+    createSessionPayload: readCreateSessionBootstrapPayload('video-sync', params.sessionId) ?? undefined,
   })
 
   return {
@@ -650,17 +653,22 @@ export default function VideoSyncManager() {
         sessionId,
       })
       if (bootstrap.instructorPasscode) {
+        // Yield once so StrictMode's development-only setup/cleanup pass cannot
+        // consume the one-time iframe bootstrap before the durable effect settles.
+        await Promise.resolve()
+        if (isCancelled) {
+          return
+        }
         if (bootstrap.shouldClearLocationState) {
           void navigate(location.pathname + location.search, {
             replace: true,
             state: null,
           })
         }
-        if (!isCancelled) {
-          setInstructorPasscode(bootstrap.instructorPasscode)
-          setPersistentRecoverySourceUrl(null)
-          setIsPasscodeReady(true)
-        }
+        consumeCreateSessionBootstrapPayload('video-sync', sessionId)
+        setInstructorPasscode(bootstrap.instructorPasscode)
+        setPersistentRecoverySourceUrl(null)
+        setIsPasscodeReady(true)
         return
       }
 

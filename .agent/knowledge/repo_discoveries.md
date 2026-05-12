@@ -491,7 +491,7 @@ Use this log for durable findings that future contributors and agents should reu
 - Discovery: SyncDeck's embedded activity start broadcast can cause an embedded manager iframe to mount before the initiating `POST /api/syncdeck/:sessionId/embedded-activity/start` response returns `managerBootstrap`. When that bootstrap contains a child credential such as Video Sync's `instructorPasscode`, the initiating manager must cache the payload and remount/refresh any already-loaded embedded manager instance, not only rely on the later backfill pass.
 - Why it matters: Ad-hoc SyncDeck sessions have no persistent teacher-cookie recovery path for child Video Sync credentials. If the first child manager mount consumes no bootstrap payload and is not refreshed after the HTTP response arrives, Video Sync reports that the instructor passcode is missing and cannot auto-configure the embed.
 - Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `DEPLOYMENT.md`
-- Follow-up action: Keep immediate embedded-start handling and bootstrap backfill handling aligned whenever new child manager bootstrap fields are added, and preserve Video Sync's delayed-credential retry so a child manager that briefly observes missing auth can recover once bootstrap data lands.
+- Follow-up action: Keep immediate embedded-start handling and bootstrap backfill handling aligned whenever new child manager bootstrap fields are added. For embedded managers that rely on one-time manager bootstrap payloads, avoid consuming the payload during transient development remount work; consume only after the settled initialization path claims it.
 - Owner: Codex
 
 - Date: 2026-03-03
