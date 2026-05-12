@@ -231,6 +231,48 @@ void test('createManagerWsAuthMessage serializes the post-connect auth payload',
   assert.equal(createManagerWsAuthMessage(null), null)
 })
 
+void test('getManagerPlaybackIntentForStateChange treats natural video completion as a pause', () => {
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 0,
+      endedStateValue: 0,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    'pause',
+  )
+})
+
+void test('getManagerPlaybackIntentForStateChange preserves ordinary play and pause events', () => {
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 1,
+      endedStateValue: 0,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    'play',
+  )
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 2,
+      endedStateValue: 0,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    'pause',
+  )
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 3,
+      endedStateValue: 0,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    null,
+  )
+})
+
 void test('shouldAutoStartBootstrapSource requires setup mode, source url, and ready credentials', () => {
   assert.equal(
     shouldAutoStartBootstrapSource({
@@ -369,6 +411,7 @@ void test('getManagerPlaybackIntentForStateChange maps native player transitions
   assert.equal(
     getManagerPlaybackIntentForStateChange({
       eventState: 1,
+      endedStateValue: 0,
       playingStateValue: 1,
       pausedStateValue: 2,
     }),
@@ -377,6 +420,7 @@ void test('getManagerPlaybackIntentForStateChange maps native player transitions
   assert.equal(
     getManagerPlaybackIntentForStateChange({
       eventState: 2,
+      endedStateValue: 0,
       playingStateValue: 1,
       pausedStateValue: 2,
     }),
@@ -385,6 +429,7 @@ void test('getManagerPlaybackIntentForStateChange maps native player transitions
   assert.equal(
     getManagerPlaybackIntentForStateChange({
       eventState: 99,
+      endedStateValue: 0,
       playingStateValue: 1,
       pausedStateValue: 2,
     }),

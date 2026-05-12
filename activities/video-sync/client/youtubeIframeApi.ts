@@ -237,10 +237,12 @@ export function resetYoutubeIframeApiForTests(): void {
 }
 
 export function resolveYoutubePlayerState(namespace: YoutubeNamespace | null): {
+  ENDED: number
   PLAYING: number
   PAUSED: number
 } {
   return {
+    ENDED: namespace?.PlayerState?.ENDED ?? 0,
     PLAYING: namespace?.PlayerState?.PLAYING ?? 1,
     PAUSED: namespace?.PlayerState?.PAUSED ?? 2,
   }

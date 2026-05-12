@@ -292,6 +292,7 @@ export function shouldCorrectManagerPlaybackDrift(
 
 export function getManagerPlaybackIntentForStateChange(params: {
   eventState: number
+  endedStateValue: number
   playingStateValue: number
   pausedStateValue: number
 }): 'play' | 'pause' | null {
@@ -299,7 +300,7 @@ export function getManagerPlaybackIntentForStateChange(params: {
     return 'play'
   }
 
-  if (params.eventState === params.pausedStateValue) {
+  if (params.eventState === params.pausedStateValue || params.eventState === params.endedStateValue) {
     return 'pause'
   }
 
@@ -842,6 +843,7 @@ export default function VideoSyncManager() {
 
               const nextIntent = getManagerPlaybackIntentForStateChange({
                 eventState: event.data,
+                endedStateValue: states.ENDED,
                 playingStateValue: states.PLAYING,
                 pausedStateValue: states.PAUSED,
               })

@@ -478,6 +478,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Keep plan/docs/tests aligned with the enforced-stop behavior unless the product decision explicitly changes to allow seeking or playback beyond `stopSec`.
 - Owner: Codex
 
+- Date: 2026-05-12
+- Area: activities
+- Discovery: `video-sync` must treat the instructor YouTube player's natural `ENDED` state as an authoritative pause intent, not as an ignorable local player transition. The manager sends the existing pause command with the current player position so server state flips to `isPlaying: false` instead of continuing to project a finished video as live playback.
+- Why it matters: If the server keeps `isPlaying: true` after natural completion, heartbeats repeatedly reconcile the manager back toward a projected end position. YouTube can then jump/replay briefly and pause again, producing the end-of-video loop reported in issue 245 even with one instructor.
+- Evidence: `activities/video-sync/client/youtubeIframeApi.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`; `DEPLOYMENT.md`
+- Follow-up action: Keep natural completion and configured `stopSec` completion aligned as server-authoritative paused outcomes when future player event handling changes.
+- Owner: Codex
+
 - Date: 2026-03-03
 - Area: activities
 - Discovery: `video-sync` drift correction and telemetry are keyed to a `0.2s` tolerance and current sync-health state, not a cumulative unsync-event threshold. Student clients report `unsync` when drift first exceeds tolerance, throttle repeated unsync reports to once per 10 seconds while still unsynced, and the manager consumes `sync.unsyncedStudents`, `sync.lastDriftSec`, and `sync.lastCorrectionResult`.
