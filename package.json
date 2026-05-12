@@ -46,7 +46,7 @@
     "description": "",
     "packageManager": "npm@11.11.1",
     "engines": {
-        "node": ">=24"
+        "node": ">=24 <25"
     },
     "dependencies": {
         "express": "^5.2.0",

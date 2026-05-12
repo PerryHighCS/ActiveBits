@@ -43,7 +43,14 @@ if (!nvmrcVersion) {
   process.exit(1);
 }
 
-const expectedRange = `>=${nvmrcVersion}`;
+const nvmrcMajor = Number.parseInt(nvmrcVersion.split('.')[0] ?? '', 10);
+
+if (!Number.isInteger(nvmrcMajor) || nvmrcMajor <= 0) {
+  console.error(`[node-version-sync] .nvmrc must start with a valid Node major version, got "${nvmrcVersion}".`);
+  process.exit(1);
+}
+
+const expectedRange = `>=${nvmrcVersion} <${nvmrcMajor + 1}`;
 const manifestPaths = [
   'package.json',
   'client/package.json',
