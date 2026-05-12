@@ -340,6 +340,46 @@ function consumeCreateSessionBootstrapPayloadFromSessionStorage(
   }
 }
 
+function readCreateSessionBootstrapPayloadFromSessionStorage(
+  activityId: string,
+  sessionId: string,
+  nowMs: number,
+): Record<string, unknown> | null {
+  if (typeof window === 'undefined' || window.sessionStorage == null) {
+    return null
+  }
+
+  const storageKey = buildCreateSessionBootstrapStorageKey(activityId, sessionId)
+  const rawValue = window.sessionStorage.getItem(storageKey)
+  if (typeof rawValue !== 'string' || rawValue.length === 0) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown
+    if (
+      !isPlainObjectRecord(parsed)
+      || typeof parsed.createdAtMs !== 'number'
+      || !Number.isFinite(parsed.createdAtMs)
+      || !isPlainObjectRecord(parsed.payload)
+    ) {
+      removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
+      return null
+    }
+
+    if (nowMs - parsed.createdAtMs > CREATE_SESSION_BOOTSTRAP_TTL_MS) {
+      removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
+      return null
+    }
+
+    return parsed.payload
+  } catch (error) {
+    removeCreateSessionBootstrapStorageEntry(window.sessionStorage, storageKey)
+    console.warn('[ManageDashboard] Failed to parse same-tab bootstrap payload from sessionStorage:', error)
+    return null
+  }
+}
+
 export function parseDeepLinkGenerator(rawDeepLinkGenerator: unknown): DeepLinkGeneratorConfig | null {
   if (!isObjectRecord(rawDeepLinkGenerator)) {
     return null
@@ -458,6 +498,17 @@ export function storeCreateSessionBootstrapPayload(
   })
   persistCreateSessionBootstrapPayloadToSessionStorage(activityId, sessionId, payload, nowMs, nowMs)
   pruneCreateSessionBootstrapPayloads(nowMs)
+}
+
+export function readCreateSessionBootstrapPayload(
+  activityId: string,
+  sessionId: string,
+  nowMs = Date.now(),
+): Record<string, unknown> | null {
+  pruneCreateSessionBootstrapPayloads(nowMs)
+  const key = `${activityId}:${sessionId}`
+  const entry = createSessionBootstrapPayloads.get(key) ?? null
+  return entry?.payload ?? readCreateSessionBootstrapPayloadFromSessionStorage(activityId, sessionId, nowMs)
 }
 
 export function consumeCreateSessionBootstrapPayload(

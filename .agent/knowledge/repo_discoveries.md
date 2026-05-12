@@ -478,6 +478,22 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Keep plan/docs/tests aligned with the enforced-stop behavior unless the product decision explicitly changes to allow seeking or playback beyond `stopSec`.
 - Owner: Codex
 
+- Date: 2026-05-12
+- Area: activities
+- Discovery: `video-sync` must treat the instructor YouTube player's natural `ENDED` state as an authoritative pause intent, not as an ignorable local player transition. The manager sends the existing pause command with the current player position so server state flips to `isPlaying: false` instead of continuing to project a finished video as live playback.
+- Why it matters: If the server keeps `isPlaying: true` after natural completion, heartbeats repeatedly reconcile the manager back toward a projected end position. YouTube can then jump/replay briefly and pause again, producing the end-of-video loop reported in issue 245 even with one instructor.
+- Evidence: `activities/video-sync/client/youtubeIframeApi.ts`; `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`; `DEPLOYMENT.md`
+- Follow-up action: Keep natural completion and configured `stopSec` completion aligned as server-authoritative paused outcomes when future player event handling changes.
+- Owner: Codex
+
+- Date: 2026-05-12
+- Area: activities
+- Discovery: SyncDeck's embedded activity start broadcast can cause an embedded manager iframe to mount before the initiating `POST /api/syncdeck/:sessionId/embedded-activity/start` response returns `managerBootstrap`. When that bootstrap contains a child credential such as Video Sync's `instructorPasscode`, the initiating manager must cache the payload and remount/refresh any already-loaded embedded manager instance, not only rely on the later backfill pass.
+- Why it matters: Ad-hoc SyncDeck sessions have no persistent teacher-cookie recovery path for child Video Sync credentials. If the first child manager mount consumes no bootstrap payload and is not refreshed after the HTTP response arrives, Video Sync reports that the instructor passcode is missing and cannot auto-configure the embed.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `DEPLOYMENT.md`
+- Follow-up action: Keep immediate embedded-start handling and bootstrap backfill handling aligned whenever new child manager bootstrap fields are added. For embedded managers that rely on one-time manager bootstrap payloads, avoid consuming the payload during transient development remount work; consume only after the settled initialization path claims it.
+- Owner: Codex
+
 - Date: 2026-03-03
 - Area: activities
 - Discovery: `video-sync` drift correction and telemetry are keyed to a `0.2s` tolerance and current sync-health state, not a cumulative unsync-event threshold. Student clients report `unsync` when drift first exceeds tolerance, throttle repeated unsync reports to once per 10 seconds while still unsynced, and the manager consumes `sync.unsyncedStudents`, `sync.lastDriftSec`, and `sync.lastCorrectionResult`.

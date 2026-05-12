@@ -45,6 +45,8 @@ import { processManagerBundlePreloadRequests } from './SyncDeckManager.js'
 import { processManagerPreloadRequests } from './SyncDeckManager.js'
 import { runEmbeddedStartWithPendingRetry } from './SyncDeckManager.js'
 import { resolveCompletedEmbeddedBootstrapChildSessionIds } from './SyncDeckManager.js'
+import { advanceEmbeddedManagerRenderNonce } from './SyncDeckManager.js'
+import { clearLoadedEmbeddedManagerInstanceKey } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRetryDelayMs } from './SyncDeckManager.js'
 import { resolveEmbeddedBootstrapBackfillRequests } from './SyncDeckManager.js'
 import { shouldRetryEmbeddedBootstrapBackfill } from './SyncDeckManager.js'
@@ -554,6 +556,33 @@ void test('resolveCompletedEmbeddedBootstrapChildSessionIds marks both stale loc
       resolvedChildSessionId: 'same-child-id',
     }),
     ['same-child-id'],
+  )
+})
+
+void test('advanceEmbeddedManagerRenderNonce increments child manager remount keys', () => {
+  assert.deepEqual(
+    advanceEmbeddedManagerRenderNonce({ childA: 2 }, 'childA'),
+    { childA: 3 },
+  )
+  assert.deepEqual(
+    advanceEmbeddedManagerRenderNonce({ childA: 2 }, 'childB'),
+    { childA: 2, childB: 1 },
+  )
+})
+
+void test('clearLoadedEmbeddedManagerInstanceKey forces bootstrap-refresh remount only for loaded instances', () => {
+  const current = {
+    'video-sync:3:0': true,
+    'resonance:4:0': true,
+  }
+
+  assert.deepEqual(
+    clearLoadedEmbeddedManagerInstanceKey(current, 'video-sync:3:0'),
+    { 'resonance:4:0': true },
+  )
+  assert.equal(
+    clearLoadedEmbeddedManagerInstanceKey(current, 'missing:1:0'),
+    current,
   )
 })
 

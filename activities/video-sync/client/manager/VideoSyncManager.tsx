@@ -1,6 +1,9 @@
 import SessionHeader from '@src/components/common/SessionHeader'
 import { fetchEmbeddedLaunchSelectedOptions } from '@src/components/common/embeddedLaunchBootstrap'
-import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import {
+  consumeCreateSessionBootstrapPayload,
+  readCreateSessionBootstrapPayload,
+} from '@src/components/common/manageDashboardUtils'
 import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import Button from '@src/components/ui/Button'
 import { useResilientWebSocket } from '@src/hooks/useResilientWebSocket'
@@ -70,6 +73,7 @@ interface ManagerLocationState {
 type AutoStartStatus = 'idle' | 'starting' | 'failed'
 
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
+const MISSING_INSTRUCTOR_CREDENTIALS_ERROR = 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.'
 const YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS = 1_500
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
@@ -177,7 +181,7 @@ export function resolveBootstrapInstructorPasscode(params: {
   }
 
   const fromBootstrapPayload = readBootstrapInstructorPasscode({
-    createSessionPayload: consumeCreateSessionBootstrapPayload('video-sync', params.sessionId) ?? undefined,
+    createSessionPayload: readCreateSessionBootstrapPayload('video-sync', params.sessionId) ?? undefined,
   })
 
   return {
@@ -240,6 +244,22 @@ export function shouldAutoStartBootstrapSource(params: {
   )
 }
 
+export function shouldRecoverAutoStartAfterCredentialLoad(params: {
+  setupMode: boolean
+  bootstrapSourceUrl: string | null
+  instructorPasscode: string | null
+  autoStartStatus: AutoStartStatus
+  errorMessage: string | null
+}): boolean {
+  return (
+    params.setupMode
+    && params.bootstrapSourceUrl != null
+    && params.instructorPasscode != null
+    && params.autoStartStatus === 'failed'
+    && params.errorMessage === MISSING_INSTRUCTOR_CREDENTIALS_ERROR
+  )
+}
+
 export async function autoConfigureBootstrapSource(params: {
   bootstrapSourceUrl: string
   saveConfig: (sourceUrl: string) => Promise<boolean>
@@ -292,6 +312,7 @@ export function shouldCorrectManagerPlaybackDrift(
 
 export function getManagerPlaybackIntentForStateChange(params: {
   eventState: number
+  endedStateValue: number
   playingStateValue: number
   pausedStateValue: number
 }): 'play' | 'pause' | null {
@@ -299,7 +320,7 @@ export function getManagerPlaybackIntentForStateChange(params: {
     return 'play'
   }
 
-  if (params.eventState === params.pausedStateValue) {
+  if (params.eventState === params.pausedStateValue || params.eventState === params.endedStateValue) {
     return 'pause'
   }
 
@@ -452,7 +473,7 @@ export default function VideoSyncManager() {
     }
     if (!instructorPasscode) {
       if (options?.reportErrors !== false) {
-        setErrorMessage('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')
+        setErrorMessage(MISSING_INSTRUCTOR_CREDENTIALS_ERROR)
       }
       return false
     }
@@ -634,17 +655,22 @@ export default function VideoSyncManager() {
         sessionId,
       })
       if (bootstrap.instructorPasscode) {
+        // Yield once so StrictMode's development-only setup/cleanup pass cannot
+        // consume the one-time iframe bootstrap before the durable effect settles.
+        await Promise.resolve()
+        if (isCancelled) {
+          return
+        }
         if (bootstrap.shouldClearLocationState) {
           void navigate(location.pathname + location.search, {
             replace: true,
             state: null,
           })
         }
-        if (!isCancelled) {
-          setInstructorPasscode(bootstrap.instructorPasscode)
-          setPersistentRecoverySourceUrl(null)
-          setIsPasscodeReady(true)
-        }
+        consumeCreateSessionBootstrapPayload('video-sync', sessionId)
+        setInstructorPasscode(bootstrap.instructorPasscode)
+        setPersistentRecoverySourceUrl(null)
+        setIsPasscodeReady(true)
         return
       }
 
@@ -842,6 +868,7 @@ export default function VideoSyncManager() {
 
               const nextIntent = getManagerPlaybackIntentForStateChange({
                 eventState: event.data,
+                endedStateValue: states.ENDED,
                 playingStateValue: states.PLAYING,
                 pausedStateValue: states.PAUSED,
               })
@@ -955,7 +982,7 @@ export default function VideoSyncManager() {
       return false
     }
     if (!instructorPasscode) {
-      setErrorMessage('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')
+      setErrorMessage(MISSING_INSTRUCTOR_CREDENTIALS_ERROR)
       return false
     }
 
@@ -1068,6 +1095,24 @@ export default function VideoSyncManager() {
     sessionId,
     setupMode,
   ])
+
+  useEffect(() => {
+    if (!shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode,
+      bootstrapSourceUrl,
+      instructorPasscode,
+      autoStartStatus,
+      errorMessage,
+    })) {
+      return
+    }
+
+    autoStartAttemptKeyRef.current = null
+    setAutoStartStatus('idle')
+    setErrorMessage((current) => (
+      current === MISSING_INSTRUCTOR_CREDENTIALS_ERROR ? null : current
+    ))
+  }, [autoStartStatus, bootstrapSourceUrl, errorMessage, instructorPasscode, setupMode])
 
   const handleEndSession = async (): Promise<void> => {
     if (!sessionId) return

@@ -22,6 +22,7 @@ import {
     shouldAutoStartBootstrapSource,
     shouldCorrectManagerPlaybackDrift,
     shouldFetchEmbeddedBootstrapSourceUrl,
+    shouldRecoverAutoStartAfterCredentialLoad,
     shouldRenderManagerHeaderForSession,
 } from './VideoSyncManager.js'
 
@@ -123,6 +124,31 @@ void test('resolveBootstrapInstructorPasscode preserves same-tab bootstrap paylo
       instructorPasscode: 'teacher-passcode',
       shouldClearLocationState: false,
     },
+  )
+})
+
+void test('resolveBootstrapInstructorPasscode can be read again before the settled manager consumes bootstrap', () => {
+  storeCreateSessionBootstrapPayload('video-sync', 'child-session-1', {
+    instructorPasscode: 'embedded-passcode',
+  })
+
+  const expected = {
+    instructorPasscode: 'embedded-passcode',
+    shouldClearLocationState: false,
+  }
+  assert.deepEqual(
+    resolveBootstrapInstructorPasscode({
+      locationState: null,
+      sessionId: 'child-session-1',
+    }),
+    expected,
+  )
+  assert.deepEqual(
+    resolveBootstrapInstructorPasscode({
+      locationState: null,
+      sessionId: 'child-session-1',
+    }),
+    expected,
   )
 })
 
@@ -231,6 +257,48 @@ void test('createManagerWsAuthMessage serializes the post-connect auth payload',
   assert.equal(createManagerWsAuthMessage(null), null)
 })
 
+void test('getManagerPlaybackIntentForStateChange treats natural video completion as a pause', () => {
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 0,
+      endedStateValue: 0,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    'pause',
+  )
+})
+
+void test('getManagerPlaybackIntentForStateChange preserves ordinary play and pause events', () => {
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 1,
+      endedStateValue: 0,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    'play',
+  )
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 2,
+      endedStateValue: 0,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    'pause',
+  )
+  assert.equal(
+    getManagerPlaybackIntentForStateChange({
+      eventState: 3,
+      endedStateValue: 0,
+      playingStateValue: 1,
+      pausedStateValue: 2,
+    }),
+    null,
+  )
+})
+
 void test('shouldAutoStartBootstrapSource requires setup mode, source url, and ready credentials', () => {
   assert.equal(
     shouldAutoStartBootstrapSource({
@@ -307,6 +375,49 @@ void test('autoConfigureBootstrapSource returns false when config save fails', a
   assert.deepEqual(calls, ['save'])
 })
 
+void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap once credentials arrive', () => {
+  assert.equal(
+    shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode: true,
+      bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+      instructorPasscode: 'teacher-passcode',
+      autoStartStatus: 'failed',
+      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+    }),
+    true,
+  )
+  assert.equal(
+    shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode: true,
+      bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+      instructorPasscode: null,
+      autoStartStatus: 'failed',
+      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+    }),
+    false,
+  )
+  assert.equal(
+    shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode: true,
+      bootstrapSourceUrl: null,
+      instructorPasscode: 'teacher-passcode',
+      autoStartStatus: 'failed',
+      errorMessage: 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.',
+    }),
+    false,
+  )
+  assert.equal(
+    shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode: true,
+      bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+      instructorPasscode: 'teacher-passcode',
+      autoStartStatus: 'failed',
+      errorMessage: 'Could not save video configuration. Please try again.',
+    }),
+    false,
+  )
+})
+
 void test('clearManagerPlayerLoadError only dismisses the transient YouTube load banner', () => {
   assert.equal(
     clearManagerPlayerLoadError('YouTube player failed to load. Try a different video URL.'),
@@ -369,6 +480,7 @@ void test('getManagerPlaybackIntentForStateChange maps native player transitions
   assert.equal(
     getManagerPlaybackIntentForStateChange({
       eventState: 1,
+      endedStateValue: 0,
       playingStateValue: 1,
       pausedStateValue: 2,
     }),
@@ -377,6 +489,7 @@ void test('getManagerPlaybackIntentForStateChange maps native player transitions
   assert.equal(
     getManagerPlaybackIntentForStateChange({
       eventState: 2,
+      endedStateValue: 0,
       playingStateValue: 1,
       pausedStateValue: 2,
     }),
@@ -385,6 +498,7 @@ void test('getManagerPlaybackIntentForStateChange maps native player transitions
   assert.equal(
     getManagerPlaybackIntentForStateChange({
       eventState: 99,
+      endedStateValue: 0,
       playingStateValue: 1,
       pausedStateValue: 2,
     }),
