@@ -70,6 +70,7 @@ interface ManagerLocationState {
 type AutoStartStatus = 'idle' | 'starting' | 'failed'
 
 const YOUTUBE_MANAGER_LOAD_ERROR = 'YouTube player failed to load. Try a different video URL.'
+const MISSING_INSTRUCTOR_CREDENTIALS_ERROR = 'Instructor credentials missing. Open this session from the dashboard or authenticated permalink.'
 const YOUTUBE_EDUCATION_FALLBACK_TIMEOUT_MS = 1_500
 const MANAGER_PLAYING_DRIFT_TOLERANCE_SEC = 2
 const MANAGER_PLAYBACK_COMMAND_FLUSH_DELAY_MS = 120
@@ -237,6 +238,20 @@ export function shouldAutoStartBootstrapSource(params: {
     params.autoStartStatus !== 'failed' &&
     params.isPasscodeReady &&
     params.instructorPasscode != null
+  )
+}
+
+export function shouldRecoverAutoStartAfterCredentialLoad(params: {
+  setupMode: boolean
+  bootstrapSourceUrl: string | null
+  instructorPasscode: string | null
+  autoStartStatus: AutoStartStatus
+}): boolean {
+  return (
+    params.setupMode
+    && params.bootstrapSourceUrl != null
+    && params.instructorPasscode != null
+    && params.autoStartStatus === 'failed'
   )
 }
 
@@ -453,7 +468,7 @@ export default function VideoSyncManager() {
     }
     if (!instructorPasscode) {
       if (options?.reportErrors !== false) {
-        setErrorMessage('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')
+        setErrorMessage(MISSING_INSTRUCTOR_CREDENTIALS_ERROR)
       }
       return false
     }
@@ -957,7 +972,7 @@ export default function VideoSyncManager() {
       return false
     }
     if (!instructorPasscode) {
-      setErrorMessage('Instructor credentials missing. Open this session from the dashboard or authenticated permalink.')
+      setErrorMessage(MISSING_INSTRUCTOR_CREDENTIALS_ERROR)
       return false
     }
 
@@ -1070,6 +1085,23 @@ export default function VideoSyncManager() {
     sessionId,
     setupMode,
   ])
+
+  useEffect(() => {
+    if (!shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode,
+      bootstrapSourceUrl,
+      instructorPasscode,
+      autoStartStatus,
+    })) {
+      return
+    }
+
+    autoStartAttemptKeyRef.current = null
+    setAutoStartStatus('idle')
+    setErrorMessage((current) => (
+      current === MISSING_INSTRUCTOR_CREDENTIALS_ERROR ? null : current
+    ))
+  }, [autoStartStatus, bootstrapSourceUrl, instructorPasscode, setupMode])
 
   const handleEndSession = async (): Promise<void> => {
     if (!sessionId) return

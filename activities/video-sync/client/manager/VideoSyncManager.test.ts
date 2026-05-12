@@ -22,6 +22,7 @@ import {
     shouldAutoStartBootstrapSource,
     shouldCorrectManagerPlaybackDrift,
     shouldFetchEmbeddedBootstrapSourceUrl,
+    shouldRecoverAutoStartAfterCredentialLoad,
     shouldRenderManagerHeaderForSession,
 } from './VideoSyncManager.js'
 
@@ -347,6 +348,36 @@ void test('autoConfigureBootstrapSource returns false when config save fails', a
 
   assert.equal(configured, false)
   assert.deepEqual(calls, ['save'])
+})
+
+void test('shouldRecoverAutoStartAfterCredentialLoad retries failed bootstrap once credentials arrive', () => {
+  assert.equal(
+    shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode: true,
+      bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+      instructorPasscode: 'teacher-passcode',
+      autoStartStatus: 'failed',
+    }),
+    true,
+  )
+  assert.equal(
+    shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode: true,
+      bootstrapSourceUrl: 'https://youtu.be/dQw4w9WgXcQ?t=43',
+      instructorPasscode: null,
+      autoStartStatus: 'failed',
+    }),
+    false,
+  )
+  assert.equal(
+    shouldRecoverAutoStartAfterCredentialLoad({
+      setupMode: true,
+      bootstrapSourceUrl: null,
+      instructorPasscode: 'teacher-passcode',
+      autoStartStatus: 'failed',
+    }),
+    false,
+  )
 })
 
 void test('clearManagerPlayerLoadError only dismisses the transient YouTube load banner', () => {

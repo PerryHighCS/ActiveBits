@@ -801,6 +801,29 @@ export function resolveCompletedEmbeddedBootstrapChildSessionIds(params: {
   return [...completedIds]
 }
 
+export function advanceEmbeddedManagerRenderNonce(
+  current: Record<string, number>,
+  childSessionId: string,
+): Record<string, number> {
+  return {
+    ...current,
+    [childSessionId]: (current[childSessionId] ?? 0) + 1,
+  }
+}
+
+export function clearLoadedEmbeddedManagerInstanceKey(
+  current: Record<string, boolean>,
+  instanceKey: string,
+): Record<string, boolean> {
+  if (!current[instanceKey]) {
+    return current
+  }
+
+  const next = { ...current }
+  delete next[instanceKey]
+  return next
+}
+
 export function resolveEmbeddedBootstrapBackfillRetryDelayMs(attemptCount: number): number {
   const normalizedAttemptCount = Number.isFinite(attemptCount) && attemptCount > 0
     ? Math.floor(attemptCount)
@@ -2566,19 +2589,14 @@ const SyncDeckManager: FC = () => {
         }
 
         storeCreateSessionBootstrapPayload(request.activityId, resolvedChildSessionId, payload.managerBootstrap)
-        setEmbeddedManagerRenderNonceByChildSessionId((current) => ({
-          ...current,
-          [resolvedChildSessionId]: (current[resolvedChildSessionId] ?? 0) + 1,
-        }))
-        setLoadedEmbeddedManagerInstanceKeys((current) => {
-          if (!current[request.instanceKey]) {
-            return current
-          }
-
-          const next = { ...current }
-          delete next[request.instanceKey]
-          return next
-        })
+        setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(
+          current,
+          resolvedChildSessionId,
+        ))
+        setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
+          current,
+          request.instanceKey,
+        ))
         return false
       } catch {
         // Best-effort only. Embedded managers with their own recovery endpoints can still self-heal.
@@ -2896,6 +2914,14 @@ const SyncDeckManager: FC = () => {
             const childSessionId = typeof payload.childSessionId === 'string' ? payload.childSessionId.trim() : ''
             if (childSessionId && isPlainObject(payload.managerBootstrap)) {
               storeCreateSessionBootstrapPayload(request.activityId, childSessionId, payload.managerBootstrap)
+              setEmbeddedManagerRenderNonceByChildSessionId((current) => advanceEmbeddedManagerRenderNonce(
+                current,
+                childSessionId,
+              ))
+              setLoadedEmbeddedManagerInstanceKeys((current) => clearLoadedEmbeddedManagerInstanceKey(
+                current,
+                request.instanceKey,
+              ))
             }
 
             if (!background) {

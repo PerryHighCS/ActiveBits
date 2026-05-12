@@ -486,6 +486,14 @@ Use this log for durable findings that future contributors and agents should reu
 - Follow-up action: Keep natural completion and configured `stopSec` completion aligned as server-authoritative paused outcomes when future player event handling changes.
 - Owner: Codex
 
+- Date: 2026-05-12
+- Area: activities
+- Discovery: SyncDeck's embedded activity start broadcast can cause an embedded manager iframe to mount before the initiating `POST /api/syncdeck/:sessionId/embedded-activity/start` response returns `managerBootstrap`. When that bootstrap contains a child credential such as Video Sync's `instructorPasscode`, the initiating manager must cache the payload and remount/refresh any already-loaded embedded manager instance, not only rely on the later backfill pass.
+- Why it matters: Ad-hoc SyncDeck sessions have no persistent teacher-cookie recovery path for child Video Sync credentials. If the first child manager mount consumes no bootstrap payload and is not refreshed after the HTTP response arrives, Video Sync reports that the instructor passcode is missing and cannot auto-configure the embed.
+- Evidence: `activities/syncdeck/client/manager/SyncDeckManager.tsx`; `DEPLOYMENT.md`
+- Follow-up action: Keep immediate embedded-start handling and bootstrap backfill handling aligned whenever new child manager bootstrap fields are added, and preserve Video Sync's delayed-credential retry so a child manager that briefly observes missing auth can recover once bootstrap data lands.
+- Owner: Codex
+
 - Date: 2026-03-03
 - Area: activities
 - Discovery: `video-sync` drift correction and telemetry are keyed to a `0.2s` tolerance and current sync-health state, not a cumulative unsync-event threshold. Student clients report `unsync` when drift first exceeds tolerance, throttle repeated unsync reports to once per 10 seconds while still unsynced, and the manager consumes `sync.unsyncedStudents`, `sync.lastDriftSec`, and `sync.lastCorrectionResult`.
