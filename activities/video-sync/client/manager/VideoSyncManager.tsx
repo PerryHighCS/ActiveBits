@@ -306,6 +306,22 @@ export function getManagerPlaybackIntentForStateChange(params: {
   return null
 }
 
+export function shouldSendManagerPlaybackPositionUpdate(params: {
+  authoritativeState: VideoSyncState
+  desiredPositionSec: number | null
+}): boolean {
+  if (params.desiredPositionSec == null) {
+    return false
+  }
+
+  const authoritativePositionSec = computeDesiredPositionSec(params.authoritativeState)
+  return shouldCorrectDrift(
+    params.desiredPositionSec,
+    authoritativePositionSec,
+    DEFAULT_DRIFT_TOLERANCE_SEC,
+  )
+}
+
 export function parseManagerStopTimeInput(params: {
   sourceUrl: string
   stopTimeEnabled: boolean
@@ -508,8 +524,14 @@ export default function VideoSyncManager() {
       return
     }
 
-    const authoritativeIsPlaying = latestStateRef.current.isPlaying
-    if ((desiredIntent === 'play') === authoritativeIsPlaying) {
+    const authoritativeState = latestStateRef.current
+    const authoritativeIsPlaying = authoritativeState.isPlaying
+    const shouldSendPositionUpdate = shouldSendManagerPlaybackPositionUpdate({
+      authoritativeState,
+      desiredPositionSec: desiredPlaybackPositionRef.current,
+    })
+
+    if ((desiredIntent === 'play') === authoritativeIsPlaying && !shouldSendPositionUpdate) {
       desiredPlaybackIntentRef.current = null
       desiredPlaybackPositionRef.current = null
       return

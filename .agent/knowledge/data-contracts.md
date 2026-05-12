@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-05-12
+- Surface: REST | activity interface
+- Contract: Video Sync instructor iframe seeks should be persisted by sending the current play-state command (`play` or `pause`) with `positionSec` when the iframe reports the same playback state at a new position. The raw `seek` command remains a pause-oriented command and should not be used for manager-side scrubbing while playback should continue.
+- Compatibility constraints: Manager-side YouTube controls may emit `PLAYING` or `PAUSED` without a play-state transition after the instructor drags the iframe slider. Treat a meaningful position delta as a command-worthy update even when `state.isPlaying` already matches the reported intent.
+- Validation rules: Ignore missing positions and in-tolerance deltas; send a position-bearing `play`/`pause` command for larger deltas so subsequent server snapshots do not snap the instructor and students back to the previous position.
+- Evidence (schema/tests/path): `activities/video-sync/client/manager/VideoSyncManager.tsx`; `activities/video-sync/client/manager/VideoSyncManager.test.ts`; `activities/video-sync/server/routes.ts`
+- Follow-up action: If the server `seek` command semantics change to preserve play state, update this contract and the manager command-selection tests together.
+- Owner: Codex
+
 - Date: 2026-05-08
 - Surface: activity interface | internal module
 - Contract: Binary Breach challenges now carry `promptEmphasis`, and order-binary challenges carry `direction: 'least-to-greatest' | 'greatest-to-least'`. The student UI bolds the `promptEmphasis` substring inside the prompt, and validation uses `direction` as authoritative for sorted-answer order.
