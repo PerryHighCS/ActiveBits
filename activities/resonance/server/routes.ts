@@ -437,7 +437,7 @@ function startStagedRun(
   setStagedActiveQuestion(
     sessionData,
     nextRun,
-    choicesRevealed ? now : null,
+    now,
     choicesRevealed ? buildSingleQuestionDeadline(currentQuestion, now) : null,
   )
   return nextRun
@@ -814,7 +814,7 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
         stagedRun = { ...stagedRun, choicesRevealed: true }
       }
       activeQuestionIds = stagedRun?.currentQuestionId ? [stagedRun.currentQuestionId] : []
-      activeQuestionRunStartedAt = startsImmediately && activeQuestionIds.length > 0 ? runStartedAt : null
+      activeQuestionRunStartedAt = activeQuestionIds.length > 0 ? runStartedAt : null
       activeQuestionDeadlineAt = startsImmediately ? buildSingleQuestionDeadline(currentQuestion, runStartedAt) : null
       embeddedAutoActivatedAt = activeQuestionIds.length > 0 ? runStartedAt : null
     } else {
@@ -829,8 +829,10 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
   if (stagedRun !== null) {
     const currentQuestion = getQuestionById(questions, stagedRun.currentQuestionId)
     activeQuestionIds = stagedRun.currentQuestionId ? [stagedRun.currentQuestionId] : []
+    if (activeQuestionIds.length > 0 && activeQuestionRunStartedAt === null) {
+      activeQuestionRunStartedAt = Date.now()
+    }
     if (currentQuestion?.type === 'multiple-choice' && !stagedRun.choicesRevealed) {
-      activeQuestionRunStartedAt = null
       activeQuestionDeadlineAt = null
     }
   }
@@ -1743,7 +1745,12 @@ export default function setupResonanceRoutes(
 
     const now = Date.now()
     const nextRun = { ...stagedRun, choicesRevealed: true }
-    setStagedActiveQuestion(session.data, nextRun, now, buildSingleQuestionDeadline(question, now))
+    setStagedActiveQuestion(
+      session.data,
+      nextRun,
+      session.data.activeQuestionRunStartedAt ?? now,
+      buildSingleQuestionDeadline(question, now),
+    )
     await sessions.set(sessionId, session)
 
     console.info('[resonance] Staged choices revealed', {
@@ -1829,7 +1836,7 @@ export default function setupResonanceRoutes(
     setStagedActiveQuestion(
       session.data,
       nextRun,
-      choicesRevealed ? now : null,
+      now,
       choicesRevealed ? buildSingleQuestionDeadline(nextQuestion, now) : null,
     )
     await sessions.set(sessionId, session)
@@ -2198,7 +2205,7 @@ export default function setupResonanceRoutes(
         setStagedActiveQuestion(
           session.data,
           { ...stagedRun, choicesRevealed: true },
-          now,
+          session.data.activeQuestionRunStartedAt ?? now,
           buildSingleQuestionDeadline(question, now),
         )
         await sessions.set(sessionId, session)
@@ -2230,7 +2237,7 @@ export default function setupResonanceRoutes(
               choicesRevealed,
               completedQuestionIds,
             },
-            choicesRevealed ? now : null,
+            now,
             choicesRevealed ? buildSingleQuestionDeadline(nextQuestion, now) : null,
           )
         }

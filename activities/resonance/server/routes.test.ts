@@ -295,6 +295,44 @@ void test('embedded resonance sessions auto-activate all questions when embedded
   await sessions.close()
 })
 
+void test('staged embedded auto-activation stamps stem-only MCQ run start without starting timer', async () => {
+  const sessions = createSessionStore(null)
+  const session = createEmbeddedResonanceSession()
+  session.data.embeddedLaunch = {
+    parentSessionId: 'syncdeck-parent',
+    instanceKey: 'resonance:2:0',
+    selectedOptions: {
+      autoActivateAllQuestions: true,
+      presentationMode: 'staged',
+      questions: [
+        {
+          id: 'q1',
+          type: 'multiple-choice',
+          text: 'Which answer is correct?',
+          order: 0,
+          responseTimeLimitMs: 30_000,
+          options: [
+            { id: 'a', text: 'A' },
+            { id: 'b', text: 'B' },
+          ],
+        },
+      ],
+    },
+  }
+
+  await sessions.set(session.id, session)
+
+  const stored = await sessions.get(session.id)
+  const stagedRun = stored?.data.stagedRun as { currentQuestionId?: string | null; choicesRevealed?: boolean } | null | undefined
+  assert.deepEqual(stored?.data.activeQuestionIds, ['q1'])
+  assert.equal(typeof stored?.data.activeQuestionRunStartedAt, 'number')
+  assert.equal(stored?.data.activeQuestionDeadlineAt, null)
+  assert.equal(stagedRun?.currentQuestionId, 'q1')
+  assert.equal(stagedRun?.choicesRevealed, false)
+
+  await sessions.close()
+})
+
 void test('embedded resonance sessions do not re-auto-activate after instructors clear questions', async () => {
   const sessions = createSessionStore(null)
   const session = createEmbeddedResonanceSession()
@@ -1550,6 +1588,9 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   assert.equal(activateBody.stagedRun?.currentQuestionId, 'q2')
   assert.equal(activateBody.stagedRun?.choicesRevealed, false)
   assert.equal(activateBody.activeQuestionDeadlineAt, null)
+  const storedAfterStagedActivate = await sessions.get(session.id)
+  const stagedRunStartedAt = storedAfterStagedActivate?.data.activeQuestionRunStartedAt ?? null
+  assert.equal(typeof stagedRunStartedAt, 'number')
 
   const hiddenStateRes = createResponse()
   await stateHandler?.({ params: { sessionId: session.id } }, hiddenStateRes)
@@ -1607,6 +1648,8 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   }
   assert.equal(revealBody.stagedRun?.choicesRevealed, true)
   assert.ok(typeof revealBody.activeQuestionDeadlineAt === 'number')
+  const storedAfterReveal = await sessions.get(session.id)
+  assert.equal(storedAfterReveal?.data.activeQuestionRunStartedAt, stagedRunStartedAt)
 
   const firstDeadlineAt = revealBody.activeQuestionDeadlineAt
   const repeatedRevealRes = createResponse()
@@ -1702,6 +1745,8 @@ void test('staged session normalization deduplicates persisted question ids whil
   }
   session.data.activeQuestionId = 'q2'
   session.data.activeQuestionIds = ['q2']
+  session.data.activeQuestionRunStartedAt = Date.now() - 500
+  const originalRunStartedAt = session.data.activeQuestionRunStartedAt
   await sessions.set(session.id, session)
 
   setupResonanceRoutes(app, sessions, ws)
@@ -1722,6 +1767,7 @@ void test('staged session normalization deduplicates persisted question ids whil
 
   assert.equal(res.statusCode, 200)
   const body = res.body as {
+    activeQuestionRunStartedAt?: number | null
     stagedRun?: {
       questionIds?: string[]
       currentQuestionId?: string | null
@@ -1733,6 +1779,7 @@ void test('staged session normalization deduplicates persisted question ids whil
   assert.equal(body.stagedRun?.currentQuestionId, 'q2')
   assert.equal(body.stagedRun?.currentIndex, 1)
   assert.deepEqual(body.stagedRun?.completedQuestionIds, ['q1'])
+  assert.equal(body.activeQuestionRunStartedAt, originalRunStartedAt)
 
   await sessions.close()
 })
@@ -1767,9 +1814,13 @@ void test('advance-staged-question moves through the staged sequence and ends af
 
   assert.equal(activateRes.statusCode, 200)
   assert.deepEqual((activateRes.body as { activeQuestionIds?: string[] }).activeQuestionIds, ['q1'])
+  const firstStoredRun = await sessions.get(session.id)
+  const firstRunStartedAt = firstStoredRun?.data.activeQuestionRunStartedAt ?? null
+  assert.equal(typeof firstRunStartedAt, 'number')
 
   const storedAfterActivate = await sessions.get(session.id)
   if (storedAfterActivate) {
+    storedAfterActivate.data.activeQuestionRunStartedAt = 1_000
     storedAfterActivate.data.activeQuestionDeadlineAt = Date.now() - 1_000
     await sessions.set(session.id, storedAfterActivate)
   }
@@ -1795,6 +1846,10 @@ void test('advance-staged-question moves through the staged sequence and ends af
   assert.equal(secondBody.stagedRun?.currentQuestionId, 'q2')
   assert.equal(secondBody.stagedRun?.choicesRevealed, false)
   assert.deepEqual(secondBody.stagedRun?.completedQuestionIds, ['q1'])
+  const secondStoredRun = await sessions.get(session.id)
+  const secondRunStartedAt = secondStoredRun?.data.activeQuestionRunStartedAt ?? null
+  assert.equal(typeof secondRunStartedAt, 'number')
+  assert.notEqual(secondRunStartedAt, 1_000)
 
   const endRes = createResponse()
   await advanceHandler?.(
