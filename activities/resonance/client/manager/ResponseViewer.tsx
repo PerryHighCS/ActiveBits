@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { getCorrectOptionIds, getAnswerSelectedOptionIds, isMcqAnswerCorrect } from '../../shared/mcq.js'
 import type {
   InstructorAnnotation,
@@ -10,6 +11,19 @@ import type {
 } from '../../shared/types.js'
 import FormattedMarkdown from '../components/FormattedMarkdown.js'
 import ResponseCard, { getResponseProgressStatusLabel } from './ResponseCard.js'
+
+export function getMcqOptionColumnLabel(index: number): string {
+  const alphabetLength = 26
+  let remaining = index
+  let label = ''
+
+  do {
+    label = String.fromCharCode(65 + (remaining % alphabetLength)) + label
+    remaining = Math.floor(remaining / alphabetLength) - 1
+  } while (remaining >= 0)
+
+  return label
+}
 
 export function reorderResponseIds(currentIds: string[], draggedId: string, targetId: string): string[] {
   if (draggedId === targetId) {
@@ -135,9 +149,181 @@ interface Props {
   onReorder(newOrder: string[]): void
 }
 
+interface McqOptionPreviewPosition {
+  anchorTop: number
+  belowTop: number
+  belowMaxHeight: number
+  aboveMaxHeight: number
+  left: number
+  top: number
+  width: number
+  maxHeight: number
+}
+
+const MCQ_OPTION_PREVIEW_WIDTH = 360
+const MCQ_OPTION_PREVIEW_MAX_HEIGHT = 320
+const MCQ_OPTION_PREVIEW_GAP = 14
+
 // ---------------------------------------------------------------------------
 // MCQ table view
 // ---------------------------------------------------------------------------
+
+function getOptionPreviewPosition(anchor: HTMLElement): McqOptionPreviewPosition {
+  const rect = anchor.getBoundingClientRect()
+  const width = Math.min(MCQ_OPTION_PREVIEW_WIDTH, Math.max(280, window.innerWidth - 24))
+  const left = Math.min(
+    Math.max(12, rect.left + rect.width / 2 - width / 2),
+    window.innerWidth - width - 12,
+  )
+  const belowTop = rect.bottom + MCQ_OPTION_PREVIEW_GAP
+  const belowMaxHeight = window.innerHeight - belowTop - 12
+  const aboveMaxHeight = rect.top - MCQ_OPTION_PREVIEW_GAP - 12
+  const maxHeight = Math.max(
+    64,
+    Math.min(MCQ_OPTION_PREVIEW_MAX_HEIGHT, belowMaxHeight),
+  )
+
+  return {
+    anchorTop: rect.top,
+    belowTop,
+    belowMaxHeight,
+    aboveMaxHeight,
+    left,
+    top: belowTop,
+    width,
+    maxHeight,
+  }
+}
+
+function getMeasuredOptionPreviewPosition(
+  current: McqOptionPreviewPosition,
+  measuredHeight: number,
+): McqOptionPreviewPosition {
+  const preferredHeight = Math.min(MCQ_OPTION_PREVIEW_MAX_HEIGHT, measuredHeight)
+  const shouldOpenAbove =
+    current.belowMaxHeight < preferredHeight &&
+    current.aboveMaxHeight > current.belowMaxHeight
+
+  if (!shouldOpenAbove) {
+    return {
+      ...current,
+      top: current.belowTop,
+      maxHeight: Math.max(64, Math.min(MCQ_OPTION_PREVIEW_MAX_HEIGHT, current.belowMaxHeight)),
+    }
+  }
+
+  const maxHeight = Math.max(64, Math.min(MCQ_OPTION_PREVIEW_MAX_HEIGHT, current.aboveMaxHeight))
+  const actualHeight = Math.min(preferredHeight, maxHeight)
+
+  return {
+    ...current,
+    top: Math.max(12, current.anchorTop - MCQ_OPTION_PREVIEW_GAP - actualHeight),
+    maxHeight,
+  }
+}
+
+function MCQOptionPreview({
+  option,
+  initialPosition,
+}: {
+  option: MCQQuestion['options'][number]
+  initialPosition: McqOptionPreviewPosition
+}) {
+  const previewRef = useRef<HTMLDivElement | null>(null)
+  const [position, setPosition] = useState(initialPosition)
+
+  useLayoutEffect(() => {
+    setPosition(initialPosition)
+  }, [initialPosition])
+
+  useLayoutEffect(() => {
+    const preview = previewRef.current
+    if (preview === null) {
+      return
+    }
+
+    const measuredPosition = getMeasuredOptionPreviewPosition(initialPosition, preview.scrollHeight)
+    setPosition((current) => (
+      current.top === measuredPosition.top &&
+      current.maxHeight === measuredPosition.maxHeight
+        ? current
+        : measuredPosition
+    ))
+  }, [initialPosition])
+
+  return (
+    <div
+      ref={previewRef}
+      role="tooltip"
+      className="fixed z-50 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-left normal-case tracking-normal shadow-xl"
+      style={{
+        left: `${position.left}px`,
+        top: `${position.top}px`,
+        width: `${position.width}px`,
+        maxHeight: `${position.maxHeight}px`,
+      }}
+    >
+      <FormattedMarkdown
+        markdown={option.text}
+        variant="inline"
+        className="text-sm text-slate-700 dark:text-slate-200"
+      />
+    </div>
+  )
+}
+
+function MCQOptionHeader({
+  option,
+  label,
+}: {
+  option: MCQQuestion['options'][number]
+  label: string
+}) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const [previewPosition, setPreviewPosition] = useState<McqOptionPreviewPosition | null>(null)
+
+  function showPreview() {
+    if (buttonRef.current === null || typeof window === 'undefined') {
+      return
+    }
+    setPreviewPosition(getOptionPreviewPosition(buttonRef.current))
+  }
+
+  function hidePreview() {
+    setPreviewPosition(null)
+  }
+
+  return (
+    <div
+      className="inline-flex justify-center"
+      onMouseEnter={showPreview}
+      onMouseLeave={hidePreview}
+      onFocus={showPreview}
+      onBlur={hidePreview}
+    >
+      <button
+        ref={buttonRef}
+        type="button"
+        className={`inline-flex h-7 min-w-7 items-center justify-center rounded-md px-2 text-xs font-semibold ring-offset-2 ring-offset-white focus:outline-none focus:ring-2 dark:ring-offset-slate-800 ${
+          option.isCorrect
+            ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 focus:ring-emerald-500'
+            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 focus:ring-indigo-500'
+        }`}
+        aria-label={`Option ${label}${option.isCorrect ? ', correct answer' : ''}`}
+      >
+        {label}
+        {option.isCorrect && <span className="ml-1">✓</span>}
+      </button>
+      {previewPosition !== null && typeof document !== 'undefined' && createPortal(
+        <MCQOptionPreview
+          option={option}
+          initialPosition={previewPosition}
+        />,
+        document.body,
+      )}
+    </div>
+  )
+}
 
 function MCQTable({
   question,
@@ -154,6 +340,36 @@ function MCQTable({
 
   return (
     <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800">
+      <div className="border-b border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/30 px-3 py-3">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {options.map((opt, index) => {
+            const label = getMcqOptionColumnLabel(index)
+            return (
+              <div
+                key={opt.id}
+                className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${
+                  opt.isCorrect
+                    ? 'border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+                }`}
+              >
+                <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 text-xs font-semibold ${
+                  opt.isCorrect
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                }`}>
+                  {label}
+                </span>
+                <FormattedMarkdown
+                  markdown={opt.text}
+                  variant="inline"
+                  className="min-w-0 text-sm text-slate-700 dark:text-slate-300"
+                />
+              </div>
+            )
+          })}
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
@@ -161,21 +377,19 @@ function MCQTable({
               <th className="pr-4 pl-3 py-2.5 font-medium text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                 Student
               </th>
-              {options.map((opt) => (
+              {options.map((opt, index) => (
                 <th
                   key={opt.id}
-                  className={`min-w-[120px] px-3 py-2.5 font-medium text-xs text-center uppercase tracking-wide ${
+                  className={`min-w-16 px-3 py-2.5 font-medium text-xs text-center uppercase tracking-wide ${
                     opt.isCorrect
                       ? 'text-emerald-700 dark:text-emerald-400'
                       : 'text-slate-500 dark:text-slate-400'
                   }`}
                 >
-                  <FormattedMarkdown
-                    markdown={opt.text}
-                    variant="inline"
-                    className="normal-case text-xs leading-snug"
+                  <MCQOptionHeader
+                    option={opt}
+                    label={getMcqOptionColumnLabel(index)}
                   />
-                  {opt.isCorrect && <span className="ml-1">✓</span>}
                 </th>
               ))}
             </tr>
