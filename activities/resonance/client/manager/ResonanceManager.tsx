@@ -182,13 +182,16 @@ export function shouldShowQuestionListActivationControls(questionCount: number):
 
 export function resolveManagerActiveTab(params: {
   currentActiveTab: string | null
+  previousStagedQuestionId: string | null
   questions: Pick<Question, 'id'>[]
   presentationMode: ResonancePresentationMode
   stagedRun: StagedRunState | null
 }): string | null {
   const questionIds = params.questions.map((question) => question.id)
   if (params.presentationMode === 'staged' && params.stagedRun?.currentQuestionId && questionIds.includes(params.stagedRun.currentQuestionId)) {
-    return params.stagedRun.currentQuestionId
+    if (params.currentActiveTab === null || params.currentActiveTab === params.previousStagedQuestionId) {
+      return params.stagedRun.currentQuestionId
+    }
   }
 
   if (params.currentActiveTab === null && questionIds.length > 0) {
@@ -241,6 +244,7 @@ export default function ResonanceManager() {
   const [activationPresentationMode, setActivationPresentationMode] = useState<ResonancePresentationMode>('standard')
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
   const questionStemRefs = useRef<Record<string, HTMLParagraphElement | null>>({})
+  const previousStagedQuestionIdRef = useRef<string | null>(null)
 
   // Resolve passcode from same-tab bootstrap state first, then recover it from
   // the server when this manager is running as an embedded child session.
@@ -327,10 +331,12 @@ export default function ResonanceManager() {
 
     const nextActiveTab = resolveManagerActiveTab({
       currentActiveTab: activeTab,
+      previousStagedQuestionId: previousStagedQuestionIdRef.current,
       questions: snapshot.questions,
       presentationMode: snapshot.presentationMode,
       stagedRun: snapshot.stagedRun,
     })
+    previousStagedQuestionIdRef.current = snapshot.stagedRun?.currentQuestionId ?? null
     if (nextActiveTab !== activeTab) {
       setActiveTab(nextActiveTab)
     }

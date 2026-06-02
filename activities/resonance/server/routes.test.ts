@@ -1784,6 +1784,61 @@ void test('staged session normalization deduplicates persisted question ids whil
   await sessions.close()
 })
 
+void test('activate-question pushes student state without student question-activated event', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  await sessions.set(session.id, session)
+
+  const studentMessages: Array<{ type?: string; payload?: unknown }> = []
+  const instructorMessages: Array<{ type?: string; payload?: unknown }> = []
+  ;(ws.wss.clients as Set<unknown>).add({
+    readyState: 1,
+    sessionId: session.id,
+    isInstructor: false,
+    studentId: 'student1',
+    send(message: string) {
+      studentMessages.push(JSON.parse(message) as { type?: string; payload?: unknown })
+    },
+  })
+  ;(ws.wss.clients as Set<unknown>).add({
+    readyState: 1,
+    sessionId: session.id,
+    isInstructor: true,
+    send(message: string) {
+      instructorMessages.push(JSON.parse(message) as { type?: string; payload?: unknown })
+    },
+  })
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  assert.equal(typeof activateHandler, 'function')
+
+  const activateRes = createResponse()
+  await activateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {
+        questionIds: ['q1'],
+      },
+    },
+    activateRes,
+  )
+
+  assert.equal(activateRes.statusCode, 200)
+  assert.equal(studentMessages.some((message) => message.type === 'resonance:session-state'), true)
+  assert.equal(studentMessages.some((message) => message.type === 'resonance:question-activated'), false)
+  assert.equal(instructorMessages.some((message) => message.type === 'resonance:question-activated'), true)
+  assert.equal(instructorMessages.some((message) => message.type === 'resonance:instructor-state'), true)
+
+  await sessions.close()
+})
+
 void test('advance-staged-question moves through the staged sequence and ends after the last question', async () => {
   const app = createMockApp()
   const ws = createMockWs()

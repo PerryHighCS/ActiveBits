@@ -135,6 +135,7 @@ void test('resolveManagerActiveTab follows the current staged question as the ru
   assert.equal(
     resolveManagerActiveTab({
       currentActiveTab: 'q1',
+      previousStagedQuestionId: 'q1',
       questions,
       presentationMode: 'staged',
       stagedRun: {
@@ -150,6 +151,39 @@ void test('resolveManagerActiveTab follows the current staged question as the ru
   assert.equal(
     resolveManagerActiveTab({
       currentActiveTab: 'q1',
+      previousStagedQuestionId: 'q2',
+      questions,
+      presentationMode: 'staged',
+      stagedRun: {
+        questionIds: ['q1', 'q2'],
+        currentQuestionId: 'q2',
+        currentIndex: 1,
+        choicesRevealed: false,
+        completedQuestionIds: ['q1'],
+      },
+    }),
+    'q1',
+  )
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: null,
+      previousStagedQuestionId: null,
+      questions,
+      presentationMode: 'staged',
+      stagedRun: {
+        questionIds: ['q1', 'q2'],
+        currentQuestionId: 'q2',
+        currentIndex: 1,
+        choicesRevealed: false,
+        completedQuestionIds: ['q1'],
+      },
+    }),
+    'q2',
+  )
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: 'q1',
+      previousStagedQuestionId: null,
       questions,
       presentationMode: 'standard',
       stagedRun: null,
@@ -159,6 +193,7 @@ void test('resolveManagerActiveTab follows the current staged question as the ru
   assert.equal(
     resolveManagerActiveTab({
       currentActiveTab: null,
+      previousStagedQuestionId: null,
       questions,
       presentationMode: 'standard',
       stagedRun: null,

@@ -1687,7 +1687,7 @@ export default function setupResonanceRoutes(
       activeQuestionIds: session.data.activeQuestionIds,
       activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
     })
-    void broadcast('resonance:question-activated', buildActivationPayload(session.data), sessionId)
+    broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
     void broadcastStudentSessionState(session, sessionId)
     broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
     res.json({
@@ -1758,7 +1758,7 @@ export default function setupResonanceRoutes(
       questionId: question.id,
       activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
     })
-    void broadcast('resonance:question-activated', buildActivationPayload(session.data), sessionId)
+    broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
     void broadcastStudentSessionState(session, sessionId)
     broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
 
@@ -1810,7 +1810,7 @@ export default function setupResonanceRoutes(
       clearStagedRun(session.data)
       await sessions.set(sessionId, session)
       console.info('[resonance] Staged run completed', { sessionId })
-      void broadcast('resonance:question-activated', buildActivationPayload(session.data), sessionId)
+      broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
       void broadcastStudentSessionState(session, sessionId)
       broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
       res.json({
@@ -1847,7 +1847,7 @@ export default function setupResonanceRoutes(
       questionId: nextQuestionId,
       currentIndex: nextIndex,
     })
-    void broadcast('resonance:question-activated', buildActivationPayload(session.data), sessionId)
+    broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
     void broadcastStudentSessionState(session, sessionId)
     broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
 
@@ -2190,7 +2190,7 @@ export default function setupResonanceRoutes(
           activeQuestionIds: session.data.activeQuestionIds,
           activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
         })
-        void broadcast('resonance:question-activated', buildActivationPayload(session.data), sessionId)
+        broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
         void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
@@ -2211,7 +2211,7 @@ export default function setupResonanceRoutes(
         )
         await sessions.set(sessionId, session)
         console.info('[resonance] WS reveal choices', { sessionId, questionId: question.id })
-        void broadcast('resonance:question-activated', buildActivationPayload(session.data), sessionId)
+        broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
         void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
@@ -2248,7 +2248,7 @@ export default function setupResonanceRoutes(
           sessionId,
           activeQuestionId: session.data.activeQuestionId,
         })
-        void broadcast('resonance:question-activated', buildActivationPayload(session.data), sessionId)
+        broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
         void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
