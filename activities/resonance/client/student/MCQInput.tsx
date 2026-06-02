@@ -98,7 +98,7 @@ export default function MCQInput({
               <label
                 key={option.id}
                 className={[
-                  'flex items-center gap-4 rounded-xl border-2 px-5 py-4 transition-all',
+                  'flex items-center gap-4 rounded-xl border-2 px-5 py-4 transition-all focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-100 dark:focus-within:ring-indigo-900/40',
                   isDisabled ? 'pointer-events-none opacity-60' : 'cursor-pointer',
                   isSelected
                     ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 dark:border-indigo-500'
