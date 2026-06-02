@@ -383,20 +383,30 @@ function getQuestionById(questions: Question[], questionId: string | null): Ques
   return questionId === null ? null : (questions.find((question) => question.id === questionId) ?? null)
 }
 
-function isCurrentStagedQuestionAnswerable(sessionData: ResonanceSessionData, questionId: string): boolean {
+type QuestionAnswerability =
+  | { ok: true }
+  | { ok: false; reason: 'expired' | 'choices-hidden' | 'inactive' }
+
+function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId: string): QuestionAnswerability {
   if (sessionData.activeQuestionDeadlineAt !== null && Date.now() >= sessionData.activeQuestionDeadlineAt) {
-    return false
+    return { ok: false, reason: 'expired' }
   }
 
   const stagedRun = sessionData.stagedRun
   if (sessionData.presentationMode !== 'staged' || stagedRun === null) {
-    return true
+    return { ok: true }
   }
   if (stagedRun.currentQuestionId !== questionId) {
-    return false
+    return { ok: false, reason: 'inactive' }
   }
   const question = getQuestionById(sessionData.questions, questionId)
   return question?.type !== 'multiple-choice' || stagedRun.choicesRevealed
+    ? { ok: true }
+    : { ok: false, reason: 'choices-hidden' }
+}
+
+function isCurrentStagedQuestionAnswerable(sessionData: ResonanceSessionData, questionId: string): boolean {
+  return getQuestionAnswerability(sessionData, questionId).ok
 }
 
 function startStagedRun(
@@ -1539,8 +1549,13 @@ export default function setupResonanceRoutes(
       return
     }
 
-    if (!isCurrentStagedQuestionAnswerable(session.data, questionId)) {
-      res.status(409).json({ error: 'choices have not been revealed' })
+    const answerability = getQuestionAnswerability(session.data, questionId)
+    if (!answerability.ok) {
+      res.status(409).json({
+        error: answerability.reason === 'expired'
+          ? 'time is up for this question'
+          : 'choices have not been revealed',
+      })
       return
     }
 

@@ -1629,6 +1629,37 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   assert.equal(visibleState.activeQuestions?.[0]?.choicesRevealed, true)
   assert.equal(visibleState.activeQuestions?.[0]?.options?.length, 2)
 
+  const expiredSession = await sessions.get(session.id)
+  if (expiredSession) {
+    expiredSession.data.activeQuestionDeadlineAt = Date.now() - 1_000
+    await sessions.set(session.id, expiredSession)
+  }
+
+  const expiredSubmitRes = createResponse()
+  await submitHandler?.(
+    {
+      params: { sessionId: session.id },
+      body: {
+        studentId: 'student1',
+        questionId: 'q2',
+        answer: {
+          type: 'multiple-choice',
+          selectedOptionIds: ['q2_b'],
+        },
+      },
+    },
+    expiredSubmitRes,
+  )
+
+  assert.equal(expiredSubmitRes.statusCode, 409)
+  assert.deepEqual(expiredSubmitRes.body, { error: 'time is up for this question' })
+
+  const resetDeadlineSession = await sessions.get(session.id)
+  if (resetDeadlineSession) {
+    resetDeadlineSession.data.activeQuestionDeadlineAt = Date.now() + 45_000
+    await sessions.set(session.id, resetDeadlineSession)
+  }
+
   const submitRes = createResponse()
   await submitHandler?.(
     {
