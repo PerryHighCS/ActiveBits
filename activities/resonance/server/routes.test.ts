@@ -8,7 +8,7 @@ import {
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupResonanceRoutes from './routes.js'
+import setupResonanceRoutes, { resolveAnswerabilityErrorMessage } from './routes.js'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -223,6 +223,12 @@ void test('embedded resonance sessions receive a stable instructor passcode duri
   assert.equal(questions[0]?.type, 'free-response')
 
   await sessions.close()
+})
+
+void test('resolveAnswerabilityErrorMessage distinguishes staged submission failure reasons', () => {
+  assert.equal(resolveAnswerabilityErrorMessage('expired'), 'time is up for this question')
+  assert.equal(resolveAnswerabilityErrorMessage('inactive'), 'question is not active')
+  assert.equal(resolveAnswerabilityErrorMessage('choices-hidden'), 'choices have not been revealed')
 })
 
 void test('embedded resonance sessions auto-activate all questions when embedded launch requests it', async () => {

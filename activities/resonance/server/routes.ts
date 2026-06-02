@@ -405,6 +405,17 @@ function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId:
     : { ok: false, reason: 'choices-hidden' }
 }
 
+export function resolveAnswerabilityErrorMessage(reason: 'expired' | 'choices-hidden' | 'inactive'): string {
+  switch (reason) {
+    case 'expired':
+      return 'time is up for this question'
+    case 'inactive':
+      return 'question is not active'
+    case 'choices-hidden':
+      return 'choices have not been revealed'
+  }
+}
+
 function isCurrentStagedQuestionAnswerable(sessionData: ResonanceSessionData, questionId: string): boolean {
   return getQuestionAnswerability(sessionData, questionId).ok
 }
@@ -1552,9 +1563,7 @@ export default function setupResonanceRoutes(
     const answerability = getQuestionAnswerability(session.data, questionId)
     if (!answerability.ok) {
       res.status(409).json({
-        error: answerability.reason === 'expired'
-          ? 'time is up for this question'
-          : 'choices have not been revealed',
+        error: resolveAnswerabilityErrorMessage(answerability.reason),
       })
       return
     }
