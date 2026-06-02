@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import type { InstructorAnnotation, Question } from '../../shared/types.js'
@@ -154,6 +155,18 @@ export function isAllQuestionsSelected(
 
 export function shouldShowQuestionListActivationControls(questionCount: number): boolean {
   return questionCount > 0
+}
+
+export function handleQuestionListItemKeyDown(
+  event: Pick<ReactKeyboardEvent<HTMLElement>, 'key' | 'preventDefault'>,
+  onActivate: () => void,
+): void {
+  if (event.key !== 'Enter' && event.key !== ' ') {
+    return
+  }
+
+  event.preventDefault()
+  onActivate()
 }
 
 // ---------------------------------------------------------------------------
@@ -596,7 +609,7 @@ export default function ResonanceManager() {
                   tabIndex={0}
                   aria-pressed={isViewing}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') setActiveTab(q.id)
+                    handleQuestionListItemKeyDown(e, () => setActiveTab(q.id))
                   }}
                 >
                   <div className="flex items-start justify-between gap-1">

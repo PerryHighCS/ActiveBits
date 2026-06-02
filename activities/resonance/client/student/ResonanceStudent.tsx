@@ -72,6 +72,21 @@ export function resolveSubmissionAnnouncement(params: {
     : null
 }
 
+export function resolveQuestionStatusBadge(selfPacedMode: boolean): {
+  label: string
+  dotClassName: string
+} {
+  return selfPacedMode
+    ? {
+        label: 'Self-paced',
+        dotClassName: 'w-2 h-2 rounded-full bg-indigo-500 dark:bg-indigo-400 inline-block',
+      }
+    : {
+        label: 'Live Question',
+        dotClassName: 'w-2 h-2 rounded-full bg-indigo-500 dark:bg-indigo-400 animate-pulse motion-reduce:animate-none inline-block',
+      }
+}
+
 function formatRemainingTime(deadlineAt: number | null, now: number): string | null {
   if (deadlineAt === null) {
     return null
@@ -302,6 +317,7 @@ export default function ResonanceStudent() {
   const activeDeadlineAt = snapshot?.activeQuestionDeadlineAt ?? null
   const hasExpired = activeDeadlineAt !== null && activeDeadlineAt <= countdownNow
   const liveCountdown = formatRemainingTime(activeDeadlineAt, countdownNow)
+  const questionStatusBadge = snapshot !== null ? resolveQuestionStatusBadge(snapshot.selfPacedMode) : null
   const submittedMessage = snapshot?.selfPacedMode && activeQuestion
     ? resolveSelfPacedSubmittedMessage({
       questionIds: activeQuestions.map((question) => question.id),
@@ -348,9 +364,9 @@ export default function ResonanceStudent() {
             {/* Live badge */}
             <div className="flex items-center justify-between gap-4">
               <span className="inline-flex items-center gap-2 bg-indigo-100 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 rounded-full px-3 py-1.5">
-                <span className="w-2 h-2 rounded-full bg-indigo-500 dark:bg-indigo-400 animate-pulse inline-block" />
+                <span className={questionStatusBadge?.dotClassName} />
                 <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">
-                  Live Question
+                  {questionStatusBadge?.label}
                 </span>
               </span>
 

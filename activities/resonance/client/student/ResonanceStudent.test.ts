@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { resolveNextSelfPacedQuestionId } from './ResonanceStudent.js'
+import { resolveQuestionStatusBadge } from './ResonanceStudent.js'
 import { resolveSubmissionAnnouncement } from './ResonanceStudent.js'
 import { resolveSelfPacedSubmittedMessage } from './ResonanceStudent.js'
 
@@ -92,4 +93,15 @@ void test('resolveSubmissionAnnouncement returns null outside self-paced mode', 
     }),
     null,
   )
+})
+
+void test('resolveQuestionStatusBadge avoids live copy for self-paced questions', () => {
+  const selfPacedBadge = resolveQuestionStatusBadge(true)
+  assert.equal(selfPacedBadge.label, 'Self-paced')
+  assert.doesNotMatch(selfPacedBadge.dotClassName, /animate-pulse/)
+
+  const liveBadge = resolveQuestionStatusBadge(false)
+  assert.equal(liveBadge.label, 'Live Question')
+  assert.match(liveBadge.dotClassName, /animate-pulse/)
+  assert.match(liveBadge.dotClassName, /motion-reduce:animate-none/)
 })
