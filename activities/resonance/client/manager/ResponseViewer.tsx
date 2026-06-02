@@ -8,7 +8,7 @@ import type {
   ResponseProgress,
   ResponseWithName,
 } from '../../shared/types.js'
-import ResponseCard from './ResponseCard.js'
+import ResponseCard, { getResponseProgressStatusLabel } from './ResponseCard.js'
 
 export function reorderResponseIds(currentIds: string[], draggedId: string, targetId: string): string[] {
   if (draggedId === targetId) {
@@ -207,11 +207,7 @@ function MCQTable({
                             : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
                       }`}
                     >
-                      {entry.status === 'submitted'
-                        ? 'Submitted'
-                        : entry.status === 'working'
-                          ? 'Working'
-                          : 'Not started'}
+                      {getResponseProgressStatusLabel(entry.status)}
                     </span>
                     {annotation.starred && <span className="ml-1 text-yellow-400">★</span>}
                     {annotation.flagged && <span className="ml-1 text-red-500">🚩</span>}

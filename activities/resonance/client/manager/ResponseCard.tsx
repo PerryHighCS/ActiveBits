@@ -24,6 +24,10 @@ interface Props {
   onDrop?(): void
 }
 
+export function getResponseProgressStatusLabel(status: ResponseProgressStatus): string {
+  return status === 'submitted' ? 'Submitted' : status === 'working' ? 'Still working' : 'Not started'
+}
+
 /**
  * A single instructor-private response card in the free-response review table.
  * Shows the student name, response text, annotation controls, and optional
@@ -213,7 +217,7 @@ export default function ResponseCard({
                   : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
             }`}
           >
-            {status === 'submitted' ? 'Submitted' : status === 'working' ? 'Still working' : 'Not started'}
+            {getResponseProgressStatusLabel(status)}
           </span>
         </div>
         <p className="text-sm text-slate-800 dark:text-slate-200 mt-0.5 whitespace-pre-wrap break-words">
