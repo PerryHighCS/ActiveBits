@@ -157,10 +157,14 @@ export function shouldShowQuestionListActivationControls(questionCount: number):
 }
 
 export function handleQuestionListItemKeyDown(
-  event: Pick<ReactKeyboardEvent<HTMLElement>, 'key' | 'preventDefault'>,
+  event: Pick<ReactKeyboardEvent<HTMLElement>, 'key' | 'preventDefault' | 'target' | 'currentTarget'>,
   onActivate: () => void,
 ): void {
   if (event.key !== 'Enter' && event.key !== ' ') {
+    return
+  }
+
+  if (event.target !== event.currentTarget) {
     return
   }
 

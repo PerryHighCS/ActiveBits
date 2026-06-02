@@ -165,9 +165,14 @@ void test('shouldShowQuestionPanelActions only keeps share controls on multiple-
 void test('handleQuestionListItemKeyDown prevents default browser behavior for button-like keys', () => {
   let activated = 0
   let prevented = 0
+  const dom = new JSDOM('<!doctype html><html><body><div><input /></div></body></html>')
+  const container = dom.window.document.querySelector('div') as HTMLElement
+  const nestedControl = dom.window.document.querySelector('input') as HTMLElement
 
   handleQuestionListItemKeyDown({
     key: ' ',
+    target: container,
+    currentTarget: container,
     preventDefault: () => {
       prevented += 1
     },
@@ -177,6 +182,8 @@ void test('handleQuestionListItemKeyDown prevents default browser behavior for b
 
   handleQuestionListItemKeyDown({
     key: 'Enter',
+    target: container,
+    currentTarget: container,
     preventDefault: () => {
       prevented += 1
     },
@@ -186,6 +193,19 @@ void test('handleQuestionListItemKeyDown prevents default browser behavior for b
 
   handleQuestionListItemKeyDown({
     key: 'Tab',
+    target: container,
+    currentTarget: container,
+    preventDefault: () => {
+      prevented += 1
+    },
+  }, () => {
+    activated += 1
+  })
+
+  handleQuestionListItemKeyDown({
+    key: ' ',
+    target: nestedControl,
+    currentTarget: container,
     preventDefault: () => {
       prevented += 1
     },
