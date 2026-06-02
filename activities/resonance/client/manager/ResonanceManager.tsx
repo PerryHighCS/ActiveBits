@@ -62,6 +62,18 @@ function formatRemainingTime(deadlineAt: number | null, now: number): string | n
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
+export function resolveLiveCountdown(params: {
+  activeQuestionDeadlineAt: number | null
+  hasLiveRun: boolean
+  now: number
+}): string | null {
+  if (!params.hasLiveRun) {
+    return null
+  }
+
+  return formatRemainingTime(params.activeQuestionDeadlineAt, params.now)
+}
+
 export function shouldShowQuestionPanelActions(question: Question): boolean {
   return question.type === 'multiple-choice'
 }
@@ -519,7 +531,11 @@ export default function ResonanceManager() {
   const allQuestionsSelected = isAllQuestionsSelected(activationSelectionSet, questionIds)
   const expandedQuestionStemSet = new Set(expandedQuestionStemIds)
   const overflowingQuestionStemSet = new Set(overflowingQuestionStemIds)
-  const liveCountdown = formatRemainingTime(activeQuestionDeadlineAt, countdownNow)
+  const liveCountdown = resolveLiveCountdown({
+    activeQuestionDeadlineAt,
+    hasLiveRun,
+    now: countdownNow,
+  })
   const activeReveal = reveals[0] ?? null
 
   // Question shown in the viewer panel.

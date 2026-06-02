@@ -10,6 +10,7 @@ import {
   reconcileActivationSelection,
   resolveActivationSelectionAfterToggle,
   resolveActivationSelectionForRender,
+  resolveLiveCountdown,
   resolveManagerActiveTab,
   resolvePasscode,
   shouldShowQuestionListActivationControls,
@@ -162,6 +163,33 @@ void test('resolveManagerActiveTab follows the current staged question as the ru
       stagedRun: null,
     }),
     'q1',
+  )
+})
+
+void test('resolveLiveCountdown hides expired live-run deadlines', () => {
+  assert.equal(
+    resolveLiveCountdown({
+      activeQuestionDeadlineAt: 1_000,
+      hasLiveRun: false,
+      now: 1_500,
+    }),
+    null,
+  )
+  assert.equal(
+    resolveLiveCountdown({
+      activeQuestionDeadlineAt: 3_000,
+      hasLiveRun: true,
+      now: 1_500,
+    }),
+    '0:02',
+  )
+  assert.equal(
+    resolveLiveCountdown({
+      activeQuestionDeadlineAt: null,
+      hasLiveRun: true,
+      now: 1_500,
+    }),
+    null,
   )
 })
 
