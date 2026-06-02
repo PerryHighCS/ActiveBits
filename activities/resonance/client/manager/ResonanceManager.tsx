@@ -186,6 +186,14 @@ export function shouldRenderResonanceEndSessionButton(sessionId: string | null |
   return !isEmbeddedChildSessionId(sessionId ?? undefined)
 }
 
+export function formatEndSessionError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message
+  }
+
+  return 'Unable to end this Resonance session. Please try again.'
+}
+
 export function resolveManagerActiveTab(params: {
   currentActiveTab: string | null
   previousStagedQuestionId: string | null
@@ -251,6 +259,7 @@ export default function ResonanceManager() {
   const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
   const [activationPresentationMode, setActivationPresentationMode] = useState<ResonancePresentationMode>('standard')
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
+  const [endSessionError, setEndSessionError] = useState<string | null>(null)
   const questionStemRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const previousStagedQuestionIdRef = useRef<string | null>(null)
 
@@ -494,15 +503,19 @@ export default function ResonanceManager() {
     }
 
     setIsEndingSession(true)
+    setEndSessionError(null)
     try {
       const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`, {
         method: 'DELETE',
       })
       if (!response.ok) {
-        throw new Error('Failed to end session')
+        throw new Error(`Failed to end session (${response.status})`)
       }
       void navigate('/manage')
-    } catch {
+    } catch (endSessionFailure) {
+      const message = formatEndSessionError(endSessionFailure)
+      console.error('Failed to end Resonance session:', endSessionFailure)
+      setEndSessionError(message)
       setIsEndingSession(false)
     }
   }, [isEndingSession, navigate, sessionId])
@@ -652,8 +665,8 @@ export default function ResonanceManager() {
               <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">{liveCountdown}</p>
             </div>
           )}
-          {error !== null && (
-            <span className="text-xs text-amber-600 dark:text-amber-400">{error}</span>
+          {(endSessionError ?? error) !== null && (
+            <span className="text-xs text-amber-600 dark:text-amber-400">{endSessionError ?? error}</span>
           )}
           {showEndSessionButton ? (
             <button

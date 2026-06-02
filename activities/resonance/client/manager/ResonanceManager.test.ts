@@ -3,6 +3,7 @@ import test from 'node:test'
 import { JSDOM } from 'jsdom'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import {
+  formatEndSessionError,
   handleQuestionListItemKeyDown,
   isAllQuestionsSelected,
   isQuestionStemVisuallyTruncated,
@@ -274,6 +275,12 @@ void test('shouldRenderResonanceEndSessionButton only shows for independent sess
   assert.equal(shouldRenderResonanceEndSessionButton('ABC123'), true)
   assert.equal(shouldRenderResonanceEndSessionButton('CHILD:parent:abc12:resonance'), false)
   assert.equal(shouldRenderResonanceEndSessionButton(undefined), true)
+})
+
+void test('formatEndSessionError returns specific failures and a fallback message', () => {
+  assert.equal(formatEndSessionError(new Error('Failed to end session (403)')), 'Failed to end session (403)')
+  assert.equal(formatEndSessionError(new Error('   ')), 'Unable to end this Resonance session. Please try again.')
+  assert.equal(formatEndSessionError('network'), 'Unable to end this Resonance session. Please try again.')
 })
 
 void test('shouldShowQuestionPanelActions only keeps share controls on multiple-choice questions', () => {
