@@ -41,6 +41,54 @@ void test('launchResonancePersistentSoloEntry creates a self-paced solo session 
       {
         encodedQuestions: 'encoded-question-set',
         persistentHash: 'persistent-hash',
+        presentationMode: 'standard',
+        selfPacedMode: true,
+      },
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+void test('launchResonancePersistentSoloEntry forwards staged presentation mode from selectedOptions', async () => {
+  const originalFetch = globalThis.fetch
+  const requests: Array<{ input: string; init?: RequestInit }> = []
+
+  globalThis.fetch = (async (input, init) => {
+    requests.push({ input: String(input), init })
+
+    if (String(input) === '/api/resonance/create') {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 'resonance-solo-staged-1',
+        }),
+      } as Response
+    }
+
+    throw new Error(`[TEST] Unexpected fetch: ${String(input)}`)
+  }) as typeof fetch
+
+  try {
+    const result = await launchResonancePersistentSoloEntry({
+      hash: '',
+      search: '',
+      selectedOptions: {
+        q: 'encoded-question-set',
+        h: 'persistent-hash',
+        presentationMode: 'staged',
+      },
+    })
+
+    assert.deepEqual(result, {
+      sessionId: 'resonance-solo-staged-1',
+    })
+    assert.deepEqual(
+      JSON.parse(String(requests[0]?.init?.body ?? '{}')),
+      {
+        encodedQuestions: 'encoded-question-set',
+        persistentHash: 'persistent-hash',
+        presentationMode: 'staged',
         selfPacedMode: true,
       },
     )
@@ -114,6 +162,7 @@ void test('launchResonancePersistentSoloEntry creates a self-paced solo session 
             order: 0,
           },
         ],
+        presentationMode: 'standard',
         selfPacedMode: true,
       },
     )

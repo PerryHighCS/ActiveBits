@@ -1,5 +1,6 @@
 export type QuestionType = 'free-response' | 'multiple-choice'
 export type MCQSelectionMode = 'single' | 'multiple'
+export type ResonancePresentationMode = 'standard' | 'staged'
 export const MAX_MCQ_OPTIONS = 10
 
 export interface MCQOption {
@@ -34,6 +35,7 @@ export interface StudentMCQQuestion extends Omit<MCQQuestion, 'options'> {
   type: 'multiple-choice'
   options: StudentMCQOption[]
   selectionMode: MCQSelectionMode
+  choicesRevealed?: boolean
 }
 
 /** Question shape sent to students — strips isCorrect from MCQ options */
@@ -114,10 +116,20 @@ export interface Student {
   joinedAt: number
 }
 
+export interface StagedRunState {
+  questionIds: string[]
+  currentQuestionId: string | null
+  currentIndex: number
+  choicesRevealed: boolean
+  completedQuestionIds: string[]
+}
+
 /** Session state snapshot safe to send to students */
 export interface StudentSessionSnapshot {
   sessionId: string
   selfPacedMode: boolean
+  presentationMode: ResonancePresentationMode
+  stagedRun: StagedRunState | null
   activeQuestion: StudentQuestion | null
   activeQuestions: StudentQuestion[]
   activeQuestionIds: string[]
@@ -133,6 +145,8 @@ export interface StudentSessionSnapshot {
 /** Session state snapshot for instructor — includes all response data */
 export interface InstructorSessionSnapshot {
   sessionId: string
+  presentationMode: ResonancePresentationMode
+  stagedRun: StagedRunState | null
   questions: Question[]
   activeQuestionId: string | null
   activeQuestionIds: string[]

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { MAX_MCQ_OPTIONS } from './types.js'
-import { parseGimkitCSV, parseGimkitCSVWithRandom, validateAnswerPayload, validateQuestion, validateQuestionSet } from './validation.js'
+import { normalizePresentationMode, parseGimkitCSV, parseGimkitCSVWithRandom, validateAnswerPayload, validateQuestion, validateQuestionSet } from './validation.js'
 
 const preserveOrderRandom = () => 0.999999
 
@@ -20,6 +20,13 @@ void test('validateQuestion accepts underscore ids', () => {
   assert.deepEqual(errors, [])
   assert.ok(result)
   assert.equal(result.id, 'question_1')
+})
+
+void test('normalizePresentationMode accepts staged and defaults malformed values to standard', () => {
+  assert.equal(normalizePresentationMode('staged'), 'staged')
+  assert.equal(normalizePresentationMode('standard'), 'standard')
+  assert.equal(normalizePresentationMode('think-first'), 'standard')
+  assert.equal(normalizePresentationMode(null), 'standard')
 })
 
 void test('validateQuestionSet treats duplicate question ids as invalid input', () => {

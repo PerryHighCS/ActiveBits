@@ -235,3 +235,37 @@ void test('QuestionView submits over websocket first when sendMessage is availab
     restoreDomEnvironment()
   }
 })
+
+void test('QuestionView shows only the stem for staged MCQs before choices are revealed', async () => {
+  const restoreDomEnvironment = installDomEnvironment()
+  const { render } = await import('@testing-library/react')
+
+  try {
+    const rendered = render(
+      React.createElement(QuestionView, {
+        question: {
+          id: 'q1',
+          type: 'multiple-choice',
+          text: 'This function creates a sequence of numbers.',
+          order: 0,
+          options: [],
+          selectionMode: 'single',
+          choicesRevealed: false,
+        },
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        sendMessage: () => {
+          throw new Error('stem-only staged questions should not send drafts or submissions')
+        },
+      }),
+    )
+
+    assert.equal(rendered.getByText('This function creates a sequence of numbers.').textContent, 'This function creates a sequence of numbers.')
+    assert.equal(rendered.queryByRole('radio'), null)
+    assert.equal(rendered.queryByRole('button', { name: /submit/i }), null)
+
+    rendered.unmount()
+  } finally {
+    restoreDomEnvironment()
+  }
+})

@@ -3,8 +3,10 @@ import type {
   InstructorAnnotation,
   InstructorSessionSnapshot,
   QuestionReveal,
+  ResonancePresentationMode,
   ResponseProgress,
   ResponseWithName,
+  StagedRunState,
   Student,
 } from '../../shared/types.js'
 
@@ -59,6 +61,37 @@ function isValidInstructorReveal(value: unknown): value is QuestionReveal {
   return Array.isArray(value.sharedResponses)
 }
 
+function normalizePresentationMode(value: unknown): ResonancePresentationMode {
+  return value === 'staged' ? 'staged' : 'standard'
+}
+
+function normalizeStagedRunState(value: unknown): StagedRunState | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const questionIds = Array.isArray(value.questionIds)
+    ? value.questionIds.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : []
+  const currentQuestionId = typeof value.currentQuestionId === 'string' && value.currentQuestionId.trim().length > 0
+    ? value.currentQuestionId
+    : null
+  const currentIndex = typeof value.currentIndex === 'number' && Number.isFinite(value.currentIndex)
+    ? Math.max(0, Math.round(value.currentIndex))
+    : 0
+  const completedQuestionIds = Array.isArray(value.completedQuestionIds)
+    ? value.completedQuestionIds.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : []
+
+  return {
+    questionIds,
+    currentQuestionId,
+    currentIndex,
+    choicesRevealed: value.choicesRevealed === true,
+    completedQuestionIds,
+  }
+}
+
 /** Full instructor snapshot returned by GET /api/resonance/:sessionId/responses */
 export interface InstructorStateSnapshot extends InstructorSessionSnapshot {
   responseOrderOverrides: Record<string, string[]>
@@ -104,6 +137,8 @@ export function normalizeInstructorStateSnapshot(
 
   return {
     sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
+    presentationMode: normalizePresentationMode(data.presentationMode),
+    stagedRun: normalizeStagedRunState(data.stagedRun),
     questions: Array.isArray(data.questions) ? data.questions : [],
     activeQuestionId: fallbackActiveQuestionId,
     activeQuestionIds,

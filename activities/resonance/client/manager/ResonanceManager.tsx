@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
-import type { InstructorAnnotation, Question } from '../../shared/types.js'
+import type { InstructorAnnotation, Question, ResonancePresentationMode } from '../../shared/types.js'
 import { useInstructorState } from '../hooks/useInstructorState.js'
 import ResponseViewer from './ResponseViewer.js'
 import QuestionBuilder from '../tools/QuestionBuilder.js'
@@ -196,6 +196,7 @@ export default function ResonanceManager() {
   const [expandedQuestionStemIds, setExpandedQuestionStemIds] = useState<string[]>([])
   const [overflowingQuestionStemIds, setOverflowingQuestionStemIds] = useState<string[]>([])
   const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
+  const [activationPresentationMode, setActivationPresentationMode] = useState<ResonancePresentationMode>('standard')
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
   const questionStemRefs = useRef<Record<string, HTMLParagraphElement | null>>({})
 
@@ -259,6 +260,12 @@ export default function ResonanceManager() {
     sessionId ?? null,
     passcode,
   )
+
+  useEffect(() => {
+    if (snapshot !== null) {
+      setActivationPresentationMode(snapshot.presentationMode)
+    }
+  }, [snapshot?.presentationMode])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -345,12 +352,28 @@ export default function ResonanceManager() {
   )
 
   const activateQuestion = useCallback(
-    (questionId: string | null) => void callInstructor('/activate-question', { questionId }),
-    [callInstructor],
+    (questionId: string | null) => void callInstructor('/activate-question', {
+      questionId,
+      presentationMode: activationPresentationMode,
+    }),
+    [activationPresentationMode, callInstructor],
   )
 
   const activateQuestions = useCallback(
-    (questionIds: string[]) => void callInstructor('/activate-question', { questionIds }),
+    (questionIds: string[]) => void callInstructor('/activate-question', {
+      questionIds,
+      presentationMode: activationPresentationMode,
+    }),
+    [activationPresentationMode, callInstructor],
+  )
+
+  const revealChoices = useCallback(
+    () => void callInstructor('/reveal-choices', {}),
+    [callInstructor],
+  )
+
+  const advanceStagedQuestion = useCallback(
+    () => void callInstructor('/advance-staged-question', {}),
     [callInstructor],
   )
 
@@ -453,6 +476,11 @@ export default function ResonanceManager() {
   } = snapshot
   const hasLiveRun = activeQuestionDeadlineAt === null || activeQuestionDeadlineAt > countdownNow
   const activeQuestionIdSet = new Set(hasLiveRun ? activeQuestionIds : [])
+  const stagedRun = snapshot.stagedRun
+  const isStagedRunActive = snapshot.presentationMode === 'staged' && stagedRun !== null
+  const currentStagedQuestion = isStagedRunActive
+    ? questions.find((question) => question.id === stagedRun.currentQuestionId) ?? null
+    : null
   const questionIds = questions.map((question) => question.id)
   const resolvedActivationSelectionIds = resolveActivationSelectionForRender(
     activationSelectionIds,
@@ -468,6 +496,14 @@ export default function ResonanceManager() {
 
   // Question shown in the viewer panel.
   const viewingQuestion = questions.find((q) => q.id === activeTab) ?? null
+  const isViewingCurrentStagedQuestion =
+    isStagedRunActive && viewingQuestion?.id === stagedRun.currentQuestionId
+  const canRevealCurrentStagedChoices =
+    isViewingCurrentStagedQuestion &&
+    viewingQuestion?.type === 'multiple-choice' &&
+    stagedRun.choicesRevealed === false
+  const canAdvanceCurrentStagedQuestion = isViewingCurrentStagedQuestion &&
+    (viewingQuestion?.type !== 'multiple-choice' || stagedRun.choicesRevealed)
 
   // Responses for the viewed question.
   const viewingResponses = viewingQuestion
@@ -560,7 +596,25 @@ export default function ResonanceManager() {
             )}
 
             {shouldShowQuestionListActivationControls(questions.length) && (
-              <div className="flex flex-wrap gap-1.5 pb-2">
+              <div className="space-y-2 pb-2">
+                <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-0.5" aria-label="Presentation mode">
+                  {(['standard', 'staged'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={activationPresentationMode === mode}
+                      onClick={() => setActivationPresentationMode(mode)}
+                      className={`flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                        activationPresentationMode === mode
+                          ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-sm'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      {mode === 'standard' ? 'Standard' : 'Staged'}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
                 {questions.length > 1 && (
                   <button
                     type="button"
@@ -578,7 +632,7 @@ export default function ResonanceManager() {
                   disabled={resolvedActivationSelectionIds.length === 0}
                   className="rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Activate
+                  {activationPresentationMode === 'staged' ? 'Start staged' : 'Activate'}
                 </button>
                 <button
                   type="button"
@@ -587,12 +641,22 @@ export default function ResonanceManager() {
                 >
                   Stop
                 </button>
+                </div>
               </div>
             )}
 
             {questions.map((q) => {
               const isActive = activeQuestionIdSet.has(q.id)
               const isSelectedForActivation = activationSelectionSet.has(q.id)
+              const stagedStatus = stagedRun?.completedQuestionIds.includes(q.id)
+                ? 'Done'
+                : stagedRun?.currentQuestionId === q.id
+                  ? q.type === 'multiple-choice' && !stagedRun.choicesRevealed
+                    ? 'Stem'
+                    : 'Live'
+                  : isStagedRunActive && stagedRun?.questionIds.includes(q.id)
+                    ? 'Queued'
+                    : null
               const isStemExpanded = expandedQuestionStemSet.has(q.id)
               const isViewing = q.id === activeTab
               const responseCount = progress.filter((entry) => entry.questionId === q.id).length
@@ -693,7 +757,12 @@ export default function ResonanceManager() {
                         )}
                       </div>
                     </div>
-                    {isActive && (
+                    {stagedStatus !== null && (
+                      <span className="text-[10px] bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 rounded-md px-1 shrink-0">
+                        {stagedStatus}
+                      </span>
+                    )}
+                    {isActive && stagedStatus === null && (
                       <span className="text-[10px] bg-indigo-500 text-white rounded-md px-1 shrink-0">
                         Live
                       </span>
@@ -765,7 +834,34 @@ export default function ResonanceManager() {
                       ● Results shared
                     </span>
                   )}
+                  {isViewingCurrentStagedQuestion && currentStagedQuestion !== null && (
+                    <span className="ml-2 text-rose-600 dark:text-rose-400">
+                      ● Staged {stagedRun.currentIndex + 1} of {stagedRun.questionIds.length}
+                    </span>
+                  )}
                 </p>
+                {isViewingCurrentStagedQuestion && (
+                  <div className="pt-2">
+                    {canRevealCurrentStagedChoices ? (
+                      <button
+                        type="button"
+                        onClick={revealChoices}
+                        className="rounded-xl bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700 transition-colors"
+                      >
+                        Reveal choices
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={advanceStagedQuestion}
+                        disabled={!canAdvanceCurrentStagedQuestion}
+                        className="rounded-xl border border-rose-300 dark:border-rose-600 px-3 py-1.5 text-sm font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {stagedRun.currentIndex + 1 >= stagedRun.questionIds.length ? 'End staged run' : 'Next question'}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Action bar */}

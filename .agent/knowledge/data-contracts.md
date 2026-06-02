@@ -15,6 +15,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 
 ## Contracts
 
+- Date: 2026-06-02
+- Surface: REST | websocket | activity interface | SyncDeck embedded launch
+- Contract: Resonance question sets may carry `presentationMode: 'standard' | 'staged'`. Standard mode preserves simultaneous active-question behavior. Staged mode presents one active question at a time through `stagedRun`, hides multiple-choice options from student snapshots until choices are revealed, and starts the question timer when choices become answerable. SyncDeck embedded `activityOptions` may include `presentationMode: 'staged'` alongside `questions` and `autoActivateAllQuestions`.
+- Compatibility constraints: Missing or malformed presentation mode defaults to `standard`. Existing `activeQuestionId`, `activeQuestionIds`, `activeQuestionRunStartedAt`, and `activeQuestionDeadlineAt` remain populated for the current staged question so older activation refresh paths continue to work. Student-safe MCQ snapshots use `choicesRevealed: false` plus an empty `options` array during the stem-only phase.
+- Validation rules: Student submissions and drafts for an unrevealed staged multiple-choice question are rejected/ignored server-side. Free-response questions do not require a reveal phase in staged runs.
+- Evidence (schema/tests/path): `activities/resonance/shared/types.ts`; `activities/resonance/shared/validation.ts`; `activities/resonance/server/routes.ts`; `activities/resonance/client/hooks/useResonanceSession.ts`; `activities/resonance/client/hooks/useInstructorState.ts`; `skills/syncdeck/references/ACTIVITY_PAYLOADS.md`
+- Follow-up action: If mixed standard/staged behavior within the same question set becomes a requirement, add explicit per-question metadata rather than overloading the set-level mode.
+- Owner: Codex
+
 - Date: 2026-05-12
 - Surface: REST | activity interface
 - Contract: Video Sync instructor iframe seeks should be persisted by sending the current play-state command (`play` or `pause`) with `positionSec` when the iframe reports the same playback state at a new position. The raw `seek` command remains a pause-oriented command and should not be used for manager-side scrubbing while playback should continue.

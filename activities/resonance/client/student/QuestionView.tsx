@@ -45,6 +45,8 @@ export default function QuestionView({
   const [error, setError] = useState<string | null>(null)
   const [draftAnswer, setDraftAnswer] = useState<AnswerPayload | null>(initialAnswer)
   const lastSentDraftRef = useRef<AnswerPayload | null>(null)
+  const isWaitingForChoices =
+    question.type === 'multiple-choice' && question.choicesRevealed === false
 
   useEffect(() => {
     setDraftAnswer(initialAnswer)
@@ -52,7 +54,7 @@ export default function QuestionView({
   }, [question.id, initialAnswer, isSubmitted])
 
   useEffect(() => {
-    if (isSubmitted || !sendMessage || isSameAnswer(draftAnswer, lastSentDraftRef.current)) {
+    if (isWaitingForChoices || isSubmitted || !sendMessage || isSameAnswer(draftAnswer, lastSentDraftRef.current)) {
       return
     }
 
@@ -78,10 +80,10 @@ export default function QuestionView({
         sendDraft()
       }
     }
-  }, [draftAnswer, isSubmitted, question.id, sendMessage, studentId])
+  }, [draftAnswer, isSubmitted, isWaitingForChoices, question.id, sendMessage, studentId])
 
   async function submitAnswer(answer: { type: 'free-response'; text: string } | { type: 'multiple-choice'; selectedOptionIds: string[] }) {
-    if (disabled || isSubmitted) {
+    if (disabled || isSubmitted || isWaitingForChoices) {
       return
     }
 
@@ -148,7 +150,7 @@ export default function QuestionView({
           submittedMessage={submittedMessage}
           announceSubmittedMessage={announceSubmittedMessage}
         />
-      ) : (
+      ) : isWaitingForChoices ? null : (
         <MCQInput
           options={question.options}
           selectionMode={question.selectionMode}

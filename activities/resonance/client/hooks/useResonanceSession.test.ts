@@ -44,6 +44,39 @@ void test('normalizeStudentSessionSnapshot keeps selfPacedMode when provided', (
   assert.equal(result.selfPacedMode, true)
 })
 
+void test('normalizeStudentSessionSnapshot preserves staged run state and hidden MCQ choices', () => {
+  const result = normalizeStudentSessionSnapshot({
+    sessionId: 'session-1',
+    presentationMode: 'staged',
+    stagedRun: {
+      questionIds: ['q1', 'q2'],
+      currentQuestionId: 'q1',
+      currentIndex: 0,
+      choicesRevealed: false,
+      completedQuestionIds: [],
+    },
+    activeQuestions: [
+      {
+        id: 'q1',
+        type: 'multiple-choice',
+        text: 'Think first',
+        order: 0,
+        options: [],
+        selectionMode: 'single',
+        choicesRevealed: false,
+      },
+    ],
+  })
+
+  assert.ok(result)
+  assert.equal(result.presentationMode, 'staged')
+  assert.deepEqual(result.stagedRun?.questionIds, ['q1', 'q2'])
+  const question = result.activeQuestion
+  assert.equal(question?.type, 'multiple-choice')
+  assert.deepEqual(question?.type === 'multiple-choice' ? question.options : null, [])
+  assert.equal(question?.type === 'multiple-choice' ? question.choicesRevealed : null, false)
+})
+
 void test('normalizeStudentSessionSnapshot filters malformed activeQuestions and revealedQuestions entries', () => {
   const result = normalizeStudentSessionSnapshot(({
     sessionId: 'session-1',

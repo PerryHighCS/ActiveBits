@@ -58,14 +58,23 @@ Treat staged reveal as a presentation mode for a question set/live run:
 
 ## Implementation Plan
 
-- [ ] Model staged reveal in Resonance set/run contracts: add a presentation mode for question sets and live activations, plus live staged-run state for current question, choices-revealed status, sequence position, and deadlines.
-- [ ] Update validation, import/export, SyncDeck embedded payload handling, and student-safe snapshot normalization so staged mode is valid, persisted, and launchable from embedded activity payloads.
-- [ ] Add instructor controls in the Resonance builder/manager for selecting set/run presentation mode, previewing stem-only presentation, revealing choices, and advancing through staged runs with accessible button/state semantics.
-- [ ] Update student rendering so staged MCQs show stem-only first, disable/delay answer drafting/submission until choices are revealed, and show the existing countdown only after reveal activates the timer.
-- [ ] Wire server routes and WebSocket handling for staged runs: authenticate instructors, start/advance staged sequences, reveal choices, compute deadlines at reveal time, broadcast state, and reject student submissions/drafts before reveal.
-- [ ] Add focused tests across shared validation, server routes, student hook normalization, manager helpers/components, and student MCQ view behavior; include explicit `[TEST]` logs for intentional error-path checks if any noisy failures are exercised.
-- [ ] Run targeted Resonance activity tests first, then activity lint/typecheck, and finish with the repo-appropriate verification gate from `AGENTS.md`; record any sandbox limitations in validation notes.
+- [x] Model staged reveal in Resonance set/run contracts: add a presentation mode for question sets and live activations, plus live staged-run state for current question, choices-revealed status, sequence position, and deadlines.
+- [x] Update validation, import/export, SyncDeck embedded payload handling, and student-safe snapshot normalization so staged mode is valid, persisted, and launchable from embedded activity payloads.
+- [x] Add instructor controls in the Resonance builder/manager for selecting set/run presentation mode, previewing stem-only presentation, revealing choices, and advancing through staged runs with accessible button/state semantics.
+- [x] Update student rendering so staged MCQs show stem-only first, disable/delay answer drafting/submission until choices are revealed, and show the existing countdown only after reveal activates the timer.
+- [x] Wire server routes and WebSocket handling for staged runs: authenticate instructors, start/advance staged sequences, reveal choices, compute deadlines at reveal time, broadcast state, and reject student submissions/drafts before reveal.
+- [x] Add focused tests across shared validation, server routes, student hook normalization, manager helpers/components, and student MCQ view behavior; include explicit `[TEST]` logs for intentional error-path checks if any noisy failures are exercised.
+- [x] Run targeted Resonance activity tests first, then activity lint/typecheck, and finish with the repo-appropriate verification gate from `AGENTS.md`; record any sandbox limitations in validation notes.
 
 ## Verification Notes
 
-Pending implementation.
+- `npm --workspace activities run test:file -- activities/resonance/shared/validation.test.ts`
+- `npm --workspace activities run test:file -- activities/resonance/client/hooks/useResonanceSession.test.ts`
+- `npm --workspace activities run test:file -- activities/resonance/client/student/QuestionInputs.test.tsx`
+- `npm --workspace activities run test:file -- activities/resonance/server/routes.test.ts`
+- `npm --workspace activities run test:file -- activities/resonance/client/index.test.ts`
+- `npm_config_target=activities/resonance npm --workspace activities run lint:scope`
+- `npm_config_target=activities/resonance npm --workspace activities run test:scope`
+- `npm run typecheck --workspace activities`
+- `npm --workspace activities test`
+- `npm --workspace activities run lint`

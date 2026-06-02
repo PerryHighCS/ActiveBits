@@ -1,5 +1,5 @@
 import { getMcqSelectionMode } from './mcq.js'
-import { MAX_MCQ_OPTIONS, type AnswerPayload, type MCQOption, type MCQQuestion, type Question, type QuestionType } from './types.js'
+import { MAX_MCQ_OPTIONS, type AnswerPayload, type MCQOption, type MCQQuestion, type Question, type QuestionType, type ResonancePresentationMode } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -23,6 +23,7 @@ function normalizeId(value: unknown): string | null {
 }
 
 const MAX_QUESTION_SET_SIZE = 100
+const PRESENTATION_MODES: ResonancePresentationMode[] = ['standard', 'staged']
 
 type RandomSource = () => number
 type ShufflableOption = Pick<MCQOption, 'text' | 'isCorrect'>
@@ -106,6 +107,12 @@ function parseTimeLimitMs(value: unknown): number | null | undefined {
   if (value === 0 || value === false) return null
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
   return Math.round(value)
+}
+
+export function normalizePresentationMode(value: unknown): ResonancePresentationMode {
+  return PRESENTATION_MODES.includes(value as ResonancePresentationMode)
+    ? value as ResonancePresentationMode
+    : 'standard'
 }
 
 /**
