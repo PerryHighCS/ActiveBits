@@ -74,6 +74,18 @@ export function resolveLiveCountdown(params: {
   return formatRemainingTime(params.activeQuestionDeadlineAt, params.now)
 }
 
+export function resolveStagedAdvanceLabel(params: {
+  isStemOnlyMultipleChoice: boolean
+  currentIndex: number
+  questionCount: number
+}): string {
+  if (params.isStemOnlyMultipleChoice) {
+    return 'Skip question'
+  }
+
+  return params.currentIndex + 1 >= params.questionCount ? 'End staged run' : 'Next question'
+}
+
 export function shouldShowQuestionPanelActions(question: Question): boolean {
   return question.type === 'multiple-choice'
 }
@@ -546,8 +558,16 @@ export default function ResonanceManager() {
     isViewingCurrentStagedQuestion &&
     viewingQuestion?.type === 'multiple-choice' &&
     stagedRun.choicesRevealed === false
+  const canSkipCurrentStagedQuestion = canRevealCurrentStagedChoices
   const canAdvanceCurrentStagedQuestion = isViewingCurrentStagedQuestion &&
     (viewingQuestion?.type !== 'multiple-choice' || stagedRun.choicesRevealed)
+  const stagedAdvanceLabel = isViewingCurrentStagedQuestion
+    ? resolveStagedAdvanceLabel({
+        isStemOnlyMultipleChoice: canSkipCurrentStagedQuestion,
+        currentIndex: stagedRun.currentIndex,
+        questionCount: stagedRun.questionIds.length,
+      })
+    : 'Next question'
 
   // Responses for the viewed question.
   const viewingResponses = viewingQuestion
@@ -885,8 +905,8 @@ export default function ResonanceManager() {
                   )}
                 </p>
                 {isViewingCurrentStagedQuestion && (
-                  <div className="pt-2">
-                    {canRevealCurrentStagedChoices ? (
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {canRevealCurrentStagedChoices && (
                       <button
                         type="button"
                         onClick={revealChoices}
@@ -894,16 +914,15 @@ export default function ResonanceManager() {
                       >
                         Reveal choices
                       </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={advanceStagedQuestion}
-                        disabled={!canAdvanceCurrentStagedQuestion}
-                        className="rounded-xl border border-rose-300 dark:border-rose-600 px-3 py-1.5 text-sm font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {stagedRun.currentIndex + 1 >= stagedRun.questionIds.length ? 'End staged run' : 'Next question'}
-                      </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={advanceStagedQuestion}
+                      disabled={!canSkipCurrentStagedQuestion && !canAdvanceCurrentStagedQuestion}
+                      className="rounded-xl border border-rose-300 dark:border-rose-600 px-3 py-1.5 text-sm font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {stagedAdvanceLabel}
+                    </button>
                   </div>
                 )}
               </div>

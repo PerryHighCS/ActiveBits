@@ -1868,6 +1868,94 @@ void test('advance-staged-question moves through the staged sequence and ends af
   await sessions.close()
 })
 
+void test('advance-staged-question can intentionally skip a stem-only MCQ', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.questions = [
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Which option should be skipped?',
+      order: 0,
+      responseTimeLimitMs: 30_000,
+      options: [
+        { id: 'q1_a', text: 'Option A' },
+        { id: 'q1_b', text: 'Option B' },
+      ],
+    },
+    {
+      id: 'q2',
+      type: 'free-response',
+      text: 'Explain your reasoning.',
+      order: 1,
+      responseTimeLimitMs: 30_000,
+    },
+  ]
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  const advanceHandler = app.handlers.post['/api/resonance/:sessionId/advance-staged-question']
+  assert.equal(typeof activateHandler, 'function')
+  assert.equal(typeof advanceHandler, 'function')
+
+  const authHeaders = { 'x-instructor-passcode': 'TEACH123' }
+  const activateRes = createResponse()
+  await activateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: authHeaders,
+      body: {
+        questionIds: ['q1', 'q2'],
+        presentationMode: 'staged',
+      },
+    },
+    activateRes,
+  )
+
+  assert.equal(activateRes.statusCode, 200)
+  const activateBody = activateRes.body as {
+    activeQuestionIds?: string[]
+    activeQuestionDeadlineAt?: number | null
+    stagedRun?: { currentQuestionId?: string; choicesRevealed?: boolean } | null
+  }
+  assert.deepEqual(activateBody.activeQuestionIds, ['q1'])
+  assert.equal(activateBody.activeQuestionDeadlineAt, null)
+  assert.equal(activateBody.stagedRun?.currentQuestionId, 'q1')
+  assert.equal(activateBody.stagedRun?.choicesRevealed, false)
+
+  const skipRes = createResponse()
+  await advanceHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: authHeaders,
+      body: {},
+    },
+    skipRes,
+  )
+
+  assert.equal(skipRes.statusCode, 200)
+  const skipBody = skipRes.body as {
+    activeQuestionIds?: string[]
+    activeQuestionDeadlineAt?: number | null
+    stagedRun?: {
+      currentQuestionId?: string
+      choicesRevealed?: boolean
+      completedQuestionIds?: string[]
+    } | null
+  }
+  assert.deepEqual(skipBody.activeQuestionIds, ['q2'])
+  assert.ok(typeof skipBody.activeQuestionDeadlineAt === 'number')
+  assert.equal(skipBody.stagedRun?.currentQuestionId, 'q2')
+  assert.equal(skipBody.stagedRun?.choicesRevealed, true)
+  assert.deepEqual(skipBody.stagedRun?.completedQuestionIds, ['q1'])
+
+  await sessions.close()
+})
+
 void test('submit-answer route broadcasts an updated instructor snapshot to instructor displays', async () => {
   const app = createMockApp()
   const ws = createMockWs()

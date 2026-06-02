@@ -13,6 +13,7 @@ import {
   resolveLiveCountdown,
   resolveManagerActiveTab,
   resolvePasscode,
+  resolveStagedAdvanceLabel,
   shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
   toggleExpandedQuestionStem,
@@ -190,6 +191,33 @@ void test('resolveLiveCountdown hides expired live-run deadlines', () => {
       now: 1_500,
     }),
     null,
+  )
+})
+
+void test('resolveStagedAdvanceLabel names skip, next, and end staged actions', () => {
+  assert.equal(
+    resolveStagedAdvanceLabel({
+      isStemOnlyMultipleChoice: true,
+      currentIndex: 0,
+      questionCount: 2,
+    }),
+    'Skip question',
+  )
+  assert.equal(
+    resolveStagedAdvanceLabel({
+      isStemOnlyMultipleChoice: false,
+      currentIndex: 0,
+      questionCount: 2,
+    }),
+    'Next question',
+  )
+  assert.equal(
+    resolveStagedAdvanceLabel({
+      isStemOnlyMultipleChoice: false,
+      currentIndex: 1,
+      questionCount: 2,
+    }),
+    'End staged run',
   )
 })
 

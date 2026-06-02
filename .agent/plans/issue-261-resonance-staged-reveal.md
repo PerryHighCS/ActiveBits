@@ -38,6 +38,7 @@ These are intentionally left easy to revise before implementation:
 - Should the student stem-only phase show a status message such as "Choices will appear when your teacher reveals them"? No.
 - Should the teacher see a stem-only preview before activating, or only after activation? before
 - Instructor display of student responses should default to order submitted (first responder first). This can be a default for all questions, not just staged response questions.
+- Should instructors be able to skip a staged multiple-choice question before revealing choices? Yes. Treat advancing from the stem-only phase as an intentional skip, not an invalid state.
 
 ## Refined Direction
 
@@ -52,7 +53,7 @@ Treat staged reveal as a presentation mode for a question set/live run:
   - wait for the teacher to reveal choices
   - start/activate the response timer on reveal
   - collect responses
-  - allow the teacher to advance to the next question
+  - allow the teacher to advance to the next question, or skip before reveal if the question should be omitted from the live sequence
 - Free-response questions can participate in the sequence using normal free-response behavior, but they do not need a reveal-choices phase.
 - SyncDeck embedded launches should be able to request the staged presentation mode in their activity payload.
 

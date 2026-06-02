@@ -1773,7 +1773,8 @@ export default function setupResonanceRoutes(
   })
 
   // POST /api/resonance/:sessionId/advance-staged-question
-  // Advances a staged run to the next question, or ends the run after the last question.
+  // Advances a staged run to the next question, skips a stem-only MCQ when requested,
+  // or ends the run after the last question.
   app.post('/api/resonance/:sessionId/advance-staged-question', async (req, res) => {
     const { sessionId } = req.params
     if (!sessionId) {
@@ -2217,6 +2218,7 @@ export default function setupResonanceRoutes(
       }
 
       case 'resonance:advance-staged-question': {
+        // Advancing from a stem-only MCQ is an intentional instructor skip.
         const stagedRun = session.data.stagedRun
         if (session.data.presentationMode !== 'staged' || stagedRun === null || stagedRun.currentQuestionId === null) return
         const nextIndex = stagedRun.currentIndex + 1
