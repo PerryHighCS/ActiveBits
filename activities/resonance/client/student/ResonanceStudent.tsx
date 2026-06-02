@@ -449,6 +449,8 @@ export default function ResonanceStudent() {
             <div className="w-16 h-16 rounded-2xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center mb-5">
               <svg
                 className="w-8 h-8 text-indigo-500 dark:text-indigo-400"
+                aria-hidden="true"
+                focusable="false"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"

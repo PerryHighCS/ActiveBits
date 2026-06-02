@@ -289,6 +289,7 @@ function RevealSection({
             return (
               <div
                 key={opt.id}
+                data-option-id={opt.id}
                 className={`${
                   isViewerOnlyMcqReveal
                     ? 'flex items-center justify-between gap-3'

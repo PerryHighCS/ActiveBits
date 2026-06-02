@@ -41,6 +41,8 @@ export default function FreeResponseInput({
       >
         <svg
           className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0"
+          aria-hidden="true"
+          focusable="false"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"

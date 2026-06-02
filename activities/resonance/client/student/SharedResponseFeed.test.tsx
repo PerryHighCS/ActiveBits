@@ -40,6 +40,18 @@ function installDomEnvironment() {
   }
 }
 
+function getMcqOptionRow(container: HTMLElement, optionId: string): HTMLElement {
+  const row = container.querySelector(`[data-option-id="${optionId}"]`)
+  assert.notEqual(row, null, `Expected MCQ option row ${optionId}`)
+  return row as HTMLElement
+}
+
+function getViewerResponseCard(labelElement: HTMLElement): HTMLElement {
+  const card = labelElement.closest('div')
+  assert.notEqual(card, null, 'Expected viewer response card')
+  return card as HTMLElement
+}
+
 const freeResponseQuestion: StudentQuestion = {
   id: 'q1',
   type: 'free-response',
@@ -224,10 +236,17 @@ void test('SharedResponseFeed highlights the student-selected option in the shar
 
     assert.equal(queryByRole(document.body, 'button', { name: 'React with Agree' }), null)
     assert.equal(rendered.queryByText('This is the response currently being shared.'), null)
-    assert.match(rendered.container.innerHTML, /border-indigo-200.*bg-indigo-50.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
-    assert.match(rendered.container.innerHTML, /Option A/)
-    assert.match(rendered.container.innerHTML, /50%/)
-    assert.match(rendered.container.innerHTML, /grid grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)_auto\] items-center gap-2 rounded-xl border px-3 py-2\.5 text-sm border-indigo-200.*bg-indigo-50.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
+
+    const selectedOptionRow = getMcqOptionRow(rendered.container, 'a')
+    assert.match(selectedOptionRow.className, /grid grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)_auto\]/)
+    assert.match(selectedOptionRow.className, /border-indigo-200/)
+    assert.match(selectedOptionRow.className, /bg-indigo-50/)
+    assert.match(selectedOptionRow.className, /ring-2/)
+    assert.match(selectedOptionRow.className, /ring-indigo-400/)
+    assert.match(selectedOptionRow.className, /ring-offset-2/)
+    assert.match(selectedOptionRow.className, /ring-offset-white/)
+    assert.equal(selectedOptionRow.textContent?.includes('Option A'), true)
+    assert.equal(selectedOptionRow.textContent?.includes('50%'), true)
   } finally {
     restoreDomEnvironment()
   }
@@ -279,12 +298,22 @@ void test('SharedResponseFeed colors the student multiple-choice reveal green wh
       }),
     )
     assert.equal(correctRendered.queryByText('Your response was shared'), null)
-    assert.notEqual(correctRendered.getByText('Your response: Correct'), null)
+    const correctViewerLabel = correctRendered.getByText('Your response: Correct')
+    const correctViewerCard = getViewerResponseCard(correctViewerLabel)
+    assert.match(correctViewerCard.className, /border-emerald-300/)
+    assert.match(correctViewerCard.className, /bg-emerald-50/)
     assert.equal(correctRendered.getAllByText('Option A').length, 2)
-    assert.match(correctRendered.container.innerHTML, /border-emerald-300.*bg-emerald-50/)
-    assert.match(correctRendered.container.innerHTML, /border-emerald-200.*bg-emerald-50.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
-    assert.match(correctRendered.container.innerHTML, /border-red-200.*bg-red-50\/70/)
-    assert.match(correctRendered.container.innerHTML, /100%/)
+    const correctOptionRow = getMcqOptionRow(correctRendered.container, 'a')
+    assert.match(correctOptionRow.className, /border-emerald-200/)
+    assert.match(correctOptionRow.className, /bg-emerald-50/)
+    assert.match(correctOptionRow.className, /ring-2/)
+    assert.match(correctOptionRow.className, /ring-indigo-400/)
+    assert.match(correctOptionRow.className, /ring-offset-2/)
+    assert.match(correctOptionRow.className, /ring-offset-white/)
+    assert.equal(correctOptionRow.textContent?.includes('100%'), true)
+    const distractorRow = getMcqOptionRow(correctRendered.container, 'b')
+    assert.match(distractorRow.className, /border-red-200/)
+    assert.match(distractorRow.className, /bg-red-50\/70/)
 
     correctRendered.unmount()
 
@@ -294,10 +323,18 @@ void test('SharedResponseFeed colors the student multiple-choice reveal green wh
         revealedQuestions: [multipleChoiceQuestion],
       }),
     )
-    assert.notEqual(incorrectRendered.getByText('Your response: Incorrect'), null)
+    const incorrectViewerLabel = incorrectRendered.getByText('Your response: Incorrect')
+    const incorrectViewerCard = getViewerResponseCard(incorrectViewerLabel)
+    assert.match(incorrectViewerCard.className, /border-red-300/)
+    assert.match(incorrectViewerCard.className, /bg-red-50/)
     assert.equal(incorrectRendered.getAllByText('Option B').length, 2)
-    assert.match(incorrectRendered.container.innerHTML, /border-red-300.*bg-red-50/)
-    assert.match(incorrectRendered.container.innerHTML, /border-red-200.*bg-red-50\/70.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
+    const incorrectOptionRow = getMcqOptionRow(incorrectRendered.container, 'b')
+    assert.match(incorrectOptionRow.className, /border-red-200/)
+    assert.match(incorrectOptionRow.className, /bg-red-50\/70/)
+    assert.match(incorrectOptionRow.className, /ring-2/)
+    assert.match(incorrectOptionRow.className, /ring-indigo-400/)
+    assert.match(incorrectOptionRow.className, /ring-offset-2/)
+    assert.match(incorrectOptionRow.className, /ring-offset-white/)
   } finally {
     restoreDomEnvironment()
   }
@@ -319,8 +356,16 @@ void test('SharedResponseFeed shows viewer-only MCQ results without empty percen
     assert.notEqual(rendered.getByText('Correct'), null)
     assert.notEqual(rendered.getByText('Your choice'), null)
     assert.equal(rendered.queryByText('0%'), null)
-    assert.match(rendered.container.innerHTML, /border-emerald-200.*bg-emerald-50/)
-    assert.match(rendered.container.innerHTML, /border-red-200.*bg-red-50\/70.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
+    const correctOptionRow = getMcqOptionRow(rendered.container, 'a')
+    assert.match(correctOptionRow.className, /border-emerald-200/)
+    assert.match(correctOptionRow.className, /bg-emerald-50/)
+    const selectedIncorrectOptionRow = getMcqOptionRow(rendered.container, 'b')
+    assert.match(selectedIncorrectOptionRow.className, /border-red-200/)
+    assert.match(selectedIncorrectOptionRow.className, /bg-red-50\/70/)
+    assert.match(selectedIncorrectOptionRow.className, /ring-2/)
+    assert.match(selectedIncorrectOptionRow.className, /ring-indigo-400/)
+    assert.match(selectedIncorrectOptionRow.className, /ring-offset-2/)
+    assert.match(selectedIncorrectOptionRow.className, /ring-offset-white/)
   } finally {
     restoreDomEnvironment()
   }

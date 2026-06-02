@@ -64,6 +64,8 @@ export default function MCQInput({
       >
         <svg
           className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0"
+          aria-hidden="true"
+          focusable="false"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -125,7 +127,7 @@ export default function MCQInput({
                 >
                   {isSelected && (
                     isMultiple ? (
-                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+                      <svg className="w-3 h-3 text-white" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
                         <path d="M5 13l4 4L19 7" />
                       </svg>
                     ) : (
