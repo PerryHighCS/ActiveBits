@@ -55,10 +55,6 @@ const markdownAllowElement: AllowElement = (node) => {
     const src = node.properties.src
     return typeof src === 'string' && isAllowedMarkdownUrl(src, 'image')
   }
-  if (node.tagName === 'a') {
-    const href = node.properties.href
-    return typeof href === 'string' && isAllowedMarkdownUrl(href, 'link')
-  }
   return true
 }
 
@@ -72,10 +68,22 @@ function cx(...parts: Array<string | undefined | false>): string {
 function createMarkdownComponents(variant: MarkdownVariant): Components {
   return {
     a({ children, href, node: _node, ...props }) {
+      const safeHref = typeof href === 'string' && isAllowedMarkdownUrl(href, 'link')
+        ? href
+        : undefined
+
+      if (safeHref === undefined) {
+        return (
+          <span {...props}>
+            {children}
+          </span>
+        )
+      }
+
       return (
         <a
           {...props}
-          href={href}
+          href={safeHref}
           target="_blank"
           rel="noopener noreferrer"
           className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900 dark:text-indigo-300 dark:decoration-indigo-700 dark:hover:text-indigo-100"

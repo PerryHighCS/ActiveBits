@@ -133,7 +133,7 @@ void test('buildResonanceReportHtml renders Markdown in authored stems and MCQ c
           order: 0,
           options: [
             { id: 'a', text: '`1`', isCorrect: true },
-            { id: 'b', text: '<script>alert("x")</script>' },
+            { id: 'b', text: '<SCRIPT>alert("x")</SCRIPT>' },
             { id: 'c', text: '![Chart](javascript:alert(1))' },
           ],
         },
@@ -148,6 +148,6 @@ void test('buildResonanceReportHtml renders Markdown in authored stems and MCQ c
   assert.match(html, /<pre/)
   assert.match(html, /<table/)
   assert.match(html, /<code/)
-  assert.doesNotMatch(html, /<script>/)
+  assert.doesNotMatch(html, /<script\b/i)
   assert.doesNotMatch(html, /javascript:alert/)
 })

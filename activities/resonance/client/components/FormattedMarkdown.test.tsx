@@ -54,6 +54,8 @@ void test('FormattedMarkdown skips raw HTML and blocks unsafe image and link URL
   assert.doesNotMatch(html, /javascript:/)
   assert.doesNotMatch(html, /file:\/\//)
   assert.doesNotMatch(html, /image\/svg\+xml/)
+  assert.match(html, />bad</)
+  assert.doesNotMatch(html, /<a[^>]*>bad<\/a>/)
   assert.match(html, /data:image\/png;base64,AAAA/)
 })
 

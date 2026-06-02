@@ -130,7 +130,7 @@ Field guidance:
 - `responseTimeLimitMs` should be provided when timed launch behavior matters
 - multiple-choice questions should carry an `options` array
 - `text` and `options[].text` support Markdown for emphasis, lists, links, inline code, fenced code blocks, tables, and images
-- Markdown images may use `http:`, `https:`, or image MIME `data:` URLs; SVG data URLs and unsafe URL schemes such as `javascript:` or `file:` are not supported
+- Markdown images may use `http:`, `https:`, or non-SVG base64 image MIME `data:` URLs such as `data:image/png;base64,...`; SVG data URLs, non-base64 data URLs, and unsafe URL schemes such as `javascript:` or `file:` are not supported
 - a resonance MCQ with zero correct options is poll mode and remains single-select; with one correct option it behaves as single-select; with multiple correct options it behaves as multi-select and requires the full correct set
 - with `presentationMode: "staged"`, Resonance presents the question set one question at a time; multiple-choice questions show stem-only first, then start their response timer when the teacher reveals choices
 - in solo/self-paced Resonance launches with no active run, `presentationMode: "staged"` does not hide choices; students still see and answer the full question set

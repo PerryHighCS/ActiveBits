@@ -225,9 +225,13 @@ function getMeasuredOptionPreviewPosition(
 function MCQOptionPreview({
   option,
   initialPosition,
+  onMouseEnter,
+  onMouseLeave,
 }: {
   option: MCQQuestion['options'][number]
   initialPosition: McqOptionPreviewPosition
+  onMouseEnter: () => void
+  onMouseLeave: () => void
 }) {
   const previewRef = useRef<HTMLDivElement | null>(null)
   const [position, setPosition] = useState(initialPosition)
@@ -255,6 +259,8 @@ function MCQOptionPreview({
     <div
       ref={previewRef}
       role="tooltip"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       className="fixed z-50 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-left normal-case tracking-normal shadow-xl"
       style={{
         left: `${position.left}px`,
@@ -280,9 +286,19 @@ function MCQOptionHeader({
   label: string
 }) {
   const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const hidePreviewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [previewPosition, setPreviewPosition] = useState<McqOptionPreviewPosition | null>(null)
 
+  function cancelHidePreview() {
+    if (hidePreviewTimeoutRef.current === null) {
+      return
+    }
+    clearTimeout(hidePreviewTimeoutRef.current)
+    hidePreviewTimeoutRef.current = null
+  }
+
   function showPreview() {
+    cancelHidePreview()
     if (buttonRef.current === null || typeof window === 'undefined') {
       return
     }
@@ -290,14 +306,27 @@ function MCQOptionHeader({
   }
 
   function hidePreview() {
+    cancelHidePreview()
     setPreviewPosition(null)
   }
+
+  function scheduleHidePreview() {
+    cancelHidePreview()
+    hidePreviewTimeoutRef.current = setTimeout(() => {
+      setPreviewPosition(null)
+      hidePreviewTimeoutRef.current = null
+    }, 120)
+  }
+
+  useEffect(() => {
+    return cancelHidePreview
+  }, [])
 
   return (
     <div
       className="inline-flex justify-center"
       onMouseEnter={showPreview}
-      onMouseLeave={hidePreview}
+      onMouseLeave={scheduleHidePreview}
       onFocus={showPreview}
       onBlur={hidePreview}
     >
@@ -318,6 +347,8 @@ function MCQOptionHeader({
         <MCQOptionPreview
           option={option}
           initialPosition={previewPosition}
+          onMouseEnter={cancelHidePreview}
+          onMouseLeave={scheduleHidePreview}
         />,
         document.body,
       )}
