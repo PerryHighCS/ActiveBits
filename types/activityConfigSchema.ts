@@ -347,7 +347,7 @@ function parseCreateSessionBootstrap(raw: unknown, context: string): ActivityCre
 function parseManageLayout(
   raw: unknown,
   context: string,
-  fieldName: 'manageLayout' | 'standaloneLayout' = 'manageLayout',
+  fieldName: 'manageLayout' | 'standaloneLayout' | 'studentLayout' = 'manageLayout',
 ): ActivityConfig['manageLayout'] {
   if (raw == null) {
     return undefined
@@ -620,6 +620,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   const manageDashboard = parseManageDashboard(rawConfig.manageDashboard, context)
   const manageLayout = parseManageLayout(rawConfig.manageLayout, context, 'manageLayout')
   const standaloneLayout = parseManageLayout(rawConfig.standaloneLayout, context, 'standaloneLayout')
+  const studentLayout = parseManageLayout(rawConfig.studentLayout, context, 'studentLayout')
   const embeddedRuntime = parseEmbeddedRuntime(rawConfig.embeddedRuntime, context)
   const reportEndpoint = readOptionalString(rawConfig, 'reportEndpoint', context)
   const waitingRoom = parseWaitingRoom(rawConfig.waitingRoom, context)
@@ -640,6 +641,7 @@ export function parseActivityConfig(rawConfig: unknown, sourceLabel = 'activity.
   assignOptionalField(parsed, 'manageDashboard', manageDashboard)
   assignOptionalField(parsed, 'manageLayout', manageLayout)
   assignOptionalField(parsed, 'standaloneLayout', standaloneLayout)
+  assignOptionalField(parsed, 'studentLayout', studentLayout)
   assignOptionalField(parsed, 'embeddedRuntime', embeddedRuntime)
   assignOptionalField(parsed, 'reportEndpoint', reportEndpoint)
   assignOptionalField(parsed, 'waitingRoom', waitingRoom)

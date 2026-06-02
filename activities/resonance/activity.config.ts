@@ -38,6 +38,12 @@ const resonanceConfig: ActivityConfig = {
   manageDashboard: {
     customPersistentLinkBuilder: true,
   },
+  manageLayout: {
+    expandShell: true,
+  },
+  studentLayout: {
+    expandShell: true,
+  },
   reportEndpoint: '/api/resonance/:sessionId/report',
   waitingRoom: {
     fields: [

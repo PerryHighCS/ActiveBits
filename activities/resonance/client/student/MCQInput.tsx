@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { SubmitEvent } from 'react'
 import type { MCQSelectionMode, StudentMCQOption } from '../../shared/types.js'
+import FormattedMarkdown, { plainTextFromMarkdown } from '../components/FormattedMarkdown.js'
 
 interface Props {
   options: StudentMCQOption[]
@@ -100,7 +101,7 @@ export default function MCQInput({
               <label
                 key={option.id}
                 className={[
-                  'flex items-center gap-4 rounded-xl border-2 px-5 py-4 transition-all focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-100 dark:focus-within:ring-indigo-900/40',
+                  'flex items-start gap-4 rounded-xl border-2 px-5 py-4 transition-all focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-100 dark:focus-within:ring-indigo-900/40',
                   isDisabled ? 'pointer-events-none opacity-60' : 'cursor-pointer',
                   isSelected
                     ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 dark:border-indigo-500'
@@ -110,7 +111,7 @@ export default function MCQInput({
                 {/* Custom indicator */}
                 <div
                   className={[
-                    'flex-shrink-0 transition-all',
+                    'mt-0.5 flex-shrink-0 transition-all',
                     isMultiple
                       ? `w-5 h-5 rounded flex items-center justify-center border-2 ${
                           isSelected
@@ -148,11 +149,13 @@ export default function MCQInput({
                   }}
                   disabled={isDisabled}
                   className="sr-only"
-                  aria-label={option.text}
+                  aria-label={plainTextFromMarkdown(option.text) || `Option ${option.id}`}
                 />
-                <span className={`text-base leading-snug ${isSelected ? 'font-medium text-indigo-900 dark:text-indigo-100' : 'text-slate-700 dark:text-slate-300'}`}>
-                  {option.text}
-                </span>
+                <FormattedMarkdown
+                  markdown={option.text}
+                  variant="inline"
+                  className={`min-w-0 flex-1 text-base leading-snug ${isSelected ? 'font-medium text-indigo-900 dark:text-indigo-100' : 'text-slate-700 dark:text-slate-300'}`}
+                />
               </label>
             )
           })}

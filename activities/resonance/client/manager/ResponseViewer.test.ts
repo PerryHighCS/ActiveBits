@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import {
+  default as ResponseViewer,
+  getMcqOptionColumnLabel,
   getMcqSelectionTone,
   isIncorrectMcqSelection,
   mergeDisplayOrder,
@@ -128,4 +132,49 @@ void test('isIncorrectMcqSelection requires the full correct set for multi-selec
     isIncorrectMcqSelection({ selectedOptionIds: ['a', 'b'], options }),
     false,
   )
+})
+
+void test('getMcqOptionColumnLabel produces spreadsheet-style option labels', () => {
+  assert.equal(getMcqOptionColumnLabel(0), 'A')
+  assert.equal(getMcqOptionColumnLabel(1), 'B')
+  assert.equal(getMcqOptionColumnLabel(25), 'Z')
+  assert.equal(getMcqOptionColumnLabel(26), 'AA')
+})
+
+void test('ResponseViewer keeps MCQ table columns compact while showing formatted choice previews', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ResponseViewer, {
+      question: {
+        id: 'q1',
+        type: 'multiple-choice',
+        text: 'Choose one',
+        order: 0,
+        options: [
+          { id: 'a', text: '![Mountain](https://example.com/mountain.png)', isCorrect: true },
+          { id: 'b', text: '```python\nprint("no")\n```' },
+        ],
+      },
+      responses: [],
+      progress: [
+        {
+          questionId: 'q1',
+          studentId: 'student-1',
+          studentName: 'Ada',
+          updatedAt: 1,
+          status: 'submitted',
+          answer: { type: 'multiple-choice', selectedOptionIds: ['a'] },
+          responseId: 'r1',
+        },
+      ],
+      annotations: {},
+      orderOverrides: [],
+      onAnnotate: () => undefined,
+      onReorder: () => undefined,
+    }),
+  )
+
+  assert.match(html, /aria-label="Option A, correct answer"/)
+  assert.match(html, /aria-label="Option B"/)
+  assert.match(html, /alt="Mountain"/)
+  assert.match(html, /language-python/)
 })

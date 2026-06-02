@@ -201,10 +201,13 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
           id="qb-text"
           value={draft.text}
           onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
-          placeholder="Type your question…"
-          rows={2}
+          placeholder="Type your question… Markdown is supported."
+          rows={4}
           className="w-full rounded border border-gray-300 px-3 py-2 text-sm resize-none focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
+        <p className="mt-1 text-xs text-gray-500">
+          Markdown supports code, links, tables, and images.
+        </p>
       </div>
 
       {/* MCQ options */}
@@ -232,12 +235,12 @@ export default function QuestionBuilder({ editTarget, nextOrder, onSave, onCance
                 >
                   ✓
                 </button>
-                <input
-                  type="text"
+                <textarea
                   value={opt.text}
                   onChange={(e) => setOption(opt.id, { text: e.target.value })}
                   placeholder={`Option ${idx + 1}`}
-                  className="flex-1 rounded border border-gray-200 px-2 py-1 text-sm focus:border-blue-400 focus:outline-none"
+                  rows={2}
+                  className="min-h-10 flex-1 resize-y rounded border border-gray-200 px-2 py-1 text-sm focus:border-blue-400 focus:outline-none"
                   aria-label={`Option ${idx + 1} text`}
                 />
                 {draft.options.length > 2 && (

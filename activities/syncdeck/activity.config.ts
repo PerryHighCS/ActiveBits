@@ -63,6 +63,9 @@ const syncdeckConfig: ActivityConfig = {
   manageLayout: {
     expandShell: true,
   },
+  studentLayout: {
+    expandShell: true,
+  },
   utilMode: true,
   clientEntry: './client/index.tsx',
   serverEntry: './server/routes.ts',

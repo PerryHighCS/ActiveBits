@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import type { InstructorAnnotation, Question, ResonancePresentationMode, StagedRunState } from '../../shared/types.js'
 import { useInstructorState } from '../hooks/useInstructorState.js'
 import ResponseViewer from './ResponseViewer.js'
 import QuestionBuilder from '../tools/QuestionBuilder.js'
+import FormattedMarkdown, { plainTextFromMarkdown } from '../components/FormattedMarkdown.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -180,6 +182,18 @@ export function shouldShowQuestionListActivationControls(questionCount: number):
   return questionCount > 0
 }
 
+export function shouldRenderResonanceEndSessionButton(sessionId: string | null | undefined): boolean {
+  return !isEmbeddedChildSessionId(sessionId ?? undefined)
+}
+
+export function formatEndSessionError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message
+  }
+
+  return 'Unable to end this Resonance session. Please try again.'
+}
+
 export function resolveManagerActiveTab(params: {
   currentActiveTab: string | null
   previousStagedQuestionId: string | null
@@ -234,8 +248,10 @@ export function handleQuestionListItemKeyDown(
  */
 export default function ResonanceManager() {
   const { sessionId } = useParams<{ sessionId?: string }>()
+  const navigate = useNavigate()
   const [passcode, setPasscode] = useState<string | null>(null)
   const [isResolvingPasscode, setIsResolvingPasscode] = useState(true)
+  const [isEndingSession, setIsEndingSession] = useState(false)
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [activationSelectionIds, setActivationSelectionIds] = useState<string[] | null>(null)
   const [expandedQuestionStemIds, setExpandedQuestionStemIds] = useState<string[]>([])
@@ -243,7 +259,8 @@ export default function ResonanceManager() {
   const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
   const [activationPresentationMode, setActivationPresentationMode] = useState<ResonancePresentationMode>('standard')
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
-  const questionStemRefs = useRef<Record<string, HTMLParagraphElement | null>>({})
+  const [endSessionError, setEndSessionError] = useState<string | null>(null)
+  const questionStemRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const previousStagedQuestionIdRef = useRef<string | null>(null)
 
   // Resolve passcode from same-tab bootstrap state first, then recover it from
@@ -475,6 +492,34 @@ export default function ResonanceManager() {
     [callInstructor],
   )
 
+  const endSession = useCallback(async () => {
+    if (!sessionId || isEndingSession) {
+      return
+    }
+
+    const confirmed = window.confirm('End this Resonance session? Students will be disconnected and session data will be cleared.')
+    if (!confirmed) {
+      return
+    }
+
+    setIsEndingSession(true)
+    setEndSessionError(null)
+    try {
+      const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        throw new Error(`Failed to end session (${response.status})`)
+      }
+      void navigate('/manage')
+    } catch (endSessionFailure) {
+      const message = formatEndSessionError(endSessionFailure)
+      console.error('Failed to end Resonance session:', endSessionFailure)
+      setEndSessionError(message)
+      setIsEndingSession(false)
+    }
+  }, [isEndingSession, navigate, sessionId])
+
   // ---------------------------------------------------------------------------
   // Render guards
   // ---------------------------------------------------------------------------
@@ -596,6 +641,7 @@ export default function ResonanceManager() {
     viewingQuestion?.type === 'multiple-choice'
       ? viewingQuestion.options.filter((o) => o.isCorrect).map((o) => o.id)
       : undefined
+  const showEndSessionButton = shouldRenderResonanceEndSessionButton(sessionId)
 
   // ---------------------------------------------------------------------------
   // UI
@@ -619,8 +665,22 @@ export default function ResonanceManager() {
               <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">{liveCountdown}</p>
             </div>
           )}
-          {error !== null && (
-            <span className="text-xs text-amber-600 dark:text-amber-400">{error}</span>
+          {(endSessionError ?? error) !== null && (
+            <span className="text-xs text-amber-600 dark:text-amber-400">{endSessionError ?? error}</span>
+          )}
+          {showEndSessionButton ? (
+            <button
+              type="button"
+              onClick={() => { void endSession() }}
+              disabled={isEndingSession}
+              className="rounded-lg border border-red-300 dark:border-red-700 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isEndingSession ? 'Ending...' : 'End session'}
+            </button>
+          ) : (
+            <span className="text-xs text-slate-400 dark:text-slate-500">
+              Embedded session managed by parent
+            </span>
           )}
         </div>
       </header>
@@ -759,20 +819,24 @@ export default function ResonanceManager() {
                           toggleActivationSelection(q.id)
                         }}
                         onClick={(e) => e.stopPropagation()}
-                        aria-label={`Select ${q.text} for activation`}
+                        aria-label={`Select ${plainTextFromMarkdown(q.text) || q.text} for activation`}
                         className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
                       />
                       <div className="min-w-0 flex-1">
                         {isStemExpanded ? (
                           <div className="space-y-1">
-                            <p
+                            <div
                               ref={(element) => {
                                 questionStemRefs.current[q.id] = element
                               }}
                               className="text-xs text-slate-700 dark:text-slate-300 whitespace-normal break-words"
                             >
-                              {q.text}
-                            </p>
+                              <FormattedMarkdown
+                                markdown={q.text}
+                                variant="inline"
+                                className="text-xs text-inherit"
+                              />
+                            </div>
                             {canExpandStem && (
                               <button
                                 type="button"
@@ -801,14 +865,18 @@ export default function ResonanceManager() {
                           </div>
                         ) : (
                           <div className="flex items-baseline gap-1 min-w-0">
-                            <p
+                            <div
                               ref={(element) => {
                                 questionStemRefs.current[q.id] = element
                               }}
                               className="flex-1 overflow-hidden whitespace-nowrap text-clip text-xs text-slate-700 dark:text-slate-300"
                             >
-                              {q.text}
-                            </p>
+                              <FormattedMarkdown
+                                markdown={q.text}
+                                variant="inline"
+                                className="text-xs text-inherit"
+                              />
+                            </div>
                             {canExpandStem && (
                               <button
                                 type="button"
@@ -894,9 +962,10 @@ export default function ResonanceManager() {
                     </span>
                   )}
                 </p>
-                <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-                  {viewingQuestion.text}
-                </p>
+                <FormattedMarkdown
+                  markdown={viewingQuestion.text}
+                  className="text-lg font-semibold text-slate-900 dark:text-slate-100"
+                />
                 <p className="text-xs text-slate-400 dark:text-slate-500">
                   {viewingResponses.length} of {students.length} responded
                   {isViewingQuestionShared && (

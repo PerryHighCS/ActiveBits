@@ -1,4 +1,5 @@
 import type { Question } from '../../shared/types.js'
+import FormattedMarkdown, { plainTextFromMarkdown } from '../components/FormattedMarkdown.js'
 
 interface Props {
   question: Question
@@ -29,15 +30,17 @@ export default function QuestionCard({ question, index, onRemove, onEdit, onMove
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-800 truncate" title={question.text}>
-          {question.text}
-        </p>
+        <FormattedMarkdown
+          markdown={question.text}
+          variant="inline"
+          className="truncate text-sm text-gray-800"
+        />
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-xs text-gray-400">{TYPE_LABEL[question.type]}</span>
           {isPoll && <span className="text-xs text-blue-500">poll</span>}
           {correctOptions.length > 0 && (
             <span className="text-xs text-green-600">
-              ✓ {correctOptions.map((option) => option.text).join(', ')}
+              ✓ {correctOptions.map((option) => plainTextFromMarkdown(option.text) || option.text).join(', ')}
             </span>
           )}
           {question.responseTimeLimitMs !== undefined && question.responseTimeLimitMs !== null && (

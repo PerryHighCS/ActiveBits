@@ -1,4 +1,4 @@
-import { Fragment, Suspense, type ComponentType, type ReactElement } from 'react'
+import { Fragment, Suspense, useState, type ComponentType, type ReactElement } from 'react'
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
 import SessionRouter from './components/common/SessionRouter'
 import SessionEnded from './components/common/SessionEnded'
@@ -36,6 +36,7 @@ function Footer() {
 
 function AppShell() {
   const location = useLocation()
+  const [sessionShellExpanded, setSessionShellExpanded] = useState(false)
   const pathSegments = location.pathname.split('/').filter(Boolean)
   const manageActivityId = pathSegments[0] === 'manage' && pathSegments.length >= 2 ? pathSegments[1] : null
   const manageActivity = manageActivityId ? activities.find((activity) => activity.id === manageActivityId) : null
@@ -45,6 +46,7 @@ function AppShell() {
   const standaloneActivity = standaloneActivityId ? activities.find((activity) => activity.id === standaloneActivityId) : null
   const shouldExpandShell = manageActivity?.manageLayout?.expandShell === true
     || standaloneActivity?.standaloneLayout?.expandShell === true
+    || sessionShellExpanded
   const appClassName = shouldExpandShell
     ? 'w-full flex flex-col items-center min-h-screen print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
     : 'w-full flex flex-col items-center min-h-screen pt-4 md:pt-10 px-4 sm:px-6 md:px-10 print:pt-0 print:px-0 md:bg-gray-100 print:bg-white'
@@ -109,12 +111,27 @@ function AppShell() {
             return <Fragment key={activity.id}>{routes}</Fragment>
           })}
 
-          <Route path="/activity/:activityName/:hash" element={<SessionRouter />} />
-          <Route path="/solo/:soloActivityId" element={<SessionRouter />} />
-          <Route path="/util/:utilityActivityId/:utilityId" element={<SessionRouter />} />
+          <Route
+            path="/activity/:activityName/:hash"
+            element={<SessionRouter onShellExpandChange={setSessionShellExpanded} />}
+          />
+          <Route
+            path="/solo/:soloActivityId"
+            element={<SessionRouter onShellExpandChange={setSessionShellExpanded} />}
+          />
+          <Route
+            path="/util/:utilityActivityId/:utilityId"
+            element={<SessionRouter onShellExpandChange={setSessionShellExpanded} />}
+          />
 
-          <Route path="/:sessionId" element={<SessionRouter />} />
-          <Route path="/" element={<SessionRouter />} />
+          <Route
+            path="/:sessionId"
+            element={<SessionRouter onShellExpandChange={setSessionShellExpanded} />}
+          />
+          <Route
+            path="/"
+            element={<SessionRouter onShellExpandChange={setSessionShellExpanded} />}
+          />
         </Routes>
       </div>
 

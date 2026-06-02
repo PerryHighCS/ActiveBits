@@ -23,6 +23,8 @@ function normalizeId(value: unknown): string | null {
 }
 
 const MAX_QUESTION_SET_SIZE = 100
+export const MAX_QUESTION_TEXT_LENGTH = 12000
+export const MAX_MCQ_OPTION_TEXT_LENGTH = 12000
 const PRESENTATION_MODES: ResonancePresentationMode[] = ['standard', 'staged']
 
 type RandomSource = () => number
@@ -40,7 +42,7 @@ function validateMCQOption(raw: unknown, index: number): { option: MCQOption | n
   if (!id) {
     return { option: null, error: `option[${index}].id must be a non-empty alphanumeric, underscore, or hyphen string` }
   }
-  const text = normalizeString(raw.text, 500)
+  const text = normalizeString(raw.text, MAX_MCQ_OPTION_TEXT_LENGTH)
   if (!text) {
     return { option: null, error: `option[${index}].text must be non-empty` }
   }
@@ -130,7 +132,7 @@ export function validateQuestion(raw: unknown, errors: string[]): Question | nul
     errors.push('question.id must be a non-empty alphanumeric, underscore, or hyphen string')
     return null
   }
-  const text = normalizeString(raw.text, 1000)
+  const text = normalizeString(raw.text, MAX_QUESTION_TEXT_LENGTH)
   if (!text) {
     errors.push(`question "${id}": text must be non-empty`)
     return null

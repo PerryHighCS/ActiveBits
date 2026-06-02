@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AnswerPayload, StudentQuestion } from '../../shared/types.js'
 import { areMcqSelectionsEqual } from '../../shared/mcq.js'
+import FormattedMarkdown from '../components/FormattedMarkdown.js'
 import FreeResponseInput from './FreeResponseInput.js'
 import MCQInput from './MCQInput.js'
 
@@ -132,9 +133,10 @@ export default function QuestionView({
   return (
     <div className="space-y-5">
       {/* Question text */}
-      <p className="text-xl font-bold text-slate-900 dark:text-slate-100 leading-snug">
-        {question.text}
-      </p>
+      <FormattedMarkdown
+        markdown={question.text}
+        className="text-xl font-bold text-slate-900 dark:text-slate-100 leading-snug"
+      />
 
       {/* Answer input */}
       {question.type === 'free-response' ? (

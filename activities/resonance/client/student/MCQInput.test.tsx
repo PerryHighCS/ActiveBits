@@ -8,7 +8,7 @@ void test('MCQInput renders checkbox controls and multi-select submit copy', () 
   const html = renderToStaticMarkup(
     React.createElement(MCQInput, {
       options: [
-        { id: 'a', text: 'Option A' },
+        { id: 'a', text: '**Option A**' },
         { id: 'b', text: 'Option B' },
       ],
       selectionMode: 'multiple',
@@ -19,6 +19,8 @@ void test('MCQInput renders checkbox controls and multi-select submit copy', () 
   assert.match(html, /type="checkbox"/)
   assert.match(html, /Submit answers/)
   assert.match(html, /focus-within:ring-indigo-100/)
+  assert.match(html, /aria-label="Option A"/)
+  assert.match(html, /<strong>Option A<\/strong>/)
 })
 
 void test('toggleMcqSelection adds and removes options for multi-select questions', () => {
