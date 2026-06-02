@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useRef, useState } from 'react'
 import { isMcqAnswerCorrect } from '../../shared/mcq.js'
 import type { ResonanceReport } from '../../shared/reportTypes.js'
+import FormattedMarkdown from '../components/FormattedMarkdown.js'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return v != null && typeof v === 'object' && !Array.isArray(v)
@@ -166,7 +167,11 @@ function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
         <p className="text-xs text-gray-400 uppercase tracking-wide">
           {question.type === 'free-response' ? 'Free response' : isPoll ? 'Poll' : 'Multiple choice'}
         </p>
-        <p className="text-base font-medium text-gray-900 mt-0.5">{question.text}</p>
+        <FormattedMarkdown
+          markdown={question.text}
+          variant="inline"
+          className="mt-0.5 text-base font-medium text-gray-900"
+        />
         <p className="text-xs text-gray-500 mt-1">
           {responses.length} response{responses.length !== 1 ? 's' : ''}
           {reveal !== null && (
@@ -194,10 +199,15 @@ function QuestionSection({ q }: { q: ResonanceReport['questions'][number] }) {
             const isCorrect = reveal?.correctOptionIds?.includes(opt.id) ?? false
             return (
               <div key={opt.id} className="space-y-0.5">
-                <p className={`text-xs ${isCorrect ? 'text-green-700 font-medium' : 'text-gray-600'}`}>
-                  {isCorrect && '✓ '}{opt.text}{' '}
+                <div className={`text-xs ${isCorrect ? 'text-green-700 font-medium' : 'text-gray-600'}`}>
+                  {isCorrect && '✓ '}
+                  <FormattedMarkdown
+                    markdown={opt.text}
+                    variant="inline"
+                    className="inline text-xs text-inherit"
+                  />{' '}
                   <span className="text-gray-400">({count})</span>
-                </p>
+                </div>
                 <PercentBar pct={pct} />
               </div>
             )

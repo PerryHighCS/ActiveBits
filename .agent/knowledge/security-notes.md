@@ -15,6 +15,15 @@ Track security-relevant boundaries, risks, and mitigation decisions.
 
 ## Notes
 
+- Date: 2026-06-02
+- Area: resonance Markdown rendering
+- Threat or risk: Authored Markdown for question stems and MCQ choices can carry raw HTML or unsafe URLs that would create XSS, navigation, or local-file exposure risks if rendered directly.
+- Control or mitigation: Resonance renders Markdown through `react-markdown` with raw HTML skipped, GFM enabled, and activity-owned URL filtering. Links allow safe web/mail schemes and open with `rel="noopener noreferrer"`. Images allow `http:`, `https:`, and non-SVG image MIME `data:` URLs only; `javascript:`, `file:`, and SVG data URLs are blocked.
+- Residual risk: Remote and data images can still display instructor-authored external content and may affect payload size, so validation keeps finite caps and classroom authors remain responsible for image provenance.
+- Validation (test/review/path): `activities/resonance/client/components/FormattedMarkdown.tsx`; `activities/resonance/client/components/FormattedMarkdown.test.tsx`; `activities/resonance/shared/validation.test.ts`
+- Follow-up action: If SVG image support becomes required, add a sanitizer-specific design and tests before allowing SVG data URLs.
+- Owner: Codex
+
 - Date: 2026-03-22
 - Area: Playwright production-mode test secret handling
 - Threat or risk: Committing a fixed `PERSISTENT_SESSION_SECRET` in the Playwright harness creates secret-scanner noise and normalizes checking pseudo-secrets into the repo, even when the value is test-only.

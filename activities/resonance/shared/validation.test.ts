@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { MAX_MCQ_OPTIONS } from './types.js'
-import { normalizePresentationMode, parseGimkitCSV, parseGimkitCSVWithRandom, validateAnswerPayload, validateQuestion, validateQuestionSet } from './validation.js'
+import {
+  MAX_MCQ_OPTION_TEXT_LENGTH,
+  MAX_QUESTION_TEXT_LENGTH,
+  normalizePresentationMode,
+  parseGimkitCSV,
+  parseGimkitCSVWithRandom,
+  validateAnswerPayload,
+  validateQuestion,
+  validateQuestionSet,
+} from './validation.js'
 
 const preserveOrderRandom = () => 0.999999
 
@@ -169,14 +178,66 @@ void test('parseGimkitCSV still normalizes valid rows when other rows have error
     {
       id: 'q1',
       type: 'multiple-choice',
-      text: 'A'.repeat(1000),
-      order: 0,
-      options: [
-        { id: 'q1_o1', text: 'B'.repeat(500), isCorrect: true },
-        { id: 'q1_o2', text: 'C'.repeat(500) },
+        text: 'A'.repeat(1005),
+        order: 0,
+        options: [
+        { id: 'q1_o1', text: 'B'.repeat(505), isCorrect: true },
+        { id: 'q1_o2', text: 'C'.repeat(505) },
       ],
     },
   ])
+})
+
+void test('validateQuestionSet allows larger Markdown and data-url payload text with finite caps', () => {
+  const dataImage = `![sample](data:image/png;base64,${'A'.repeat(3000)})`
+  const markdownPrompt = [
+    'Explain the table.',
+    '',
+    '| value | count |',
+    '| --- | ---: |',
+    '| A | 12 |',
+    '',
+    dataImage,
+  ].join('\n')
+  const result = validateQuestionSet([
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: markdownPrompt,
+      order: 0,
+      options: [
+        { id: 'a', text: `Code answer:\n\n\`\`\`js\nconsole.log('ok')\n\`\`\`\n${dataImage}`, isCorrect: true },
+        { id: 'b', text: 'Plain distractor' },
+      ],
+    },
+  ])
+
+  assert.deepEqual(result.errors, [])
+  assert.equal(result.questions[0]?.text, markdownPrompt)
+  assert.equal(
+    result.questions[0]?.type === 'multiple-choice' ? result.questions[0].options[0]?.text.includes(dataImage) : false,
+    true,
+  )
+
+  const cappedResult = validateQuestionSet([
+    {
+      id: 'q2',
+      type: 'multiple-choice',
+      text: 'Q'.repeat(MAX_QUESTION_TEXT_LENGTH + 5),
+      order: 0,
+      options: [
+        { id: 'a', text: 'A'.repeat(MAX_MCQ_OPTION_TEXT_LENGTH + 5), isCorrect: true },
+        { id: 'b', text: 'B' },
+      ],
+    },
+  ])
+
+  assert.deepEqual(cappedResult.errors, [])
+  assert.equal(cappedResult.questions[0]?.text.length, MAX_QUESTION_TEXT_LENGTH)
+  assert.equal(
+    cappedResult.questions[0]?.type === 'multiple-choice' ? cappedResult.questions[0].options[0]?.text.length : 0,
+    MAX_MCQ_OPTION_TEXT_LENGTH,
+  )
 })
 
 void test('parseGimkitCSV can randomize Gimkit answer order so the correct answer is not always first', () => {

@@ -59,8 +59,8 @@ void test('buildResonanceReportHtml labels MCQ questions from question definitio
   }
 
   const html = buildResonanceReportHtml(report)
-  assert.match(html, /<span class="type-label">Multiple choice<\/span>\s*<h2>Graded MCQ<\/h2>/)
-  assert.match(html, /<span class="type-label">Poll<\/span>\s*<h2>Poll MCQ<\/h2>/)
+  assert.match(html, /<span class="type-label">Multiple choice<\/span>\s*<div class="question-stem">[\s\S]*Graded MCQ/)
+  assert.match(html, /<span class="type-label">Poll<\/span>\s*<div class="question-stem">[\s\S]*Poll MCQ/)
 })
 
 void test('buildResonanceReportHtml renders shared MCQ responses using option text', () => {
@@ -103,6 +103,51 @@ void test('buildResonanceReportHtml renders shared MCQ responses using option te
   }
 
   const html = buildResonanceReportHtml(report)
-  assert.match(html, /<li>Mars<\/li>/)
+  assert.match(html, /<li><div class="resonance-markdown/)
+  assert.match(html, /Mars/)
   assert.doesNotMatch(html, /<li>opt_mars<\/li>/)
+})
+
+void test('buildResonanceReportHtml renders Markdown in authored stems and MCQ choices', () => {
+  const report: ResonanceReport = {
+    version: 1,
+    sessionId: 'session-3',
+    exportedAt: Date.now(),
+    students: [],
+    questions: [
+      {
+        question: {
+          id: 'q1',
+          type: 'multiple-choice',
+          text: [
+            'What does this print?',
+            '',
+            '```python',
+            'print([1, 2][0])',
+            '```',
+            '',
+            '| index | value |',
+            '| ---: | ---: |',
+            '| 0 | 1 |',
+          ].join('\n'),
+          order: 0,
+          options: [
+            { id: 'a', text: '`1`', isCorrect: true },
+            { id: 'b', text: '<script>alert("x")</script>' },
+            { id: 'c', text: '![Chart](javascript:alert(1))' },
+          ],
+        },
+        responses: [],
+        reveal: null,
+        annotations: {},
+      },
+    ],
+  }
+
+  const html = buildResonanceReportHtml(report)
+  assert.match(html, /<pre/)
+  assert.match(html, /<table/)
+  assert.match(html, /<code/)
+  assert.doesNotMatch(html, /<script>/)
+  assert.doesNotMatch(html, /javascript:alert/)
 })

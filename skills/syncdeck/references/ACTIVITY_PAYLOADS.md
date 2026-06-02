@@ -31,6 +31,44 @@ Minimal free-response example:
 >
 ```
 
+Question `text` fields and multiple-choice `options[].text` fields may contain Markdown. Plain text remains valid.
+
+Markdown-formatted question example:
+
+```json
+{
+  "questions": [
+    {
+      "id": "q1",
+      "type": "multiple-choice",
+      "text": "Given this code, what is printed?\n\n```python\nvalues = [2, 4, 6]\nprint(values[1])\n```",
+      "order": 0,
+      "responseTimeLimitMs": 30000,
+      "options": [
+        { "id": "q1a", "text": "`2`", "isCorrect": false },
+        { "id": "q1b", "text": "`4`", "isCorrect": true },
+        { "id": "q1c", "text": "`6`", "isCorrect": false }
+      ]
+    }
+  ]
+}
+```
+
+Markdown table and image example:
+
+```json
+{
+  "questions": [
+    {
+      "id": "q1",
+      "type": "free-response",
+      "text": "Use the data table to justify your answer.\n\n| Input | Output |\n| ---: | ---: |\n| 1 | 3 |\n| 2 | 5 |\n| 3 | 7 |\n\n![Graph of the pattern](https://example.com/pattern.png)",
+      "order": 0
+    }
+  ]
+}
+```
+
 Mixed question-set example:
 
 ```json
@@ -91,6 +129,8 @@ Field guidance:
 - `order` should be explicit and zero-based
 - `responseTimeLimitMs` should be provided when timed launch behavior matters
 - multiple-choice questions should carry an `options` array
+- `text` and `options[].text` support Markdown for emphasis, lists, links, inline code, fenced code blocks, tables, and images
+- Markdown images may use `http:`, `https:`, or image MIME `data:` URLs; SVG data URLs and unsafe URL schemes such as `javascript:` or `file:` are not supported
 - a resonance MCQ with zero correct options is poll mode and remains single-select; with one correct option it behaves as single-select; with multiple correct options it behaves as multi-select and requires the full correct set
 - with `presentationMode: "staged"`, Resonance presents the question set one question at a time; multiple-choice questions show stem-only first, then start their response timer when the teacher reveals choices
 - in solo/self-paced Resonance launches with no active run, `presentationMode: "staged"` does not hide choices; students still see and answer the full question set

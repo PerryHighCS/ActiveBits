@@ -5,6 +5,7 @@ import type { InstructorAnnotation, Question, ResonancePresentationMode, StagedR
 import { useInstructorState } from '../hooks/useInstructorState.js'
 import ResponseViewer from './ResponseViewer.js'
 import QuestionBuilder from '../tools/QuestionBuilder.js'
+import FormattedMarkdown, { plainTextFromMarkdown } from '../components/FormattedMarkdown.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -243,7 +244,7 @@ export default function ResonanceManager() {
   const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
   const [activationPresentationMode, setActivationPresentationMode] = useState<ResonancePresentationMode>('standard')
   const [countdownNow, setCountdownNow] = useState(() => Date.now())
-  const questionStemRefs = useRef<Record<string, HTMLParagraphElement | null>>({})
+  const questionStemRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const previousStagedQuestionIdRef = useRef<string | null>(null)
 
   // Resolve passcode from same-tab bootstrap state first, then recover it from
@@ -759,20 +760,24 @@ export default function ResonanceManager() {
                           toggleActivationSelection(q.id)
                         }}
                         onClick={(e) => e.stopPropagation()}
-                        aria-label={`Select ${q.text} for activation`}
+                        aria-label={`Select ${plainTextFromMarkdown(q.text) || q.text} for activation`}
                         className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
                       />
                       <div className="min-w-0 flex-1">
                         {isStemExpanded ? (
                           <div className="space-y-1">
-                            <p
+                            <div
                               ref={(element) => {
                                 questionStemRefs.current[q.id] = element
                               }}
                               className="text-xs text-slate-700 dark:text-slate-300 whitespace-normal break-words"
                             >
-                              {q.text}
-                            </p>
+                              <FormattedMarkdown
+                                markdown={q.text}
+                                variant="inline"
+                                className="text-xs text-inherit"
+                              />
+                            </div>
                             {canExpandStem && (
                               <button
                                 type="button"
@@ -801,14 +806,18 @@ export default function ResonanceManager() {
                           </div>
                         ) : (
                           <div className="flex items-baseline gap-1 min-w-0">
-                            <p
+                            <div
                               ref={(element) => {
                                 questionStemRefs.current[q.id] = element
                               }}
                               className="flex-1 overflow-hidden whitespace-nowrap text-clip text-xs text-slate-700 dark:text-slate-300"
                             >
-                              {q.text}
-                            </p>
+                              <FormattedMarkdown
+                                markdown={q.text}
+                                variant="inline"
+                                className="text-xs text-inherit"
+                              />
+                            </div>
                             {canExpandStem && (
                               <button
                                 type="button"
@@ -894,9 +903,10 @@ export default function ResonanceManager() {
                     </span>
                   )}
                 </p>
-                <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-                  {viewingQuestion.text}
-                </p>
+                <FormattedMarkdown
+                  markdown={viewingQuestion.text}
+                  className="text-lg font-semibold text-slate-900 dark:text-slate-100"
+                />
                 <p className="text-xs text-slate-400 dark:text-slate-500">
                   {viewingResponses.length} of {students.length} responded
                   {isViewingQuestionShared && (

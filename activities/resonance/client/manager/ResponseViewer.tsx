@@ -8,6 +8,7 @@ import type {
   ResponseProgress,
   ResponseWithName,
 } from '../../shared/types.js'
+import FormattedMarkdown from '../components/FormattedMarkdown.js'
 import ResponseCard, { getResponseProgressStatusLabel } from './ResponseCard.js'
 
 export function reorderResponseIds(currentIds: string[], draggedId: string, targetId: string): string[] {
@@ -169,7 +170,11 @@ function MCQTable({
                       : 'text-slate-500 dark:text-slate-400'
                   }`}
                 >
-                  {opt.text}
+                  <FormattedMarkdown
+                    markdown={opt.text}
+                    variant="inline"
+                    className="normal-case text-xs leading-snug"
+                  />
                   {opt.isCorrect && <span className="ml-1">✓</span>}
                 </th>
               ))}

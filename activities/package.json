@@ -18,7 +18,9 @@
   "dependencies": {
     "activebits-server": "file:../server",
     "qrcode.react": "^4.2.0",
-    "react-zxing": "^2.1.0"
+    "react-markdown": "^10.1.0",
+    "react-zxing": "^2.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

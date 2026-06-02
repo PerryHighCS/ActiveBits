@@ -274,7 +274,7 @@ void test('SharedResponseFeed keeps released questions in authored question orde
     )
 
     const questionHeadings = Array.from(
-      rendered.container.querySelectorAll('section[aria-label="Shared responses"] > div > p'),
+      rendered.container.querySelectorAll('section[aria-label="Shared responses"] > div > .resonance-markdown'),
     ).map((element) => element.textContent)
 
     assert.deepEqual(questionHeadings, [

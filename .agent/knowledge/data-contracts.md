@@ -16,6 +16,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-06-02
+- Surface: activity interface | SyncDeck embedded launch | file import
+- Contract: Resonance question stem fields (`text`) and multiple-choice answer choice fields (`options[].text`) are plain strings interpreted as Markdown at render time. No parallel `markdown` schema field is introduced, so existing plain-text payloads remain valid and stored/imported question sets keep the same shape.
+- Compatibility constraints: Markdown is additive and activity-owned. Student free-response answer text remains plain escaped user text, not authored Markdown. SyncDeck deck authors can put Markdown directly in embedded Resonance `questions[].text` and `questions[].options[].text` values.
+- Validation rules: Resonance trims and requires non-empty strings, then caps question stems and MCQ options at `MAX_QUESTION_TEXT_LENGTH` and `MAX_MCQ_OPTION_TEXT_LENGTH` respectively to support code, tables, and data URL images while keeping finite payload bounds.
+- Evidence (schema/tests/path): `activities/resonance/shared/validation.ts`; `activities/resonance/shared/validation.test.ts`; `activities/resonance/client/components/FormattedMarkdown.tsx`; `skills/syncdeck/references/ACTIVITY_PAYLOADS.md`
+- Follow-up action: If future activities need formatted prompts, define a shared generic contract only after a second activity adopts the pattern.
+- Owner: Codex
+
+- Date: 2026-06-02
 - Surface: REST | websocket | activity interface | SyncDeck embedded launch
 - Contract: Resonance question sets may carry `presentationMode: 'standard' | 'staged'`. Standard mode preserves simultaneous active-question behavior. Staged mode presents one active question at a time through `stagedRun`, hides multiple-choice options from student snapshots until choices are revealed, and starts the question timer when choices become answerable. SyncDeck embedded `activityOptions` may include `presentationMode: 'staged'` alongside `questions` and `autoActivateAllQuestions`.
 - Compatibility constraints: Missing or malformed presentation mode defaults to `standard`. Existing `activeQuestionId`, `activeQuestionIds`, `activeQuestionRunStartedAt`, and `activeQuestionDeadlineAt` remain populated for the current staged question so older activation refresh paths continue to work. Student-safe MCQ snapshots use `choicesRevealed: false` plus an empty `options` array during the stem-only phase.

@@ -45,24 +45,29 @@ Plain text should continue to work exactly as it does today. Existing question p
 
 ## Implementation Plan
 
-- [ ] Choose the Markdown rendering stack for the activities workspace. Prefer a React renderer such as `react-markdown` with `remark-gfm`; confirm whether an explicit sanitizer plugin is needed when raw HTML is disabled.
-- [ ] Add a small Resonance-owned formatted-text component, for example `activities/resonance/client/components/FormattedMarkdown.tsx`, that renders Markdown with constrained styling for paragraphs, lists, code, tables, links, and images.
-- [ ] Implement URL-scheme validation for Markdown links/images: allow safe links, allow image `http:`, `https:`, and image MIME `data:` URLs, and block unsafe schemes.
-- [ ] Replace direct question stem text rendering with the formatted component in student, manager, shared response, and report-facing Resonance views.
-- [ ] Replace direct MCQ option text rendering with the formatted component in student MCQ inputs and instructor MCQ response/table views while preserving accessible input labels.
-- [ ] Update `QuestionBuilder` authoring UI to make Markdown authoring comfortable: use multiline text areas for options and expose concise helper copy. Live preview can be deferred unless it is simple and ergonomic.
-- [ ] Increase validated content length caps for stems and options to support Markdown and data URLs, with clear constants and tests for accepted and rejected lengths.
-- [ ] Ensure imported, encrypted, persistent-link, solo, and SyncDeck embedded question payloads continue using the same `text` fields with no schema break.
-- [ ] Add tests for Markdown rendering in stems and choices, including inline code, fenced code blocks, GFM tables, links, image syntax, URL filtering, and raw HTML escaping/ignoring.
-- [ ] Add accessibility tests or assertions that formatted answer choices remain selectable and keep useful accessible names.
-- [ ] Update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` with embedded Resonance Markdown payload examples for stems and answer choices.
-- [ ] Update `.agent/knowledge/data-contracts.md` and `.agent/knowledge/security-notes.md` with the Markdown contract and sanitization decision.
-- [ ] Run focused Resonance tests, activities typecheck, scoped lint, and the Resonance scoped test suite; broaden to full `npm test` if dependency or shared rendering changes affect cross-workspace behavior.
+- [x] Choose the Markdown rendering stack for the activities workspace. Prefer a React renderer such as `react-markdown` with `remark-gfm`; confirm whether an explicit sanitizer plugin is needed when raw HTML is disabled.
+- [x] Add a small Resonance-owned formatted-text component, for example `activities/resonance/client/components/FormattedMarkdown.tsx`, that renders Markdown with constrained styling for paragraphs, lists, code, tables, links, and images.
+- [x] Implement URL-scheme validation for Markdown links/images: allow safe links, allow image `http:`, `https:`, and image MIME `data:` URLs, and block unsafe schemes.
+- [x] Replace direct question stem text rendering with the formatted component in student, manager, shared response, and report-facing Resonance views.
+- [x] Replace direct MCQ option text rendering with the formatted component in student MCQ inputs and instructor MCQ response/table views while preserving accessible input labels.
+- [x] Update `QuestionBuilder` authoring UI to make Markdown authoring comfortable: use multiline text areas for options and expose concise helper copy. Live preview can be deferred unless it is simple and ergonomic.
+- [x] Increase validated content length caps for stems and options to support Markdown and data URLs, with clear constants and tests for accepted and rejected lengths.
+- [x] Ensure imported, encrypted, persistent-link, solo, and SyncDeck embedded question payloads continue using the same `text` fields with no schema break.
+- [x] Add tests for Markdown rendering in stems and choices, including inline code, fenced code blocks, GFM tables, links, image syntax, URL filtering, and raw HTML escaping/ignoring.
+- [x] Add accessibility tests or assertions that formatted answer choices remain selectable and keep useful accessible names.
+- [x] Update `skills/syncdeck/references/ACTIVITY_PAYLOADS.md` with embedded Resonance Markdown payload examples for stems and answer choices.
+- [x] Update `.agent/knowledge/data-contracts.md` and `.agent/knowledge/security-notes.md` with the Markdown contract and sanitization decision.
+- [x] Run focused Resonance tests, activities typecheck, scoped lint, and the Resonance scoped test suite; broaden to full `npm test` if dependency or shared rendering changes affect cross-workspace behavior.
 
 ## Remaining Open Questions
 
 None identified yet. Revisit during implementation if renderer behavior, sanitizer behavior, or dependency constraints force a tradeoff.
 
-## Initial Verification Notes
+## Verification Notes
 
-No implementation yet. Branch and plan created from `main` on 2026-06-02.
+- Branch and plan created from `main` on 2026-06-02.
+- `npm --workspace activities run typecheck` passed.
+- `npm --workspace activities run lint:scope --target=resonance` passed.
+- `npm --workspace activities run test:file -- resonance/client/components/FormattedMarkdown.test.tsx` passed.
+- `npm --workspace activities run test:activity --activity=resonance` passed.
+- `git diff --check` passed.

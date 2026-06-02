@@ -439,6 +439,6 @@ void test('ResonanceReportView does not double-count duplicate uploaded MCQ opti
 
   const html = renderToStaticMarkup(React.createElement(ResonanceReportView, { report: parsed }))
 
-  assert.match(html, /A <span class="text-gray-400">\(1\)<\/span>/)
+  assert.match(html, /<span class="leading-relaxed">A<\/span><\/div> <span class="text-gray-400">\(1\)<\/span>/)
   assert.match(html, /1 correct response/)
 })

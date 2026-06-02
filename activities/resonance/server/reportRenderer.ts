@@ -1,6 +1,9 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { isMcqAnswerCorrect } from '../shared/mcq.js'
 import type { InstructorAnnotation, Question, QuestionReveal, Response, Student } from '../shared/types.js'
 import type { ResonanceReport, ResonanceReportQuestion } from '../shared/reportTypes.js'
+import FormattedMarkdown from '../client/components/FormattedMarkdown.js'
 
 /**
  * Minimal session data shape needed to build a report.
@@ -80,6 +83,16 @@ function pct(count: number, total: number): number {
   return total > 0 ? Math.round((count / total) * 100) : 0
 }
 
+function renderMarkdown(markdown: string): string {
+  return renderToStaticMarkup(
+    createElement(FormattedMarkdown, {
+      markdown,
+      variant: 'block',
+      className: 'report-markdown',
+    }),
+  )
+}
+
 function renderQuestionSection(sec: ResonanceReportQuestion): string {
   const { question, responses, reveal, annotations } = sec
   const hasCorrectOption = question.type === 'multiple-choice' && question.options.some((option) => option.isCorrect === true)
@@ -109,7 +122,7 @@ function renderQuestionSection(sec: ResonanceReportQuestion): string {
       const p = pct(count, responses.length)
       const isCorrect = correctIds.has(opt.id)
       body += `<tr${isCorrect ? ' class="correct"' : ''}>`
-      body += `<td>${isCorrect ? '✓ ' : ''}${esc(opt.text)}</td>`
+      body += `<td>${isCorrect ? '✓ ' : ''}${renderMarkdown(opt.text)}</td>`
       body += `<td class="num">${count}</td>`
       body += `<td class="num">${p}%</td>`
       body += '</tr>'
@@ -149,7 +162,7 @@ function renderQuestionSection(sec: ResonanceReportQuestion): string {
         text = textParts.join(', ')
       }
       const emoji = sr.instructorEmoji !== null ? esc(sr.instructorEmoji) + ' ' : ''
-      body += `<li>${emoji}${esc(text)}</li>`
+      body += `<li>${emoji}${sr.answer.type === 'multiple-choice' ? renderMarkdown(text) : esc(text)}</li>`
     }
     body += '</ul>'
   }
@@ -168,7 +181,7 @@ function renderQuestionSection(sec: ResonanceReportQuestion): string {
     <section class="question">
       <header>
         <span class="type-label">${esc(label)}</span>
-        <h2>${esc(question.text)}</h2>
+        <div class="question-stem">${renderMarkdown(question.text)}</div>
         <p class="meta">${responses.length} response${responses.length !== 1 ? 's' : ''}${sharedTag}</p>
       </header>
       ${body}
@@ -184,7 +197,18 @@ const CSS = `
   .question { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
   .question header { margin-bottom: 14px; }
   .type-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #9ca3af; }
-  h2 { font-size: 16px; font-weight: 600; margin: 4px 0 4px; }
+  .question-stem { font-size: 16px; font-weight: 600; margin: 4px 0 4px; color: #111827; }
+  .report-markdown { color: inherit; }
+  .report-markdown p { margin: 0 0 8px; }
+  .report-markdown p:last-child { margin-bottom: 0; }
+  .report-markdown ul, .report-markdown ol { margin: 6px 0 6px 20px; }
+  .report-markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #f3f4f6; border-radius: 4px; padding: 1px 4px; }
+  .report-markdown pre { overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 6px; background: #111827; color: #f9fafb; padding: 10px; margin: 8px 0; }
+  .report-markdown pre code { background: transparent; color: inherit; padding: 0; }
+  .report-markdown table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .report-markdown th, .report-markdown td { border: 1px solid #e5e7eb; padding: 4px 6px; }
+  .report-markdown img { max-width: 100%; max-height: 360px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 6px; }
+  .report-markdown a { color: #4338ca; text-decoration: underline; }
   .meta { font-size: 12px; color: #6b7280; }
   .shared-tag { color: #16a34a; }
   table.opts { width: 100%; border-collapse: collapse; font-size: 13px; }
