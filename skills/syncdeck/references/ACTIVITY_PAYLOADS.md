@@ -93,6 +93,8 @@ Field guidance:
 - multiple-choice questions should carry an `options` array
 - a resonance MCQ with zero correct options is poll mode and remains single-select; with one correct option it behaves as single-select; with multiple correct options it behaves as multi-select and requires the full correct set
 - with `presentationMode: "staged"`, Resonance presents the question set one question at a time; multiple-choice questions show stem-only first, then start their response timer when the teacher reveals choices
+- in solo/self-paced Resonance launches with no active run, `presentationMode: "staged"` does not hide choices; students still see and answer the full question set
+- when SyncDeck adds `autoActivateAllQuestions: true` to a Resonance launch with `presentationMode: "staged"`, the host starts the staged sequence at the first question; for a multiple-choice first question this shows the stem only and waits for the instructor to reveal choices
 
 ### Child embedded launch state
 
