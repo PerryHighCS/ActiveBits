@@ -8,7 +8,7 @@ import type {
   ResponseProgress,
   ResponseWithName,
 } from '../../shared/types.js'
-import ResponseCard from './ResponseCard.js'
+import ResponseCard, { getResponseProgressStatusLabel } from './ResponseCard.js'
 
 export function reorderResponseIds(currentIds: string[], draggedId: string, targetId: string): string[] {
   if (draggedId === targetId) {
@@ -77,21 +77,21 @@ export function getMcqSelectionTone({
 } {
   if (isPoll) {
     return {
-      cellClassName: 'bg-sky-50',
-      dotClassName: 'bg-sky-500',
+      cellClassName: 'bg-indigo-50 dark:bg-indigo-900/20',
+      dotClassName: 'bg-indigo-500',
     }
   }
 
   if (isCorrect) {
     return {
-      cellClassName: 'bg-green-50',
-      dotClassName: 'bg-green-600',
+      cellClassName: 'bg-emerald-50 dark:bg-emerald-900/20',
+      dotClassName: 'bg-emerald-600',
     }
   }
 
   if (isIncorrect) {
     return {
-      cellClassName: 'bg-red-50',
+      cellClassName: 'bg-red-50/70 dark:bg-red-900/10',
       dotClassName: 'bg-red-500',
     }
   }
@@ -152,95 +152,107 @@ function MCQTable({
   const isPoll = correctOptionIds.length === 0
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
-            <th className="pr-4 py-1 font-medium">Student</th>
-            {options.map((opt) => (
-              <th
-                key={opt.id}
-                className={`min-w-[120px] px-3 py-2 font-medium text-center ${opt.isCorrect ? 'text-green-700' : ''}`}
-              >
-                {opt.text}
-                {opt.isCorrect && <span className="ml-1 text-green-600">✓</span>}
+    <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700 text-left">
+              <th className="pr-4 pl-3 py-2.5 font-medium text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                Student
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {progress.map((entry) => {
-            const responseId = entry.responseId
-            const selectedOptionIds =
-              entry.answer?.type === 'multiple-choice' ? getAnswerSelectedOptionIds(entry.answer) : []
-            const annotation = responseId
-              ? (annotations[responseId] ?? { starred: false, flagged: false, emoji: null })
-              : { starred: false, flagged: false, emoji: null }
-            const isCorrect =
-              correctOptionIds.length > 0 && isMcqAnswerCorrect(selectedOptionIds, correctOptionIds)
-            const isIncorrect = isIncorrectMcqSelection({ selectedOptionIds, options })
+              {options.map((opt) => (
+                <th
+                  key={opt.id}
+                  className={`min-w-[120px] px-3 py-2.5 font-medium text-xs text-center uppercase tracking-wide ${
+                    opt.isCorrect
+                      ? 'text-emerald-700 dark:text-emerald-400'
+                      : 'text-slate-500 dark:text-slate-400'
+                  }`}
+                >
+                  {opt.text}
+                  {opt.isCorrect && <span className="ml-1">✓</span>}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {progress.map((entry) => {
+              const responseId = entry.responseId
+              const selectedOptionIds =
+                entry.answer?.type === 'multiple-choice'
+                  ? getAnswerSelectedOptionIds(entry.answer)
+                  : []
+              const annotation = responseId
+                ? (annotations[responseId] ?? { starred: false, flagged: false, emoji: null })
+                : { starred: false, flagged: false, emoji: null }
+              const isCorrect =
+                correctOptionIds.length > 0 && isMcqAnswerCorrect(selectedOptionIds, correctOptionIds)
+              const isIncorrect = isIncorrectMcqSelection({ selectedOptionIds, options })
 
-            return (
-              <tr
-                key={`${entry.studentId}:${entry.questionId}`}
-                className="border-b border-gray-100 hover:bg-gray-50"
-              >
-                <td className="pr-4 py-1.5 font-medium text-gray-700 max-w-[120px] truncate">
-                  <span title={entry.studentName}>{entry.studentName}</span>
-                  <span className={`ml-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                    entry.status === 'submitted'
-                      ? 'bg-green-100 text-green-700'
-                      : entry.status === 'working'
-                        ? 'bg-amber-100 text-amber-700'
-                        : 'bg-gray-100 text-gray-600'
-                  }`}>
-                    {entry.status === 'submitted' ? 'Submitted' : entry.status === 'working' ? 'Still working' : 'Not started'}
-                  </span>
-                  {annotation.starred && <span className="ml-1 text-yellow-400">★</span>}
-                  {annotation.flagged && <span className="ml-1 text-red-500">🚩</span>}
-                </td>
-                {options.map((opt) => {
-                  const chosen = selectedOptionIds.includes(opt.id)
-                  const selectionTone = getMcqSelectionTone({
-                    isPoll,
-                    isCorrect,
-                    isIncorrect,
-                  })
-                  return (
-                    <td
-                      key={opt.id}
-                      className={`px-3 py-2 text-center align-middle ${
-                        chosen
-                          ? selectionTone.cellClassName
-                          : ''
+              return (
+                <tr
+                  key={`${entry.studentId}:${entry.questionId}`}
+                  className="border-b border-slate-100 dark:border-slate-700/60 hover:bg-slate-50 dark:hover:bg-slate-700/30"
+                >
+                  <td className="pr-4 pl-3 py-2 font-medium text-slate-700 dark:text-slate-300 max-w-[140px]">
+                    <span className="truncate block" title={entry.studentName}>
+                      {entry.studentName}
+                    </span>
+                    <span
+                      className={`mt-0.5 inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                        entry.status === 'submitted'
+                          ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                          : entry.status === 'working'
+                            ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
                       }`}
                     >
-                      {chosen && (
-                        <div className="flex justify-center">
-                          <span
-                            className={`inline-block h-5 w-5 rounded-full ${selectionTone.dotClassName}`}
-                            aria-label={`Selected${isCorrect ? ', correct' : isIncorrect ? ', incorrect' : ''}`}
-                          />
-                        </div>
-                      )}
-                    </td>
-                  )
-                })}
+                      {getResponseProgressStatusLabel(entry.status)}
+                    </span>
+                    {annotation.starred && <span className="ml-1 text-yellow-400">★</span>}
+                    {annotation.flagged && <span className="ml-1 text-red-500">🚩</span>}
+                  </td>
+                  {options.map((opt) => {
+                    const chosen = selectedOptionIds.includes(opt.id)
+                    const selectionTone = getMcqSelectionTone({
+                      isPoll,
+                      isCorrect,
+                      isIncorrect,
+                    })
+                    return (
+                      <td
+                        key={opt.id}
+                        className={`px-3 py-2 text-center align-middle ${
+                          chosen ? selectionTone.cellClassName : ''
+                        }`}
+                      >
+                        {chosen && (
+                          <div className="flex justify-center">
+                            <span
+                              className={`inline-block h-5 w-5 rounded-full ${selectionTone.dotClassName}`}
+                              aria-label={`Selected${isCorrect ? ', correct' : isIncorrect ? ', incorrect' : ''}`}
+                            />
+                          </div>
+                        )}
+                      </td>
+                    )
+                  })}
+                </tr>
+              )
+            })}
+            {progress.length === 0 && (
+              <tr>
+                <td
+                  colSpan={options.length + 1}
+                  className="py-6 text-center text-sm text-slate-400 dark:text-slate-500 italic"
+                >
+                  No responses yet.
+                </td>
               </tr>
-            )
-          })}
-          {progress.length === 0 && (
-            <tr>
-              <td
-                colSpan={options.length + 1}
-                className="py-4 text-center text-sm text-gray-400"
-              >
-                No responses yet.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -275,9 +287,12 @@ function FreeResponseList({
   const [dragOverResponseId, setDragOverResponseId] = useState<string | null>(null)
   const dragStartOrderRef = useRef<string[] | null>(null)
   const normalizedOrderOverrides = normalizeOrderOverrides(orderOverrides)
-  // Apply order overrides: put overridden IDs first in the given order, then any remaining.
   const overrideSet = new Set(normalizedOrderOverrides)
-  const progressByResponseId = new Map(progress.filter((entry) => entry.responseId).map((entry) => [entry.responseId as string, entry]))
+  const progressByResponseId = new Map(
+    progress
+      .filter((entry) => entry.responseId)
+      .map((entry) => [entry.responseId as string, entry]),
+  )
   const submittedResponses = [
     ...normalizedOrderOverrides.map((id) => responses.find((r) => r.id === id)).filter(Boolean),
     ...responses.filter((r) => !overrideSet.has(r.id)),
@@ -323,7 +338,12 @@ function FreeResponseList({
   const displayItemsById = new Map(displayItems.map((item) => [item.id, item]))
   const [displayOrderIds, setDisplayOrderIds] = useState<string[]>(displayItemIds)
   const activeReactionSummaryByResponseId = new Map<string, Record<string, number>>(
-    (activeReveal?.sharedResponses ?? []).map((sharedResponse: QuestionReveal['sharedResponses'][number]) => [sharedResponse.id, sharedResponse.reactions]),
+    (activeReveal?.sharedResponses ?? []).map(
+      (sharedResponse: QuestionReveal['sharedResponses'][number]) => [
+        sharedResponse.id,
+        sharedResponse.reactions,
+      ],
+    ),
   )
 
   useEffect(() => {
@@ -364,7 +384,9 @@ function FreeResponseList({
               event.preventDefault()
               if (draggedResponseId !== null && draggedResponseId !== item.id) {
                 const reorderedIds = reorderResponseIds(displayOrderIds, draggedResponseId, item.id)
-                setDisplayOrderIds((current) => (areIdsEqual(current, reorderedIds) ? current : reorderedIds))
+                setDisplayOrderIds((current) =>
+                  areIdsEqual(current, reorderedIds) ? current : reorderedIds,
+                )
                 setDragOverResponseId(item.id)
               }
             }}
@@ -381,20 +403,40 @@ function FreeResponseList({
               response={item.response}
               annotation={item.annotation}
               answerText={item.answerText}
-              reactionSummary={item.submittedResponseId !== null ? activeReactionSummaryByResponseId.get(item.submittedResponseId) : undefined}
+              reactionSummary={
+                item.submittedResponseId !== null
+                  ? activeReactionSummaryByResponseId.get(item.submittedResponseId)
+                  : undefined
+              }
               status={item.status}
               onAnnotate={(patch) => {
                 if (item.submittedResponseId !== null) {
                   onAnnotate(item.submittedResponseId, patch)
                 }
               }}
-              onShare={item.submittedResponseId !== null && onShareResponse ? () => onShareResponse(item.submittedResponseId) : undefined}
-              shareLabel={item.submittedResponseId !== null && activeSharedResponseId === item.submittedResponseId ? 'Stop sharing' : 'Share'}
-              shareActive={item.submittedResponseId !== null && activeSharedResponseId === item.submittedResponseId}
+              onShare={
+                item.submittedResponseId !== null && onShareResponse
+                  ? () => onShareResponse(item.submittedResponseId)
+                  : undefined
+              }
+              shareLabel={
+                item.submittedResponseId !== null &&
+                activeSharedResponseId === item.submittedResponseId
+                  ? 'Stop sharing'
+                  : 'Share'
+              }
+              shareActive={
+                item.submittedResponseId !== null &&
+                activeSharedResponseId === item.submittedResponseId
+              }
               draggable
               isDragging={false}
               hideWhileDragging={hiddenDraggedResponseId === item.id}
-              isDragTarget={draggedResponseId !== null && dragOverResponseId === item.id && draggedResponseId !== item.id}
+              isDragTarget={
+                draggedResponseId !== null &&
+                dragOverResponseId === item.id &&
+                draggedResponseId !== item.id
+              }
               onDragStart={() => {
                 dragStartOrderRef.current = [...displayOrderIds]
                 setDraggedResponseId(item.id)
@@ -410,7 +452,9 @@ function FreeResponseList({
                 clearDragState()
               }}
               onMoveUp={idx > 0 ? () => moveItem(idx, idx - 1) : undefined}
-              onMoveDown={idx < displayOrderIds.length - 1 ? () => moveItem(idx, idx + 1) : undefined}
+              onMoveDown={
+                idx < displayOrderIds.length - 1 ? () => moveItem(idx, idx + 1) : undefined
+              }
             />
           </div>
         )
@@ -422,7 +466,9 @@ function FreeResponseList({
           onDragOver={(event) => {
             event.preventDefault()
             const reorderedIds = moveResponseIdToEnd(displayOrderIds, draggedResponseId)
-            setDisplayOrderIds((current) => (areIdsEqual(current, reorderedIds) ? current : reorderedIds))
+            setDisplayOrderIds((current) =>
+              areIdsEqual(current, reorderedIds) ? current : reorderedIds,
+            )
             setDragOverResponseId('__end__')
           }}
           onDrop={(event) => {
@@ -438,7 +484,7 @@ function FreeResponseList({
         />
       )}
       {displayItems.length === 0 && (
-        <p className="text-sm text-gray-400 italic">No responses yet.</p>
+        <p className="text-sm text-slate-400 dark:text-slate-500 italic">No responses yet.</p>
       )}
     </div>
   )

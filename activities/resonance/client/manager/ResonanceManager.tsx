@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import type { InstructorAnnotation, Question } from '../../shared/types.js'
@@ -154,6 +154,22 @@ export function isAllQuestionsSelected(
 
 export function shouldShowQuestionListActivationControls(questionCount: number): boolean {
   return questionCount > 0
+}
+
+export function handleQuestionListItemKeyDown(
+  event: Pick<ReactKeyboardEvent<HTMLElement>, 'key' | 'preventDefault' | 'target' | 'currentTarget'>,
+  onActivate: () => void,
+): void {
+  if (event.key !== 'Enter' && event.key !== ' ') {
+    return
+  }
+
+  if (event.target !== event.currentTarget) {
+    return
+  }
+
+  event.preventDefault()
+  onActivate()
 }
 
 // ---------------------------------------------------------------------------
@@ -383,12 +399,16 @@ export default function ResonanceManager() {
   // ---------------------------------------------------------------------------
 
   if (!sessionId) {
-    return <div className="p-6 text-gray-500">No active session.</div>
+    return (
+      <div className="flex items-center justify-center p-8 text-slate-500 dark:text-slate-400">
+        No active session.
+      </div>
+    )
   }
 
   if (isResolvingPasscode) {
     return (
-      <div className="p-6 text-gray-500">
+      <div className="flex items-center justify-center p-8 text-slate-500 dark:text-slate-400">
         Loading instructor session…
       </div>
     )
@@ -396,18 +416,26 @@ export default function ResonanceManager() {
 
   if (passcode === null) {
     return (
-      <div className="p-6 text-gray-500">
+      <div className="flex items-center justify-center p-8 text-slate-500 dark:text-slate-400">
         Instructor passcode not found. Try re-entering from the session creation link.
       </div>
     )
   }
 
   if (loading && snapshot === null) {
-    return <div className="p-6 text-gray-400">Loading session…</div>
+    return (
+      <div className="flex items-center justify-center p-8 text-slate-400 dark:text-slate-500">
+        Loading session…
+      </div>
+    )
   }
 
   if (error !== null && snapshot === null) {
-    return <div className="p-6 text-red-600">{error}</div>
+    return (
+      <div className="flex items-center justify-center p-8 text-red-600 dark:text-red-400">
+        {error}
+      </div>
+    )
   }
 
   if (snapshot === null) return null
@@ -468,32 +496,34 @@ export default function ResonanceManager() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-base font-semibold text-gray-900">Resonance</h1>
-          <span className="text-xs text-gray-400 font-mono">{sessionId.slice(0, 8)}</span>
-          <span className="text-xs text-gray-500">{students.length} student{students.length !== 1 ? 's' : ''}</span>
+          <h1 className="text-base font-semibold text-slate-900 dark:text-slate-100">Resonance</h1>
+          <span className="text-xs text-slate-400 dark:text-slate-500 font-mono">{sessionId.slice(0, 8)}</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {students.length} student{students.length !== 1 ? 's' : ''}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           {liveCountdown !== null && activeQuestionIds.length > 0 && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-right">
-              <p className="text-[10px] uppercase tracking-wide text-amber-700">Time left</p>
-              <p className="text-sm font-semibold text-amber-900">{liveCountdown}</p>
+            <div className="rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 text-right">
+              <p className="text-[10px] uppercase tracking-wide text-amber-700 dark:text-amber-400">Time left</p>
+              <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">{liveCountdown}</p>
             </div>
           )}
           {error !== null && (
-            <span className="text-xs text-amber-600">{error}</span>
+            <span className="text-xs text-amber-600 dark:text-amber-400">{error}</span>
           )}
         </div>
       </header>
 
       <div className="flex h-[calc(100vh-57px)]">
         {/* Left panel: question list */}
-        <aside className="w-64 shrink-0 bg-white border-r border-gray-200 flex flex-col overflow-y-auto">
+        <aside className="w-64 shrink-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 flex flex-col overflow-y-auto">
           <div className="p-3 space-y-1">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
               Build
             </p>
             <div className="pb-3">
@@ -502,10 +532,10 @@ export default function ResonanceManager() {
                 aria-expanded={isAddQuestionOpen}
                 aria-controls="resonance-add-question-builder"
                 onClick={() => setIsAddQuestionOpen((current) => !current)}
-                className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2.5 py-2 text-left text-xs font-medium text-gray-700 hover:border-gray-300 hover:bg-white"
+                className="flex w-full items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-white dark:hover:bg-slate-700"
               >
                 <span>{isAddQuestionOpen ? 'Hide question builder' : 'Add question'}</span>
-                <span className="text-sm text-gray-400">{isAddQuestionOpen ? '▴' : '▾'}</span>
+                <span className="text-sm text-slate-400 dark:text-slate-500">{isAddQuestionOpen ? '▴' : '▾'}</span>
               </button>
               {isAddQuestionOpen && (
                 <div id="resonance-add-question-builder" className="mt-2">
@@ -521,12 +551,12 @@ export default function ResonanceManager() {
               )}
             </div>
 
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 border-t border-gray-200 pt-3">
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2 border-t border-slate-200 dark:border-slate-700 pt-3">
               Questions
             </p>
 
             {questions.length === 0 && (
-              <p className="text-xs text-gray-400 italic">No questions yet.</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 italic">No questions yet.</p>
             )}
 
             {shouldShowQuestionListActivationControls(questions.length) && (
@@ -534,10 +564,10 @@ export default function ResonanceManager() {
                 {questions.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => setActivationSelectionIds(
-                      allQuestionsSelected ? [] : questionIds,
-                    )}
-                    className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
+                    onClick={() =>
+                      setActivationSelectionIds(allQuestionsSelected ? [] : questionIds)
+                    }
+                    className="rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
                   >
                     {allQuestionsSelected ? 'Select none' : 'Select all'}
                   </button>
@@ -546,14 +576,14 @@ export default function ResonanceManager() {
                   type="button"
                   onClick={() => activateQuestions(resolvedActivationSelectionIds)}
                   disabled={resolvedActivationSelectionIds.length === 0}
-                  className="rounded bg-blue-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Activate
                 </button>
                 <button
                   type="button"
                   onClick={() => activateQuestion(null)}
-                  className="rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
+                  className="rounded-lg border border-slate-300 dark:border-slate-600 px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
                 >
                   Stop
                 </button>
@@ -572,14 +602,18 @@ export default function ResonanceManager() {
               return (
                 <div
                   key={q.id}
-                  className={`rounded-md border px-2 py-2 cursor-pointer text-sm transition-colors ${
-                    isViewing ? 'border-blue-300 bg-blue-50' : 'border-gray-100 hover:border-gray-300'
+                  className={`rounded-xl border px-2.5 py-2 cursor-pointer text-sm transition-colors ${
+                    isViewing
+                      ? 'border-indigo-300 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20'
+                      : 'border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-500'
                   }`}
                   onClick={() => setActiveTab(q.id)}
                   role="button"
                   tabIndex={0}
                   aria-pressed={isViewing}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveTab(q.id) }}
+                  onKeyDown={(e) => {
+                    handleQuestionListItemKeyDown(e, () => setActiveTab(q.id))
+                  }}
                 >
                   <div className="flex items-start justify-between gap-1">
                     <div className="flex items-start gap-2 flex-1 min-w-0">
@@ -592,7 +626,7 @@ export default function ResonanceManager() {
                         }}
                         onClick={(e) => e.stopPropagation()}
                         aria-label={`Select ${q.text} for activation`}
-                        className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
                       />
                       <div className="min-w-0 flex-1">
                         {isStemExpanded ? (
@@ -601,7 +635,7 @@ export default function ResonanceManager() {
                               ref={(element) => {
                                 questionStemRefs.current[q.id] = element
                               }}
-                              className="text-xs text-gray-700 whitespace-normal break-words"
+                              className="text-xs text-slate-700 dark:text-slate-300 whitespace-normal break-words"
                             >
                               {q.text}
                             </p>
@@ -614,7 +648,7 @@ export default function ResonanceManager() {
                                   e.stopPropagation()
                                   toggleQuestionStemExpansion(q.id)
                                 }}
-                                className="inline-flex items-center text-[10px] font-medium text-blue-700 hover:text-blue-800"
+                                className="inline-flex items-center text-[10px] font-medium text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
                               >
                                 <svg
                                   aria-hidden="true"
@@ -637,7 +671,7 @@ export default function ResonanceManager() {
                               ref={(element) => {
                                 questionStemRefs.current[q.id] = element
                               }}
-                              className="flex-1 overflow-hidden whitespace-nowrap text-clip text-xs text-gray-700"
+                              className="flex-1 overflow-hidden whitespace-nowrap text-clip text-xs text-slate-700 dark:text-slate-300"
                             >
                               {q.text}
                             </p>
@@ -650,7 +684,7 @@ export default function ResonanceManager() {
                                   e.stopPropagation()
                                   toggleQuestionStemExpansion(q.id)
                                 }}
-                                className="shrink-0 text-[10px] font-medium leading-none text-blue-700 hover:text-blue-800"
+                                className="shrink-0 text-[10px] font-medium leading-none text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
                               >
                                 ...
                               </button>
@@ -660,27 +694,37 @@ export default function ResonanceManager() {
                       </div>
                     </div>
                     {isActive && (
-                      <span className="text-[10px] bg-blue-500 text-white rounded px-1 shrink-0">Live</span>
+                      <span className="text-[10px] bg-indigo-500 text-white rounded-md px-1 shrink-0">
+                        Live
+                      </span>
                     )}
                     {hasReveal && !isActive && (
-                      <span className="text-[10px] text-gray-400 shrink-0">Shared</span>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
+                        Shared
+                      </span>
                     )}
                   </div>
                   <div className="flex items-center justify-between mt-1">
-                    <span className="text-[10px] text-gray-400">{responseCount} resp.</span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                      {responseCount} resp.
+                    </span>
                     <div className="flex gap-1">
                       <button
                         type="button"
-                        aria-label={isSelectedForActivation ? 'Remove question from selected activation set' : 'Add question to selected activation set'}
+                        aria-label={
+                          isSelectedForActivation
+                            ? 'Remove question from selected activation set'
+                            : 'Add question to selected activation set'
+                        }
                         aria-pressed={isSelectedForActivation}
                         onClick={(e) => {
                           e.stopPropagation()
                           toggleActivationSelection(q.id)
                         }}
-                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                        className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${
                           isSelectedForActivation
-                            ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-900/50'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
                         }`}
                       >
                         {isSelectedForActivation ? 'Selected' : 'Select'}
@@ -690,31 +734,36 @@ export default function ResonanceManager() {
                 </div>
               )
             })}
-
           </div>
         </aside>
 
         {/* Right panel: response viewer */}
-        <main className="flex flex-1 flex-col overflow-y-auto p-4 gap-4">
+        <main className="flex flex-1 flex-col overflow-y-auto p-5 gap-4">
           {viewingQuestion === null ? (
-            <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+            <div className="flex items-center justify-center h-full text-slate-400 dark:text-slate-500 text-sm">
               Select a question from the left panel.
             </div>
           ) : (
             <>
               {/* Question header */}
-              <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 space-y-1">
-                <p className="text-xs text-gray-500 uppercase tracking-wide">
+              <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 px-5 py-4 space-y-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                   {viewingQuestion.type === 'free-response' ? 'Free response' : 'Multiple choice'}
                   {activeQuestionIdSet.has(viewingQuestion.id) && (
-                    <span className="ml-2 text-blue-600 font-medium">● Live</span>
+                    <span className="ml-2 text-indigo-600 dark:text-indigo-400 font-medium">
+                      ● Live
+                    </span>
                   )}
                 </p>
-                <p className="text-base font-medium text-gray-900">{viewingQuestion.text}</p>
-                <p className="text-xs text-gray-400">
+                <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                  {viewingQuestion.text}
+                </p>
+                <p className="text-xs text-slate-400 dark:text-slate-500">
                   {viewingResponses.length} of {students.length} responded
                   {isViewingQuestionShared && (
-                    <span className="ml-2 text-green-600">● Results shared</span>
+                    <span className="ml-2 text-emerald-600 dark:text-emerald-400">
+                      ● Results shared
+                    </span>
                   )}
                 </p>
               </div>
@@ -732,10 +781,12 @@ export default function ResonanceManager() {
                       shareResults(
                         viewingQuestion.id,
                         viewingResponses.map((response) => response.id),
-                        mcqCorrectOptionIds !== undefined && mcqCorrectOptionIds.length > 0 ? mcqCorrectOptionIds : null,
+                        mcqCorrectOptionIds !== undefined && mcqCorrectOptionIds.length > 0
+                          ? mcqCorrectOptionIds
+                          : null,
                       )
                     }}
-                    className="rounded border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50"
+                    className="rounded-xl border border-indigo-300 dark:border-indigo-600 px-3 py-1.5 text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
                   >
                     {isViewingQuestionShared ? 'Stop sharing' : 'Share'}
                   </button>

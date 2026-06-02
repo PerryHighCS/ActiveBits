@@ -17,11 +17,6 @@ interface Props {
   sendMessage?(type: string, payload: unknown): boolean
 }
 
-/**
- * Renders the active question and the appropriate answer input.
- * Submission goes to POST /api/resonance/:sessionId/submit-answer.
- * Phase 7 will add a WebSocket path alongside this REST fallback.
- */
 const DRAFT_PUSH_DELAY_MS = 1500
 
 function isSameAnswer(left: AnswerPayload | null, right: AnswerPayload | null): boolean {
@@ -133,9 +128,13 @@ export default function QuestionView({
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-base font-medium text-gray-900">{question.text}</p>
+    <div className="space-y-5">
+      {/* Question text */}
+      <p className="text-xl font-bold text-slate-900 dark:text-slate-100 leading-snug">
+        {question.text}
+      </p>
 
+      {/* Answer input */}
       {question.type === 'free-response' ? (
         <FreeResponseInput
           value={draftAnswer?.type === 'free-response' ? draftAnswer.text : ''}
@@ -166,13 +165,13 @@ export default function QuestionView({
       )}
 
       {error !== null && (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-sm text-red-600 dark:text-red-400" role="alert">
           {error}
         </p>
       )}
 
       {disabled && (
-        <p className="text-sm text-amber-700" role="status">
+        <p className="text-sm text-amber-700 dark:text-amber-400" role="status">
           Time is up for this activity.
         </p>
       )}

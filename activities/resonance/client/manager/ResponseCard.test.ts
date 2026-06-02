@@ -2,9 +2,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import ResponseCard from './ResponseCard.js'
+import ResponseCard, { getResponseProgressStatusLabel } from './ResponseCard.js'
 
 ;(globalThis as { React?: typeof React }).React = React
+
+void test('getResponseProgressStatusLabel keeps instructor status copy consistent', () => {
+  assert.equal(getResponseProgressStatusLabel('submitted'), 'Submitted')
+  assert.equal(getResponseProgressStatusLabel('working'), 'Still working')
+  assert.equal(getResponseProgressStatusLabel('idle'), 'Not started')
+})
 
 void test('ResponseCard renders drag, star, flag, and emoji controls in the leading action stack order', () => {
   const markup = renderToStaticMarkup(
@@ -51,7 +57,7 @@ void test('ResponseCard renders drag, star, flag, and emoji controls in the lead
     'Expected the full response card to be draggable',
   )
   assert.ok(
-    markup.includes('self-stretch rounded-md'),
+    markup.includes('self-stretch rounded-lg'),
     'Expected drag handle to render as a full-height leading handle',
   )
 })

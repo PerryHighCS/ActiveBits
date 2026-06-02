@@ -18,6 +18,7 @@ void test('MCQInput renders checkbox controls and multi-select submit copy', () 
 
   assert.match(html, /type="checkbox"/)
   assert.match(html, /Submit answers/)
+  assert.match(html, /focus-within:ring-indigo-100/)
 })
 
 void test('toggleMcqSelection adds and removes options for multi-select questions', () => {

@@ -56,7 +56,7 @@ function ReactionSummary({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-400">
+    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
       {canReact && onReact !== undefined && (
         <div className="relative">
           <button
@@ -67,8 +67,8 @@ function ReactionSummary({
             onClick={() => setIsPickerOpen((current) => !current)}
             className={`rounded-full border px-2 py-1 text-sm transition ${
               viewerReaction !== null
-                ? 'border-blue-500 bg-blue-600 text-white'
-                : 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100'
+                ? 'border-indigo-500 bg-indigo-600 text-white'
+                : 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:border-indigo-300 dark:hover:border-indigo-600'
             }`}
           >
             {viewerReaction ?? '☺'}
@@ -77,7 +77,7 @@ function ReactionSummary({
             <ul
               role="listbox"
               aria-label="Choose reaction emoji"
-              className="absolute left-0 top-full z-10 mt-1 flex w-40 flex-wrap gap-1 rounded border border-gray-200 bg-white p-1 shadow-md"
+              className="absolute left-0 top-full z-10 mt-1 flex w-40 flex-wrap gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 shadow-lg"
             >
               {STUDENT_REACTION_EMOJIS.map((entry) => (
                 <li key={entry.emoji}>
@@ -86,8 +86,10 @@ function ReactionSummary({
                     role="option"
                     aria-label={`React with ${entry.label}`}
                     aria-selected={viewerReaction === entry.emoji}
-                    className={`rounded px-1.5 py-1 text-base hover:bg-gray-100 ${
-                      viewerReaction === entry.emoji ? 'bg-blue-50 text-blue-700' : ''
+                    className={`rounded-lg px-1.5 py-1 text-base hover:bg-slate-100 dark:hover:bg-slate-700 ${
+                      viewerReaction === entry.emoji
+                        ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
+                        : ''
                     }`}
                     onClick={() => {
                       onReact(entry.emoji)
@@ -106,7 +108,9 @@ function ReactionSummary({
         <span
           key={emoji}
           className={`inline-flex items-center rounded-full border px-2 py-1 ${
-            viewerReaction === emoji ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-gray-200 bg-gray-50'
+            viewerReaction === emoji
+              ? 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300'
+              : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
           }`}
         >
           {emoji} {count}
@@ -136,13 +140,19 @@ function ResponseCard({
   const viewerReaction = response.viewerReaction ?? null
 
   return (
-    <div className={`rounded-lg border bg-white px-4 py-3 space-y-2 ${response.isOwnResponse ? 'border-blue-300 bg-blue-50/40' : 'border-gray-200'}`}>
+    <div
+      className={`rounded-xl border px-4 py-3 space-y-2 ${
+        response.isOwnResponse
+          ? 'border-indigo-300 dark:border-indigo-600 bg-indigo-50/50 dark:bg-indigo-900/20'
+          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+      }`}
+    >
       {response.isOwnResponse && (
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
           Your response was shared
         </p>
       )}
-      <p className="text-sm text-gray-800">
+      <p className="text-sm text-slate-800 dark:text-slate-200">
         {instructorEmoji !== null && (
           <span className="mr-1" aria-label="instructor highlight">
             {instructorEmoji}
@@ -154,11 +164,13 @@ function ResponseCard({
         reactions={reactions}
         viewerReaction={viewerReaction}
         canReact={canReact}
-        onReact={canReact
-          ? (emoji) => {
-              onReactToSharedResponse?.(response.questionId, response.id, emoji)
-            }
-          : undefined}
+        onReact={
+          canReact
+            ? (emoji) => {
+                onReactToSharedResponse?.(response.questionId, response.id, emoji)
+              }
+            : undefined
+        }
       />
     </div>
   )
@@ -175,7 +187,6 @@ function RevealSection({
 }) {
   const { sharedResponses, correctOptionIds, viewerResponse } = reveal
 
-  // For MCQ poll mode (no correct answer), compute percentages.
   const isPoll =
     question?.type === 'multiple-choice' && (correctOptionIds === null || correctOptionIds.length === 0)
 
@@ -210,22 +221,30 @@ function RevealSection({
     <div className="space-y-2">
       {viewerResponse !== null && viewerResponse !== undefined && (
         <div
-          className={`rounded-lg border px-4 py-3 space-y-1 ${
+          className={`rounded-xl border px-4 py-3 space-y-1 ${
             viewerIsCorrect === true
-              ? 'border-green-300 bg-green-50'
+              ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20'
               : viewerIsCorrect === false
-                ? 'border-red-300 bg-red-50'
+                ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20'
                 : viewerResponse.isShared
-                  ? 'border-blue-300 bg-blue-50'
-                  : 'border-sky-200 bg-sky-50'
+                  ? 'border-indigo-300 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20'
+                  : 'border-indigo-200 dark:border-indigo-700 bg-indigo-50/50 dark:bg-indigo-900/10'
           }`}
         >
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+          <p
+            className={`text-[11px] font-semibold uppercase tracking-wide ${
+              viewerIsCorrect === true
+                ? 'text-emerald-700 dark:text-emerald-400'
+                : viewerIsCorrect === false
+                  ? 'text-red-700 dark:text-red-400'
+                  : 'text-indigo-700 dark:text-indigo-400'
+            }`}
+          >
             {question?.type === 'multiple-choice' && viewerIsCorrect !== null
               ? `Your response: ${viewerIsCorrect ? 'Correct' : 'Incorrect'}`
               : 'Your response'}
           </p>
-          <p className="text-sm text-sky-950">
+          <p className="text-sm text-slate-800 dark:text-slate-200">
             {viewerResponse.instructorEmoji !== null && (
               <span className="mr-1" aria-label="instructor highlight">
                 {viewerResponse.instructorEmoji}
@@ -236,13 +255,15 @@ function RevealSection({
               : getOptionTextList(question, viewerResponse.answer.selectedOptionIds)}
           </p>
           {viewerResponse.isShared && question?.type === 'free-response' && (
-            <p className="text-xs text-sky-700">This is the response currently being shared.</p>
+            <p className="text-xs text-indigo-600 dark:text-indigo-400">
+              This is the response currently being shared.
+            </p>
           )}
         </div>
       )}
 
       {shouldRenderMcqBreakdown && question.type === 'multiple-choice' && (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {question.options.map((opt) => {
             const count = mcqCounts.get(opt.id) ?? 0
             const total = sharedResponses.length
@@ -253,43 +274,53 @@ function RevealSection({
             const isCorrectOption = correctOptionIds?.includes(opt.id) ?? false
             const baseRowClass = isPoll
               ? isViewerSelection
-                ? 'border-blue-300 bg-blue-50'
-                : 'border-transparent'
+                ? 'border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20'
+                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
               : isCorrectOption
-                ? 'border-green-300 bg-green-50'
-                : 'border-red-200 bg-red-50/70'
-            const rowClass = `${baseRowClass} ${isViewerSelection ? 'ring-2 ring-blue-400 ring-offset-2 ring-offset-white' : ''}`.trim()
-            const meterClass = isPoll ? 'bg-blue-500' : isCorrectOption ? 'bg-green-500' : 'bg-red-400'
+                ? 'border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20'
+                : 'border-red-200 dark:border-red-800 bg-red-50/70 dark:bg-red-900/10'
+            const rowClass =
+              `${baseRowClass} ${isViewerSelection ? 'ring-2 ring-indigo-400 dark:ring-indigo-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-900' : ''}`.trim()
+            const meterClass = isPoll
+              ? 'bg-indigo-500'
+              : isCorrectOption
+                ? 'bg-emerald-500'
+                : 'bg-red-400'
             return (
               <div
                 key={opt.id}
+                data-option-id={opt.id}
                 className={`${
                   isViewerOnlyMcqReveal
                     ? 'flex items-center justify-between gap-3'
                     : 'grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-2'
-                } rounded-lg border px-3 py-2 text-sm ${rowClass}`}
+                } rounded-xl border px-3 py-2.5 text-sm ${rowClass}`}
               >
-                <span className="text-gray-700 break-words">{opt.text}</span>
+                <span className="text-slate-700 dark:text-slate-300 break-words">{opt.text}</span>
                 {isViewerOnlyMcqReveal ? (
-                  <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${
-                    isCorrectOption
-                      ? 'bg-green-100 text-green-800'
-                      : isViewerSelection
-                        ? 'bg-red-100 text-red-800'
-                        : 'bg-gray-100 text-gray-500'
-                  }`}>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${
+                      isCorrectOption
+                        ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300'
+                        : isViewerSelection
+                          ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'
+                          : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
                     {isCorrectOption ? 'Correct' : isViewerSelection ? 'Your choice' : 'Other option'}
                   </span>
                 ) : (
                   <>
-                    <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                    <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-2.5 overflow-hidden">
                       <div
-                        className={`h-2 rounded-full ${meterClass}`}
+                        className={`h-2.5 rounded-full transition-all ${meterClass}`}
                         style={{ width: `${pct}%` }}
                         role="presentation"
                       />
                     </div>
-                    <span className="text-xs text-gray-500 w-8 text-right">{pct}%</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400 w-8 text-right tabular-nums">
+                      {pct}%
+                    </span>
                   </>
                 )}
               </div>
@@ -298,7 +329,6 @@ function RevealSection({
         </div>
       )}
 
-      {/* Shared responses */}
       {sharedResponses.length > 0 && question?.type !== 'multiple-choice' && (
         <div className="space-y-2">
           {sharedResponses.map((resp) => (
@@ -313,7 +343,7 @@ function RevealSection({
       )}
 
       {sharedResponses.length === 0 && question?.type !== 'multiple-choice' && (
-        <p className="text-sm text-gray-400 italic">No responses shared yet.</p>
+        <p className="text-sm text-slate-400 dark:text-slate-500 italic">No responses shared yet.</p>
       )}
     </div>
   )
@@ -328,9 +358,14 @@ function ReviewedResponseSection({ reviewedResponses }: { reviewedResponses: Rev
     <section aria-label="Instructor feedback" className="space-y-3">
       <div className="space-y-3">
         {reviewedResponses.map((response) => (
-          <div key={`${response.question.id}:${response.submittedAt}`} className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 space-y-1">
-            <p className="text-sm font-medium text-sky-900">{response.question.text}</p>
-            <p className="text-sm text-sky-950">
+          <div
+            key={`${response.question.id}:${response.submittedAt}`}
+            className="rounded-xl border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 px-4 py-3 space-y-1"
+          >
+            <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+              {response.question.text}
+            </p>
+            <p className="text-sm text-slate-700 dark:text-slate-300">
               <span className="mr-1" aria-label="instructor highlight">
                 {response.instructorEmoji}
               </span>
@@ -364,13 +399,15 @@ export default function SharedResponseFeed({
     <div className="space-y-6">
       <ReviewedResponseSection reviewedResponses={reviewedResponses} />
       {orderedReveals.length > 0 && (
-        <section aria-label="Shared responses" className="space-y-4">
+        <section aria-label="Shared responses" className="space-y-5">
           {orderedReveals.map((reveal) => {
             const question = revealedQuestions.find((q) => q.id === reveal.questionId)
             return (
-              <div key={reveal.questionId} className="space-y-2">
+              <div key={reveal.questionId} className="space-y-2.5">
                 {question !== undefined && (
-                  <p className="text-sm font-medium text-gray-700">{question.text}</p>
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                    {question.text}
+                  </p>
                 )}
                 <RevealSection
                   reveal={reveal}

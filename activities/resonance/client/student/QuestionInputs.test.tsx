@@ -201,7 +201,7 @@ void test('QuestionView submits over websocket first when sendMessage is availab
 
     const textarea = rendered.getByLabelText(/your answer/i)
     fireEvent.change(textarea, { target: { value: 'Fast path answer' } })
-    fireEvent.click(rendered.getByRole('button', { name: 'Submit answer' }))
+    fireEvent.click(rendered.getByRole('button', { name: /submit answer/i }))
 
     await waitFor(() => {
       assert.equal(wsMessages.length > 0, true)

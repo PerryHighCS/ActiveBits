@@ -63,19 +63,19 @@ void test('reorder helpers tolerate unexpected runtime shapes upstream', () => {
   )
 })
 
-void test('getMcqSelectionTone uses green for correct answers and red for incorrect answers', () => {
+void test('getMcqSelectionTone uses emerald for correct answers, red for incorrect, and indigo for polls', () => {
   assert.deepEqual(
     getMcqSelectionTone({ isPoll: false, isCorrect: true, isIncorrect: false }),
     {
-      cellClassName: 'bg-green-50',
-      dotClassName: 'bg-green-600',
+      cellClassName: 'bg-emerald-50 dark:bg-emerald-900/20',
+      dotClassName: 'bg-emerald-600',
     },
   )
 
   assert.deepEqual(
     getMcqSelectionTone({ isPoll: false, isCorrect: false, isIncorrect: true }),
     {
-      cellClassName: 'bg-red-50',
+      cellClassName: 'bg-red-50/70 dark:bg-red-900/10',
       dotClassName: 'bg-red-500',
     },
   )
@@ -83,8 +83,8 @@ void test('getMcqSelectionTone uses green for correct answers and red for incorr
   assert.deepEqual(
     getMcqSelectionTone({ isPoll: true, isCorrect: false, isIncorrect: false }),
     {
-      cellClassName: 'bg-sky-50',
-      dotClassName: 'bg-sky-500',
+      cellClassName: 'bg-indigo-50 dark:bg-indigo-900/20',
+      dotClassName: 'bg-indigo-500',
     },
   )
 })

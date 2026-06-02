@@ -3,6 +3,7 @@ import test from 'node:test'
 import { JSDOM } from 'jsdom'
 import { storeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
 import {
+  handleQuestionListItemKeyDown,
   isAllQuestionsSelected,
   isQuestionStemVisuallyTruncated,
   normalizeActivationSelection,
@@ -159,6 +160,61 @@ void test('shouldShowQuestionPanelActions only keeps share controls on multiple-
     }),
     false,
   )
+})
+
+void test('handleQuestionListItemKeyDown prevents default browser behavior for button-like keys', () => {
+  let activated = 0
+  let prevented = 0
+  const dom = new JSDOM('<!doctype html><html><body><div><input /></div></body></html>')
+  const container = dom.window.document.querySelector('div') as HTMLElement
+  const nestedControl = dom.window.document.querySelector('input') as HTMLElement
+
+  handleQuestionListItemKeyDown({
+    key: ' ',
+    target: container,
+    currentTarget: container,
+    preventDefault: () => {
+      prevented += 1
+    },
+  }, () => {
+    activated += 1
+  })
+
+  handleQuestionListItemKeyDown({
+    key: 'Enter',
+    target: container,
+    currentTarget: container,
+    preventDefault: () => {
+      prevented += 1
+    },
+  }, () => {
+    activated += 1
+  })
+
+  handleQuestionListItemKeyDown({
+    key: 'Tab',
+    target: container,
+    currentTarget: container,
+    preventDefault: () => {
+      prevented += 1
+    },
+  }, () => {
+    activated += 1
+  })
+
+  handleQuestionListItemKeyDown({
+    key: ' ',
+    target: nestedControl,
+    currentTarget: container,
+    preventDefault: () => {
+      prevented += 1
+    },
+  }, () => {
+    activated += 1
+  })
+
+  assert.equal(activated, 2)
+  assert.equal(prevented, 2)
 })
 
 void test('isQuestionStemVisuallyTruncated uses rendered overflow rather than stem length', () => {
