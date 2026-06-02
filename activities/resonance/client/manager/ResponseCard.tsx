@@ -77,9 +77,11 @@ export default function ResponseCard({
   return (
     <div
       draggable={draggable}
-      className={`flex items-start gap-3 rounded-lg border px-3 py-2 ${
-        shareActive ? 'border-blue-300 bg-blue-50/40' : 'border-gray-200 bg-white'
-      } ${draggable ? 'cursor-grab' : ''} ${isDragging ? 'scale-[1.01] opacity-60 shadow-lg' : ''} ${hideWhileDragging ? 'pointer-events-none opacity-0' : ''} ${isDragTarget ? 'ring-2 ring-blue-200 ring-offset-1' : ''} transition-[box-shadow,transform,opacity]`}
+      className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 ${
+        shareActive
+          ? 'border-indigo-300 dark:border-indigo-600 bg-indigo-50/40 dark:bg-indigo-900/20'
+          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+      } ${draggable ? 'cursor-grab' : ''} ${isDragging ? 'scale-[1.01] opacity-60 shadow-lg' : ''} ${hideWhileDragging ? 'pointer-events-none opacity-0' : ''} ${isDragTarget ? 'ring-2 ring-indigo-200 dark:ring-indigo-700 ring-offset-1' : ''} transition-[box-shadow,transform,opacity]`}
       onDragStart={(event) => {
         if (!draggable) {
           return
@@ -115,7 +117,7 @@ export default function ResponseCard({
           type="button"
           aria-label={`Drag to reorder response from ${response.studentName}`}
           tabIndex={-1}
-          className="self-stretch rounded-md border border-transparent px-1 text-lg leading-none text-gray-300 hover:border-gray-200 hover:bg-gray-50 hover:text-gray-500"
+          className="self-stretch rounded-lg border border-transparent px-1 text-lg leading-none text-slate-300 dark:text-slate-600 hover:border-slate-200 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-slate-500 dark:hover:text-slate-400"
         >
           <span className="flex h-full items-center">⋮⋮</span>
         </button>
@@ -128,10 +130,10 @@ export default function ResponseCard({
           aria-pressed={annotation.starred}
           onClick={() => onAnnotate({ starred: !annotation.starred })}
           disabled={status !== 'submitted'}
-          className={`rounded-md px-1.5 py-1 text-lg leading-none ${
+          className={`rounded-lg px-1.5 py-1 text-lg leading-none ${
             annotation.starred
-              ? 'bg-yellow-100 text-yellow-500'
-              : 'text-gray-300 hover:bg-gray-100'
+              ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-500'
+              : 'text-slate-300 dark:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700'
           } disabled:opacity-50`}
         >
           ★
@@ -143,10 +145,10 @@ export default function ResponseCard({
           aria-pressed={annotation.flagged}
           onClick={() => onAnnotate({ flagged: !annotation.flagged })}
           disabled={status !== 'submitted'}
-          className={`rounded-md px-1.5 py-1 text-sm leading-none ${
+          className={`rounded-lg px-1.5 py-1 text-sm leading-none ${
             annotation.flagged
-              ? 'bg-red-100 text-red-600 ring-1 ring-red-200'
-              : 'text-gray-300 hover:bg-gray-100'
+              ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 ring-1 ring-red-200 dark:ring-red-700'
+              : 'text-slate-300 dark:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700'
           } disabled:opacity-50`}
         >
           🚩
@@ -158,14 +160,14 @@ export default function ResponseCard({
             aria-label="Add emoji annotation"
             aria-haspopup="listbox"
             disabled={status !== 'submitted'}
-            className="rounded-md px-1.5 py-1 text-sm leading-none text-gray-400 hover:bg-gray-100 disabled:opacity-50"
+            className="rounded-lg px-1.5 py-1 text-sm leading-none text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50"
           >
             {annotation.emoji ?? '☺'}
           </button>
           <ul
             role="listbox"
             aria-label="Choose emoji"
-            className="absolute left-full top-0 z-10 ml-2 hidden w-32 flex-wrap gap-1 rounded border border-gray-200 bg-white p-1 shadow-md group-focus-within:flex"
+            className="absolute left-full top-0 z-10 ml-2 hidden w-32 flex-wrap gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-1.5 shadow-lg group-focus-within:flex"
           >
             <li>
               <button
@@ -173,7 +175,7 @@ export default function ResponseCard({
                 role="option"
                 aria-selected={annotation.emoji === null}
                 onClick={() => onAnnotate({ emoji: null })}
-                className="px-1 text-xs text-gray-400 hover:bg-gray-100 rounded"
+                className="px-1 text-xs text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
               >
                 none
               </button>
@@ -185,7 +187,7 @@ export default function ResponseCard({
                   role="option"
                   aria-selected={annotation.emoji === em.emoji}
                   onClick={() => onAnnotate({ emoji: em.emoji })}
-                  className="text-base hover:bg-gray-100 rounded px-0.5"
+                  className="text-base hover:bg-slate-100 dark:hover:bg-slate-700 rounded px-0.5"
                   aria-label={em.label}
                 >
                   {em.emoji}
@@ -194,36 +196,43 @@ export default function ResponseCard({
             ))}
           </ul>
         </div>
-
       </div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-3">
-          <p className="text-xs font-medium text-gray-500 truncate">{response.studentName}</p>
+          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 truncate">
+            {response.studentName}
+          </p>
           <span
-            className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+            className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0 ${
               status === 'submitted'
-                ? 'bg-green-100 text-green-700'
+                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
                 : status === 'working'
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'bg-gray-100 text-gray-600'
+                  ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                  : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
             }`}
           >
             {status === 'submitted' ? 'Submitted' : status === 'working' ? 'Still working' : 'Not started'}
           </span>
         </div>
-        <p className="text-sm text-gray-800 mt-0.5 whitespace-pre-wrap break-words">{answerText}</p>
+        <p className="text-sm text-slate-800 dark:text-slate-200 mt-0.5 whitespace-pre-wrap break-words">
+          {answerText}
+        </p>
         {reactionEntries.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-gray-500">
+          <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
             {reactionEntries.map(([emoji, count]) => (
-              <span key={emoji} className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-blue-700">
+              <span
+                key={emoji}
+                className="inline-flex items-center rounded-full border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 px-2 py-1 text-indigo-700 dark:text-indigo-300"
+              >
                 {emoji} {count}
               </span>
             ))}
           </div>
         )}
       </div>
+
       {/* Right-side actions */}
       <div className="flex items-center gap-1 shrink-0">
         {onShare !== undefined && (
@@ -232,10 +241,10 @@ export default function ResponseCard({
             aria-label={`${shareLabel} response from ${response.studentName}`}
             onClick={onShare}
             disabled={status !== 'submitted'}
-            className={`rounded border px-2 py-1 text-xs font-medium disabled:opacity-50 ${
+            className={`rounded-lg border px-2 py-1 text-xs font-medium disabled:opacity-50 transition-colors ${
               shareActive
-                ? 'border-blue-400 bg-blue-100 text-blue-800'
-                : 'border-blue-300 text-blue-700 hover:bg-blue-50'
+                ? 'border-indigo-400 dark:border-indigo-600 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-200'
+                : 'border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'
             }`}
           >
             {shareLabel}
@@ -248,7 +257,7 @@ export default function ResponseCard({
               aria-label="Move response up"
               onClick={onMoveUp}
               disabled={onMoveUp === undefined}
-              className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-30 leading-none"
+              className="text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 disabled:opacity-30 leading-none"
             >
               ▲
             </button>
@@ -257,7 +266,7 @@ export default function ResponseCard({
               aria-label="Move response down"
               onClick={onMoveDown}
               disabled={onMoveDown === undefined}
-              className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-30 leading-none"
+              className="text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 disabled:opacity-30 leading-none"
             >
               ▼
             </button>

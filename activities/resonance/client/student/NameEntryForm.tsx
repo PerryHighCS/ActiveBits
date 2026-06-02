@@ -48,21 +48,41 @@ export default function NameEntryForm({ sessionId, onRegistered }: Props) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-sm bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h1 className="text-xl font-bold text-gray-900 mb-1">Join Resonance</h1>
-        <p className="text-sm text-gray-500 mb-5">Enter your name to join the session.</p>
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
+      <div className="w-full max-w-xl bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700 p-10">
+        <div className="flex justify-center mb-6">
+          <div className="w-16 h-16 rounded-2xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center">
+            <svg
+              className="w-8 h-8 text-indigo-600 dark:text-indigo-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </div>
+        </div>
+
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100 text-center mb-1.5">
+          Join Resonance
+        </h1>
+        <p className="text-slate-500 dark:text-slate-400 text-center mb-8">
+          Enter your name to join the session
+        </p>
 
         <form
-          onSubmit={(e) => {
-            void handleSubmit(e)
-          }}
-          className="space-y-4"
+          onSubmit={(e) => { void handleSubmit(e) }}
+          className="space-y-5"
         >
           <div>
             <label
               htmlFor="resonance-student-name"
-              className="block text-sm font-medium text-gray-700 mb-1"
+              className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2"
             >
               Your name
             </label>
@@ -75,14 +95,14 @@ export default function NameEntryForm({ sessionId, onRegistered }: Props) {
               maxLength={80}
               autoComplete="name"
               autoFocus
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-400 px-4 py-3.5 text-base focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-900/40 transition-all"
               aria-describedby={error !== null ? 'resonance-name-error' : undefined}
               disabled={submitting}
             />
           </div>
 
           {error !== null && (
-            <p id="resonance-name-error" className="text-sm text-red-600" role="alert">
+            <p id="resonance-name-error" className="text-sm text-red-600 dark:text-red-400" role="alert">
               {error}
             </p>
           )}
@@ -92,9 +112,9 @@ export default function NameEntryForm({ sessionId, onRegistered }: Props) {
             disabled={!canSubmit}
             aria-busy={submitting}
             aria-disabled={!canSubmit}
-            className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-xl bg-indigo-600 px-4 py-3.5 text-base font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors shadow-sm"
           >
-            {submitting ? 'Joining…' : 'Join session'}
+            {submitting ? 'Joining…' : 'Join session →'}
           </button>
         </form>
       </div>

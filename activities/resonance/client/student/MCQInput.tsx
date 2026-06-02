@@ -58,36 +58,82 @@ export default function MCQInput({
 
   if (submitted && selected.length > 0) {
     return (
-      <p
-        className="text-sm text-gray-500 italic"
+      <div
+        className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 px-4 py-3 flex items-center gap-3"
         {...(announceSubmittedMessage ? { 'aria-live': 'polite' as const } : {})}
       >
-        {submittedMessage}
-      </p>
+        <svg
+          className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 13l4 4L19 7" />
+        </svg>
+        <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">{submittedMessage}</p>
+      </div>
     )
   }
 
+  const isMultiple = selectionMode === 'multiple'
+
   return (
     <form
-      onSubmit={(e) => {
-        void handleSubmit(e)
-      }}
-      className="space-y-3"
+      onSubmit={(e) => { void handleSubmit(e) }}
+      className="space-y-4"
     >
       <fieldset>
         <legend className="sr-only">
-          {selectionMode === 'multiple' ? 'Choose one or more answers' : 'Choose an answer'}
+          {isMultiple ? 'Choose one or more answers' : 'Choose an answer'}
         </legend>
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {options.map((option) => {
             const isSelected = selected.includes(option.id)
+            const isDisabled = submitting || submitted
+
             return (
               <label
                 key={option.id}
-                className={`flex items-start gap-3 rounded-lg border-2 px-4 py-3 cursor-pointer transition-colors ${
-                  isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
-                } ${submitting || submitted ? 'pointer-events-none opacity-60' : ''}`}
+                className={[
+                  'flex items-center gap-4 rounded-xl border-2 px-5 py-4 transition-all',
+                  isDisabled ? 'pointer-events-none opacity-60' : 'cursor-pointer',
+                  isSelected
+                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 dark:border-indigo-500'
+                    : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 hover:border-indigo-300 dark:hover:border-indigo-600 hover:bg-indigo-50/40 dark:hover:bg-indigo-900/20',
+                ].join(' ')}
               >
+                {/* Custom indicator */}
+                <div
+                  className={[
+                    'flex-shrink-0 transition-all',
+                    isMultiple
+                      ? `w-5 h-5 rounded flex items-center justify-center border-2 ${
+                          isSelected
+                            ? 'border-indigo-500 bg-indigo-500'
+                            : 'border-slate-300 dark:border-slate-500'
+                        }`
+                      : `w-5 h-5 rounded-full flex items-center justify-center border-2 ${
+                          isSelected
+                            ? 'border-indigo-500 bg-indigo-500'
+                            : 'border-slate-300 dark:border-slate-500'
+                        }`,
+                  ].join(' ')}
+                  aria-hidden="true"
+                >
+                  {isSelected && (
+                    isMultiple ? (
+                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <div className="w-2 h-2 rounded-full bg-white" />
+                    )
+                  )}
+                </div>
+
                 <input
                   type={getMcqInputControlType(selectionMode)}
                   name="resonance-mcq"
@@ -98,11 +144,13 @@ export default function MCQInput({
                     setSelected(nextSelected)
                     onDraftChange?.(nextSelected)
                   }}
-                  disabled={submitting || submitted}
-                  className="mt-0.5 accent-blue-600"
+                  disabled={isDisabled}
+                  className="sr-only"
                   aria-label={option.text}
                 />
-                <span className="text-sm text-gray-800">{option.text}</span>
+                <span className={`text-base leading-snug ${isSelected ? 'font-medium text-indigo-900 dark:text-indigo-100' : 'text-slate-700 dark:text-slate-300'}`}>
+                  {option.text}
+                </span>
               </label>
             )
           })}
@@ -114,9 +162,9 @@ export default function MCQInput({
         disabled={!canSubmit}
         aria-busy={submitting}
         aria-disabled={!canSubmit}
-        className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-xl bg-indigo-600 px-4 py-3.5 text-base font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors shadow-sm"
       >
-        {submitting ? 'Submitting…' : selectionMode === 'multiple' ? 'Submit answers' : 'Submit answer'}
+        {submitting ? 'Submitting…' : isMultiple ? 'Submit answers →' : 'Submit answer →'}
       </button>
     </form>
   )

@@ -51,7 +51,7 @@ void test('ResponseCard renders drag, star, flag, and emoji controls in the lead
     'Expected the full response card to be draggable',
   )
   assert.ok(
-    markup.includes('self-stretch rounded-md'),
+    markup.includes('self-stretch rounded-lg'),
     'Expected drag handle to render as a full-height leading handle',
   )
 })

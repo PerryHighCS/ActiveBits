@@ -224,10 +224,10 @@ void test('SharedResponseFeed highlights the student-selected option in the shar
 
     assert.equal(queryByRole(document.body, 'button', { name: 'React with Agree' }), null)
     assert.equal(rendered.queryByText('This is the response currently being shared.'), null)
-    assert.match(rendered.container.innerHTML, /border-blue-300 bg-blue-50 ring-2 ring-blue-400 ring-offset-2 ring-offset-white/)
+    assert.match(rendered.container.innerHTML, /border-indigo-200.*bg-indigo-50.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
     assert.match(rendered.container.innerHTML, /Option A/)
     assert.match(rendered.container.innerHTML, /50%/)
-    assert.match(rendered.container.innerHTML, /grid grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)_auto\] items-center gap-2 rounded-lg border px-3 py-2 text-sm border-blue-300 bg-blue-50 ring-2 ring-blue-400 ring-offset-2 ring-offset-white/)
+    assert.match(rendered.container.innerHTML, /grid grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)_auto\] items-center gap-2 rounded-xl border px-3 py-2\.5 text-sm border-indigo-200.*bg-indigo-50.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
   } finally {
     restoreDomEnvironment()
   }
@@ -281,9 +281,9 @@ void test('SharedResponseFeed colors the student multiple-choice reveal green wh
     assert.equal(correctRendered.queryByText('Your response was shared'), null)
     assert.notEqual(correctRendered.getByText('Your response: Correct'), null)
     assert.equal(correctRendered.getAllByText('Option A').length, 2)
-    assert.match(correctRendered.container.innerHTML, /border-green-300 bg-green-50/)
-    assert.match(correctRendered.container.innerHTML, /border-green-300 bg-green-50 ring-2 ring-blue-400 ring-offset-2 ring-offset-white/)
-    assert.match(correctRendered.container.innerHTML, /border-red-200 bg-red-50\/70/)
+    assert.match(correctRendered.container.innerHTML, /border-emerald-300.*bg-emerald-50/)
+    assert.match(correctRendered.container.innerHTML, /border-emerald-200.*bg-emerald-50.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
+    assert.match(correctRendered.container.innerHTML, /border-red-200.*bg-red-50\/70/)
     assert.match(correctRendered.container.innerHTML, /100%/)
 
     correctRendered.unmount()
@@ -296,8 +296,8 @@ void test('SharedResponseFeed colors the student multiple-choice reveal green wh
     )
     assert.notEqual(incorrectRendered.getByText('Your response: Incorrect'), null)
     assert.equal(incorrectRendered.getAllByText('Option B').length, 2)
-    assert.match(incorrectRendered.container.innerHTML, /border-red-300 bg-red-50/)
-    assert.match(incorrectRendered.container.innerHTML, /border-red-200 bg-red-50\/70 ring-2 ring-blue-400 ring-offset-2 ring-offset-white/)
+    assert.match(incorrectRendered.container.innerHTML, /border-red-300.*bg-red-50/)
+    assert.match(incorrectRendered.container.innerHTML, /border-red-200.*bg-red-50\/70.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
   } finally {
     restoreDomEnvironment()
   }
@@ -319,8 +319,8 @@ void test('SharedResponseFeed shows viewer-only MCQ results without empty percen
     assert.notEqual(rendered.getByText('Correct'), null)
     assert.notEqual(rendered.getByText('Your choice'), null)
     assert.equal(rendered.queryByText('0%'), null)
-    assert.match(rendered.container.innerHTML, /border-green-300 bg-green-50/)
-    assert.match(rendered.container.innerHTML, /border-red-200 bg-red-50\/70 ring-2 ring-blue-400 ring-offset-2 ring-offset-white/)
+    assert.match(rendered.container.innerHTML, /border-emerald-200.*bg-emerald-50/)
+    assert.match(rendered.container.innerHTML, /border-red-200.*bg-red-50\/70.*ring-2 ring-indigo-400.*ring-offset-2 ring-offset-white/)
   } finally {
     restoreDomEnvironment()
   }

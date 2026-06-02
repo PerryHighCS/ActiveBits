@@ -112,7 +112,6 @@ export default function ResonanceStudent() {
   const previousActiveQuestionIdsRef = useRef<string[]>([])
   const previousActiveQuestionRunStartedAtRef = useRef<number | null>(null)
 
-  // Step 1: resolve entry participant identity from the waiting room.
   useEffect(() => {
     if (!sessionId) return
     mountedRef.current = true
@@ -143,7 +142,6 @@ export default function ResonanceStudent() {
     }
   }, [sessionId])
 
-  // Step 2: once we have a name and studentId, register with the session server.
   useEffect(() => {
     if (!sessionId || !nameSubmitted || registered || studentName === null) return
 
@@ -163,7 +161,6 @@ export default function ResonanceStudent() {
           return
         }
 
-        // Use the server-assigned studentId (may differ if there was a conflict).
         setStudentId(data.studentId)
         persistSessionParticipantIdentity(
           window.localStorage,
@@ -254,25 +251,24 @@ export default function ResonanceStudent() {
     setSelectedQuestionId((current) => (current && activeIds.includes(current) ? current : activeIds[0] ?? null))
   }, [snapshot])
 
-  // Guard: no session
+  // ── Guards ──────────────────────────────────────────────────────────────────
+
   if (!sessionId) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <p className="text-gray-500">No active session.</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
+        <p className="text-slate-500 dark:text-slate-400">No active session.</p>
       </div>
     )
   }
 
-  // Guard: identity not yet resolved
   if (!identityResolved) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <p className="text-gray-400 text-sm">Loading…</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
+        <p className="text-slate-400 dark:text-slate-500 text-sm">Loading…</p>
       </div>
     )
   }
 
-  // Guard: waiting for name entry (waiting room didn't collect one)
   if (!nameSubmitted) {
     return (
       <NameEntryForm
@@ -287,20 +283,20 @@ export default function ResonanceStudent() {
     )
   }
 
-  // Guard: registration in progress or failed
   if (!registered) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
         {registerError !== null ? (
-          <p className="text-red-600 text-sm">{registerError}</p>
+          <p className="text-red-600 dark:text-red-400 text-sm" role="alert">{registerError}</p>
         ) : (
-          <p className="text-gray-400 text-sm">Joining session…</p>
+          <p className="text-slate-400 dark:text-slate-500 text-sm">Joining session…</p>
         )}
       </div>
     )
   }
 
-  // Main session view
+  // ── Main session view ────────────────────────────────────────────────────────
+
   const activeQuestions = snapshot?.activeQuestions ?? []
   const activeQuestion = activeQuestions.find((question) => question.id === selectedQuestionId) ?? activeQuestions[0] ?? null
   const activeDeadlineAt = snapshot?.activeQuestionDeadlineAt ?? null
@@ -315,109 +311,147 @@ export default function ResonanceStudent() {
     : 'Answer submitted.'
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       {submissionAnnouncement !== null && (
         <p key={submissionAnnouncement.id} className="sr-only" role="status" aria-live="polite">
           {submissionAnnouncement.message}
         </p>
       )}
-      <div className="max-w-xl mx-auto px-4 py-6 space-y-6">
-        {/* Header */}
-        <header className="flex items-center justify-between">
-          {liveCountdown !== null && activeQuestions.length > 0 && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-right">
-              <p className="text-[11px] uppercase tracking-wide text-amber-700">Time left</p>
-              <p className="text-lg font-semibold text-amber-900">{liveCountdown}</p>
-            </div>
-          )}
-        </header>
+
+      {/* Countdown header strip — only shown when a timed question is live */}
+      {liveCountdown !== null && activeQuestions.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800 px-5 py-2.5 flex items-center justify-between">
+          <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+            Time remaining
+          </span>
+          <span className="text-lg font-bold tabular-nums text-amber-900 dark:text-amber-300">
+            {liveCountdown}
+          </span>
+        </div>
+      )}
+
+      <div className="max-w-2xl mx-auto px-5 py-8 space-y-6">
 
         {/* Session loading / error */}
         {sessionLoading && snapshot === null && (
-          <p className="text-sm text-gray-400">Loading session…</p>
+          <p className="text-sm text-slate-400 dark:text-slate-500">Loading session…</p>
         )}
         {sessionError !== null && (
-          <p className="text-sm text-red-500" role="alert">
+          <p className="text-sm text-red-500 dark:text-red-400" role="alert">
             {sessionError}
           </p>
         )}
 
         {/* Active question(s) */}
         {snapshot !== null && activeQuestion !== null && studentId !== null && (
-          <section aria-label="Current question" className="space-y-4">
-            {activeQuestions.length > 1 && (
-              <nav className="flex flex-wrap gap-2" aria-label="Active questions">
-                {activeQuestions.map((question, index) => {
-                  const isSelected = question.id === activeQuestion.id
-                  const isSubmitted = submittedQuestionIds.has(question.id)
-                  return (
-                    <button
-                      key={question.id}
-                      type="button"
-                      onClick={() => setSelectedQuestionId(question.id)}
-                      className={`rounded-full border px-3 py-1.5 text-sm ${
-                        isSelected
-                          ? 'border-blue-400 bg-blue-50 text-blue-700'
-                          : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
-                      }`}
-                      aria-pressed={isSelected}
-                    >
-                      Q{index + 1}{isSubmitted ? ' Submitted' : ''}
-                    </button>
-                  )
-                })}
-              </nav>
-            )}
+          <section aria-label="Current question" className="space-y-5">
+            {/* Live badge */}
+            <div className="flex items-center justify-between gap-4">
+              <span className="inline-flex items-center gap-2 bg-indigo-100 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-800 rounded-full px-3 py-1.5">
+                <span className="w-2 h-2 rounded-full bg-indigo-500 dark:bg-indigo-400 animate-pulse inline-block" />
+                <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">
+                  Live Question
+                </span>
+              </span>
 
-            <QuestionView
-              question={activeQuestion}
-              sessionId={sessionId}
-              studentId={studentId}
-              initialAnswer={snapshot.submittedAnswers[activeQuestion.id] ?? submittedAnswers[activeQuestion.id] ?? null}
-              disabled={hasExpired}
-              isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
-              submittedMessage={submittedMessage}
-              announceSubmittedMessage={!snapshot.selfPacedMode}
-              onSubmitted={(questionId, answer) => {
-                setSubmittedAnswers((current) => ({
-                  ...current,
-                  [questionId]: answer,
-                }))
-                setSubmittedQuestionIds((current) => {
-                  const nextSubmittedQuestionIds = new Set(current)
-                  nextSubmittedQuestionIds.add(questionId)
-                  const nextAnnouncement = resolveSubmissionAnnouncement({
-                    selfPacedMode: snapshot.selfPacedMode,
-                    questionIds: activeQuestions.map((question) => question.id),
-                    submittedQuestionIds: nextSubmittedQuestionIds,
-                    currentQuestionId: questionId,
-                  })
-                  if (nextAnnouncement) {
-                    setSubmissionAnnouncement((currentAnnouncement) => ({
-                      id: (currentAnnouncement?.id ?? 0) + 1,
-                      message: nextAnnouncement,
-                    }))
-                  }
-                  if (snapshot.selfPacedMode) {
-                    setSelectedQuestionId((currentQuestionId) => resolveNextSelfPacedQuestionId({
+              {/* Multi-question nav tabs */}
+              {activeQuestions.length > 1 && (
+                <nav className="flex flex-wrap gap-2" aria-label="Active questions">
+                  {activeQuestions.map((question, index) => {
+                    const isSelected = question.id === activeQuestion.id
+                    const isSubmitted = submittedQuestionIds.has(question.id)
+                    return (
+                      <button
+                        key={question.id}
+                        type="button"
+                        onClick={() => setSelectedQuestionId(question.id)}
+                        className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                          isSelected
+                            ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
+                            : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                        aria-pressed={isSelected}
+                      >
+                        Q{index + 1}{isSubmitted ? ' ✓' : ''}
+                      </button>
+                    )
+                  })}
+                </nav>
+              )}
+            </div>
+
+            {/* Question card */}
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm px-6 py-6">
+              <QuestionView
+                question={activeQuestion}
+                sessionId={sessionId}
+                studentId={studentId}
+                initialAnswer={snapshot.submittedAnswers[activeQuestion.id] ?? submittedAnswers[activeQuestion.id] ?? null}
+                disabled={hasExpired}
+                isSubmitted={submittedQuestionIds.has(activeQuestion.id)}
+                submittedMessage={submittedMessage}
+                announceSubmittedMessage={!snapshot.selfPacedMode}
+                onSubmitted={(questionId, answer) => {
+                  setSubmittedAnswers((current) => ({
+                    ...current,
+                    [questionId]: answer,
+                  }))
+                  setSubmittedQuestionIds((current) => {
+                    const nextSubmittedQuestionIds = new Set(current)
+                    nextSubmittedQuestionIds.add(questionId)
+                    const nextAnnouncement = resolveSubmissionAnnouncement({
+                      selfPacedMode: snapshot.selfPacedMode,
                       questionIds: activeQuestions.map((question) => question.id),
                       submittedQuestionIds: nextSubmittedQuestionIds,
-                      currentQuestionId: currentQuestionId ?? questionId,
-                    }))
-                  }
-                  return nextSubmittedQuestionIds
-                })
-              }}
-              sendMessage={sendMessage}
-            />
+                      currentQuestionId: questionId,
+                    })
+                    if (nextAnnouncement) {
+                      setSubmissionAnnouncement((currentAnnouncement) => ({
+                        id: (currentAnnouncement?.id ?? 0) + 1,
+                        message: nextAnnouncement,
+                      }))
+                    }
+                    if (snapshot.selfPacedMode) {
+                      setSelectedQuestionId((currentQuestionId) => resolveNextSelfPacedQuestionId({
+                        questionIds: activeQuestions.map((question) => question.id),
+                        submittedQuestionIds: nextSubmittedQuestionIds,
+                        currentQuestionId: currentQuestionId ?? questionId,
+                      }))
+                    }
+                    return nextSubmittedQuestionIds
+                  })
+                }}
+                sendMessage={sendMessage}
+              />
+            </div>
           </section>
         )}
 
         {/* Waiting state */}
         {snapshot !== null && activeQuestions.length === 0 && snapshot.reveals.length === 0 && snapshot.reviewedResponses.length === 0 && (
-          <p className="text-sm text-gray-500 text-center py-8">
-            Waiting for the instructor to activate a question…
-          </p>
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center mb-5">
+              <svg
+                className="w-8 h-8 text-indigo-500 dark:text-indigo-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </div>
+            <p className="text-base font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Waiting for a question
+            </p>
+            <p className="text-sm text-slate-400 dark:text-slate-500">
+              Your instructor will activate a question shortly…
+            </p>
+          </div>
         )}
 
         {/* Shared responses / reveals / private feedback */}

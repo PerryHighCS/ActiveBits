@@ -35,20 +35,29 @@ export default function FreeResponseInput({
 
   if (submitted) {
     return (
-      <p
-        className="text-sm text-gray-500 italic"
+      <div
+        className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 px-4 py-3 flex items-center gap-3"
         {...(announceSubmittedMessage ? { 'aria-live': 'polite' as const } : {})}
       >
-        {submittedMessage}
-      </p>
+        <svg
+          className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 13l4 4L19 7" />
+        </svg>
+        <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">{submittedMessage}</p>
+      </div>
     )
   }
 
   return (
     <form
-      onSubmit={(e) => {
-        void handleSubmit(e)
-      }}
+      onSubmit={(e) => { void handleSubmit(e) }}
       className="space-y-3"
     >
       <label htmlFor="resonance-fr-input" className="sr-only">
@@ -63,20 +72,23 @@ export default function FreeResponseInput({
           onDraftChange?.(nextValue)
         }}
         placeholder="Type your answer…"
-        rows={4}
+        rows={5}
         maxLength={2000}
         disabled={submitting}
-        className="w-full rounded border border-gray-300 px-3 py-2 text-sm resize-none focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-400 px-4 py-3 text-base resize-none focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-900/40 transition-all"
       />
-      <button
-        type="submit"
-        disabled={!canSubmit}
-        aria-busy={submitting}
-        aria-disabled={!canSubmit}
-        className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {submitting ? 'Submitting…' : 'Submit answer'}
-      </button>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">{text.length} / 2000</span>
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          aria-busy={submitting}
+          aria-disabled={!canSubmit}
+          className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors shadow-sm"
+        >
+          {submitting ? 'Submitting…' : 'Submit answer →'}
+        </button>
+      </div>
     </form>
   )
 }
