@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
-import type { InstructorAnnotation, Question, ResonancePresentationMode } from '../../shared/types.js'
+import type { InstructorAnnotation, Question, ResonancePresentationMode, StagedRunState } from '../../shared/types.js'
 import { useInstructorState } from '../hooks/useInstructorState.js'
 import ResponseViewer from './ResponseViewer.js'
 import QuestionBuilder from '../tools/QuestionBuilder.js'
@@ -156,6 +156,24 @@ export function shouldShowQuestionListActivationControls(questionCount: number):
   return questionCount > 0
 }
 
+export function resolveManagerActiveTab(params: {
+  currentActiveTab: string | null
+  questions: Pick<Question, 'id'>[]
+  presentationMode: ResonancePresentationMode
+  stagedRun: StagedRunState | null
+}): string | null {
+  const questionIds = params.questions.map((question) => question.id)
+  if (params.presentationMode === 'staged' && params.stagedRun?.currentQuestionId && questionIds.includes(params.stagedRun.currentQuestionId)) {
+    return params.stagedRun.currentQuestionId
+  }
+
+  if (params.currentActiveTab === null && questionIds.length > 0) {
+    return questionIds[0] ?? null
+  }
+
+  return params.currentActiveTab
+}
+
 export function handleQuestionListItemKeyDown(
   event: Pick<ReactKeyboardEvent<HTMLElement>, 'key' | 'preventDefault' | 'target' | 'currentTarget'>,
   onActivate: () => void,
@@ -277,10 +295,20 @@ export default function ResonanceManager() {
     }
   }, [])
 
-  // Default active tab to the first question when data loads.
+  // Default active tab to the first question, and follow the current staged question as it advances.
   useEffect(() => {
-    if (snapshot !== null && activeTab === null && snapshot.questions.length > 0) {
-      setActiveTab(snapshot.questions[0]?.id ?? null)
+    if (snapshot === null) {
+      return
+    }
+
+    const nextActiveTab = resolveManagerActiveTab({
+      currentActiveTab: activeTab,
+      questions: snapshot.questions,
+      presentationMode: snapshot.presentationMode,
+      stagedRun: snapshot.stagedRun,
+    })
+    if (nextActiveTab !== activeTab) {
+      setActiveTab(nextActiveTab)
     }
   }, [snapshot, activeTab])
 

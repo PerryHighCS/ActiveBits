@@ -10,6 +10,7 @@ import {
   reconcileActivationSelection,
   resolveActivationSelectionAfterToggle,
   resolveActivationSelectionForRender,
+  resolveManagerActiveTab,
   resolvePasscode,
   shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
@@ -120,6 +121,47 @@ void test('resolveActivationSelectionAfterToggle uses the rendered default selec
   assert.deepEqual(
     resolveActivationSelectionAfterToggle([], 'q2', ['q1', 'q2', 'q3'], ['q2']),
     ['q2'],
+  )
+})
+
+void test('resolveManagerActiveTab follows the current staged question as the run advances', () => {
+  const questions = [
+    { id: 'q1' },
+    { id: 'q2' },
+  ]
+
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: 'q1',
+      questions,
+      presentationMode: 'staged',
+      stagedRun: {
+        questionIds: ['q1', 'q2'],
+        currentQuestionId: 'q2',
+        currentIndex: 1,
+        choicesRevealed: false,
+        completedQuestionIds: ['q1'],
+      },
+    }),
+    'q2',
+  )
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: 'q1',
+      questions,
+      presentationMode: 'standard',
+      stagedRun: null,
+    }),
+    'q1',
+  )
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: null,
+      questions,
+      presentationMode: 'standard',
+      stagedRun: null,
+    }),
+    'q1',
   )
 })
 
