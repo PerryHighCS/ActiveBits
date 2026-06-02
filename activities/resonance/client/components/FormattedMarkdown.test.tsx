@@ -59,6 +59,18 @@ void test('FormattedMarkdown skips raw HTML and blocks unsafe image and link URL
   assert.match(html, /data:image\/png;base64,AAAA/)
 })
 
+void test('FormattedMarkdown does not render interactive task list inputs', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(FormattedMarkdown, {
+      markdown: '- [ ] Draft answer\n- [x] Review answer',
+    }),
+  )
+
+  assert.doesNotMatch(html, /<input\b/)
+  assert.match(html, /Draft answer/)
+  assert.match(html, /Review answer/)
+})
+
 void test('Markdown URL and plain-text helpers match the classroom authoring contract', () => {
   assert.equal(isAllowedMarkdownUrl('https://example.com/image.png', 'image'), true)
   assert.equal(isAllowedMarkdownUrl('http://example.com/image.png', 'image'), true)

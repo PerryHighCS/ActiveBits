@@ -51,6 +51,9 @@ const markdownUrlTransform: UrlTransform = (url, key, node) => {
 }
 
 const markdownAllowElement: AllowElement = (node) => {
+  if (node.tagName === 'input') {
+    return false
+  }
   if (node.tagName === 'img') {
     const src = node.properties.src
     return typeof src === 'string' && isAllowedMarkdownUrl(src, 'image')
