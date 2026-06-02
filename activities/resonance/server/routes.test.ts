@@ -8,7 +8,7 @@ import {
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { WsRouter } from '../../../types/websocket.js'
-import setupResonanceRoutes from './routes.js'
+import setupResonanceRoutes, { resolveAnswerabilityErrorMessage } from './routes.js'
 
 interface RouteRequest {
   params: Record<string, string | undefined>
@@ -225,6 +225,12 @@ void test('embedded resonance sessions receive a stable instructor passcode duri
   await sessions.close()
 })
 
+void test('resolveAnswerabilityErrorMessage distinguishes staged submission failure reasons', () => {
+  assert.equal(resolveAnswerabilityErrorMessage('expired'), 'time is up for this question')
+  assert.equal(resolveAnswerabilityErrorMessage('inactive'), 'question is not active')
+  assert.equal(resolveAnswerabilityErrorMessage('choices-hidden'), 'choices have not been revealed')
+})
+
 void test('embedded resonance sessions auto-activate all questions when embedded launch requests it', async () => {
   const sessions = createSessionStore(null)
   const session = createEmbeddedResonanceSession()
@@ -285,6 +291,44 @@ void test('embedded resonance sessions auto-activate all questions when embedded
       },
     ],
   })
+
+  await sessions.close()
+})
+
+void test('staged embedded auto-activation stamps stem-only MCQ run start without starting timer', async () => {
+  const sessions = createSessionStore(null)
+  const session = createEmbeddedResonanceSession()
+  session.data.embeddedLaunch = {
+    parentSessionId: 'syncdeck-parent',
+    instanceKey: 'resonance:2:0',
+    selectedOptions: {
+      autoActivateAllQuestions: true,
+      presentationMode: 'staged',
+      questions: [
+        {
+          id: 'q1',
+          type: 'multiple-choice',
+          text: 'Which answer is correct?',
+          order: 0,
+          responseTimeLimitMs: 30_000,
+          options: [
+            { id: 'a', text: 'A' },
+            { id: 'b', text: 'B' },
+          ],
+        },
+      ],
+    },
+  }
+
+  await sessions.set(session.id, session)
+
+  const stored = await sessions.get(session.id)
+  const stagedRun = stored?.data.stagedRun as { currentQuestionId?: string | null; choicesRevealed?: boolean } | null | undefined
+  assert.deepEqual(stored?.data.activeQuestionIds, ['q1'])
+  assert.equal(typeof stored?.data.activeQuestionRunStartedAt, 'number')
+  assert.equal(stored?.data.activeQuestionDeadlineAt, null)
+  assert.equal(stagedRun?.currentQuestionId, 'q1')
+  assert.equal(stagedRun?.choicesRevealed, false)
 
   await sessions.close()
 })
@@ -1008,6 +1052,7 @@ void test('prepare-link-options returns encrypted resonance selectedOptions with
       params: {},
       body: {
         teacherCode: 'teacher-code',
+        presentationMode: 'staged',
         questions: [
           {
             id: 'q1',
@@ -1022,9 +1067,10 @@ void test('prepare-link-options returns encrypted resonance selectedOptions with
   )
 
   assert.equal(res.statusCode, 200)
-  const body = res.body as { selectedOptions?: { q?: string; h?: string } }
+  const body = res.body as { selectedOptions?: { q?: string; h?: string; presentationMode?: string } }
   assert.equal(typeof body.selectedOptions?.q, 'string')
   assert.equal(typeof body.selectedOptions?.h, 'string')
+  assert.equal(body.selectedOptions?.presentationMode, 'staged')
   assert.ok((body.selectedOptions?.q ?? '').length > 0)
   assert.equal((body.selectedOptions?.h ?? '').length, 20)
 
@@ -1495,6 +1541,472 @@ void test('activate-question route can activate all questions with a shared coun
     responses.map((response) => ({ questionId: response.questionId, studentId: response.studentId })),
     [{ questionId: 'q2', studentId: 'student1' }],
   )
+
+  await sessions.close()
+})
+
+void test('staged activate-question hides MCQ choices until reveal and then accepts submissions', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  const revealHandler = app.handlers.post['/api/resonance/:sessionId/reveal-choices']
+  const stateHandler = app.handlers.get['/api/resonance/:sessionId/state']
+  const submitHandler = app.handlers.post['/api/resonance/:sessionId/submit-answer']
+  assert.equal(typeof activateHandler, 'function')
+  assert.equal(typeof revealHandler, 'function')
+  assert.equal(typeof stateHandler, 'function')
+  assert.equal(typeof submitHandler, 'function')
+
+  const activateRes = createResponse()
+  await activateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {
+        questionIds: ['q2'],
+        presentationMode: 'staged',
+      },
+    },
+    activateRes,
+  )
+
+  assert.equal(activateRes.statusCode, 200)
+  const activateBody = activateRes.body as {
+    presentationMode?: string
+    stagedRun?: { currentQuestionId?: string; choicesRevealed?: boolean } | null
+    activeQuestionDeadlineAt?: number | null
+  }
+  assert.equal(activateBody.presentationMode, 'staged')
+  assert.equal(activateBody.stagedRun?.currentQuestionId, 'q2')
+  assert.equal(activateBody.stagedRun?.choicesRevealed, false)
+  assert.equal(activateBody.activeQuestionDeadlineAt, null)
+  const storedAfterStagedActivate = await sessions.get(session.id)
+  const stagedRunStartedAt = storedAfterStagedActivate?.data.activeQuestionRunStartedAt ?? null
+  assert.equal(typeof stagedRunStartedAt, 'number')
+
+  const hiddenStateRes = createResponse()
+  await stateHandler?.({ params: { sessionId: session.id } }, hiddenStateRes)
+
+  assert.equal(hiddenStateRes.statusCode, 200)
+  const hiddenState = hiddenStateRes.body as {
+    activeQuestions?: Array<{ id: string; type: string; options?: unknown[]; choicesRevealed?: boolean }>
+  }
+  assert.deepEqual(hiddenState.activeQuestions?.[0], {
+    id: 'q2',
+    type: 'multiple-choice',
+    text: 'Which option best fits?',
+    order: 1,
+    responseTimeLimitMs: 45000,
+    options: [],
+    selectionMode: 'single',
+    choicesRevealed: false,
+  })
+
+  const blockedSubmitRes = createResponse()
+  await submitHandler?.(
+    {
+      params: { sessionId: session.id },
+      body: {
+        studentId: 'student1',
+        questionId: 'q2',
+        answer: {
+          type: 'multiple-choice',
+          selectedOptionIds: ['q2_b'],
+        },
+      },
+    },
+    blockedSubmitRes,
+  )
+
+  assert.equal(blockedSubmitRes.statusCode, 409)
+  assert.deepEqual(blockedSubmitRes.body, { error: 'choices have not been revealed' })
+
+  const revealRes = createResponse()
+  await revealHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {},
+    },
+    revealRes,
+  )
+
+  assert.equal(revealRes.statusCode, 200)
+  const revealBody = revealRes.body as {
+    stagedRun?: { choicesRevealed?: boolean } | null
+    activeQuestionDeadlineAt?: number | null
+  }
+  assert.equal(revealBody.stagedRun?.choicesRevealed, true)
+  assert.ok(typeof revealBody.activeQuestionDeadlineAt === 'number')
+  const storedAfterReveal = await sessions.get(session.id)
+  assert.equal(storedAfterReveal?.data.activeQuestionRunStartedAt, stagedRunStartedAt)
+
+  const firstDeadlineAt = revealBody.activeQuestionDeadlineAt
+  const repeatedRevealRes = createResponse()
+  await revealHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {},
+    },
+    repeatedRevealRes,
+  )
+
+  assert.equal(repeatedRevealRes.statusCode, 200)
+  assert.equal(
+    (repeatedRevealRes.body as { activeQuestionDeadlineAt?: number | null }).activeQuestionDeadlineAt,
+    firstDeadlineAt,
+  )
+
+  const visibleStateRes = createResponse()
+  await stateHandler?.({ params: { sessionId: session.id } }, visibleStateRes)
+  const visibleState = visibleStateRes.body as {
+    activeQuestions?: Array<{ id: string; options?: unknown[]; choicesRevealed?: boolean }>
+  }
+  assert.equal(visibleState.activeQuestions?.[0]?.choicesRevealed, true)
+  assert.equal(visibleState.activeQuestions?.[0]?.options?.length, 2)
+
+  const expiredSession = await sessions.get(session.id)
+  if (expiredSession) {
+    expiredSession.data.activeQuestionDeadlineAt = Date.now() - 1_000
+    await sessions.set(session.id, expiredSession)
+  }
+
+  const expiredSubmitRes = createResponse()
+  await submitHandler?.(
+    {
+      params: { sessionId: session.id },
+      body: {
+        studentId: 'student1',
+        questionId: 'q2',
+        answer: {
+          type: 'multiple-choice',
+          selectedOptionIds: ['q2_b'],
+        },
+      },
+    },
+    expiredSubmitRes,
+  )
+
+  assert.equal(expiredSubmitRes.statusCode, 409)
+  assert.deepEqual(expiredSubmitRes.body, { error: 'time is up for this question' })
+
+  const resetDeadlineSession = await sessions.get(session.id)
+  if (resetDeadlineSession) {
+    resetDeadlineSession.data.activeQuestionDeadlineAt = Date.now() + 45_000
+    await sessions.set(session.id, resetDeadlineSession)
+  }
+
+  const submitRes = createResponse()
+  await submitHandler?.(
+    {
+      params: { sessionId: session.id },
+      body: {
+        studentId: 'student1',
+        questionId: 'q2',
+        answer: {
+          type: 'multiple-choice',
+          selectedOptionIds: ['q2_b'],
+        },
+      },
+    },
+    submitRes,
+  )
+
+  assert.equal(submitRes.statusCode, 200)
+
+  await sessions.close()
+})
+
+void test('staged session normalization deduplicates persisted question ids while preserving order', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.presentationMode = 'staged'
+  session.data.stagedRun = {
+    questionIds: ['q1', 'q2', 'q1', 'q2'],
+    currentQuestionId: 'q2',
+    currentIndex: 3,
+    choicesRevealed: false,
+    completedQuestionIds: ['q1', 'q1'],
+  }
+  session.data.activeQuestionId = 'q2'
+  session.data.activeQuestionIds = ['q2']
+  session.data.activeQuestionRunStartedAt = Date.now() - 500
+  const originalRunStartedAt = session.data.activeQuestionRunStartedAt
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const responsesHandler = app.handlers.get['/api/resonance/:sessionId/responses']
+  assert.equal(typeof responsesHandler, 'function')
+
+  const res = createResponse()
+  await responsesHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    activeQuestionRunStartedAt?: number | null
+    stagedRun?: {
+      questionIds?: string[]
+      currentQuestionId?: string | null
+      currentIndex?: number
+      completedQuestionIds?: string[]
+    } | null
+  }
+  assert.deepEqual(body.stagedRun?.questionIds, ['q1', 'q2'])
+  assert.equal(body.stagedRun?.currentQuestionId, 'q2')
+  assert.equal(body.stagedRun?.currentIndex, 1)
+  assert.deepEqual(body.stagedRun?.completedQuestionIds, ['q1'])
+  assert.equal(body.activeQuestionRunStartedAt, originalRunStartedAt)
+
+  await sessions.close()
+})
+
+void test('activate-question pushes student state without student question-activated event', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  await sessions.set(session.id, session)
+
+  const studentMessages: Array<{ type?: string; payload?: unknown }> = []
+  const instructorMessages: Array<{ type?: string; payload?: unknown }> = []
+  ;(ws.wss.clients as Set<unknown>).add({
+    readyState: 1,
+    sessionId: session.id,
+    isInstructor: false,
+    studentId: 'student1',
+    send(message: string) {
+      studentMessages.push(JSON.parse(message) as { type?: string; payload?: unknown })
+    },
+  })
+  ;(ws.wss.clients as Set<unknown>).add({
+    readyState: 1,
+    sessionId: session.id,
+    isInstructor: true,
+    send(message: string) {
+      instructorMessages.push(JSON.parse(message) as { type?: string; payload?: unknown })
+    },
+  })
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  assert.equal(typeof activateHandler, 'function')
+
+  const activateRes = createResponse()
+  await activateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {
+        questionIds: ['q1'],
+      },
+    },
+    activateRes,
+  )
+
+  assert.equal(activateRes.statusCode, 200)
+  assert.equal(studentMessages.some((message) => message.type === 'resonance:session-state'), true)
+  assert.equal(studentMessages.some((message) => message.type === 'resonance:question-activated'), false)
+  assert.equal(instructorMessages.some((message) => message.type === 'resonance:question-activated'), true)
+  assert.equal(instructorMessages.some((message) => message.type === 'resonance:instructor-state'), true)
+
+  await sessions.close()
+})
+
+void test('advance-staged-question moves through the staged sequence and ends after the last question', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  const advanceHandler = app.handlers.post['/api/resonance/:sessionId/advance-staged-question']
+  assert.equal(typeof activateHandler, 'function')
+  assert.equal(typeof advanceHandler, 'function')
+
+  const authHeaders = { 'x-instructor-passcode': 'TEACH123' }
+  const activateRes = createResponse()
+  await activateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: authHeaders,
+      body: {
+        questionIds: ['q1', 'q2'],
+        presentationMode: 'staged',
+      },
+    },
+    activateRes,
+  )
+
+  assert.equal(activateRes.statusCode, 200)
+  assert.deepEqual((activateRes.body as { activeQuestionIds?: string[] }).activeQuestionIds, ['q1'])
+  const firstStoredRun = await sessions.get(session.id)
+  const firstRunStartedAt = firstStoredRun?.data.activeQuestionRunStartedAt ?? null
+  assert.equal(typeof firstRunStartedAt, 'number')
+
+  const storedAfterActivate = await sessions.get(session.id)
+  if (storedAfterActivate) {
+    storedAfterActivate.data.activeQuestionRunStartedAt = 1_000
+    storedAfterActivate.data.activeQuestionDeadlineAt = Date.now() - 1_000
+    await sessions.set(session.id, storedAfterActivate)
+  }
+
+  const advanceToSecondRes = createResponse()
+  await advanceHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: authHeaders,
+      body: {},
+    },
+    advanceToSecondRes,
+  )
+
+  assert.equal(advanceToSecondRes.statusCode, 200)
+  const secondBody = advanceToSecondRes.body as {
+    activeQuestionIds?: string[]
+    activeQuestionDeadlineAt?: number | null
+    stagedRun?: { currentQuestionId?: string; choicesRevealed?: boolean; completedQuestionIds?: string[] } | null
+  }
+  assert.deepEqual(secondBody.activeQuestionIds, ['q2'])
+  assert.equal(secondBody.activeQuestionDeadlineAt, null)
+  assert.equal(secondBody.stagedRun?.currentQuestionId, 'q2')
+  assert.equal(secondBody.stagedRun?.choicesRevealed, false)
+  assert.deepEqual(secondBody.stagedRun?.completedQuestionIds, ['q1'])
+  const secondStoredRun = await sessions.get(session.id)
+  const secondRunStartedAt = secondStoredRun?.data.activeQuestionRunStartedAt ?? null
+  assert.equal(typeof secondRunStartedAt, 'number')
+  assert.notEqual(secondRunStartedAt, 1_000)
+
+  const endRes = createResponse()
+  await advanceHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: authHeaders,
+      body: {},
+    },
+    endRes,
+  )
+
+  assert.equal(endRes.statusCode, 200)
+  assert.deepEqual((endRes.body as { activeQuestionIds?: string[] }).activeQuestionIds, [])
+  assert.equal((endRes.body as { stagedRun?: unknown }).stagedRun, null)
+
+  await sessions.close()
+})
+
+void test('advance-staged-question can intentionally skip a stem-only MCQ', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.questions = [
+    {
+      id: 'q1',
+      type: 'multiple-choice',
+      text: 'Which option should be skipped?',
+      order: 0,
+      responseTimeLimitMs: 30_000,
+      options: [
+        { id: 'q1_a', text: 'Option A' },
+        { id: 'q1_b', text: 'Option B' },
+      ],
+    },
+    {
+      id: 'q2',
+      type: 'free-response',
+      text: 'Explain your reasoning.',
+      order: 1,
+      responseTimeLimitMs: 30_000,
+    },
+  ]
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const activateHandler = app.handlers.post['/api/resonance/:sessionId/activate-question']
+  const advanceHandler = app.handlers.post['/api/resonance/:sessionId/advance-staged-question']
+  assert.equal(typeof activateHandler, 'function')
+  assert.equal(typeof advanceHandler, 'function')
+
+  const authHeaders = { 'x-instructor-passcode': 'TEACH123' }
+  const activateRes = createResponse()
+  await activateHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: authHeaders,
+      body: {
+        questionIds: ['q1', 'q2'],
+        presentationMode: 'staged',
+      },
+    },
+    activateRes,
+  )
+
+  assert.equal(activateRes.statusCode, 200)
+  const activateBody = activateRes.body as {
+    activeQuestionIds?: string[]
+    activeQuestionDeadlineAt?: number | null
+    stagedRun?: { currentQuestionId?: string; choicesRevealed?: boolean } | null
+  }
+  assert.deepEqual(activateBody.activeQuestionIds, ['q1'])
+  assert.equal(activateBody.activeQuestionDeadlineAt, null)
+  assert.equal(activateBody.stagedRun?.currentQuestionId, 'q1')
+  assert.equal(activateBody.stagedRun?.choicesRevealed, false)
+
+  const skipRes = createResponse()
+  await advanceHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: authHeaders,
+      body: {},
+    },
+    skipRes,
+  )
+
+  assert.equal(skipRes.statusCode, 200)
+  const skipBody = skipRes.body as {
+    activeQuestionIds?: string[]
+    activeQuestionDeadlineAt?: number | null
+    stagedRun?: {
+      currentQuestionId?: string
+      choicesRevealed?: boolean
+      completedQuestionIds?: string[]
+    } | null
+  }
+  assert.deepEqual(skipBody.activeQuestionIds, ['q2'])
+  assert.ok(typeof skipBody.activeQuestionDeadlineAt === 'number')
+  assert.equal(skipBody.stagedRun?.currentQuestionId, 'q2')
+  assert.equal(skipBody.stagedRun?.choicesRevealed, true)
+  assert.deepEqual(skipBody.stagedRun?.completedQuestionIds, ['q1'])
 
   await sessions.close()
 })

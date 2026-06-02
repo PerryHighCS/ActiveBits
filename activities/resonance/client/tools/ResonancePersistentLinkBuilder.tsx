@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ActivityPersistentLinkBuilderProps } from '../../../../types/activity.js'
-import type { Question } from '../../shared/types.js'
+import type { Question, ResonancePresentationMode } from '../../shared/types.js'
 import { validateQuestionSet } from '../../shared/validation.js'
 import { cacheResonanceQuestionDraft, loadResonanceQuestionDraft } from './resonanceQuestionDraftCache.js'
 import ResonanceQuestionSetUploader from './ResonanceQuestionSetUploader.js'
@@ -9,6 +9,7 @@ interface PrepareLinkOptionsResponse {
   selectedOptions?: {
     q?: string
     h?: string
+    presentationMode?: string
   }
   error?: string
   details?: string[]
@@ -16,7 +17,15 @@ interface PrepareLinkOptionsResponse {
 
 const PREPARE_LINK_OPTIONS_DEBOUNCE_MS = 500
 
-function buildPreparedInputSignature(teacherCode: string, questions: Question[] | null): string | null {
+function normalizePersistentPresentationMode(value: unknown): ResonancePresentationMode {
+  return value === 'staged' ? 'staged' : 'standard'
+}
+
+function buildPreparedInputSignature(
+  teacherCode: string,
+  questions: Question[] | null,
+  presentationMode: ResonancePresentationMode,
+): string | null {
   if (teacherCode.trim().length < 6 || questions === null || questions.length === 0) {
     return null
   }
@@ -24,6 +33,7 @@ function buildPreparedInputSignature(teacherCode: string, questions: Question[] 
   return JSON.stringify({
     teacherCode: teacherCode.trim(),
     questions,
+    presentationMode,
   })
 }
 
@@ -71,6 +81,9 @@ export default function ResonancePersistentLinkBuilder({
   const savedQuestions = savedQuestionsFromEditState ?? cachedQuestions
 
   const [questions, setQuestions] = useState<Question[] | null>(savedQuestions)
+  const [presentationMode, setPresentationMode] = useState<ResonancePresentationMode>(
+    normalizePersistentPresentationMode(selectedOptions?.presentationMode ?? editState?.selectedOptions?.presentationMode),
+  )
   const [preparing, setPreparing] = useState(false)
   const [prepareError, setPrepareError] = useState<string | null>(null)
   const [preparedHash, setPreparedHash] = useState<string | null>(
@@ -78,13 +91,13 @@ export default function ResonancePersistentLinkBuilder({
   )
   const [preparedInputSignature, setPreparedInputSignature] = useState<string | null>(() => {
     const hasPreparedSelectedOptions = typeof selectedOptions?.q === 'string' && typeof selectedOptions?.h === 'string'
-    return hasPreparedSelectedOptions ? buildPreparedInputSignature(teacherCode, savedQuestions) : null
+    return hasPreparedSelectedOptions ? buildPreparedInputSignature(teacherCode, savedQuestions, presentationMode) : null
   })
 
   const isEdit = Boolean(editState)
   const normalizedTeacherCode = teacherCode.trim()
   const canPrepare = normalizedTeacherCode.length >= 6 && questions !== null && questions.length > 0
-  const currentPreparedInputSignature = buildPreparedInputSignature(normalizedTeacherCode, questions)
+  const currentPreparedInputSignature = buildPreparedInputSignature(normalizedTeacherCode, questions, presentationMode)
   const hasPreparedSelectedOptions = typeof selectedOptions?.q === 'string' && typeof selectedOptions?.h === 'string'
   const isPreparedForCurrentInputs = hasPreparedSelectedOptions
     && currentPreparedInputSignature !== null
@@ -101,6 +114,11 @@ export default function ResonancePersistentLinkBuilder({
   const handleQuestionsChanged = (nextQuestions: Question[] | null): void => {
     invalidatePreparedState()
     setQuestions(nextQuestions)
+  }
+
+  const handlePresentationModeChanged = (nextMode: ResonancePresentationMode): void => {
+    invalidatePreparedState()
+    setPresentationMode(nextMode)
   }
 
   useEffect(() => {
@@ -134,7 +152,7 @@ export default function ResonancePersistentLinkBuilder({
           const resp = await fetch('/api/resonance/prepare-link-options', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ teacherCode: normalizedTeacherCode, questions }),
+            body: JSON.stringify({ teacherCode: normalizedTeacherCode, questions, presentationMode }),
             signal: abortController.signal,
           })
 
@@ -158,6 +176,7 @@ export default function ResonancePersistentLinkBuilder({
           onSelectedOptionsChange?.({
             q: preparedQuestionPayload,
             h: preparedHashValue,
+            ...(presentationMode === 'staged' ? { presentationMode } : {}),
           })
           onSubmitReadinessChange?.(true)
         } catch (error) {
@@ -192,6 +211,7 @@ export default function ResonancePersistentLinkBuilder({
     normalizedTeacherCode,
     onSelectedOptionsChange,
     onSubmitReadinessChange,
+    presentationMode,
     questions,
     selectedOptions?.h,
   ])
@@ -206,6 +226,29 @@ export default function ResonancePersistentLinkBuilder({
           onQuestionsChanged={handleQuestionsChanged}
           initialQuestions={savedQuestions}
         />
+      </div>
+
+      <div>
+        <p className="block text-sm font-medium text-gray-700 mb-1" id="resonance-presentation-mode-label">
+          Presentation mode
+        </p>
+        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5" aria-labelledby="resonance-presentation-mode-label">
+          {(['standard', 'staged'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={presentationMode === mode}
+              onClick={() => handlePresentationModeChanged(mode)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                presentationMode === mode
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {mode === 'standard' ? 'Standard' : 'Staged'}
+            </button>
+          ))}
+        </div>
       </div>
 
       {normalizedTeacherCode.length > 0 && normalizedTeacherCode.length < 6 && (

@@ -59,15 +59,42 @@ Mixed question-set example:
 }
 ```
 
+Staged presentation example:
+
+```json
+{
+  "presentationMode": "staged",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "multiple-choice",
+      "text": "Which function creates a sequence of numbers that a for loop can use?",
+      "order": 0,
+      "responseTimeLimitMs": 30000,
+      "options": [
+        { "id": "q1a", "text": "print()?", "isCorrect": false },
+        { "id": "q1b", "text": "range()?", "isCorrect": true },
+        { "id": "q1c", "text": "input()?", "isCorrect": false },
+        { "id": "q1d", "text": "len()?", "isCorrect": false }
+      ]
+    }
+  ]
+}
+```
+
 Field guidance:
 
 - `questions` is the main launch payload
+- `presentationMode` may be `standard` or `staged`; omit it for standard behavior
 - each question should have a stable `id`
 - `type` should match the activity's supported question types such as `free-response` or `multiple-choice`
 - `order` should be explicit and zero-based
 - `responseTimeLimitMs` should be provided when timed launch behavior matters
 - multiple-choice questions should carry an `options` array
 - a resonance MCQ with zero correct options is poll mode and remains single-select; with one correct option it behaves as single-select; with multiple correct options it behaves as multi-select and requires the full correct set
+- with `presentationMode: "staged"`, Resonance presents the question set one question at a time; multiple-choice questions show stem-only first, then start their response timer when the teacher reveals choices
+- in solo/self-paced Resonance launches with no active run, `presentationMode: "staged"` does not hide choices; students still see and answer the full question set
+- when SyncDeck adds `autoActivateAllQuestions: true` to a Resonance launch with `presentationMode: "staged"`, the host starts the staged sequence at the first question; for a multiple-choice first question this shows the stem only and waits for the instructor to reveal choices
 
 ### Child embedded launch state
 
@@ -75,6 +102,7 @@ Resonance persistent and embedded recovery paths may store encrypted question ma
 
 - `q` for encoded question payload
 - `h` for the associated hash
+- `presentationMode` for the set/run presentation mode when a host wants to restore or launch staged behavior
 
 That storage shape is a host/runtime detail. Deck authors should usually provide plain `questions` in the launch payload and let the host normalize as needed.
 

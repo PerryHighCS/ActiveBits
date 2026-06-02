@@ -42,6 +42,7 @@ export async function launchResonancePersistentSoloEntry(
   const encodedQuestions = typeof rawEncodedQuestions === 'string' ? rawEncodedQuestions.trim() : null
   const persistentHash = typeof rawPersistentHash === 'string' ? rawPersistentHash.trim() : null
   const rawQuestions = params.selectedOptions?.questions
+  const presentationMode = params.selectedOptions?.presentationMode === 'staged' ? 'staged' : 'standard'
   const validatedQuestionSet = rawQuestions !== undefined
     ? validateQuestionSet(rawQuestions)
     : null
@@ -70,6 +71,7 @@ export async function launchResonancePersistentSoloEntry(
     body: JSON.stringify({
       ...(encodedQuestions && persistentHash ? { encodedQuestions, persistentHash } : {}),
       ...(validatedQuestions.length > 0 ? { questions: validatedQuestions } : {}),
+      presentationMode,
       selfPacedMode: true,
     }),
   })

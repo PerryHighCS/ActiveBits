@@ -11,13 +11,15 @@ import type {
   InstructorAnnotation,
   Question,
   QuestionReveal,
+  ResonancePresentationMode,
   Response,
   ResponseProgress,
+  StagedRunState,
   Student,
 } from '../shared/types.js'
 import { isValidStudentReactionEmoji } from '../shared/emojiSet.js'
 import { getCorrectOptionIds, getMcqSelectionMode } from '../shared/mcq.js'
-import { validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
+import { normalizePresentationMode, validateAnswerPayload, validateQuestion, validateQuestionSet, validateStudentRegistration } from '../shared/validation.js'
 import { decryptQuestions, encryptQuestions, MAX_ENCODED_PAYLOAD_CHARS } from './questionCrypto.js'
 import {
   buildResonanceReport,
@@ -63,6 +65,8 @@ interface ResonanceSocket extends ActiveBitsWebSocket {
 interface ResonanceSessionData extends Record<string, unknown> {
   instructorPasscode: string
   selfPacedMode?: boolean
+  presentationMode: ResonancePresentationMode
+  stagedRun: StagedRunState | null
   questions: Question[]
   activeQuestionId: string | null
   activeQuestionIds: string[]
@@ -145,7 +149,11 @@ function prepareResonanceLinkOptions(body: Record<string, unknown>):
 
   return {
     ok: true,
-    selectedOptions: { q: encoded, h: hash },
+    selectedOptions: {
+      q: encoded,
+      h: hash,
+      ...(normalizePresentationMode(body.presentationMode) === 'staged' ? { presentationMode: 'staged' } : {}),
+    },
   }
 }
 
@@ -234,6 +242,68 @@ function normalizeActiveQuestionDeadlineAt(value: unknown): number | null {
   return rounded > 0 ? rounded : null
 }
 
+function normalizeStagedRunState(value: unknown, availableQuestionIds: string[]): StagedRunState | null {
+  if (!isPlainObject(value)) {
+    return null
+  }
+
+  const availableQuestionIdSet = new Set(availableQuestionIds)
+  const seenQuestionIds = new Set<string>()
+  const questionIds = Array.isArray(value.questionIds)
+    ? value.questionIds.filter((entry): entry is string => {
+        if (typeof entry !== 'string' || entry.trim().length === 0 || !availableQuestionIdSet.has(entry)) {
+          return false
+        }
+        if (seenQuestionIds.has(entry)) {
+          return false
+        }
+        seenQuestionIds.add(entry)
+        return true
+      })
+    : []
+  if (questionIds.length === 0) {
+    return null
+  }
+
+  const completedQuestionIds = Array.isArray(value.completedQuestionIds)
+    ? value.completedQuestionIds.filter((entry): entry is string => (
+        typeof entry === 'string' &&
+        questionIds.includes(entry)
+      ))
+    : []
+  const requestedCurrentQuestionId = typeof value.currentQuestionId === 'string' ? value.currentQuestionId : null
+  const fallbackCurrentIndex = typeof value.currentIndex === 'number' && Number.isFinite(value.currentIndex)
+    ? Math.max(0, Math.min(questionIds.length - 1, Math.round(value.currentIndex)))
+    : 0
+  const currentIndex = requestedCurrentQuestionId !== null && questionIds.includes(requestedCurrentQuestionId)
+    ? questionIds.indexOf(requestedCurrentQuestionId)
+    : fallbackCurrentIndex
+  const currentQuestionId = questionIds[currentIndex] ?? null
+
+  return {
+    questionIds,
+    currentQuestionId,
+    currentIndex,
+    choicesRevealed: value.choicesRevealed === true,
+    completedQuestionIds: Array.from(new Set(completedQuestionIds)),
+  }
+}
+
+function createStagedRunState(questionIds: string[]): StagedRunState | null {
+  const normalizedQuestionIds = questionIds.filter((questionId) => questionId.trim().length > 0)
+  if (normalizedQuestionIds.length === 0) {
+    return null
+  }
+
+  return {
+    questionIds: normalizedQuestionIds,
+    currentQuestionId: normalizedQuestionIds[0] ?? null,
+    currentIndex: 0,
+    choicesRevealed: false,
+    completedQuestionIds: [],
+  }
+}
+
 function isSyncDeckStandaloneSession(value: unknown): boolean {
   const record = ensurePlainObject(value)
   return record.standaloneMode === true
@@ -245,6 +315,7 @@ function setActiveQuestions(
   runStartedAt: number | null,
   deadlineAt: number | null,
 ): void {
+  sessionData.stagedRun = null
   sessionData.activeQuestionIds = questionIds
   sessionData.activeQuestionId = questionIds[0] ?? null
   sessionData.activeQuestionRunStartedAt = questionIds.length > 0 ? runStartedAt : null
@@ -253,6 +324,24 @@ function setActiveQuestions(
 
 function clearActiveQuestions(sessionData: ResonanceSessionData): void {
   setActiveQuestions(sessionData, [], null, null)
+}
+
+function setStagedActiveQuestion(
+  sessionData: ResonanceSessionData,
+  stagedRun: StagedRunState,
+  runStartedAt: number | null,
+  deadlineAt: number | null,
+): void {
+  sessionData.stagedRun = stagedRun
+  sessionData.activeQuestionIds = stagedRun.currentQuestionId ? [stagedRun.currentQuestionId] : []
+  sessionData.activeQuestionId = stagedRun.currentQuestionId
+  sessionData.activeQuestionRunStartedAt = runStartedAt
+  sessionData.activeQuestionDeadlineAt = deadlineAt
+}
+
+function clearStagedRun(sessionData: ResonanceSessionData): void {
+  sessionData.stagedRun = null
+  clearActiveQuestions(sessionData)
 }
 
 function getOrderedExistingQuestionIds(
@@ -282,6 +371,85 @@ function buildActiveQuestionRun(
   return {
     questionIds: orderedQuestionIds,
     deadlineAt: totalTimeLimitMs > 0 ? now + totalTimeLimitMs : null,
+  }
+}
+
+function buildSingleQuestionDeadline(question: Question | null, now: number): number | null {
+  const timeLimitMs = question?.responseTimeLimitMs
+  return typeof timeLimitMs === 'number' && timeLimitMs > 0 ? now + timeLimitMs : null
+}
+
+function getQuestionById(questions: Question[], questionId: string | null): Question | null {
+  return questionId === null ? null : (questions.find((question) => question.id === questionId) ?? null)
+}
+
+type QuestionAnswerability =
+  | { ok: true }
+  | { ok: false; reason: 'expired' | 'choices-hidden' | 'inactive' }
+
+function getQuestionAnswerability(sessionData: ResonanceSessionData, questionId: string): QuestionAnswerability {
+  if (sessionData.activeQuestionDeadlineAt !== null && Date.now() >= sessionData.activeQuestionDeadlineAt) {
+    return { ok: false, reason: 'expired' }
+  }
+
+  const stagedRun = sessionData.stagedRun
+  if (sessionData.presentationMode !== 'staged' || stagedRun === null) {
+    return { ok: true }
+  }
+  if (stagedRun.currentQuestionId !== questionId) {
+    return { ok: false, reason: 'inactive' }
+  }
+  const question = getQuestionById(sessionData.questions, questionId)
+  return question?.type !== 'multiple-choice' || stagedRun.choicesRevealed
+    ? { ok: true }
+    : { ok: false, reason: 'choices-hidden' }
+}
+
+export function resolveAnswerabilityErrorMessage(reason: 'expired' | 'choices-hidden' | 'inactive'): string {
+  switch (reason) {
+    case 'expired':
+      return 'time is up for this question'
+    case 'inactive':
+      return 'question is not active'
+    case 'choices-hidden':
+      return 'choices have not been revealed'
+  }
+}
+
+function isCurrentStagedQuestionAnswerable(sessionData: ResonanceSessionData, questionId: string): boolean {
+  return getQuestionAnswerability(sessionData, questionId).ok
+}
+
+function startStagedRun(
+  sessionData: ResonanceSessionData,
+  questionIds: string[],
+  now: number,
+): StagedRunState | null {
+  const stagedRun = createStagedRunState(questionIds)
+  if (stagedRun === null) {
+    clearStagedRun(sessionData)
+    return null
+  }
+
+  const currentQuestion = getQuestionById(sessionData.questions, stagedRun.currentQuestionId)
+  const choicesRevealed = currentQuestion?.type !== 'multiple-choice'
+  const nextRun = { ...stagedRun, choicesRevealed }
+  setStagedActiveQuestion(
+    sessionData,
+    nextRun,
+    now,
+    choicesRevealed ? buildSingleQuestionDeadline(currentQuestion, now) : null,
+  )
+  return nextRun
+}
+
+function buildActivationPayload(sessionData: ResonanceSessionData) {
+  return {
+    questionId: sessionData.activeQuestionId,
+    questionIds: sessionData.activeQuestionIds,
+    deadlineAt: sessionData.activeQuestionDeadlineAt,
+    presentationMode: sessionData.presentationMode,
+    stagedRun: sessionData.stagedRun,
   }
 }
 
@@ -321,6 +489,10 @@ function clearAllReveals(sessionData: ResonanceSessionData): QuestionReveal[] {
 }
 
 function expireActiveQuestionRunIfNeeded(session: ResonanceSession): boolean {
+  if (session.data.stagedRun !== null) {
+    return false
+  }
+
   const deadlineAt = session.data.activeQuestionDeadlineAt
   if (deadlineAt === null || Date.now() < deadlineAt) {
     return false
@@ -575,6 +747,9 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     ? { ...(normalizedEmbeddedLaunch.selectedOptions as Record<string, unknown>) }
     : null
   const shouldAutoActivateAllQuestions = embeddedLaunchSelectedOptions?.autoActivateAllQuestions === true
+  const presentationMode = normalizePresentationMode(
+    embeddedLaunchSelectedOptions?.presentationMode ?? source.presentationMode,
+  )
   if (embeddedLaunchSelectedOptions && 'autoActivateAllQuestions' in embeddedLaunchSelectedOptions) {
     delete embeddedLaunchSelectedOptions.autoActivateAllQuestions
     normalizedEmbeddedLaunch = {
@@ -615,6 +790,9 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
       : null
   let activeQuestionDeadlineAt =
     activeQuestionIds.length > 0 ? normalizeActiveQuestionDeadlineAt(source.activeQuestionDeadlineAt) : null
+  let stagedRun = presentationMode === 'staged'
+    ? normalizeStagedRunState(source.stagedRun, questions.map((question) => question.id))
+    : null
   let embeddedAutoActivatedAt =
     typeof source.embeddedAutoActivatedAt === 'number' && Number.isFinite(source.embeddedAutoActivatedAt)
       ? Math.round(source.embeddedAutoActivatedAt)
@@ -627,11 +805,36 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     && questions.length > 0
   ) {
     const runStartedAt = Date.now()
-    const run = buildActiveQuestionRun(questions, questions.map((question) => question.id), runStartedAt)
-    activeQuestionIds = run.questionIds
-    activeQuestionRunStartedAt = run.questionIds.length > 0 ? runStartedAt : null
-    activeQuestionDeadlineAt = run.questionIds.length > 0 ? run.deadlineAt : null
-    embeddedAutoActivatedAt = run.questionIds.length > 0 ? runStartedAt : null
+    const orderedQuestionIds = questions.map((question) => question.id)
+    if (presentationMode === 'staged') {
+      stagedRun = createStagedRunState(orderedQuestionIds)
+      const currentQuestion = getQuestionById(questions, stagedRun?.currentQuestionId ?? null)
+      const startsImmediately = currentQuestion?.type !== 'multiple-choice'
+      if (stagedRun && startsImmediately) {
+        stagedRun = { ...stagedRun, choicesRevealed: true }
+      }
+      activeQuestionIds = stagedRun?.currentQuestionId ? [stagedRun.currentQuestionId] : []
+      activeQuestionRunStartedAt = activeQuestionIds.length > 0 ? runStartedAt : null
+      activeQuestionDeadlineAt = startsImmediately ? buildSingleQuestionDeadline(currentQuestion, runStartedAt) : null
+      embeddedAutoActivatedAt = activeQuestionIds.length > 0 ? runStartedAt : null
+    } else {
+      const run = buildActiveQuestionRun(questions, orderedQuestionIds, runStartedAt)
+      activeQuestionIds = run.questionIds
+      activeQuestionRunStartedAt = run.questionIds.length > 0 ? runStartedAt : null
+      activeQuestionDeadlineAt = run.questionIds.length > 0 ? run.deadlineAt : null
+      embeddedAutoActivatedAt = run.questionIds.length > 0 ? runStartedAt : null
+    }
+  }
+
+  if (stagedRun !== null) {
+    const currentQuestion = getQuestionById(questions, stagedRun.currentQuestionId)
+    activeQuestionIds = stagedRun.currentQuestionId ? [stagedRun.currentQuestionId] : []
+    if (activeQuestionIds.length > 0 && activeQuestionRunStartedAt === null) {
+      activeQuestionRunStartedAt = Date.now()
+    }
+    if (currentQuestion?.type === 'multiple-choice' && !stagedRun.choicesRevealed) {
+      activeQuestionDeadlineAt = null
+    }
   }
 
   return {
@@ -642,8 +845,10 @@ function normalizeSessionData(data: unknown): ResonanceSessionData {
     instructorPasscode: normalizeInstructorPasscode(source.instructorPasscode) ?? generatePasscode(),
     ...(source.selfPacedMode === true ? { selfPacedMode: true } : {}),
     ...(normalizedEmbeddedLaunch ? { embeddedLaunch: normalizedEmbeddedLaunch } : {}),
+    presentationMode,
+    stagedRun,
     questions,
-    activeQuestionId: activeQuestionIds[0] ?? null,
+    activeQuestionId: stagedRun?.currentQuestionId ?? activeQuestionIds[0] ?? null,
     activeQuestionIds,
     activeQuestionRunStartedAt,
     activeQuestionDeadlineAt,
@@ -675,12 +880,13 @@ function asResonanceSession(session: SessionRecord | null): ResonanceSession | n
 // Snapshot builders (produce student-safe and instructor-safe views)
 // ---------------------------------------------------------------------------
 
-function toStudentQuestion(q: Question) {
+function toStudentQuestion(q: Question, choicesRevealed = true) {
   if (q.type === 'free-response') return q
   return {
     ...q,
-    options: q.options.map(({ id, text }) => ({ id, text })),
+    options: choicesRevealed ? q.options.map(({ id, text }) => ({ id, text })) : [],
     selectionMode: getMcqSelectionMode(q),
+    choicesRevealed,
   }
 }
 
@@ -778,6 +984,21 @@ function buildSelfPacedMcqReveals(
   })
 }
 
+function areChoicesVisibleToStudents(sessionData: ResonanceSessionData, question: Question): boolean {
+  if (question.type !== 'multiple-choice') {
+    return true
+  }
+  const stagedRun = sessionData.stagedRun
+  if (sessionData.presentationMode !== 'staged' || stagedRun === null) {
+    return true
+  }
+  return stagedRun.currentQuestionId !== question.id || stagedRun.choicesRevealed
+}
+
+function toStudentQuestionForSession(sessionData: ResonanceSessionData, question: Question) {
+  return toStudentQuestion(question, areChoicesVisibleToStudents(sessionData, question))
+}
+
 function buildStudentSnapshotWithMode(
   session: ResonanceSession,
   viewerStudentId: string | null,
@@ -789,10 +1010,10 @@ function buildStudentSnapshotWithMode(
     ? questions.map((question) => question.id)
     : activeQuestionIds
   const fallbackQuestions = effectiveSelfPacedMode
-    ? questions.map(toStudentQuestion)
+    ? questions.map((question) => toStudentQuestionForSession(session.data, question))
     : questions
       .filter((question) => activeQuestionIds.includes(question.id))
-      .map(toStudentQuestion)
+      .map((question) => toStudentQuestionForSession(session.data, question))
   const liveActiveQuestionIdSet = new Set(activeQuestionIds)
   const activeQuestions = fallbackQuestions
   const activeQuestion = activeQuestions[0] ?? null
@@ -803,7 +1024,7 @@ function buildStudentSnapshotWithMode(
   for (const reveal of selfPacedReveals) {
     revealedQuestionIds.add(reveal.questionId)
   }
-  const revealedQuestions = questions.filter((q) => revealedQuestionIds.has(q.id)).map(toStudentQuestion)
+  const revealedQuestions = questions.filter((q) => revealedQuestionIds.has(q.id)).map((question) => toStudentQuestion(question))
   const submittedAnswers =
     viewerStudentId === null
       ? {}
@@ -837,6 +1058,8 @@ function buildStudentSnapshotWithMode(
   return {
     sessionId: session.id,
     selfPacedMode: effectiveSelfPacedMode,
+    presentationMode: session.data.presentationMode,
+    stagedRun: effectiveSelfPacedMode ? null : session.data.stagedRun,
     activeQuestion: activeQuestionId !== null ? (activeQuestions.find((q) => q.id === activeQuestionId) ?? activeQuestion) : activeQuestion,
     activeQuestions,
     activeQuestionIds: fallbackQuestionIds,
@@ -854,6 +1077,8 @@ function buildStudentSnapshotWithMode(
 
 function buildInstructorSnapshot(session: ResonanceSession) {
   const {
+    presentationMode,
+    stagedRun,
     questions,
     activeQuestionId,
     activeQuestionIds,
@@ -929,17 +1154,27 @@ function buildInstructorSnapshot(session: ResonanceSession) {
     }
   }
 
-  const progress = [...progressByQuestionStudent.values()]
+  const progress = [...progressByQuestionStudent.values()].sort((left, right) => {
+    if (left.status === 'submitted' && right.status === 'submitted') {
+      return left.updatedAt - right.updatedAt
+    }
+    if (left.status === 'submitted') return -1
+    if (right.status === 'submitted') return 1
+    return left.updatedAt - right.updatedAt
+  })
+  const orderedResponses = [...responses].sort((left, right) => left.submittedAt - right.submittedAt)
 
   return {
     sessionId: session.id,
+    presentationMode,
+    stagedRun,
     questions,
     activeQuestionId,
     activeQuestionIds,
     activeQuestionRunStartedAt,
     activeQuestionDeadlineAt,
     students: Object.values(students),
-    responses: responses.map((r) => ({
+    responses: orderedResponses.map((r) => ({
       ...r,
       studentName: students[r.studentId]?.name ?? 'Unknown',
     })),
@@ -1120,6 +1355,7 @@ export default function setupResonanceRoutes(
     const body = isPlainObject(req.body) ? req.body : {}
     const instructorPasscode = generatePasscode()
     const selfPacedMode = body.selfPacedMode === true
+    const presentationMode = normalizePresentationMode(body.presentationMode)
 
     let questions: Question[] = []
     let persistentHash: string | null = null
@@ -1155,6 +1391,7 @@ export default function setupResonanceRoutes(
         instructorPasscode,
         questions,
         persistentHash,
+        presentationMode,
         ...(selfPacedMode ? { selfPacedMode: true } : {}),
       }),
     })
@@ -1166,6 +1403,7 @@ export default function setupResonanceRoutes(
       questionCount: questions.length,
       fromPersistentLink: persistentHash !== null,
       selfPacedMode,
+      presentationMode,
     })
 
     res.json(selfPacedMode ? { id: session.id } : { id: session.id, instructorPasscode })
@@ -1324,6 +1562,14 @@ export default function setupResonanceRoutes(
       return
     }
 
+    const answerability = getQuestionAnswerability(session.data, questionId)
+    if (!answerability.ok) {
+      res.status(409).json({
+        error: resolveAnswerabilityErrorMessage(answerability.reason),
+      })
+      return
+    }
+
     const answer = validateAnswerPayload(body.answer, activeQuestion)
     if (!answer) {
       res.status(400).json({ error: 'invalid answer payload' })
@@ -1417,9 +1663,15 @@ export default function setupResonanceRoutes(
         res.status(404).json({ error: 'question not found' })
         return
       }
+      const presentationMode = normalizePresentationMode(body.presentationMode ?? session.data.presentationMode)
       const runStartedAt = Date.now()
-      const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, runStartedAt)
-      setActiveQuestions(session.data, run.questionIds, runStartedAt, run.deadlineAt)
+      session.data.presentationMode = presentationMode
+      if (presentationMode === 'staged') {
+        startStagedRun(session.data, orderedQuestionIds, runStartedAt)
+      } else {
+        const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, runStartedAt)
+        setActiveQuestions(session.data, run.questionIds, runStartedAt, run.deadlineAt)
+      }
     } else {
       clearActiveQuestions(session.data)
     }
@@ -1435,20 +1687,177 @@ export default function setupResonanceRoutes(
       activeQuestionIds: session.data.activeQuestionIds,
       activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
     })
-    void broadcast(
-      'resonance:question-activated',
-      {
-        questionId: session.data.activeQuestionId,
-        questionIds: session.data.activeQuestionIds,
-        deadlineAt: session.data.activeQuestionDeadlineAt,
-      },
-      sessionId,
-    )
+    broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
+    void broadcastStudentSessionState(session, sessionId)
+    broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
     res.json({
       ok: true,
       activeQuestionId: session.data.activeQuestionId,
       activeQuestionIds: session.data.activeQuestionIds,
       activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+      presentationMode: session.data.presentationMode,
+      stagedRun: session.data.stagedRun,
+    })
+  })
+
+  // POST /api/resonance/:sessionId/reveal-choices
+  // Reveals choices for the current staged multiple-choice question and starts its timer.
+  app.post('/api/resonance/:sessionId/reveal-choices', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = await loadResonanceSession(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const stagedRun = session.data.stagedRun
+    if (session.data.presentationMode !== 'staged' || stagedRun === null || stagedRun.currentQuestionId === null) {
+      res.status(409).json({ error: 'no staged question is active' })
+      return
+    }
+
+    const question = getQuestionById(session.data.questions, stagedRun.currentQuestionId)
+    if (!question || question.type !== 'multiple-choice') {
+      res.status(409).json({ error: 'current staged question has no choices to reveal' })
+      return
+    }
+    if (stagedRun.choicesRevealed) {
+      res.json({
+        ok: true,
+        activeQuestionId: session.data.activeQuestionId,
+        activeQuestionIds: session.data.activeQuestionIds,
+        activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+        presentationMode: session.data.presentationMode,
+        stagedRun: session.data.stagedRun,
+      })
+      return
+    }
+
+    const now = Date.now()
+    const nextRun = { ...stagedRun, choicesRevealed: true }
+    setStagedActiveQuestion(
+      session.data,
+      nextRun,
+      session.data.activeQuestionRunStartedAt ?? now,
+      buildSingleQuestionDeadline(question, now),
+    )
+    await sessions.set(sessionId, session)
+
+    console.info('[resonance] Staged choices revealed', {
+      sessionId,
+      questionId: question.id,
+      activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+    })
+    broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
+    void broadcastStudentSessionState(session, sessionId)
+    broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+
+    res.json({
+      ok: true,
+      activeQuestionId: session.data.activeQuestionId,
+      activeQuestionIds: session.data.activeQuestionIds,
+      activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+      presentationMode: session.data.presentationMode,
+      stagedRun: session.data.stagedRun,
+    })
+  })
+
+  // POST /api/resonance/:sessionId/advance-staged-question
+  // Advances a staged run to the next question, skips a stem-only MCQ when requested,
+  // or ends the run after the last question.
+  app.post('/api/resonance/:sessionId/advance-staged-question', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) {
+      res.status(400).json({ error: 'missing sessionId' })
+      return
+    }
+
+    const session = await loadResonanceSession(sessionId)
+    if (!session) {
+      res.status(404).json({ error: 'session not found' })
+      return
+    }
+
+    if (!checkInstructorAuth(req, session)) {
+      res.status(403).json({ error: 'forbidden' })
+      return
+    }
+
+    const stagedRun = session.data.stagedRun
+    if (session.data.presentationMode !== 'staged' || stagedRun === null || stagedRun.currentQuestionId === null) {
+      res.status(409).json({ error: 'no staged question is active' })
+      return
+    }
+
+    const completedQuestionIds = Array.from(new Set([
+      ...stagedRun.completedQuestionIds,
+      stagedRun.currentQuestionId,
+    ]))
+    const nextIndex = stagedRun.currentIndex + 1
+    const nextQuestionId = stagedRun.questionIds[nextIndex] ?? null
+
+    if (nextQuestionId === null) {
+      clearStagedRun(session.data)
+      await sessions.set(sessionId, session)
+      console.info('[resonance] Staged run completed', { sessionId })
+      broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
+      void broadcastStudentSessionState(session, sessionId)
+      broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+      res.json({
+        ok: true,
+        activeQuestionId: session.data.activeQuestionId,
+        activeQuestionIds: session.data.activeQuestionIds,
+        activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+        presentationMode: session.data.presentationMode,
+        stagedRun: session.data.stagedRun,
+      })
+      return
+    }
+
+    const nextQuestion = getQuestionById(session.data.questions, nextQuestionId)
+    const choicesRevealed = nextQuestion?.type !== 'multiple-choice'
+    const now = Date.now()
+    const nextRun: StagedRunState = {
+      questionIds: stagedRun.questionIds,
+      currentQuestionId: nextQuestionId,
+      currentIndex: nextIndex,
+      choicesRevealed,
+      completedQuestionIds,
+    }
+    setStagedActiveQuestion(
+      session.data,
+      nextRun,
+      now,
+      choicesRevealed ? buildSingleQuestionDeadline(nextQuestion, now) : null,
+    )
+    await sessions.set(sessionId, session)
+
+    console.info('[resonance] Staged question advanced', {
+      sessionId,
+      questionId: nextQuestionId,
+      currentIndex: nextIndex,
+    })
+    broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
+    void broadcastStudentSessionState(session, sessionId)
+    broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+
+    res.json({
+      ok: true,
+      activeQuestionId: session.data.activeQuestionId,
+      activeQuestionIds: session.data.activeQuestionIds,
+      activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+      presentationMode: session.data.presentationMode,
+      stagedRun: session.data.stagedRun,
     })
   })
 
@@ -1765,9 +2174,15 @@ export default function setupResonanceRoutes(
           const uniqueRequestedIds = Array.from(new Set(requestedQuestionIds))
           const orderedQuestionIds = getOrderedExistingQuestionIds(session.data.questions, uniqueRequestedIds)
           if (orderedQuestionIds.length !== uniqueRequestedIds.length) return
+          const presentationMode = normalizePresentationMode(payload.presentationMode ?? session.data.presentationMode)
           const runStartedAt = Date.now()
-          const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, runStartedAt)
-          setActiveQuestions(session.data, run.questionIds, runStartedAt, run.deadlineAt)
+          session.data.presentationMode = presentationMode
+          if (presentationMode === 'staged') {
+            startStagedRun(session.data, orderedQuestionIds, runStartedAt)
+          } else {
+            const run = buildActiveQuestionRun(session.data.questions, orderedQuestionIds, runStartedAt)
+            setActiveQuestions(session.data, run.questionIds, runStartedAt, run.deadlineAt)
+          }
         }
         await sessions.set(sessionId, session)
         console.info('[resonance] WS activate-question', {
@@ -1775,15 +2190,65 @@ export default function setupResonanceRoutes(
           activeQuestionIds: session.data.activeQuestionIds,
           activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
         })
-        void broadcast(
-          'resonance:question-activated',
-          {
-            questionId: session.data.activeQuestionId,
-            questionIds: session.data.activeQuestionIds,
-            deadlineAt: session.data.activeQuestionDeadlineAt,
-          },
-          sessionId,
+        broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
+        void broadcastStudentSessionState(session, sessionId)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:reveal-choices': {
+        const stagedRun = session.data.stagedRun
+        if (session.data.presentationMode !== 'staged' || stagedRun === null || stagedRun.currentQuestionId === null) return
+        if (stagedRun.choicesRevealed) return
+        const question = getQuestionById(session.data.questions, stagedRun.currentQuestionId)
+        if (!question || question.type !== 'multiple-choice') return
+        const now = Date.now()
+        setStagedActiveQuestion(
+          session.data,
+          { ...stagedRun, choicesRevealed: true },
+          session.data.activeQuestionRunStartedAt ?? now,
+          buildSingleQuestionDeadline(question, now),
         )
+        await sessions.set(sessionId, session)
+        console.info('[resonance] WS reveal choices', { sessionId, questionId: question.id })
+        broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
+        void broadcastStudentSessionState(session, sessionId)
+        broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
+        break
+      }
+
+      case 'resonance:advance-staged-question': {
+        // Advancing from a stem-only MCQ is an intentional instructor skip.
+        const stagedRun = session.data.stagedRun
+        if (session.data.presentationMode !== 'staged' || stagedRun === null || stagedRun.currentQuestionId === null) return
+        const nextIndex = stagedRun.currentIndex + 1
+        const nextQuestionId = stagedRun.questionIds[nextIndex] ?? null
+        const completedQuestionIds = Array.from(new Set([...stagedRun.completedQuestionIds, stagedRun.currentQuestionId]))
+        if (nextQuestionId === null) {
+          clearStagedRun(session.data)
+        } else {
+          const nextQuestion = getQuestionById(session.data.questions, nextQuestionId)
+          const choicesRevealed = nextQuestion?.type !== 'multiple-choice'
+          const now = Date.now()
+          setStagedActiveQuestion(
+            session.data,
+            {
+              questionIds: stagedRun.questionIds,
+              currentQuestionId: nextQuestionId,
+              currentIndex: nextIndex,
+              choicesRevealed,
+              completedQuestionIds,
+            },
+            now,
+            choicesRevealed ? buildSingleQuestionDeadline(nextQuestion, now) : null,
+          )
+        }
+        await sessions.set(sessionId, session)
+        console.info('[resonance] WS advance staged question', {
+          sessionId,
+          activeQuestionId: session.data.activeQuestionId,
+        })
+        broadcastToRole('resonance:question-activated', buildActivationPayload(session.data), sessionId, true)
         void broadcastStudentSessionState(session, sessionId)
         broadcastToRole('resonance:instructor-state', buildInstructorSnapshot(session), sessionId, true)
         break
@@ -1952,6 +2417,7 @@ export default function setupResonanceRoutes(
         if (!questionId || !availableQuestionIds.includes(questionId)) return
         const activeQuestion = session.data.questions.find((q) => q.id === questionId) ?? null
         if (!activeQuestion) return
+        if (!isCurrentStagedQuestionAnswerable(session.data, questionId)) return
         const answer = validateAnswerPayload(payload.answer, activeQuestion)
         if (!answer) return
         const response = upsertResponse(session.data.responses, questionId, studentId, answer)
@@ -1986,6 +2452,7 @@ export default function setupResonanceRoutes(
 
         const question = session.data.questions.find((entry) => entry.id === questionId) ?? null
         if (!question) return
+        if (!isCurrentStagedQuestionAnswerable(session.data, questionId)) return
 
         const alreadyAnswered = session.data.responses.some(
           (response) => response.questionId === questionId && response.studentId === studentId,

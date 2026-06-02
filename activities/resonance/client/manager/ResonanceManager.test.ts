@@ -10,7 +10,10 @@ import {
   reconcileActivationSelection,
   resolveActivationSelectionAfterToggle,
   resolveActivationSelectionForRender,
+  resolveLiveCountdown,
+  resolveManagerActiveTab,
   resolvePasscode,
+  resolveStagedAdvanceLabel,
   shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
   toggleExpandedQuestionStem,
@@ -120,6 +123,136 @@ void test('resolveActivationSelectionAfterToggle uses the rendered default selec
   assert.deepEqual(
     resolveActivationSelectionAfterToggle([], 'q2', ['q1', 'q2', 'q3'], ['q2']),
     ['q2'],
+  )
+})
+
+void test('resolveManagerActiveTab follows the current staged question as the run advances', () => {
+  const questions = [
+    { id: 'q1' },
+    { id: 'q2' },
+  ]
+
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: 'q1',
+      previousStagedQuestionId: 'q1',
+      questions,
+      presentationMode: 'staged',
+      stagedRun: {
+        questionIds: ['q1', 'q2'],
+        currentQuestionId: 'q2',
+        currentIndex: 1,
+        choicesRevealed: false,
+        completedQuestionIds: ['q1'],
+      },
+    }),
+    'q2',
+  )
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: 'q1',
+      previousStagedQuestionId: 'q2',
+      questions,
+      presentationMode: 'staged',
+      stagedRun: {
+        questionIds: ['q1', 'q2'],
+        currentQuestionId: 'q2',
+        currentIndex: 1,
+        choicesRevealed: false,
+        completedQuestionIds: ['q1'],
+      },
+    }),
+    'q1',
+  )
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: null,
+      previousStagedQuestionId: null,
+      questions,
+      presentationMode: 'staged',
+      stagedRun: {
+        questionIds: ['q1', 'q2'],
+        currentQuestionId: 'q2',
+        currentIndex: 1,
+        choicesRevealed: false,
+        completedQuestionIds: ['q1'],
+      },
+    }),
+    'q2',
+  )
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: 'q1',
+      previousStagedQuestionId: null,
+      questions,
+      presentationMode: 'standard',
+      stagedRun: null,
+    }),
+    'q1',
+  )
+  assert.equal(
+    resolveManagerActiveTab({
+      currentActiveTab: null,
+      previousStagedQuestionId: null,
+      questions,
+      presentationMode: 'standard',
+      stagedRun: null,
+    }),
+    'q1',
+  )
+})
+
+void test('resolveLiveCountdown hides expired live-run deadlines', () => {
+  assert.equal(
+    resolveLiveCountdown({
+      activeQuestionDeadlineAt: 1_000,
+      hasLiveRun: false,
+      now: 1_500,
+    }),
+    null,
+  )
+  assert.equal(
+    resolveLiveCountdown({
+      activeQuestionDeadlineAt: 3_000,
+      hasLiveRun: true,
+      now: 1_500,
+    }),
+    '0:02',
+  )
+  assert.equal(
+    resolveLiveCountdown({
+      activeQuestionDeadlineAt: null,
+      hasLiveRun: true,
+      now: 1_500,
+    }),
+    null,
+  )
+})
+
+void test('resolveStagedAdvanceLabel names skip, next, and end staged actions', () => {
+  assert.equal(
+    resolveStagedAdvanceLabel({
+      isStemOnlyMultipleChoice: true,
+      currentIndex: 0,
+      questionCount: 2,
+    }),
+    'Skip question',
+  )
+  assert.equal(
+    resolveStagedAdvanceLabel({
+      isStemOnlyMultipleChoice: false,
+      currentIndex: 0,
+      questionCount: 2,
+    }),
+    'Next question',
+  )
+  assert.equal(
+    resolveStagedAdvanceLabel({
+      isStemOnlyMultipleChoice: false,
+      currentIndex: 1,
+      questionCount: 2,
+    }),
+    'End staged run',
   )
 })
 
