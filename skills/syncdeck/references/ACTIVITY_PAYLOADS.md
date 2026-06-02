@@ -68,14 +68,14 @@ Staged presentation example:
     {
       "id": "q1",
       "type": "multiple-choice",
-      "text": "This function creates a sequence of numbers that a for loop can use.",
+      "text": "Which function creates a sequence of numbers that a for loop can use?",
       "order": 0,
       "responseTimeLimitMs": 30000,
       "options": [
-        { "id": "q1a", "text": "What is print()?", "isCorrect": false },
-        { "id": "q1b", "text": "What is range()?", "isCorrect": true },
-        { "id": "q1c", "text": "What is input()?", "isCorrect": false },
-        { "id": "q1d", "text": "What is len()?", "isCorrect": false }
+        { "id": "q1a", "text": "print()?", "isCorrect": false },
+        { "id": "q1b", "text": "range()?", "isCorrect": true },
+        { "id": "q1c", "text": "input()?", "isCorrect": false },
+        { "id": "q1d", "text": "len()?", "isCorrect": false }
       ]
     }
   ]

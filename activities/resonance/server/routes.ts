@@ -248,12 +248,18 @@ function normalizeStagedRunState(value: unknown, availableQuestionIds: string[])
   }
 
   const availableQuestionIdSet = new Set(availableQuestionIds)
+  const seenQuestionIds = new Set<string>()
   const questionIds = Array.isArray(value.questionIds)
-    ? value.questionIds.filter((entry): entry is string => (
-        typeof entry === 'string' &&
-        entry.trim().length > 0 &&
-        availableQuestionIdSet.has(entry)
-      ))
+    ? value.questionIds.filter((entry): entry is string => {
+        if (typeof entry !== 'string' || entry.trim().length === 0 || !availableQuestionIdSet.has(entry)) {
+          return false
+        }
+        if (seenQuestionIds.has(entry)) {
+          return false
+        }
+        seenQuestionIds.add(entry)
+        return true
+      })
     : []
   if (questionIds.length === 0) {
     return null
@@ -1699,6 +1705,17 @@ export default function setupResonanceRoutes(
       res.status(409).json({ error: 'current staged question has no choices to reveal' })
       return
     }
+    if (stagedRun.choicesRevealed) {
+      res.json({
+        ok: true,
+        activeQuestionId: session.data.activeQuestionId,
+        activeQuestionIds: session.data.activeQuestionIds,
+        activeQuestionDeadlineAt: session.data.activeQuestionDeadlineAt,
+        presentationMode: session.data.presentationMode,
+        stagedRun: session.data.stagedRun,
+      })
+      return
+    }
 
     const now = Date.now()
     const nextRun = { ...stagedRun, choicesRevealed: true }
@@ -2150,6 +2167,7 @@ export default function setupResonanceRoutes(
       case 'resonance:reveal-choices': {
         const stagedRun = session.data.stagedRun
         if (session.data.presentationMode !== 'staged' || stagedRun === null || stagedRun.currentQuestionId === null) return
+        if (stagedRun.choicesRevealed) return
         const question = getQuestionById(session.data.questions, stagedRun.currentQuestionId)
         if (!question || question.type !== 'multiple-choice') return
         const now = Date.now()

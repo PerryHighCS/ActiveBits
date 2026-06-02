@@ -1602,6 +1602,25 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   assert.equal(revealBody.stagedRun?.choicesRevealed, true)
   assert.ok(typeof revealBody.activeQuestionDeadlineAt === 'number')
 
+  const firstDeadlineAt = revealBody.activeQuestionDeadlineAt
+  const repeatedRevealRes = createResponse()
+  await revealHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+      body: {},
+    },
+    repeatedRevealRes,
+  )
+
+  assert.equal(repeatedRevealRes.statusCode, 200)
+  assert.equal(
+    (repeatedRevealRes.body as { activeQuestionDeadlineAt?: number | null }).activeQuestionDeadlineAt,
+    firstDeadlineAt,
+  )
+
   const visibleStateRes = createResponse()
   await stateHandler?.({ params: { sessionId: session.id } }, visibleStateRes)
   const visibleState = visibleStateRes.body as {
@@ -1627,6 +1646,56 @@ void test('staged activate-question hides MCQ choices until reveal and then acce
   )
 
   assert.equal(submitRes.statusCode, 200)
+
+  await sessions.close()
+})
+
+void test('staged session normalization deduplicates persisted question ids while preserving order', async () => {
+  const app = createMockApp()
+  const ws = createMockWs()
+  const sessions = createSessionStore(null)
+  const session = createMultiQuestionSession()
+  session.data.presentationMode = 'staged'
+  session.data.stagedRun = {
+    questionIds: ['q1', 'q2', 'q1', 'q2'],
+    currentQuestionId: 'q2',
+    currentIndex: 3,
+    choicesRevealed: false,
+    completedQuestionIds: ['q1', 'q1'],
+  }
+  session.data.activeQuestionId = 'q2'
+  session.data.activeQuestionIds = ['q2']
+  await sessions.set(session.id, session)
+
+  setupResonanceRoutes(app, sessions, ws)
+
+  const responsesHandler = app.handlers.get['/api/resonance/:sessionId/responses']
+  assert.equal(typeof responsesHandler, 'function')
+
+  const res = createResponse()
+  await responsesHandler?.(
+    {
+      params: { sessionId: session.id },
+      headers: {
+        'x-instructor-passcode': 'TEACH123',
+      },
+    },
+    res,
+  )
+
+  assert.equal(res.statusCode, 200)
+  const body = res.body as {
+    stagedRun?: {
+      questionIds?: string[]
+      currentQuestionId?: string | null
+      currentIndex?: number
+      completedQuestionIds?: string[]
+    } | null
+  }
+  assert.deepEqual(body.stagedRun?.questionIds, ['q1', 'q2'])
+  assert.equal(body.stagedRun?.currentQuestionId, 'q2')
+  assert.equal(body.stagedRun?.currentIndex, 1)
+  assert.deepEqual(body.stagedRun?.completedQuestionIds, ['q1'])
 
   await sessions.close()
 })
