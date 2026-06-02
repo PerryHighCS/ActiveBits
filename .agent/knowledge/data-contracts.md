@@ -16,6 +16,15 @@ Document API and data-shape assumptions that must stay compatible over time.
 ## Contracts
 
 - Date: 2026-06-02
+- Surface: activity interface | client routing
+- Contract: Activities may set `studentLayout.expandShell: true` to request the app shell omit its default page padding once `SessionRouter` resolves a live student session to that activity. `manageLayout.expandShell` remains for instructor manager routes, and `standaloneLayout.expandShell` remains for direct standalone routes where the activity id is already available in the URL.
+- Compatibility constraints: Live join routes such as `/:sessionId` cannot know the activity from the URL alone, so padding must be driven after the session payload resolves instead of adding activity-specific route exceptions in `AppShell`.
+- Validation rules: `studentLayout.expandShell` is parsed with the same boolean-only shape as the existing layout configs.
+- Evidence (schema/tests/path): `types/activity.ts`; `types/activityConfigSchema.ts`; `client/src/App.tsx`; `client/src/components/common/SessionRouter.tsx`; `server/activityConfigSchema.test.ts`
+- Follow-up action: Use `studentLayout` for future full-bleed live student activities rather than compensating with negative margins inside activity UI.
+- Owner: Codex
+
+- Date: 2026-06-02
 - Surface: activity interface | SyncDeck embedded launch | file import
 - Contract: Resonance question stem fields (`text`) and multiple-choice answer choice fields (`options[].text`) are plain strings interpreted as Markdown at render time. No parallel `markdown` schema field is introduced, so existing plain-text payloads remain valid and stored/imported question sets keep the same shape.
 - Compatibility constraints: Markdown is additive and activity-owned. Student free-response answer text remains plain escaped user text, not authored Markdown. SyncDeck deck authors can put Markdown directly in embedded Resonance `questions[].text` and `questions[].options[].text` values.

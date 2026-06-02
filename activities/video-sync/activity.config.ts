@@ -35,6 +35,9 @@ const videoSyncConfig: ActivityConfig = {
   manageLayout: {
     expandShell: true,
   },
+  studentLayout: {
+    expandShell: true,
+  },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }

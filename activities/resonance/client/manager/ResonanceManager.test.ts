@@ -16,6 +16,7 @@ import {
   resolveStagedAdvanceLabel,
   shouldShowQuestionListActivationControls,
   shouldShowQuestionPanelActions,
+  shouldRenderResonanceEndSessionButton,
   toggleExpandedQuestionStem,
   toggleQuestionActivationSelection,
 } from './ResonanceManager.js'
@@ -267,6 +268,12 @@ void test('shouldShowQuestionListActivationControls keeps activate and stop avai
   assert.equal(shouldShowQuestionListActivationControls(0), false)
   assert.equal(shouldShowQuestionListActivationControls(1), true)
   assert.equal(shouldShowQuestionListActivationControls(3), true)
+})
+
+void test('shouldRenderResonanceEndSessionButton only shows for independent sessions', () => {
+  assert.equal(shouldRenderResonanceEndSessionButton('ABC123'), true)
+  assert.equal(shouldRenderResonanceEndSessionButton('CHILD:parent:abc12:resonance'), false)
+  assert.equal(shouldRenderResonanceEndSessionButton(undefined), true)
 })
 
 void test('shouldShowQuestionPanelActions only keeps share controls on multiple-choice questions', () => {

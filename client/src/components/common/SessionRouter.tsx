@@ -51,6 +51,10 @@ interface RouteParams {
   utilityId?: string
 }
 
+interface SessionRouterProps {
+  onShellExpandChange?: (shouldExpand: boolean) => void
+}
+
 interface SessionPayload {
   session?: Record<string, unknown>
 }
@@ -101,7 +105,7 @@ function getWindowSearch(): string {
   return typeof window !== 'undefined' ? window.location.search : ''
 }
 
-const SessionRouter = () => {
+const SessionRouter = ({ onShellExpandChange }: SessionRouterProps = {}) => {
   const [sessionIdInput, setSessionIdInput] = useState('')
   const { sessionId, activityName, hash, soloActivityId, utilityActivityId, utilityId } = useParams<RouteParams>()
   const location = useLocation()
@@ -163,6 +167,18 @@ const SessionRouter = () => {
     : utilityRouteMatch != null
       ? null
       : 'Unknown utility route'
+  const sessionActivity = sessionData?.type ? getActivity(sessionData.type) : null
+  const shouldExpandSessionShell = soloActivity?.standaloneLayout?.expandShell === true
+    || utilityRouteMatch?.activity.standaloneLayout?.expandShell === true
+    || sessionActivity?.studentLayout?.expandShell === true
+
+  useEffect(() => {
+    onShellExpandChange?.(shouldExpandSessionShell)
+  }, [onShellExpandChange, shouldExpandSessionShell])
+
+  useEffect(() => {
+    return () => onShellExpandChange?.(false)
+  }, [onShellExpandChange])
 
   const resolveTeacherManagePath = useCallback(
     async (
@@ -743,7 +759,7 @@ const SessionRouter = () => {
 
   if (!sessionData) return <div className="text-center">Loading session...</div>
 
-  const activity = getActivity(sessionData.type || '')
+  const activity = sessionActivity
 
   if (!activity) {
     return <div className="text-center">Unknown session type: {sessionData.type}</div>

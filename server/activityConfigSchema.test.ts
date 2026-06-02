@@ -94,6 +94,9 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
       manageDashboard: {
         customPersistentLinkBuilder: true,
       },
+      studentLayout: {
+        expandShell: true,
+      },
       embeddedRuntime: {
         instructorGated: 'runtime',
       },
@@ -144,6 +147,7 @@ void test('parseActivityConfig accepts valid shared contracts', () => {
   assert.deepEqual(parsed.createSessionBootstrap?.historyState, ['instructorPasscode'])
   assert.deepEqual(parsed.createSessionBootstrap?.selectedOptionsToSessionData, ['presentationUrl'])
   assert.equal(parsed.manageDashboard?.customPersistentLinkBuilder, true)
+  assert.equal(parsed.studentLayout?.expandShell, true)
   assert.equal(parsed.embeddedRuntime?.instructorGated, 'runtime')
   assert.equal(parsed.reportEndpoint, '/api/syncdeck/s1/report')
   assert.deepEqual(parsed.utilities, [

@@ -75,6 +75,9 @@ const binaryBreachConfig: ActivityConfig = {
   standaloneLayout: {
     expandShell: true,
   },
+  studentLayout: {
+    expandShell: true,
+  },
   clientEntry: './client/index.ts',
   serverEntry: './server/routes.ts',
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { consumeCreateSessionBootstrapPayload } from '@src/components/common/manageDashboardUtils'
+import { isEmbeddedChildSessionId } from '@src/components/common/sessionHeaderUtils'
 import type { InstructorAnnotation, Question, ResonancePresentationMode, StagedRunState } from '../../shared/types.js'
 import { useInstructorState } from '../hooks/useInstructorState.js'
 import ResponseViewer from './ResponseViewer.js'
@@ -181,6 +182,10 @@ export function shouldShowQuestionListActivationControls(questionCount: number):
   return questionCount > 0
 }
 
+export function shouldRenderResonanceEndSessionButton(sessionId: string | null | undefined): boolean {
+  return !isEmbeddedChildSessionId(sessionId ?? undefined)
+}
+
 export function resolveManagerActiveTab(params: {
   currentActiveTab: string | null
   previousStagedQuestionId: string | null
@@ -235,8 +240,10 @@ export function handleQuestionListItemKeyDown(
  */
 export default function ResonanceManager() {
   const { sessionId } = useParams<{ sessionId?: string }>()
+  const navigate = useNavigate()
   const [passcode, setPasscode] = useState<string | null>(null)
   const [isResolvingPasscode, setIsResolvingPasscode] = useState(true)
+  const [isEndingSession, setIsEndingSession] = useState(false)
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [activationSelectionIds, setActivationSelectionIds] = useState<string[] | null>(null)
   const [expandedQuestionStemIds, setExpandedQuestionStemIds] = useState<string[]>([])
@@ -476,6 +483,30 @@ export default function ResonanceManager() {
     [callInstructor],
   )
 
+  const endSession = useCallback(async () => {
+    if (!sessionId || isEndingSession) {
+      return
+    }
+
+    const confirmed = window.confirm('End this Resonance session? Students will be disconnected and session data will be cleared.')
+    if (!confirmed) {
+      return
+    }
+
+    setIsEndingSession(true)
+    try {
+      const response = await fetch(`/api/session/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        throw new Error('Failed to end session')
+      }
+      void navigate('/manage')
+    } catch {
+      setIsEndingSession(false)
+    }
+  }, [isEndingSession, navigate, sessionId])
+
   // ---------------------------------------------------------------------------
   // Render guards
   // ---------------------------------------------------------------------------
@@ -597,6 +628,7 @@ export default function ResonanceManager() {
     viewingQuestion?.type === 'multiple-choice'
       ? viewingQuestion.options.filter((o) => o.isCorrect).map((o) => o.id)
       : undefined
+  const showEndSessionButton = shouldRenderResonanceEndSessionButton(sessionId)
 
   // ---------------------------------------------------------------------------
   // UI
@@ -622,6 +654,20 @@ export default function ResonanceManager() {
           )}
           {error !== null && (
             <span className="text-xs text-amber-600 dark:text-amber-400">{error}</span>
+          )}
+          {showEndSessionButton ? (
+            <button
+              type="button"
+              onClick={() => { void endSession() }}
+              disabled={isEndingSession}
+              className="rounded-lg border border-red-300 dark:border-red-700 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isEndingSession ? 'Ending...' : 'End session'}
+            </button>
+          ) : (
+            <span className="text-xs text-slate-400 dark:text-slate-500">
+              Embedded session managed by parent
+            </span>
           )}
         </div>
       </header>
