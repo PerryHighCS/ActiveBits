@@ -205,6 +205,8 @@ const CSS = `
   .report-markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #f3f4f6; border-radius: 4px; padding: 1px 4px; }
   .report-markdown pre { overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 6px; background: #111827; color: #f9fafb; padding: 10px; margin: 8px 0; }
   .report-markdown pre code { background: transparent; color: inherit; padding: 0; }
+  .report-markdown .max-w-full { max-width: 100%; }
+  .report-markdown .overflow-x-auto { overflow-x: auto; }
   .report-markdown table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px; }
   .report-markdown th, .report-markdown td { border: 1px solid #e5e7eb; padding: 4px 6px; }
   .report-markdown img { max-width: 100%; max-height: 360px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 6px; }

@@ -147,6 +147,8 @@ void test('buildResonanceReportHtml renders Markdown in authored stems and MCQ c
   const html = buildResonanceReportHtml(report)
   assert.match(html, /<pre/)
   assert.match(html, /<table/)
+  assert.match(html, /<div class="max-w-full overflow-x-auto">/)
+  assert.match(html, /\.report-markdown \.overflow-x-auto \{ overflow-x: auto; \}/)
   assert.match(html, /<code/)
   assert.doesNotMatch(html, /<script\b/i)
   assert.doesNotMatch(html, /javascript:alert/)
