@@ -1917,7 +1917,7 @@ export default function setupResonanceRoutes(
   })
 
   // POST /api/resonance/:sessionId/import-questions
-  // Appends a validated saved question set, remapping set-local duplicate ids.
+  // Appends a validated saved question set, remapping ids that already exist in the session.
   app.post('/api/resonance/:sessionId/import-questions', async (req, res) => {
     const { sessionId } = req.params
     if (!sessionId) {
